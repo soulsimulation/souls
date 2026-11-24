@@ -30,15 +30,17 @@ on:
         default: scratch
 permissions:
   contents: read
-# its own group: a rollback never waits behind a release
-concurrency:
-  group: rollback-v2
-  cancel-in-progress: false
+# The code rollback has no group shared with a release: it never waits behind one. A reseed's undo moves Eden's store
+# objects, folder and pin, so it takes a turn in release.yml's group and never runs beside a release (0.133 R13).
 jobs:
   rollback:
+    if: ${{ inputs.reseed == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ inputs.target }}
+    concurrency:
+      group: rollback-v2
+      cancel-in-progress: false
     steps:
       - name: Inputs
         env:
@@ -54,10 +56,6 @@ jobs:
           echo "::add-mask::$SIM_DEPLOY_HOST"
           echo "::add-mask::$SIM_DEPLOY_USER"
           [ "$REF" = refs/heads/main ] || { echo "::error::rollback-v2 runs from main only (got $REF)"; exit 1; }
-          if [ -n "$RESEED" ]; then
-            [[ "$RESEED" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::reseed: the reseed's label, YYYYMMDDTHHMMSSZ"; exit 1; }
-            exit 0
-          fi
           [[ "$TO" =~ ^1220[0-9a-f]{64}$ && "$FROM" =~ ^1220[0-9a-f]{64}$ && "$TO" != "$FROM" ]] || { echo "::error::to and from: two different builds, 1220 and 64 hex"; exit 1; }
           [[ "$WORLDS" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+(\ [0-9a-f]{32}-[0-9a-f]{32}-[0-9]+)*$ ]] || { echo "::error::worlds: world names (<32 hex>-<32 hex>-<n>) separated by spaces"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,18 +72,7 @@ jobs:
           printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
           printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
             "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
-      - name: Undo the reseed (pre-check, then the undo)
-        if: ${{ inputs.reseed != '' }}
-        env:
-          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
-          RESEED: ${{ inputs.reseed }}
-        run: |
-          set -o pipefail
-          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" check 2>&1 | tee "$RUNNER_TEMP/undo.txt"
-          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" run 2>&1 | tee -a "$RUNNER_TEMP/undo.txt"
-          { echo '```'; cat "$RUNNER_TEMP/undo.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: deploy rollback, world by world
-        if: ${{ inputs.reseed == '' }}
         env:
           RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
           TO: ${{ inputs.to }}
@@ -99,6 +86,59 @@ jobs:
           cat "$RUNNER_TEMP/rollback.txt"
           { echo "rollback exit $status"; echo '```'; cat "$RUNNER_TEMP/rollback.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  reseed-undo:
+    if: ${{ inputs.reseed != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.target }}
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - name: Inputs
+        env:
+          REF: ${{ github.ref }}
+          TO: ${{ inputs.to }}
+          FROM: ${{ inputs.from }}
+          WORLDS: ${{ inputs.worlds }}
+          RESEED: ${{ inputs.reseed }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -n "$SIM_DEPLOY_HOST" ] && [ -n "$SIM_DEPLOY_USER" ] || { echo "::error::the environment names no machine (SIM_DEPLOY_HOST, SIM_DEPLOY_USER)"; exit 1; }
+          echo "::add-mask::$SIM_DEPLOY_HOST"
+          echo "::add-mask::$SIM_DEPLOY_USER"
+          [ "$REF" = refs/heads/main ] || { echo "::error::rollback-v2 runs from main only (got $REF)"; exit 1; }
+          [[ "$RESEED" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::reseed: the reseed's label, YYYYMMDDTHHMMSSZ"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: Undo the reseed (pre-check, then the undo)
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          RESEED: ${{ inputs.reseed }}
+        run: |
+          set -o pipefail
+          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" check 2>&1 | tee "$RUNNER_TEMP/undo.txt"
+          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" run 2>&1 | tee -a "$RUNNER_TEMP/undo.txt"
+      - name: The undo's output
+        if: always()
+        run: '[ ! -f "$RUNNER_TEMP/undo.txt" ] || { echo "\`\`\`"; cat "$RUNNER_TEMP/undo.txt"; echo "\`\`\`"; } >> "$GITHUB_STEP_SUMMARY"'
       - name: Remove deploy credentials
         if: always()
         run: rm -f ~/.ssh/deploy_key

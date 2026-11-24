@@ -19,7 +19,7 @@
 #   stage <bundle>                 each artifact to $WORLDS_ROOT/builds/<hash>/<name> if its bytes hash to the
 #                                  manifest's; the release's record to $DATA/releases/<sha>/; then verify
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
-#   move <sha> [<canary world>]    the canary's pin by `deploy` (O7), then every other world's, then the gateway by
+#   move <sha> [<canary world>|@eden]   the canary's pin by `deploy` (O7), then every other world's, then the gateway by
 #                                  `gateway-upgrade` (O16), then the page, then the served client
 #                                  ($LIB/client, which a world's address serves); each step done once per release
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
@@ -209,6 +209,11 @@ move() {
   page=$(artifact "$rel/manifest.json" page.tar) client=$(artifact "$rel/manifest.json" client.tar)
   all=$(worlds)
   [ -n "$all" ] || refuse "release.no-worlds: nothing under $WORLDS_ROOT/worlds"
+  # @eden: Eden's world (the cut-over's, $ETC/cutover.env), the canary of a release that reseeded it (0.133 R13)
+  if [ "$canary" = @eden ]; then
+    canary=$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ETC/cutover.env" 2> /dev/null)
+    [ -n "$canary" ] || refuse "release.no-such-world: no Eden world in $ETC/cutover.env"
+  fi
   canary=${canary:-$(head -1 <<< "$all")}
   grep -qxF -- "$canary" <<< "$all" || refuse "release.no-such-world: $canary"
   order=("$canary")

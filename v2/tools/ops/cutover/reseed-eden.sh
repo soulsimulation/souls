@@ -128,6 +128,16 @@ if [ -n "$RESUME" ]; then
   OLD=$(sed -n 's/^old=//p' "$RECEIPT")
   [ "$(sed -n 's/^new=//p' "$RECEIPT")" = "$NEW" ] || die "reseed $STAMP was for another build"
 else
+  # A fresh reseed only from a world not yet on this build, and with no earlier reseed to this build left un-undone:
+  # either of those is a reseed to resume, not to start again (0.133 R13).
+  for r in "$ROOT"/aside/"$WORLD"-*.reseed; do
+    [ -f "$r" ] || continue
+    if [ "$(sed -n 's/^new=//p' "$r")" = "$NEW" ] && ! grep -q '^undone=' "$r"; then
+      l=$(sed -n 's/^label=//p' "$r")
+      die "reseed $l to this build is not undone: resume it (reseed=$l; by hand: $0 $SHA resume $l check), or undo it first"
+    fi
+  done
+  [ "$PINNED" != "$NEW" ] || die "the world is already pinned to this build ($NEW): nothing to reseed fresh; resume a reseed that stopped with its label"
   STAMP=${RESEED_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
   RECEIPT=$ROOT/aside/$WORLD-$STAMP.reseed
   OLD=$PINNED
@@ -173,7 +183,8 @@ echo "reseed: store            $STORE_WHAT"
 echo "reseed: world-aside      $TOOL_WHAT"
 echo "reseed: facts            $SRC_DIR/facts.json, sha256 $(sha256 "$SRC_DIR/facts.json")"
 echo "reseed: kind entries     $ENTRIES ($KINDS entries)"
-echo "reseed: creator          ${CREATOR:-none}"
+# whether it has one, not its account id: this line reaches the release's public log
+echo "reseed: creator          $([ -n "$CREATOR" ] && echo "kept (from world.json)" || echo none)"
 echo "reseed: entry point      $AT m"
 echo "reseed: bodies           ${BODIES:-none}"
 echo "reseed: units            worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true)"

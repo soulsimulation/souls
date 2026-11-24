@@ -4,10 +4,12 @@
 #              the release head of every job, main keeps moving and RELEASE_FREEZE is not consulted. The Soul client
 #              must be stamped at that head (release-client.mjs check): eden-sync.yml stamps it on main after each client
 #              change, so a release never makes a commit of its own that needs CI again (0.133 R13; #1969)
-#   v2         (v2=true, the default) Engine v2's release at the same sha, beside ship: release-v2.yml, called (build,
-#              stage by hash, with reseed=fresh or a label Eden's reseed on that build, then the move by canary and the
-#              news entry; a dry run builds, stages and runs the reseed's pre-check only). Its checks count the merge
-#              queue's green ci run at the sha. publish waits for it; the tag, Release and changelog are made once, here
+#   v2         (v2=true, the default) Engine v2's release at the same sha: release-v2.yml, called twice. v2 builds and
+#              stages by hash beside ship; v2-move, after ship's verdict, runs Eden's reseed when asked (reseed=fresh or
+#              a label; Eden is then the canary) and the move by canary and the news entry (a dry run: the reseed's
+#              pre-check only). Preflight runs Engine v2's checks first (the merge queue's green ci run at the sha
+#              counts), so a refusal on either side stops both before anything moves. eden-check then reads /w/eden/;
+#              publish waits for all of it and makes the tag, Release and changelog once
 #   ship       in the `production` environment: tools/world-launcher/deploy/ship.sh, the committed root-only release:
 #              snapshot, stage, boot rehearsal of every world, backup, probe, activate, healthz, walks, poster, stall,
 #              cdn-walk. With dry_run (the DEFAULT) it runs `ship.sh --no-switch`: every step for real except the
@@ -128,6 +130,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      checks: read    # Engine v2's checks at the release head (v2=true)
+      actions: read   # the merge queue's ci run there counts for them
     outputs:
       sha: ${{ steps.refs.outputs.sha }}
       label: ${{ steps.refs.outputs.label }}
@@ -172,6 +176,7 @@ jobs:
           EYES_ONLY: ${{ inputs.eyes_only }}
           PIN: ${{ inputs.sha }}
           RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # receipts_only (#2262) and eyes_only touch no host and ship nothing, so a test cut on a branch may use them
           [ "$REF" = refs/heads/main ] || [ "$RECEIPTS_ONLY" = true ] || [ "$EYES_ONLY" = true ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
@@ -221,6 +226,18 @@ jobs:
             || { cat "$stamp"; echo "::error::$(grep -v '^client stamp' "$stamp" | tail -1)"; exit 1; }
           cat "$stamp"
           echo "Soul $(tail -1 "$stamp")" >> "$GITHUB_STEP_SUMMARY"
+          # 0.133 R13: Engine v2's checks at the release head here, before either release stages or moves anything, so
+          # a refusal stops both (main's copy of release.sh and its list, whatever the pin's tree holds). The tag was
+          # checked above. release-v2 checks the same again when called.
+          if [ "$V2" = true ]; then
+            git show "$GITHUB_SHA:v2/tools/ops/release/release.sh" > "$RUNNER_TEMP/release-v2.sh"
+            git show "$GITHUB_SHA:v2/docs/release.md" > "$RUNNER_TEMP/release-v2.md"
+            if ! RELEASE_DOC="$RUNNER_TEMP/release-v2.md" bash "$RUNNER_TEMP/release-v2.sh" checks "$(git rev-parse HEAD)" > "$RUNNER_TEMP/v2-checks.txt" 2>&1; then
+              cat "$RUNNER_TEMP/v2-checks.txt"; echo "::error::Engine v2's checks refused this head (above): neither release runs"; exit 1
+            fi
+            cat "$RUNNER_TEMP/v2-checks.txt"
+            echo "Engine v2: $(tail -1 "$RUNNER_TEMP/v2-checks.txt")" >> "$GITHUB_STEP_SUMMARY"
+          fi
           # One release date for the page the ship job builds and the CHANGELOG.md publish commits.
           { echo "sha=$(git rev-parse HEAD)"; echo "label=$LABEL"; echo "date=$DATE"; } >> "$GITHUB_OUTPUT"
           echo "Release v$VERSION: head $(git rev-parse --short HEAD), label $LABEL, $([ "$DRY_RUN" = true ] && echo 'DRY RUN (ship.sh --no-switch, nothing goes live)' || echo 'REAL SHIP')$([ "$V2" = true ] && echo ", Engine v2 beside it${RESEED:+, reseed $RESEED}")" >> "$GITHUB_STEP_SUMMARY"
@@ -657,12 +674,14 @@ jobs:
         if: always()
         run: '[ -z "$PER_RUN" ] || rm -rf "$PER_RUN"'
 
-  # 0.133 R13: Engine v2's release at the same sha, beside ship (one run, both releases): release-v2.yml, called. It
-  # builds while ship stages, stages by hash, runs the reseed (pre-check only in a dry run) when asked, and on a real
-  # ship moves every world by canary and adds the news entry. publish below makes the tag, Release and changelog once.
+  # 0.133 R13: Engine v2's release at the same sha (one run, both releases): release-v2.yml, called twice. v2 builds and
+  # stages by hash beside ship, under ship's own conditions (preflight's checks and, for a real ship, the receipts), so
+  # neither side starts alone. v2-move runs only after ship's verdict, so Eden's page never moves under ship's eyes:
+  # the reseed (pre-check only in a dry run) when asked, then the move by canary and the news entry. publish below
+  # makes the tag, Release and changelog once.
   v2:
-    needs: preflight
-    if: ${{ inputs.v2 && needs.preflight.result == 'success' && !inputs.receipts_only && !inputs.feed_only && !inputs.eyes_only }}
+    needs: [preflight, receipts]
+    if: ${{ !cancelled() && inputs.v2 && !inputs.receipts_only && !inputs.feed_only && !inputs.eyes_only && needs.preflight.result == 'success' && (needs.receipts.result == 'success' || ((inputs.dry_run || inputs.gate == 'report') && needs.receipts.result == 'skipped')) }}
     # a called workflow's jobs get at most these: release-v2's own (its tag and changelog steps do not run when called)
     permissions:
       contents: write
@@ -677,8 +696,57 @@ jobs:
       dry_run: ${{ inputs.dry_run }}
       target: production
       date: ${{ needs.preflight.outputs.date }}
+      called: true
+      part: stage
+
+  v2-move:
+    needs: [preflight, ship, v2]
+    if: ${{ !cancelled() && inputs.v2 && needs.ship.result == 'success' && needs.v2.result == 'success' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: read
+    uses: ./.github/workflows/release-v2.yml
+    secrets: inherit
+    with:
+      version: ${{ inputs.version }}
+      sha: ${{ needs.preflight.outputs.sha }}
+      dry_run: ${{ inputs.dry_run }}
+      target: production
+      date: ${{ needs.preflight.outputs.date }}
       reseed: ${{ inputs.reseed }}
       called: true
+      part: move
+
+  # Once both have moved (or, in a dry run, both stayed): Eden's page answers at its address and names the build it
+  # should. A real ship: today's system's we-<sha12>; a dry run: the live build, unchanged.
+  eden-check:
+    needs: [preflight, ship, v2-move]
+    if: ${{ !cancelled() && needs.ship.result == 'success' && (needs.v2-move.result == 'success' || (!inputs.v2 && needs.v2-move.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Eden's page at /w/eden/
+        env:
+          SHA: ${{ needs.preflight.outputs.sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          page="$RUNNER_TEMP/eden.html"
+          for wait in 0 5 10 20 30; do
+            sleep "$wait"
+            code=$(curl -sS -o "$page" -w '%{http_code}' "$SIM_ORIGIN/w/eden/" || echo 000)
+            build=$(grep -o '"build":"we-[0-9a-f]\{12\}[a-z-]*"' "$page" 2> /dev/null | head -1 | sed 's/.*"\(we-[^"]*\)"/\1/')
+            want="we-${SHA:0:12}"; [ "$DRY_RUN" = false ] || want="$build"
+            if [ "$code" = 200 ] && [ -n "$build" ] && [ "$build" = "$want" ]; then
+              echo "Eden's page: HTTP 200, build $build$([ "$DRY_RUN" = false ] || echo ' (the live build: a dry run moves nothing)')" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            echo "Eden's page: HTTP $code, build ${build:-none}, want ${want:-a build}; trying again"
+          done
+          echo "::error::Eden's page at $SIM_ORIGIN/w/eden/ did not answer 200 with build ${want:-a build} (last: HTTP $code, ${build:-no build})"
+          exit 1
 
   # feed_only: the feed item of a release already live and tagged, by itself (A3 of the 0.127 follow-up). The tag's tree
   # with this workflow's release-client.mjs, which compares with the release before the tag. Idempotent: the item's link
@@ -728,10 +796,10 @@ jobs:
         run: rm -rf ~/.ssh/deploy_key
 
   publish:
-    needs: [preflight, ship, v2]
+    needs: [preflight, ship, v2-move, eden-check]
     # !cancelled(): with gate=report the receipts job (ship's need) is skipped, and a bare condition would skip publish with it.
-    # Engine v2's release (v2) must have moved too, unless v2=false skipped it.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.ship.result == 'success' && (needs.v2.result == 'success' || (!inputs.v2 && needs.v2.result == 'skipped')) && !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
+    # Engine v2 must have moved too (unless v2=false skipped it) and Eden's page must answer (eden-check).
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.ship.result == 'success' && needs.eden-check.result == 'success' && !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

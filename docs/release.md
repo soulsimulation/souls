@@ -99,12 +99,15 @@ main's HEAD under the freeze below, as before.
 ### A patch release in one run
 
 One dispatch takes a merged sha through both releases at that sha (0.133 R13): today's system (ship, eyes, publish)
-and, in the **v2** job beside it, Engine v2's ([release-v2.yml](../v2/docs/release.md), called). Engine v2 builds while
-ship stages, stages by hash, and moves every world by canary; publish waits for both and makes the tag, the GitHub
+and Engine v2's ([release-v2.yml](../v2/docs/release.md), called twice). Preflight runs Engine v2's checks too, so a
+refusal on either side stops both before anything moves. The **v2** job builds and stages by hash while ship stages,
+under ship's own conditions; **v2-move** runs after ship's verdict and moves every world by canary; **eden-check**
+reads `/w/eden/` (HTTP 200 and the build it should name); publish waits for all of it and makes the tag, the GitHub
 Release and the changelog pull request once. Engine v2's checks count the merge queue's green `ci` run at the sha, so a
-merged fix needs no CI run of its own on main. When the build cannot read Eden's store, `-f reseed=fresh` runs Eden's
-reseed on the machine after the stage and before the move (a dry run runs its pre-check only); its label and undo
-(`rollback-v2.yml -f reseed=<label>`) are in the step's summary.
+merged fix needs no CI run of its own on main: the v2 legs' tests ran on the pull request's own head, not on the tree
+that ships, which the queue only compiled. When the build cannot read Eden's store, `-f reseed=fresh` runs Eden's
+reseed on the machine before the move, with Eden as the canary (a dry run runs its pre-check only); its label and undo
+(`rollback-v2.yml -f reseed=<label>`) are in the summary even when it stops.
 
 ```sh
 gh workflow run release.yml --ref main -f version=0.133.1 -f sha=<merged fix>                    # dry run, both
@@ -190,11 +193,11 @@ Its jobs:
    the run before anything touches the host.
 3. **eyes** (`eyes=gpu-runner`, or `eyes_only`): [`ship/eyes.mjs`](#the-eyes) on a `souls-timed` runner, beside
    the ship job, with `--gpu hardware`.
-4. **v2** (`v2=true`, the default): Engine v2's release at the same sha, beside the ship job
-   ([a patch release in one run](#a-patch-release-in-one-run)); release-v2.yml, called, with its own tag and changelog
-   steps left to publish.
+4. **v2**, **v2-move** and **eden-check** (`v2=true`, the default): Engine v2's release at the same sha
+   ([a patch release in one run](#a-patch-release-in-one-run)); release-v2.yml, called to stage beside the ship job and
+   to move after its verdict, with its own tag and changelog steps left to publish; then one read of Eden's page.
 5. **feed** (`feed_only` only): the release item of an already-tagged release, as above.
-6. **publish** (real ships only, once ship and v2 passed): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
+6. **publish** (real ships only, once ship, v2-move and eden-check passed): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit, creates the GitHub Release and opens the changelog commit as a pull request (branch
    `release/changelog-<version>`, as `publish.yml` does). The `main` ruleset requires checks and the merge queue, so
    nothing in the release pushes to `main` directly; the pull request merges through the queue.

@@ -69,7 +69,7 @@ WORLD=$(sed -n 's/^world=//p' "$RECEIPT")
 OLD=$(sed -n 's/^old=//p' "$RECEIPT")
 [[ "$WORLD" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] && [[ "$OLD" =~ ^1220[0-9a-f]{64}$ ]] || die "the receipt $RECEIPT is not whole"
 [ -f "$ROOT/builds/$OLD/worldd" ] || die "the old build $OLD is not on this machine"
-[ -x "$TOOL" ] || die "the one-off tool is not at $TOOL"
+[ -x "$TOOL" ] || die "world-aside is not at $TOOL"
 ASIDE_DIR=$ROOT/aside/$WORLD-$STAMP
 FRESH=$STAMP-fresh
 FRESH_DIR=$ROOT/aside/$WORLD-$FRESH
