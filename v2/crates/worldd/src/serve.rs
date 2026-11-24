@@ -5112,7 +5112,7 @@ mod s10c_lockstep {
             log.wait_durable(n + 1).unwrap();
             let store = log.close();
             let (mut town, planner) =
-                recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+                recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
             let (places, ..) = worldd::places::register(&mut town, &kinds);
             let rules = Rules {
                 kinds: Json::Obj(kinds),
