@@ -2027,6 +2027,68 @@ impl Stage {
         }
     }
 
+    /// The body up from the seat it holds by the forms' own `rise` step, as a one-step form on the seat's thing, and
+    /// run until it ends: what a Soul left seated by a leave (#4187: the seat outlives the run) does before it sits
+    /// again (0.135 E11). Answered as `wait` answers; a body in no seat has nothing to rise from.
+    fn rise(&mut self) -> J {
+        let Some(node) = self.slots.held_by(self.body) else {
+            return obj(vec![("verdict", J::s("yes")), ("receipt", J::s("completed"))]);
+        };
+        let Ok(entry) = parse(r#"{"forms":{"rise":{"steps":[{"step":"rise"}]}}}"#) else {
+            return err("the rise form does not parse");
+        };
+        let n = self.runs.len() as u64 + 1;
+        let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
+            return err("no intent id");
+        };
+        let mut digest = [0u8; 32];
+        digest[..8].copy_from_slice(&n.to_le_bytes());
+        let intent = Intent {
+            id,
+            expiry: i64::MAX,
+            actor: Actor::Soul(self.soul),
+            digest,
+        };
+        let (body, now, from) = (self.body, self.now, self.log.len());
+        let asked = {
+            let (mut w, forms) = self.world();
+            forms.commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                node,
+                &entry,
+                "rise",
+                &Args::default(),
+                intent,
+                Limits::default(),
+                now,
+            )
+        };
+        self.flush();
+        if let Err(r) = asked {
+            return obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::s(r.name)),
+                ("code", J::s(r.name)),
+                ("receipt", J::s("refused")),
+            ]);
+        }
+        let rid = format!("r{n}");
+        let last = self.forms.at(body);
+        self.runs.insert(
+            rid.clone(),
+            Run {
+                intent: id,
+                last,
+                from,
+                body,
+            },
+        );
+        self.wait(&rid)
+    }
+
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
     /// The tree is the store's, and stays.
     fn restart(&mut self) -> J {
