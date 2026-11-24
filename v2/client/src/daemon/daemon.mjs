@@ -1157,6 +1157,19 @@ function actsOf(words) {
       if (arg) {
         kinds ??= heldKinds();
         rows ??= rowsOf(copy);
+        // E14b: `<name>=<thing id>/<slot>` is a slot of another thing (a seat on a bench of the hall), by its name or
+        // its number in that thing's entry; checked as R2's `{node, slot}`, sent as `[id, number]` (`slotsOf`).
+        const other = /^([0-9a-f]{32}-\d+)\/([A-Za-z0-9_]+)$/.exec(arg[2]);
+        if (other) {
+          const names = Object.keys(kinds[rows.get(other[1])?.entry ?? rows.get(other[1])?.kind]?.slots ?? {});
+          const slot = /^\d+$/.test(other[2]) ? names[Number(other[2]) - 1] ?? Number(other[2]) : other[2];
+          if (typeof slot === 'string' && !names.includes(slot)) {
+            const why = names.length ? `${other[1]} has no slot ${slot}: ${names.join(', ')}` : `${other[1]}'s slots are not in your copy: name the slot by its number`;
+            throw Object.assign(new Error(why), { code: 'act-slot-unknown' });
+          }
+          args[arg[1]] = { node: other[1], slot };
+          continue;
+        }
         const take = kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
@@ -1187,6 +1200,19 @@ function actsOf(words) {
     }
   }
   return out;
+}
+
+/**
+ * E14b: a form's argument pairs as they go on the wire, a slot of another thing (`{node, slot}`, its slot by name as
+ * R2 checks it) by that slot's number in the thing's entry, 1, 2, ..., which `wireIntent` sends as `[id, number]`.
+ */
+function slotsOf(pairs) {
+  const kinds = heldKinds(), rows = rowsOf(copy);
+  return pairs.map(([n, v]) => {
+    if (!v || typeof v !== 'object' || typeof v.node !== 'string') return [n, v];
+    const names = Object.keys(kinds[rows.get(v.node)?.entry ?? rows.get(v.node)?.kind]?.slots ?? {});
+    return [n, { node: v.node, slot: typeof v.slot === 'number' ? v.slot : names.indexOf(v.slot) + 1 }];
+  });
 }
 
 /** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
@@ -1559,7 +1585,7 @@ async function answer(req, conn = null) {
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
-      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
+      const pairs = slotsOf(Object.entries(keep[0].args ?? {})), counted = pairs.some(([, v]) => typeof v !== 'string');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });

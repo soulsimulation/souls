@@ -1697,6 +1697,23 @@ fn numbered(
                 },
                 _ => return Err(JsError::new("param-unsupported")),
             },
+            // E14b: a slot of another thing, `{"node": "<id>", "slot": n}` (the slot's number in that thing's entry,
+            // 1, 2, ...), goes as `[id, n]`.
+            Json::Obj(m) if m.len() == 2 => {
+                let get = |k: &str| m.iter().find(|(n, _)| n == k).map(|(_, v)| v);
+                match (get("node"), get("slot")) {
+                    (Some(Json::Str(id)), Some(Json::Int(n))) if *n >= 1 => match node(id)? {
+                        Some(Target::Node(id)) => Value::Array(vec![
+                            id.to_value(),
+                            Value::Uint(
+                                u64::try_from(*n).map_err(|_| JsError::new("param-out-of-range"))?,
+                            ),
+                        ]),
+                        _ => return Err(JsError::new("param-unsupported")),
+                    },
+                    _ => return Err(JsError::new("param-unsupported")),
+                }
+            }
             _ => return Err(JsError::new("param-unsupported")),
         })
     }

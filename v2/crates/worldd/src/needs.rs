@@ -326,9 +326,28 @@ pub fn check(
     for (name, a) in args {
         let v = match a {
             Arg::Name(n) => Value::s(n),
-            Arg::Node(id) | Arg::Slot(id, _) => {
+            Arg::Node(id) => {
                 s.add(*id);
                 Value::Str(key(*id))
+            }
+            // A slot of another thing is R2's `{node, slot}`, the slot by its name in that thing's entry (E14b).
+            Arg::Slot(id, n) => {
+                s.add(*id);
+                let name = tree
+                    .handle(*id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|t| {
+                        s.entry(import_eden::entry_name(t.kind().as_str(), t.fields()))
+                            .and_then(|e| e.get("slots"))
+                            .and_then(Value::obj)
+                            .and_then(|o| o.get(usize::try_from(*n).ok()?.checked_sub(1)?))
+                            .map(|(name, _)| name.clone())
+                    })
+                    .unwrap_or_else(|| n.to_string());
+                Value::Obj(vec![
+                    ("node".into(), Value::Str(key(*id))),
+                    ("slot".into(), Value::Str(name)),
+                ])
             }
             Arg::Text(id) => Value::Str(key(*id)),
             Arg::Int(n) => Value::Int(i128::from(*n)),

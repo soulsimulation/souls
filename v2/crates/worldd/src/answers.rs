@@ -1397,7 +1397,8 @@ pub struct PartMaps {
 }
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
-/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
+/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12), or a slot of another thing as
+/// `[id, slot number]` (E14b).
 fn keep_arg_names(intent: &mut Value) {
     let Value::Map(intent) = intent else { return };
     let Some(Value::Map(parameters)) = intent.get_mut(&4) else {
@@ -1465,6 +1466,19 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
                     .ok_or("arg-malformed")
                     .and_then(|v| replica::effects::read_id(v).map_err(|_| "arg-malformed"))?;
                 args.values.insert(k, Arg::Text(id));
+            }
+            // E14b: a slot of another thing, `[id, slot number]` (a seat on a bench of the hall): that thing and its
+            // slot, numbered in its own entry, as the form runner reads the pair (`form_runner::args_in`).
+            Value::Array(a) if matches!(a.as_slice(), [Value::Array(_), Value::Uint(_)]) => {
+                let [id, Value::Uint(n)] = a.as_slice() else {
+                    unreachable!("matched above")
+                };
+                let id = replica::effects::read_id(id).map_err(|_| "arg-malformed")?;
+                if *n == 0 {
+                    return Err("arg-malformed");
+                }
+                args.things.insert(k.clone(), id);
+                args.slots.insert(k, *n);
             }
             _ => {
                 args.things.insert(
