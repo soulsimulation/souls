@@ -135,6 +135,7 @@ fn bodies_with(place: &str, point: Vec3) -> Result<Bodies, replica::effects::Ref
         point,
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -161,6 +162,7 @@ fn bodies_and_bed() -> Result<Bodies, replica::effects::Refusal> {
         point: bed_at(),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -1293,6 +1295,7 @@ fn multi_slot_eligibility(ranked: bool) {
             point: Vec3::new(-38_000_000 + slot as i64 * 1_000_000, 450_000, 30_000_000),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })
         .unwrap();
     }
@@ -1306,6 +1309,7 @@ fn multi_slot_eligibility(ranked: bool) {
         point: Vec3::new(-34_000_000, 450_000, 30_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })
     .unwrap();
     b.begin(0);
@@ -1602,6 +1606,7 @@ fn exact_slot_reach(first_is_near: bool, replace_pending: bool) {
             ),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })
         .unwrap();
     }

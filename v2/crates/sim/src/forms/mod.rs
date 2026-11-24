@@ -1114,18 +1114,56 @@ impl Forms {
         // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
         // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
         // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
+        // A form that leaves the body in that slot (no rise or sit of its own, nor the rise the binding adds to a form
+        // that moves the actor, `form_runner::rises_out`) is done from inside: its own walks to the thing's points are
+        // dropped too (a phone box opened from inside, 0.135 E17), never walked by legs the slot holds.
         let in_its_slot = w.places.as_ref().and_then(|p| p.slots.held_by(body)) == Some(node);
+        let stays = in_its_slot
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. }));
         if node == body || in_its_slot {
-            steps.retain(|s| {
-                !matches!(
-                    s,
-                    Step::WalkTo {
-                        on: None,
-                        approach: true,
-                        ..
-                    }
-                )
+            steps.retain(|s| match s {
+                Step::WalkTo {
+                    on: None, approach, ..
+                } => !*approach && !stays,
+                _ => true,
             });
+        }
+        // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
+        // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
+        // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
+        // is as it was.
+        let soul = match intent.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        let rises_first = in_its_slot && !stays;
+        let mut unlinked: Vec<&Name> = Vec::new();
+        for e in effects.iter().filter(|_| rises_first) {
+            if let form_runner::Effect::Unlink { ty, .. } = e {
+                unlinked.push(ty);
+            }
+            if let form_runner::Effect::Link { ty, soul: s, .. } = e
+                && !unlinked.contains(&ty)
+            {
+                let end = if *s { soul } else { body };
+                if w.tree
+                    .links_at(node)
+                    .iter()
+                    .any(|l| w.tree.ty(l) == ty && l.other == end)
+                {
+                    return Err(Refusal {
+                        name: "already_linked",
+                        detail: format!(
+                            "{} is already a {} of {}",
+                            show(end),
+                            ty.as_str(),
+                            show(node)
+                        ),
+                    });
+                }
+            }
         }
         let reserves = node != body && !self.shared.contains(&node);
         // The body's own run, which this act preempts, holds nothing against it.
@@ -1295,6 +1333,19 @@ impl Forms {
             Ok((steps, effects)) => self.start(w, body, node, intent, steps, effects, limits, now),
             Err(stages) => self.start_stages(w, body, node, intent, stages, limits, now),
         }
+    }
+
+    /// [`other_slots`] for a caller that binds the arguments itself and starts with [`Forms::start`] (worldd's acts,
+    /// E14b): each slot argument on another thing is refused by name as [`Forms::commit`] refuses it.
+    pub fn other_slots<G: Geometry, R: Reach>(
+        &self,
+        w: &World<'_, G, R>,
+        body: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        args: &form_runner::Args,
+    ) -> Result<(), Refusal> {
+        other_slots(w, &self.slots_of, body, entry, form, args)
     }
 
     /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
@@ -1820,19 +1871,44 @@ impl Forms {
         now: Micros,
     ) {
         self.planning.remove(&run);
+        let Some(fr) = self.runs.get_mut(&run) else {
+            return;
+        };
+        let body = fr.body;
+        if let Some(d) = fr.walk.take() {
+            self.walks.retain(|r| r.body != body);
+            let _ = w.controller.release(body, d);
+        }
+        // A seat's move ends through the places (E11b), as a cancel under it does in `Slots::fire`: a sit not yet in
+        // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
+        if let Some(n) = fr.mv.take() {
+            let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
+            let held = w.places.as_mut().and_then(|p| {
+                p.slots.cancel(
+                    w.controller,
+                    w.due,
+                    w.moves,
+                    p.floors,
+                    body,
+                    n,
+                    now,
+                    name("form-ended"),
+                )
+            });
+            match held {
+                Some(true) if sitting => self.seat_posture(w.tree, run, now),
+                Some(_) => {}
+                None => {
+                    w.moves
+                        .cancel(w.controller, w.due, n, now, name("form-ended"));
+                }
+            }
+        }
         let Some(fr) = self.runs.remove(&run) else {
             return;
         };
         self.by_body.remove(&fr.body);
         self.by_intent.remove(&fr.intent.id);
-        if let Some(d) = fr.walk {
-            self.walks.retain(|r| r.body != fr.body);
-            let _ = w.controller.release(fr.body, d);
-        }
-        if let Some(n) = fr.mv {
-            w.moves
-                .cancel(w.controller, w.due, n, now, name("form-ended"));
-        }
         let mine: Vec<Id> = self
             .by_timer
             .iter()
@@ -1970,11 +2046,14 @@ impl Forms {
                 );
                 s.slots
                     .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
-                    .map(|(f, _)| f)
+                    .map(|(f, h)| (f, h.and_then(Result::err)))
             }
-            _ => w.moves.fire(w.controller, w.due, w.mint, w.reach, t),
+            _ => w
+                .moves
+                .fire(w.controller, w.due, w.mint, w.reach, t)
+                .map(|f| (f, None)),
         };
-        if let Some(f) = fired {
+        if let Some((f, refused)) = fired {
             match f {
                 Fired::Done(rec) | Fired::Cancelled(rec) => {
                     if let Some(&run) = self.by_body.get(&rec.body)
@@ -1988,15 +2067,21 @@ impl Forms {
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
-                // Phase 1 begins at the contact instant (B2).
+                // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no
+                // floor to stand on, a sit the slot would not take) cancelled the move: its run ends now by the
+                // refusal's name (E11c), not at its deadline waiting on a move that is gone.
                 Fired::Phase { instance, phase: 1 } => {
                     if let Some(&run) = self.by_body.get(&t.node)
-                        && self
-                            .runs
-                            .get(&run)
-                            .is_some_and(|fr| fr.mv == Some(instance))
+                        && let Some(fr) = self.runs.get_mut(&run)
+                        && fr.mv == Some(instance)
                     {
-                        self.wake(w, run, Woke::Contact, t.due);
+                        match refused {
+                            Some(r) => {
+                                fr.mv = None;
+                                self.wake(w, run, Woke::Moved(name(r.name)), t.due);
+                            }
+                            None => self.wake(w, run, Woke::Contact, t.due),
+                        }
                     }
                 }
                 Fired::Phase { .. } => {}

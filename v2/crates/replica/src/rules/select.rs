@@ -26,8 +26,11 @@ pub(super) enum Choice {
 /// (a sit or lie step's slot, or a reparent of the actor into it).
 fn selects_body_slot(form: &Value, key: &str) -> bool {
     let t = has(form.get("takes"), key);
+    let select = t.and_then(|t| t.get("select"));
     if t.and_then(|t| t.get("type")).and_then(Value::str) != Some("slot")
-        || has(t.and_then(|t| t.get("select")), "of").and_then(Value::str) != Some("free_slots")
+        || has(select, "of").and_then(Value::str) != Some("free_slots")
+        // A seat of another thing (`in`: `parent` or `here`, E14b) is the world's to choose (worldd `other_seat`).
+        || matches!(has(select, "in").and_then(Value::str), Some("parent" | "here"))
     {
         return false;
     }

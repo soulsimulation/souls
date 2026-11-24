@@ -100,7 +100,8 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
-    handle: (req, res, w, url) => load()?.handle(req, res, w, url) ?? false,
+    published: (w) => load()?.published(w) ?? false,
+    handle: (req, res, w, url, o) => load()?.handle(req, res, w, url, o) ?? false,
   };
 }
 
@@ -140,7 +141,8 @@ function withRouteOnly(fence, bindings) {
     v2Bodies: (w) => (of(w) ?? fence).v2Bodies(w),
     v2Fields: (w) => (of(w) ?? fence).v2Fields(w),
     publish: (w, read) => (of(w) ? Promise.resolve(null) : fence.publish(w, read)),
-    handle: (req, res, w, url) => (of(w) ?? fence).handle(req, res, w, url),
+    published: (w) => (of(w) ? false : fence.published(w)),
+    handle: (req, res, w, url, o) => (of(w) ?? fence).handle(req, res, w, url, o),
   };
 }
 
@@ -159,7 +161,8 @@ function fenceOf(binding) {
     v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
-    handle: (req, res, w, url) => of(w)?.handle(req, res, w, url) ?? false,
+    published: (w) => of(w)?.published(w) ?? false,
+    handle: (req, res, w, url, o) => of(w)?.handle(req, res, w, url, o) ?? false,
   }, binding.worlds);
 }
 
@@ -297,7 +300,17 @@ function oneFence(binding) {
         return m;
       })().finally(() => { publishing = null; });
     },
-    handle(req, res, w, url) {
+    /** `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
+     *  404 `world.new-engine`, as for a world with no old twin, and the page draws the world from its stream (W2,
+     *  stream-scene.ts); it never wakes the old process. A running one answers it live, as before. */
+    /** Whether the old views are published for the world's current stream (its snapshot, in staticDir or held). */
+    published(w) {
+      const stream = this.v2Stream(w);
+      if (!stream || !staticDir) return false;
+      const m = manifest();
+      return (m?.stream === stream && !!m.files?.['snapshot.json']) || (held?.m.stream === stream && !!held.m.files['snapshot.json']);
+    },
+    handle(req, res, w, url, o) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
       const read = req.method === 'GET' || req.method === 'HEAD';
@@ -356,11 +369,18 @@ function oneFence(binding) {
         return true;
       }
       if (SERVED.has(path)) {
-        // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers.
-        // Only the query-less form is published: the snapshot's wire forms (`?defs=ref`, `&cols=1`; apps/server/src/god/
-        // routes.ts) differ in body and headers (x-defs-ref, x-ground-ref, column-packed entities), so they pass through.
+        // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers,
+        // or, its process not running, none does (the page draws from the stream). The snapshot's wire forms (`?defs=ref`,
+        // `&cols=1`, `&v=<key>`; apps/web/src/snapshot-wire.ts) are answered with the plain one: an answer without
+        // x-defs-ref and x-ground-ref is the plain snapshot to the page. Any other query passes through.
+        const plain = !url.search || (path === '/v1/world/snapshot' && [...url.searchParams.keys()].every((k) => k === 'defs' || k === 'cols' || k === 'v'));
         let body = null;
-        try { if (!url.search) body = view(this.v2Stream(w), SERVED.get(path)); } catch { body = null; }
+        try { if (plain) body = view(this.v2Stream(w), SERVED.get(path)); } catch { body = null; }
+        if (!body && plain && o?.cold) {
+          res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'world.new-engine', message: 'This world runs on the new engine; its old view is not published, and the page draws it from its stream.' }));
+          return true;
+        }
         if (!body) return false;
         res.writeHead(200, { 'content-type': 'application/json', 'content-length': body.length, 'cache-control': 'no-cache', 'x-souls-static': 'published' }).end(req.method === 'HEAD' ? undefined : body);
         return true;

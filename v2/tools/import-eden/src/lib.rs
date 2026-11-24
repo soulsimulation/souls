@@ -1577,6 +1577,46 @@ pub struct BodySlot {
     /// The slot's boarding reach, µm (its `board_mm`; 0 when it has none): when no body can stand at or near its stand
     /// point (a boat's side afloat), how far from the slot the clear ground it is got onto from may be.
     pub board: i64,
+    /// The slot's other places when its `most` is above one (E16: a tent's two sleepers), as offsets from `at` in the
+    /// thing's axes, µm ([`more_places`]). Empty for a slot of one body.
+    pub more: Vec<Vec3>,
+}
+
+/// How many rings of places around a slot's point [`more_places`] looks in.
+const MORE_RINGS: i64 = 3;
+
+/// A standard body's standing reach, µm (`sim::slots::STANDARD_REACH`): a thing no taller is body-sized, so its
+/// footprint is its slots' space.
+const BODY_REACH: i64 = 2_060_000;
+
+/// The other places of a slot at `at` that holds `most` bodies (E16), offsets from `at` in the thing's axes, µm: the
+/// points of a triangular grid around it a standard body's clearance diameter apart (so no two bodies are at one
+/// point, nor closer than their clearance), ring by ring outward (in a ring by x, then z), each with its body's clearance circle
+/// inside the thing's footprint (`bounds`, its `geometry.bounds_mm` across x and z, centred on its origin), so none is
+/// in a neighbour's geometry. At most `most - 1` of them; fewer when fewer fit, and none when the entry declares no
+/// bounds: such a slot holds one body, as before.
+pub fn more_places(at: Vec3, most: u64, bounds: Option<[i64; 2]>) -> Vec<Vec3> {
+    let Some([w, d]) = bounds else {
+        return Vec::new();
+    };
+    let r = replica::kinds::sizes::Size::Standard.radius_mm() * 1000;
+    let (pitch, row) = (2 * r, 2 * r * 866_025 / 1_000_000);
+    let fits = |x: i64, z: i64| (at.x + x).abs() + r <= w / 2 && (at.z + z).abs() + r <= d / 2;
+    // Nearest first by ring (the grid's own distance, exact where rounded lengths are not), then by x and z.
+    let mut grid: Vec<(i64, i64, i64)> = (-MORE_RINGS..=MORE_RINGS)
+        .flat_map(|b| (-MORE_RINGS..=MORE_RINGS).map(move |a| (a, b)))
+        .map(|(a, b)| {
+            let ring = a.abs().max(b.abs()).max((a + b).abs());
+            (ring, a * pitch + b * pitch / 2, b * row)
+        })
+        .filter(|&(ring, x, z)| ring > 0 && ring <= MORE_RINGS && fits(x, z))
+        .collect();
+    grid.sort_unstable();
+    let take = usize::try_from(most.saturating_sub(1)).unwrap_or(usize::MAX);
+    grid.into_iter()
+        .take(take)
+        .map(|(_, x, z)| Vec3::new(x, 0, z))
+        .collect()
 }
 
 /// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
@@ -1612,8 +1652,8 @@ pub fn body_slots_of(
     out
 }
 
-/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach).
-type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64)>>;
+/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach, other places).
+type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64, Vec<Vec3>)>>;
 
 fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKind<'_> {
     use replica::rules::json::Value as J;
@@ -1630,6 +1670,19 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
     let mut by_kind = BTreeMap::new();
     for (kind, e) in entries {
         let slots = e.get("slots").and_then(J::obj).unwrap_or(&[]);
+        // A box's footprint across x and z, µm, from its `[w, h, d]` mm; with its height for the thing's bounds.
+        let box3 = |v: Option<&J>| match v.and_then(J::arr) {
+            Some([J::Int(w), J::Int(h), J::Int(d)]) => Some((
+                [
+                    i64::try_from(*w).ok()? * 1000,
+                    i64::try_from(*d).ok()? * 1000,
+                ],
+                i64::try_from(*h).ok()? * 1000,
+            )),
+            _ => None,
+        };
+        let xz = |v: Option<&J>| box3(v).map(|(b, _)| b);
+        let bounds = box3(e.get("geometry").and_then(|g| g.get("bounds_mm")));
         let found: Vec<_> = (1u64..)
             .zip(slots)
             .filter(|(_, (_, d))| d.get("admits").and_then(J::str) == Some("body"))
@@ -1641,7 +1694,22 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
                     Some(J::Int(mm)) => i64::try_from(*mm).ok()?.saturating_mul(1000),
                     _ => 0,
                 };
-                Some((n, lie, um(d.get("at_mm"))?, stand, board))
+                let at = um(d.get("at_mm"))?;
+                // The space the places must fit in: the slot's own (`fits_mm`, centred on its point) when it declares
+                // one, else the thing's footprint, but only for a thing no taller than a body's standing reach (a tent,
+                // a piste): a taller thing (a big wheel, a cable car) has room that is not the slot's, so a slot on it
+                // with no space of its own holds one body.
+                let most = match d.get("most") {
+                    Some(J::Int(m)) if *m > 1 => u64::try_from(*m).unwrap_or(u64::MAX),
+                    _ => 1,
+                };
+                let more = match (most > 1, xz(d.get("fits_mm")), bounds) {
+                    (false, ..) => Vec::new(),
+                    (true, Some(fits), _) => more_places(Vec3::ZERO, most, Some(fits)),
+                    (true, None, Some((b, h))) if h <= BODY_REACH => more_places(at, most, Some(b)),
+                    _ => Vec::new(),
+                };
+                Some((n, lie, at, stand, board, more))
             })
             .collect();
         if !found.is_empty() {
@@ -1667,24 +1735,31 @@ fn slots_on(
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
     // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered.
     let borrowed = entry != plain(kind);
-    out.extend(found.iter().filter_map(|&(slot, lie, at, stand, board)| {
-        let (at, stand) = if borrowed {
-            let own = slot_point(fields, slot)?;
-            (
-                own,
-                Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
-            )
-        } else {
-            (at, stand)
-        };
-        Some(BodySlot {
-            thing: id,
-            slot,
-            lie,
-            at,
-            stand,
-            board,
-        })
-    }));
+    out.extend(
+        found
+            .iter()
+            .filter_map(|(slot, lie, at, stand, board, more)| {
+                let (slot, lie, at, stand, board) = (*slot, *lie, *at, *stand, *board);
+                let (at, stand) = if borrowed {
+                    let own = slot_point(fields, slot)?;
+                    (
+                        own,
+                        Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
+                    )
+                } else {
+                    (at, stand)
+                };
+                Some(BodySlot {
+                    thing: id,
+                    slot,
+                    lie,
+                    at,
+                    stand,
+                    board,
+                    // A borrowed entry's places were fitted to the entry's shape, not this thing's: one body.
+                    more: if borrowed { Vec::new() } else { more.clone() },
+                })
+            }),
+    );
     found.len()
 }

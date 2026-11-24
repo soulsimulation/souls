@@ -68,6 +68,7 @@ export default function v2Transport({build = true} = {}) {
     async wait(rid) { return call({op: 'wait', rid}); },
     async leave() { await call({op: 'leave'}); },
     async body() { return call({op: 'body'}); },
+    async rise() { return call({op: 'rise'}); },
     async restart() { await call({op: 'restart'}); },
     async reset() { await call({op: 'reset'}); },
     async arrange(scene) { return call({op: 'arrange', ...scene}); },

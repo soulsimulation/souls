@@ -1405,6 +1405,7 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             point: Vec3::new(0, place.height, 0),
             facing: Quat::IDENTITY,
             floor: fixture(1),
+            more: Vec::new(),
         };
         let stand = at.stand().expect("a stand point");
         let mut slots = crate::slots::Slots::new();
@@ -1558,6 +1559,7 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
             point: Vec3::new(0, place.height, 0),
             facing: Quat::IDENTITY,
             floor: fixture(1),
+            more: Vec::new(),
         };
         let stand = at.stand().expect("a stand point");
         let mut slots = crate::slots::Slots::new();
@@ -1621,6 +1623,73 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
         assert_eq!(e.how.as_str(), "done", "not resource-held");
         assert_eq!(held, Some(chair), "still in its place");
     }
+}
+
+/// 0.135 E17: a form's own `walk_to` while the body is in a slot of the thing. A form that leaves the body there (a
+/// phone box's `open` from inside: no rise, no sit) is done from inside: its own walk is dropped and the run ends
+/// `done` with the body still in the slot, never refused `resource-held`. A form that moves the actor starts with the
+/// rise its binding adds (`rises_out`): the rise move stands the body up at the seat's stand point, out of the slot,
+/// before anything walks.
+#[test]
+fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // The form's own walk to the doorway, 1 m off, then its move's time.
+    let walk = Step::WalkTo {
+        point: Name::new("doorway").expect("a name"),
+        at: Vec3::new(stand.x, stand.y, stand.z + 1_000_000),
+        on: None,
+        approach: false,
+    };
+    b.steps(
+        body,
+        chair,
+        vec![walk.clone(), Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done", "not resource-held");
+    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+    assert_eq!(held, Some(chair), "done from inside, still in the slot");
+    // A form that moves the actor rises first: out of the slot by the rise move, standing on the floor.
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise, Step::Wait(200_000)],
+        intent(body, 2),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done");
+    assert_eq!(b.slots.as_ref().and_then(|s| s.held_by(body)), None);
+    let p = b.c.body(body).expect("a body").pose;
+    assert!(
+        matches!(p.support, replica::pose::Support::Surface { .. }),
+        "on its feet"
+    );
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (stand.x, stand.z),
+        "at the stand point"
+    );
 }
 
 /// 0.135 E14: a form done at one thing takes a seat of another (a lecture's `attend` takes a bench's seat, the hall's
@@ -1969,6 +2038,7 @@ fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
         point: Vec3::new(0, place.height, 0),
         facing: Quat::IDENTITY,
         floor: fixture(1),
+        more: Vec::new(),
     };
     let stand = at.stand().expect("a stand point");
     let mut slots = crate::slots::Slots::new();
@@ -2085,6 +2155,225 @@ fn i4187_a_waiting_act_cancelled_or_timed_out_never_starts() {
         );
         assert_eq!(b.forms.due(new), None);
     }
+}
+
+/// E11b: a Soul that leaves its sit is never left half sat. Left mid-sit, the run ends `left` at the sit's contact with
+/// the body in the slot and seated still, so a later rise is taken and completes, and the seat is free after it. Left
+/// before the body reaches the slot (the sit's deadline passes first), the seat is given back and the body stands.
+#[test]
+fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
+    use skills::form_runner::Step;
+    for when in ["in-slot", "before-slot"] {
+        let (mut b, body, chair, slot, _) = seat_bench();
+        let sit = Step::Sit {
+            slot,
+            lie: false,
+            stand: false,
+            on: None,
+        };
+        let limits = match when {
+            "in-slot" => Limits::default(),
+            _ => Limits {
+                step_move: 100_000,
+                ..Limits::default()
+            },
+        };
+        b.steps(
+            body,
+            chair,
+            vec![sit, Step::Wait(500_000)],
+            intent(body, 0),
+            limits,
+        )
+        .expect("started");
+        b.until_moving(body, 0);
+        let now = b.now;
+        {
+            let (mut w, forms) = b.world();
+            forms.leave(&mut w, body, None, now).expect("left");
+        }
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{when}: {:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "left", "{when}");
+        let slots = b.slots.as_ref().expect("slots");
+        let support = b.c.body(body).expect("a body").pose.support;
+        println!(
+            "E11b {when}: left at {} µs; slot held {:?}, holder {:?}, support {support:?}",
+            e.at,
+            slots.held_by(body),
+            slots.holder_in(chair, slot)
+        );
+        assert!(b.moves.is_empty(), "{when}: the sit's move ended");
+        if when == "before-slot" {
+            assert_eq!(slots.held_by(body), None, "{when}: the slot given back");
+            assert_eq!(slots.holder_in(chair, slot), None, "{when}: the slot free");
+            assert_ne!(support, replica::pose::Support::Slot, "{when}: standing");
+            b.clean();
+            continue;
+        }
+        assert_eq!(slots.held_by(body), Some(chair), "{when}: seated still");
+        assert_eq!(support, replica::pose::Support::Slot, "{when}: in the slot");
+        b.forms.ended.clear();
+        b.steps(body, chair, vec![Step::Rise], intent(body, 1), limits)
+            .expect("the rise starts");
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{when}: {:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "done", "{when}: the rise completes");
+        let slots = b.slots.as_ref().expect("slots");
+        assert_eq!(slots.held_by(body), None, "{when}: out of the slot");
+        assert_eq!(slots.holder_in(chair, slot), None, "{when}: the slot free");
+        assert_ne!(
+            b.c.body(body).expect("a body").pose.support,
+            replica::pose::Support::Slot
+        );
+        b.clean();
+    }
+}
+
+/// E11c: a rise whose stand point is off the floor (here the floor is cut back to stop short of the seat's exit) is
+/// refused at its contact, and its run ends there by the refusal's name, not at its deadline waiting on a move the
+/// places cancelled. The body stays seated, and once the floor is back under the stand point the same rise completes.
+#[test]
+fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "seated");
+    b.forms.ended.clear();
+    // The floor now ends 2 m behind the seat: its stand point (in front) and every point out along its exit are off it.
+    let whole = b.surfaces.remove(&fixture(1)).expect("the floor");
+    let corners = vec![
+        [-30_000, 0, -30_000],
+        [30_000, 0, -30_000],
+        [30_000, 0, -2_000],
+        [-30_000, 0, -2_000],
+    ];
+    let cut = Surface::new(
+        fixture(1),
+        vec![Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
+        }],
+    );
+    assert!(stand.z > -2_000_000, "the stand point is off the cut floor");
+    b.surfaces.insert(fixture(1), cut);
+    let asked = b.now;
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("the rise starts");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    println!(
+        "E11c: the rise ended {} after {} µs",
+        e.how.as_str(),
+        e.at - asked
+    );
+    assert_eq!(e.how.as_str(), "off-surface", "ends by the refusal's name");
+    assert!(
+        e.at - asked < Limits::default().step_move / 2,
+        "at its contact, not its deadline: {} µs",
+        e.at - asked
+    );
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.held_by(body), Some(chair), "seated still");
+    assert_eq!(slots.holder_in(chair, slot), Some(body));
+    assert_eq!(
+        b.c.body(body).expect("a body").pose.support,
+        replica::pose::Support::Slot
+    );
+    assert!(b.moves.is_empty(), "the rise's move ended");
+    b.forms.ended.clear();
+    b.surfaces.insert(fixture(1), whole);
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise],
+        intent(body, 2),
+        Limits::default(),
+    )
+    .expect("the rise starts again");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "the floor back: the rise completes");
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.holder_in(chair, slot), None, "the slot free");
+    b.clean();
+}
+
+/// E11c review: a sit whose hand-off into the slot is refused at its contact (forced here: the body is already off
+/// its surface when contact comes, `support-not-surface`) ends its run at once by that name, its move cancelled and
+/// the seat given back: no seat is left held by a body that never got into it.
+#[test]
+fn e11c_a_sit_refused_into_its_slot_ends_by_name_and_frees_the_seat() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.until_moving(body, 0);
+    let d =
+        *b.c.claims(body)
+            .expect("a body")
+            .running()
+            .keys()
+            .next()
+            .expect("the sit's driver");
+    let frame = Frame {
+        node: chair,
+        slot: Some(slot),
+    };
+    let asked = b.now;
+    b.c.slot_in(body, d, frame, asked)
+        .expect("off its surface before contact");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(
+        e.how.as_str(),
+        "support-not-surface",
+        "ends by the refusal's name"
+    );
+    assert!(
+        e.at - asked < Limits::default().step_move / 2,
+        "at its contact, not its deadline: {} µs",
+        e.at - asked
+    );
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.held_by(body), None, "the slot given back");
+    assert_eq!(slots.holder_in(chair, slot), None, "the slot free");
+    b.clean();
 }
 
 /// #4187 review: a take that waited on its body's seat step, behind a long walk (20 m, well past an act's 10 s), is

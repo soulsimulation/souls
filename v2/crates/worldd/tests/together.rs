@@ -154,6 +154,7 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         mv: Some(name(mv)),
         stands: Vec::new(),
         within: None,
+        link: None,
     };
     ActivityKind {
         name: name(&full(plain)),
