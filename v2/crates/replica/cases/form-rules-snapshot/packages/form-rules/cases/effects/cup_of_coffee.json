@@ -62,14 +62,14 @@
         "change": "set",
         "node": "t1",
         "field": "coffee",
-        "n": 1,
+        "n": 28,
         "to": 160
        },
        {
         "change": "set",
         "node": "t1",
         "field": "sips",
-        "n": 2,
+        "n": 29,
         "to": 1
        }
       ],

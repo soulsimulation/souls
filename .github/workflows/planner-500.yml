@@ -121,6 +121,14 @@ jobs:
                   const ph = Object.entries(o.phases ?? {}).sort((a, b) => b[1].meanUs - a[1].meanUs).map(([n, p]) => `${n} ${ms(p.meanUs)}/${ms(p.p99Us)}`).join(", ");
                   console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${ms(o.tick.p50Us)} / ${ms(o.tick.p99Us)} / ${ms(o.tick.maxUs)} | ${ms(o.tick.meanUs)} | ${o.cpu.world} / ${o.cpu.gateway} / ${o.cpu.origin} | ${ph} |`);
                 ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/phases.md"
+                grep -h '^bodies:' "$d/driver.out" 2> /dev/null | sed "s/^/$r $rung $arm r$k /"
+                # The stuck agents' acts (S11): verb, accepted or unanswered, counted, with the longest time since sent.
+                node -e '
+                  const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const by = {}; for (const a of o.stuck?.stuckActs ?? []) { const [v, st, ms, how] = a.split(" "); const e = (by[v + " " + st + " " + (how ?? "")] ??= { n: 0, ms: 0 }); e.n++; e.ms = Math.max(e.ms, parseInt(ms)); }
+                  const t = Object.entries(by).sort((x, y) => y[1].n - x[1].n).map(([key, e]) => `${key} ${e.n} (up to ${Math.round(e.ms / 1000)} s)`).join("; ");
+                  if (t) console.log(`long acts ${r} ${rung} ${arm} r${k}: ${t}; stuck ${o.stuck.stuck} (${o.stuck.rule ?? "unanswered 60 s"}), on their way ${o.stuck.onTheirWay ?? "-"} (${o.stuck.unseen ?? "-"} never seen on the stream); refused only ${o.stuck.refusedOnly}, longest stall ${Math.round(o.stuck.stallMaxMs / 1000)} s`);
+                ' "$r" "$rung" "$arm" "$k" "$line"
               done
             done
           done

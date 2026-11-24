@@ -64,6 +64,11 @@ each new one does the same job:
 - `tools/playtest/observer/new-engine/`: the observer plays the public stream with the old page's own stream worker, and reads
   the gateway's answers to each seat's intents through `souls.mjs events`.
 
+`soul-eval.mjs run --battery <b> --seat scripted --engine v2` runs a battery there, each item on its own world
+(`arena/new-engine/battery.mjs`). An item's `board` places a notice board in its genesis, and its `calendar` is posted
+there by a second scripted Soul before the instruction; `calendarInterest` is judged by the notice's `interested`
+links in the public stream.
+
 `node tools/playtest/arena/new-engine/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
 `.local/playtest-v2/` and prints one line per check.
 

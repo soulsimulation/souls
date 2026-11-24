@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:car_lift",
   "owner": "thing",
-  "state": {"raised":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"raised":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "mechanic": {"role":"stand","at_mm":[1600,0,800],"yaw_mdeg":180000},
     "control": {"role":"contact","at_mm":[1600,900,350]}

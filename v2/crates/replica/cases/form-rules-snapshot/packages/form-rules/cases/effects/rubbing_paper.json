@@ -51,14 +51,14 @@
                 "change": "set",
                 "node": "r1",
                 "field": "charcoal",
-                "n": 1,
+                "n": 28,
                 "to": 1
               },
               {
                 "change": "set",
                 "node": "r1",
                 "field": "rings",
-                "n": 2,
+                "n": 29,
                 "to": 1
               }
             ],
@@ -96,14 +96,14 @@
                 "change": "set",
                 "node": "r1",
                 "field": "charcoal",
-                "n": 1,
+                "n": 28,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "r1",
                 "field": "grain",
-                "n": 3,
+                "n": 30,
                 "to": 1
               }
             ],

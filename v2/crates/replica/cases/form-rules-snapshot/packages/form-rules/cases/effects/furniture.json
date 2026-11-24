@@ -41,7 +41,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -106,7 +106,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -171,7 +171,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -236,7 +236,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -301,7 +301,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -409,7 +409,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "clean",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -514,7 +514,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "shavings",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -543,7 +543,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "shavings",
-                "n": 1,
+                "n": 28,
                 "to": 2
               }
             ],
@@ -572,7 +572,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "shavings",
-                "n": 1,
+                "n": 28,
                 "to": 3
               }
             ],
@@ -601,7 +601,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "shavings",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -630,7 +630,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "shavings",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -692,7 +692,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "pages",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -721,7 +721,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "pages",
-                "n": 1,
+                "n": 28,
                 "to": 2
               }
             ],
@@ -783,7 +783,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "computer_on",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -812,7 +812,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "computer_on",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -874,7 +874,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "open",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -903,7 +903,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "open",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -932,7 +932,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "locked",
-                "n": 2,
+                "n": 29,
                 "to": 1
               }
             ],
@@ -976,7 +976,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "locked",
-                "n": 2,
+                "n": 29,
                 "to": 0
               }
             ],
@@ -1005,7 +1005,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "open",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -1107,7 +1107,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "apples",
-                "n": 1,
+                "n": 28,
                 "to": 23,
                 "by": -1
               }
@@ -1268,7 +1268,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "apples",
-                "n": 1,
+                "n": 28,
                 "to": 11,
                 "by": -1
               }
@@ -1309,7 +1309,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "apples",
-                "n": 1,
+                "n": 28,
                 "to": 10,
                 "by": -1
               }
@@ -1346,6 +1346,80 @@
             "left": "rf29.0",
             "right": "rf30.0"
           }
+        }
+      }
+    },
+    {
+      "name": "shop_counter_take_apple_hands_an_apple_and_the_counter_stays",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:shop_counter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apple"
+          },
+          "receipt": "rf3719",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rf3719.0",
+                "kind": "eden:apple",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                },
+                "stock": "apples"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "apples",
+                "n": 28,
+                "to": 11,
+                "by": -1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:apple_taken",
+                "node": "t1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1",
+            "t1"
+          ]
         }
       }
     }

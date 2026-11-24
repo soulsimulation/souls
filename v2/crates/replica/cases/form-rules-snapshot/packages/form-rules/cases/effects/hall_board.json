@@ -41,7 +41,7 @@
           "receipt": "hb4",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1, "to": { "text": "p_tides_1" } }],
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 28, "to": { "text": "p_tides_1" } }],
             "events": [{ "event": "eden:page_shown", "node": "w1", "changes": [0] }]
           }
         },
@@ -50,7 +50,7 @@
           "receipt": "hb5",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1, "to": { "text": "p_tides_2" } }],
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 28, "to": { "text": "p_tides_2" } }],
             "events": [{ "event": "eden:page_shown", "node": "w1", "changes": [0] }]
           }
         },
@@ -59,7 +59,7 @@
           "receipt": "hb6",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1 }],
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 28 }],
             "events": [{ "event": "eden:board_cleared", "node": "w1", "changes": [0] }]
           }
         },
@@ -75,7 +75,7 @@
             "verdict": "yes",
             "changes": [
               { "change": "unlink", "node": "w1", "link": "presenter", "n": 1, "end": "b1" },
-              { "change": "set", "node": "w1", "field": "page", "n": 1 }
+              { "change": "set", "node": "w1", "field": "page", "n": 28 }
             ],
             "events": [
               { "event": "eden:stopped_presenting", "node": "w1", "changes": [0] },

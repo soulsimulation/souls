@@ -3,7 +3,7 @@
   "kind": "eden:rabbit_feed",
   "owner": "thing",
   "state": {
-    "feed": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "feed": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 750] },

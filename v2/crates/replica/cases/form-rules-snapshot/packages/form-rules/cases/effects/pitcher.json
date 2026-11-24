@@ -23,8 +23,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 500, "by": -500 },
-              { "change": "set", "node": "p2", "field": "water", "n": 1, "to": 500, "by": 500 }
+              { "change": "set", "node": "p1", "field": "water", "n": 28, "to": 500, "by": -500 },
+              { "change": "set", "node": "p2", "field": "water", "n": 28, "to": 500, "by": 500 }
             ],
             "events": [{ "event": "eden:poured", "node": "p1", "changes": [0, 1] }],
             "timers": []
@@ -43,8 +43,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "p2", "field": "water", "n": 1, "to": 250, "by": -250 },
-              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 750, "by": 250 }
+              { "change": "set", "node": "p2", "field": "water", "n": 28, "to": 250, "by": -250 },
+              { "change": "set", "node": "p1", "field": "water", "n": 28, "to": 750, "by": 250 }
             ]
           }
         }

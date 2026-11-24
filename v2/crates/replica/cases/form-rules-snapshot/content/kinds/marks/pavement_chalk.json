@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "red": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 8,
@@ -15,7 +15,7 @@
       }
     },
     "blue": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 8,
@@ -26,7 +26,7 @@
       }
     },
     "yellow": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 8,
@@ -37,7 +37,7 @@
       }
     },
     "strokes": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 0,

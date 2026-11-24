@@ -18,8 +18,9 @@
 //! copy checks are the originals deleted. A copy already there with the same bytes counts as made (a run stopped
 //! halfway is finished by the next); one with other bytes refuses, changing nothing more. `--back` refuses a key the
 //! world holds again (set the fresh world's objects aside first). The store is the one `deploy` and `supervisor` read:
-//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Exits 0 on success, 1 on a
-//! refusal, 2 on a usage error.
+//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Every store call, the listing
+//! included, is tried again with back-off while the store is out of reach (`tried`: a stall, a dropped connection, a
+//! 5xx; 0.132.1, 0.133 R13). Exits 0 on success, 1 on a refusal, 2 on a usage error.
 // Operations, not the engine: the default label is the wall clock.
 #![allow(clippy::disallowed_methods)]
 
@@ -27,7 +28,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use directoryd::directory::s3::S3;
-use directoryd::directory::store::{R, Store, When, refuse};
+use directoryd::directory::store::{R, Store, refuse};
 use replica::encode::to_hex;
 use replica::ids::sha256;
 use supervisor::World;
@@ -59,11 +60,11 @@ fn places(world: &World) -> (String, [String; 4]) {
 pub fn keys(store: &dyn Store, world: &World) -> R<Vec<String>> {
     let (record, prefixes) = places(world);
     let mut out = Vec::new();
-    if store.get(&record)?.is_some() {
+    if tried(&record, || store.head(&record))?.is_some() {
         out.push(record);
     }
     for p in &prefixes {
-        out.extend(store.list(p)?);
+        out.extend(tried(p, || store.list(p))?);
     }
     Ok(out)
 }
@@ -95,7 +96,7 @@ pub fn plan_aside(store: &dyn Store, world: &World, label: &str) -> R<Vec<Move>>
 pub fn plan_back(store: &dyn Store, world: &World, label: &str) -> R<Vec<Move>> {
     let prefix = format!("aside/{label}/");
     let mut out = Vec::new();
-    for k in store.list(&prefix)? {
+    for k in tried(&prefix, || store.list(&prefix))? {
         let key = k[prefix.len()..].to_owned();
         if !belongs(world, &key) {
             return refuse(
@@ -115,50 +116,101 @@ pub struct Moved {
     pub bytes: u64,
 }
 
-/// Copies every move's object to its new key and reads each copy back; then, only if every copy checks, deletes the
-/// originals.
-pub fn run(store: &dyn Store, moves: &[Move]) -> R<Moved> {
-    // First, before anything is written: a new key that holds other bytes refuses the whole run.
-    for m in moves {
-        if let Some(there) = store.get(&m.to)? {
-            let src = store.get(&m.from)?;
-            if src.is_none_or(|s| sha256(&s.bytes) != sha256(&there.bytes)) {
-                return refuse(
-                    "aside-copy-differs",
-                    format!(
-                        "{} holds other bytes than {}; nothing was written or deleted",
-                        m.to, m.from
-                    ),
+/// How many times a request the store did not answer (a stall, a dropped connection, a 5xx) is tried again, and the
+/// first wait before it (doubled each time: 2, 4, 8, 16, 32 s).
+const RETRIES: u32 = 5;
+const FIRST_WAIT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(1)
+} else {
+    std::time::Duration::from_secs(2)
+};
+
+/// `f`, tried again up to [`RETRIES`] times while the store is out of reach (`store-unreachable`: no answer in time, a
+/// dropped connection or a 5xx). Any other refusal ends it.
+fn tried<T>(what: &str, f: impl Fn() -> R<T>) -> R<T> {
+    let mut wait = FIRST_WAIT;
+    let mut left = RETRIES;
+    loop {
+        match f() {
+            Err(e) if e.name == "store-unreachable" && left > 0 => {
+                eprintln!(
+                    "world-aside: {what}: out of reach ({}), trying again in {} s",
+                    e.detail,
+                    wait.as_secs()
                 );
+                std::thread::sleep(wait);
+                wait *= 2;
+                left -= 1;
             }
+            r => return r,
         }
     }
-    let mut done = Moved::default();
+}
+
+/// Whether the object at `m.to` (length and ETag `there`) is a copy of the one at `m.from` (`src`): by length and
+/// ETag, which the store keeps for a copy of a whole object; only when the lengths agree and the ETags do not (or one
+/// is missing) are both read and their SHA-256 compared.
+fn same(store: &dyn Store, m: &Move, src: &(u64, String), there: &(u64, String)) -> R<bool> {
+    if src.0 != there.0 {
+        return Ok(false);
+    }
+    if !src.1.is_empty() && src.1 == there.1 {
+        return Ok(true);
+    }
+    let a = tried(&m.from, || store.get(&m.from))?;
+    let b = tried(&m.to, || store.get(&m.to))?;
+    Ok(matches!((a, b), (Some(a), Some(b)) if sha256(&a.bytes) == sha256(&b.bytes)))
+}
+
+/// Copies every move's object to its new key inside the store (a bucket copies it itself: no byte passes through this
+/// machine), and checks each copy by its length and ETag; then, only if every copy checks, deletes the originals. A
+/// copy already there (a run stopped halfway) is checked the same way and counts as made.
+pub fn run(store: &dyn Store, moves: &[Move]) -> R<Moved> {
+    // First, before anything is written: a new key that holds other bytes refuses the whole run.
+    let mut heads = Vec::with_capacity(moves.len());
     for m in moves {
-        let Some(src) = store.get(&m.from)? else {
+        let Some(src) = tried(&m.from, || store.head(&m.from))? else {
             return refuse("aside-source-gone", m.from.clone());
         };
-        match store.put(&m.to, &src.bytes, When::Absent) {
-            Ok(_) => {}
-            // A copy left by a run stopped halfway: kept only if it is the same bytes (checked below).
-            Err(e) if e.name == "precondition-failed" => {}
-            Err(e) => return Err(e),
+        if let Some(there) = tried(&m.to, || store.head(&m.to))?
+            && !same(store, m, &src, &there)?
+        {
+            return refuse(
+                "aside-copy-differs",
+                format!(
+                    "{} holds other bytes than {}; nothing was written or deleted",
+                    m.to, m.from
+                ),
+            );
         }
-        let copy = store.get(&m.to)?;
-        let same = copy.as_ref().is_some_and(|c| {
-            c.bytes.len() == src.bytes.len() && sha256(&c.bytes) == sha256(&src.bytes)
-        });
-        if !same {
+        heads.push(src);
+    }
+    let mut done = Moved::default();
+    for (i, (m, src)) in moves.iter().zip(&heads).enumerate() {
+        // A copy whose answer was lost may have been made: look before copying again.
+        tried(&m.to, || match store.head(&m.to)? {
+            Some(_) => Ok(()),
+            None => store.copy(&m.from, &m.to).map(|_| ()),
+        })?;
+        let there = tried(&m.to, || store.head(&m.to))?;
+        if !there.is_some_and(|t| same(store, m, src, &t).unwrap_or(false)) {
             return refuse(
                 "aside-copy-differs",
                 format!("{} is not a copy of {}; nothing was deleted", m.to, m.from),
             );
         }
         done.objects += 1;
-        done.bytes += src.bytes.len() as u64;
+        done.bytes += src.0;
+        if (i + 1) % 20 == 0 {
+            eprintln!(
+                "world-aside: {} of {} copied and checked",
+                i + 1,
+                moves.len()
+            );
+        }
     }
     for m in moves {
-        store.delete(&m.from)?;
+        tried(&m.from, || store.delete(&m.from))?;
     }
     Ok(done)
 }
@@ -278,6 +330,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use directoryd::directory::store::When;
 
     const WORLD: &str = "cd5ce79e0e0cf90b312c5ba60b941f58-cd5ce79e0e0cf90b312c5ba60b941f58-0";
     const OTHER: &str = "aa5ce79e0e0cf90b312c5ba60b941f58-aa5ce79e0e0cf90b312c5ba60b941f58-0";
@@ -436,6 +489,103 @@ mod tests {
             2
         );
         assert_eq!(s.get(&key).unwrap().unwrap().bytes, big);
+        // A copy already made counts as made by its length and ETag; a stalled answer is tried again.
+        let plan = plan_aside(&s, &w, "t6").unwrap();
+        s.copy(&plan[0].from, &plan[0].to).unwrap();
+        let slow = s3().for_operator(OBJECT_LIMIT, Duration::from_secs(1));
+        stand_in.stall_reads(1, Duration::from_secs(2), "/t6/");
+        assert_eq!(run(&slow, &plan).unwrap().objects, 2);
+        assert_eq!(
+            s.get(&format!("aside/t6/{key}")).unwrap().unwrap().bytes,
+            big
+        );
+        assert!(keys(&s, &w).unwrap().is_empty());
+    }
+
+    /// A store that drops the next `fail` calls (`store-unreachable`, as a dropped connection or a 5xx is named).
+    struct Flaky<'a> {
+        store: &'a dyn Store,
+        fail: std::sync::atomic::AtomicU32,
+    }
+
+    impl Flaky<'_> {
+        fn drop_one(&self) -> R<()> {
+            use std::sync::atomic::Ordering::SeqCst;
+            if self
+                .fail
+                .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return refuse("store-unreachable", "connection reset by peer");
+            }
+            Ok(())
+        }
+        fn set(&self, n: u32) {
+            self.fail.store(n, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl Store for Flaky<'_> {
+        fn get(&self, key: &str) -> R<Option<directoryd::directory::store::Object>> {
+            self.drop_one()?;
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.drop_one()?;
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.drop_one()?;
+            self.store.list(prefix)
+        }
+        fn delete(&self, key: &str) -> R<()> {
+            self.drop_one()?;
+            self.store.delete(key)
+        }
+        fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+            self.drop_one()?;
+            self.store.head(key)
+        }
+        fn copy(&self, from: &str, to: &str) -> R<String> {
+            self.drop_one()?;
+            self.store.copy(from, to)
+        }
+    }
+
+    /// 0.133 R13: dropped connections on the listing, the copies and the deletes are tried again (`tried`), and the
+    /// move finishes whole; past the last try the run refuses with nothing deleted; any other refusal is not retried.
+    #[test]
+    fn dropped_connections_are_tried_again_before_a_refusal() {
+        let (d, s) = folder("flaky");
+        let w = World::parse(WORLD).unwrap();
+        let mine = shipped(&s);
+        let flaky = Flaky {
+            store: &s,
+            fail: 0.into(),
+        };
+        // RETRIES drops in a row before each phase: the listing, then the run's first call.
+        flaky.set(RETRIES);
+        let plan = plan_aside(&flaky, &w, "t7").unwrap();
+        assert_eq!(plan.len(), 5);
+        flaky.set(RETRIES);
+        assert_eq!(run(&flaky, &plan).unwrap().objects, 5);
+        for (k, v) in &mine {
+            assert_eq!(s.get(&format!("aside/t7/{k}")).unwrap().unwrap().bytes, *v);
+            assert_eq!(s.get(k).unwrap(), None);
+        }
+        // One more drop than the tries: the run refuses, and nothing aside is deleted.
+        let back = plan_back(&s, &w, "t7").unwrap();
+        flaky.set(RETRIES + 1);
+        assert_eq!(run(&flaky, &back).unwrap_err().name, "store-unreachable");
+        assert_eq!(s.list("aside/t7/").unwrap().len(), 5, "nothing deleted");
+        // A refusal that is not a dropped connection is not tried again.
+        s.put("aside/t7/world/zz", b"z", When::Absent).unwrap();
+        flaky.set(0);
+        assert_eq!(
+            plan_back(&flaky, &w, "t7").unwrap_err().name,
+            "aside-foreign-key"
+        );
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "charcoal": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -15,7 +15,7 @@
       }
     },
     "rings": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -26,7 +26,7 @@
       }
     },
     "grain": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 0,

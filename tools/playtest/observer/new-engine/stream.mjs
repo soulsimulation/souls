@@ -4,7 +4,7 @@
 // to each seat's intents are the seats' own (receipts.mjs), not the viewer's.
 //
 //   const v = await streamViewer({ world, pkg });   // world: arena/new-engine/world.mjs startWorld's answer
-//   v.bodies(), v.said(), v.node(clientId), v.errors; v.close()
+//   v.bodies(), v.said(), v.node(clientId), v.links(clientId), v.errors; v.close()
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join } from 'node:path';
@@ -43,10 +43,41 @@ export function hookOnce(pkg) {
   hooked = pkg;
 }
 
+/** A public node record's links (record key 9: `[n, "<ns>:<link>@<rev>", [scope, counter], audience]`), as
+ *  `{ type: "<ns>:<link>", end: <client id> }`. The page's records carry only a body's Soul from them (`publicSoul`). */
+export function linksOf(record) {
+  const out = [];
+  for (const l of (record instanceof Map ? record.get(9) : null) ?? []) {
+    if (!Array.isArray(l) || typeof l[1] !== 'string' || !Array.isArray(l[2]) || !(l[2][0] instanceof Uint8Array)) continue;
+    out.push({ type: l[1].split('@')[0], end: `${Buffer.from(l[2][0]).toString('hex')}-${Number(l[2][1])}` });
+  }
+  return out;
+}
+
+/** Each node's links as the replica's stream player gives its records to the page's worker (its `query` by id and its
+ *  `snapshot`), read beside the worker: client id → links. One table for the process, as the replica is one. */
+const linkTable = new Map();
+let tapped = null;
+async function tapLinks(pkg) {
+  if (tapped) return tapped;
+  tapped = (async () => {
+    const { StreamPlayer } = await import(pathToFileURL(join(pkg, 'replica.js')).href);
+    const { decode } = await import(pathToFileURL(join(REPO_ROOT, 'apps/web/node_modules/cborg/cborg.js')).href);
+    const keep = (r) => { if (r instanceof Map && Array.isArray(r.get(1)) && r.get(1)[0] instanceof Uint8Array) linkTable.set(`${Buffer.from(r.get(1)[0]).toString('hex')}-${Number(r.get(1)[1])}`, linksOf(r)); };
+    const read = (bytes) => { try { const v = decode(bytes, { useMaps: true }); if (Array.isArray(v)) v.forEach(keep); else keep(v); } catch { /* not a record */ } };
+    for (const name of ['query', 'snapshot']) {
+      const real = StreamPlayer.prototype[name];
+      StreamPlayer.prototype[name] = function (...a) { const out = real.apply(this, a); read(out); return out; };
+    }
+  })();
+  return tapped;
+}
+
 let n = 0;
 /** A fresh viewer from now on, of `world`'s stream or of the `stream` address given. Resolves once its worker is started. */
 export async function streamViewer({ world = null, stream = null, pkg = REPLICA_PKG }) {
   hookOnce(pkg);
+  await tapLinks(pkg);
   // a stream's address given (a world's old page names it, as soul.game's does), else the world's advert
   if (!stream) {
     const advert = await fetch(`${world.page}views/world.json`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null)
@@ -75,6 +106,8 @@ export async function streamViewer({ world = null, stream = null, pkg = REPLICA_
     bodies: () => [...v.nodes.values()].filter((x) => x.kind.startsWith('souls:body')).map((x) => ({ id: clientKey(x.id), kind: x.kind, pos: x.pos, parent: x.parent })),
     /** The node for a client id, or null. */
     node: (id) => v.nodes.get(pageKey(id)) ?? null,
+    /** A node's links by its client id (`linksOf`), as last played; [] when none were read. */
+    links: (id) => linkTable.get(String(id)) ?? [],
     /** What was said in public since this viewer started: [{speaker (client id), at, words}] */
     said: () => v.saidRecs.map((s) => ({ speaker: clientKey(s.speaker), at: s.at, words: s.words, private: !!s.private })),
     /** Waits until `pred(v)` holds (or the viewer errs); → true, or false at the timeout. */

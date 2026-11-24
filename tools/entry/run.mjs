@@ -154,6 +154,16 @@ function sceneGap(c, entry, form, t) {
   return leans ? t.treeGap?.(entry, form) ?? null : null;
 }
 
+/** What a world that keeps a tree could not do, from an act's answer: `scene`, the case's start would not stand in
+ *  its tree (the case is skipped, by the refusal's name); `run`, its tree refused the run's own entries (the case
+ *  fails, by name). A pass then means the tree took what the run wrote. */
+export function refusedBy(got) {
+  return {
+    scene: got?.scene_refused?.length ? `the world's tree would not hold the case's start: ${got.scene_refused[0]}` : null,
+    run: got?.tree_refused?.length ? `the world's tree refused the run's entries: ${got.tree_refused[0]}` : null,
+  };
+}
+
 /** Fields read back until they hold `want` (or the time runs out): what the world shows from outside. */
 async function readUntil(t, id, want, ms = 6000) {
   const end = Date.now() + ms;
@@ -201,8 +211,11 @@ async function ruleCase(t, row, kinds, placed) {
   for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
   for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
   const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])), {case: c, ids});
+  const refused = refusedBy(got);
+  if (refused.scene) return {result: 'skip', why: refused.scene};
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
   const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
+  if (refused.run) off.push(refused.run);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), got: brief(got), ...(via ? {via} : {})};
 }
 
@@ -216,6 +229,7 @@ async function effectCase(t, row, kinds, placed) {
   let moved = null;
   for (const [k, step] of c.do.entries()) {
     const kind = c.state.nodes[step.act.this]?.kind, form = kinds.get(kind)?.forms?.[step.act.form], id = ids[step.act.this];
+    if (!id) return {result: 'skip', why: `step ${k}: it acts on ${step.act.this}, which an earlier step made, and this run places only the case's own things`, steps};
     if (form && form.starts !== 'act') {
       if (!t.timers) return {result: 'skip', why: `step ${k}: ${step.act.form} is started by the world's timer, which this world does not run`, steps};
       const want = setsOf(step.expect, ids, c, kinds)[id] ?? {}, got = await readUntil(t, id, want, (timerAfter(c, step) ?? 0) / 1000 + 10000);
@@ -228,16 +242,24 @@ async function effectCase(t, row, kinds, placed) {
     const tree = step.expect?.verdict === 'yes' && sceneGap(c, kinds.get(kind), step.act.form, t);
     if (tree) return {result: 'skip', why: `step ${k}: ${tree}`, steps};
     // a world that decides on the case's start (t.scene) cannot see what an earlier step linked or moved
-    if (k > 0 && t.scene && moved) return {result: 'skip', why: `step ${k}: an earlier step ${moved}, and this world decides on the case's start`, steps};
+    if (k > 0 && t.scene && !t.tree && moved) return {result: 'skip', why: `step ${k}: an earlier step ${moved}, and this world decides on the case's start`, steps};
     const unread = (step.expect?.changes ?? []).filter(x => x.change !== 'set').map(x => x.change);
-    if (unread.length && !t.reads?.includes?.(unread[0])) return {result: 'skip', why: `step ${k}: a ${unread[0]} change cannot be read from outside on this world`, steps};
+    const blind = unread.find(x => !t.reads?.includes?.(x));
+    if (blind) return {result: 'skip', why: `step ${k}: a ${blind} change cannot be read from outside on this world`, steps};
     const before = await t.fields(id);
     const args = Object.fromEntries(Object.entries(step.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v]));
-    const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: c.state}, ids});
+    const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: step.actor ? {...c.state, actor: step.actor} : c.state}, ids});
+    const refused = refusedBy(got);
+    if (refused.scene) return {result: 'skip', why: `step ${k}: ${refused.scene}`, steps};
     const sets = setsOf(step.expect, ids, c, kinds);
     const after = got.verdict === 'no' ? await settled(t, id) : await readUntil(t, id, sets[id] ?? {});
     const {off, via} = judge(step.expect ?? {}, got, before, after);
+    if (refused.run) off.push(refused.run);
     for (const [nid, want] of Object.entries(sets)) { const now = nid === id ? after : await readUntil(t, nid, want); if (!sameFields(now, want)) off.push(`after the step, ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(want)}`); }
+    if (unread.length && got.verdict === 'yes') {
+      const want = (step.expect.changes ?? []).filter(x => x.change !== 'set').map(changeLine).sort(), have = (got.changes ?? []).map(changeLine).sort();
+      if (!same(want, have)) off.push(`its changes were ${JSON.stringify(have)}, not ${JSON.stringify(want)}`);
+    }
     if (t.events && step.expect?.events && !same((got.events ?? []).map(e => e.event), step.expect.events.map(e => e.event))) off.push(`events ${JSON.stringify(got.events)} differ`);
     steps.push({step: k, form: step.act.form, got: brief(got), ...(via ? {via} : {})});
     const changed = got.verdict === 'yes' && (form?.effects ?? []).find(e => ['link', 'unlink', 'reparent', 'create', 'remove'].includes(e.change));
@@ -314,6 +336,9 @@ async function disturbCase(t, row, kinds, placed) {
   // the case's other things (an argument), placed and set as the rule cases place them
   const ids = {[c.act.this]: id};
   for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind && nid !== c.act.this) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
+  // a world that keeps the case's scene in its tree sets it now, so what the Soul holds before is the case's
+  const set = refusedBy(await t.arrange?.({case: c, ids}));
+  if (set.scene) return {result: 'skip', why: set.scene};
   const body0 = await t.body();
   const b = await t.begin(id, row.form, c.act.args, {case: c, ids});
   if (b.verdict !== 'started') return {result: 'fail', why: `the act was not accepted (${b.code ?? b.reason ?? b.verdict}), though every need is met`};
@@ -326,6 +351,7 @@ async function disturbCase(t, row, kinds, placed) {
   else await t.restart();
   const landed = ['accepted', 'started'].includes((await t.progress(b.rid)).phase);   // still under way once it was done
   const end = await t.wait(b.rid);
+  const stopRefused = refusedBy(end).run;
   const off = [], ended = {phase: end.receipt ?? end.verdict, ...(end.code ? {code: end.code} : {}), ...(end.text ? {reason: end.text} : {})};
   const sentAt = {step: (sent.step ?? 0) + 1, moving: sent.moving, ...(r.passed ? {late: true} : {})};
   if (end.verdict === 'yes' && !landed) return {result: 'skip', why: `the form completed before the disturbance landed: it did not test a stop`, ended, sent_at: sentAt};
@@ -334,11 +360,15 @@ async function disturbCase(t, row, kinds, placed) {
   else if (!end.code) off.push('the form ended with no named reason');
   const body1 = await t.body();
   if (body1.posture === 'busy') off.push(`the Soul is still busy (${body1.activity})`);
-  if (!same(body1.holding, body0.holding)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(body0.holding)} as before`);
+  // a thing removed from the Soul's hand is gone from it: it holds the rest as before
+  const held0 = row.how === 'remove' ? (body0.holding ?? []).filter(h => h !== id) : body0.holding;
+  if (!same(body1.holding, held0)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(held0)} as before`);
   let again;
   if (row.how === 'remove') {
-    const fresh = await scene();
-    again = await t.act(fresh.id, row.form, c.act.args, {case: c, ids: {...ids, [c.act.this]: fresh.id}});
+    const fresh = await scene(), ids2 = {...ids, [c.act.this]: fresh.id};
+    // a world that keeps a tree took the case's other things in it away with it: those are placed again
+    if (t.tree) for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind && nid !== c.act.this && !(await t.fields(ids[nid]))) { ids2[nid] = await placed(n.kind); await t.set(ids2[nid], startFields(kinds.get(n.kind), n)); }
+    again = await t.act(fresh.id, row.form, c.act.args, {case: c, ids: ids2});
     if (again.verdict !== 'yes') off.push(`afterwards the Soul could not do ${row.form} on a fresh thing (${again.code ?? again.reason ?? again.verdict})`);
   } else {
     const after = await settled(t, id);
@@ -349,9 +379,19 @@ async function disturbCase(t, row, kinds, placed) {
       if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
     }
   }
+  for (const r of [stopRefused, refusedBy(again).run]) if (r) off.push(r);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
 }
 
+/** A change other than a set as one line to compare, by the case's names: what it did, to what, and where to (a made
+ *  thing by its kind). A world whose `reads` names a change kind answers an act with its changes in these terms. */
+export function changeLine(x) {
+  const to = x.to ? `${x.to.node}${x.to.hand ? `/hand:${x.to.hand}` : x.to.slot ? `/slot:${x.to.slot}` : ''}` : '';
+  if (x.change === 'create') return `create ${x.kind} into ${to}`;
+  if (x.change === 'reparent') return `reparent ${x.node} into ${to}`;
+  if (x.change === 'link' || x.change === 'unlink') return `${x.change} ${x.node} ${x.link} ${x.end}`;
+  return `${x.change} ${x.node ?? ''}`.trim();
+}
 const timerAfter = (c, step) => c.do.flatMap(s => s.expect?.timers ?? []).find(x => x.form === step.act.form)?.after_us;
 /** The `set` changes a step expects, as fields per world id, in the world's terms (a bool's 0/1 as false/true). */
 export function setsOf(expect, ids, c, kinds) {

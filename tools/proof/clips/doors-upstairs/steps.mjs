@@ -8,8 +8,9 @@ import { actOn, cast, walk } from '../_shared/cast.mjs';
 
 await cast({ souls: [{ name: 'Clara', owner: 'admin' }] });
 // off camera: up to the landing, the bedroom door shut by hand, then out, the front door shut, and to the bakery's front
-await walk('Clara', 'canal-west-home-3');
+await walk('Clara', 'Landing in canal-west-home-3');
 await actOn('Clara', 'close', 'canal-west-home-3-door-3');
+await walk('Clara', 'canal-west-home-3');
 await walk('Clara', 'canal-west-home-3-door-1');
 await actOn('Clara', 'close', 'canal-west-home-3-door-1');
 await walk('Clara', 'int-bakery');
@@ -23,8 +24,8 @@ export default async function steps(page, { mark }) {
   await page.keyboard.press('Enter');
   mark('follow Clara at the bakery front, ~45 m from the townhouse, both doors closed');
   await page.waitForTimeout(1500);
-  mark('one walk into the townhouse (its rooms carry no names on the new engine yet, so not the bedroom by name)');
-  await walk('Clara', 'canal-west-home-3');
-  mark('in the townhouse, the front door closed behind');
+  mark('one walk: to the upstairs bedroom, through both doors');
+  await walk('Clara', 'Bedroom in canal-west-home-3');
+  mark('in the upstairs bedroom, both doors closed behind');
   await page.waitForTimeout(2500);
 }

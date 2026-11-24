@@ -1,0 +1,93 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:lawn (0.135 E1): wander across it, or lie down on the grass where you are to nap or watch the sky (stand again with the body's own stand); none needs anything or changes anything.",
+ "cases": [
+  {
+   "name": "wander_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "wander"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:lawn"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "nap_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "nap"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:lawn"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stargaze_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "stargaze"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:lawn"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  }
+ ]
+}

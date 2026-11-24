@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "food": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -49,6 +49,13 @@
     ]
   },
   "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
     "serve": {
       "who": "holder",
       "starts": "act",

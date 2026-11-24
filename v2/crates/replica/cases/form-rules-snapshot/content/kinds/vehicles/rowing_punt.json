@@ -1,0 +1,135 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rowing_punt",
+  "owner": "thing",
+  "card": {
+    "text": "card",
+    "category": "getting_around",
+    "synonyms": [
+      "punt",
+      "boat"
+    ]
+  },
+  "text": {
+    "card": "A rowing punt for two: board at its plank, row its loop or steer it.",
+    "getting_around": "transport",
+    "punt": "punt",
+    "boat": "boat"
+  },
+  "points": {
+    "plank": {
+      "role": "stand",
+      "at_mm": [
+        3100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 180000
+    },
+    "exit_a": {
+      "role": "stand",
+      "at_mm": [
+        3650,
+        0,
+        -850
+      ],
+      "yaw_mdeg": 0
+    },
+    "exit_b": {
+      "role": "stand",
+      "at_mm": [
+        3650,
+        0,
+        850
+      ],
+      "yaw_mdeg": 0
+    }
+  },
+  "slots": {
+    "rider_a": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        -650,
+        360,
+        0
+      ],
+      "stand": "plank"
+    },
+    "rider_b": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        650,
+        360,
+        0
+      ],
+      "stand": "plank"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3400,
+      550,
+      1350
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "forms": {
+    "row": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": {
+            "of": "free_slots",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "slot_free",
+          "slot": {
+            "arg": "seat"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "seat"
+          }
+        },
+        {
+          "step": "sit",
+          "slot": {
+            "arg": "seat"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": {
+            "arg": "seat"
+          },
+          "event": "boarded"
+        }
+      ]
+    }
+  }
+}

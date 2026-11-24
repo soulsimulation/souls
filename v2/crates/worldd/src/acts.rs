@@ -258,10 +258,9 @@ impl Planning {
         to: Vec3,
         map: &Arc<Versions>,
     ) -> Option<Result<sim::walk::town::Line, Refusal>> {
-        let matches = self
-            .current
-            .get(&key)
-            .is_some_and(|(q, _)| q.body == body && q.query == (FormQuery::Line { to }));
+        let matches = self.current.get(&key).is_some_and(|(q, _)| {
+            same_asker(&q.query, &q.body, &body) && q.query == (FormQuery::Line { to })
+        });
         let answer = self.answer(&key, map).cloned();
         if answer.is_some() {
             self.current.remove(&key);
@@ -281,10 +280,9 @@ impl Planning {
         query: FormQuery,
         map: &Arc<Versions>,
     ) -> Option<FormResult> {
-        let unchanged = self
-            .current
-            .get(&key)
-            .is_some_and(|(q, m)| q.body == body && q.query == query && Arc::ptr_eq(m, map));
+        let unchanged = self.current.get(&key).is_some_and(|(q, m)| {
+            same_asker(&q.query, &q.body, &body) && q.query == query && Arc::ptr_eq(m, map)
+        });
         if !unchanged {
             self.generation += 1;
             let q = FormQuestion {
@@ -301,6 +299,19 @@ impl Planning {
         }
         self.queued.insert(key, self.current[&key].0.clone());
         None
+    }
+}
+
+/// Whether a question asked for `asked` still stands for the body as it is now (S11). A walk's place and legs are
+/// asked for the body exactly as it stood. A line is asked for a walker on its way, and a walker waiting for one is
+/// still pushed along by those round it: its line stands while it is on the same floor, and the line it gets is the
+/// planner's from where it was, which it follows from where it is, or asks again when pushed off it
+/// (`Town::corner_planned`). Asked again for each new pose, a jostled walker's line was never the current one when it
+/// came back, and the walker waited for it, standing, for as long as the crowd round it moved.
+fn same_asker(query: &FormQuery, asked: &Moved, now: &Moved) -> bool {
+    match query {
+        FormQuery::Line { .. } => sim::walk::node_of(asked) == sim::walk::node_of(now),
+        FormQuery::Walk { .. } => asked == now,
     }
 }
 

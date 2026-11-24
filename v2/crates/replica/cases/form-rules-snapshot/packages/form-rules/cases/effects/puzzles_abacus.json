@@ -6,13 +6,13 @@
       "name": "count_to_twenty_one_and_clear",
       "state": {"actor":"b1","nodes":{"room":{"loose":["b1","a1"]},"a1":{"kind":"eden:abacus"},"b1":{"hands":{"left":null,"right":null}}}},
       "do": [
-        {"act":{"this":"a1","form":"add_ten"},"receipt":"ra1","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":1,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"add_ten"},"receipt":"ra2","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":1,"to":2}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"add_one"},"receipt":"ra3","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":2,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"subtract_one"},"receipt":"ra4","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":2,"to":0}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"add_one"},"receipt":"ra5","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":2,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"subtract_ten"},"receipt":"ra6","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":1,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
-        {"act":{"this":"a1","form":"clear"},"receipt":"ra7","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":1,"to":0},{"change":"set","node":"a1","field":"ones","n":2,"to":0}],"events":[{"event":"eden:cleared","node":"a1","changes":[0]},{"event":"eden:cleared","node":"a1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"a1","form":"add_ten"},"receipt":"ra1","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":28,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"add_ten"},"receipt":"ra2","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":28,"to":2}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"add_one"},"receipt":"ra3","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":29,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"subtract_one"},"receipt":"ra4","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":29,"to":0}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"add_one"},"receipt":"ra5","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"ones","n":29,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"subtract_ten"},"receipt":"ra6","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":28,"to":1}],"events":[{"event":"eden:counted","node":"a1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"a1","form":"clear"},"receipt":"ra7","expect":{"verdict":"yes","changes":[{"change":"set","node":"a1","field":"tens","n":28,"to":0},{"change":"set","node":"a1","field":"ones","n":29,"to":0}],"events":[{"event":"eden:cleared","node":"a1","changes":[0]},{"event":"eden:cleared","node":"a1","changes":[1]}],"timers":[]}},
         {"act":{"this":"a1","form":"clear"},"receipt":"ra8","expect":{"verdict":"no","reason":"field_differs","need":1}}
       ],
       "after": {"a1":{"kind":"eden:abacus","fields":{"tens":0,"ones":0}}}

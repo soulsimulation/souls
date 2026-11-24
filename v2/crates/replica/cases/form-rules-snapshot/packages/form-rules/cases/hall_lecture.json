@@ -49,7 +49,7 @@
       "act": { "this": "h1", "form": "lapse" },
       "state": { "actor": "b1", "now_us": 3600000000, "nodes": { "h1": { "kind": "eden:hall_lecture" }, "b1": { "hands": {} } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["h1/field/2", 0], ["h1/link/1", 0], ["h1/link/2", 0]] }
+      "expect": { "verdict": "yes", "read": [["h1/field/29", 0], ["h1/link/1", 0], ["h1/link/2", 0]] }
     },
     {
       "name": "lapse_one_microsecond_early",

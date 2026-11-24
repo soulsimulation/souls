@@ -60,6 +60,8 @@ step install-apart bash tools/ops/install.sh check
 step cost node --test tools/ops/cost/cost.test.mjs
 # The cut-over's count of what a rollback leaves in the new system (X7, #2836).
 step cutover-count node --test tools/ops/cutover/count.test.mjs
+# The release head's checks (the merge queue's ci run counts) and the reseed a release carries (0.133 R13).
+step ops-release node --test tools/ops/release/release.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 }
 ops_health() {

@@ -4,14 +4,14 @@
   "owner": "thing",
   "state": {
     "prepared": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["loose", "loop", "guyline"],
       "default": "loose",
       "audience": {"rule": "everyone"}
     },
     "binding": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 0,

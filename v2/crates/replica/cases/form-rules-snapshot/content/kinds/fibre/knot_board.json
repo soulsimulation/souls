@@ -4,13 +4,13 @@
   "owner": "thing",
   "state": {
     "overhand": {
-      "n": 1,
+      "n": 28,
       "type": "bool",
       "default": false,
       "audience": {"rule": "everyone"}
     },
     "eight": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": false,
       "audience": {"rule": "everyone"}
