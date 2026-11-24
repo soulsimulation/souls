@@ -966,6 +966,18 @@ export async function openLauncher(cfg = {}) {
     return true;
   }
   const inside = (base, rel) => { const p = normalize(join(base, rel)); return p === base || p.startsWith(base + sep) ? p : null; };
+  // 0.133.2 hotfix: the site-level Mars static files the old root world's server answered (apps/server/src/mars-static.ts):
+  // /mars-assets/<file> from mars-web's top level (the static and campus manifests, the Draco decoders), and the published
+  // /browser, /engine, /history, /2020, /models derivatives. With no old process left for a moved world they were a 404
+  // here (the release's Mars web overlay fetches the manifests); now this release's mars-web answers them, same cache.
+  const MARS_STATIC_CACHE = 'public, max-age=86400, stale-while-revalidate=604800';
+  const marsRoot = marsWebDir ? resolve(marsWebDir) : null;
+  const marsStatic = (path) => {
+    if (!marsRoot || /[\\%]|\.\./.test(path)) return null;
+    if (/^\/mars-assets\/[a-zA-Z0-9_./-]+\.(glb|json|webp|png|jpe?g|svg|bin|js|wasm)$/.test(path)) return inside(marsRoot, path.slice('/mars-assets'.length));
+    return /^\/(browser|modular|engine|history|2020|models)\/[a-zA-Z0-9_./-]+\.(glb|json|webp|png|jpe?g|svg|bin)$/.test(path) || path === '/data/manifest.json' ? inside(marsRoot, path) : null;
+  };
+  const serveMarsStatic = (req, res, path) => { const f = marsStatic(path); return !!f && serveFile(res, f, MARS_STATIC_CACHE, req); };
 
   // ---------- proxy
   // Shared static files (/modular, /engine, …) come from a running world on this release's server. An old-world fork
@@ -1647,6 +1659,7 @@ export async function openLauncher(cfg = {}) {
       if (outside) {
         if (path === '/healthz' && direct(req)) { json(res, 200, { ok: true, service: 'world-launcher', base: B, build: BUILD }); return; }
         const p = (req.method === 'GET' || req.method === 'HEAD') && /^\/(modular|mars-assets|engine|browser|models|history|2020|world-assets)\/|^\/data\/manifest\.json$/.test(path) && anyRunning();
+        if ((req.method === 'GET' || req.method === 'HEAD') && serveMarsStatic(req, res, path)) return;
         if (p) { proxyHttp(req, res, p, { noindex: true }); return; }
         json(res, 404, { ok: false, code: 'not-found', message: `this server answers under ${B}/` }); return;
       }
@@ -1936,6 +1949,7 @@ export async function openLauncher(cfg = {}) {
         // lacks still goes to a world below.
         if (path.startsWith('/modular/') && marsWebDir && !/[\\%]|\.\./.test(path) && /\.(glb|json|bin|webp|png|jpe?g|svg)$/i.test(path)) { const f = inside(join(marsWebDir, 'modular'), path.slice('/modular'.length)); if (f && serveFile(res, f, 'public, max-age=86400, stale-while-revalidate=604800', req)) return; }
         if (path.startsWith('/world-assets/')) { const f = inside(join(root, 'worlds'), decodeURIComponent(path.slice('/world-assets'.length))); if (f && serveFile(res, f, 'public, max-age=3600', req)) return; }
+        if (serveMarsStatic(req, res, path)) return;
       }
       // Anything else a world page asks for (Mars assets, engine files, …): any running world serves it (base stripped).
       // Original worlds at the root: the world the laptop proxy sent that path to (woken if asleep), as before the move.
