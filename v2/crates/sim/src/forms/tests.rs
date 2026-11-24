@@ -2099,6 +2099,7 @@ fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
             slot,
             lie: false,
             stand: false,
+            on: None,
         };
         let limits = match when {
             "in-slot" => Limits::default(),
