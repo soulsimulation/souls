@@ -1259,7 +1259,12 @@ impl Stage {
     /// end offers it at the thing to the other role's ends, and each accepts. A side the case leaves empty is filled
     /// by a stand-in body that leaves once the others are in, so its link is gone again. The engine writes each
     /// member's role link (`sim::activity`); none is written here.
-    fn take_roles(&mut self, thing: Id, kind: &str, seats: &[(String, Vec<Id>)]) -> Result<(), String> {
+    fn take_roles(
+        &mut self,
+        thing: Id,
+        kind: &str,
+        seats: &[(String, Vec<Id>)],
+    ) -> Result<(), String> {
         let Some(a) = self.roles.get(kind).cloned() else {
             return Ok(());
         };
