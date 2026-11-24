@@ -1669,6 +1669,82 @@ fn i4187_a_waiting_act_cancelled_or_timed_out_never_starts() {
     }
 }
 
+/// E11b: a Soul that leaves its sit is never left half sat. Left mid-sit, the run ends `left` at the sit's contact with
+/// the body in the slot and seated still, so a later rise is taken and completes, and the seat is free after it. Left
+/// before the body reaches the slot (the sit's deadline passes first), the seat is given back and the body stands.
+#[test]
+fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
+    use skills::form_runner::Step;
+    for when in ["in-slot", "before-slot"] {
+        let (mut b, body, chair, slot, _) = seat_bench();
+        let sit = Step::Sit {
+            slot,
+            lie: false,
+            stand: false,
+        };
+        let limits = match when {
+            "in-slot" => Limits::default(),
+            _ => Limits {
+                step_move: 100_000,
+                ..Limits::default()
+            },
+        };
+        b.steps(
+            body,
+            chair,
+            vec![sit, Step::Wait(500_000)],
+            intent(body, 0),
+            limits,
+        )
+        .expect("started");
+        b.until_moving(body, 0);
+        let now = b.now;
+        {
+            let (mut w, forms) = b.world();
+            forms.leave(&mut w, body, None, now).expect("left");
+        }
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{when}: {:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "left", "{when}");
+        let slots = b.slots.as_ref().expect("slots");
+        let support = b.c.body(body).expect("a body").pose.support;
+        println!(
+            "E11b {when}: left at {} µs; seat held {:?}, holder {:?}, support {support:?}",
+            e.at,
+            slots.held_by(body),
+            slots.holder_in(chair, slot)
+        );
+        assert!(b.moves.is_empty(), "{when}: the sit's move ended");
+        if when == "before-slot" {
+            assert_eq!(slots.held_by(body), None, "{when}: the seat given back");
+            assert_eq!(slots.holder_in(chair, slot), None, "{when}: the seat free");
+            assert_ne!(support, replica::pose::Support::Slot, "{when}: standing");
+            b.clean();
+            continue;
+        }
+        assert_eq!(slots.held_by(body), Some(chair), "{when}: seated still");
+        assert_eq!(support, replica::pose::Support::Slot, "{when}: in the slot");
+        b.forms.ended.clear();
+        b.steps(body, chair, vec![Step::Rise], intent(body, 1), limits)
+            .expect("the rise starts");
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{when}: {:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "done", "{when}: the rise completes");
+        let slots = b.slots.as_ref().expect("slots");
+        assert_eq!(slots.held_by(body), None, "{when}: out of the seat");
+        assert_eq!(slots.holder_in(chair, slot), None, "{when}: the seat free");
+        assert_ne!(
+            b.c.body(body).expect("a body").pose.support,
+            replica::pose::Support::Slot
+        );
+        b.clean();
+    }
+}
+
 /// #4187 review: a take that waited on its body's seat step, behind a long walk (20 m, well past an act's 10 s), is
 /// listed as started late when its run starts, so `worldd` gives it its run's own deadline (its start plus its
 /// steps' span) and its progress answer then; it runs to its end.
