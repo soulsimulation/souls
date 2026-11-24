@@ -1,0 +1,1727 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:combination_latch",
+  "owner": "thing",
+  "state": {
+    "left": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "middle": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "right": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "released": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand_left": {
+      "role": "stand",
+      "at_mm": [
+        -440,
+        0,
+        500
+      ],
+      "yaw_mdeg": 180000
+    },
+    "left": {
+      "role": "contact",
+      "at_mm": [
+        -440,
+        1180,
+        130
+      ]
+    },
+    "stand_middle": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        500
+      ],
+      "yaw_mdeg": 180000
+    },
+    "middle": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1180,
+        130
+      ]
+    },
+    "stand_right": {
+      "role": "stand",
+      "at_mm": [
+        440,
+        0,
+        500
+      ],
+      "yaw_mdeg": 180000
+    },
+    "right": {
+      "role": "contact",
+      "at_mm": [
+        440,
+        1180,
+        130
+      ]
+    },
+    "stand_bolt": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        500
+      ],
+      "yaw_mdeg": 180000
+    },
+    "bolt": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        760,
+        130
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1450,
+      1700,
+      450
+    ]
+  },
+  "forms": {
+    "set_dial": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "dial"
+          },
+          "not": {
+            "arg": "position"
+          },
+          "says": "already_set"
+        },
+        {
+          "need": "state",
+          "field": "released",
+          "is": false,
+          "says": "close_first"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "dial"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_middle"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": {
+            "arg": "dial"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "dial"
+          },
+          "to": {
+            "arg": "position"
+          },
+          "event": "dial_changed"
+        }
+      ],
+      "takes": {
+        "dial": {
+          "type": "field",
+          "of": [
+            "left",
+            "middle",
+            "right"
+          ]
+        },
+        "position": {
+          "type": "count"
+        }
+      }
+    },
+    "release": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "is": 2,
+          "says": "wrong_code"
+        },
+        {
+          "need": "state",
+          "field": "middle",
+          "is": 1,
+          "says": "wrong_code"
+        },
+        {
+          "need": "state",
+          "field": "right",
+          "is": 3,
+          "says": "wrong_code"
+        },
+        {
+          "need": "state",
+          "field": "released",
+          "is": false,
+          "says": "already_open"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "bolt"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_bolt"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "bolt"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": true,
+          "event": "bolt_changed"
+        }
+      ]
+    },
+    "relatch": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "is": true,
+          "says": "already_closed"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "bolt"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_bolt"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "bolt"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": false,
+          "event": "bolt_changed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:combination_latch",
+    "table": [
+      {
+        "part": "bolt",
+        "field": "released",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "false": 0,
+          "true": 210
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1450,
+            80,
+            400
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -680,
+            850,
+            -100
+          ],
+          "size": [
+            70,
+            1540,
+            100
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            680,
+            850,
+            -100
+          ],
+          "size": [
+            70,
+            1540,
+            100
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1180,
+            -90
+          ],
+          "size": [
+            1350,
+            1000,
+            50
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -440,
+            1180,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "wheel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1235,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": 0,
+          "when": "@left=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -385,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@left=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@left=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -495,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@left=3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -440,
+            1180,
+            90
+          ],
+          "r": 27,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1374,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -423,
+            1342,
+            60
+          ],
+          "size": [
+            7,
+            64,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1310,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -457,
+            1326,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -457,
+            1358,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -261,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -261,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1050,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -423,
+            1034,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1018,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -457,
+            1002,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            986,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -602,
+            1212,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -602,
+            1180,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -602,
+            1148,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1578,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -417,
+            1557,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1535,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -463,
+            1513,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1492,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1440,
+            50
+          ],
+          "size": [
+            110,
+            8,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1180,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "wheel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1235,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": 0,
+          "when": "@middle=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            55,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@middle=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@middle=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -55,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@middle=3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1180,
+            90
+          ],
+          "r": 27,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1374,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            17,
+            1358,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            17,
+            1326,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1310,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -17,
+            1326,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -17,
+            1358,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            179,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            179,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            17,
+            1034,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1018,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -17,
+            1002,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            986,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -162,
+            1212,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -145,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -162,
+            1180,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -145,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -162,
+            1148,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            23,
+            1557,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            23,
+            1513,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1440,
+            50
+          ],
+          "size": [
+            110,
+            8,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            440,
+            1180,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "wheel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1235,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": 0,
+          "when": "@right=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            495,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@right=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@right=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@right=3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            440,
+            1180,
+            90
+          ],
+          "r": 27,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1374,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            457,
+            1358,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            457,
+            1326,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1310,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            423,
+            1326,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            423,
+            1358,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            619,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            619,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1050,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            457,
+            1034,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1018,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            423,
+            1002,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            986,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            278,
+            1212,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            295,
+            1196,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            278,
+            1180,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            295,
+            1164,
+            60
+          ],
+          "size": [
+            7,
+            32,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            278,
+            1148,
+            60
+          ],
+          "size": [
+            34,
+            7,
+            10
+          ],
+          "tint": "legend"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1578,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            463,
+            1557,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1535,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            463,
+            1513,
+            60
+          ],
+          "size": [
+            9,
+            43,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1492,
+            60
+          ],
+          "size": [
+            46,
+            9,
+            10
+          ],
+          "tint": "target"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1440,
+            50
+          ],
+          "size": [
+            110,
+            8,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            760,
+            90
+          ],
+          "r": 32,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            30
+          ],
+          "size": [
+            330,
+            45,
+            60
+          ],
+          "tint": "bolt",
+          "role": "bolt",
+          "pivot": [
+            0,
+            850,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -210,
+            850,
+            0
+          ],
+          "size": [
+            50,
+            100,
+            90
+          ],
+          "tint": "guide"
+        },
+        {
+          "kind": "box",
+          "at": [
+            210,
+            850,
+            0
+          ],
+          "size": [
+            50,
+            100,
+            90
+          ],
+          "tint": "guide"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -270,
+            850,
+            55
+          ],
+          "size": [
+            18,
+            85,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            270,
+            850,
+            55
+          ],
+          "size": [
+            18,
+            85,
+            12
+          ],
+          "tint": "reference"
+        }
+      ],
+      "palette": {
+        "frame": "#35424c",
+        "back": "#182b35",
+        "wheel": "#407faa",
+        "index": "#fff4b7",
+        "reference": "#ef4e49",
+        "hub": "#65c3ad",
+        "legend": "#d3e7e6",
+        "target": "#efc75f",
+        "bolt": "#efc75f",
+        "guide": "#639d9c"
+      },
+      "tags": [
+        "tool",
+        "latch",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Set three indexed dials to the public target 213, then release the bolt.",
+    "latch": "combination latch",
+    "combination": "three dial exhibit",
+    "close_first": "Relatch the bolt before turning a dial.",
+    "wrong_code": "Set left, middle and right dials to the engraved public target 213.",
+    "already_open": "The bolt is already released.",
+    "already_closed": "The bolt is already latched.",
+    "free_hand": "Put down an object so a hand is free to operate the exhibit.",
+    "howto_set": "Read the three gold target digits left to right:213. Each pale index points to fixed legends 0 above, 1 right, 2 below and 3 left. Use set_dial with dial left, middle or right and position 0, 1, 2 or 3. It selects that indexed position. Dials turn only while the bolt is latched. Set left 2, middle 1, right 3, then release. Relatch preserves all three dial values. The public target is visible to everyone; this learning exhibit grants no door or container access, security, permission or custody. Its bolt and indices prescribe indexed graphic poses, without force, load, collision, continuous-spin or physical-contact simulation.",
+    "already_set": "That dial is already at the requested position; choose another position."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "latch",
+      "combination"
+    ]
+  }
+}
