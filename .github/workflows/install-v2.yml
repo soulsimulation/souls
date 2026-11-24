@@ -54,11 +54,13 @@ jobs:
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page and its pinned body assets
+      - name: The pinned body assets
+        # X2: the page folder holds only the body files; the pairing card is the old page's (soul-game.caddy). The new
+        # page is not built: its packages are installed for the preparation's renderer closure (three, zod) alone.
         run: |
           npm --prefix v2/web ci
           node v2/tools/import-body/prepare.mjs --out "$RUNNER_TEMP/body-assets"
-          V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
+          node v2/tools/ops/release/bodies.ts --from "$RUNNER_TEMP/body-assets" --out "$RUNNER_TEMP/page"
       - name: Build the served client
         # The version the client's skill declares (v2/client/skill/SKILL.md); release-v2 stamps its own later.
         run: |
@@ -68,7 +70,7 @@ jobs:
           npm install --no-save --no-package-lock --no-audit --no-fund --prefix packages/ground zod@4.6.7
           node v2/client/served/build.mjs --out "$RUNNER_TEMP/client" --version "$version" --pkg v2/target/wasm-load/pkg
       - name: Bundle
-        run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release v2/web/dist "" "$RUNNER_TEMP/client"
+        run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release "$RUNNER_TEMP/page" "" "$RUNNER_TEMP/client"
       - name: SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}

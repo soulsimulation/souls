@@ -268,6 +268,9 @@ it never substitutes another preset. Materials, maps and UV seams remain model-s
 
 The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
 files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
+Install and release publish them without building the page: `node v2/tools/ops/release/bodies.ts --from <prepared>
+--out <page folder>` runs the same check and writes the install's page folder (`assets/bodies/`), which the front
+door serves at `/assets/bodies/` (X2).
 Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
 comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
 and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.

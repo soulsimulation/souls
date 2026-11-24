@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- X2 (0.134): copied from v2/web/src/pairing/card.html, built by the old page's build (vite.config.ts `pairing`). -->
+<!-- The approval card (Engine v2 W2, #2705). Opening it changes nothing: it shows a pairing request only to the
+     signed-in owner, through a POST, and approves only through another signed-in POST after the owner confirms the
+     code matches the one on their own screen (RFC 8628 §5.4). Sign-in uses the existing provider session, or an explicit local test person on HTTP loopback only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2712%27 fill=%27%233d6fb6%27/%3E%3C/svg%3E">
+<title>Approve a device</title>
+<style>
+  :root { --ink: #1d1d1b; --muted: #6b6b66; --line: #d9d6cf; --bg: #faf8f4; --warn: #8a3b12; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #eceae4; --muted: #a09d95; --line: #3a3934; --bg: #191917; --warn: #f0a070; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 32rem; margin: 3rem auto; padding: 0 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+  .warn { color: var(--warn); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  #code { font: 600 1.3rem ui-monospace, monospace; letter-spacing: .1em; }
+  input[type=text] { font: inherit; padding: .3rem .5rem; width: 12rem; }
+  button { font: inherit; padding: .4rem 1rem; margin-top: 1rem; }
+  [hidden] { display: none !important; }
+  /* Phones and touch screens (W14): every control at least 44 px, as today's pages (apps/web world-chrome.css). */
+  @media (max-width: 700px), (pointer: coarse) {
+    input[type=text], button { min-height: 44px; box-sizing: border-box; }
+    input[type=text] { width: 100%; max-width: 16rem; }
+    label.match { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
+    label.match input { width: 20px; height: 20px; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="heading">A device is asking to act as your Soul</h1>
+  <p class="warn">Approve only if you started this yourself, on a machine you control, and the code below matches the
+    code on your own screen. Anyone who sent you this link can be asking for your Soul.</p>
+  <button id="signin" type="button">Sign in</button>
+  <form id="who" hidden>
+    <label>Test person <input type="text" id="person" autocomplete="off" required></label>
+    <button>Show the request</button>
+  </form>
+  <section id="card" hidden>
+    <dl>
+      <dt>Code</dt><dd id="code"></dd>
+      <dt>Device</dt><dd id="device"></dd>
+      <dt>Agent</dt><dd id="label"></dd>
+      <dt>Soul</dt><dd id="soul"></dd>
+      <dt>Asked</dt><dd id="age"></dd>
+      <dt>Now on</dt><dd id="connected"></dd>
+    </dl>
+    <label class="match"><input type="checkbox" id="match"> The code matches the one on my screen</label><br>
+    <button id="approve" disabled>Approve this device</button>
+    <button id="cancel" type="button" hidden>Refuse this request</button>
+  </section>
+  <p id="said" role="status"></p>
+</main>
+<script type="module" src="./src/pairing/card.ts"></script>
+</body>
+</html>
