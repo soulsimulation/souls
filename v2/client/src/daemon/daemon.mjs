@@ -2040,12 +2040,13 @@ async function give(req) {
     req = { ...req, to: Array.isArray(req.to) ? req.to.map(named) : named(req.to) };
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
-  if ((req.do === 'accept' || req.do === 'decline') && req.offer !== undefined && !ID.test(String(req.offer))) {
+  if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
     const w = String(req.offer).toLowerCase().replace(/_/g, '-');
-    const e = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w))
-      // offered while this daemon was not running: the newest activity of that kind in the copy
+    // A leave by word is of the newest activity of that kind in the copy (this Soul may have made it); an answer is of
+    // the newest offer of it to this Soul, else, offered while this daemon was not running, the newest in the copy.
+    const e = (req.do === 'leave' ? null : logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w)))
       ?? (() => { const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null); const r = a && rows.filter((x) => x.kind === `${a.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
-    if (!e) return { ok: false, code: 'together-no-offer', detail: `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
+    if (!e) return { ok: false, code: 'together-no-offer', detail: req.do === 'leave' ? `no ${w.slice(0, 40)} here: \`find activity\` lists the activities in the copy` : `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
     req = { ...req, offer: e.offer };
   }
   const intents = giveIntents(req, { place, kinds });
@@ -2065,6 +2066,10 @@ async function carry(req) {
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
   const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
   const me = all.find((r) => r.soul === ME)?.id ?? null;
+  // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
+  if (req.do === 'offer' && Array.isArray(req.to)) {
+    req = { ...req, to: req.to.map((w) => (ID.test(String(w)) ? w : all.find((r) => r.soul && r.id !== me && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w)) };
+  }
   // Who is in each crew, as this Soul knows it: the bodies it offered the crew to, or the one that offered it.
   state.crews ??= {};
   const crews = crewsIn(rows);

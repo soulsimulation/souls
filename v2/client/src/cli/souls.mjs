@@ -626,7 +626,7 @@ async function schedule(home, named, { sub, args, until, missed }) {
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
   'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
-  'carry offer <body id> [<body id> ...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
+  'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
   'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',

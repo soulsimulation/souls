@@ -13,13 +13,15 @@
 //                                                        roles, the offerer in the first one member plays; to as many
 //                                                        as its other roles take. `together kinds` lists them
 //   together accept|decline <activity>                   the newest open offer of that activity to this Soul
+//   together leave <offer id | activity>                 leaves it (\`activity:leave\`, always taken): a touch, a dance,
+//                                                        any activity; by its word, the newest of that kind in the copy
 //
 // The offer's id: the other's `wait` shows `{"kind":"together","what":"offered","touch":..,"offer":..,"from":..}`.
-// When the touch is done, either one leaves it with `converse leave <id>`'s intent, `activity:leave`. Holding hands,
+// When the touch is done, either one leaves it with `together leave <id>` (`activity:leave`). Holding hands,
 // the first to walk leads and the other walks beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or
 // act lets go, and both hands come free.
 
-import { activityPin } from '../carry/carry.mjs';
+import { CARRY_ENTRY, activityPin } from '../carry/carry.mjs';
 
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({
@@ -48,6 +50,9 @@ export function activitiesIn(kinds) {
     const roles = Object.entries(e?.roles ?? {}).filter(([n, v]) => n !== 'now' && v && typeof v === 'object' && !Array.isArray(v));
     const pin = roles.length >= 2 ? activityPin(kind, e) : null;
     if (!pin) continue;
+    // Played at its own thing, through the thing's forms (a lectern, a chess table, a frisbee pitch, B10's links), or a
+    // crew (`carry offer`): offered on the open ground it would hold its members with nothing to do (this audit, #4681).
+    if (Object.keys(e.forms ?? {}).length || kind === CARRY_ENTRY) continue;
     const most = (n) => (Number.isInteger(e.links?.[n]?.most) ? e.links[n].most : 1);
     const first = roles.find(([n]) => most(n) === 1);
     if (!first) continue;
@@ -64,7 +69,7 @@ export function activityNamed(list, word) {
 }
 
 const ID = /^[0-9a-f]{32}-\d+$/;
-const USAGE = `together offer <${Object.keys(KINDS).join('|')}|any activity \`together kinds\` lists> <body id> [<body id> ...] | together accept|decline <offer id | activity>`;
+const USAGE = `together offer <${Object.keys(KINDS).join('|')}|any activity \`together kinds\` lists> <body id> [<body id> ...] | together accept|decline|leave <offer id | activity>`;
 const no = (code, detail) => ({ code, detail });
 
 /** The intents a `together` request sends, or a refusal by name. `place` is the node the offer goes under. */
@@ -82,8 +87,8 @@ export function togetherIntents(req, { place, kinds = {} }) {
       if (!ID.test(String(place ?? ''))) return no('together-no-place', 'this Soul stands nowhere in its copy yet: look first');
       return [{ verb: 'activity:offer', target: place, params: { 1: kind, 2: role, 3: to } }];
     }
-    case 'accept': case 'decline': {
-      if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', `together ${req.do} <offer id>`);
+    case 'accept': case 'decline': case 'leave': {
+      if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', `together ${req.do} <offer id | activity>`);
       return [{ verb: `activity:${req.do}`, target: req.offer }];
     }
     default: return no('together-usage', USAGE);

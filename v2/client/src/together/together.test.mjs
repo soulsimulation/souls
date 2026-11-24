@@ -50,15 +50,27 @@ test('any activity the world serves is offered by its word, the offerer in its o
   const jacks = read('calisthenics/group_jumping_jacks.json'), chess = read('games/chess_table.json');
   const kinds = { [jacks.kind]: jacks, [chess.kind]: chess, 'eden:rock': { kind: 'eden:rock' } };
   const list = activitiesIn(kinds);
-  assert.deepEqual(list.map((a) => [a.word, a.role, a.most]), [['chess-table', 'eden:white', 1], ['group-jumping-jacks', 'eden:starter', 7]]);
+  // chess is played at its table, through the table's forms: never offered on the open ground
+  assert.deepEqual(list.map((a) => [a.word, a.role, a.most]), [['group-jumping-jacks', 'eden:starter', 7]]);
   const to = [3, 4].map(id);
   assert.deepEqual(togetherIntents({ do: 'offer', touch: 'group-jumping-jacks', to }, { place: id(1), kinds }),
     [{ verb: 'activity:offer', target: id(1), params: { 1: activityPin(jacks.kind, jacks), 2: 'eden:starter', 3: to } }]);
   assert.equal(togetherIntents({ do: 'offer', touch: 'eden:group_jumping_jacks', to }, { place: id(1), kinds })[0].params[2], 'eden:starter', 'by its kind too');
-  assert.equal(togetherIntents({ do: 'offer', touch: 'chess-table', to }, { place: id(1), kinds }).code, 'together-usage', 'chess takes one other');
+  assert.equal(togetherIntents({ do: 'offer', touch: 'chess-table', to: id(3) }, { place: id(1), kinds }).code, 'together-unknown', 'chess is at its table');
   // its offer reaches the asked Soul as that activity, not as a conversation
   const ev = { name: 'souls:offer', fields: { 1: id(9), 2: activityPin(jacks.kind, jacks), 3: to, 4: 60_000_000, 5: id(2) } };
   assert.deepEqual(offerNote(ev, id(3)), { kind: 'together', what: 'offered', touch: 'group-jumping-jacks', offer: id(9), from: id(2) });
   assert.deepEqual(requestOf(['together', 'kinds']).req, { op: 'give', do: 'kinds' });
   assert.deepEqual(requestOf(['together', 'accept', 'group-jumping-jacks']).req, { op: 'give', do: 'accept', offer: 'group-jumping-jacks' });
+});
+
+test('together leave ends this Soul\'s part in an activity, by its id or its word; things played at a thing and crews are not offered', () => {
+  assert.deepEqual(togetherIntents({ do: 'leave', offer: id(9) }, { place: id(1) }), [{ verb: 'activity:leave', target: id(9) }]);
+  assert.deepEqual(requestOf(['together', 'leave', 'dance']).req, { op: 'give', do: 'leave', offer: 'dance' });
+  const { req } = requestOf(['together', 'leave', id(9)]);
+  assert.deepEqual(giveIntents(req, { place: id(1) }), [{ verb: 'activity:leave', target: id(9) }]);
+  assert.equal(togetherIntents({ do: 'leave' }, { place: id(1) }).code, 'together-names-an-offer');
+  const read = (f) => JSON.parse(readFileSync(join(import.meta.dirname, '../../../../content/kinds', f), 'utf8'));
+  const kinds = Object.fromEntries(['hall/lecture.json', 'play/frisbee.json', 'construction/carry.json', 'together/dance_together.json'].map((f) => { const e = read(f); return [e.kind, e]; }));
+  assert.deepEqual(activitiesIn(kinds).map((a) => a.word), ['dance-together']);
 });
