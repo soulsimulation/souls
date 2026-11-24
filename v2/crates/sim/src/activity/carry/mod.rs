@@ -28,7 +28,8 @@
 //!   beyond its grip, and its `hold_crew` is how many must carry it. Before the lift ([`Load::check`]) a crew smaller
 //!   than that is refused `carry-crew-too-small`, a carrier more than [`GRIP_REACH`] from its grip
 //!   `carry-grip-out-of-reach`, and, when the lift names where the front goes, a load whose outline would meet fixed
-//!   geometry on the straight way there `carry-board-clips` ([`sweep_load`]); nothing is written. A load whose kind
+//!   geometry on the straight way there ([`sweep_load`]) and on every way that turns it (0.135 R2, below)
+//!   `carry-load-blocked`; nothing is written. A load whose kind
 //!   has no entry is B9's 2 m board, as before.
 //!
 //! - **Held lengthwise (0.135 C4).** The carry's +x runs from the back carrier to the front, so a load is held in the
@@ -63,14 +64,21 @@
 //!   of its bay) does not count until it is clear of it ([`Carry::began_in`], [`step_way`]), so it can be carried out
 //!   from there and not back through it.
 //!
-//! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; turning with three carriers or
-//! more; a sweep that counts the sides' bodies; a blocked
+//! - **A way that turns (0.135 R2, #2814).** When the straight way to a lift's destination clips, [`turn`] searches
+//!   the load's poses for a way that turns it (through a door narrower than its length, say), each move checked by
+//!   [`way`]; no way is refused `carry-load-blocked` before the lift, a search past its budget `carry-unproven`.
+//!   The carriers walk that way ([`turn::turn_way`] gives where they stand at each pose), each tick checked as
+//!   above.
+//!
+//! Not here, proposed as tasks: carriers that swing about their grips (a corner between 1.2 m corridors); stairs;
+//! turning with three carriers or more; a sweep that counts the sides' bodies; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
 //! open ground, whose frame holds the building).
 
 #[cfg(test)]
 mod tests;
+pub mod turn;
 
 use std::collections::BTreeMap;
 
@@ -390,8 +398,8 @@ impl Load {
     /// The checks before the lift (see the module's notes): `crew` carriers, the front at `front` and the back at
     /// `back`, the load's middle at `middle` (each the open ground's plan, µm), its grips along `axis` on the plan from
     /// the back toward the front ([`Load::lies_along`]; the carriers' own line when it stands); and, if the lift names
-    /// one, the front's destination `to` and the fixed geometry on the way. `carry-crew-too-small`,
-    /// `carry-grip-out-of-reach`, `carry-board-clips`, `carry-route-too-short`.
+    /// one, the front's destination `to` and the fixed geometry on the way, straight or turning (0.135 R2).
+    /// `carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`, `carry-unproven`.
     pub fn check(
         &self,
         crew: usize,
@@ -431,8 +439,11 @@ impl Load {
                 );
             }
         }
-        if let Some((to, fixed)) = to {
-            sweep_load(&[back, front, to], fixed, self, l)?;
+        // 0.135 R2: a straight way that clips is searched for one that turns the load ([`turn::turn_way`]).
+        if let Some((to, fixed)) = to
+            && sweep_load(&[back, front, to], fixed, self, l).is_err()
+        {
+            turn::turn_way(self, fixed, front, back, to, turn::BUDGET)?;
         }
         Ok(())
     }

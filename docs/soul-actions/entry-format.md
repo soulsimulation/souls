@@ -84,7 +84,10 @@ Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its 
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
 hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
-too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`).
+A straight way that clips is searched for one that turns the load (0.135 R2: through a door narrower than its length,
+carried in line, each move checked as a step is); no such way is `carry-load-blocked`, a search past its budget
+`carry-unproven`.
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.

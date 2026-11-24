@@ -885,8 +885,8 @@ mod from_entry {
     }
 
     /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused
-    /// `carry-board-clips` before the lift and the beam (0.1 m) is not; a crew of one and a carrier off its grip are
-    /// refused by name.
+    /// before the lift (`carry-load-blocked` since 0.135 R2: no way turns it through, nor round the walls) and the
+    /// beam (0.1 m) is not; a crew of one and a carrier off its grip are refused by name.
     #[test]
     fn c2_a_passage_a_crew_and_a_grip_refused_before_the_lift() {
         let wall = |z0: i64, z1: i64| {
@@ -910,7 +910,7 @@ mod from_entry {
             let r = load.check(2, [f, 0], [b, 0], [0, 0], None, Some(([20 * M, 0], &fixed)));
             match ok {
                 true => assert!(r.is_ok(), "{name}: {r:?}"),
-                false => assert_eq!(r.map_err(|e| e.name), Err("carry-board-clips"), "{name}"),
+                false => assert_eq!(r.map_err(|e| e.name), Err("carry-load-blocked"), "{name}"),
             }
         }
         let beam = Load::of(&entry("rack_beam.json")).unwrap();
@@ -1358,5 +1358,173 @@ mod each_step {
             carry.rests_on(tree, im.nodes["world"], floor, q).unwrap(),
             7
         );
+    }
+}
+
+/// 0.135 R2 (#2814): a long load turned through a door narrower than it is long, by the search over its poses; every
+/// move checked by C7's own check; no way refused by name before the lift, and a search past its budget unproven.
+mod turning {
+    use replica::rules::json::parse;
+
+    use super::super::turn::{BUDGET, Ends, STEP, turn_way};
+    use super::super::{Fixed, Load, Quad, len, outline, step_way, sweep_load};
+
+    const M: i64 = 1_000_000;
+
+    fn beam() -> Load {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction");
+        let e = std::fs::read_to_string(root.join("rack_beam.json")).expect("the entry");
+        Load::of(&parse(&e).expect("json")).expect("the beam")
+    }
+
+    /// A box from (x0, z0) to (x1, z1), µm.
+    fn wall(x0: i64, z0: i64, x1: i64, z1: i64) -> Quad {
+        [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
+    }
+
+    /// A room 8 m wide and 6 m deep north of a wall along x at z 0 (0.2 m thick), its one doorway `door` wide in the
+    /// middle of that wall; the wall runs on 8 m either way, and south of it is open.
+    fn room(door: i64) -> Fixed {
+        let (d, t) = (door / 2, 200_000);
+        Fixed::new(vec![
+            wall(-8 * M, 0, -d, t),
+            wall(d, 0, 8 * M, t),
+            wall(-4 * M - t, t, -4 * M, 6 * M + t),
+            wall(4 * M, t, 4 * M + t, 6 * M + t),
+            wall(-4 * M, 6 * M, 4 * M, 6 * M + t),
+        ])
+    }
+
+    /// Every move of `way` checked as a carry's step is ([`step_way`], as `Carry::step` calls it, the load as it is
+    /// held, not grown), and each carrier's body (0.28 m about it) clear at each pose: the number of poses.
+    fn walked(fixed: &Fixed, load: &Load, way: &[Ends]) -> usize {
+        let body = Load {
+            half_length: 280_000,
+            half_width: 280_000,
+            ..*load
+        };
+        let mut but = Vec::new();
+        for w in way.windows(2) {
+            step_way(fixed, load, w[0], w[1], &mut but)
+                .unwrap_or_else(|r| panic!("a move through fixed geometry: {r:?}"));
+            let (f, b) = w[1];
+            for p in [f, b] {
+                let q = outline(
+                    [p[0] + f[0] - b[0], p[1] + f[1] - b[1]],
+                    [p[0] - f[0] + b[0], p[1] - f[1] + b[1]],
+                    &body,
+                );
+                assert!(fixed.hit(&q).is_none(), "a carrier in a wall at {p:?}");
+            }
+        }
+        way.len()
+    }
+
+    /// The heading from the back to the front, in whole degrees from +x toward +z.
+    fn heading(e: Ends) -> i64 {
+        let d = [e.0[0] - e.1[0], e.0[1] - e.1[1]];
+        ((d[1] as f64).atan2(d[0] as f64).to_degrees()).round() as i64
+    }
+
+    /// The beam (2.74 m) lying along the wall 1 m south of it, its carriers at its ends: the straight way to a point
+    /// 5 m into the room clips the wall, so the lift's check finds a way that turns it a quarter and carries it
+    /// through the 1.2 m doorway; the front ends within a step of that point, the back inside the room too.
+    #[test]
+    fn r2_the_beam_turns_through_a_door_narrower_than_it_is_long() {
+        let (load, fixed) = (beam(), room(1_200_000));
+        assert!(
+            2 * load.half_length > 2 * 1_200_000,
+            "the door less than half its length"
+        );
+        let [b, f] = load.places();
+        let (front, back, to) = ([f, -M], [b, -M], [0, 5 * M]);
+        assert!(sweep_load(&[back, front, to], &fixed, &load, f - b).is_err());
+        load.check(2, front, back, [0, -M], None, Some((to, &fixed)))
+            .expect("a way that turns it");
+        let way = turn_way(&load, &fixed, front, back, to, BUDGET).expect("a way");
+        let poses = walked(&fixed, &load, &way);
+        let end = *way.last().unwrap();
+        assert!(len([end.0[0] - to[0], end.0[1] - to[1]]) <= STEP, "{end:?}");
+        assert!(end.1[1] > 200_000, "the back inside the room too: {end:?}");
+        assert_eq!(heading(way[0]), 0);
+        assert!(
+            (heading(end) - 90).abs() <= 15,
+            "turned a quarter: {}",
+            heading(end)
+        );
+        println!(
+            "R2: the beam turned through the 1.2 m door in {poses} poses, from 0 to {} degrees",
+            heading(end)
+        );
+    }
+
+    /// #2814 A2: twenty starts along the wall (moved along it and away from it, either end first), each carried into
+    /// the room through the doorway; no move of any of them meets fixed geometry.
+    #[test]
+    fn r2_twenty_runs_never_meet_fixed_geometry() {
+        let (load, fixed) = (beam(), room(1_200_000));
+        let [b, f] = load.places();
+        let mut poses = 0;
+        for k in 0..20i64 {
+            let (x, z) = ((k % 5 - 2) * 400_000, -M - (k / 5) * 150_000);
+            let (front, back) = if k % 2 == 0 {
+                ([x + f, z], [x + b, z])
+            } else {
+                ([x + b, z], [x + f, z])
+            };
+            let to = [(k % 3 - 1) * 500_000, 5 * M];
+            let way = turn_way(&load, &fixed, front, back, to, BUDGET)
+                .unwrap_or_else(|r| panic!("run {k}: {r:?}"));
+            poses += walked(&fixed, &load, &way);
+            assert!(way.last().unwrap().1[1] > 200_000, "run {k}: inside");
+        }
+        println!("R2: 20 runs, {poses} poses, none meeting fixed geometry");
+    }
+
+    /// An L of corridors `width` wide: east along z 0 to a corner at the origin, then north.
+    fn corner(width: i64) -> Fixed {
+        let (h, t) = (width / 2, 200_000);
+        Fixed::new(vec![
+            wall(-20 * M, -h - t, h + t, -h),
+            wall(h, -h - t, h + t, 20 * M),
+            wall(-20 * M, h, -h, 20 * M),
+        ])
+    }
+
+    /// #2814 A3, and the corner #2814 A1 asks: B9's 2 m board, carried in line, cannot round a corner between 0.9 m
+    /// corridors, and is refused `carry-load-blocked` before the lift. Between 1.2 m corridors it is refused too: in
+    /// line, the board, both reaches and both bodies are 3.26 m (the limit there is 2.27 m). That corner needs carriers
+    /// that swing about their grips.
+    #[test]
+    fn r2_a_corner_too_tight_is_refused_before_the_lift() {
+        let board = Load::board();
+        let [b, f] = board.places();
+        for width in [900_000, 1_200_000] {
+            let fixed = corner(width);
+            let (front, back) = ([-3 * M + f, 0], [-3 * M + b, 0]);
+            let r = board.check(
+                2,
+                front,
+                back,
+                [-3 * M, 0],
+                None,
+                Some(([0, 5 * M], &fixed)),
+            );
+            assert_eq!(r.map_err(|e| e.name), Err("carry-load-blocked"), "{width}");
+        }
+        // The corridor itself is no bar: carried on east along it.
+        let fixed = corner(900_000);
+        let (front, back) = ([-6 * M + f, 0], [-6 * M + b, 0]);
+        turn_way(&board, &fixed, front, back, [-M, 0], BUDGET).expect("along the corridor");
+    }
+
+    /// #2814 A4: the same door with a search allowed only twenty poses is refused `carry-unproven`.
+    #[test]
+    fn r2_a_search_past_its_budget_is_unproven() {
+        let (load, fixed) = (beam(), room(1_200_000));
+        let [b, f] = load.places();
+        let r = turn_way(&load, &fixed, [f, -M], [b, -M], [0, 5 * M], 20);
+        assert_eq!(r.map_err(|e| e.name), Err("carry-unproven"));
     }
 }
