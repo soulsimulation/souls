@@ -6,7 +6,7 @@
 // Explore) are gone; flags, previews and the Constitution are switched off (god-ui/features.ts) but their code stays.
 // Everyone else has no God Mode (U3: the God button is the god's only): the claim card of a godless world and the offer
 // links keep their small floating card. The approval link (#approve/<id>) is a modal on top for everyone (lane HF).
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { apiPath, worldKey } from './world-path.ts';
 import * as G from './god-ui/god-api.ts';
 import { flyTo } from './god-ui/camera.ts';
@@ -25,7 +25,6 @@ import { approvalFromHash, landingHash } from './god-ui/join-api.ts';
 import { closeApproval, closedApprovals, pickWindowApproval, useWindowApprovals } from './god-ui/window-approvals.ts';
 import { OfferCard, offerFromHash } from './god-ui/OfferCard.tsx';
 import { countEvent } from './visitor-counts.ts';
-import { BuildBar } from './god-ui/BuildBar.tsx';
 import './god-ui/god-panel.css';
 
 const query = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -34,6 +33,8 @@ const shotMode = query.get('shot') === '1';
 // Taking it also strips it from the URL, so the view key does not stay in browser history.
 const landingPreviewKey = typeof location === 'undefined' ? null : takePreviewKey({ location, history });
 const PAIRED_KEY = `sim.godPaired:${worldKey}`;
+// 0.133 item 6: loaded when the creator opens Build, not with the panel
+const BuildBar = lazy(() => import('./god-ui/BuildBar.tsx').then((m) => ({ default: m.BuildBar })));
 const PHONE = () => typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches;  // P6: landscape phones (coarse pointer) too
 // Phones keep their own remembered choice and start compact: the open panel covers most of a small screen.
 const openKey = () => 'sim.godPanel.open' + (PHONE() ? '.phone' : '');
@@ -315,7 +316,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   return <>
     {approvalModal}
     {ghostBar}
-    {build && v2 && !god.open && <BuildBar creator={v2} start={build} onClose={endBuild} />}
+    {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
       forsake={v2 ? null : <ForsakeWorld name={name} />} />}
   </>;
