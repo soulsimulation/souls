@@ -64,7 +64,7 @@ process.on('exit', stopAll);
 // ---- two new-engine worlds, `eden` and `hamlet`, each with its own gatewayd ----------------------------------------
 const made = await run(bin('testworld'), ['--seed', '1', '--things', '0', '--out', dir]);
 if (made.code !== 0) throw Error(made.out);
-const front = await freePort(), admin = await freePort();
+const front = await freePort(), tls = await freePort(), admin = await freePort();
 const FRONT = `http://127.0.0.1:${front}`;
 // One directory for both, as production has. Production's directory keeps a tokens file per world (its world-authority
 // map, which needs the world store); this one keeps one, in Eden's folder, and hamlet's gatewayd reads it through a
@@ -110,7 +110,7 @@ const etc = join(dir, 'caddy'), web = join(dir, 'web');
 mkdirSync(join(etc, 'sites'), { recursive: true }); mkdirSync(web);
 writeFileSync(join(web, 'pair.html'), '<!doctype html><title>pairing card</title>');
 copyFileSync(join(repo, 'tools/world-launcher/deploy/blobs/sim-blobs.snippet'), join(etc, 'sim-blobs.snippet'));
-writeFileSync(join(etc, 'Caddyfile'), `{\n\tadmin 127.0.0.1:${admin}\n\tauto_https off\n\tstorage file_system ${join(etc, 'data')}\n}\nimport ${join(etc, 'sim-blobs.snippet')}\nimport sites/*.caddy\n`);
+writeFileSync(join(etc, 'Caddyfile'), `{\n\tadmin 127.0.0.1:${admin}\n\tauto_https disable_redirects\n\tlocal_certs\n\tskip_install_trust\n\tstorage file_system ${join(etc, 'data')}\n}\nimport ${join(etc, 'sim-blobs.snippet')}\nimport sites/*.caddy\n`);
 // The live 0.131 F0 soul.game file's shape (production's addresses swapped for this machine's)
 const live = `http://127.0.0.1:${front} {
   encode zstd gzip
@@ -178,7 +178,9 @@ writeFileSync(join(dir, 'moved.caddy'), withLines({ eden: W.eden.port, hamlet: W
 writeFileSync(join(dir, 'crossed.caddy'), withLines({ eden: W.eden.port, hamlet: W.eden.port }));
 
 // (1), (2) install, as the release owner runs it, with this machine's paths
-const env = { PATH: process.env.PATH, ETC: etc, SAVED: join(etc, 'soul-game.caddy.before-moved'), SITE: FRONT, FRONT, DIRECTORY: directory,
+const env = { PATH: process.env.PATH, ETC: etc, SAVED: join(etc, 'soul-game.caddy.before-moved'), // The script checks the front door over HTTPS, where curl negotiates HTTP/2 as it does against soul.game: the installed
+  // site also answers on https://localhost:<tls> (Caddy's own local CA, trusted only by this run's curl)
+  SITE: FRONT, SITE_LINE: `${FRONT}, https://localhost:${tls}`, FRONT: `https://localhost:${tls}`, CURL_CA: join(etc, 'data', 'pki', 'authorities', 'local', 'root.crt'), DIRECTORY: directory,
   ORIGIN: `127.0.0.1:${originPort}`, ROUTES: routes, WEB: web, SRC: join(dir, 'moved.caddy'), ...caddyEnv, RELOAD: reload };
 // asynchronous: the origin and the launcher stand-in answer from this process while the script runs
 const sh = (a, extra = {}) => new Promise((ok) => execFile('bash', [join(here, 'moved-install.sh'), a], { env: { ...env, ...extra } }, (e, out, err) => ok({ code: e ? e.code : 0, out: `${out}${err}` })));
@@ -190,6 +192,10 @@ check(listed.out.includes(`import moved-world eden ${W.eden.port}`) && listed.ou
 const installed = await sh('install');
 console.log(installed.out.trim());
 check(installed.code === 0, 'moved-install.sh install: saved, validated, reloaded, checked');
+// The script's own front-door checks went over HTTPS, where curl speaks HTTP/2 to this Caddy as to soul.game
+const h2 = await new Promise((ok) => execFile('curl', ['-sI', '--cacert', env.CURL_CA, `${env.FRONT}/`], (e, out) => ok(String(out).split('\n')[0].trim())));
+check(h2.startsWith('HTTP/2') && ['eden', 'hamlet'].every((w) => installed.out.includes(`front door /w/${w}/v2/ws: 101`)),
+  `the script's socket checks through ${env.FRONT} (${h2}) got 101 for both worlds`);
 check(existsSync(env.SAVED) && readFileSync(env.SAVED, 'utf8') === live, 'the live file is saved byte for byte');
 const put = readFileSync(join(etc, 'sites/soul-game.caddy'), 'utf8').split('\n').filter((l) => /^\s*#/.test(l));
 check(!put.some((l) => l.includes('private_ranges') || l.includes(String(launcherPort))), 'the installed file\'s comments carry no host values');

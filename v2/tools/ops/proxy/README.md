@@ -73,7 +73,7 @@ node v2/tools/ops/proxy/moved-standin.mjs
 ```
 
 It runs a scratch Caddy with a live-shaped file in front of two real new-engine worlds, `eden` and `hamlet`, each with
-its own gatewayd, and a stand-in for today's launcher. It shows production's two faults (`pair-world-routing`, then
+its own gatewayd, and a stand-in for today's launcher; the install's front-door checks go over HTTPS with HTTP/2, as against soul.game. It shows production's two faults (`pair-world-routing`, then
 #4520's file answering `/w/eden/v2/ws` 404), that a line sending hamlet to Eden's gatewayd is refused, and then, after
 `install`: for each world a fresh `eden.mjs pair` approved through the front door, its socket opening (101), and
 `act life:join` answered with its receipt, recorded by that world's gatewayd and not the other's; an old world's page,

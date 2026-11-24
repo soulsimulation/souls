@@ -33,6 +33,9 @@ PREVIOUS="${PREVIOUS:-$ETC/soul-game.caddy.before-last-install}"
 CADDY="${CADDY:-caddy}"
 RELOAD="${RELOAD:-systemctl reload caddy}"
 SITE="${SITE:-https://soul.game}"
+SITE_LINE="${SITE_LINE:-$SITE}"   # the installed site block's addresses
+# Trust for the front-door checks: the system's, unless CURL_CA names a CA file (the stand-in's local CA)
+CA=(); [ -n "${CURL_CA:-}" ] && CA=(--cacert "$CURL_CA")
 DIRECTORY="${DIRECTORY:-localhost:7310}"
 ORIGIN="${ORIGIN:-localhost:7320}"
 ROUTES="${ROUTES:-/var/lib/souls/routes/worlds.json}"
@@ -45,12 +48,13 @@ say() { echo "moved-install: $*"; }
 validate() { "$CADDY" validate --config "$ETC/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || "$CADDY" validate --config "$ETC/Caddyfile" --adapter caddyfile; }
 front() { # GET <path> through the front door; prints the status, then the X-Souls-System header's value
   local url
-  if [ -n "$FRONT" ]; then url="$FRONT$1"; curl -s -o /dev/null -D - --max-time 10 "$url"
-  else curl -s -o /dev/null -D - --max-time 10 --resolve "${SITE#https://}:443:127.0.0.1" "$SITE$1"; fi \
+  if [ -n "$FRONT" ]; then url="$FRONT$1"; curl -s ${CA[@]+"${CA[@]}"} -o /dev/null -D - --max-time 10 "$url"
+  else curl -s ${CA[@]+"${CA[@]}"} -o /dev/null -D - --max-time 10 --resolve "${SITE#https://}:443:127.0.0.1" "$SITE$1"; fi \
     | tr -d '\r' | awk 'NR==1{s=$2} tolower($1)=="x-souls-system:"{h=$2} END{print s" "(h?h:"today")}'
 }
-upgrade() { # the status a WebSocket upgrade of <url> gets (101 when a socket opens); curl then waits, so it is cut at 3 s
-  curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+upgrade() { # the status a WebSocket upgrade of <url> gets (101 when a socket opens); curl then waits, so it is cut at 3 s.
+  # HTTP/1.1 always: over https curl would negotiate HTTP/2, where an Upgrade request is invalid (400, 24 Nov)
+  curl -s ${CA[@]+"${CA[@]}"} --http1.1 -o /dev/null -w '%{http_code}' --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$@" || true
 }
 gateway_of() { # the gateway worlds.json names for world <slug>, when it is canonical and not archived
@@ -91,7 +95,7 @@ install)
   # values go into directives only, never into the comments
   sed -e "/^[[:space:]]*#/!s|@@LAUNCHER_PORT@@|$PORT|g" -e "/^[[:space:]]*#/!s|@@TRUSTED_PROXIES@@|$PROXIES|g" \
       -e "/^[[:space:]]*#/!s|localhost:7310|$DIRECTORY|g" -e "/^[[:space:]]*#/!s|localhost:7320|$ORIGIN|g" \
-      -e "s|/srv/sim-worlds/production/apps/web/dist|$WEB|g" -e "s|^https://soul.game {|$SITE {|" "$SRC" > "$LIVE.new" \
+      -e "s|/srv/sim-worlds/production/apps/web/dist|$WEB|g" -e "s|^https://soul.game {|$SITE_LINE {|" "$SRC" > "$LIVE.new" \
     && mv "$LIVE.new" "$LIVE" || { restore; say "could not write $LIVE: Caddy NOT reloaded"; exit 1; }
   if ! validate; then restore; say "caddy validate failed: the saved file is back, Caddy NOT reloaded"; exit 1; fi
   $RELOAD || { restore; $RELOAD; say "the reload failed: the saved file is back"; exit 1; }
