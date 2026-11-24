@@ -1245,9 +1245,9 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
         1 + slots.iter().position(|(k, _)| k == slot).unwrap() as u64
     };
     let mut bodies = BTreeMap::new();
-    let mut seats = Vec::new();
-    let mut seat = |thing: Id, entry: &Json, slot: &'static str, point: &'static str| {
-        let id = Id::new(Scope([0xcb; 16]), seats.len() as u64 + 1).unwrap();
+    let mut riders = Vec::new();
+    let mut ride = |thing: Id, entry: &Json, slot: &'static str, point: &'static str| {
+        let id = Id::new(Scope([0xcb; 16]), riders.len() as u64 + 1).unwrap();
         let pose = replica::pose::Pose {
             frame: Frame {
                 node: thing,
@@ -1265,15 +1265,15 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
             tri: 0,
         };
         bodies.insert(id, body);
-        seats.push((id, thing, slot, point));
+        riders.push((id, thing, slot, point));
     };
     for thing in [west, east] {
         for slot in ["helm", "front", "back_left", "back_right"] {
-            seat(thing, &motorboat, slot, "key");
+            ride(thing, &motorboat, slot, "key");
         }
     }
     for slot in ["stern", "berth", "galley"] {
-        seat(room, &narrowboat, slot, "hatch");
+        ride(room, &narrowboat, slot, "hatch");
     }
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
@@ -1299,7 +1299,7 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
     let reach = 600_000;
     let mut by_seat = BTreeMap::new();
-    for (body, thing, slot, point) in seats {
+    for (body, thing, slot, point) in riders {
         let d = sight
             .distance(
                 body,

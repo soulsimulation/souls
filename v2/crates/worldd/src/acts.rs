@@ -1267,12 +1267,12 @@ impl Sight<'_> {
         let n = self.tree.node(self.tree.handle(thing)?)?;
         let entry = entry_in(self.kinds, self.tree, &n)?;
         let points = entry.get("points");
-        let (_, seat) = entry
+        let (_, slot_def) = entry
             .get("slots")?
             .obj()?
             .get(usize::try_from(slot).ok()?.checked_sub(1)?)?;
-        let at = um(seat.get("at_mm"))?;
-        let feet = seat
+        let at = um(slot_def.get("at_mm"))?;
+        let feet = slot_def
             .get("stand")
             .and_then(Json::str)
             .and_then(|s| um(points?.get(s)?.get("at_mm")))
