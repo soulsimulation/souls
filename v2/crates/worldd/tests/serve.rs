@@ -1654,7 +1654,7 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
             s.stall_reads(0, Duration::ZERO, "");
         }
     };
-    // The store's head is the spool's: the backup is current.
+    // The store holds the head the spool held when asked, or one after it: the backup is current up to then.
     let backed_up = || {
         // The spool's one head, `stream-recovery/<stream>/head`; its objects come and go as they are backed up.
         let spool = dir.join("stream-backup");
@@ -1683,13 +1683,36 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
         })
         .expect("the store");
         use directoryd::directory::store::Store;
-        let end = Instant::now() + Duration::from_secs(150);
-        loop {
-            let there = bucket.get(&key).ok().flatten().map(|o| o.bytes);
-            if there.is_some() && there == std::fs::read(&head).ok() {
-                return;
+        // A head names its manifest (field 1), and each manifest the one before it (field 2). What the spool held when
+        // asked is backed up once the store's head is that manifest or one after it: by order, never a race with
+        // the parts a stream still behind the world goes on cutting meanwhile.
+        let named = |bytes: &[u8], field: u64| match decode(bytes).ok()?.value {
+            Value::Map(m) => match m.get(&field) {
+                Some(Value::Bytes(h)) if !h.is_empty() => Some(h.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let wanted =
+            named(&std::fs::read(&head).expect("the spool's head"), 1).expect("a manifest");
+        let objects = key.strip_suffix("head").expect("a head's key");
+        let holds = || {
+            let mut at = named(&bucket.get(&key).ok().flatten()?.bytes, 1);
+            while let Some(h) = at {
+                if h == wanted {
+                    return Some(());
+                }
+                let o = bucket
+                    .get(&format!("{objects}objects/{}", to_hex(&h)))
+                    .ok()
+                    .flatten()?;
+                at = named(&o.bytes, 2);
             }
-            assert!(Instant::now() < end, "the store's head is the spool's");
+            None
+        };
+        let end = Instant::now() + Duration::from_secs(150);
+        while holds().is_none() {
+            assert!(Instant::now() < end, "the store holds the spool's head");
             std::thread::sleep(Duration::from_millis(200));
         }
     };
@@ -1828,10 +1851,15 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
     assert!(behind > 0, "the backup waits on the store: {h}");
     assert!(w.child.try_wait().expect("its state").is_none(), "still up");
 
-    // The store answers: the backup catches up by itself, and the stream keeps up meanwhile.
+    // The store answers: the backup catches up by itself, and the stream goes on meanwhile. The walker stops first, so
+    // the backup catches up to a spool that stops growing once the stream has cut what it was behind on.
     stall(false);
     let answered = Instant::now();
     advances("while the backup catches up");
+    stop.store(true, Ordering::Relaxed);
+    let walks = walking.join().expect("the walker");
+    println!("{walks} walks answered across the stall");
+    assert!(walks > 3, "the world went on: {walks}");
     w.line("worldd: the public stream's backup caught up after ");
     health_says("\"stream_backup\":{\"state\":\"current\"}");
     backed_up();
@@ -1839,10 +1867,6 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
         "the backup caught up {} ms after the store answered",
         answered.elapsed().as_millis()
     );
-    stop.store(true, Ordering::Relaxed);
-    let walks = walking.join().expect("the walker");
-    println!("{walks} walks answered across the stall");
-    assert!(walks > 3, "the world went on: {walks}");
     let after = worst.swap(0, Ordering::Relaxed);
     println!(
         "viewer delay while it caught up: at most {} ms",
