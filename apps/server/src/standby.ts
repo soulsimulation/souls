@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
+import { prebakeTiles } from '@souls/ground';
 
 export const STANDBY_MARK = '[standby] ready';
 
@@ -35,6 +36,20 @@ function rehearse(dbPath: string, worldId: string, factory: Parameters<typeof re
     console.log(`[standby] rehearsed the restore of tick ${r.tick} (read-only) in ${Math.round(restored - t0)} ms${kept ? `; built its static grids for the boot in ${Math.round(performance.now() - restored)} ms` : ''}`);
   } catch (e) { console.log(`[standby] restore rehearsal skipped: ${(e as Error).message}`); }
   finally { try { db?.close(); } catch { /* closed */ } }
+}
+
+/** R14: a god world's terrain tiles, baked here from its stored ground (read-only), for the boot after the go
+ *  (packages/ground prebakeTiles; dropped once it listens): its first reconcile otherwise bakes them inside the pause
+ *  that holds every viewer's upgrade. A ground edited before the go no longer matches and is baked as before. */
+export function prebakeGround(db: DatabaseSync, worldId: string): void {
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='world_meta_v1'").get()) return;
+    const r = db.prepare('SELECT body FROM world_meta_v1 WHERE world_id = ?').get(worldId) as { body: string } | undefined;
+    const ground = r ? (JSON.parse(r.body) as { ground?: Parameters<typeof prebakeTiles>[0] }).ground : undefined;
+    if (!ground?.extent) return;
+    const t0 = performance.now(), n = prebakeTiles(ground);
+    console.log(`[standby] baked ${n} terrain tiles for the boot in ${Math.round(performance.now() - t0)} ms`);
+  } catch (e) { console.log(`[standby] terrain tiles not baked: ${(e as Error).message}`); }
 }
 
 type BootGridFile = { put(name: string, parts: Uint8Array[]): void; take(name: string): Uint8Array | null; drop(name: string): void };

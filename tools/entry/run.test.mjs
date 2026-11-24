@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadDef} from './load.mjs';
-import {casesFor, newEngineGap, placeDistance, rulesFix, runOnce, setsOf, startFields, unloadedWhy} from './run.mjs';
+import {casesFor, changeLine, newEngineGap, placeDistance, refusedBy, rulesFix, runOnce, setsOf, startFields, unloadedWhy} from './run.mjs';
 import {loadEntries} from './look.mjs';
 import {loadCases} from '../../packages/form-rules/src/load.ts';
 
@@ -90,4 +90,24 @@ test('(7) a refusal whose case leaves the fix out is judged by the rules\' own f
   const row = casesFor([{kind: 'eden:sink', entry: kind('sink')}]).find(r => r.name === 'sink_turn_on_out_of_reach');
   const [r] = await runOnce(fakeWorld(), kinds, [row]);
   assert.deepEqual([r.result, r.via], ['pass', 'fix'], 'the world walked there, as the rules\' fix says');
+});
+
+test('(9) a world that keeps a tree: what its tree refused decides the row, by the refusal\'s name', async () => {
+  const kinds = new Map([['eden:sink', kind('sink')]]);
+  const row = casesFor([{kind: 'eden:sink', entry: kind('sink')}]).find(r => r.case.expect.verdict === 'yes');
+  const answer = extra => Object.assign(fakeWorld(), {async act() { return {verdict: 'yes', receipt: 'completed', ...extra}; }});
+  const [run] = await runOnce(answer({tree_refused: ['name-not-pinned: a create\'s kind: eden:pie']}), kinds, [row]);
+  assert.equal(run.result, 'fail');
+  assert.match(run.why, /the world's tree refused the run's entries: name-not-pinned/);
+  const [scene] = await runOnce(answer({scene_refused: ['k1 where the case has it: child-not-admitted: no']}), kinds, [row]);
+  assert.deepEqual([scene.result, scene.why], ['skip', 'the world\'s tree would not hold the case\'s start: k1 where the case has it: child-not-admitted: no']);
+  assert.deepEqual(refusedBy({verdict: 'yes'}), {scene: null, run: null});
+});
+
+test('(10) a change other than a set is one line by the case\'s names, so a world\'s answer and a case compare', () => {
+  assert.equal(changeLine({change: 'reparent', node: 't1', to: {node: 'x1', slot: 'box'}}), 'reparent t1 into x1/slot:box');
+  assert.equal(changeLine({change: 'reparent', node: 'c1', to: {node: 'b1', hand: 'left'}}), 'reparent c1 into b1/hand:left');
+  assert.equal(changeLine({change: 'link', node: 'h1', link: 'speaker', n: 1, end: 'b1'}), 'link h1 speaker b1');
+  assert.equal(changeLine({change: 'create', node: 'rc4.0', kind: 'eden:letter', to: {node: 'b1', hand: 'left'}, stock: 'post'}), 'create eden:letter into b1/hand:left');
+  assert.equal(changeLine({change: 'remove', node: 'l1'}), 'remove l1');
 });
