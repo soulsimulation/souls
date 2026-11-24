@@ -1224,6 +1224,10 @@ mod each_step {
             high.len()
         );
         assert!(!high.is_empty(), "boxes above a body are kept");
+        // A node with no ground of its own (a thing) has no fixed geometry: a carry over it is not stopped for want of
+        // a scene.
+        let thing = Fixed::of(&im.tree, im.nodes["world"]).unwrap();
+        assert!(thing.quads.is_empty());
         // B9's checks read only the boxes a walking body meets.
         for k in high {
             let q = &fixed.quads[k];
