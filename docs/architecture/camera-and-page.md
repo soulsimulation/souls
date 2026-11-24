@@ -107,6 +107,7 @@ history chunks carry bodies and things on a course only.
   the engine, never in the camera.
 - When the world's stream goes quiet, no new chunk is built, so the picture and the camera hold the last frame. The
   page shows "This world's stream is not available right now". The quiet-world bug, where a world's last line does
-  not arrive (lane C), sits on this same path.
+  not arrive (lane C), sits on this same path. A reader that is behind and playing the parts it missed says how far
+  behind it is as it goes, and the page shows "Catching up with this world." instead (`stream-health.ts`).
 - Following a Soul needs it to have a body in the depicted frame (`canFollowSoul`). A Soul whose body the public copy
   cannot place is not followable until it can be placed again.
