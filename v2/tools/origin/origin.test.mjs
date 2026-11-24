@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { get } from 'node:http';
+import { Agent, get } from 'node:http';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
@@ -321,7 +322,7 @@ test('a large immutable file goes br, else gzip, to a reader that takes it; as i
   const br = await raw(`${base}/big`, { 'accept-encoding': 'gzip, deflate, br' });
   assert.equal(br.res.headers['content-encoding'], 'br');
   assert.equal(br.res.headers.vary, 'accept-encoding');
-  assert.equal(br.res.headers.etag, etag);
+  assert.equal(br.res.headers.etag, `W/${etag}`, 'an encoded copy\'s tag is weak');
   assert.equal(br.res.headers['cache-control'], 'public, max-age=31536000, immutable, no-transform');
   assert.equal(Number(br.res.headers['content-length']), br.body.length);
   assert.ok(br.body.length < packable.length / 4);
@@ -332,6 +333,7 @@ test('a large immutable file goes br, else gzip, to a reader that takes it; as i
   const plain = await raw(`${base}/big`);
   assert.equal(plain.res.headers['content-encoding'], undefined);
   assert.equal(plain.res.headers.vary, 'accept-encoding');
+  assert.equal(plain.res.headers.etag, etag, 'the bytes as they are keep the strong tag');
   assert.deepEqual(plain.body, packable);
   const small = await raw(`${base}/7`, { 'accept-encoding': 'br' });
   assert.equal(small.res.headers['content-encoding'], undefined);
@@ -339,7 +341,7 @@ test('a large immutable file goes br, else gzip, to a reader that takes it; as i
   assert.deepEqual(Buffer.from(await (await fetch(`${base}/big`)).arrayBuffer()), packable); // fetch decodes it
 });
 
-test('one Range gets those bytes of the decoded file (206), never encoded; a range past the end is a no-store 416', async () => {
+test('one Range gets those bytes of the decoded file (206), never encoded; an invalid one is ignored (200); a range past the end is a no-store 416', async () => {
   writeFileSync(join(dir, stream, 'big'), packable);
   const head = await raw(`${base}/big`, { range: 'bytes=0-15', 'accept-encoding': 'br' });
   assert.equal(head.res.statusCode, 206);
@@ -347,8 +349,75 @@ test('one Range gets those bytes of the decoded file (206), never encoded; a ran
   assert.equal(head.res.headers['content-encoding'], undefined);
   assert.deepEqual(head.body, packable.subarray(0, 16));
   assert.deepEqual((await raw(`${base}/big`, { range: 'bytes=-4' })).body, packable.subarray(-4));
+  const invalid = await raw(`${base}/big`, { range: 'bytes=5-3' });
+  assert.equal(invalid.res.statusCode, 200);
+  assert.deepEqual(invalid.body, packable);
   const past = await raw(`${base}/big`, { range: `bytes=${packable.length}-` });
   assert.equal(past.res.statusCode, 416);
   assert.equal(past.res.headers['cache-control'], 'no-store');
   assert.equal(past.res.headers['content-range'], `bytes */${packable.length}`);
+});
+
+test('a viewer that takes nothing for stallMs is let go; a slow one that keeps taking finishes; an idle keep-alive stays', async () => {
+  const big = Buffer.alloc(16 << 20, 3), name = join(dir, stream, '10');
+  writeFileSync(name, big);
+  const { server: s, stats } = createOrigin(dir, {}, { stallMs: 300 });
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const port = s.address().port, path = `/${stream}/10`;
+  try {
+    // Asks for 16 MB and never reads: the origin closes it, rather than holding the socket and its buffer for as long
+    // as the reader stays connected.
+    // (The paused reader cannot see its socket close, so this watches the origin's side.)
+    const c = connect(port, '127.0.0.1', () => { c.pause(); c.write(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`); });
+    c.on('error', () => {});
+    const connections = () => new Promise((ok) => s.getConnections((_, n) => ok(n)));
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000 && (stats.stalled < 1 || (await connections()) > 0)) await new Promise((ok) => setTimeout(ok, 50));
+    c.destroy();
+    assert.equal(stats.stalled, 1, 'a stalled reader is let go');
+    assert.equal(await connections(), 0, 'and its connection is closed');
+    // Reads 16 MB a slice at a time with a pause after each, taking far longer than stallMs in all: never let go.
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const t1 = Date.now();
+    const body = await new Promise((ok, no) => {
+      get({ port, host: '127.0.0.1', path, agent }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => { chunks.push(c); res.pause(); setTimeout(() => res.resume(), 2); });
+        res.on('end', () => ok(Buffer.concat(chunks)));
+        res.on('error', no);
+      }).on('error', no);
+    });
+    assert.ok(Date.now() - t1 > 300, `the slow read took longer than stallMs (${Date.now() - t1} ms)`);
+    assert.ok(big.equals(body), 'the slow reader got every byte');
+    assert.equal(stats.stalled, 1);
+    // Idle past stallMs between requests: the connection is kept (keepAliveTimeout governs idle, not stallMs).
+    await new Promise((ok) => setTimeout(ok, 600));
+    const reused = await new Promise((ok, no) => {
+      const r = get({ port, host: '127.0.0.1', path: `/${stream}/7`, agent }, (res) => { res.resume(); res.on('end', () => ok(r.reusedSocket)); });
+      r.on('error', no);
+    });
+    assert.equal(reused, true, 'an idle keep-alive connection outlives stallMs');
+    agent.destroy();
+  } finally {
+    s.close();
+    rmSync(name);
+  }
+});
+
+test('concurrent encoded requests for one file share one compression, and a later one compresses nothing', async () => {
+  writeFileSync(join(dir, stream, 'shared'), packable);
+  const { server: s, stats } = createOrigin(dir);
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const url = `http://127.0.0.1:${s.address().port}/${stream}/shared`;
+  try {
+    const rs = await Promise.all(Array.from({ length: 20 }, () => raw(url, { 'accept-encoding': 'br' })));
+    for (const r of rs) { assert.equal(r.res.headers['content-encoding'], 'br'); assert.deepEqual(brotliDecompressSync(r.body), packable); }
+    assert.equal(stats.compressions, 1, '20 concurrent br requests, one compression');
+    await raw(url, { 'accept-encoding': 'br' });
+    assert.equal(stats.compressions, 1, 'a held copy is not compressed again');
+    await raw(url, { 'accept-encoding': 'gzip' });
+    assert.equal(stats.compressions, 2, 'gzip is its own copy');
+  } finally {
+    s.close();
+  }
 });

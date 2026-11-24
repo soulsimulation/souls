@@ -166,6 +166,8 @@ import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { giveIntents } from '../give/give.mjs';
+import { KINDS as TOUCHES, activitiesIn, activityNamed } from '../together/together.mjs';
+import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
@@ -870,6 +872,7 @@ const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
 const OPS = new Set([
+  'carry',
   'ack',
   'act',
   'answer',
@@ -1232,7 +1235,7 @@ const summary = (plan, edits, started) => ({
 // A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
 // retry (a harness that timed out, the same command run twice, a daemon restarted between) sends nothing and gets the
 // first answer back, `repeat: true`, with the receipt as it stands. Two at once with one key wait for the same write.
-const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear', 'give']);
+const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear', 'give', 'carry']);
 const KEYS_KEPT = 500, keying = new Map();
 /** Today's limits for a key (eden.mjs `keyArg`): 1 to 100 printable characters, no spaces. */
 const keyOk = (k) => typeof k === 'string' && /^[\x21-\x7e]{1,100}$/.test(k);
@@ -1754,6 +1757,7 @@ async function answer(req, conn = null) {
     }
     case 'converse': return converse(req);
     case 'give': return give(req);
+    case 'carry': return carry(req);
     case 'look-set': {
       // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
       const params = String(req.params ?? '');
@@ -2022,14 +2026,79 @@ function converse(req) {
 /** 0.133 R4: a give's intents (`../give/give.mjs`), sent once as `act`'s are; the answers arrive as events. The offer's
  *  node goes on the open ground, which admits activities (a floor or a room does not): where the two stand is the
  *  world's check at the accept. */
-function give(req) {
-  const rows = [...rowsOf(copy).values()];
+async function give(req) {
+  // The copy brought current first (a daemon just started has none yet): the offer goes on the ground it holds.
+  await ageAfter();
+  for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); await ageAfter(); }
+  const rows = [...rowsOf(copy).values()], kinds = heldKinds();
   const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
-  const intents = giveIntents(req, { place });
+  // 0.135: the activities this world serves, by the words `together offer` takes.
+  if (req.do === 'kinds') return closing({ ok: true, touches: Object.keys(TOUCHES), activities: activitiesIn(kinds).map(({ word, kind, most }) => ({ word, kind, asks: most })) }, null, { now: true });
+  // A Soul named by its name (a body's name in the copy), not only by its body's id.
+  if (req.touch !== undefined && req.to !== undefined) {
+    const named = (w) => (ID.test(String(w)) ? w : rows.find((r) => r.soul && r.id !== ME && r.soul !== ME && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w);
+    req = { ...req, to: Array.isArray(req.to) ? req.to.map(named) : named(req.to) };
+  }
+  // An answer by the activity's word: the newest offer of it to this Soul.
+  if ((req.do === 'accept' || req.do === 'decline') && req.offer !== undefined && !ID.test(String(req.offer))) {
+    const w = String(req.offer).toLowerCase().replace(/_/g, '-');
+    const e = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w))
+      // offered while this daemon was not running: the newest activity of that kind in the copy
+      ?? (() => { const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null); const r = a && rows.filter((x) => x.kind === `${a.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
+    if (!e) return { ok: false, code: 'together-no-offer', detail: `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
+    req = { ...req, offer: e.offer };
+  }
+  const intents = giveIntents(req, { place, kinds });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
-  return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
+  // `sequence`: the command waits for its end, so a refused offer or accept (too far, already in one) is said.
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
+}
+
+const groundIn = (rows) => [...rows.values()].find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? null;
+/** 0.135 C, A: carrying together and building with parts (`../carry/carry.mjs`), each command's intents sent once as
+ *  `act`'s are, in order; the answers arrive as events. Positions are read from the copy. `list` names the crews. */
+async function carry(req) {
+  // The copy brought current first: each step reads where things are now (a daemon just started has no copy yet).
+  let age = await ageAfter();
+  for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
+  const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
+  const me = all.find((r) => r.soul === ME)?.id ?? null;
+  // Who is in each crew, as this Soul knows it: the bodies it offered the crew to, or the one that offered it.
+  state.crews ??= {};
+  const crews = crewsIn(rows);
+  for (const c of crews) {
+    if (state.crews[c.id]) continue;
+    const mine = state.crewOffer && !state.crewOffer.before.includes(c.id) ? state.crewOffer : null;
+    if (mine) { state.crews[c.id] = [me, ...mine.to]; state.crewOffer = null; }
+  }
+  if (req.do === 'accept') {
+    const from = logged.findLast((e) => e.kind === 'carry' && e.offer === req.crew)?.from;
+    if (from) state.crews[req.crew] = [from, me];
+  }
+  for (const id of Object.keys(state.crews)) if (!rows.has(id)) delete state.crews[id];
+  if (req.do === 'list') return closing({ ok: true, crews: crews.map((c) => ({ ...c, ...(state.crews[c.id] ? { with: state.crews[c.id] } : {}) })) }, null, { age });
+  const kindOf = (id) => rows.get(id)?.entry ?? rows.get(id)?.kind;
+  const at = placer(rows, (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
+  // Where a crew's load is now: between its front and its back (it is carried at their middle), else where the copy
+  // places its load or its node (a lifted crew's node is placed by the carry's samples only once it moves).
+  const crewMiddle = (crew) => {
+    const ends = (state.crews[crew] ?? []).slice(0, 2).map(at);
+    if (ends.length === 2 && ends.every(Boolean)) return [(ends[0].pos[0] + ends[1].pos[0]) / 2, (ends[0].pos[2] + ends[1].pos[2]) / 2];
+    const load = all.find((r) => r.parent === crew), p = load ? at(load.id) : rows.has(crew) ? at(crew) : null;
+    return p ? [p.pos[0], p.pos[2]] : null;
+  };
+  const ground = groundIn(rows);
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle });
+  if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
+  const basis = shownVersion ?? state.cursor;
+  // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.
+  const before = req.do === 'offer' ? crews.map((c) => c.id) : null;
+  if (before) state.crewOffer = { before, to: [req.to].flat() };
+  const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
+  const walked = intents.find((i) => /:walk$/.test(i.verb));
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}) }, null, { now: true });
 }
 
 /**

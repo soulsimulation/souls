@@ -20,8 +20,10 @@ OOMPolicy=continue
 Restart=always
 RestartSec=1s
 # For all of them: about 55 MB each idle (7 Node processes on 8 cores), 32 MB of held buffers each, and a join wave's
-# requests in flight (#4018: 256M held one process). Inside souls.slice's 3G.
-MemoryMax=1G
+# requests in flight, each holding a reference to the one shared copy of a file, never its own. 2G, as production has
+# held it since 24 Nov (a 256M origin that copied the 9 MB baseline per viewer was killed 24 times as 100 viewers
+# joined Eden). Inside souls.slice's 14G.
+MemoryMax=2G
 MemorySwapMax=0
 NoNewPrivileges=yes
 ProtectSystem=strict

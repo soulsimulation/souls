@@ -6,7 +6,7 @@ import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from '
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { playSpeed, v2History } from './v2-engine/history.ts';
 import { CABIN } from './v2-engine/bridge.ts';
-import { seekTick } from './v2-engine/moment-link.ts';
+import { momentTick, seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
 import {SoulSwipe,swipeStep,soulRing,interestScores} from './touch/soul-swipe.ts';
@@ -329,7 +329,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ~8 s of a 1.6 Mbps link) wait until the arrival is over. Before, they shared the link with the world's own build (its
     // building worker's code waited behind them) and held the card ~12 s; until they land, a simple figure stands in.
     // Desktop, old worlds and pictures load them at once and wait for them as before. `?people=wait|later` overrides.
-    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode);
+    // a moment link (#t=) draws nothing before its moment: no early arrival, the card holds until the recording is drawn
+    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode||momentTick(location.hash)!==null);
     // Old worlds on phones (F12): undecided until the first snapshot, held meanwhile; the people wait for the arrival
     // only when none of them stands in the arrival camera's view (otherwise the card waits for them as before).
     const peopleAsk=new URLSearchParams(location.search).get('people'),peopleRule=((q:string|null)=>q==='wait'?false:q==='later'?true:quality.tier==='phone'&&!shotMode)(peopleAsk);
@@ -702,7 +703,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
       const ref=reference as {contract?:unknown;hash?:unknown;rulesVersion?:unknown}|undefined;
       const mismatch=reference!==undefined&&ref?.rulesVersion!==chunk.take.rulesVersion;
-      const key=reference===undefined?(history?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
+      // a moved world's past (its history export) and a world drawn from its stream (W2) have no old scenery to name: their
+      // past is drawn in the same scenery as their live view (the current layout, or the stream's ground), so a seek never
+      // tears the world down; only an old-engine recording with no reference shows people on plain ground
+      const bare=history&&!v2History()&&!streamBound();
+      const key=reference===undefined?(bare?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
       if(key===sceneKey&&(sceneSettled||now<sceneRetryAt))return sceneSettled;
       const request=++sceneRequest;sceneKey=key;sceneRetryAt=Infinity;sceneSettled=false;initialGate?.cancel();setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
       staticBatches.reset();batchGeometry=null;batchRevision=-1;entityBatches.reset();entityBatchRevision=-1;
@@ -719,10 +724,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       renderer.domElement.dataset.sceneHash='';renderer.domElement.dataset.sceneBinding='loading';sceneryStatus('Loading the scenery for this recording.');
       const active=()=>!abort.signal.aborted&&request===sceneRequest;
       if(reference===undefined){
-        // a world drawn from its stream (W2) has no old scenery to name: its past draws the stream's ground, as its live view does
-        const plain=history&&!streamBound();
-        const pending=plain?Promise.resolve(parseSceneInfo(null)):currentLayout();
-        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(plain?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=plain?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
+        const pending=bare?Promise.resolve(parseSceneInfo(null)):currentLayout();
+        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(bare?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=bare?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
       }else if(mismatch){failLayout('The scenery reference does not match this recording.');}
       else void sceneHistory.resolve(reference).then(result=>{
         if(!active())return;

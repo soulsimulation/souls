@@ -11,7 +11,7 @@ export type MenuSection = 'time' | 'search' | 'souls' | 'god' | 'music' | 'camer
 
 /** The rows after Worlds, in the issue's order. `value` reads the control's current state for the row's second line. */
 export const MENU_TARGETS: readonly { key: string; section: MenuSection; selector: string; label?: string; value?: (root: MenuRoot) => string; fallback?: () => void; unless?: string }[] = [
-  { key: 'time', section: 'time', selector: '.hud-status .world-time-button', label: 'Time', value: (root) => text(root, '.hud-status [data-viewer-status]') },
+  { key: 'time', section: 'time', selector: '.hud-status .time-pill', label: 'Time', value: (root) => text(root, '.hud-status [data-viewer-status]') },
   { key: 'search', section: 'search', selector: '.hud-explore-group .explore-open:not(.god-open)', label: 'Search' },
   // the Souls list (part b) carries its own New Soul; this row stands in when you have no Souls yet
   { key: 'new-soul', section: 'souls', selector: '.hud-explore-group .bring-agent-open', label: 'New Soul', unless: '.hud-menu-souls' },

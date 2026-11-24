@@ -12,9 +12,13 @@
 //
 // An immutable file of at least COMPRESS_FROM bytes that packs well (a generation's baseline, 8.8 MB on Eden, 1.1 MB
 // as brotli) is served encoded to a reader that accepts it: br, else gzip, compressed once per file in each process
-// and held with its buffer (`encoded`), with `Vary: Accept-Encoding`. Its ETag stays the hash of the decoded bytes,
-// which is what a reader checks. A request with one `Range` (a crossing reader asks for a baseline's first 16 bytes,
-// worker.ts) gets those bytes of the decoded file, 206, never encoded.
+// and held with its buffer (`encoded`), with `Vary: Accept-Encoding`. Its ETag is the decoded bytes' hash, which is
+// what a reader checks, made weak (`W/"…"`) on an encoded copy. A request with one valid `Range` (a crossing reader
+// asks for a baseline's first 16 bytes, worker.ts) gets those bytes of the decoded file, 206, never encoded.
+//
+// Memory, with stallMs: a stalled reader of an encoded copy pins only that copy (about 1.1 MB for Eden's 9 MB
+// baseline); a 206 is a view of the shared decoded buffer and pins it for up to stallMs; the packed copies add at most
+// about 0.32 times the held bytes in a process when both br and gzip are asked for (Eden: 1.11 + 1.83 MB a 9 MB file).
 //
 // An immutable file is read once and its one buffer is shared by every request for it (#4018: a join wave of 250
 // viewers, each with its own copy of a 9 MB baseline, took the origin past its unit's 256 MB). Requests in flight
@@ -72,24 +76,32 @@ export function chooseEncoding(accept = '') {
  * `body` encoded as `encoding`, once per buffer: every request for that buffer shares one compression, and the
  * result lives as long as the buffer. Null when it does not pack to nine tenths or less (sent as it is).
  */
-export function encoder() {
+export function encoder(stats = {}) {
   const held = new WeakMap(); // body -> { br: Promise<Buffer|null>, gzip: … }
+  stats.compressions = 0;
   return (body, encoding) => {
     let e = held.get(body);
     if (!e) held.set(body, (e = {}));
+    if (!e[encoding]) stats.compressions++;
     return (e[encoding] ??= ENCODERS[encoding](body).then((out) => (out.length <= body.length * 0.9 ? out : null), () => null));
   };
 }
 
-/** The one byte range `range` names in a file of `size` bytes ({start, end} inclusive), 'unsatisfiable', or null (whole). */
+/**
+ * The one byte range `range` names in a file of `size` bytes ({start, end} inclusive), 'unsatisfiable' (it starts past
+ * the end, or asks for the last 0 bytes), or null: no range, more than one, or an invalid one (first after last), which
+ * RFC 9110 14.1.1 treats as absent (the whole file).
+ */
 export function byteRange(range, size) {
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(range ?? '').trim());
   if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] !== '' && m[2] !== '' && Number(m[1]) > Number(m[2])) return null;
   let start, end;
   if (m[1] === '') { start = Math.max(0, size - Number(m[2])); end = size - 1; }
   else { start = Number(m[1]); end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1); }
   return start > end || start >= size ? 'unsatisfiable' : { start, end };
 }
+const SLICE = 256 * 1024; // a response body is written this much at a time (createOrigin's stallMs)
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -151,13 +163,14 @@ export function sharedFiles(cacheBytes, stats = {}) {
 
 /**
  * An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served.
- * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles).
+ * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles). `stallMs` is how long a
+ * response may go with its reader taking nothing before the connection is closed (`stats.stalled`).
  */
-export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20 } = {}) {
+export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20, stallMs = 20_000 } = {}) {
   const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
-  const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
+  const stats = { pointer: 0, immutable: 0, miss: 0, stalled: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const shared = sharedFiles(cacheBytes, stats);
-  const encode = encoder();
+  const encode = encoder(stats);
   const server = createServer(async (req, res) => {
     const miss = () => {
       stats.miss++;
@@ -210,7 +223,9 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
         headers.vary = 'accept-encoding';
         const encoding = chooseEncoding(req.headers['accept-encoding']);
         const packed = encoding && await encode(body, encoding);
-        if (packed) { headers['content-encoding'] = encoding; body = packed; }
+        // weak: a strong validator names one representation's bytes (RFC 9110 8.8.3), and a Range is answered from
+        // the decoded file, so an encoded copy's tag must never match a resumed download's If-Range
+        if (packed) { headers['content-encoding'] = encoding; headers.etag = `W/${etag}`; body = packed; }
       }
     }
     stats[kind]++;
@@ -218,7 +233,22 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     if (req.method === 'GET') stats.bytes[rel.split('/')[0]] = (stats.bytes[rel.split('/')[0]] ?? 0) + body.length;
     headers['content-length'] = body.length;
     res.writeHead(status, headers);
-    res.end(req.method === 'HEAD' ? undefined : body);
+    if (req.method === 'HEAD') return res.end();
+    // A reader that takes nothing for stallMs is let go: its socket closes, and the page asks again from the newest
+    // baseline. Without this a stalled connection held its socket, and the buffer of the file it asked for, for as long
+    // as it stayed connected (Node gives a response no time limit), one 9 MB baseline per generation it stalled on.
+    // The body goes in slices of the one shared buffer, each written once the last has drained, so a slow reader that
+    // keeps taking bytes resets the clock with each slice and is never let go.
+    res.setTimeout(stallMs, () => { stats.stalled++; res.destroy(); });
+    let at = 0;
+    const more = () => {
+      while (at < body.length) {
+        const slice = body.subarray(at, at = Math.min(body.length, at + SLICE));
+        if (!res.write(slice)) return res.once('drain', more);
+      }
+      res.end();
+    };
+    more();
   });
   server.on('upgrade', worlds.upgrade);
   server.keepAliveTimeout = 60_000;
@@ -272,7 +302,7 @@ function serveOne(dir, port, host, every) {
   const figures = () => {
     const cpu = process.cpuUsage();
     return { index, pid: process.pid, started, pointer: stats.pointer, immutable: stats.immutable, miss: stats.miss,
-      reads: stats.reads, bytes: stats.bytes, cpu_s: (cpu.user + cpu.system) / 1e6, rss_bytes: process.memoryUsage.rss() };
+      stalled: stats.stalled, reads: stats.reads, bytes: stats.bytes, cpu_s: (cpu.user + cpu.system) / 1e6, rss_bytes: process.memoryUsage.rss() };
   };
   const end = () => {
     const f = figures();

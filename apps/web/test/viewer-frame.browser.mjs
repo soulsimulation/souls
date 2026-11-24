@@ -71,16 +71,16 @@ try {
   check('Resize places actual actor beside desktop drawer', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: output + '/desktop-follow.png' });
   await page.waitForFunction(() => Number(document.querySelector('.viewer-history')?.getAttribute('data-viewer-tick')) > 1600, null, {timeout:120000});
-  await page.locator('.world-time-button').click(); // the moment controls are in the time panel
+  await page.locator('.time-pill').click(); // every time control is in the panel the pill opens
   await page.getByRole('button', { name: 'Back 1 min', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation') === 'history');
   check('Typed history seek reports actual drawn tick', Number(await page.locator('.viewer-history').getAttribute('data-viewer-tick')) >= 0);
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
   check('History seek truthfully reports automatic playback', true);
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).click();
-  await page.getByRole('button', { name: 'Play recording', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Play recording', exact: true }).click();
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
   check('Typed playback pause and resume acknowledged', true);
   await page.getByRole('button', { name: 'Return to live', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation') === 'live');

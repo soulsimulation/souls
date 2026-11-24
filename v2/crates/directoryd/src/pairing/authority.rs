@@ -55,6 +55,23 @@ fn header(tokens: &Path) -> Option<(String, u64)> {
     Some((creator, generation.parse().ok()?))
 }
 
+/// The waits before each further try of a removal's file write: a short-lived failure (a full disk freed, a
+/// temporary file in the way) costs at most 150 ms under the pairing store's lock.
+const REMOVAL_RETRIES: [Duration; 2] = [Duration::from_millis(25), Duration::from_millis(125)];
+
+/// `write`, tried again after each of [`REMOVAL_RETRIES`] while it fails; its last error.
+pub(super) fn retried(mut write: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut result = write();
+    for wait in REMOVAL_RETRIES {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(wait);
+        result = write();
+    }
+    result
+}
+
 /// The world files owed: every world's (`full`, as at start-up) or these worlds'.
 #[derive(Default)]
 pub(super) struct Owed {
@@ -699,37 +716,42 @@ impl Pairing {
         }
     }
 
-    /// After a revoke or retire of a Soul in `worlds`, already kept in the store: lines only leave the files, so each
-    /// world's files are rewritten at once with the owner its tokens file already names, and no owner is read. The
-    /// gateway stops accepting the token before this answers; a file that cannot be written is refused by name
-    /// (`tokens-file`, `souls-file`) and owed to the copier, never reported done. A world whose file names no owner
-    /// yet, or with a token from before the registry still to bind, is written as [`Pairing::publish`] writes it.
+    /// After a revoke or a retire (`retire`) of Souls in `worlds`, already kept in the store: lines only leave the
+    /// files, so each world's files are rewritten at once with the owner its tokens file already names, and no owner
+    /// is read. A write that fails is tried again ([`REMOVAL_RETRIES`]); one that still fails is owed to the copier,
+    /// which rewrites the world from the store. A revoke is then refused by name (`tokens-file`, `souls-file`), since
+    /// the gateway must stop accepting its token before it answers; a retire stands, as the store already holds it,
+    /// and its other worlds are still written. A world whose file names no owner yet, or with a token from before the
+    /// registry still to bind, is written as [`Pairing::publish`] writes it.
     pub(super) fn publish_removal(
         &self,
         db: &Connection,
         worlds: &BTreeSet<String>,
-        souls: bool,
+        retire: bool,
         legacy: impl FnOnce() -> Result<(), &'static str>,
     ) -> Result<(), &'static str> {
         if self.authority_file.is_none() {
             return legacy();
         }
-        let owe = |world: &str, refusal: &'static str| {
-            eprintln!("directoryd: degraded: world-files {world}: {refusal}; owed to the copier");
-            self.owe(Some(world));
-            refusal
+        let owe = |world: Option<&str>, refusal: &'static str| {
+            let name = world.unwrap_or("every world");
+            eprintln!("directoryd: degraded: world-files {name}: {refusal}; owed to the copier");
+            self.owe(world);
+            if retire { Ok(()) } else { Err(refusal) }
         };
-        let rows = self
-            .registry()
-            .map_err(|_| "tokens-file")?
-            .unwrap_or_default();
+        let Ok(rows) = self.registry() else {
+            return owe(None, "tokens-file");
+        };
+        let rows = rows.unwrap_or_default();
         let backfill = Self::needs_backfill(db).map_err(|_| "store")?;
         for world in worlds {
             let Some(row) = rows.get(world) else {
                 continue;
             };
             let Some((creator, generation)) = header(&row.tokens).filter(|_| !backfill) else {
-                self.publish_one(db, world).map_err(|_| "tokens-file")?;
+                if self.publish_one(db, world).is_err() && !retire {
+                    return Err("tokens-file");
+                }
                 continue;
             };
             let authority = Authority {
@@ -737,10 +759,12 @@ impl Pairing {
                 generation,
                 ..row.clone()
             };
-            self.world_tokens(db, &authority)
-                .map_err(|_| owe(world, "tokens-file"))?;
-            if souls {
-                Self::world_souls(db, &rows, &authority).map_err(|_| owe(world, "souls-file"))?;
+            if retried(|| self.world_tokens(db, &authority)).is_err() {
+                owe(Some(world), "tokens-file")?;
+                continue;
+            }
+            if retire && retried(|| Self::world_souls(db, &rows, &authority)).is_err() {
+                owe(Some(world), "souls-file")?;
             }
         }
         Ok(())
