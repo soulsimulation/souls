@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { activityPin, carryIntents, crewsIn, gripSpot, loadOf, placer, slotPoint } from './carry.mjs';
+import { activityPin, byName, carryIntents, crewsIn, gripSpot, loadOf, placer, slotPoint } from './carry.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
 const entry = (dir, f) => JSON.parse(readFileSync(join(ROOT, dir, f), 'utf8'));
@@ -112,4 +112,17 @@ test('a carry\'s offer reaches the asked Soul as a carry; the crews are listed w
   assert.deepEqual(offerNote(ev, id(7)), { kind: 'carry', what: 'offered', offer: id(8), from: id(6) });
   const held = new Map([...rows, [id(10), { id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam', parent: id(8) }]]);
   assert.deepEqual(crewsIn(held), [{ id: id(8), on: id(1), holds: [{ id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam' }] }]);
+});
+
+test('a thing is named by its title as look shows it, in any case; crews stay ids; none or several is refused', () => {
+  const named = new Map([...rows, [id(4), { ...rows.get(id(4)), name: 'rack frame 1' }], [id(5), { ...rows.get(id(5)), name: 'Rack Bay', aliases: ['the bay'] }],
+    [id(2), { ...rows.get(id(2)), name: 'beam' }], [id(9), { ...rows.get(id(9)), name: 'beam' }]]);
+  assert.deepEqual(byName({ kind: 'part', do: 'take', crew: id(8), part: 'rack frame 1' }, named), { kind: 'part', do: 'take', crew: id(8), part: id(4) });
+  assert.equal(byName({ kind: 'part', do: 'put', crew: id(8), into: 'rack bay', slot: 'upright_a' }, named).into, id(5));
+  assert.equal(byName({ do: 'to', crew: id(8), where: 'the bay', slot: 'upright_a' }, named).where, id(5), 'an alias');
+  assert.deepEqual(byName({ do: 'to', crew: id(8), where: '1.5,2' }, named), { do: 'to', crew: id(8), where: '1.5,2' }, 'a point stays a point');
+  assert.equal(byName({ kind: 'part', do: 'put', crew: id(8), into: 'here' }, named).into, 'here');
+  assert.equal(byName({ do: 'grip', thing: 'beam', end: 'back' }, named).code, 'carry-name-ambiguous');
+  assert.equal(byName({ do: 'grip', thing: 'frame 9', end: 'back' }, named).code, 'carry-name-unknown');
+  assert.equal(byName({ do: 'accept', crew: 'my crew' }, named).crew, 'my crew', 'a crew is never looked up by name');
 });
