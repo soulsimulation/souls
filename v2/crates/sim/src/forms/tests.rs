@@ -1534,6 +1534,93 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
     }
 }
 
+/// 0.135 E13: a body in a seat of a thing acts on that thing from the seat. A form's approach walk to one of the
+/// thing's points (a motorboat's key from its helm) is dropped, as it is for a move on the body itself (#4143), so the
+/// seat's held legs never refuse it `resource-held`; the body stays seated. (Without the rule the walk starts: in a
+/// world its legs refuse it `resource-held`; here, where the bench's tree has no chair, it ends `node-gone`.)
+#[test]
+fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
+    use skills::form_runner::Step;
+    const CHAIR: &str = include_str!("../../../replica/fixtures/seats/chair.diag");
+    let place = replica::moves::Place::from_value(
+        &decode(&fixture_bytes(CHAIR).expect("bytes"))
+            .expect("decodes")
+            .value,
+    )
+    .expect("the chair's place");
+    {
+        let mut b = Bench::new();
+        let chair = b.mint.mint().expect("id");
+        let at = crate::slots::PlaceAt {
+            thing: chair,
+            place: place.clone(),
+            point: Vec3::new(0, place.height, 0),
+            facing: Quat::IDENTITY,
+            floor: fixture(1),
+        };
+        let stand = at.stand().expect("a stand point");
+        let mut slots = crate::slots::Slots::new();
+        slots.add(at).expect("a place");
+        b.slots = Some(slots);
+        let body = b.mint.mint().expect("id");
+        let frame = Frame {
+            node: fixture(1),
+            slot: None,
+        };
+        let placed = b.surfaces[&fixture(1)]
+            .place(body, frame, stand, Quat::IDENTITY)
+            .expect("placed");
+        b.c.add(family(), placed).expect("added");
+        let start = |b: &mut Bench, steps: Vec<Step>, intent: Intent| {
+            b.look();
+            let now = b.now;
+            let (mut w, forms) = b.world();
+            forms.start(
+                &mut w,
+                body,
+                chair,
+                intent,
+                steps,
+                Vec::new(),
+                Limits::default(),
+                now,
+            )
+        };
+        let sit = Step::Sit {
+            slot: place.slot,
+            lie: false,
+            stand: false,
+        };
+        start(&mut b, vec![sit], intent(body, 0)).expect("started");
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "done", "seated");
+        b.forms.ended.clear();
+        // The approach walk the form runner puts before a move at one of the thing's points, 1 m from the stand point.
+        let point = Vec3::new(stand.x + 1_000_000, stand.y, stand.z);
+        let walk = Step::WalkTo {
+            point: Name::new("key").expect("a name"),
+            at: point,
+            on: None,
+            approach: true,
+        };
+        start(&mut b, vec![walk, Step::Wait(200_000)], intent(body, 1)).expect("started");
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+        println!(
+            "E13: the seated body's act ended {}, body in {held:?}",
+            e.how.as_str()
+        );
+        assert_eq!(e.how.as_str(), "done", "not resource-held");
+        assert_eq!(held, Some(chair), "still in its place");
+    }
+}
+
 /// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand
 /// point: the bench, the body, the chair, its slot and its stand point.
 fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
