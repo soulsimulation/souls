@@ -64,7 +64,8 @@
 //   (POST cobuild/pair/approve {code}).
 //   /w/<slug>/*                  proxied to that world (HTTP, SSE, WebSocket); started on demand. A world with only a new-engine route (no registry row,
 //                                no binding; cutover.mjs withRouteOnly) starts nothing: its old page is built here (D2);
-//                                nor does a world its binding routes to the new engine (moved, D2b): answered here alone
+//                                nor does a world its binding routes to the new engine (moved, D2b): answered here alone,
+//                                its /asset-view/<sha>.glb and /assets/<sha>.<ext> from the release and the upload store (moved-assets.mjs)
 //
 // --base /worlds puts all of the above under one path prefix (/worlds/, /worlds/__sim/…, /worlds/w/<slug>/…,
 // /worlds/assets/…), so one reverse-proxy rule serves the launcher beside another release on the same origin
@@ -129,6 +130,7 @@ import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, r
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
+import { movedAssets } from './moved-assets.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -298,6 +300,9 @@ export async function openLauncher(cfg = {}) {
   const dataDir = resolve(cfg.dataDir ?? join(root, '.lane/launcher'));
   const webDir = resolve(cfg.webDir ?? join(root, 'apps/web/dist'));
   const templatesDir = resolve(cfg.templatesDir ?? join(root, 'worlds/templates'));
+  // 24 Nov: a moved world's models and pictures, from the release's core assets and the box's shared upload store, as
+  // its old process served them (moved-assets.mjs)
+  const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent
   // #887: the site admin's vetoes apply to thumbnails as to every upload. The site log is the one the worlds share: by
@@ -1432,6 +1437,7 @@ export async function openLauncher(cfg = {}) {
     // (Explore's place pictures among them: the page keeps those places as text), and its old process never starts.
     if (moved(w)) {
       if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
+      if (movedAsset(req, res, edgeRest)) return;
       if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
       if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, w, edgeRest, url)) return;
       if (req.method === 'POST' && edgeRest === '/v1/world/context/views') { await noPictures(req, res); return; }
