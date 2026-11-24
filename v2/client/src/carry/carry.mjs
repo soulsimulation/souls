@@ -36,7 +36,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <body id> [<body id> ...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 

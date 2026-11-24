@@ -33,6 +33,8 @@ export function giveIntents(req, { place, kinds }) {
       if (!ID.test(String(req.offer ?? ''))) return no('give-names-an-offer', `give ${req.do} <offer id>`);
       return [{ verb: `activity:${req.do}`, target: req.offer }];
     }
+    // `together leave <id>` comes here too: leaving the activity an offer made (`activity:leave`).
+    case 'leave': return togetherIntents(req, { place, kinds });
     default: return no('give-usage', 'give <thing id> --to <body id> | give accept|decline <offer id>');
   }
 }
