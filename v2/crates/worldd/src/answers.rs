@@ -4441,17 +4441,18 @@ impl Clock {
         // A walk that ended as near its goal as the crowd there allows says so (A2-4); taken off first, so a move no
         // longer open leaves nothing behind.
         let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
+        // 0.133: how far from its target a done walk ended, mm, taken however the move ends
+        let away = self.bodies.as_mut().and_then(|b| b.away(id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
             false => how,
         };
-        let (actor, sequence, body) = (o.actor, o.sequence, o.body);
+        let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
                 let done = if short { DONE_SHORT } else { "done" };
                 // 0.133: how far from its target the walk ended, mm, as field 7 of its end (a fact, never a label)
-                let away = self.bodies.as_mut().and_then(|b| b.away(id, body));
                 self.note_away(id, MOVE_ENDED, Some(done), away, now);
                 self.end(id, |c| Answer::Receipt {
                     actor,
