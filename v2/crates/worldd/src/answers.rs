@@ -253,6 +253,85 @@ fn motion_effects(
     out
 }
 
+/// The events of a form run's start and its end (`sim::forms`): field 1 the run, 2 its body, and on the end 3 the
+/// ending's name. The reservation's link type, from the body to the thing.
+const RUN_STARTED: &str = "souls:form-started";
+const RUN_ENDED: &str = "souls:form-ended";
+const RUN_RESERVES: &str = "souls:reserves";
+
+/// An intent's entries the world refused as `refusal`, split (0.133 F1b): the ends of runs that started in an earlier
+/// part, and the rest. A run that starts in `group` is written nowhere, so its end stays with the rest. A carved end
+/// that ended `done` names the refusal instead; one with no unlink (its run's own effect removed its thing, and that
+/// removal is refused too) unlinks the reservation its body still holds on `tree`.
+fn refused_ends(
+    group: Vec<Effect>,
+    refusal: &str,
+    tree: &replica::tree::Tree,
+) -> (Vec<Effect>, Vec<Effect>) {
+    let run_of = |e: &Effect, event: &str| {
+        e.events
+            .iter()
+            .flatten()
+            .find(|v| v.name.as_str() == event)
+            .and_then(|v| v.fields.get(&1).cloned())
+    };
+    let started: Vec<Value> = group
+        .iter()
+        .filter_map(|e| run_of(e, RUN_STARTED))
+        .collect();
+    let how = match refusal.contains(':') {
+        true => refusal.to_owned(),
+        false => format!("souls:{refusal}"),
+    };
+    let (mut ends, rest): (Vec<Effect>, Vec<Effect>) = group
+        .into_iter()
+        .partition(|e| run_of(e, RUN_ENDED).is_some_and(|r| !started.contains(&r)));
+    for e in &mut ends {
+        let unlinked = e
+            .changes()
+            .iter()
+            .any(|c| matches!(c.change, Change::Unlink { .. }));
+        let (Body::Changes(changes), Some(events)) = (&mut e.body, e.events.as_mut()) else {
+            continue;
+        };
+        let Some(v) = events.iter_mut().find(|v| v.name.as_str() == RUN_ENDED) else {
+            continue;
+        };
+        if v.fields.get(&3) == Some(&Value::Bytes(b"souls:done".to_vec())) {
+            v.fields.insert(3, Value::Bytes(how.as_bytes().to_vec()));
+        }
+        let body = v
+            .fields
+            .get(&2)
+            .and_then(|b| replica::effects::read_id(b).ok());
+        // A body runs one form at a time, so it holds at most one reservation: the one its run's start wrote. The
+        // thing owns the link, so the end is written at the thing, as an end that unlinks always is.
+        let held = body.and_then(|body| {
+            tree.links_at(body).iter().find_map(|l| {
+                let (ty, at, ..) = tree.link(l.link)?;
+                (ty.as_str() == RUN_RESERVES && at[0] == body).then_some((l.link, at[1]))
+            })
+        });
+        if !unlinked && let Some((link, thing)) = held {
+            v.changes.push(changes.len() as u64);
+            changes.push(ChangeRec {
+                change: Change::Unlink { link },
+                rest: Rest::new(),
+            });
+            e.envelope.node = thing;
+        }
+    }
+    (ends, rest)
+}
+
+/// Whether `e` is a form run's end.
+fn ends_run(e: &Effect) -> bool {
+    e.events
+        .iter()
+        .flatten()
+        .any(|v| v.name.as_str() == RUN_ENDED)
+}
+
 fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
     changes
         .into_iter()
@@ -4025,7 +4104,7 @@ impl Clock {
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
     /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
     /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
-    /// written.
+    /// written but the end of a run that started in an earlier part, which names the refusal ([`refused_ends`]).
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         let mut assembled = (Vec::new(), Vec::new());
@@ -4050,18 +4129,31 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
+                // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
+                let (ends, group) = refused_ends(group, r.name, self.replica.tree());
+                // The intent's run ended in this tick: there is nothing of it left to leave, and the body's run now may
+                // be another act's, started as this one ended (#4187).
+                let ended = !ends.is_empty() || group.iter().any(ends_run);
                 self.forms.unwritten(&group);
+                if !ends.is_empty()
+                    && let Err(e) = self.commit_forms(ends)
+                {
+                    eprintln!("worldd: a refused run's end was not written: {e}");
+                }
                 let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
                     continue;
                 };
                 let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
-                self.forms.leave(
-                    self.replica.tree(),
-                    self.bodies.as_mut(),
-                    body,
-                    Some(id),
-                    now,
-                );
+                if !ended {
+                    self.forms.leave(
+                        self.replica.tree(),
+                        self.bodies.as_mut(),
+                        body,
+                        Some(id),
+                        now,
+                    );
+                }
                 self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
