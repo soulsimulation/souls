@@ -116,7 +116,8 @@ pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec
 }
 
 /// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex> <kind> <reason or
-/// outcome>`, with `-` for any the frame has none of (an answer the gateway gives itself has no version), or
+/// outcome> <names> <op>[ <detail>]`, with `-` for any the frame has none of (an answer the gateway gives itself has
+/// no version), a refusal's detail (its words, with spaces) last when it has one, or
 /// `sync <n> <refusal name or ->` for the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
 #[wasm_bindgen(js_name = wireFrame)]
 pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
@@ -164,8 +165,13 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
             .join(","),
         _ => "-".to_owned(),
     };
+    // A refusal's detail (8), its own words, last: everything after the seventh space, when it has one.
+    let detail = match a.get(&8) {
+        Some(Value::Bytes(b)) if kind == "2" => format!(" {}", String::from_utf8_lossy(b)),
+        _ => String::new(),
+    };
     Ok(format!(
-        "answer {sequence} {version} {kind} {name} {names} {}",
+        "answer {sequence} {version} {kind} {name} {names} {}{detail}",
         field(7)
     ))
 }

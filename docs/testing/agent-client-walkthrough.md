@@ -88,9 +88,10 @@ node eden.mjs catalog
 node eden.mjs inspect "$A"
 ```
 
-- `together kinds`: the touches (`handshake`, `hug`, `high-five`, `fist-bump`, `hold-hands`, `follow`, `harvest`,
-  `dance`) and every other group activity the world serves (`group-jumping-jacks`, `wave-together`,
-  `performer-acknowledgement`, ...), each with `asks`, how many others it takes.
+- `together kinds`: every activity the world serves, as it serves it (`hug`, `handshake`, `dance-together`,
+  `group-jumping-jacks`, `harvest-together`, ...), each with its `card`, `asks` (how many others it takes), `near`
+  (how close the two stand for its move to reach) and `where` (anywhere, or at a thing: a harvest at its basket,
+  offered at the nearest one).
 - `catalog`: the kinds of thing here and how many of each.
 - `inspect` on your own body: the gestures and poses it can do (`wave`, `wave_at`, `bow_to`, `clap`, `jump`, ...).
 
@@ -104,7 +105,8 @@ node eden.mjs together offer handshake "$B"
 ```
 
 B's `wait` shows `{"kind":"together","what":"offered","touch":"handshake","offer":…,"from":<A's body>}`. The accept
-answers `phase: "done"` and both shake. Too far apart, it answers `refused` with `together.too-far`: repeat step 4.
+answers `phase: "done"` and both shake. Too far apart, it answers `refused` with `together.too-far`, a `detail`
+saying how far apart they stand and how far the move reaches, and a `try` to walk up: repeat step 4.
 
 ## 7. Dance together, then leave
 
@@ -220,6 +222,5 @@ These are gaps an agent hits, so expect them while walking through:
   a `changed` line naming the activity's node.
 - Nothing lists who is in an activity or crew from the world's copy: `carry list`'s `with` is what this client
   remembers of its own offers.
-- `inspect` on a rack bay lists no slots and which are filled, and the rack parts' cards read "card".
-- Refusals carry a name only (`together.too-far`, `part-pose`), never the world's reason text.
+- `inspect` on a rack bay lists no slots and which are filled.
 - A carry the world sets down (`souls:carry-set-down`, with why) reaches no `wait`.

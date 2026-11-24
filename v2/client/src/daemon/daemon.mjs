@@ -166,11 +166,11 @@ import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { giveIntents } from '../give/give.mjs';
-import { KINDS as TOUCHES, activitiesIn, activityNamed } from '../together/together.mjs';
+import { activitiesIn, activityNamed } from '../together/together.mjs';
 import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
-import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
+import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -287,9 +287,20 @@ function receiptSent(sequence, ranked, { target, replaces, words }) {
   if (receipts.size > RECEIPTS_KEPT) { const old = receipts.keys().next().value; receipts.delete(old); entriesAt.delete(old); }
   if (words === undefined && ranked[0] !== 'souls:cancel') going.push(sequence);
 }
+/** A refusal's detail as a person reads it: µm in metres, and each body or thing it names (the world's short form,
+ *  `<first scope byte>:<counter>`) by its name and id in the copy, when one row there is it. */
+function readableDetail(text) {
+  const rows = [...rowsOf(copy).values()];
+  return text.slice(0, 400)
+    .replace(/(\d+) µm/g, (_, n) => `${(Number(n) / 1e6).toFixed(2)} m`)
+    .replace(/\b([0-9a-f]{2}):(\d+)\b/g, (short, b, n) => {
+      const hit = rows.filter((r) => r.id.startsWith(b) && r.id.endsWith(`-${n}`));
+      return hit.length === 1 ? `${hit[0].name || 'it'} (${hit[0].id})` : short;
+    });
+}
 function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
-  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
+  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
   const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
   // R5: an act of this Soul's that ends (not words, not a progress answer) is the client's `client:act-ended`, which a
   // wake rule (`wake add act-ended`) or a reflex can match: field 1 its sequence, 2 how it ended, 3 the reason.
@@ -613,7 +624,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const [kind, a, b, c, d, names = '-', op = '-'] = wire.wireFrame(bytes).split(' ');
+      const [kind, a, b, c, d, names = '-', op = '-', ...said] = wire.wireFrame(bytes).split(' ');
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -660,7 +671,9 @@ function connect() {
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
       // G7: an edit's receipt carries the ids its names became; its refusal, the operation that failed.
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
-      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...edit };
+      // A refusal's own words (the world's detail: how far apart, what it reaches), after the seven fields.
+      const detail = kind === 'answer' && said.length ? readableDetail(said.join(' ')) : '';
+      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...(detail ? { detail } : {}), ...edit };
       note(answered);
       keyAnswered(answered);
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
@@ -1848,7 +1861,20 @@ async function answer(req, conn = null) {
  * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
  */
 function suggestionFor(r) {
-  const target = String(r.target ?? '').split(' ')[0];
+  const target = String(r.target ?? '').split(' ')[0], reason = r.answers.at(-1)?.reason;
+  // Held by an activity, every other act is refused: leaving it comes first, not another offer that is refused too.
+  if (reason === 'resource-blocked') {
+    const held = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry') && ID.test(String(x.offer ?? '')));
+    return { command: held ? `together leave ${held.offer}` : 'find activity', why: 'this body is held by an activity: `together leave <its id or word>` first (`find activity` lists them)' };
+  }
+  // An activity's own verbs answer for the activity, not a thing to walk to: too far, walk up to the place it is
+  // played (the thing it is at) or to the Soul who offered it; any other refusal of one has no other offer.
+  if (r.verbs.some((v) => String(v).startsWith('activity:'))) {
+    if (reason !== 'together.too-far') return null;
+    const rows = rowsOf(copy), parent = rows.get(target)?.parent, at = parent && !/(^|:)ground$/.test(String(rows.get(parent)?.kind ?? '').split('@')[0]) ? parent : null;
+    const to = at ?? logged.findLast((x) => x.offer === target && ID.test(String(x.from ?? '')))?.from;
+    return to ? { act: `walk:${to}`, name: 'walk', checked: 'unknown', why: at ? 'walk to the thing it is played at, then accept again' : 'walk up to the Soul who offered it, then accept again' } : null;
+  }
   if (!ID.test(target)) return null;
   const t = thingOf(target);
   if (!t.ok) return null;
@@ -2030,10 +2056,19 @@ async function give(req) {
   // The copy brought current first (a daemon just started has none yet): the offer goes on the ground it holds.
   await ageAfter();
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); await ageAfter(); }
-  const rows = [...rowsOf(copy).values()], kinds = heldKinds();
+  const rows = [...rowsOf(copy).values()], kinds = heldKinds(), served = activitiesServed(home, seat.world), list = activitiesIn(served);
   const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
-  // 0.135: the activities this world serves, by the words `together offer` takes.
-  if (req.do === 'kinds') return closing({ ok: true, touches: Object.keys(TOUCHES), activities: activitiesIn(kinds).map(({ word, kind, most }) => ({ word, kind, asks: most })) }, null, { now: true });
+  // 0.135: the activities this world serves, as it serves them, by the words `together offer` takes.
+  if (req.do === 'kinds') {
+    if (!served) return closing({ ok: false, code: 'together-not-served', detail: 'this world has served no list of its activities yet: `status`, then try again once the daemon has signed in' }, null, { now: true });
+    return closing({ ok: true, activities: list.map(({ word, card, most, near_m: near, at }) => ({ word, ...(card ? { card } : {}), asks: most, near: near === null ? 'any distance' : `within ${near} m`, where: at ? `at a ${at.replace(/^.*:/, '').replace(/_/g, ' ')} (${at})` : 'anywhere' })) }, null, { now: true });
+  }
+  // The nearest thing of a kind in the copy, where an activity played at it is offered.
+  const poses = posesOf(copy), at = placer(rowsOf(copy), (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
+  const mine = rows.find((r) => r.soul === ME)?.id, from = mine && at(mine)?.pos;
+  const thingAt = (kind) => rows.filter((r) => String(r.entry ?? r.kind ?? '').split('@')[0] === kind)
+    .map((r) => ({ id: r.id, d: from && at(r.id) ? Math.hypot(at(r.id).pos[0] - from[0], at(r.id).pos[2] - from[2]) : Infinity }))
+    .sort((a, b) => a.d - b.d)[0]?.id ?? null;
   // A Soul named by its name (a body's name in the copy), not only by its body's id.
   if (req.touch !== undefined && req.to !== undefined) {
     const named = (w) => (ID.test(String(w)) ? w : rows.find((r) => r.soul && r.id !== ME && r.soul !== ME && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w);
@@ -2041,15 +2076,15 @@ async function give(req) {
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
   if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
-    const w = String(req.offer).toLowerCase().replace(/_/g, '-');
+    const named = activityNamed(list, req.offer), w = named?.word ?? String(req.offer).toLowerCase().replace(/_/g, '-');
     // A leave by word is of the newest activity of that kind in the copy (this Soul may have made it); an answer is of
     // the newest offer of it to this Soul, else, offered while this daemon was not running, the newest in the copy.
     const e = (req.do === 'leave' ? null : logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w)))
-      ?? (() => { const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null); const r = a && rows.filter((x) => x.kind === `${a.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
+      ?? (() => { const r = named && rows.filter((x) => x.kind === `${named.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
     if (!e) return { ok: false, code: 'together-no-offer', detail: req.do === 'leave' ? `no ${w.slice(0, 40)} here: \`find activity\` lists the activities in the copy` : `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
     req = { ...req, offer: e.offer };
   }
-  const intents = giveIntents(req, { place, kinds });
+  const intents = giveIntents(req, { place, served, thingAt });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
@@ -2095,7 +2130,7 @@ async function carry(req) {
     return p ? [p.pos[0], p.pos[2]] : null;
   };
   const ground = groundIn(rows);
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle });
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.

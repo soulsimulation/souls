@@ -304,6 +304,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
         now: i.basis.clone(),
         changed: Vec::new(),
         op: None,
+        detail: None,
     };
     assert_eq!(keys(&receipt), [1, 2, 3, 4, 5]);
     assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);

@@ -9,7 +9,9 @@
 //!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
 //!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
-//!   lines for the creator's local checks of the existing boot registrations and admissions.
+//!   lines for the creator's local checks of the existing boot registrations and admissions. `activities.json`
+//!   (written at each start, [`served_activities`]): the activities as this start serves them, which the gateway
+//!   hands its clients with the entries.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its rules and the walkers' town.
 //! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
@@ -118,6 +120,7 @@ use replica::edit::World as Editing;
 use replica::effects::{Effect, Header, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
+use replica::moves::Move;
 use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
@@ -509,6 +512,114 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         );
     }
     Ok(by_kind.into_values().collect())
+}
+
+/// The served activities' file in a world's folder, beside `world.kinds`: `gatewayd --entries` serves it with the
+/// entries (`v2/crates/gatewayd/src/entries.rs`).
+pub const ACTIVITIES_FILE: &str = "activities.json";
+
+/// The activities a start serves from its entries, as an agent decides from them (`souls-activities/1`): for each,
+/// its entry's `kind`, the `name` it is served by (the engine's pin, the header's after [`adopt`]), its `word` (its
+/// plain name with dashes), its `card` (the entry's card text), its `roles` and how many each takes, the role the
+/// offerer plays (the first one member plays) and how many it asks; `near_m`, how close (m) two members stand for its
+/// moves to reach, the shortest reach among its roles' moves (none: no distance is checked); and `at`, the kind of
+/// thing it is played at when its entry plays it through forms (`crate::engine::at_its_thing`), else none: anywhere.
+fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: &[Move]) -> Json {
+    let by_kind: BTreeMap<&str, &Json> = entries.iter().map(|(k, e)| (k.as_str(), e)).collect();
+    let entries_obj = Json::Obj(entries.to_vec());
+    let mut out = Vec::new();
+    for a in kinds {
+        let Some(kind) = plain(a.name.as_str()).strip_suffix("_activity") else {
+            continue;
+        };
+        let Some(entry) = by_kind.get(kind) else {
+            continue;
+        };
+        let most = |r: &str| match entry
+            .get("links")
+            .and_then(|l| l.get(r))
+            .and_then(|l| l.get("most"))
+        {
+            Some(Json::Int(n)) => *n,
+            _ => 1,
+        };
+        let roles: Vec<(String, i128)> = a
+            .roles
+            .iter()
+            .map(|r| {
+                let n = r.name.as_str();
+                (n.to_owned(), most(n.split_once(':').map_or(n, |(_, r)| r)))
+            })
+            .collect();
+        let card = entry
+            .get("card")
+            .and_then(|c| c.get("text"))
+            .and_then(Json::str)
+            .and_then(|t| entry.get("text")?.get(t)?.str())
+            .or_else(|| entry.get("text")?.get("card")?.str())
+            .unwrap_or("");
+        let reach = a
+            .roles
+            .iter()
+            .filter_map(|r| r.mv.as_ref())
+            .filter_map(|mv| moves.iter().find(|m| m.name == *mv))
+            .map(|m| m.reach)
+            .min();
+        // Offered (`activity:offer`) only as the engine takes an offer: a pair's kind, or a crew's three roles, the
+        // third taken by several (`sim::activity::offer`); any other is proposed at its thing, and has no offerer.
+        let crew = roles.len() == 3 && a.most > 3;
+        let offerer = (roles.len() == 2 || crew)
+            .then(|| {
+                roles
+                    .iter()
+                    .take(2)
+                    .find(|(_, m)| *m == 1)
+                    .map(|(n, _)| n.clone())
+            })
+            .flatten();
+        let asks: i128 = roles
+            .iter()
+            .filter(|(n, _)| Some(n) != offerer.as_ref())
+            .map(|(_, m)| m)
+            .sum();
+        let mut o = vec![
+            ("kind".to_owned(), Json::s(kind)),
+            ("name".to_owned(), Json::s(a.name.as_str())),
+            (
+                "word".to_owned(),
+                Json::s(&kind.rsplit(':').next().unwrap_or(kind).replace('_', "-")),
+            ),
+            ("card".to_owned(), Json::s(card)),
+            (
+                "roles".to_owned(),
+                Json::Arr(
+                    roles
+                        .iter()
+                        .map(|(n, m)| Json::object([("role", Json::s(n)), ("most", Json::Int(*m))]))
+                        .collect(),
+                ),
+            ),
+            ("asks".to_owned(), Json::Int(asks)),
+        ];
+        if let Some(r) = offerer {
+            o.push(("offerer".to_owned(), Json::Str(r)));
+        }
+        if let Some(r) = reach {
+            // µm to m, to the centimetre.
+            o.push((
+                "near_m".to_owned(),
+                Json::Num(format!("{}.{:02}", r / 1_000_000, (r % 1_000_000) / 10_000)),
+            ));
+        }
+        if let Some(at) = worldd::engine::at_its_thing(&entries_obj, &a.name) {
+            o.push(("at".to_owned(), Json::s(at)));
+        }
+        out.push(Json::Obj(o));
+    }
+    Json::object([
+        ("format", Json::s("souls-activities/1")),
+        ("activities", Json::Arr(out)),
+    ])
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
@@ -2961,6 +3072,12 @@ fn serve(args: &[String]) -> R<()> {
         places.len(),
         things
     );
+    // The activities as served (after `adopt`, so by the header's pins), read before the entries become the rules.
+    let served = served_activities(
+        &kinds,
+        &built.activities,
+        &worldd::moves::library().map_err(refusal)?,
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -3092,6 +3209,9 @@ fn serve(args: &[String]) -> R<()> {
     }
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
+    // The activities as this start serves them, which the gateway hands out with the entries (`activities.json`).
+    let served_path = dir.join(ACTIVITIES_FILE);
+    std::fs::write(&served_path, served.to_json()).map_err(io(&served_path))?;
 
     let ground = built.ground;
 
@@ -3668,13 +3788,50 @@ mod tests {
                 )),
             ),
         ];
-        for k in kinds.iter().chain(&activity_kinds(&more).unwrap()) {
-            assert!(
-                client.contains(k.name.as_str()),
-                "the client offers {}",
-                k.name.as_str()
-            );
+        // The client offers them by the names the world serves (`activities.json`), never its own copy of a pin.
+        let all: Vec<_> = entries.iter().chain(&more).cloned().collect();
+        let kinds: Vec<_> = kinds
+            .into_iter()
+            .chain(activity_kinds(&more).unwrap())
+            .collect();
+        let served = served_activities(&all, &kinds, &worldd::moves::library().unwrap());
+        assert_eq!(
+            served.get("format").and_then(Json::str),
+            Some("souls-activities/1")
+        );
+        let list = served.get("activities").and_then(Json::arr).unwrap();
+        assert_eq!(list.len(), kinds.len());
+        for (a, k) in list.iter().zip(&kinds) {
+            assert_eq!(a.get("name").and_then(Json::str), Some(k.name.as_str()));
+            assert!(!client.contains(k.name.as_str()), "no pin in the client");
         }
+        let one = |kind: &str| {
+            list.iter()
+                .find(|a| a.get("kind").and_then(Json::str) == Some(kind))
+                .unwrap()
+        };
+        let hug = one("eden:hug");
+        assert_eq!(hug.get("word").and_then(Json::str), Some("hug"));
+        assert_eq!(
+            hug.get("card").and_then(Json::str),
+            Some("A hug for two: offer it, and it starts when the other accepts.")
+        );
+        assert_eq!(hug.get("offerer").and_then(Json::str), Some("eden:one"));
+        assert_eq!(hug.get("asks"), Some(&Json::Int(1)));
+        assert!(
+            hug.get("near_m").is_some() && hug.get("at").is_none(),
+            "a hug is anywhere, within its reach"
+        );
+        assert_eq!(one("eden:dance_together").get("asks"), Some(&Json::Int(7)));
+        assert!(
+            one("eden:follow").get("near_m").is_none(),
+            "following checks no distance"
+        );
+        assert_eq!(
+            one("eden:harvest_together").get("at").and_then(Json::str),
+            Some("eden:harvest_together"),
+            "a harvest is played at its basket"
+        );
     }
 
     #[test]

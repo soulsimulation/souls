@@ -482,6 +482,23 @@ impl Intent {
 /// the same answer. A 16-byte trace id may follow the integers when one is carried (OpenTelemetry's, later).
 pub const ANSWER_TIMES: u64 = 3;
 
+/// The most bytes of a refusal's detail an answer carries (its field 8).
+pub const DETAIL_MOST: usize = 240;
+
+/// A refusal's detail as an answer carries it: printable, on one line, at most [`DETAIL_MOST`] bytes cut at a
+/// character; None when nothing is left.
+pub fn answer_detail(text: &str) -> Option<String> {
+    let mut out = String::new();
+    for c in text.chars().map(|c| if c.is_control() { ' ' } else { c }) {
+        if out.len() + c.len_utf8() > DETAIL_MOST {
+            break;
+        }
+        out.push(c);
+    }
+    let out = out.trim().to_owned();
+    (!out.is_empty()).then_some(out)
+}
+
 /// How an intent is answered (rules 8 and 9). The zone's writer mints an id for each intent it reads (T3, from its
 /// own scope), which every effect it causes names as its cause (T6 rule 6). A checked act gets a receipt, naming that
 /// id and the entries that carried it out, or a refusal naming its reason and what changed since its basis. A move
@@ -499,8 +516,10 @@ pub enum Answer {
         names: BTreeMap<u64, Id>,
     },
     /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis, 7: the
-    /// failing operation}`: 6 left out when empty; 7, an edit's operation by its place in the batch (rule 15), left
-    /// out when none.
+    /// failing operation, 8: detail}`: 6 left out when empty; 7, an edit's operation by its place in the batch (rule
+    /// 15), left out when none; 8, the refusal's own words for a person or an agent (`together.too-far`'s distances),
+    /// UTF-8 bytes (a text is a name), at most [`DETAIL_MOST`], left out when it has none. A client acts on the
+    /// reason; the detail is for reading.
     Refused {
         actor: Actor,
         sequence: u64,
@@ -508,6 +527,7 @@ pub enum Answer {
         now: Value,
         changed: Vec<Id>,
         op: Option<u64>,
+        detail: Option<String>,
     },
     /// `{1: actor, 2: sequence, 3: 3, 4: intent id}`: a move accepted, to be resolved.
     Accepted {
@@ -559,6 +579,7 @@ impl Answer {
                 now,
                 changed,
                 op,
+                detail,
             } => {
                 let mut m = head(a, sequence, 2);
                 m.push((4, Value::Text(reason.clone())));
@@ -570,6 +591,11 @@ impl Answer {
                     ));
                 }
                 m.extend(op.map(|o| (7, Value::Uint(o))));
+                m.extend(
+                    detail
+                        .as_ref()
+                        .map(|d| (8, Value::Bytes(d.as_bytes().to_vec()))),
+                );
                 map(m)
             }
             Answer::Accepted {

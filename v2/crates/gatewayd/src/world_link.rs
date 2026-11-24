@@ -764,6 +764,7 @@ mod delivery_tests {
                 now: version.clone(),
                 changed: Vec::new(),
                 op: None,
+                detail: None,
             }
         } else {
             Answer::Receipt {

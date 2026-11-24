@@ -637,7 +637,7 @@ fn answer_in(frame: &[u8]) -> (u64, Result<Vec<u64>, String>) {
 }
 
 /// A scripted client on the world's socket, one per Soul.
-struct Client(UnixStream, Id, u64, Vec<u8>);
+struct Client(UnixStream, Id, u64, Vec<u8>, Vec<u8>);
 
 impl Client {
     fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
@@ -692,7 +692,22 @@ impl Client {
                 break frame;
             }
         };
+        self.4 = frame.clone();
         answer_in(&frame)
+    }
+
+    /// The last answer's refusal detail (its field 8, UTF-8), when it has one.
+    fn detail(&self) -> Option<String> {
+        let Value::Map(m) = decode(&self.4).ok()?.value else {
+            return None;
+        };
+        match m.get(&2)? {
+            Value::Map(a) => match a.get(&8)? {
+                Value::Bytes(b) => String::from_utf8(b.clone()).ok(),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Waits for the progress answer of the act just sent (C20: sent in the tick its run starts).
@@ -756,7 +771,7 @@ fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
     let client = |soul| {
         let s = UnixStream::connect(&path).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-        Client(s, soul, 0, Vec::new())
+        Client(s, soul, 0, Vec::new(), Vec::new())
     };
     let (a, b) = (client(w1()), client(w2()));
     (Run { world, store, path }, a, b)
@@ -852,6 +867,29 @@ fn a2_take_and_put_through_the_gateway_each_one_receipt() {
     let again = a.act("test:put", Some(rack()), p(&[(1, item)]));
     println!("A2 put again: {again:?}");
     assert!(again.is_err(), "nothing held: refused");
+    run.stop();
+}
+
+#[test]
+fn a3b_an_activity_played_at_its_thing_is_refused_on_the_open_ground_with_its_detail() {
+    let (run, mut a, _b) = serve("a3b");
+    // The court's entry plays it through forms on the court: offered on the ground, no member would hold its link.
+    let offered = a.act(
+        "activity:offer",
+        Some(ground()),
+        p(&[
+            (1, Value::Text(name(&full("test:court_activity", 0xfe)))),
+            (2, Value::Text(name("test:end_a"))),
+            (3, Value::Array(vec![w2().to_value()])),
+        ]),
+    );
+    let detail = a.detail();
+    println!("A3b: {offered:?} {detail:?}");
+    assert_eq!(offered, Err("together.at-its-thing".into()));
+    assert!(
+        detail.is_some_and(|d| d.contains("test:court_activity is played at a test:court")),
+        "the refusal says where it is played"
+    );
     run.stop();
 }
 
