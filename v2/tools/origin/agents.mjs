@@ -1,5 +1,6 @@
 // The agents' relay (stage 2c, #4152): the agents' gateway paths of every world (`/w/<slug>/v2/ws`, `v2/creator-token`,
-// `v2/entries`, canonical and `/preview/`), relayed to the world's own gatewayd by the same rules as the viewers'
+// a creator's `v2/creator-upload`, `v2/creator-edit` and `v2/creator-helper`, `v2/entries`, `v2/kinds`, canonical and
+// `/preview/`), relayed to the world's own gatewayd by the same rules as the viewers'
 // origin (world-routes.mjs: trusted placement metadata names the gateway, refusals by name), in a process of its own.
 // The front door sends those paths here and every viewer path to the origin, so a viewer join wave that saturates or
 // restarts the origin never drops an agent (docs/architecture/scaling.md: one concern, one process, one limit, one

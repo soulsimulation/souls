@@ -19,7 +19,7 @@ test('the front door sends every agent path to the relay on 7330; the page and i
   const agents = matcher('agents');
   assert.equal(upstream('agents'), '7330');
   for (const base of ['/w/eden', '/w/new-town']) {
-    for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries', `v2/uploads/1220${'ab'.repeat(32)}`]) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
+    for (const path of ['v2/ws', 'v2/creator-token', 'v2/creator-upload', 'v2/creator-edit', 'v2/creator-helper', 'v2/entries', 'v2/kinds', `v2/uploads/1220${'ab'.repeat(32)}`]) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
     for (const path of ['v2/uploads/abc', `v2/uploads/1220${'ab'.repeat(32)}/x`, 'v2/uploads/']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} is no upload`);
     for (const path of ['', 'views/world.json', 'eden.mjs', 'v1/config']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} stays with today's launcher`);
   }

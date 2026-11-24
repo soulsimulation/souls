@@ -23,7 +23,7 @@
 # What it needs: `caddy` and `node` on PATH (CADDY names another caddy). What is missing it builds, as `tools/ci.sh`
 # does: the four programs (`cargo build`, into target/debug), replica's WASM package (target/wasm-load/pkg) and the
 # page (`vite build`, each start, so the page is this checkout's). Prebuilt instead: V2_BIN names the folder holding
-# worldd, gatewayd, directoryd and testworld; V2_REPLICA_PKG the WASM package; V2_WEB a built page (its `dist`).
+# worldd, gatewayd, directoryd, testworld and assets-check (the gateway's uploads checker); V2_REPLICA_PKG the WASM package; V2_WEB a built page (its `dist`).
 # Local only: loopback ports, its own folder, never a production world or its data.
 set -euo pipefail
 V2=$(cd "$(dirname "$0")/../.." && pwd)
@@ -51,10 +51,10 @@ DIRECTORY=127.0.0.1:$((PORT + 1)) GATEWAY=127.0.0.1:$((PORT + 2)) ORIGIN=127.0.0
 TARGET=${CARGO_TARGET_DIR:-$V2/target}
 BIN=${V2_BIN:-$TARGET/debug}
 PKG=${V2_REPLICA_PKG:-$TARGET/wasm-load/pkg}
-for b in worldd gatewayd directoryd testworld; do
+for b in worldd gatewayd directoryd testworld assets-check; do
   [ -x "$BIN/$b" ] && continue
   [ -z "${V2_BIN:-}" ] || die "V2_BIN has no $b"
-  (cd "$V2" && cargo build --locked -p worldd -p gatewayd -p directoryd -p testworld)
+  (cd "$V2" && cargo build --locked -p worldd -p gatewayd -p directoryd -p testworld -p assets --bin assets-check)
   break
 done
 if [ ! -f "$PKG/replica.js" ]; then
@@ -142,7 +142,8 @@ rm -f w.sock
 start worldd "$BIN/worldd" serve --dir "$DIR/world" --socket "$DIR/w.sock"
 until_ready worldd test -S w.sock -a -f world/views/world.json
 start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world "$DIR/w.sock" --tokens world/tokens --build "1220$(printf '%064d' 0)" \
-  --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY" --mailbox "$DIRECTORY" --mailbox-key mailbox.key
+  --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY" --mailbox "$DIRECTORY" --mailbox-key mailbox.key \
+  --uploads world/uploads
 until_ready gatewayd grep -q '^listening' logs/gatewayd.log
 
 # The origin serves the world's stream and history as a placed world's (place-world.sh's links), and routes the

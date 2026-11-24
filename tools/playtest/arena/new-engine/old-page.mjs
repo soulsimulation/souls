@@ -13,7 +13,7 @@
 //
 //   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>] [--create]
 //
-// --create (0.135 W1): no old world at all. The launcher makes worlds on the new engine (--create-on-new-engine): the
+// --create (0.135 W1): no old world at all. The launcher makes worlds on the new engine (on wherever it has a binding): the
 // home page's New world goes to the directory's create as the signed-in person, and the world is served at /w/<slug>/
 // and listed once its route is registered. Locally the create and its placement are `localCreate` (below): the
 // directory's create contract (`POST /v1/worlds`, `world-starting` until placed), the creator the person the directory
@@ -202,7 +202,7 @@ async function withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPo
   const routes = JSON.parse(readFileSync(routesFile, 'utf8'));
   execFileSync(process.execPath, [SWITCH, '--binding', binding, '--slug', WORLD, '--stream', routes.worlds[WORLD].stream, '--routes', routesFile, '--client', client,
     '--static', join(dir, 'static')], { cwd: REPO_ROOT, stdio: 'ignore' });
-  procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth', '--create-on-new-engine',
+  procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
     '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/,
     { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: made.url } }));
   const base = `http://127.0.0.1:${frontPort}`;

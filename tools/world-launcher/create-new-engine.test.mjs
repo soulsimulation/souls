@@ -203,6 +203,13 @@ test('W1: a resume with an address this launcher did not give is refused before 
   assert.equal(stub.asks.length, 1);
 });
 
+test('W1: on by default where a cutover binding is in place (Gene\'s yes, 24 Nov)', async t => {
+  const { stub, create } = await fixture(t, { launcher: { v2Create: undefined } });
+  const out = await create({ name: 'Default On', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  assert.equal(stub.asks.length, 1, 'no flag: New world is the directory\'s create');
+  assert.equal(out.status, 202, JSON.stringify(out.body));
+});
+
 test('W1: with the flag off, New world is not sent to the directory', async t => {
   const { stub, create } = await fixture(t, { launcher: { v2Create: false } });
   const out = await create({ name: 'Old Way', template: 'empty' }, 'Bearer dev:ada');

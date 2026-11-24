@@ -50,6 +50,7 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   exe(join(bins, 'deploy'), 'echo 1220' + '0'.repeat(64));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
+  exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(lib, 'supervisor'), 'if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
