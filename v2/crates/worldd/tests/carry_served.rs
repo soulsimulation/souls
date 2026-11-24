@@ -291,6 +291,41 @@ fn moves_of(dir: &Path, load: Id) -> Vec<Pose> {
         .collect()
 }
 
+/// The way the world said for a carry that turns its load (0.135 R2, `souls:carry-way`), within 20 s: each pose's
+/// front x, front z, back x and back z, µm.
+fn carry_way(dir: &Path) -> Vec<[i64; 4]> {
+    let num = |v: &Value| match v {
+        Value::Uint(n) => i64::try_from(*n).ok(),
+        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+        _ => None,
+    };
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let found = effects(dir)
+            .iter()
+            .flat_map(|e| e.events.iter().flatten())
+            .find(|ev| ev.name.as_str() == "souls:carry-way")
+            .and_then(|ev| match ev.fields.get(&3) {
+                Some(Value::Array(ps)) => ps
+                    .iter()
+                    .map(|p| match p {
+                        Value::Array(v) => {
+                            let v: Vec<i64> = v.iter().filter_map(num).collect();
+                            v.try_into().ok()
+                        }
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<[i64; 4]>>>(),
+                _ => None,
+            });
+        if let Some(w) = found {
+            return w;
+        }
+        assert!(Instant::now() < end, "no souls:carry-way in the log");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn int(v: i64) -> Value {
     u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
 }
@@ -914,6 +949,171 @@ async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carri
     assert!(
         (middle - east_most).abs() < 2_000,
         "set down where its last sample had it, not moved: {middle} against {east_most}"
+    );
+}
+
+/// 0.135 R2 (#2814): the beam, lying along a wall 1.2 m west of it, is carried into a room through the wall's 1.2 m
+/// doorway, narrower than the beam's 2.74 m, by turning it a quarter. A room of walls stands on the open ground east of
+/// the beam: 5.8 m by 8 m clear inside, its one doorway in its west wall level with the beam's middle. The lift names
+/// a point 4.6 m inside; the straight way there clips the wall, so the lift's check finds a way that turns the beam
+/// (`turn::turn_way`) and says it (`souls:carry-way`); the two Souls read it from the world and walk it pose by pose,
+/// by their own intents through the gateway, each tick checked by C7's check. The carry is never stopped, no sample of the beam meets a wall, it turns from north to
+/// east, and it is set down inside the room.
+#[tokio::test(flavor = "multi_thread")]
+async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
+    use sim::activity::carry::{Fixed, outline};
+    let d = scratch("r2");
+    // The room's west wall's west face, level with the beam's middle, 1.2 m east of it (mm).
+    let (wx, wz) = (beam_at().x / 1000 + 1_200, beam_at().z / 1000);
+    let walls: [[i64; 4]; 5] = [
+        [100, 2_300, 100, 1_700],
+        [100, -2_300, 100, 1_700],
+        [3_100, 4_100, 3_100, 100],
+        [3_100, -4_100, 3_100, 100],
+        [6_100, 0, 100, 4_000],
+    ];
+    let mut f = json::parse(&world(&d)).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("things", json::Value::Arr(a)) = (k.as_str(), v) {
+            let solids = walls
+                .iter()
+                .map(|[cx, cz, hx, hz]| {
+                    json::Value::Arr([*cx, *cz, *hx, *hz, 0, 0, 2_400, 5, 0].map(num).to_vec())
+                })
+                .collect();
+            a.push(json::Value::Obj(vec![
+                ("id".into(), json::Value::s("room")),
+                ("def".into(), json::Value::s("testworld-box@1")),
+                ("ref".into(), json::Value::s("testworld-box@1")),
+                ("parent".into(), json::Value::Null),
+                (
+                    "pose".into(),
+                    json::Value::Arr([wx, 0, wz, 0].map(num).to_vec()),
+                ),
+                ("scale_ppm".into(), num(1_000_000)),
+                ("solids".into(), json::Value::Arr(solids)),
+                ("name".into(), json::Value::s("a room with one doorway")),
+            ]));
+        }
+    }
+    let facts = f.to_json();
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
+    let lineage = im.nodes["world"].scope();
+    let entry = construction("rack_beam.json");
+    let load = Load::of(&entry).unwrap();
+    let to = Vec3::new((wx + 4_600) * 1000, 0, wz * 1000);
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+    let carry = gather(&mut a, &mut b, &dir, ground, beam, &entry, beam_at(), true).await;
+    let lift = BTreeMap::from([
+        (1, beam.to_value()),
+        (2, Value::Array(vec![int(to.x), int(0), int(to.z)])),
+    ]);
+    a.act("carry:lift", carry, lift)
+        .await
+        .expect("lifted, a way through the doorway found");
+    // The way, as the world says it to the carry's audience: each pose where the front and the back stand.
+    let way = carry_way(&dir);
+    for (k, p) in way.iter().enumerate().skip(1) {
+        a.send("eden:walk", ground, point(Vec3::new(p[0], 0, p[1])))
+            .await;
+        b.send("eden:walk", ground, point(Vec3::new(p[2], 0, p[3])))
+            .await;
+        let (wa, wb) = (a.answer().await, b.answer().await);
+        wa.unwrap_or_else(|r| panic!("the front's walk {k}: {r}"));
+        wb.unwrap_or_else(|r| panic!("the back's walk {k}: {r}"));
+    }
+    b.act("carry:set-down", carry, BTreeMap::new())
+        .await
+        .expect("set down inside, the carry never stopped");
+    for s in [&mut a, &mut b] {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("each carrier leaves");
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+
+    let es = effects(&dir);
+    let stopped = es
+        .iter()
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .count();
+    assert_eq!(stopped, 0, "the carry was never broken off");
+    // Every sample of the carry: the beam as it is held (on its edge), clear of every wall.
+    let quads = walls
+        .iter()
+        .map(|[cx, cz, hx, hz]| {
+            let (x, z) = ((wx + cx) * 1000, (wz + cz) * 1000);
+            let (hx, hz) = (hx * 1000, hz * 1000);
+            [
+                [x - hx, z - hz],
+                [x + hx, z - hz],
+                [x + hx, z + hz],
+                [x - hx, z + hz],
+            ]
+        })
+        .collect();
+    let walls_fixed = Fixed::new(quads);
+    let (held, _) = load.as_held().unwrap();
+    let mut headings = Vec::new();
+    for e in &es {
+        let Body::Changes(cs) = &e.body else { continue };
+        for c in cs {
+            let Change::Motion(h) = &c.change else {
+                continue;
+            };
+            if h.node != carry {
+                continue;
+            }
+            let p = h.pose.position;
+            let u = h
+                .pose
+                .orientation
+                .rotate(Vec3::new(1_000_000, 0, 0))
+                .unwrap();
+            let q = outline([p.x + u.x, p.z + u.z], [p.x - u.x, p.z - u.z], &held);
+            assert!(
+                walls_fixed.hit(&q).is_none(),
+                "a sample through a wall: {p:?}"
+            );
+            headings.push((u.z as f64).atan2(u.x as f64).to_degrees());
+        }
+    }
+    let (first, last) = (headings[0], *headings.last().unwrap());
+    let moved = moves_of(&dir, beam);
+    let [lift, set] = moved[..] else {
+        panic!("lifted once and set down once: {moved:?}")
+    };
+    assert!(lift.frame.slot.is_some(), "held in the carry's slot");
+    let m = set.orientation.rotate(load.middle).unwrap();
+    let middle = (set.position.x + m.x, set.position.z + m.z);
+    println!(
+        "R2: {} poses walked, {} samples of the carry, none through a wall; it turned from {first:.0} to {last:.0} \
+         degrees through the 1.2 m doorway and was set down inside, its middle {} mm east of the wall's inner face",
+        way.len(),
+        headings.len(),
+        (middle.0 - (wx + 200) * 1000) / 1000
+    );
+    assert!(headings.len() > 20, "the carry moved");
+    assert!((first - 90.0).abs() < 5.0, "lifted facing north: {first}");
+    assert!(
+        last.abs() < 20.0,
+        "set down facing east, into the room: {last}"
+    );
+    assert!(
+        middle.0 > (wx + 200) * 1000 + 500_000 && middle.0 < (wx + 6_000) * 1000,
+        "set down inside the room: {middle:?}"
     );
 }
 
