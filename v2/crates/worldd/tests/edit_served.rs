@@ -2803,6 +2803,25 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
         .collect()
 }
 
+/// How many straight tracks (a set-in's, or its way back) the log has handed node `node` to.
+fn set_in_tracks(w: &Seeded, node: Id) -> usize {
+    use replica::effects::{Body, Change};
+    use replica::pose::{Owner, Track};
+    logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            Body::Changes(cs) => Some(cs),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| {
+            matches!(&c.change, Change::Motion(h)
+                if h.node == node && matches!(h.to, Owner::Track(Track::Straight { .. })))
+        })
+        .count()
+}
+
 /// The node of a kind starting `prefix` created by the entries numbered `entries`.
 fn created_by(w: &Seeded, entries: &[u64], prefix: &str) -> Id {
     use replica::effects::{Body, Change};
@@ -3453,7 +3472,15 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         v3(br.x + 3_000_000, 0, br.z),
         "Soul 2 walks out",
     );
+    // The leave goes only once the set-in has started: its straight track on crew C's node is in the log. The put and
+    // the leave go over two sockets, so nothing else orders them.
+    let tracks = set_in_tracks(&w, crew_c);
     hands[0].send("part:put", crew_c, into("beam_low_r"));
+    let end = Instant::now() + Duration::from_secs(30);
+    while set_in_tracks(&w, crew_c) == tracks {
+        assert!(Instant::now() < end, "beam 2's set-in starts");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let got = leave(&mut hands, 2, crew_c);
     refused(
         &got,

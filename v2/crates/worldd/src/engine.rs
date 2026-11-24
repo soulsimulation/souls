@@ -806,7 +806,7 @@ impl Engine {
                         None => None,
                     };
                     let xz = |v: Vec3| [v.x, v.z];
-                    load.check(
+                    let way = load.check(
                         crew,
                         xz(f),
                         xz(k),
@@ -836,6 +836,15 @@ impl Engine {
                         .iter()
                         .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
                         .collect();
+                    // 0.135 R2: a way that turns the load is kept on the carry and said to its carriers after the lift.
+                    if let Some(way) = way {
+                        self.take(&mut carry, Some((a.id, a.soul)));
+                        self.activities.next = tree.next();
+                        let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
+                        self.activities
+                            .carry_way(&mut tree, activity, board, &way, by)?;
+                        carry.way = way;
+                    }
                     self.carries.insert(activity, carry);
                 } else {
                     let mut carry = self
