@@ -32,6 +32,8 @@ type Camera={following:boolean;follow():void;stop():void};
 function usePublicRecord(api:Api,soulId:string):Rec{
  const [rec,setRec]=useState<Rec>('loading');
  useEffect(()=>{let live=true,timer:ReturnType<typeof setTimeout>|undefined;setRec('loading');
+  // A world the new engine runs publishes no old live record (its world answers 404): none asked, 24 Nov
+  if(v2World()){setRec('unavailable');return;}
   const read=async()=>{try{const r=await api(PUBLIC_SOUL_PATH(soulId));if(!live)return;
    if(r.status===404||r.status===405){setRec('unavailable');return;}
    const p=r.status===200?readPublicRecord(r.data):null;setRec(prev=>p??(prev!=='loading'?prev:'unavailable'));}catch{/* keep the last record */}
