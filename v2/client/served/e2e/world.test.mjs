@@ -314,6 +314,13 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   for (const me of [meA, meB]) assert.ok(v1.nodes.has(pageKey(me)), `(a) the public stream carries ${me}'s body: ${v1.bodies().map((n) => n.id)}`);
   stage('viewer has both bodies');
 
+  // Q1: an owner names their Soul on its page; another Soul's copy then finds its body by that name (the body's name
+  // field, 30, which the world's describe sets), as an agent asked to "go over to Alder" first does
+  const post = (path, body) => fetch(new URL(path, directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: 'alder' }) });
+  const key = ((await (await post('/v1/account/souls', {})).json()).souls ?? [])[0]?.soul;
+  assert.equal((await post('/v1/account/souls/profile', { soul: key, name: 'Alder Quill' })).status, 200, "A's owner names A");
+  await waitFor("A's body by its name in B's copy", async () => ((await B.cli('find', 'alder', 'quill')).found ?? []).find((r) => r.id === meA), 20_000);
+
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
   assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', `(b) \`can wave:<me>\` answers yes from the copy (#3772, fixed by #4075): ${JSON.stringify(can)}`);
