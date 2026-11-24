@@ -30,7 +30,12 @@ price are the owner's (C4 on #2636).
    | The pointer (`<stream>/pointer`) | 200 | `public, max-age=1, no-transform` |
    | Anything not there, a temporary file (`*.tmp`), a URL with a query string, a path outside the directory | 404 | `no-store` |
 
-   Every 200 is `application/octet-stream` with a strong `ETag`: the SHA-256 of its bytes, in hex.
+   Every 200 is `application/octet-stream` with a strong `ETag`: the SHA-256 of its bytes, in hex. An immutable
+   file of 16 KiB or more that packs well (a generation's `baseline`, 8.97 MB on Eden: 1.11 MB as brotli, 1.83 MB as
+   gzip) goes `Content-Encoding: br`, else `gzip`, to a reader whose `Accept-Encoding` takes it, with `Vary:
+   Accept-Encoding`; it is compressed once a process and held with its buffer, and its `ETag` stays the hash of the
+   decoded bytes, which is what a reader checks. One `Range` on an immutable file gets those decoded bytes, 206 (a
+   crossing reader asks for a baseline's first 16 bytes); a range past the end is a `no-store` 416.
 3. **The pointer's max-age is half a period, rounded up to a whole second.** `max-age` takes whole seconds
    (RFC 9111), and half of V1's 0.5 s period rounds down to 0, which would send every pointer read to the origin. One
    second is the shortest that keeps the origin's pointer reads per cache node at about one a second whatever the
@@ -72,11 +77,11 @@ each part.
 
 | Rule | Why | On nginx |
 |---|---|---|
-| Key on the path alone | one entry per part | `proxy_cache_key $uri;` |
+| Key on the path, and keep the origin's `Vary: Accept-Encoding` | one entry per part; a baseline's br, gzip and plain copies apart | `proxy_cache_key $uri;` (nginx keeps a variant per `Vary`) |
 | Honour the origin's `Cache-Control`; keep no error | a kept 404 hides a part that now exists (Fact 3: Cloudflare keeps a 404 3 min, CloudFront 10 s, Bunny 5 s by default) | the default honours it; `proxy_cache_valid 404 0;` |
 | Collapse concurrent misses into one origin request | 2,000 readers asking for a new part at once are one origin request a node | `proxy_cache_lock on;` and, for the pointer's expiry, `proxy_cache_use_stale updating; proxy_cache_background_update on;` |
 | Keep extensionless binary files | parts and the pointer have no extension (Fact 3: Cloudflare does not cache them by default; a cache rule must make them eligible) | the default |
-| Never recompress or transform | the ETag is the bytes' hash; parts are already packed (Fact 8) | `no-transform` is sent; `gzip off;` |
+| Never recompress or transform | the ETag is the decoded bytes' hash; parts are already packed (Fact 8); the origin encodes a baseline itself | `no-transform` is sent; `gzip off;` |
 | Keep connections open | a reader makes about three requests a second | `keepalive` to the origin, HTTP/1.1 or 2 to readers |
 
 **Origin requests per part are at most the number of cache nodes**, not one: each edge location (or nginx machine)

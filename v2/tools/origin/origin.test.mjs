@@ -7,6 +7,7 @@ import { get } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { createOrigin } from './origin.mjs';
 import { readWorldRoutes } from './world-routes.mjs';
 import { localAddresses, worldAddress } from '../../web/src/source/address.ts';
@@ -277,7 +278,8 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
     const url = `http://127.0.0.1:${s.address().port}/${stream}/9`;
     try {
-      const rs = await Promise.all(Array.from({ length: 40 }, () => fetch(url)));
+      // as they are: an encoded body's length is its own (the test after this one)
+      const rs = await Promise.all(Array.from({ length: 40 }, () => fetch(url, { headers: { 'accept-encoding': 'identity' } })));
       for (const r of rs) {
         assert.equal(r.status, 200);
         assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(big).digest('hex')}"`);
@@ -305,4 +307,48 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     }
   }
   rmSync(name);
+});
+
+const raw = (url, headers = {}) => new Promise((ok, no) => get(url, { headers }, (res) => {
+  const chunks = [];
+  res.on('data', (c) => chunks.push(c)).on('end', () => ok({ res, body: Buffer.concat(chunks) }));
+}).on('error', no));
+const packable = Buffer.from(Array.from({ length: 4000 }, (_, i) => `node ${i % 97} at ${i % 13}\n`).join(''));
+
+test('a large immutable file goes br, else gzip, to a reader that takes it; as it is to one that does not; its ETag is the decoded bytes\' hash', async () => {
+  writeFileSync(join(dir, stream, 'big'), packable);
+  const etag = `"${createHash('sha256').update(packable).digest('hex')}"`;
+  const br = await raw(`${base}/big`, { 'accept-encoding': 'gzip, deflate, br' });
+  assert.equal(br.res.headers['content-encoding'], 'br');
+  assert.equal(br.res.headers.vary, 'accept-encoding');
+  assert.equal(br.res.headers.etag, etag);
+  assert.equal(br.res.headers['cache-control'], 'public, max-age=31536000, immutable, no-transform');
+  assert.equal(Number(br.res.headers['content-length']), br.body.length);
+  assert.ok(br.body.length < packable.length / 4);
+  assert.deepEqual(brotliDecompressSync(br.body), packable);
+  const gz = await raw(`${base}/big`, { 'accept-encoding': 'gzip, br;q=0' });
+  assert.equal(gz.res.headers['content-encoding'], 'gzip');
+  assert.deepEqual(gunzipSync(gz.body), packable);
+  const plain = await raw(`${base}/big`);
+  assert.equal(plain.res.headers['content-encoding'], undefined);
+  assert.equal(plain.res.headers.vary, 'accept-encoding');
+  assert.deepEqual(plain.body, packable);
+  const small = await raw(`${base}/7`, { 'accept-encoding': 'br' });
+  assert.equal(small.res.headers['content-encoding'], undefined);
+  assert.deepEqual(small.body, part);
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}/big`)).arrayBuffer()), packable); // fetch decodes it
+});
+
+test('one Range gets those bytes of the decoded file (206), never encoded; a range past the end is a no-store 416', async () => {
+  writeFileSync(join(dir, stream, 'big'), packable);
+  const head = await raw(`${base}/big`, { range: 'bytes=0-15', 'accept-encoding': 'br' });
+  assert.equal(head.res.statusCode, 206);
+  assert.equal(head.res.headers['content-range'], `bytes 0-15/${packable.length}`);
+  assert.equal(head.res.headers['content-encoding'], undefined);
+  assert.deepEqual(head.body, packable.subarray(0, 16));
+  assert.deepEqual((await raw(`${base}/big`, { range: 'bytes=-4' })).body, packable.subarray(-4));
+  const past = await raw(`${base}/big`, { range: `bytes=${packable.length}-` });
+  assert.equal(past.res.statusCode, 416);
+  assert.equal(past.res.headers['cache-control'], 'no-store');
+  assert.equal(past.res.headers['content-range'], `bytes */${packable.length}`);
 });
