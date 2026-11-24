@@ -4969,6 +4969,8 @@ mod s10c_lockstep {
         initial: Replica,
         built: Built,
         tick: i64,
+        /// How many ticks after the last run an intent sent now is taken.
+        ahead: i64,
         sequences: BTreeMap<Id, u64>,
     }
 
@@ -5014,6 +5016,7 @@ mod s10c_lockstep {
                 initial,
                 built,
                 tick: 0,
+                ahead: 1,
                 sequences: BTreeMap::new(),
             }
         }
@@ -5074,7 +5077,7 @@ mod s10c_lockstep {
             self.world
                 .events
                 .send(answers::Event::ArrivalAt {
-                    tick: self.tick + 1,
+                    tick: self.tick + self.ahead,
                     bytes: encode(&i.to_value()).unwrap(),
                     reply,
                 })
@@ -5286,13 +5289,13 @@ mod s10c_lockstep {
             .find(|k| k.starts_with("mars:rack_upright@"))
             .unwrap()
             .clone();
-        let place = Op::Place {
+        let place = |x: i64| Op::Place {
             name: 1,
             kind: Name::new(&upright).unwrap(),
             parent: Ref::Node(g),
             at: Spot {
                 slot: None,
-                position: v3(50_000_000, -30_000_000),
+                position: v3(x, -30_000_000),
                 orientation: Quat::IDENTITY,
                 support: Support::Surface {
                     surface: g,
@@ -5303,7 +5306,8 @@ mod s10c_lockstep {
             fields: BTreeMap::new(),
         };
         let planned = w.replay().version();
-        let rxs = vec![
+        // Body-reading jobs in consecutive ticks (the set-down, then two edits): each reads its own tick's bodies.
+        let mut rxs = vec![
             w.walk(souls[0], p),
             w.walk(souls[1], q),
             w.soul(
@@ -5312,16 +5316,20 @@ mod s10c_lockstep {
                 Some(b3),
                 BTreeMap::from([(1, Value::Text(Name::new("place:here").unwrap()))]),
             ),
-            w.send(
+        ];
+        for (k, x) in [50_000_000, 54_000_000].into_iter().enumerate() {
+            w.ahead = 2 + k as i64;
+            rxs.push(w.send(
                 (Actor::Creator(creator), creator),
                 VERB,
                 None,
-                parameters(&[place]),
+                parameters(&[place(x)]),
                 planned,
-            ),
-        ];
+            ));
+        }
+        w.ahead = 1;
         let got = w.answers(rxs);
-        println!("S10c: walks, set-down, edit: {got:?}");
+        println!("S10c: walks, set-down, edits: {got:?}");
         for g in &got {
             assert_eq!(g.kind, 1, "done: {g:?}");
         }

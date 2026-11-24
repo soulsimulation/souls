@@ -1172,12 +1172,24 @@ struct Clock {
 
 /// The edit checker's queue (S10): each job goes with the tick whose bodies it is checked against, the newest tick
 /// whose snapshot point has passed ([`EditQueue::offered`]), so the checker never checks it on older bodies, and waits
-/// only when the snapshot it has is older than that.
+/// only when the snapshot it has is older than that. In lockstep (S10c) it is the tick running as the job is sent
+/// ([`EditQueue::running`]): a job sent before that tick's snapshot point waits for it, so it reads that tick's bodies
+/// in every run, never the last tick's or this one's by how far the clock has got.
+///
+/// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
 struct EditQueue {
     tx: Sender<(u64, CheckJob)>,
     walkers: Arc<buildsafe::Moving>,
     /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
     offered: std::cell::Cell<u64>,
+    /// Lockstep, in a world with bodies: the tick running (or last run, between ticks). `None` otherwise.
+    running: Option<std::cell::Cell<u64>>,
+}
+
+impl Drop for EditQueue {
+    fn drop(&mut self) {
+        self.walkers.close();
+    }
 }
 
 impl EditQueue {
@@ -1191,8 +1203,12 @@ impl EditQueue {
         ) {
             self.walkers.want();
         }
+        let need = self
+            .running
+            .as_ref()
+            .map_or(self.offered.get(), std::cell::Cell::get);
         self.tx
-            .send((self.offered.get(), job))
+            .send((need, job))
             .map_err(|e| std::sync::mpsc::SendError(e.0.1))
     }
 }
@@ -4532,6 +4548,9 @@ impl Clock {
         self.checkpoint();
         at[1] = mark();
         self.tick = n;
+        if let Some(r) = self.edits.as_ref().and_then(|c| c.running.as_ref()) {
+            r.set(u64::try_from(n).unwrap_or(0));
+        }
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
         // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
         // directory's notices read by (#4134): in lockstep that is every word queued before it.
@@ -5580,6 +5599,9 @@ pub fn start<S: Storage + 'static>(
                 tx,
                 walkers: m,
                 offered: std::cell::Cell::new(0),
+                // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
+                running: (cfg.lockstep && (make.is_some() || make_built.is_some()))
+                    .then(|| std::cell::Cell::new(0)),
             })
         })
         .transpose()?;
@@ -7406,6 +7428,27 @@ mod tests {
             Some(sky::EV_WEATHER),
             "E6's weather event follows the creator's record"
         );
+    }
+
+    /// S10c: the clock thread's queue to the edit checker dropped (the clock ended, for any reason, `run_due`'s error
+    /// among them) wakes a checker waiting for bodies with no deadline, as in lockstep: refused, never blocked.
+    #[test]
+    fn s10c_a_checker_waiting_with_no_deadline_wakes_when_the_clocks_queue_drops() {
+        let walkers = Arc::new(buildsafe::Moving::default());
+        let waiting = {
+            let w = Arc::clone(&walkers);
+            thread::spawn(move || w.fresh(5, None).is_err())
+        };
+        let (tx, _rx) = channel();
+        let queue = EditQueue {
+            tx,
+            walkers,
+            offered: std::cell::Cell::new(0),
+            running: Some(std::cell::Cell::new(5)),
+        };
+        thread::sleep(Duration::from_millis(20));
+        drop(queue);
+        assert!(waiting.join().unwrap(), "woken and refused");
     }
 
     #[test]

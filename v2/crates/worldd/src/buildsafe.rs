@@ -120,12 +120,13 @@ pub struct Moving(
 );
 
 /// The edit checker's asks for a fresh snapshot (S10): whether one is wanted, and the tick the newest was built at,
-/// which a waiting checker watches.
+/// which a waiting checker watches; and whether the clock has stopped, so a checker waiting with no deadline wakes.
 #[derive(Default)]
 pub struct Asked {
     wanted: AtomicBool,
     built: Mutex<u64>,
     done: Condvar,
+    closed: AtomicBool,
 }
 
 /// What the clock thread handed the edit checker since it last took (#3743): the town to seed its own with, once,
@@ -310,6 +311,14 @@ impl Moving {
         self.build(bodies, version, tick);
     }
 
+    /// Clock thread, as it stops (its queue to the checker dropped, for any reason): no snapshot comes any more, so a
+    /// checker waiting for one wakes and refuses its job (S10c).
+    pub fn close(&self) {
+        let _built = self.4.built.lock().unwrap_or_else(|e| e.into_inner());
+        self.4.closed.store(true, Ordering::Release);
+        self.4.done.notify_all();
+    }
+
     /// Clock thread: whether the edit checker has asked for a snapshot since the last build (S10).
     pub fn asked(&self) -> bool {
         self.4.wanted.load(Ordering::Acquire)
@@ -360,7 +369,8 @@ impl Moving {
     /// no such snapshot yet it asks and waits for the clock's next build, at most `wait`; past that it is `Err` with
     /// the newest there is, which a check must refuse by a name its sender may try again (`edit.stale`), never use.
     /// With no `wait` (lockstep) it waits as long as the build takes, so the answer never depends on the machine's
-    /// speed: a lockstep clock builds the asked snapshot before it runs another tick.
+    /// speed: a lockstep clock builds the asked snapshot before it runs another tick. Either wait ends, `Err`, once
+    /// the clock has stopped ([`Moving::close`]).
     pub fn fresh(
         &self,
         need: u64,
@@ -374,14 +384,18 @@ impl Moving {
             Some(wait) => {
                 self.4
                     .done
-                    .wait_timeout_while(built, wait, |n| *n < need)
+                    .wait_timeout_while(built, wait, |n| {
+                        *n < need && !self.4.closed.load(Ordering::Acquire)
+                    })
                     .unwrap_or_else(|e| e.into_inner())
                     .0
             }
             None => self
                 .4
                 .done
-                .wait_while(built, |n| *n < need)
+                .wait_while(built, |n| {
+                    *n < need && !self.4.closed.load(Ordering::Acquire)
+                })
                 .unwrap_or_else(|e| e.into_inner()),
         };
         let ok = *built >= need;
@@ -793,6 +807,16 @@ mod class_snapshot_tests {
         let late = asked.fresh(9, Some(std::time::Duration::from_millis(100)));
         assert!(late.is_err(), "refused, not checked on tick 8's bodies");
         assert!(asked.asked(), "and the next tick builds one");
+        // S10c: a checker waiting with no deadline (lockstep) wakes, refused, once the clock stops.
+        let waiting = {
+            let m = std::sync::Arc::clone(&asked);
+            std::thread::spawn(move || m.fresh(9, None))
+        };
+        asked.close();
+        assert!(
+            waiting.join().unwrap().is_err(),
+            "the clock stopped: refused, never blocked"
+        );
     }
 }
 
