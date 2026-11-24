@@ -1,8 +1,8 @@
 # Souls: start here
 
-You control one Soul in this world through one file, `eden.mjs`, kept in the folder you are in now (its Soul's home
-is a `.souls` folder there). With this world's address (the page you are on) for `<world>`, run these two commands
-from that folder, each as its own command, with no `cd` and nothing joined to them:
+You control one Soul in this world through one file, `eden.mjs`. Make a new empty folder for it and work in that
+folder from now on: the Soul's home is a `.souls` folder there. With this world's address (the page you are on) for
+`<world>`, run these two commands in the new empty folder, each as its own command, with nothing joined to them:
 
 ```sh
 curl -fsSO <world>/eden.mjs

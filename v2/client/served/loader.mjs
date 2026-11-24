@@ -1,7 +1,9 @@
 // The served client's loader (Engine v2 R17, #2818): the tail of eden.mjs. build.mjs writes VERSION, ENTRY (the thin
 // command's path) and FILES (the client's modules by repo-relative path) above it; not run on its own.
 //
-// - The home is SOULS_HOME, else the nearest .souls upward from here to the user's home folder, else ./.souls.
+// - The home is `--home <path>`, else SOULS_HOME, else the nearest .souls folder that exists upward from here to the
+//   user's home folder, else ./.souls; a command that adds to a home takes ./.souls (0.133 Q2). The command it runs,
+//   or the copy it hands off to, is given that home as SOULS_HOME. A new home gets a `.gitignore` of everything.
 // - A copy that is not the home's `.souls/bin/eden.mjs` hands off to that one, its arguments unchanged, unless this
 //   copy is newer (docs/architecture/api.md, "Soul client upgrade", frozen).
 // - The modules are unpacked once into `.souls/bin/client/<version>-<digest>/` and the thin command runs from there,
@@ -34,9 +36,10 @@ function findHome(argv) {
   if (process.env.SOULS_HOME) return resolve(process.env.SOULS_HOME);
   const start = real(process.cwd()), stop = real(homedir());
   if (ADDS.has(argv[0] === 'god' ? argv[1] : argv[0])) return join(start, '.souls');
+  // the nearest `.souls` that exists, a home or one still pairing: never past it to a parent folder's
   for (let dir = start; ; dir = dirname(dir)) {
     const h = join(dir, '.souls');
-    if (existsSync(join(h, 'config.json')) || existsSync(join(h, 'souls'))) return h;
+    if (existsSync(h)) return h;
     if (dir === stop || dirname(dir) === dir) return join(start, '.souls');
   }
 }
@@ -45,14 +48,22 @@ const num = (v) => v.split('.').map(Number);
 const newer = (a, b) => { const x = num(a), y = num(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
 const versionIn = (file) => { try { return /^const VERSION = "(\d+\.\d+\.\d+)";$/m.exec(readFileSync(file, 'utf8'))?.[1]; } catch { return undefined; } };
 
+const home = findHome(process.argv.slice(2));
+// `--home <path>` is taken here: what runs next is given the home as SOULS_HOME, its words without it (0.133 Q2)
+const at = process.argv.indexOf('--home', 2);
+if (at >= 0 && process.argv[at + 1]) process.argv.splice(at, 2);
 const args = process.argv.slice(2);
-const home = findHome(args);
+process.env.SOULS_HOME = home;
+if (!existsSync(home)) {
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, '.gitignore'), "# A Souls home: its credentials and its Souls' own files. Never committed.\n*\n");
+}
 const installed = join(home, 'bin', 'eden.mjs');
 const self = fileURLToPath(import.meta.url);
 
 const theirs = real(self) !== real(installed) && versionIn(installed);
 if (theirs && !newer(VERSION, theirs)) {
-  const r = spawnSync(process.execPath, [installed, ...args], { stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [installed, ...args], { stdio: 'inherit', env: process.env });
   process.exit(r.status ?? 1);
 }
 
