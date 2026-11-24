@@ -4,7 +4,8 @@
 //! creator as actor, through the same write as every act (`sim::commit::write`), or refused whole.
 //!
 //! - **Who:** the world's one creator, and nobody else (`edit.not-the-creator`).
-//! - **Marks:** an owner or access mark (`who_may::F_OWNER`, `F_ACCESS`, #3700) reads as one (`edit.owner-malformed`).
+//! - **Marks:** an owner or access mark (`who_may::F_OWNER`, `F_ACCESS`, #3700) reads as one (`edit.owner-malformed`),
+//!   and a tint (`tint::F_TINT`, 0.134 R4) as rows of a part and a colour (`edit.tint-malformed`).
 //! - **Size:** at most [`OPS_MOST`] operations (`edit.too-many-operations`) and [`NODES_MOST`] changed nodes, a removed
 //!   subtree counted whole (`edit.too-many-nodes`).
 //! - **Structure:** a placed kind is known by its full `namespace:name@hash` (`edit.kind-unknown`), and the parent's
@@ -506,6 +507,9 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                     if let Err(why) = crate::who_may::check_mark(*f, v) {
                         return refuse(here, "edit.owner-malformed", why);
                     }
+                    if let Err(why) = crate::tint::check(*f, v) {
+                        return refuse(here, "edit.tint-malformed", why);
+                    }
                 }
                 if let Ref::Node(p) = parent {
                     parents.push((i, *p));
@@ -563,6 +567,9 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 if let Err(why) = crate::who_may::check_mark(*field, to) {
                     return refuse(here, "edit.owner-malformed", why);
                 }
+                if let Err(why) = crate::tint::check(*field, to) {
+                    return refuse(here, "edit.tint-malformed", why);
+                }
                 written = write_size(here, written, to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
@@ -600,6 +607,9 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         "rows go into a field of rows, each at least two values",
                     );
                 };
+                if let Err(why) = crate::tint::check(*field, &to) {
+                    return refuse(here, "edit.tint-malformed", why);
+                }
                 written = write_size(here, written, &to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
@@ -624,6 +634,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         here,
                         "edit.link",
                         "the engine's own links are not made by an edit",
+                    );
+                }
+                if *field == crate::tint::F_TINT {
+                    return refuse(
+                        here,
+                        "edit.tint-malformed",
+                        "a tint's rows are [part, rgb], never a link's",
                     );
                 }
                 if *field == DOOR_GEOMETRY
