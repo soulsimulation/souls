@@ -312,6 +312,10 @@ fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
                     ty: name(&replica::audience::link_type(kind, role)),
                     soul: from == Some("soul"),
                     on: kind.clone(),
+                    most: match link.and_then(|l| l.get("most")) {
+                        Some(J::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
                 }),
             });
         }

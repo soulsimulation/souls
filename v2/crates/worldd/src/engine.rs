@@ -911,6 +911,21 @@ impl Engine {
         if let Some(tr) = tree.as_mut() {
             self.begin_moves(tr, c, now);
         }
+        // B10: a creator's edit that removed a thing took the activity bound to it: its members are let go at once.
+        if self.activities.stranded(live) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for a in self.activities.release_gone(tr, c, now) {
+                self.carries.remove(&a);
+            }
+        }
+        // B10: an unstarted activity past its expiry that no offer or pair waits on (a proposal, or an offer a restart
+        // did not keep) ends, with its role links.
+        if self.activities.expiring(now) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            self.activities.expire(tr, now);
+        }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
         // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
         if self.activities.finishing() {

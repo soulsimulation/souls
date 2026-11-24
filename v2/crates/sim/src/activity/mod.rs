@@ -48,6 +48,15 @@
 //!   written in the part of the offer, accept or join that makes the member, one more effect at the thing acted and
 //!   caused as that step; it is taken down in the part of its leave, or of the offer's lapse or decline that ends the
 //!   node, unless the member holds the same role at the thing in another activity. On the open ground none is written.
+//!   A role the thing already holds as often as its link's `most` allows, by others, is not taken again: the offer,
+//!   accept or join is refused `role-taken` and writes nothing. An offer asks bodies only (`offer-asked-not-a-body`).
+//!   A bound activity claims no part of its members' bodies: the thing's forms, which its members play it through,
+//!   take what they use.
+//! - **Nothing bound outlives its reason (B10).** An unstarted activity past its expiry that no offer or pair waits on
+//!   (a proposal nobody started, or an offer or waiting pair a restart did not keep) ends at worldd's tick, with its
+//!   memberships and role links ([`Activities::expire`], `souls:activity-expired`). A bound activity whose thing a
+//!   creator's edit removed (the tree takes its node and links with it) is forgotten at the next tick and its members
+//!   let go at once, each told at its body by name ([`Activities::release_gone`], [`ENDED`] why [`THING_GONE`]).
 //! - **A restart does not end an activity.** Its node and its membership links are in the log; [`Activities::restore`]
 //!   reads them back and takes each started activity's claims again. A move in progress is not stored, so after a
 //!   restart no claim is held by a move that did not come back, and a member can leave at once.
@@ -69,6 +78,8 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::time::{Micros, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, plain, show};
+
+use replica::bodies::SkillShape;
 
 use crate::controller::{Controller, Driver};
 use crate::moves::{Instance, Moves, Reach};
@@ -197,7 +208,28 @@ struct Live {
     drivers: BTreeMap<Id, Driver>,
     /// The move each member's body is making inside the activity.
     moves: BTreeMap<Id, Instance>,
+    /// Bound to its thing (B10): it was made under a thing its roles' links are on, so it claims nothing.
+    bound: bool,
+    /// The node it was made under: its place, or its thing when bound.
+    under: Id,
 }
+
+/// What `role` of `kind` claims on its member's body: its claims, or nothing when its activity is bound to its thing
+/// (B10): it is played through the thing's own forms, whose runs take what they use, so its members' hands stay theirs.
+fn shape_of(kind: &ActivityKind, role: &replica::activity::Role, bound: bool) -> SkillShape {
+    let mut shape = kind.shape(role);
+    if bound {
+        shape.claims.clear();
+    }
+    shape
+}
+
+/// The event of an activity that ended without a member's leave (B10): `{1: activity, 2: why}`, at each member's body.
+pub const ENDED: &str = "souls:activity-ended";
+/// Why: its node went with the thing it was under (a creator's edit removed it).
+pub const THING_GONE: &str = "souls:thing-gone";
+/// Why: it did not start before it expired, and no offer or pair waits on it (or its offer did not survive a restart).
+pub const EXPIRED: &str = "souls:activity-expired";
 
 /// A body that left while in a move: it is let go when the timer fires or the move ends first.
 struct Leaving {
@@ -441,21 +473,13 @@ impl Activities {
         (plain(n.kind().as_str()) == link.on).then(|| (link.clone(), n.audience()))
     }
 
-    /// What `role` of `kind` claims on its member's body when its activity is under `place`: the role's claims, or
-    /// nothing when the activity is bound to its thing there (B10): it is played through the thing's own forms, whose
-    /// runs take what they use, so its members' hands stay theirs.
-    pub(super) fn role_shape(
-        &self,
-        tree: &Tree,
-        kind: &ActivityKind,
-        role: &replica::activity::Role,
-        place: Option<Id>,
-    ) -> replica::bodies::SkillShape {
-        let mut shape = kind.shape(role);
-        if place.is_some_and(|p| self.bound_on(tree, &kind.name, p, &role.name).is_some()) {
-            shape.claims.clear();
-        }
-        shape
+    /// Whether an activity of `kind` under `place` is bound to its thing there (B10): a role of it links on `place`.
+    pub(super) fn binds(&self, tree: &Tree, kind: &Name, place: Id) -> bool {
+        self.kinds.get(kind).is_some_and(|k| {
+            k.roles
+                .iter()
+                .any(|r| self.bound_on(tree, kind, place, &r.name).is_some())
+        })
     }
 
     /// `place`'s own links of type `ty` ending at `end`.
@@ -473,7 +497,8 @@ impl Activities {
     }
 
     /// The entry that gives member `m` of an activity of `kind` under `place` its role's link (B10): its body (or its
-    /// Soul) linked to the thing, owned by the thing. None when its role binds nothing there, or the link is there.
+    /// Soul) linked to the thing, owned by the thing. None when its role binds nothing there, or the link is there;
+    /// `role-taken` when the thing holds the role's `most` already, by others.
     fn role_link(
         &self,
         tree: &Tree,
@@ -488,6 +513,24 @@ impl Activities {
         let end = if rl.soul { m.soul } else { m.body };
         if !Self::role_links_at(tree, place, &rl.ty, end).is_empty() {
             return Ok(None);
+        }
+        // Held by as many others as it takes: one more is refused, and nothing is written.
+        let held: Vec<Id> = tree
+            .links_at(place)
+            .iter()
+            .filter(|e| tree.ty(e) == &rl.ty && e.other != end)
+            .map(|e| e.other)
+            .collect();
+        if rl.most.is_some_and(|most| held.len() as u64 >= most) {
+            return refuse(
+                "role-taken",
+                format!(
+                    "{} at {} is held by {}",
+                    m.role.as_str(),
+                    show(place),
+                    held.iter().map(|h| show(*h)).collect::<Vec<_>>().join(", ")
+                ),
+            );
         }
         let link = minted(mint)?;
         Ok(Some((
@@ -624,6 +667,7 @@ impl Activities {
             "souls:activity-proposed",
             vec![create],
         )?;
+        let bound = self.binds(tree, kind, place);
         self.live.insert(
             id,
             Live {
@@ -632,6 +676,8 @@ impl Activities {
                 node,
                 drivers: BTreeMap::new(),
                 moves: BTreeMap::new(),
+                bound,
+                under: place,
             },
         );
         Ok(id)
@@ -772,14 +818,13 @@ impl Activities {
                 );
             }
         }
-        let place = parent(tree, activity);
         let shapes: Vec<_> = l
             .node
             .members
             .iter()
             .map(|m| {
                 let role = kind.role(&m.role).expect("a member's role");
-                (m.body, self.role_shape(tree, kind, role, place))
+                (m.body, shape_of(kind, role, l.bound))
             })
             .collect();
         for (body, shape) in &shapes {
@@ -835,6 +880,94 @@ impl Activities {
         self.begun.push(activity);
         self.mark_places(activity, None);
         Ok(())
+    }
+
+    /// Whether a bound activity's thing is gone from `tree` (B10: a creator's edit removed it, and the activity's node
+    /// and links with it).
+    pub fn stranded(&self, tree: &Tree) -> bool {
+        self.live
+            .values()
+            .any(|l| l.bound && tree.handle(l.under).is_none())
+    }
+
+    /// Every bound activity whose thing is gone from `tree` (B10: a creator's edit removed it, and the tree took the
+    /// activity's node and links with it) forgotten, its members' claims let go, and each member told by name at
+    /// its body ([`ENDED`], why [`THING_GONE`]), acted and caused by the world. Its members are free at once: they may
+    /// act, offer and join again. Returns the activities forgotten.
+    pub fn release_gone(&mut self, tree: &mut Tree, c: &mut Controller, at: Micros) -> Vec<Id> {
+        let gone: Vec<Id> = self
+            .live
+            .iter()
+            .filter(|(_, l)| l.bound && tree.handle(l.under).is_none())
+            .map(|(a, _)| *a)
+            .collect();
+        for a in &gone {
+            let Some(l) = self.live.get(a) else { continue };
+            let members: Vec<Id> = l.node.members.iter().map(|m| m.body).collect();
+            for (b, d) in l.drivers.clone() {
+                let _ = c.release(b, d);
+            }
+            self.forgotten(*a);
+            for body in members {
+                let Some(audience) = tree
+                    .handle(body)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.audience())
+                else {
+                    continue;
+                };
+                let fields =
+                    BTreeMap::from([(1, a.to_value()), (2, Value::Text(name(THING_GONE)))]);
+                let by = (at, Actor::World, Cause::World);
+                if let Err(r) = self.emit(tree, body, audience, by, ENDED, fields, Vec::new()) {
+                    eprintln!("an activity's end was not told to {}: {r}", show(body));
+                }
+            }
+        }
+        gone
+    }
+
+    /// Whether an unstarted activity no offer or pair waits on is past its expiry at `now` ([`Activities::expire`]).
+    pub fn expiring(&self, now: Micros) -> bool {
+        self.live.iter().any(|(a, l)| self.lapses(*a, l, now))
+    }
+
+    fn lapses(&self, a: Id, l: &Live, now: Micros) -> bool {
+        l.node.state == State::Proposed
+            && l.node.expires <= now
+            && !self.offers.open.contains_key(&a)
+            && !self.offers.pairs.contains_key(&a)
+    }
+
+    /// Ends every unstarted activity past its expiry that no offer or pair waits on (B10): a proposal nobody started,
+    /// or an offer or waiting pair whose offer did not survive a restart (offers are not restored). Its node goes with
+    /// its memberships and its members' role links, in one part acted and caused by the world, event [`EXPIRED`].
+    pub fn expire(&mut self, tree: &mut Tree, now: Micros) -> Vec<Id> {
+        let due: Vec<Id> = self
+            .live
+            .iter()
+            .filter(|(a, l)| self.lapses(**a, l, now))
+            .map(|(a, _)| *a)
+            .collect();
+        for a in &due {
+            let Some(l) = self.live.get(a) else { continue };
+            let audience = l.audience;
+            let mut changes: Vec<Change> = l
+                .node
+                .members
+                .iter()
+                .map(|m| Change::Unlink { link: m.link })
+                .collect();
+            changes.push(Change::Remove { node: *a });
+            let bound = self.role_unlinks(tree, *a);
+            let fields = BTreeMap::from([(1, a.to_value())]);
+            let by = (now, Actor::World, Cause::World);
+            match self.emit_with(tree, *a, audience, by, EXPIRED, fields, changes, bound) {
+                Ok(()) => self.forgotten(*a),
+                Err(r) => eprintln!("an expired activity {} did not end: {r}", show(*a)),
+            }
+        }
+        due
     }
 
     /// Every activity running, by id (0.135 C3: worldd finds the loads riding them after a restart).
@@ -893,6 +1026,13 @@ impl Activities {
     /// Forgets `activity`, whose node is gone (0.135 A2: a kept hold removed with its part's set-down).
     pub fn forgotten(&mut self, activity: Id) {
         self.live.remove(&activity);
+        self.offers.open.remove(&activity);
+        if self.offers.pairs.remove(&activity).is_some() {
+            for q in self.offers.queues.values_mut() {
+                q.retain(|p| *p != activity);
+            }
+        }
+        self.offers.timers.retain(|_, a| *a != activity);
         self.beats.remove(&activity);
         self.ending.remove(&activity);
         self.begun.retain(|a| *a != activity);
@@ -1535,7 +1675,7 @@ impl Activities {
                 let Some(m) = l.node.members.iter().find(|m| m.body == body) else {
                     continue;
                 };
-                let shape = kind.shape(kind.role(&m.role).expect("a member's role"));
+                let shape = shape_of(kind, kind.role(&m.role).expect("a member's role"), l.bound);
                 match c.claim(body, &shape) {
                     Ok(d) => {
                         l.drivers.insert(body, d);
@@ -1602,7 +1742,7 @@ impl Activities {
             .iter()
             .find(|m| m.body == actor)
             .expect("a held body is a member");
-        let shape = kind.shape(kind.role(&m.role).expect("a member's role"));
+        let shape = shape_of(kind, kind.role(&m.role).expect("a member's role"), l.bound);
         let first = moves.start(c, due, mint, geo, actor, mv, target, at);
         let held =
             matches!(&first, Err(r) if r.name == "resource-held" || r.name == "resource-blocked");
@@ -1647,6 +1787,8 @@ impl Activities {
             let links: BTreeSet<Id> = tree.links_at(*id).iter().map(|e| e.link).collect();
             node.members.retain(|m| links.contains(&m.link));
             let mut drivers = BTreeMap::new();
+            let under = parent(tree, *id).unwrap_or(*id);
+            let bound = a.binds(tree, &n.kind, under);
             if node.state == State::Started {
                 let kind = &a.kinds[&n.kind];
                 for m in &node.members {
@@ -1654,7 +1796,7 @@ impl Activities {
                         name: "role-unknown",
                         detail: m.role.as_str().to_owned(),
                     })?;
-                    let shape = a.role_shape(tree, kind, role, parent(tree, *id));
+                    let shape = shape_of(kind, role, bound);
                     match c.claim(m.body, &shape) {
                         Ok(d) => {
                             drivers.insert(m.body, d);
@@ -1677,6 +1819,8 @@ impl Activities {
                     node,
                     drivers,
                     moves: BTreeMap::new(),
+                    bound,
+                    under,
                 },
             );
         }

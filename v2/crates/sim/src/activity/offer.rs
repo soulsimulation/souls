@@ -71,7 +71,7 @@ fn ids<'a>(xs: impl IntoIterator<Item = &'a Id>) -> Value {
 
 /// An offer still open to answers.
 #[derive(Clone)]
-struct Open {
+pub(super) struct Open {
     kind: Name,
     /// The asker's body and Soul, and the intent that made the offer.
     asker: Id,
@@ -95,7 +95,7 @@ struct Open {
 }
 
 /// A pair accepted and not yet started.
-struct Pair {
+pub(super) struct Pair {
     offer: Id,
     asker: Id,
     body: Id,
@@ -109,13 +109,13 @@ struct Pair {
 /// Every open offer and waiting pair of a zone.
 #[derive(Default)]
 pub(super) struct Offers {
-    open: BTreeMap<Id, Open>,
+    pub(super) open: BTreeMap<Id, Open>,
     /// Pairs accepted and not started, by their activity.
-    pairs: BTreeMap<Id, Pair>,
+    pub(super) pairs: BTreeMap<Id, Pair>,
     /// Each asker's waiting pairs, in order of arrival.
-    queues: BTreeMap<Id, VecDeque<Id>>,
+    pub(super) queues: BTreeMap<Id, VecDeque<Id>>,
     /// What each timer is for: an offer or a pair, by its activity.
-    timers: BTreeMap<Id, Id>,
+    pub(super) timers: BTreeMap<Id, Id>,
 }
 
 /// The bodies in `room` at this instant: its children that the controller drives. An offer to a room asks these.
@@ -176,6 +176,15 @@ impl Activities {
         if asked.is_empty() {
             return refuse("offer-to-nobody", show(body));
         }
+        // B10: only a body is asked (a node of a kind of the `family` owner, as a Soul's body is).
+        if let Some(not) = asked.iter().find(|b| {
+            tree.handle(**b)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| self.rules.kinds.get(n.kind().as_str()))
+                .is_none_or(|k| k.owner != "family")
+        }) {
+            return refuse("offer-asked-not-a-body", show(*not));
+        }
         let audience = tree
             .handle(place)
             .and_then(|h| tree.node(h))
@@ -235,6 +244,7 @@ impl Activities {
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
         self.emit_with(tree, place, audience, by, OFFER, fields, changes, bound)?;
         if given.is_none() {
+            let bound = self.binds(tree, kind, place);
             self.live.insert(
                 id,
                 Live {
@@ -243,6 +253,8 @@ impl Activities {
                     node,
                     drivers: BTreeMap::new(),
                     moves: BTreeMap::new(),
+                    bound,
+                    under: place,
                 },
             );
         }
@@ -411,6 +423,7 @@ impl Activities {
             changes,
             bound,
         )?;
+        let bound = self.binds(tree, &o.kind, o.place);
         self.live
             .entry(pair)
             .and_modify(|l| l.node = node.clone())
@@ -420,6 +433,8 @@ impl Activities {
                 node,
                 drivers: BTreeMap::new(),
                 moves: BTreeMap::new(),
+                bound,
+                under: o.place,
             });
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);
@@ -492,7 +507,7 @@ impl Activities {
                     );
                 }
                 let role = k.role(&o.other).expect("the offer's other role");
-                Some(c.claim(body, &self.role_shape(tree, k, role, Some(o.place)))?)
+                Some(c.claim(body, &super::shape_of(k, role, l.bound))?)
             }
             State::Proposed => None,
         };

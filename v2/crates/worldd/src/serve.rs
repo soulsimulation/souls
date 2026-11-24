@@ -355,6 +355,14 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                         .ok_or("a role's link")?,
                     soul: from == "soul",
                     on: kind.clone(),
+                    most: match entry
+                        .get("links")
+                        .and_then(|l| l.get(role))
+                        .and_then(|l| l.get("most"))
+                    {
+                        Some(Json::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
                 }),
                 _ => None,
             };

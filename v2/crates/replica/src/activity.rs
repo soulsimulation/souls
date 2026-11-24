@@ -77,6 +77,8 @@ pub struct RoleLink {
     pub soul: bool,
     /// The plain kind of the thing the link is written on.
     pub on: String,
+    /// How many may hold it on one thing at once (the entry link's `most`): one more is refused `role-taken`.
+    pub most: Option<u64>,
 }
 
 /// An activity's kind, as data.
