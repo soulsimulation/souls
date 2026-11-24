@@ -1,1 +1,4 @@
-Adds one existing carryable cup to Eden House 1’s kitchen counter, keeping previous placements and paths unchanged. The cup uses the counter’s existing declared surface; native carry and visual carry remain separate.
+---
+type: feature
+---
+One carryable cup is available on Eden House 1’s kitchen counter.
