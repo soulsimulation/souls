@@ -2820,6 +2820,44 @@ fn c22_an_area_off_a_things_floors_is_walked_to_on_the_ground() {
     back.expect("round the back of the house, done");
 }
 
+/// #3983: the roof stairs of eden-house-3 and eden-house-4 (today's e_303f348f and e_f071fa8e, 4.2 m long and
+/// 2.82 m high) climb from the west garden onto their bedroom wing's flat roof, 2.82 m up. Born west of each
+/// flight's foot, a Soul goes up (`go_up` to `top`) and ends on that roof (e_3d52ac7f's and e_0c946e80's floor-1).
+/// Each flight's top is 0.51 m short of the roof's edge and its landing 10 mm short, so nothing of it overlaps the
+/// roof (the office's landing overlaps its roof by 0.48 m); the top is carried along the flight onto the roof's
+/// standing ground, which starts within the 1 m a flight's top may be carried (`sim::links`, #3979). Their kind borrows `eden:stair_flight`'s entry through Eden's map, as live Eden's import does: the facts must be
+/// exported with `--map content/worlds/eden/map.json` (without it, `go_up` ends `no_such_kind`).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3983_the_courtyard_houses_roof_stairs_go_up_onto_their_roofs() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let mut ends = Vec::new();
+    for (house, at, stairs, roof) in [
+        (
+            "eden-house-3",
+            "22.0,30.27",
+            "e_303f348f",
+            "e_3d52ac7f/floor-1",
+        ),
+        (
+            "eden-house-4",
+            "42.0,30.27",
+            "e_f071fa8e",
+            "e_0c946e80/floor-1",
+        ),
+    ] {
+        let (up, end) = act_ending(&facts, at, stairs, "eden:go_up", &format!("i3983{house}"));
+        ends.push((house, im.nodes[roof], up, end));
+    }
+    for (house, roof, up, end) in ends {
+        up.unwrap_or_else(|e| panic!("{house}: up the stairs, done: {e}"));
+        let (node, at) = end.expect("the body's end");
+        assert_eq!(node, roof, "{house}: on the bedroom wing's roof: {at:?}");
+        assert_eq!(at.y, 2_820_000, "{house}: 2.82 m up: {at:?}");
+    }
+}
+
 /// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,
 /// "lying in bed", #2835): the beds of the houses west of the library, from eden-house-2's living room. A bed's side
 /// stand point beside its room's door is one the spot tables never stop a walker on; it is moved out of the doorway at
