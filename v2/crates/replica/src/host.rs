@@ -101,6 +101,9 @@ pub enum WalkPlan {
     Pending,
     Unplanned,
     Legs(Vec<(Vec3, Option<Id>)>),
+    /// The planner refused the walk by this name (the ground changed under it, its answer failed): the form ends with
+    /// it, not with no way (S13d).
+    Refused(Name),
 }
 
 /// The one interface a skill touches the world through (rule 7). The world implements it; a test implements a fake.

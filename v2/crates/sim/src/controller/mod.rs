@@ -838,9 +838,22 @@ impl Controller {
     /// (`resource-not-held`): its motion's owner becomes the slot (T4 rule 10), it is at the slot's point, and a tick
     /// no longer steps it. `support-not-surface` when it is in a slot already.
     pub fn slot_in(&mut self, body: Id, driver: Driver, frame: Frame, at: Micros) -> R<HandOff> {
+        self.slot_in_at(body, driver, frame, Vec3::ZERO, at)
+    }
+
+    /// [`Controller::slot_in`] at `position` in the slot's frame, µm: the body's own place in a slot that holds several
+    /// bodies (E16: a tent's two sleepers).
+    pub fn slot_in_at(
+        &mut self,
+        body: Id,
+        driver: Driver,
+        frame: Frame,
+        position: Vec3,
+        at: Micros,
+    ) -> R<HandOff> {
         let pose = Pose {
             frame,
-            position: Vec3::ZERO,
+            position,
             orientation: Quat::IDENTITY,
             support: Support::Slot,
         };

@@ -149,6 +149,7 @@ impl Projection {
                                 point,
                                 facing,
                                 floor,
+                                more: slot.more,
                             },
                             named(floor),
                         ));
