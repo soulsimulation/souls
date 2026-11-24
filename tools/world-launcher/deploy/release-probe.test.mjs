@@ -27,12 +27,12 @@ const DROP_PAGE = `<!doctype html><title>eden</title><body>Eden<script>
 const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/w/drop/ws'); setTimeout(() => ws.close(), 3000);
 </script></body>`;
 
-function origin({ upAfterMs, builds = {} }) {
-  const t0 = Date.now(), sockets = new Set();
+function origin({ upAfterMs, builds = {}, siteBefore = null }) {
+  const t0 = Date.now(), sockets = new Set(); let site = 0;
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://x').pathname, up = path !== '/w/down/' && upAfterMs !== null && Date.now() - t0 >= upAfterMs;
     if (!up) { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('world unavailable'); return; }
-    if (path === '/__sim/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, build: BUILD })); return; }
+    if (path === '/__sim/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, build: siteBefore && site++ < 2 ? siteBefore : BUILD })); return; }   // siteBefore: the build before the release (the two marks' reads)
     res.writeHead(200, { 'content-type': 'text/html' });
     res.end(path === '/w/v2/' ? V2_PAGE(true) : path === '/w/v2-stuck/' ? V2_PAGE(false) : path === '/w/drop/' ? DROP_PAGE : PAGE.replace("'/w/eden/ws'", `'${path}ws'`));
   });
@@ -47,8 +47,8 @@ function origin({ upAfterMs, builds = {} }) {
   return new Promise((yes) => server.listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const s of sockets) s.destroy(); server.close(); } })));
 }
 
-async function probe(upAfterMs, { pages = '/w/eden/', phonePages = '/w/eden/', builds } = {}) {
-  const o = await origin({ upAfterMs, builds }), out = mkdtempSync(join(tmpdir(), 'release-probe-'));
+async function probe(upAfterMs, { pages = '/w/eden/', phonePages = '/w/eden/', builds, siteBefore } = {}) {
+  const o = await origin({ upAfterMs, builds, siteBefore }), out = mkdtempSync(join(tmpdir(), 'release-probe-'));
   const child = spawn(process.execPath, [PROBE, '--origin', o.url, '--pages', pages, '--phone-pages', phonePages, '--out', out,
     '--expect-build', BUILD, '--settle-s', '1', '--after-s', '4', '--arrive-every', '2', '--retry-s', '1', '--max-min', '2'], { env: { ...process.env, SIM_CHROME_LEASE: '' } });
   let log = ''; child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
@@ -107,4 +107,14 @@ test('a world socket the page closes itself and never replaces is not resumed (e
   assert.equal(r.code, 1, r.log);
   assert.equal(r.bar.notResumed, 2, r.log);
   assert.match(r.bar.notResumedAt[0], /^desktop \/w\/drop\/: closed \(1005\) at \+\d/);
+});
+
+// 0.132.4 (run 45352560019): an open v2 page keeps running across a compatible release (no reload, #2368) and reads no
+// world socket after its entry socket, so a socket's welcome named the old build to the end: rolledBack=2 for a release
+// that landed. Its build is the site's, which changes with the release.
+test('a v2 page across a release that lands: the site\'s new build, no false rollback', { timeout: 120_000 }, async () => {
+  const r = await probe(0, { pages: '/w/v2/', phonePages: '/w/v2/', siteBefore: 'we-000000000000' });
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(r.bar.builds, { 'desktop /w/v2/': `we-000000000000 -> ${BUILD}`, 'phone /w/v2/': `we-000000000000 -> ${BUILD}` });
+  assert.deepEqual(r.bar.rolledBack, []);
 });
