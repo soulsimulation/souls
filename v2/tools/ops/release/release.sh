@@ -7,9 +7,11 @@
 #                                                      v2/docs/release.md's list the head has not passed (gh api); the
 #                                                      merge queue's green `ci` run at <sha> counts for its CI checks
 #   bash release.sh bundle <out> <sha> <version> <cargo release dir> <page dist dir> <client dir> [<wasm pkg dir>]
-#                                                      the four artifacts, the tools and manifest.json (name, hash);
+#                                                      the artifacts, the tools and manifest.json (name, hash);
 #                                                      client.tar is the served client (v2/client/served/build.mjs,
 #                                                      R17 #2818), each served file a `served` line of the manifest;
+#                                                      directoryd, origin.tar (install.sh origin) and units.tar (their
+#                                                      two unit files) are the directory and the viewers' origin;
 #                                                      reseed/ holds Eden's reseed, its undo and content/kinds
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
@@ -21,7 +23,10 @@
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
 #   move <sha> [<canary world>|@eden]   the canary's pin by `deploy` (O7), then every other world's, then the gateway by
 #                                  `gateway-upgrade` (O16), then the page, then the served client
-#                                  ($LIB/client, which a world's address serves); each step done once per release
+#                                  ($LIB/client, which a world's address serves), then the directory (souls-directory)
+#                                  and the viewers' origin (souls-origin), each restarted once on the release's program
+#                                  and unit and checked healthy, else put back on its previous ones; each step done
+#                                  once per release
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
@@ -35,9 +40,13 @@ DATA=${RELEASE_DATA:-/var/lib/souls}
 WORLDS_ROOT=${WORLDS_ROOT:-$DATA/worlds}
 LIB=${RELEASE_LIB:-/usr/local/lib/souls}
 ETC=${RELEASE_ETC:-/etc/souls}
+UNITS=${RELEASE_UNITS:-/etc/systemd/system}
 export WORLDS_ROOT
-# The four artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7).
-ARTIFACTS=(worldd gatewayd page.tar client.tar)
+# The artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7). directoryd,
+# origin.tar and units.tar (souls-directory.service, souls-origin.service) are the directory and the viewers' origin.
+ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
+# The two services the move restarts after the worlds and the gateway; the scratch machine runs neither (scratch.sh).
+SERVICES=${RELEASE_SERVICES-directory origin}
 # What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
 # assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
 TOOLS=(deploy gateway-upgrade world-aside assets-check)
@@ -103,6 +112,14 @@ bundle() {
   mkdir -p "$out/artifacts" "$out/bin"
   install -m 755 "$bins/worldd" "$out/artifacts/worldd"
   install -m 755 "$bins/gatewayd" "$out/artifacts/gatewayd"
+  install -m 755 "$bins/directoryd" "$out/artifacts/directoryd"
+  # The origin's files as the install puts them (install.sh origin), and the two services' unit files.
+  bash "$(dirname "$0")/../install.sh" origin "$out/origin"
+  COPYFILE_DISABLE=1 tar -C "$out/origin" -cf "$out/artifacts/origin.tar" .
+  mkdir -p "$out/units"
+  cp "$(dirname "$0")/../units/souls-directory.service" "$(dirname "$0")/../units/souls-origin.service" "$out/units/"
+  COPYFILE_DISABLE=1 tar -C "$out/units" -cf "$out/artifacts/units.tar" .
+  rm -rf "$out/origin" "$out/units"
   COPYFILE_DISABLE=1 tar -C "$page" -cf "$out/artifacts/page.tar" .
   # The served client (R17): its files by name, version, length and hash, as soul-client.json gives them. Its version
   # is x.y.z (build.mjs), so a minor release's (0.132) is stamped 0.132.0; a patch's (0.131.1) is its own.
@@ -267,7 +284,116 @@ move() {
     touch "$rel/moved/client"
     echo "move: the served client is ${client:0:16}… ($LIB/client)"
   fi
-  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page and the served client"
+  # Last, once the worlds and the gateway are on the release: the directory, then the viewers' origin. Each restart is
+  # a blip of a second or two; the page tries again.
+  local s l
+  for s in $SERVICES; do
+    case $s in
+      directory)
+        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1)
+        service "$rel" directory souls-directory.service directoryd 401 \
+          -X POST "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}/v1/account/session"
+        ;;
+      origin)
+        service "$rel" origin souls-origin.service origin.tar 200 \
+          "${RELEASE_ORIGIN_URL:-http://localhost:7320}$(stream_path "${order[@]}")"
+        ;;
+    esac
+  done
+  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page, the served client$([ -z "$SERVICES" ] || echo ', the directory and the origin')"
+}
+
+# The first of these worlds' streams the origin serves (place-world.sh links /w/<world>/views), as its pointer's path;
+# with none, the origin's own feed.
+stream_path() {
+  local w s
+  for w in "$@"; do
+    s=$(sed -n 's/.*"stream": *"\([^"]*\)".*/\1/p' "$WORLDS_ROOT/worlds/$w/views/world.json" 2> /dev/null | head -1)
+    if [ -n "$s" ]; then
+      echo "/w/$w/${s%/}/pointer"
+      return
+    fi
+  done
+  echo /v1/feed
+}
+
+# The HTTP status a request gets (000 with no answer), asked every half second for RELEASE_HEALTH_S (30) seconds until
+# it is <want>; prints the last one when it never was.
+answers() {
+  local want=$1 end=$((SECONDS + ${RELEASE_HEALTH_S:-30})) got
+  shift
+  while :; do
+    got=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$@" 2> /dev/null || true)
+    [ "$got" = "$want" ] && return 0
+    if [ "$SECONDS" -ge "$end" ]; then
+      echo "${got:-000}"
+      return 1
+    fi
+    sleep 0.5
+  done
+}
+
+# service <release> <name> <unit> <artifact> <want> <request...>: the release's program ($LIB/directoryd, or the folder
+# $LIB/origin from origin.tar) and its unit file (from units.tar, then a daemon-reload) go in beside the old ones and
+# are renamed over them, the unit is restarted once, and the request must get <want>. If it does not, the previous
+# program and unit go back, the unit is restarted on them, and the release stops: `release.<name>-unhealthy`.
+service() {
+  local rel=$1 name=$2 unit=$3 a=$4 want=$5 h prog new prev changed=0 got again
+  shift 5
+  if [ -f "$rel/moved/$name" ]; then
+    echo "move: $unit already moved by this release"
+    return 0
+  fi
+  h=$(artifact "$rel/manifest.json" "$a")
+  if [ -z "$h" ]; then
+    echo "move: release ${rel##*/} carries no $a (staged by an older release.sh): $unit not moved"
+    return 0
+  fi
+  prog=$LIB/${a%.tar} new=$LIB/.${a%.tar}.new prev=$LIB/.${a%.tar}.prev
+  rm -rf "$new" "$prev" "$rel/units" "$rel/prev/$unit"
+  if [ "$a" = "${a%.tar}" ]; then
+    install -m 755 "$WORLDS_ROOT/builds/$h/$a" "$new"
+  else
+    mkdir -p "$new"
+    tar --no-same-owner -xf "$WORLDS_ROOT/builds/$h/$a" -C "$new"
+  fi
+  mkdir -p "$rel/units" "$rel/prev"
+  tar --no-same-owner -xf "$WORLDS_ROOT/builds/$(artifact "$rel/manifest.json" units.tar)/units.tar" -C "$rel/units"
+  if ! cmp -s "$rel/units/$unit" "$UNITS/$unit"; then
+    if [ -f "$UNITS/$unit" ]; then cp -p "$UNITS/$unit" "$rel/prev/$unit"; fi
+    install -m 644 "$rel/units/$unit" "$UNITS/.$unit.new"
+    mv "$UNITS/.$unit.new" "$UNITS/$unit"
+    systemctl daemon-reload
+    changed=1
+  fi
+  if [ -d "$new" ]; then
+    if [ -e "$prog" ]; then mv "$prog" "$prev"; fi
+  elif [ -e "$prog" ]; then
+    cp -p "$prog" "$prev"
+  fi
+  mv "$new" "$prog"
+  echo "move: $unit restarts on ${h:0:16}…$([ "$changed" = 0 ] || echo ' with its new unit file')"
+  systemctl restart "$unit" || true
+  if got=$(answers "$want" "$@"); then
+    rm -rf "$prev"
+    touch "$rel/moved/$name"
+    echo "move: $unit answers $want on ${h:0:16}…"
+    return 0
+  fi
+  echo "move: $unit answered $got, not $want: back to its previous program and unit"
+  [ -e "$prev" ] || refuse "release.$name-unhealthy: $unit answered $got, not $want, and has no previous program to go back to"
+  if [ -d "$prev" ]; then rm -rf "$prog"; fi
+  mv "$prev" "$prog"
+  if [ -f "$rel/prev/$unit" ]; then
+    install -m 644 "$rel/prev/$unit" "$UNITS/.$unit.new"
+    mv "$UNITS/.$unit.new" "$UNITS/$unit"
+    systemctl daemon-reload
+  fi
+  systemctl restart "$unit" || true
+  if again=$(answers "$want" "$@"); then
+    refuse "release.$name-unhealthy: $unit answered $got, not $want, on ${h:0:16}…; back on its previous program it answers $want"
+  fi
+  refuse "release.$name-unhealthy: $unit answered $got, not $want, on ${h:0:16}…; back on its previous program it answers $again"
 }
 
 rollback() {

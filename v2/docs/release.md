@@ -46,8 +46,10 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    checks above passed at it.
 2. **Build once.** At that commit: the world process (`worldd`), the gateway (`gatewayd`), the page (`v2/web`'s
    build, as `page.tar`) and the served client (`v2/client/served/build.mjs`, stamped with the version: `eden.mjs`,
-   `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), with the tools that
-   move them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
+   `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), the directory
+   (`directoryd`), the viewers' origin (its files as the install places them, `install.sh origin`, as `origin.tar`) and
+   their two unit files (`souls-directory.service`, `souls-origin.service`, as `units.tar`), with the tools that move
+   them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
    (`1220` and 64 hex), as O1 names a build, and each served file by name, version, hash and length (`served`). The
    bundle is the run's artifact.
 3. **Stage.** The bundle goes to the machine over ssh; each artifact lands at `$WORLDS_ROOT/builds/<hash>/<name>`
@@ -66,7 +68,15 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
 4. **Move.** The canary world (input `canary`, default the first by name) by `deploy`: rehearsal, pin, restart, the
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
    `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
-   then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`).
+   then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`);
+   last the directory (`souls-directory`), then the viewers' origin (`souls-origin`). For each, the release's program
+   (`/usr/local/lib/souls/directoryd`, the folder `/usr/local/lib/souls/origin`) and unit file go in beside the old ones
+   and are renamed over them (`systemctl daemon-reload` when the unit file changed), the unit is restarted once (a
+   blip of a second or two; the page tries again), and it must answer as healthy within 30 s: the directory `401` to
+   `POST /v1/account/session` without a token, the origin `200` for the first world's stream pointer
+   (`/w/<world>/<views/world.json stream>pointer`, or `/v1/feed` when no world has a stream). When it does not, its
+   previous program and unit go back, it is restarted on them, and the release stops with
+   `release.directory-unhealthy` or `release.origin-unhealthy`, saying what the previous one answers.
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
    enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
    so a release never drives a user's Soul
@@ -129,12 +139,14 @@ bash tools/ops/release/release.sh remote move <sha>
 bash tools/ops/release/scratch.sh down <dir>
 ```
 
-The facts file is N1's export (`v2/tools/import-eden`). `<bins>` holds `worldd`, `gatewayd`, `deploy` and
-`gateway-upgrade`; `scratch.sh build <dir> <label> [plant|mute]` makes a `worldd` that runs the machine's, or one that
+The facts file is N1's export (`v2/tools/import-eden`). `<bins>` holds `worldd`, `gatewayd`, `directoryd`,
+`deploy` and `gateway-upgrade`; `scratch.sh build <dir> <label> [plant|mute]` makes a `worldd` that runs the machine's, or one that
 dies when served (`plant`), or one that never serves (`mute`).
 
 ## Known limits
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- `install.sh apply` with an older bundle writes its own page over a released one.
+- `install.sh apply` with an older bundle writes its own page, directoryd, origin and their units over released ones.
+- The scratch machine runs no directory and no origin (`scratch.sh` sets `RELEASE_SERVICES` empty), so its move skips
+  them; `release.test.mjs` proves that step with stand-ins for `systemctl` and `curl`.
