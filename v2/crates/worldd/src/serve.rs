@@ -95,6 +95,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -162,10 +163,26 @@ const EVERY: u64 = 8 << 20;
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 
-/// R17: a start's claim or archive open refused for a reason other than a store that does not answer. The process
+/// R17: a start's claim or archive open refused for a reason other than a store that does not answer (R18: or the
+/// shipper's refused push while the world runs). The process
 /// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
 fn refused_at_start(e: Refusal) -> ! {
-    eprintln!("worldd serve: {}", refusal(e));
+    // R18: start-up errors are written so that a closed stderr cannot panic the thread that says them.
+    let _ = writeln!(std::io::stderr(), "worldd serve: {}", refusal(e));
+    std::process::exit(1)
+}
+
+/// R18: the shipping thread (the claim, then the forwarding of records) or the shipper's own thread panicked. Before
+/// the claim the world would serve unclaimed and its archive wait for ever (`held`); after it nothing would ship, the
+/// marks would freeze, the log would grow for ever and acts with stakes would wait for ever. The process ends by name,
+/// `worldd serve: shipping-panicked: <message>`, exit 1, and the unit restarts it.
+fn shipping_panicked(panic: &(dyn std::any::Any + Send)) -> ! {
+    let said = panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    let _ = writeln!(std::io::stderr(), "worldd serve: shipping-panicked: {said}");
     std::process::exit(1)
 }
 
@@ -183,18 +200,36 @@ fn held(claimed: &std::sync::atomic::AtomicBool) {
 /// so never a crash loop. Any other answer is `f`'s at once; `gauge` then says `current`, or `stopped` with the fault.
 fn until_answered<T>(
     what: &str,
-    gauge: &measures::Stream,
+    gauge: &'static measures::Stream,
     mut f: impl FnMut() -> Result<T, Refusal>,
 ) -> Result<T, Refusal> {
     let mut tries = 0u64;
+    // R18: every unanswered try the gauge is told of, the patient read's and this loop's, counted once.
+    let unanswered = std::rc::Rc::new(std::cell::Cell::new(0u64));
     loop {
-        match f() {
+        // R18: `degraded` from a patient read's first unanswered try, so a long run of them (a rate-limited store)
+        // names its fault in health.json, not only `recovering`.
+        let counted = std::rc::Rc::clone(&unanswered);
+        let tried = supervisor::bucket::waiting_says(
+            move |e, wait| {
+                counted.set(counted.get() + 1);
+                gauge.degraded(&refusal(e.clone()), counted.get(), wait.as_millis() as u64);
+            },
+            &mut f,
+        );
+        match tried {
             Err(e) if e.name == "store-unreachable" => {
                 tries += 1;
-                let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                // R18: a rate-limited store's `Retry-After`, when longer, bounded.
+                let after = directoryd::directory::store::retry_after(&e)
+                    .map_or(0, |d| d.as_millis() as u64);
+                let wait =
+                    STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)].max(after);
                 let fault = refusal(e);
-                gauge.degraded(&fault, tries, wait);
-                eprintln!(
+                unanswered.set(unanswered.get() + 1);
+                gauge.degraded(&fault, unanswered.get(), wait);
+                let _ = writeln!(
+                    std::io::stderr(),
                     "worldd: {what} waits for the store: {fault}; try {tries} unanswered, the next in {wait} ms"
                 );
                 for _ in 0..wait / 100 {
@@ -205,7 +240,10 @@ fn until_answered<T>(
             Ok(v) => {
                 gauge.current();
                 if tries > 0 {
-                    eprintln!("worldd: {what}: the store answered after {tries} unanswered tries");
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: {what}: the store answered after {tries} unanswered tries"
+                    );
                 }
                 return Ok(v);
             }
@@ -2287,7 +2325,8 @@ fn off_machine(
         }
         let claim = shipping::take_over(&mut d, &lineage, zone, first..end)?;
         let from = claim.takeover.from;
-        println!(
+        let _ = writeln!(
+            std::io::stdout(),
             "shipping: epoch {} from record {from} of {end}",
             claim.takeover.epoch
         );
@@ -2304,6 +2343,11 @@ fn off_machine(
     let opening = std::thread::Builder::new()
         .name("shipping".into())
         .spawn(move || -> Result<(), Refusal> {
+            // R18: a test's forced panic on this thread, before the claim (`tests/serve.rs`); a debug build's only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("WORLDD_TEST_PANIC_SHIPPING").is_some() {
+                panic!("WORLDD_TEST_PANIC_SHIPPING");
+            }
             // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
             // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
             // would number new records over ones already off the machine.
@@ -2312,16 +2356,45 @@ fn off_machine(
             // The claim is held: the archive may write.
             claiming.store(true, std::sync::atomic::Ordering::SeqCst);
             let (to, _, h) = shipper.spawn();
-            report("the shipper", h);
+            // R18: the shipper stopping while the world runs (a panic, or a refused push such as `ship-gap`) would
+            // freeze its marks, so it ends the process by name. Only its last flush, once the records' sender is
+            // dropped as the world ends, is said and passed over.
+            let ending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let ended = Arc::clone(&ending);
+            std::thread::spawn(move || match h.join() {
+                Err(panic) => shipping_panicked(panic.as_ref()),
+                Ok(Err(e)) if !ended.load(std::sync::atomic::Ordering::SeqCst) => {
+                    refused_at_start(e)
+                }
+                Ok(Err(e)) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: the shipper's last flush: {}",
+                        refusal(e)
+                    );
+                }
+                Ok(Ok(_)) => {}
+            });
+            let mut lost = false;
             for item in items {
                 if to.send(item).is_err() {
+                    lost = true;
                     break;
                 }
             }
+            if !lost {
+                ending.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            drop(to);
             Ok(())
         })
         .map_err(|e| e.to_string())?;
-    report("shipping", opening);
+    // R18: a panic on the shipping thread ends the process by name; its refusals already do (`refused_at_start`).
+    std::thread::spawn(move || {
+        if let Err(panic) = opening.join() {
+            shipping_panicked(panic.as_ref());
+        }
+    });
     let mut based = false;
     let mut archive_base = 0;
     let again = Again {
@@ -2486,7 +2559,7 @@ pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("worldd serve: {e}");
+            let _ = writeln!(std::io::stderr(), "worldd serve: {e}");
             1
         }
     }
