@@ -223,6 +223,10 @@
 .time-preview-ticks{display:flex;justify-content:space-between;margin-top:-4px;color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
 .time-preview-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px;margin-top:2px;padding-top:8px;border-top:1px solid color-mix(in srgb,var(--fg) 10%,transparent);color:var(--dim);font-size:12px}
 .time-preview-foot button{flex:none;height:30px;padding:0 14px;border-radius:999px;border:0;background:var(--fg);color:var(--bg);font:600 13px/1 system-ui,sans-serif;cursor:pointer}
+.time-preview-moments{display:flex;flex-wrap:wrap;gap:6px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--fg) 10%,transparent)}
+.time-preview-moments button{flex:1 1 auto;height:32px;padding:0 12px;border-radius:999px;border:1px solid color-mix(in srgb,var(--fg) 16%,transparent);background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg);font:600 13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer}
+.time-preview-moments button:hover:not(:disabled){background:color-mix(in srgb,var(--fg) 12%,transparent)}
+.time-preview-moments button:disabled{opacity:.45;cursor:default}
 @media(prefers-reduced-motion:reduce){.time-preview{animation:none}}
 /* Lane P6 (2026-10-19): small screens only (HudMore.tsx sets html.phone-tidy there, never on desktop). Secondary controls
    leave the world view and are offered from the HUD's one "More" button; watch mode keeps only the primary chrome. */
