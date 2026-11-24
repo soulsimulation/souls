@@ -45,7 +45,7 @@ use sim::routes::HANDS;
 use sim::walk::town::{Basis, Rebuilt, Town};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::bodies::Bodies;
 
@@ -105,13 +105,26 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
 /// The bodies the clock thread last handed off (G1d): written once a tick by a pointer swap, read by the edit checker;
 /// and the edits it committed since the checker last took them (G1e), with the edit checker's town as the boot built
 /// it (#3743), handed off once.
+///
+/// The clock builds a snapshot only when the edit checker has asked for one since the last ([`Moving::fresh`], S10):
+/// at 750 bodies a build cost 2-3.7 ms of every tick, and edits are rare. The checker waits for the next tick's.
 #[derive(Default)]
 pub struct Moving(
     Mutex<Arc<BodySnapshot>>,
     Mutex<Taken>,
     AtomicU64,
     AtomicBool,
+    Asked,
 );
+
+/// The edit checker's asks for a fresh snapshot (S10): whether one is wanted, and how many the clock has built, which
+/// a waiting checker watches.
+#[derive(Default)]
+pub struct Asked {
+    wanted: AtomicBool,
+    built: Mutex<u64>,
+    done: Condvar,
+}
 
 /// What the clock thread handed the edit checker since it last took (#3743): the town to seed its own with, once,
 /// and each edit committed, in order.
@@ -287,6 +300,10 @@ impl Moving {
     /// Clock thread: a shared map basis, never a geometry build or whole-tree copy. The first offer, at boot before the
     /// first tick, also hands the edit checker a memory copy of the town to seed its own with (#3743).
     pub fn offer_map(&self, bodies: &Bodies, version: u64) {
+        // Seeded already and nobody asked since the last: nothing to build (S10).
+        if self.3.load(Ordering::Acquire) && !self.4.wanted.swap(false, Ordering::AcqRel) {
+            return;
+        }
         if !self.3.swap(true, Ordering::AcqRel) {
             let town = bodies.town.duplicate();
             self.1.lock().unwrap_or_else(|e| e.into_inner()).seed = Some((version, town));
@@ -317,6 +334,24 @@ impl Moving {
                 .collect(),
             map: Some(map),
         });
+        let mut built = self.4.built.lock().unwrap_or_else(|e| e.into_inner());
+        *built += 1;
+        self.4.done.notify_all();
+    }
+
+    /// Edit checker: the bodies as the clock offers them at its next tick (S10). It asks, then waits for that tick's
+    /// snapshot, at most `wait` (a clock that is not ticking moves no body: the last snapshot stands).
+    pub fn fresh(&self, wait: std::time::Duration) -> Arc<BodySnapshot> {
+        let built = self.4.built.lock().unwrap_or_else(|e| e.into_inner());
+        let before = *built;
+        self.4.wanted.store(true, Ordering::Release);
+        drop(
+            self.4
+                .done
+                .wait_timeout_while(built, wait, |n| *n == before)
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        self.current()
     }
 
     pub fn map(&self) -> Option<Arc<MapBasis>> {
@@ -674,6 +709,38 @@ mod class_snapshot_tests {
             "slot-owned actors are not surface-rebound"
         );
         assert_eq!(bodies.classes().get(&id), Some(&Size::Large));
+
+        // S10: after the seed, the clock builds a snapshot only when the edit checker asks, and what the checker gets
+        // is the one built at that tick: the same map and bodies an offer at every tick would have given it.
+        moving.offer_map(&bodies, 7);
+        assert_eq!(
+            moving.current().map.as_ref().map(|m| m.version),
+            Some(0),
+            "not asked: not built"
+        );
+        let asked = std::sync::Arc::new(moving);
+        let reader = {
+            let m = std::sync::Arc::clone(&asked);
+            std::thread::spawn(move || m.fresh(std::time::Duration::from_secs(5)))
+        };
+        while !asked.4.wanted.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        asked.offer_map(&bodies, 8);
+        let got = reader.join().unwrap();
+        assert_eq!(
+            got.map.as_ref().map(|m| m.version),
+            Some(8),
+            "the next tick's map"
+        );
+        let every = Moving::default();
+        every.offer_map(&bodies, 8);
+        let want = every.current();
+        assert_eq!(got.classes, want.classes);
+        assert_eq!(got.bodies.len(), want.bodies.len());
+        for (a, b) in got.bodies.iter().zip(want.bodies.iter()) {
+            assert_eq!((a.body, a.pose, a.crossing), (b.body, b.pose, b.crossing));
+        }
     }
 }
 

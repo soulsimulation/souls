@@ -1472,6 +1472,10 @@ fn has_words(v: &Value) -> bool {
     }
 }
 
+/// The longest the edit checker waits for the clock's next body snapshot (S10, [`buildsafe::Moving::fresh`]): two
+/// ticks, past which the last snapshot stands (a clock not ticking moves no body).
+const FRESH_WAIT: Duration = Duration::from_millis(100);
+
 /// The body an intent drives: the Soul's own, or the one a creator names.
 fn body_of(intent: &Intent) -> Result<Id, &'static str> {
     match (intent.actor, intent.body) {
@@ -5960,7 +5964,7 @@ fn edit_checker(
                     // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
                     CheckJob::Undo(job) => {
                         let (id, actor, redo, effects) = *job;
-                        let snapshot = walkers.current();
+                        let snapshot = walkers.fresh(FRESH_WAIT);
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6001,7 +6005,7 @@ fn edit_checker(
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {
-                        let snapshot = walkers.current();
+                        let snapshot = walkers.fresh(FRESH_WAIT);
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6063,7 +6067,7 @@ fn edit_checker(
                     // A crew's take or seating (0.135 A2): the walkers' maps from its part, as a set-down's.
                     CheckJob::Part(job) => {
                         let (r, planned) = *job;
-                        let snapshot = walkers.current();
+                        let snapshot = walkers.fresh(FRESH_WAIT);
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6140,7 +6144,7 @@ fn edit_checker(
                         continue;
                     }
                 };
-                let snapshot = walkers.current();
+                let snapshot = walkers.fresh(FRESH_WAIT);
                 let source = snapshot.map.as_ref();
                 let needed = source
                     .as_ref()
