@@ -168,7 +168,7 @@ import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../convers
 import { giveIntents } from '../give/give.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
-import { refreshEntries } from '../pair/pair.mjs';
+import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -576,11 +576,16 @@ function syncAnswer(sock, n, refused, bytes) {
   current();
 }
 
-/** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304). */
+/** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304), and for
+ *  its creator the world's kinds text (#1960), which a restart on a new build may change. */
 function refreshKinds() {
   refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
     .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
     .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
+  if (seat.grant.actor !== 'creator') return;
+  refreshKindsText({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
+    .then((r) => { if (r.changed) log('kinds: the world\'s kinds text'); })
+    .catch((e) => log(`kinds text: not fetched (${e.code ?? 'unreachable'})`));
 }
 
 function connect() {
