@@ -15,8 +15,8 @@
 //!   [`BELOW_FEET`] under its feet is that much further (a thing on the floor above or below is out of reach).
 //! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
 //!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
-//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
-//!   one is refused `arg-missing`.
+//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`], [`AT_AIM`];
+//!   a `toward` from a seat of the form's own thing aims what the body rides); a missing one is refused `arg-missing`.
 //! - **Written once.** What the runner writes ([`Forms::out`]) is numbered at the replica's version, applied as one
 //!   part with the tick's other entries and handed back to [`Forms::logged`] (F2's log hook, #3257, as its issue
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
@@ -1202,10 +1202,14 @@ impl Reach for Sight<'_> {
     ) -> Option<i64> {
         let me = self.bodies.get(&body)?;
         let a = me.pose.position;
-        // C23: a move at the body itself, or at the thing argument its run named.
+        // C23: a move at the body itself, or at the thing argument its run named. A move aimed toward an argument
+        // from a slot of the run's own thing (a tiller's steer toward a heading) aims what it rides (0.135 E20).
+        let seated =
+            me.pose.support == replica::pose::Support::Slot && me.pose.frame.node == target;
         let target = match point.as_str() {
             AT_SELF => return Some(0),
-            AT_ARG => *self.toward.get(&body)?,
+            AT_AIM if seated => return Some(0),
+            AT_ARG | AT_AIM => *self.toward.get(&body)?,
             _ => target,
         };
         // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
@@ -1248,7 +1252,7 @@ impl Reach for Sight<'_> {
     /// The thing argument this body's run named, for a move at it ([`AT_ARG`]). The record that names it is seen by
     /// everyone, so a thing in a closed container is not named (#4339): the record keeps the form's own node.
     fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
-        if point.as_str() != AT_ARG {
+        if point.as_str() != AT_ARG && point.as_str() != AT_AIM {
             return None;
         }
         let thing = *self.toward.get(&body)?;
@@ -1266,7 +1270,7 @@ impl Reach for Sight<'_> {
     }
 }
 
-pub use sim::reach::{AT_ARG, AT_SELF};
+pub use sim::reach::{AT_AIM, AT_ARG, AT_SELF};
 use sim::reach::{obj_mut, targets};
 
 /// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it

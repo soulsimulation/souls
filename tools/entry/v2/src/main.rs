@@ -191,10 +191,13 @@ impl Reach for Snap {
     ) -> Option<i64> {
         let me = self.poses.get(&body)?;
         let a = me.position;
-        // C23: a move at the body itself, or at the thing argument its run named (`sim::reach::targets`).
+        // C23: a move at the body itself, or at the thing argument its run named (`sim::reach::targets`); aimed
+        // toward one from a slot of the run's own thing, it aims what the body rides (`sim::reach::AT_AIM`).
+        let seated = me.support == Support::Slot && me.frame.node == target;
         let target = match point.as_str() {
             sim::reach::AT_SELF => return Some(0),
-            sim::reach::AT_ARG => *self.toward.get(&body)?,
+            sim::reach::AT_AIM if seated => return Some(0),
+            sim::reach::AT_ARG | sim::reach::AT_AIM => *self.toward.get(&body)?,
             _ => target,
         };
         let build = sim::slots::STANDARD_BUILD;

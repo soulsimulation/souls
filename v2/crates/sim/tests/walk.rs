@@ -1183,3 +1183,57 @@ fn a1_a2_a5_four_hundred_walkers_cross_the_square() {
         );
     }
 }
+
+/// 0.135 E20: a walk is done within `AT_GOAL` of its goal, short of it on the side it came from; a form's walk right
+/// before a move (`arrive` set to `AT_SPOT`) ends on its goal, the stand point the move is reached from.
+#[test]
+fn e20_a_walk_before_a_move_ends_on_its_stand_point() {
+    use skills::route::{AT_GOAL, AT_SPOT};
+    let goal = Vec3::new(3_000_000, 0, 0);
+    let end = |arrive: i64| {
+        let mut w = Plane {
+            half: 20_000_000,
+            now: 0,
+            bodies: BTreeMap::from([(id(1), (Vec3::ZERO, Vec3::ZERO))]),
+        };
+        let mut skill = common::route(
+            &[Leg {
+                to: goal,
+                link: None,
+            }],
+            SPEED,
+            TICK,
+        );
+        skill.arrive = arrive;
+        for _ in 0..1_000 {
+            let mut h = OnPlane {
+                plane: &w,
+                me: id(1),
+                input: None,
+            };
+            if skill.step(&mut h) == Progress::Done {
+                return dist(w.bodies[&id(1)].0, goal);
+            }
+            let v = h.input.map_or(Vec3::ZERO, |i| i.velocity);
+            let (p, _) = w.bodies[&id(1)];
+            w.bodies
+                .insert(id(1), (Vec3::new(p.x + v.x * TICK / 1_000_000, 0, p.z), v));
+            w.now += TICK;
+        }
+        panic!("the walk never ended");
+    };
+    let (any, before_a_move) = (end(AT_GOAL), end(AT_SPOT));
+    println!(
+        "E20: done {} mm short; before a move {} mm",
+        any / 1000,
+        before_a_move / 1000
+    );
+    assert!(
+        any > AT_SPOT && any <= AT_GOAL,
+        "a walk is done short of its goal: {any}"
+    );
+    assert!(
+        before_a_move <= AT_SPOT,
+        "a walk before a move ends on it: {before_a_move}"
+    );
+}

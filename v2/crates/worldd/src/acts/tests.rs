@@ -1275,7 +1275,12 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     for slot in ["stern", "berth", "galley"] {
         ride(room, &narrowboat, slot, "hatch");
     }
-    let toward = BTreeMap::new();
+    // 0.135 E20: each rider's run steers toward a thing far off (a heading): the ring for those on the building or the
+    // room in it, the building for those on the ring.
+    let toward: BTreeMap<Id, Id> = riders
+        .iter()
+        .map(|&(body, thing, ..)| (body, if thing == east { west } else { east }))
+        .collect();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
         bodies: Arc::new(bodies.clone()),
@@ -1299,7 +1304,7 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
     let reach = 600_000;
     let mut by_seat = BTreeMap::new();
-    for (body, thing, slot, point) in riders {
+    for &(body, thing, slot, point) in &riders {
         let d = sight
             .distance(
                 body,
@@ -1319,5 +1324,22 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
         if let Some(was) = by_seat.insert(slot, d) {
             assert_eq!(was, d, "{slot}: the same from another place");
         }
+    }
+    // 0.135 E20: a steer toward the heading from a seat of the thing ridden aims what it rides, from any of its seats:
+    // in reach. A move at the heading itself is measured to it, far off.
+    for &(body, thing, slot, _) in &riders {
+        let d = |point: &str| {
+            sight
+                .distance(
+                    body,
+                    &Effector::Held,
+                    None,
+                    thing,
+                    &Name::new(point).unwrap(),
+                )
+                .expect("measured")
+        };
+        assert_eq!(d(AT_AIM), 0, "{slot}: aimed from its seat");
+        assert!(d(AT_ARG) > 50_000_000, "{slot}: the heading is far off");
     }
 }
