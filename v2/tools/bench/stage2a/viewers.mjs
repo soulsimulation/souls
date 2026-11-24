@@ -74,8 +74,11 @@ function summary() {
 
 process.on('SIGTERM', async () => {
   clearInterval(timer);
+  setTimeout(() => process.exit(0), 7_000); // the last take waits at most 5 s
   await tick().catch(() => {});
-  writeFileSync(`${out}/viewers.json`, JSON.stringify(summary(), null, 1));
+  try { writeFileSync(`${out}/viewers.json`, JSON.stringify(summary(), null, 1)); } catch { /* a stopped rung's folder */ }
   kids.forEach((k) => !k.dead && k.send({ stop: true }));
   setTimeout(() => process.exit(0), 1_000);
 });
+// However this ends, its readers end with it (a reader's own loop never stops on its parent's exit).
+process.on('exit', () => kids.forEach((k) => { if (!k.dead) k.kill('SIGKILL'); }));
