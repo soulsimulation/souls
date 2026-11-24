@@ -74,7 +74,7 @@ mod backup;
 #[cfg(test)]
 mod tests;
 
-pub use backup::{State as BackupState, beside as backup_beside};
+pub use backup::{Drain as BackupDrain, State as BackupState, beside as backup_beside};
 
 use std::fs;
 use std::io::Write as _;
@@ -1633,18 +1633,30 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
-        let head = match w.spool.as_ref().and_then(|s| s.read(&head_key)) {
-            Some(bytes) => Some(directoryd::directory::store::Object {
-                etag: String::new(),
-                bytes,
-            }),
-            None => w.store.get(&head_key)?,
+        let (head, from_store) = match w.spool.as_ref().and_then(|s| s.read(&head_key)) {
+            Some(bytes) => (
+                Some(directoryd::directory::store::Object {
+                    etag: String::new(),
+                    bytes,
+                }),
+                false,
+            ),
+            None => (w.store.get(&head_key)?, true),
         };
+        // R15: a spooled writer that recovered from the store alone (a new machine, or a spool lost) may be behind
+        // what an earlier writer published from its own spool: it starts a new generation below, so it never cuts a
+        // part at an address of that lost tail (rule: exact bytes before exposure).
+        let mut fresh = false;
         if let Some(head) = head {
             let h = object_map(&head.bytes)?;
             let hash = obj_bytes(&h, 1)?;
-            w.etag = Some(head.etag);
             w.recover(&hash)?;
+            if from_store && let Some(spool) = &w.spool {
+                // The store's head as this writer found it: what its backup writes against, and fences on.
+                spool.confirm(&head_key, &head.bytes, &head.etag)?;
+                fresh = true;
+            }
+            w.etag = Some(head.etag);
             w.head = Some(hash);
         } else {
             if record != 0 && checkpoint.is_none() {
@@ -1834,7 +1846,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         )?;
         w.closed_generations();
         // A writer stopped between a generation's last part and its rollover rolls over now, at the same place.
-        if w.rollover_due() {
+        let fresh = fresh
+            && w.generation_parts > 0
+            && w.chunks.is_empty()
+            && !w.force_remainder
+            && w.migration_cut.is_none();
+        if w.rollover_due() || fresh {
             w.rollover()?;
         }
         w.prune();
@@ -2570,6 +2587,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             Some(spool) => backup::start(spool, store, prefix, report),
             None => Ok(()),
         }
+    }
+    /// R15: what a stop waits on, bounded, for the backup to hold the spool's head; none before [`Self::back_up`].
+    pub fn drainer(&self) -> Option<BackupDrain> {
+        self.spool.as_ref()?.drainer()
     }
     pub fn public_player(&self) -> &PublicPlayer {
         &self.player

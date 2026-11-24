@@ -36,9 +36,15 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
   `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
   holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
-  log is. A restart, even after a SIGKILL, recovers the chain from the spool's head, so viewers keep the exact bytes
-  they were shown. Do not delete `stream-backup/` on a running machine. A new machine has none and recovers from the
-  store.
+  log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
+  so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
+  (SIGTERM) and a sleep give the backup up to 8 s and 10 s to catch up first.
+- **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
+  that recovers from the store alone (no `stream-backup/`) starts a new generation, so it never cuts a part again at
+  an address viewers may hold. If the store was behind, the parts it lacked are a gap in the stream's history.
+- **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
+  this world still running beside a newer one (on this machine or another). The fenced one never writes over it
+  and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a

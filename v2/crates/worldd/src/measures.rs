@@ -523,8 +523,13 @@ impl Stream {
                 tries,
                 next_try_ms,
                 behind,
+                behind_bytes,
             } => format!(
-                "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms},\"behind\":{behind}}}",
+                "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms},\"behind\":{behind},\"behind_bytes\":{behind_bytes}}}",
+                quoted(fault)
+            ),
+            crate::view_out::BackupState::Fenced { fault } => format!(
+                "{{\"state\":\"fenced\",\"fault\":\"{}\"}}",
                 quoted(fault)
             ),
         });

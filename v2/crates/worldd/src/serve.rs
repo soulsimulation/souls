@@ -2987,6 +2987,17 @@ fn serve(args: &[String]) -> R<()> {
                     backup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
                 )?;
+                // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
+                // unit's 10 s stop timeout; best effort.
+                if let Some(d) = writer.drainer() {
+                    crate::stopped::on_stop(move || {
+                        let held = d.drain(std::time::Duration::from_secs(8));
+                        eprintln!(
+                            "worldd: the public stream's backup {} before the stop",
+                            if held { "is current" } else { "is still behind" }
+                        );
+                    });
+                }
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };
@@ -3023,6 +3034,11 @@ fn serve(args: &[String]) -> R<()> {
                         }
                         let slept = writer.sleep(answers::now(), due).map_err(refusal);
                         let done = slept.is_ok();
+                        // R15: before the world exits to sleep, its backup is given up to 10 s to hold the spool's
+                        // head, so a move finds the store current; best effort.
+                        if done && let Some(d) = writer.drainer() {
+                            d.drain(std::time::Duration::from_secs(10));
+                        }
                         let _ = answer.send(slept);
                         if done {
                             published(&writer);
