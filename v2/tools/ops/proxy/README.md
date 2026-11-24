@@ -42,8 +42,10 @@ launcher), so a Soul could not pair with a world that had moved: `node eden.mjs 
 `pair-world-routing`. [`soul-game-moved.caddy`](soul-game-moved.caddy) is that live file plus, for each moved world, the
 agent paths (`v2/ws`, `creator-token`, `entries`, uploads) straight to **that world's own gatewayd** with `/w/<slug>`
 stripped, the bootstrap (to 7320) only for a world the routes file marks canonical (the origin refuses any other's), and, for everyone, the site-level pairing paths (`/pair`, `/v1/pair/*`,
-`/v1/agent/account[/*]`, to the directory and the release's card); today's client pairs at `/w/<slug>/v1/agent/pair`,
-which stays with the launcher. The agents' relay (`souls-agents`) is not used: production runs none, and 7330 is
+`/v1/agent/account[/*]`, to the directory and the release's card) and the site-level accounts (`/v1/account[/*]`, to
+the directory: a moved world's page exchanges its sign-in at `/v1/account/view-token`, and the card approves an agent's
+login at `/v1/account/requests/<id>`); today's client pairs at `/w/<slug>/v1/agent/pair`, and today's pages ask
+`/w/<slug>/v1/account/*`, which stay with the launcher. The agents' relay (`souls-agents`) is not used: production runs none, and 7330 is
 Eden's gatewayd.
 
 The moved worlds are the lines in its site block, one per world: `import moved-world <slug> <port>` for a world

@@ -120,6 +120,15 @@ ensure_once() {
   act "file $p $m $o:$g (once)" bash -c 'umask 077; printf "%s\n" "$1" > "$2" && chown "$3" "$2" && chmod "$4" "$2"' _ "$text" "$p" "$o:$g" "$m"
 }
 
+# ensure_key <path>: 64 random hex digits, root:souls 640, written when absent and never overwritten. The view key
+# (V13b): the directory signs a signed-in page's view tokens with it and every world's gateway checks them, so all of
+# them name this one file (directory.args, gateway-<world>.env). Without it the page's sign-in gets no view token.
+ensure_key() {
+  local p=$1
+  [ -e "$R$p" ] && return 0
+  act "file $p 640 root:$ACCOUNT (once, a new key)" bash -c 'umask 077; od -An -tx1 -N32 /dev/urandom | tr -d " \n" > "$1" && chown "root:$2" "$1" && chmod 640 "$1"' _ "$p" "$ACCOUNT"
+}
+
 # ensure_tree <source dir> <path>: every file of the source, root-owned and world-readable; files the source lacks go.
 ensure_tree() {
   local src=$1 dst=$2 f rel
@@ -151,7 +160,7 @@ directory_args() {
 # Arguments for souls-directory.service (directoryd; v2/crates/directoryd/src/accounts/start.rs). Written once by
 # the install, never overwritten. Add the sign-in provider (--issuer <https origin> --parties <origin,...>) before
 # starting it; only the configured origin mounts sign-in (docs/operations/auth.md).
-DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory
+DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory --view-key $ETC/view.key
 EOF
 }
 SECRETS="# Secrets for Engine v2's programs, KEY=value lines (root only; systemd reads it before a unit drops to souls)."
@@ -214,6 +223,7 @@ install_all() {
   local build
   build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
   ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
+  ensure_key "$ETC/view.key"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
   ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Browser provider: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
@@ -337,6 +347,7 @@ check() {
   bundle "$tmp/b" "$tmp/bins" "$tmp/page" "" "$tmp/client" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
   grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
+  grep -qxF "would file $ETC/view.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the view key missing from plan"
   cp -R "$tmp/root" "$tmp/placed"
   mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
