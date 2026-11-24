@@ -832,6 +832,10 @@ fn in_place(
             {
                 return Ok(None);
             }
+            // The swap and the encodings' update take the rows gone in index order: any other is left to the whole path.
+            if removed.last().is_some_and(|(last, ..)| *last >= i) {
+                return Ok(None);
+            }
             removed.push((i, id, Value::Array(Vec::new())));
             continue;
         }
@@ -2156,6 +2160,54 @@ mod gone_in_place_tests {
         assert_eq!(s, new, "the whole path's state");
         plan.swap(&mut s);
         assert_eq!(s, old, "swapped back, the state before");
+    }
+
+    /// Two nodes gone: in id order they play in place to the whole path's state; with their rows reversed they are
+    /// left to the whole path, which makes the same state.
+    #[test]
+    fn nodes_gone_out_of_id_order_are_left_to_the_whole_path() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut before = world(&header);
+        let four = before.nodes[&id(1)].clone();
+        before.nodes.insert(id(4), four);
+        let mut after = before.clone();
+        after.next += 1;
+        after.nodes.remove(&id(1));
+        after.nodes.remove(&id(4));
+        after.links.remove(&id(6));
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
+        );
+        let frames = || std::cell::RefCell::new(None);
+        let mut plan = in_place(&header, &old, &delta, &frames())
+            .unwrap()
+            .expect("in id order, played in place");
+        assert_eq!(plan.removed.len(), 2);
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(
+            s,
+            apply_observation(&header, &old, &Value::Map(delta.clone())).unwrap()
+        );
+        assert_eq!(s, new);
+        let mut reversed = delta.clone();
+        let Some(Value::Array(rows)) = reversed.get_mut(&2) else {
+            unreachable!()
+        };
+        rows.reverse();
+        assert!(
+            in_place(&header, &old, &reversed, &frames())
+                .unwrap()
+                .is_none(),
+            "out of id order: the whole path"
+        );
+        assert_eq!(
+            apply_observation(&header, &old, &Value::Map(reversed)).unwrap(),
+            new,
+            "the whole path's state"
+        );
     }
 
     /// A node gone that something still needs is left to the whole path: one with a node inside it, one owning a link
