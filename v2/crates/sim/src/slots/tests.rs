@@ -892,3 +892,72 @@ fn e16_a_slot_of_two_holds_two_bodies_each_at_its_own_place() {
     );
     assert_eq!(w.slots.spot_of(b[2]), Some((w.chair, 1, 0)));
 }
+
+/// 0.135 E16, review of #4549: a restart seats each body again at the place the checkpoint had it, never another. A
+/// at place 0 and B at place 1; A rises; the world restarts with B's logged position. B comes back at place 1, though
+/// place 0 is free and lower; a body whose own place is taken takes the lowest free one.
+#[test]
+fn e16_a_restart_seats_a_body_at_its_own_place() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let other = Vec3::new(560_000, 0, 0);
+    let two = |w: &mut World| {
+        let mut p = w.slots.place(w.chair).expect("the chair").clone();
+        p.more = vec![other];
+        w.slots.replace(w.chair, vec![p]).expect("unoccupied");
+    };
+    let mut w = world(chair());
+    two(&mut w);
+    let (a, b) = (w.bodies[0], w.bodies[1]);
+    let out = w.sit(&[0, 1], &sit);
+    assert!(out.iter().all(|o| o.1.is_ok()), "{out:?}");
+    w.run(i64::MAX);
+    assert_eq!(w.slots.spot_of(b), Some((w.chair, 1, 1)));
+    let geo = w.geo();
+    w.slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            a,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    w.run(i64::MAX);
+    let logged = w.c.body(b).expect("b").pose.position;
+    assert_eq!(logged, other);
+    // The restart: the same bodies standing again (the fixture's), the places registered anew, B restored.
+    let mut w = world(chair());
+    two(&mut w);
+    w.slots
+        .restore(
+            &mut w.c,
+            b,
+            (w.chair, Some(1)),
+            Some(logged),
+            Stance::Sit,
+            3_000_000,
+        )
+        .expect("restored");
+    assert_eq!(w.slots.spot_of(b), Some((w.chair, 1, 1)), "its own place");
+    assert_eq!(w.c.body(b).expect("b").pose.position, other, "not moved");
+    assert_eq!(
+        w.slots.holders_in(w.chair, 1),
+        vec![b],
+        "place 0 still free"
+    );
+    // A body whose kept place is taken falls back to the lowest free one.
+    w.slots
+        .restore(
+            &mut w.c,
+            a,
+            (w.chair, Some(1)),
+            Some(other),
+            Stance::Sit,
+            3_000_000,
+        )
+        .expect("restored");
+    assert_eq!(w.slots.spot_of(a), Some((w.chair, 1, 0)));
+}

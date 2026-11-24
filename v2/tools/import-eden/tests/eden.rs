@@ -558,6 +558,34 @@ fn e16_a_slot_of_several_bodies_has_a_place_for_each_inside_its_thing() {
     let circle = Vec3::new(0, 0, -5_400_000);
     let more = more_places(circle, 6, Some([3_000_000, 12_000_000]));
     assert_eq!(more.len(), 5);
+    // From an entry: a body-sized thing's footprint is its slot's space; a thing taller than a body (a big wheel's
+    // gondola) has none of its own unless the slot declares one (`fits_mm`), so it holds one body.
+    let entry = |bounds: &str, fits: &str| {
+        let e = replica::rules::json::parse(&format!(
+            r#"{{"kind":"t:x","points":{{"by":{{"role":"stand","at_mm":[0,0,900]}}}},
+            "slots":{{"s":{{"admits":"body","posture":"sit","most":2,"at_mm":[0,1500,0],"stand":"by"{fits}}}}},
+            "geometry":{{"bounds_mm":{bounds}}}}}"#
+        ))
+        .unwrap();
+        let id = replica::ids::Id::new(replica::ids::Scope([1; 16]), 1).unwrap();
+        import_eden::body_slots_of(id, "t:x", &Default::default(), &[("t:x".into(), e)])
+            .remove(0)
+            .more
+    };
+    assert_eq!(
+        entry("[1981, 1330, 2500]", "").len(),
+        1,
+        "a tent-sized thing"
+    );
+    assert!(
+        entry("[30000, 30000, 8000]", "").is_empty(),
+        "a big wheel's gondola"
+    );
+    assert_eq!(
+        entry("[30000, 30000, 8000]", r#","fits_mm":[1800,1200,900]"#),
+        vec![Vec3::new(-560_000, 0, 0)],
+        "a gondola that declares its own space"
+    );
     let all: Vec<Vec3> = std::iter::once(Vec3::ZERO).chain(more).collect();
     for (i, p) in all.iter().enumerate() {
         assert!(

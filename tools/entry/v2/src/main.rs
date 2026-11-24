@@ -1495,7 +1495,7 @@ impl Stage {
             let before = self.c.body(body).map(|b| b.pose.position);
             match self
                 .slots
-                .restore(&mut self.c, body, (thing, Some(s)), stance, self.now)
+                .restore(&mut self.c, body, (thing, Some(s)), None, stance, self.now)
             {
                 Ok(()) => {
                     seated = true;
@@ -2143,7 +2143,10 @@ impl Stage {
     /// One try at [`Self::rise`]; its intents are numbered apart from the acts' (`k` the try).
     fn rise_once(&mut self, k: u64) -> J {
         let Some(node) = self.slots.held_by(self.body) else {
-            return obj(vec![("verdict", J::s("yes")), ("receipt", J::s("completed"))]);
+            return obj(vec![
+                ("verdict", J::s("yes")),
+                ("receipt", J::s("completed")),
+            ]);
         };
         let Ok(entry) = parse(r#"{"forms":{"rise":{"steps":[{"step":"rise"}]}}}"#) else {
             return err("the rise form does not parse");
@@ -2208,11 +2211,17 @@ impl Stage {
         // A body in a seat, or taking or leaving one, stands at the seat's stand point; the seated are seated again
         // once the places are registered anew (K18c's restore, as a served world's restart seats them).
         let at_seat = |s: &Slots, body: Id| s.held_place(body).and_then(|p| p.stand().ok());
-        let seated: Vec<(Id, Id, Option<u64>, sim::controller::Stance)> = self
+        // Each at its own place in its slot (E16): the place it held, kept across the restart.
+        type Seated = (Id, Id, Option<u64>, Option<Vec3>, sim::controller::Stance);
+        let seated: Vec<Seated> = self
             .slots
             .seated()
             .into_iter()
-            .map(|(b, t, st)| (b, t, self.slots.held_place(b).map(|p| p.place.slot), st))
+            .map(|(b, t, st)| {
+                let p = self.slots.held_place(b);
+                let was = p.zip(self.slots.spot_of(b)).map(|(p, s)| p.spot(s.2));
+                (b, t, p.map(|p| p.place.slot), was, st)
+            })
             .collect();
         let b = at_seat(&self.slots, self.body).unwrap_or_else(|| self.body_at());
         let g = ground();
@@ -2240,10 +2249,10 @@ impl Stage {
         for t in things {
             self.seat(t);
         }
-        for (body, thing, slot, stance) in seated {
-            if let Err(r) = self
-                .slots
-                .restore(&mut self.c, body, (thing, slot), stance, self.now)
+        for (body, thing, slot, was, stance) in seated {
+            if let Err(r) =
+                self.slots
+                    .restore(&mut self.c, body, (thing, slot), was, stance, self.now)
             {
                 eprintln!(
                     "a seated body could not be seated again: {}: {}",

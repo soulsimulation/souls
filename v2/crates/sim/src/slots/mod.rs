@@ -377,6 +377,12 @@ impl Slots {
             .collect()
     }
 
+    /// Whether the seat of `thing` in `slot` has no free place (E16: a tent with two sleepers, not one); false for a
+    /// slot that is no seat.
+    pub fn full(&self, thing: Id, slot: u64) -> bool {
+        self.places.contains_key(&(thing, slot)) && self.free_spot((thing, slot)).is_none()
+    }
+
     /// The lowest free place of the seat `key`, if it has one (E16).
     fn free_spot(&self, key: Key) -> Option<u32> {
         let most = self.places.get(&key)?.most();
@@ -587,13 +593,16 @@ impl Slots {
 
     /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` in `slot` (its
     /// lowest when none is named) at `at`, held there in `stance` by a driver with no timer, as a sit that finished
-    /// leaves it. The hold is this table's again, so a rise or another sit sees the seat taken. `place-unknown`,
-    /// `place-taken` or `place-already-held` as for a sit.
+    /// leaves it. The hold is this table's again, so a rise or another sit sees the seat taken. In a slot of several
+    /// places (E16) it is the place at `was`, the body's position in the slot's frame as the checkpoint had it, so a
+    /// restart never moves a body to another place; the lowest free place only when that one is gone or taken, or no
+    /// position was kept. `place-unknown`, `place-taken` or `place-already-held` as for a sit.
     pub fn restore(
         &mut self,
         c: &mut Controller,
         body: Id,
         (thing, slot): (Id, Option<u64>),
+        was: Option<Vec3>,
         stance: Stance,
         at: Micros,
     ) -> R<()> {
@@ -606,7 +615,11 @@ impl Slots {
         };
         let n = place.place.slot;
         let position = |k| place.spot(k);
-        let Some(spot) = self.free_spot((thing, n)) else {
+        let own = was.and_then(|p| {
+            (0..place.most())
+                .find(|&k| place.spot(k) == p && !self.held.contains_key(&(thing, n, k)))
+        });
+        let Some(spot) = own.or_else(|| self.free_spot((thing, n))) else {
             let by: Vec<String> = self.holders_in(thing, n).into_iter().map(show).collect();
             return refuse(
                 "place-taken",
@@ -840,7 +853,7 @@ impl Slots {
         if n != instance {
             return None;
         }
-        let at = self.places.get(&key)?.clone();
+        let at = self.places.get(&seat_of(key))?.clone();
         moves.cancel(c, due, instance, now, how);
         let _ = self.cancelled(c, &at, floors, key, hold.state, now);
         Some(self.by_body.contains_key(&body))
@@ -852,7 +865,7 @@ impl Slots {
         c: &mut Controller,
         at: &PlaceAt,
         floors: &dyn crate::mover::Floors,
-        key: Key,
+        key: Spot,
         state: State,
         now: Micros,
     ) -> Option<R<HandOff>> {
