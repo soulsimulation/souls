@@ -2767,19 +2767,19 @@ fn serve(args: &[String]) -> R<()> {
         level: Level::Full,
         audience: Audience::Everyone,
     };
+    let stream_spec = bucket
+        .as_deref()
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()));
     let stream_store = Patient::new(
-        supervisor::bucket::Bucket::from_spec(
-            bucket
-                .as_deref()
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    format!("folder:{}", dir.join(".stream-recovery-store").display())
-                })
-                .as_str(),
-        )
-        .map_err(refusal)?
-        .for_world(),
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
     );
+    // R15: the stream's backup to the store, on its own thread with its own client.
+    let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
+        .map_err(refusal)?
+        .for_world();
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2911,12 +2911,14 @@ fn serve(args: &[String]) -> R<()> {
                         clock_seed: stream_clock,
                         history: Some(&*stream_found),
                     };
-                    // Its recovery reads are the world's start: patient (#1960).
+                    // Its recovery reads are the world's start: patient (#1960). Its recovery chain is written to the
+                    // spool beside `views/` and backed up to the store behind the stream (R15).
                     let mut writer = patiently(|| {
-                        view_out::PublicWriter::open_hiding(
+                        view_out::PublicWriter::open_spooled(
                             start,
                             &stream_store,
                             stream_closed.clone(),
+                            Some(view_out::backup_beside(&views_dir)),
                         )
                     })?;
                     // Both the pointer and placement bootstrap resolve the existing strict public history export.
@@ -2979,6 +2981,12 @@ fn serve(args: &[String]) -> R<()> {
                 if tries > 0 {
                     eprintln!("worldd: the public stream recovered after {tries} refused tries");
                 }
+                // R15: from here the store is the backup's: a stall or refusal delays only it, never a part.
+                measures::BACKUP.backup(&view_out::BackupState::Current);
+                writer.back_up(
+                    backup_store,
+                    Box::new(|state| measures::BACKUP.backup(&state)),
+                )?;
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };

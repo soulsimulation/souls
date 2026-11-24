@@ -2559,7 +2559,7 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         copy_dir(&recorded, &dir);
-        for gone in ["views", ".stream-recovery-store", "gateway.sock"] {
+        for gone in ["views", ".stream-recovery-store", "stream-backup", "gateway.sock"] {
             let p = dir.join(gone);
             let _ = std::fs::remove_dir_all(&p);
             let _ = std::fs::remove_file(&p);
