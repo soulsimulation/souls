@@ -78,6 +78,15 @@ there: Clerk on the stages, the same provider the directory verifies with its `-
 Run with only `--binding` (or nothing), it switches the bound world on again. `--back` clears only the flag: the next page
 names neither field, the published files are removed, the body folder is no longer served and the old world answers.
 
+A world with no old twin (D2, 0.134): every world the first binding's routes file routes to the new engine (`canonical`,
+not `archived`) that no binding binds and the launcher's registry does not hold. The launcher starts no process for it.
+It serves its page at `/w/<world>/` itself (the old page with the same v2 fields, its stream and history from its route,
+its body path and gateway as above), its client and bodies from the first binding's folders, refuses its old writes
+(409 `world.new-engine`), and answers its other old routes 404 `world.new-engine` (the page draws from the stream alone).
+`/__sim/worlds.json` lists it under its directory label (`GET /v1/worlds`, asked at most every 10 s; its name until the
+directory answers), not when the directory marks it unlisted. `/__sim/op/cutover` names these worlds in `routeOnly`; read
+it before a release, since a routed test world would be listed.
+
 Locally (fake minds; never against production): a launcher started with `SOULS_CUTOVER_BINDING=<abs file>`, a v2 world
 from `worldd seed` and `worldd serve`, `v2/tools/origin/origin.mjs` serving its stream, and Caddy on one port sending
 `/s/*` to the origin (`handle_path`) and everything else to the launcher.

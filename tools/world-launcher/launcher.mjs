@@ -11,7 +11,7 @@
 //   GET  /changelog              the public changelog: CHANGELOG.md rendered into the web build (apps/web/changelog.html)
 //   GET  /robots.txt, /sitemap.xml  what crawlers are told (crawl.mjs): public pages and listed worlds only; an unlisted
 //                                world's every response is X-Robots-Tag noindex, as is every /__sim JSON answer
-//   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities
+//   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities; with the worlds that have only a new-engine route (D2)
 //   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
 //   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
 //                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
@@ -59,7 +59,8 @@
 //   cobuilders/remove {account}, transfer {to?}, offers/cancel; anyone with the link: GET offer?code=, POST offer/accept
 //   {code} (signed in: that is the consent); a co-builder's agent: POST cobuild/pair/start|poll, approved by the co-builder
 //   (POST cobuild/pair/approve {code}).
-//   /w/<slug>/*                  proxied to that world (HTTP, SSE, WebSocket); started on demand
+//   /w/<slug>/*                  proxied to that world (HTTP, SSE, WebSocket); started on demand. A world with only a new-engine route (no registry row,
+//                                no binding; cutover.mjs withRouteOnly) starts nothing: its old page is built here (D2)
 //
 // --base /worlds puts all of the above under one path prefix (/worlds/, /worlds/__sim/…, /worlds/w/<slug>/…,
 // /worlds/assets/…), so one reverse-proxy rule serves the launcher beside another release on the same origin
@@ -434,7 +435,9 @@ export async function openLauncher(cfg = {}) {
     return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0 };   // #2233 A3: state; status kept for old readers
   };
   async function worldsJson() {
-    await Promise.all([...registry.worlds.map(refreshStats), cutover ? directoryWorlds() : null]);
+    // D2: the directory names the worlds with no old twin; the list waits for it only until it has answered once
+    const asked = cutover?.routeOnly().length ? directoryWorlds() : null;
+    await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
     return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], (w) => stats.get(w.slug)?.souls ?? w.souls).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
