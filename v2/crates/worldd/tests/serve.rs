@@ -431,6 +431,11 @@ fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
         "{said}"
     );
     w.line("worldd: started at tick");
+    let kinds = std::fs::read_to_string(dir.join("world.kinds")).unwrap();
+    assert!(
+        kinds.contains(&format!("# souls-boot-body {older_ground}\n")),
+        "the creator's boot lines name the world's revision"
+    );
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 

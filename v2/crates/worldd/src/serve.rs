@@ -876,19 +876,21 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
 ///
 /// Its kinds may differ from this build's: [`adopt`] reconciles them.
 fn own_header(dir: &Path, built: &Built, records: &[Vec<u8>]) -> R<Header> {
+    // A log compacted to a checkpoint with nothing written since holds no part: the kept header is checked by its
+    // world alone.
     let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
-        Some(bytes) => replica::effects::Part::read(bytes).map_err(refusal)?.header,
-        None => return Err("header-unnamed: the log holds no part".into()),
+        Some(bytes) => Some(replica::effects::Part::read(bytes).map_err(refusal)?.header),
+        None => None,
     };
     let path = dir.join("header");
     let header = match std::fs::read(&path) {
         Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if built.header.hash().to_bytes() != named {
+            if named.as_ref() != Some(&built.header.hash().to_bytes()) {
                 return Err(format!(
                     "header-missing: the log names header {}, the world keeps none, and this build's is {}: \
                      reseed the world",
-                    to_hex(&named),
+                    named.as_deref().map_or("none".into(), to_hex),
                     to_hex(&built.header.hash().to_bytes())
                 ));
             }
@@ -898,7 +900,9 @@ fn own_header(dir: &Path, built: &Built, records: &[Vec<u8>]) -> R<Header> {
         }
         Err(e) => return Err(io(&path)(e)),
     };
-    if header.hash().to_bytes() != named {
+    if let Some(named) = named
+        && header.hash().to_bytes() != named
+    {
         return Err(format!(
             "header-mismatch: {} is header {}, the log names {}",
             path.display(),
@@ -912,59 +916,71 @@ fn own_header(dir: &Path, built: &Built, records: &[Vec<u8>]) -> R<Header> {
     Ok(header)
 }
 
-/// Serves the built world under its own `header` (K16). Where this build would pin a kind by another revision than the
-/// header (a kind whose definition code or an entry changed), the header's revision is taken, by plain name: its
-/// rules are this build's definition, the activity and body kinds the engine makes are named by the header's pin.
-/// A kind only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per act); a
-/// kind only the header pins, with no definition of that plain name here, has no rules (`kind-unknown`, per act).
-/// When the header is this build's, nothing changes. Prints what differs.
+/// Serves the built world under its own `header` (K16). A kind this build pins by another revision than the header
+/// (its definition changed in code or in an entry) is paired with the header's by plain name, when each side has
+/// exactly one unmatched revision of that name: its rules are this build's definition under the header's pin, and the
+/// activity and body kinds the engine makes and `world.kinds`' boot lines name the header's pin. Any other unmatched
+/// revision is not guessed: one only this build pins cannot be made in this world until it is reseeded
+/// (`kind-not-in-header`, per act); one only the header pins has no rules (`kind-unknown`, per act). When the header
+/// is this build's, nothing changes. Prints what differs.
 fn adopt(built: &mut Built, header: Header) {
     if header.stored() == built.header.stored() {
         return;
     }
-    let pinned = |n: &str| header.kinds.iter().any(|k| k.as_str() == n);
-    let same = |n: &str| {
-        header
-            .kinds
-            .iter()
-            .find(|k| plain(k.as_str()) == plain(n))
-            .cloned()
-    };
-    let mut taken = Vec::new();
-    let mut unknown = Vec::new();
-    for k in &header.kinds {
-        if built.rules.kinds.contains_key(k.as_str()) {
-            continue;
+    let unmatched = |of: &Header, by: &Header| -> BTreeMap<String, Vec<String>> {
+        let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for k in of.kinds.iter().filter(|k| !by.kinds.contains(k)) {
+            m.entry(plain(k.as_str()).to_owned())
+                .or_default()
+                .push(k.as_str().to_owned());
         }
-        let ours = built
-            .rules
-            .kinds
-            .iter()
-            .find(|(n, _)| plain(n) == plain(k.as_str()))
-            .map(|(_, kind)| kind.clone());
-        match ours {
-            Some(kind) => {
-                built.rules.kinds.insert(k.as_str().to_owned(), kind);
-                taken.push(plain(k.as_str()).to_owned());
-            }
-            None => unknown.push(k.as_str().to_owned()),
+        m
+    };
+    let (mut world, mut build) = (
+        unmatched(&header, &built.header),
+        unmatched(&built.header, &header),
+    );
+    // This build's pin -> the world's, for each plain name with one unmatched revision on each side.
+    let mut renames = BTreeMap::new();
+    for (name, ours) in &build {
+        if let (Some(theirs), [ours]) = (world.get(name), ours.as_slice())
+            && let [theirs] = theirs.as_slice()
+            && let Some(kind) = built.rules.kinds.get(ours).cloned()
+        {
+            built.rules.kinds.insert(theirs.clone(), kind);
+            renames.insert(ours.clone(), theirs.clone());
         }
     }
+    for (ours, theirs) in &renames {
+        build.remove(plain(ours));
+        world.remove(plain(theirs));
+    }
     for a in &mut built.activities {
-        if let Some(k) = same(a.name.as_str()).filter(|_| !pinned(a.name.as_str())) {
+        if let Some(k) = renames.get(a.name.as_str()).and_then(|k| Name::new(k)) {
             a.name = k;
         }
     }
-    if let Some(k) = same(&built.body_kind).filter(|_| !pinned(&built.body_kind)) {
-        built.body_kind = k.as_str().to_owned();
+    if let Some(k) = renames.get(&built.body_kind) {
+        built.body_kind = k.clone();
     }
-    let anew: Vec<&str> = built
-        .header
-        .kinds
-        .iter()
-        .filter(|k| same(k.as_str()).is_none())
-        .map(|k| k.as_str())
+    let boot = |line: &str| {
+        line.split(' ')
+            .map(|w| renames.get(w).map_or(w, String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    built.kinds_text = built
+        .kinds_text
+        .lines()
+        .map(|l| match l.starts_with("# souls-boot-") {
+            true => boot(l) + "\n",
+            false => format!("{l}\n"),
+        })
         .collect();
+    let list =
+        |m: &BTreeMap<String, Vec<String>>| m.values().flatten().cloned().collect::<Vec<_>>();
+    let (anew, unknown) = (list(&build), list(&world));
+    let taken: Vec<&str> = renames.keys().map(|k| plain(k)).collect();
     println!(
         "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
          pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
