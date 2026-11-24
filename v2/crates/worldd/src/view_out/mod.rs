@@ -226,8 +226,9 @@ enum Start {
 }
 
 /// How long past a stretch's world time the writer waits for its last records before writing it (rule 11): records
-/// reach the writer once K4 has synced them, a little after the world time they carry.
-pub const SETTLE_US: Micros = 250_000;
+/// reach the writer once K4 has synced them, a little after the world time they carry. A stretch no later record cuts
+/// (a quiet spell, a few Souls) reaches the page this much after its end, so it is kept short (0.133 L1: was 250 ms).
+pub const SETTLE_US: Micros = 100_000;
 /// How often, in world time, a still world's pointer moves its "quiet until" on (rule 11).
 pub const QUIET_EVERY_US: Micros = stream::PERIOD_US;
 /// Parts in one public generation before the next baseline (#3825): 2 minutes of a busy world at 2 parts a second,

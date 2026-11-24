@@ -171,8 +171,8 @@ async function worldPage(video) {
   await page.addInitScript(() => {
     const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
     // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
-    // (it is written only after its end) and each pointer's quiet time plus the writer's 250 ms settle (worldd view_out
-    // rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
+    // (it is written only after its end) and each pointer's quiet time plus the writer's 100 ms settle (worldd view_out
+    // `SETTLE_US`, rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
     // came soonest after its world time; the least over the last minute maps one to the other, early by that sample's
     // own lag (tens to a few hundred ms). It never assumes the last part ended "now", which a quiet spell breaks.
     window.__worldAt = (pt) => { const xs = clock.filter((c) => c.at <= pt && c.at > pt - 60_000); return xs.length ? (pt - Math.min(...xs.map((c) => c.at - c.world / 1000))) * 1000 : null; };
@@ -187,7 +187,7 @@ async function worldPage(video) {
           // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
           const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
           if (p) clock.push({ at: now, world: p.to });
-          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 250_000 });
+          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 100_000 });
           if (clock.length > 600) clock.shift();
           if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
             framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })),
@@ -242,7 +242,7 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
     playDelayTicks: v.takes.playDelay,
     // G-late: when the first part after the send that touches this Soul reached the page, on the machine's wall clock (ms)
     arrivedAt: after.find((p) => (p.touched ?? []).some(mine))?.at ?? null,
-    // how long after its end each part of the step came, on the same mapping (worldd writes a part 250 ms after its end)
+    // how long after its end each part of the step came, on the same mapping (worldd writes a quiet stretch's part 100 ms after its end)
     partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
   };
 }, { soul, pt0 });
