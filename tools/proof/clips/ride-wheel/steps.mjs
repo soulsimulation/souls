@@ -6,12 +6,12 @@
 import { cast } from '../_shared/cast.mjs';
 import { board, carrierPose, fixed, orbit, shotPage } from '../_shared/ride.mjs';
 
-const RIDERS = ['Ana', 'Ben'], CARRIER = 'region-seaside-resort.ferris-wheel';
+const RIDERS = ['Ana', 'Ben'], CARRIER = { name: 'region-seaside-resort.ferris-wheel', def: 'ferris' };
 // the wheel as the template places it (worlds/templates/eden-district.json): at x 12, z 46, turned 0.3 rad; its front is
 // (sin 0.3, cos 0.3) (a god thing turns by rotation.y = +yaw); the core wheel's hub is 8.6 m up
 const WHEEL = [12, 46], YAW = 0.3, HUB = 8.6, FRONT = [Math.sin(YAW), Math.cos(YAW)], ACROSS = [Math.cos(YAW), -Math.sin(YAW)];
 await cast({ souls: [{ name: 'Ana', owner: 'admin' }, { name: 'Ben', owner: 'ben' }] });
-await board(RIDERS, CARRIER);
+await board(RIDERS, CARRIER.name);
 
 const view = (ground, front, across, dist, up) => ({
   eye: [WHEEL[0] + (FRONT[0] * front + ACROSS[0] * across) * dist, ground + up, WHEEL[1] + (FRONT[1] * front + ACROSS[1] * across) * dist],
