@@ -12,6 +12,7 @@ import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
+import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
 import { KIND_BOUNDS, KIND_LOOKS_URL } from './source/kind-bounds.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
@@ -54,6 +55,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
+    setBuildNodes(() => kinds.seen); // 0.133 item 6: the creator panel's Build places, moves and removes from what the stream shows
     // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
     // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
     const looks = entryLooks(KIND_BOUNDS);
@@ -148,7 +150,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };
   }, [stream]);
   return s.current;
 }

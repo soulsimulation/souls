@@ -9,7 +9,7 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd` and its uploads checker `assets-check` (which a release's move also puts beside it), `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
@@ -38,8 +38,24 @@ the origin and the agents' relay listen on loopback only (ports 7310, 7320 and 7
 `v2/entries`) to the world's gateway in a process apart from the viewers' origin, so a viewer join wave that saturates
 or restarts the origin drops no agent; its gauge is `/run/souls-agents/stats.json` (open agent sockets); each world's gateway gets its port from its own
 `/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
-entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
-a gateway whose entries folder is missing or empty refuses to start.
+entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760),
+and the world's kinds text beside them (`<world>/world.kinds`) at `/v2/kinds`, which a creator's client keeps to check
+its edits against; a gateway whose entries folder is missing or empty refuses to start. It ends with the world's
+uploads folder (`--uploads <world>/uploads`, #1960), where the creator's checked models and pictures are kept and
+served by hash; the gateway refuses to start without `assets-check` beside it.
+
+A world placed before 25 Nov 2026 has no `--uploads`, so its creator's uploads are refused `upload.off`. Once a
+release with `assets-check` has moved (it is then at `/usr/local/lib/souls/assets-check`), add it on the host as the
+view key was added, one world at a time, then restart that world's gateway:
+
+```sh
+for f in /etc/souls/gateway-*.env; do
+  w=${f#/etc/souls/gateway-}; w=${w%.env}
+  grep -q -- ' --uploads ' "$f" && continue
+  sudo sed -i "s|^GATEWAYD_ARGS=.*|& --uploads /var/lib/souls/worlds/worlds/$w/uploads|" "$f"
+  sudo systemctl restart "souls-gateway@$w"
+done
+```
 
 **Does it fit beside today's system?** Production: 8 cores, 30.6 GB of memory, about 173 GB of disk free. Today's
 worlds use 6.3 GB, and their unit may use at most 26 GB (O14, `v2/docs/machines.md`). With the new system's 3 GB

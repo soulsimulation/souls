@@ -9,6 +9,12 @@
 //! The folder is read at start (an unreadable folder, or one without an entry, stops the gateway) and again at a
 //! request whenever its files' names, sizes or times changed, so a world given new entries serves them without a
 //! restart. If a re-read fails, the last good array is served.
+//!
+//! **The world's kinds text** (#1960, 0.133): `GET /v2/kinds`, signed in the same way, serves `world.kinds` beside
+//! the entries folder (`<world>/world.kinds`, which `worldd serve` writes at each start): the pinned kinds and boot
+//! lines a creator's client checks its edits against (`<home>/kinds/<world>.kinds`, `v2/client/src/pair/pair.mjs`
+//! `refreshKindsText`). Gzip-encoded with its SHA-256 as a strong `ETag` (304 while unchanged), read at each request;
+//! `kinds-not-served` (404) without `--entries` or while the world has not written it.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -26,6 +32,8 @@ use crate::token::Token;
 
 /// Where clients fetch the entries.
 pub const PATH: &str = "/v2/entries";
+/// Where a creator's client fetches the world's kinds text.
+pub const KINDS_PATH: &str = "/v2/kinds";
 
 /// The entries as served: gzip bytes, their tag and how many entries.
 pub struct Built {
@@ -52,6 +60,11 @@ impl Entries {
             dir: dir.to_owned(),
             held: Mutex::new((stamps, Arc::new(built))),
         })
+    }
+
+    /// The world's kinds text: `world.kinds` in the world's folder, the entries folder's parent.
+    pub fn kinds_file(&self) -> PathBuf {
+        self.dir.parent().unwrap_or(&self.dir).join("world.kinds")
     }
 
     /// The current array, re-read when the folder changed since the last build.
@@ -145,16 +158,13 @@ fn refuse(status: StatusCode, name: &str) -> Response {
         .into_response()
 }
 
-/// `GET /v2/entries`.
-pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
-    let Some(entries) = gw.entries.get() else {
-        return refuse(StatusCode::NOT_FOUND, "entries-not-served");
-    };
+/// A request signed in with a token of the tokens file (a page's view token is not one).
+fn signed_in(gw: &Gateway, headers: &HeaderMap) -> bool {
     // As a sign-in does (C3): a token paired a moment ago is in the file before the 2 s re-read.
     if let Some(f) = gw.tokens_file.get() {
         f.refresh(&gw.tokens);
     }
-    let signed_in = headers
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
@@ -165,17 +175,16 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Respon
                 .unwrap_or_else(|e| e.into_inner())
                 .check(&t)
                 .is_some()
-        });
-    if !signed_in {
-        return refuse(StatusCode::UNAUTHORIZED, "token.refused");
-    }
-    let built = entries.current();
-    let tag =
-        HeaderValue::from_str(&built.etag).unwrap_or_else(|_| HeaderValue::from_static("\"\""));
+        })
+}
+
+/// The gzip body with its tag, or 304 when the client holds that tag.
+fn tagged(headers: &HeaderMap, etag: &str, kind: &'static str, gz: Vec<u8>) -> Response {
+    let tag = HeaderValue::from_str(etag).unwrap_or_else(|_| HeaderValue::from_static("\"\""));
     let cache = HeaderValue::from_static("private, no-cache");
     if headers
         .get(header::IF_NONE_MATCH)
-        .is_some_and(|v| v.as_bytes() == built.etag.as_bytes())
+        .is_some_and(|v| v.as_bytes() == etag.as_bytes())
     {
         return (
             StatusCode::NOT_MODIFIED,
@@ -186,17 +195,41 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Respon
     (
         StatusCode::OK,
         [
-            (
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            ),
+            (header::CONTENT_TYPE, HeaderValue::from_static(kind)),
             (header::CONTENT_ENCODING, HeaderValue::from_static("gzip")),
             (header::ETAG, tag),
             (header::CACHE_CONTROL, cache),
         ],
-        built.gz.clone(),
+        gz,
     )
         .into_response()
+}
+
+/// `GET /v2/entries`.
+pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
+    let Some(entries) = gw.entries.get() else {
+        return refuse(StatusCode::NOT_FOUND, "entries-not-served");
+    };
+    if !signed_in(&gw, &headers) {
+        return refuse(StatusCode::UNAUTHORIZED, "token.refused");
+    }
+    let built = entries.current();
+    tagged(&headers, &built.etag, "application/json", built.gz.clone())
+}
+
+/// `GET /v2/kinds`: the world's kinds text.
+pub async fn serve_kinds(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
+    let Some(entries) = gw.entries.get() else {
+        return refuse(StatusCode::NOT_FOUND, "kinds-not-served");
+    };
+    if !signed_in(&gw, &headers) {
+        return refuse(StatusCode::UNAUTHORIZED, "token.refused");
+    }
+    let Ok(text) = std::fs::read(entries.kinds_file()) else {
+        return refuse(StatusCode::NOT_FOUND, "kinds-not-served");
+    };
+    let etag = format!("\"{}\"", to_hex(&sha256(&text)));
+    tagged(&headers, &etag, "text/plain; charset=utf-8", gzip(&text))
 }
 
 #[cfg(test)]

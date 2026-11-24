@@ -13,7 +13,8 @@
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
 //! - [`creator`]: a page signed in with W1's session exchanges it for a short token for the world's one creator (W5,
 //!   #2801), so a browser holds the creator's socket.
-//! - [`entries`]: `GET /v2/entries`, the world's kind entries as one gzip JSON array for a signed-in client (#3760).
+//! - [`entries`]: `GET /v2/entries`, the world's kind entries as one gzip JSON array for a signed-in client (#3760),
+//!   and `GET /v2/kinds`, the world's kinds text a creator's client checks its edits against.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
 //! - Stopping (O16, #2809): on SIGTERM the gateway stops accepting, closes each signed-in socket with 1012 (Service
