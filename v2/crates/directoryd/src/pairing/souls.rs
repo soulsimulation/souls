@@ -338,7 +338,10 @@ impl Pairing {
         }
         Self::import_profile(&tx, grant, &world, &name, &description)?;
         store(tx.commit())?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        let worlds = Self::worlds_of(&db, grant)?;
+        self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
     }
 
     /// The owner of the unretired Soul `grant`, if it is `account`'s; refused by name otherwise.
@@ -351,62 +354,78 @@ impl Pairing {
         }
     }
 
+    /// Every placed world's Souls file.
+    pub(super) fn all_world_souls(
+        db: &rusqlite::Connection,
+        rows: &std::collections::BTreeMap<String, super::authority::Authority>,
+    ) -> std::io::Result<()> {
+        for (key, authority) in rows {
+            if key == &authority.world {
+                Self::world_souls(db, rows, authority)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// One placed world's Souls file, beside its tokens file: its Souls' notices only. `rows` (the registry) tells
+    /// which world a Soul's world name, alias or instance is.
+    pub(super) fn world_souls(
+        db: &rusqlite::Connection,
+        rows: &std::collections::BTreeMap<String, super::authority::Authority>,
+        authority: &super::authority::Authority,
+    ) -> std::io::Result<()> {
+        let mut text = String::from("# World-bound Soul lifecycle notices\n");
+        let mut query = db.prepare("SELECT grant_text,world,retired_at IS NOT NULL,name,description FROM soul_profiles_v1 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1").map_err(std::io::Error::other)?;
+        let found = query
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, bool>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .map_err(std::io::Error::other)?;
+        for row in found {
+            let (grant, world, retired, name, description) = row.map_err(std::io::Error::other)?;
+            if world
+                .as_ref()
+                .and_then(|world| rows.get(world))
+                .is_none_or(|bound| bound.world != authority.world)
+            {
+                continue;
+            }
+            if retired {
+                text.push_str(&format!("retired {grant}\n"));
+            } else {
+                let hex = |word: Option<String>| {
+                    word.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()))
+                };
+                text.push_str(&format!(
+                    "words {grant} {} {}\n",
+                    hex(name),
+                    hex(description)
+                ));
+            }
+        }
+        let name = format!(
+            "{}.souls",
+            authority
+                .tokens
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        let file = authority.tokens.with_file_name(name);
+        let temporary = file.with_extension("souls-tmp");
+        crate::durable::replace(&file, &temporary, text.as_bytes())
+    }
+
     /// Writes the Souls file beside the gateway's tokens file (W11b), when there is one.
     pub(super) fn write_souls(&self, db: &rusqlite::Connection) -> std::io::Result<()> {
         if let Some(authorities) = self.authorities().map_err(std::io::Error::other)? {
-            for (key, authority) in authorities.iter() {
-                if key != &authority.world {
-                    continue;
-                }
-                let mut text = String::from("# World-bound Soul lifecycle notices\n");
-                let mut query = db.prepare("SELECT grant_text,world,retired_at IS NOT NULL,name,description FROM soul_profiles_v1 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1").map_err(std::io::Error::other)?;
-                let rows = query
-                    .query_map([], |r| {
-                        Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, Option<String>>(1)?,
-                            r.get::<_, bool>(2)?,
-                            r.get::<_, Option<String>>(3)?,
-                            r.get::<_, Option<String>>(4)?,
-                        ))
-                    })
-                    .map_err(std::io::Error::other)?;
-                for row in rows {
-                    let (grant, world, retired, name, description) =
-                        row.map_err(std::io::Error::other)?;
-                    if world
-                        .as_ref()
-                        .and_then(|world| authorities.get(world))
-                        .is_none_or(|bound| bound.world != authority.world)
-                    {
-                        continue;
-                    }
-                    if retired {
-                        text.push_str(&format!("retired {grant}\n"));
-                    } else {
-                        let hex = |word: Option<String>| {
-                            word.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()))
-                        };
-                        text.push_str(&format!(
-                            "words {grant} {} {}\n",
-                            hex(name),
-                            hex(description)
-                        ));
-                    }
-                }
-                let name = format!(
-                    "{}.souls",
-                    authority
-                        .tokens
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                );
-                let file = authority.tokens.with_file_name(name);
-                let temporary = file.with_extension("souls-tmp");
-                crate::durable::replace(&file, &temporary, text.as_bytes())?;
-            }
-            return Ok(());
+            return Self::all_world_souls(db, &authorities);
         }
         let Some(tokens) = &self.tokens_file else {
             return Ok(());
@@ -495,7 +514,10 @@ impl Pairing {
              ON CONFLICT(grant_text) DO UPDATE SET name = COALESCE(?2, name), description = COALESCE(?3, description)",
             params![grant, p.name, p.description],
         ))?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        let worlds = Self::worlds_of(&db, grant)?;
+        self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
     }
 
     /// `account` sets its Soul's picture: G6's check with a portrait's limits, then the hold point. The stripped
@@ -615,6 +637,7 @@ impl Pairing {
     pub fn retire(&self, account: &str, grant: &str, now: u64) -> Result<(), &'static str> {
         self.owned(account, grant)?;
         let db = self.db.lock().expect("the store");
+        let worlds = Self::worlds_of(&db, grant)?;
         store(db.execute(
             "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
             params![grant, account],
@@ -628,7 +651,9 @@ impl Pairing {
             "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
             params![grant],
         ))?;
-        self.write_tokens(&db).map_err(|_| "tokens-file")?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        self.publish_removal(&db, &worlds, true, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")?;
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
     }
 }
