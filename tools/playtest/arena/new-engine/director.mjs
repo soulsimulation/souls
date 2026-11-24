@@ -52,6 +52,9 @@ export async function offerOf(v2, id) {
   return offers.find((o) => o.name !== 'walk' && o.act)?.act ?? id;
 }
 
+/** A calendar entry's kind (`eden:calendar_entry@…`, content/kinds/calendar/entry.json). */
+export const calendarKind = (k) => /:calendar_entry(@|$)/.test(String(k ?? ''));
+
 /** A place path from a node's frames: the place names of its parents, innermost first. */
 export function placePathOf(nodes, id) {
   const out = [];
@@ -75,8 +78,9 @@ export function newEngineModules({ log = () => {} } = {}) {
   const bodies = new Map(); // soul → its body's client id, as its own copy has it
 
   const provision = {
-    async startWorld({ genesis, dataDir, log: logFile, onSpawn }) {
-      world = await startV2({ template: genesis, dir: join(dataDir, 'v2'), log: logFile });
+    /** `facts`: an already exported genesis (the template's facts with things added), seeded instead of `genesis`. */
+    async startWorld({ genesis, facts = null, dataDir, log: logFile, onSpawn }) {
+      world = await startV2({ template: genesis, facts, dir: join(dataDir, 'v2'), log: logFile });
       onSpawn?.({ pid: world.pid });
       viewer = await streamViewer({ world });
       log(`new engine: ${world.page}`);
@@ -140,6 +144,8 @@ export function newEngineModules({ log = () => {} } = {}) {
       }
       const self = {
         info, dir, rails: null, budgetRefused: null, skipped, commands: () => join(dir, s.id, 'commands.jsonl'),
+        /** The thin command with this seat's Soul, outside its script (another Soul's own step in an item). */
+        cli: (...words) => v2.cli(...words),
         async onboard() {
           v2 = await pairSeat({ world, dir, label: s.id, owner: s.id, name: info.soulName });
           info.body = (await v2.join()).body; info.soulId = v2.soul; bodies.set(v2.soul, info.body);
@@ -176,6 +182,17 @@ export function newEngineModules({ log = () => {} } = {}) {
       const speech = viewer.said().filter((x) => x.speaker === bodies.get(soulId) && !x.private && x.words)
         .map((x) => ({ atMs: Math.round(x.at / 1000), tick: null, text: x.words, channel: 'say', pos: null, posSource: null }));
       return { soulId, ok: true, place: placePath[0] ?? null, placePath, posture: body.slot != null ? 'seated' : 'standing', activity: null, speech, pos: [body.pos[0] / 1e6, body.pos[2] / 1e6], posSource: 'stream' };
+    },
+    /** The calendar as the public stream shows it: each posted notice (a calendar entry with a poster) and who is
+     *  coming (its `interested` links), each end named by the seat's Soul id when it is a seat's Soul or body. */
+    calendar() {
+      if (!viewer) return [];
+      const soulOf = (end) => [...bodies].find(([soul, body]) => body === end || mailboxSoul(soul) === `soul-${end}`)?.[0] ?? end;
+      return [...viewer.nodes.values()].filter((x) => calendarKind(x.kind)).map((x) => {
+        const id = x.id.replace(/\.(\d+)$/, '-$1'), links = viewer.links(id);
+        return { id, poster: links.filter((l) => l.type.endsWith(':poster')).map((l) => soulOf(l.end))[0] ?? null,
+          interested: links.filter((l) => l.type.endsWith(':interested')).map((l) => ({ soulId: soulOf(l.end) })) };
+      }).filter((it) => it.poster);
     },
   });
 
