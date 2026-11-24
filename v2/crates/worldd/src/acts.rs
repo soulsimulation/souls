@@ -1262,7 +1262,7 @@ impl Sight<'_> {
     /// how far the point lies outside the body's reach above and below its feet, at the seat's stand point's height
     /// (the floor it took the seat from), both in the thing's own frame, so where the thing is placed and how it is
     /// turned change nothing. A point the entry does not declare is the thing itself, which the body is in: 0.
-    fn from_seat(&self, body: Id, thing: Id, slot: u64, point: &Name) -> Option<i64> {
+    fn reach_in_slot(&self, body: Id, thing: Id, slot: u64, point: &Name) -> Option<i64> {
         let build = *self.builds.get(&body)?;
         let n = self.tree.node(self.tree.handle(thing)?)?;
         let entry = entry_in(self.kinds, self.tree, &n)?;
@@ -1323,7 +1323,7 @@ impl Reach for Sight<'_> {
         // A body in a slot of the thing it acts on (a helm and its key, a chess seat and the board) reaches from its
         // seat (0.135 E13): its controller pose is the seat's frame at zero, which measures nothing on any floor.
         if me.pose.support == replica::pose::Support::Slot && me.pose.frame.node == target {
-            return self.from_seat(body, target, me.pose.frame.slot?, point);
+            return self.reach_in_slot(body, target, me.pose.frame.slot?, point);
         }
         let floor = sim::walk::node_of(me);
         if let Some(d) = self.to_thing(body, floor, a, target, point) {
