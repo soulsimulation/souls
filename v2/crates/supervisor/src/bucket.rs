@@ -6,6 +6,8 @@
 //! O9's folder store. Neither the URL nor a key is ever printed: [`Bucket::what`] names the kind of store only. The
 //! type is [`directoryd::backup::Bucket`], shared with O20b's shipper.
 
+use std::io::Write as _;
+
 use directoryd::directory::store::{Object, R, Store, When};
 
 /// The offsite bucket, or a folder standing in for it: O20b's type (#3523), one for both (O3c's `parse` and `list`).
@@ -65,7 +67,8 @@ pub fn patiently<T>(f: impl FnOnce() -> T) -> T {
 }
 
 /// A store whose reads (`get`, `list`) made [`patiently`] are tried again after each of `waits` while the store
-/// answers `store-unreachable` (no answer in time, or a 5xx); then that refusal, as the store gave it. Any other
+/// answers `store-unreachable` (no answer in time, a 5xx or a 429; a `Retry-After` longer than the wait is waited
+/// instead, up to [`directoryd::directory::store::RETRY_AFTER_MAX`]); then that refusal, as the store gave it. Any other
 /// answer, a refusal or not, is the store's at once. Writes and deletes pass through untouched.
 #[derive(Clone)]
 pub struct Patient<S> {
@@ -89,12 +92,17 @@ impl<S> Patient<S> {
                     let Some(wait) = waits.next() else {
                         return Err(e);
                     };
-                    eprintln!(
+                    // R18: a rate-limited store's `Retry-After`, when longer, bounded.
+                    let wait = (*wait)
+                        .max(directoryd::directory::store::retry_after(&e).unwrap_or_default());
+                    // R18: a closed stderr never panics the start's thread.
+                    let _ = writeln!(
+                        std::io::stderr(),
                         "store: out of reach ({}), trying again in {} s",
                         e.detail,
                         wait.as_secs_f32()
                     );
-                    std::thread::sleep(*wait);
+                    std::thread::sleep(wait);
                 }
                 answer => return answer,
             }

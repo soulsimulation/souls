@@ -95,6 +95,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -165,7 +166,21 @@ const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 6
 /// R17: a start's claim or archive open refused for a reason other than a store that does not answer. The process
 /// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
 fn refused_at_start(e: Refusal) -> ! {
-    eprintln!("worldd serve: {}", refusal(e));
+    // R18: start-up errors are written so that a closed stderr cannot panic the thread that says them.
+    let _ = writeln!(std::io::stderr(), "worldd serve: {}", refusal(e));
+    std::process::exit(1)
+}
+
+/// R18: the shipping thread panicked. Before its claim, the world would serve unclaimed and its archive wait for ever
+/// (`held`); after it, nothing would ship. The process ends by name, `worldd serve: shipping-panicked: <message>`,
+/// exit 1, and the unit restarts it.
+fn shipping_panicked(panic: &(dyn std::any::Any + Send)) -> ! {
+    let said = panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    let _ = writeln!(std::io::stderr(), "worldd serve: shipping-panicked: {said}");
     std::process::exit(1)
 }
 
@@ -191,10 +206,15 @@ fn until_answered<T>(
         match f() {
             Err(e) if e.name == "store-unreachable" => {
                 tries += 1;
-                let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                // R18: a rate-limited store's `Retry-After`, when longer, bounded.
+                let after = directoryd::directory::store::retry_after(&e)
+                    .map_or(0, |d| d.as_millis() as u64);
+                let wait =
+                    STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)].max(after);
                 let fault = refusal(e);
                 gauge.degraded(&fault, tries, wait);
-                eprintln!(
+                let _ = writeln!(
+                    std::io::stderr(),
                     "worldd: {what} waits for the store: {fault}; try {tries} unanswered, the next in {wait} ms"
                 );
                 for _ in 0..wait / 100 {
@@ -205,7 +225,10 @@ fn until_answered<T>(
             Ok(v) => {
                 gauge.current();
                 if tries > 0 {
-                    eprintln!("worldd: {what}: the store answered after {tries} unanswered tries");
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: {what}: the store answered after {tries} unanswered tries"
+                    );
                 }
                 return Ok(v);
             }
@@ -2287,7 +2310,8 @@ fn off_machine(
         }
         let claim = shipping::take_over(&mut d, &lineage, zone, first..end)?;
         let from = claim.takeover.from;
-        println!(
+        let _ = writeln!(
+            std::io::stdout(),
             "shipping: epoch {} from record {from} of {end}",
             claim.takeover.epoch
         );
@@ -2304,6 +2328,11 @@ fn off_machine(
     let opening = std::thread::Builder::new()
         .name("shipping".into())
         .spawn(move || -> Result<(), Refusal> {
+            // R18: a test's forced panic on this thread, before the claim (`tests/serve.rs`); a debug build's only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("WORLDD_TEST_PANIC_SHIPPING").is_some() {
+                panic!("WORLDD_TEST_PANIC_SHIPPING");
+            }
             // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
             // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
             // would number new records over ones already off the machine.
@@ -2321,7 +2350,12 @@ fn off_machine(
             Ok(())
         })
         .map_err(|e| e.to_string())?;
-    report("shipping", opening);
+    // R18: a panic on the shipping thread ends the process by name; its refusals already do (`refused_at_start`).
+    std::thread::spawn(move || {
+        if let Err(panic) = opening.join() {
+            shipping_panicked(panic.as_ref());
+        }
+    });
     let mut based = false;
     let mut archive_base = 0;
     let again = Again {
@@ -2486,7 +2520,7 @@ pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("worldd serve: {e}");
+            let _ = writeln!(std::io::stderr(), "worldd serve: {e}");
             1
         }
     }
