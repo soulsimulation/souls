@@ -3429,6 +3429,120 @@ fn again_objects_bound() -> usize {
     2 * (4 + 3 * 4) + 1
 }
 
+/// R16: the generations a writer under claim `epoch` begins over `records` records, a generation every 2 parts,
+/// reopened from its store after each record in `restarts` under `reopened`'s epoch; and the public digest it ends at.
+fn r16_run(
+    tag: &str,
+    epoch: Option<u64>,
+    records: u64,
+    restarts: &[u64],
+    reopened: Option<u64>,
+) -> (Vec<String>, Vec<u8>) {
+    let h = header();
+    let d = scratch(&format!("r16-{tag}"));
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |epoch| {
+        let mut w = PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &views,
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            None,
+            epoch,
+        )
+        .unwrap();
+        w.generation_parts = 2;
+        w
+    };
+    let body = Id::new(Scope([73; 16]), 1).unwrap();
+    let mut out = open(epoch);
+    let id = |w: &PublicWriter<_>| replica::encode::to_hex(&replica::ids::sha256(&w.baseline));
+    let mut began = vec![id(&out)];
+    for r in 0..records {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(r)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        out.push(r, &w3e_packet(&h, vec![effect])).unwrap();
+        out.flush().unwrap();
+        if began.last() != Some(&id(&out)) {
+            began.push(id(&out));
+        }
+        if restarts.contains(&r) {
+            drop(out);
+            out = open(reopened);
+        }
+    }
+    (began, out.player.hash().unwrap())
+}
+
+/// R16: every baseline a writer under a directory claim makes carries the claim's epoch, so two claims' writers on
+/// the same records, rolling over at the very same cursors, never make one generation address; each is deterministic
+/// for its own claim, and with no claim the addresses are those made before. A restart under a new claim keeps the
+/// generations already made (recovered, not made again) and makes its later ones under its own epoch.
+#[test]
+fn r16_a_claim_s_generations_never_share_an_address_with_another_claim_s() {
+    let (none, public) = r16_run("none", None, 7, &[], None);
+    let (a, a_public) = r16_run("a", Some(4), 7, &[], None);
+    let (a_again, _) = r16_run("a-again", Some(4), 7, &[], None);
+    let (b, b_public) = r16_run("b", Some(5), 7, &[], None);
+    assert_eq!(none.len(), 4, "a generation every 2 parts");
+    assert_eq!(a.len(), none.len());
+    assert_eq!(a, a_again, "one claim's generations are deterministic");
+    assert_eq!(a_public, public, "the epoch changes nothing a viewer plays");
+    assert_eq!(b_public, public);
+    for (x, y) in [(&none, &a), (&a, &b), (&none, &b)] {
+        for g in x {
+            assert!(!y.contains(g), "no generation address is shared");
+        }
+    }
+    // The four fields made before R16, with no claim: the first baseline as `baseline_from_projection` makes it.
+    let h = header();
+    let first = replica::stream::public::baseline_from_projection(
+        &h,
+        shown(
+            &h,
+            Some(&Closed::default()),
+            Replica::start(h.stored()).unwrap().tree(),
+        )
+        .unwrap(),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        none[0],
+        replica::encode::to_hex(&replica::ids::sha256(&first))
+    );
+    // Claim 4 runs to record 2, then a restart takes claim 5: the first two generations are claim 4's, recovered, and
+    // the later ones claim 5's.
+    let (moved, moved_public) = r16_run("moved", Some(4), 7, &[2], Some(5));
+    assert_eq!(moved_public, public);
+    assert_eq!(moved[..2], a[..2], "recovered with the bytes made");
+    for g in &moved[2..] {
+        assert!(!a.contains(g), "made again under the new claim: {g}");
+    }
+}
+
 // ---- #3948: what a closed container holds stays out of the public stream ----------------------------------------
 
 /// The fixture header's crate kind is closed (to its creator alone).

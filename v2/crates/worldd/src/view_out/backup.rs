@@ -19,6 +19,12 @@
 //! `health.json`; the stream and its viewers go on from the local disk. A confirmed head is kept with the store's
 //! identity: a spool with none, or one of another store, learns the store's head again (and puts over it), and a
 //! store with no head gets this writer's; neither is fenced.
+//!
+//! **The newest claim wins** (R16). Before it fences, a backup given its claim ([`Claim`]) reads the directory: a
+//! writer that holds the world's newest claim puts over the other head (the older writer wrote it during the overlap
+//! of a move, between this writer's open and its first put), and the older writer, finding the newer one's head,
+//! fences. A directory that does not answer leaves the pass refused, to be tried again; without a claim (no
+//! directory), the first head wins, as before.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -37,6 +43,9 @@ const DELETES_PER_PASS: usize = 64;
 /// The generations closed long enough ago to delete waiting, at most: a rollover adds one, so this holds hours of
 /// them; past it the oldest is left in the store (best effort, as deletion always was).
 const PRUNES_HELD: usize = 64;
+
+/// Whether this writer still holds the world's newest directory claim (R16): asked only before fencing.
+pub type Claim = Box<dyn FnMut() -> super::R<bool> + Send>;
 
 /// How the backup stands, for `health.json`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,6 +222,7 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     store: S,
     prefix: String,
     report: Box<dyn Fn(State) + Send>,
+    claim: Option<Claim>,
 ) -> super::R<()> {
     let (wake, woken) = std::sync::mpsc::sync_channel(1);
     spool.wake = Some(wake);
@@ -245,6 +255,7 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
         confirmed,
         known,
         tried,
+        claim,
         deletes: std::collections::VecDeque::new(),
         deleting: true,
     };
@@ -305,6 +316,8 @@ struct Worker<S> {
     known: bool,
     /// Heads put since, whose answers were lost: if the store holds one, it is this writer's.
     tried: Vec<Vec<u8>>,
+    /// Whether this writer holds the newest claim, read before fencing (R16); none: the first head wins.
+    claim: Option<Claim>,
     deletes: std::collections::VecDeque<String>,
     deleting: bool,
 }
@@ -466,10 +479,22 @@ impl<S: ObjectStore> Worker<S> {
                 }
                 Err(lost.into())
             }
-            Some(_) => Err(Short::Fenced(format!(
-                "stream-backup-fenced: the store's head {} is another writer's",
-                self.head_key
-            ))),
+            // Another writer's head: this one puts over it if it holds the newest claim (R16), else it fences.
+            Some(o) => match self.claim.as_mut().map(|newest| newest()) {
+                Some(Ok(true)) => {
+                    eprintln!(
+                        "worldd: the public stream's backup finds an older writer's head and holds the newest claim; it writes its own over it"
+                    );
+                    self.confirm(o.bytes, o.etag)?;
+                    Err(lost.into())
+                }
+                // The directory did not answer: not known to be another's yet, so tried again.
+                Some(Err(e)) => Err(e.into()),
+                Some(Ok(false)) | None => Err(Short::Fenced(format!(
+                    "stream-backup-fenced: the store's head {} is another writer's",
+                    self.head_key
+                ))),
+            },
         }
     }
 
@@ -546,4 +571,90 @@ impl<S: ObjectStore> Worker<S> {
 /// The spool beside a world's `views/`: never under it, as the chunks hold the world's own records.
 pub fn beside(views: &Path) -> PathBuf {
     views.with_file_name("stream-backup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use directoryd::directory::store::Memory;
+
+    /// A writer's backup over `store`, its spool in a scratch folder holding `head`, having confirmed `confirmed`.
+    fn worker<'a>(
+        tag: &str,
+        store: &'a Memory,
+        head: &[u8],
+        confirmed: (Vec<u8>, String),
+        claim: Option<Claim>,
+    ) -> Worker<&'a Memory> {
+        let dir = std::env::temp_dir().join(format!("v2-r16-backup-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("p")).unwrap();
+        std::fs::write(dir.join("p/head"), head).unwrap();
+        Worker {
+            store,
+            dir,
+            prefix: "p/".into(),
+            head_key: "p/head".into(),
+            identity: "store".into(),
+            prunes: Arc::default(),
+            progress: Arc::default(),
+            confirmed: Some(confirmed),
+            known: true,
+            tried: Vec::new(),
+            claim,
+            deletes: std::collections::VecDeque::new(),
+            deleting: true,
+        }
+    }
+
+    /// R16: two writers overlap in a move. Both found the old head; the old writer A puts a new head between the new
+    /// writer B's open and B's first put. B holds the newest claim, so it puts over A's head rather than fencing; A,
+    /// finding B's head and holding an older claim, fences. With no claim to read the first head still wins, and a
+    /// directory that does not answer leaves the pass to be tried again, never fenced.
+    #[test]
+    fn r16_the_newest_claim_wins_an_overlap_and_the_older_writer_fences() {
+        let store = Memory::default();
+        let found = store.put("p/head", b"h0", When::Absent).unwrap();
+        // A writes on over the head both found.
+        let a_put = store.put("p/head", b"a1", When::Is(&found)).unwrap();
+        // No claim: B fences, the first head wins (as before R16).
+        let mut first = worker(
+            "first",
+            &store,
+            b"b1",
+            (b"h0".to_vec(), found.clone()),
+            None,
+        );
+        assert!(matches!(first.pass(), Err(Short::Fenced(_))));
+        // The directory does not answer: tried again, not fenced.
+        let unanswered: Claim = Box::new(|| Err(super::super::fault("timeout", "directory")));
+        let mut b = worker(
+            "b",
+            &store,
+            b"b1",
+            (b"h0".to_vec(), found.clone()),
+            Some(unanswered),
+        );
+        assert!(matches!(b.pass(), Err(Short::Refused(_))));
+        // B holds the newest claim: it learns A's head and puts over it on the next pass.
+        b.claim = Some(Box::new(|| Ok(true)));
+        assert!(matches!(b.pass(), Err(Short::Refused(_))));
+        assert!(matches!(b.pass(), Ok(true)), "B's head is in the store");
+        let there = store.get("p/head").unwrap().unwrap();
+        assert_eq!(there.bytes, b"b1");
+        // A's next head is put over its own last, which B's has replaced: A's claim is older, so A fences.
+        let mut a = worker(
+            "a",
+            &store,
+            b"a2",
+            (b"a1".to_vec(), a_put),
+            Some(Box::new(|| Ok(false))),
+        );
+        assert!(matches!(a.pass(), Err(Short::Fenced(_))));
+        assert_eq!(
+            store.get("p/head").unwrap().unwrap().bytes,
+            b"b1",
+            "the older writer never puts over the newer one's head"
+        );
+    }
 }

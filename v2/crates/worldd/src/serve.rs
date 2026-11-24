@@ -1914,6 +1914,9 @@ struct Off {
     /// The log compactor's floors from here (#3837): the shipper's marks, and how far the archive has closed.
     mark: shipping::Mark,
     floor: Option<crate::compactor::Archive>,
+    /// R16: the claim this run took, its epoch and the machine's name: the public stream's generations carry the
+    /// epoch, and its backup reads the directory by it before fencing.
+    claim: Option<(u64, Name)>,
 }
 
 impl Off {
@@ -2194,7 +2197,7 @@ fn off_machine(
         .transpose()
         .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store.clone(), machine);
+    let mut d = Directory::new(store.clone(), machine.clone());
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     match d.world(&lineage, zone) {
         Err(e) if e.name == "record-missing" => {
@@ -2210,10 +2213,8 @@ fn off_machine(
     let end = first + records.len() as u64;
     let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
     let from = claim.takeover.from;
-    println!(
-        "shipping: epoch {} from record {from} of {end}",
-        claim.takeover.epoch
-    );
+    let epoch = claim.takeover.epoch;
+    println!("shipping: epoch {epoch} from record {from} of {end}");
     let shipper = Shipper::open(
         d,
         claim,
@@ -2299,6 +2300,7 @@ fn off_machine(
         archive_base,
         mark,
         floor: archive_floor,
+        claim: Some((epoch, machine)),
     };
     for (k, bytes) in records.iter().enumerate() {
         let record = first + k as u64;
@@ -2665,6 +2667,7 @@ fn serve(args: &[String]) -> R<()> {
         None => None,
     };
     let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
+    let off_claim = off.as_ref().and_then(|o| o.claim.clone());
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
@@ -2786,6 +2789,28 @@ fn serve(args: &[String]) -> R<()> {
     // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
     // store moved to another bucket is learned again rather than fenced on.
     let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
+    // R16: the claim this run took. Its epoch goes into every stream generation's baseline, so a machine that took
+    // over never makes a lost tail's address; and before fencing, the backup asks the directory whether this run still
+    // holds the newest claim: the newest writer puts over an older one's head, and the older one fences.
+    let stream_epoch = off_claim.as_ref().map(|(epoch, _)| *epoch);
+    let backup_claim = match off_claim {
+        Some((epoch, machine)) => {
+            let mut d = Directory::new(
+                supervisor::bucket::Bucket::from_spec(&stream_spec)
+                    .map_err(refusal)?
+                    .for_world(),
+                machine,
+            );
+            let (lineage, zone) = (built.header.lineage.0, built.header.zone);
+            let newest: view_out::BackupClaim = Box::new(move || {
+                Ok(d.world(&lineage, zone)?
+                    .current()
+                    .is_some_and(|t| t.epoch == epoch))
+            });
+            Some(newest)
+        }
+        None => None,
+    };
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2928,6 +2953,7 @@ fn serve(args: &[String]) -> R<()> {
                                 view_out::backup_beside(&views_dir),
                                 backup_identity.clone(),
                             )),
+                            stream_epoch,
                         )
                     })?;
                     // Both the pointer and placement bootstrap resolve the existing strict public history export.
@@ -2995,6 +3021,7 @@ fn serve(args: &[String]) -> R<()> {
                 writer.back_up(
                     backup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
+                    backup_claim,
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
                 // unit's 10 s stop timeout; best effort.
@@ -3611,6 +3638,7 @@ mod tests {
             archive_base: 4,
             mark: shipping::Mark::default(),
             floor: None,
+            claim: None,
         };
         for (record, bytes, is_input) in [
             (0, &part, false),
@@ -3637,6 +3665,7 @@ mod tests {
             archive_base: 4,
             mark: shipping::Mark::default(),
             floor: None,
+            claim: None,
         };
         for (record, bytes, is_input) in
             [(10, &input, true), (11, &part, false), (12, &part, false)]
