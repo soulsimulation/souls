@@ -1711,11 +1711,15 @@ impl Forms {
             // Out of a seat by B3's rise (its end wakes the run, [`Forms::fire`]); up from a ground posture, or a body
             // standing, at once (C25).
             Next::Rise => {
-                if let Some(d) = self.settled.remove(&body) {
+                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
+                // A body in a seat rises from it (0.135 E21): a ground posture it settled into before was ended by the
+                // walk to the seat, which claimed its legs, so the record of it is dropped, not released.
+                if let Some(d) = self.settled.remove(&body)
+                    && seated.is_none()
+                {
                     let _ = w.controller.release(body, d);
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 }
-                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
                 let Some(_) = seated else {
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 };

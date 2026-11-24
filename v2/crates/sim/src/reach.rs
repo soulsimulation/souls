@@ -6,7 +6,7 @@
 use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::kinds::sizes::Build;
-use replica::pose::Vec3;
+use replica::pose::{Pose, Support, Vec3};
 use replica::rules::json::Value as Json;
 use skills::form_runner::{Arg, Args};
 
@@ -144,6 +144,32 @@ pub fn in_slot(entry: &Json, build: Build, slot: u64, point: &str) -> Option<i64
     Some(with_height(h, off_height(feet, reach, to.y, to.y)))
 }
 
+/// Where the body with pose `pose` is, on a floor (0.135 E21): a body on a surface at its pose, on that surface; a
+/// seated, lying or riding body (`Support::Slot`, its controller pose the slot's frame at the slot's point,
+/// `Controller::slot_in`) at its slot's point of the thing it is in, the slot its pose names (`slots.<slot>.at_mm`,
+/// numbered from 1 in the entry's order, as the places register them) with its pose's position added, carried by `on`
+/// from that thing's frame onto a floor, wherever the thing stands and however it is turned. `within` is the entry of
+/// the thing a seated body is in; `None` when it or `on` gives no point. The served world and the run gate's world
+/// both measure reach to and from a body by this (`worldd`'s `Sight`, `tools/entry/v2`).
+pub fn body_at(
+    pose: &Pose,
+    within: Option<&Json>,
+    on: impl Fn(Id, Vec3) -> Option<(Id, Vec3)>,
+) -> Option<(Id, Vec3)> {
+    match pose.support {
+        Support::Surface { surface, .. } => Some((surface, pose.position)),
+        Support::Slot => {
+            let (_, slot_def) = within?
+                .get("slots")?
+                .obj()?
+                .get(usize::try_from(pose.frame.slot?).ok()?.checked_sub(1)?)?;
+            let at = um(slot_def.get("at_mm"))?.plus(pose.position).ok()?;
+            on(pose.frame.node, at)
+        }
+        _ => Some((pose.frame.node, pose.position)),
+    }
+}
+
 /// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
 /// stretch, a bow where it stands).
 pub const AT_SELF: &str = "souls:self";
@@ -227,6 +253,71 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
 #[cfg(test)]
 mod tests {
     use super::*;
+    use replica::pose::{Frame, Quat};
+
+    /// 0.135 E21: a seated body is at its slot's point of the thing it is in, carried onto the floor, not at its slot
+    /// frame's zero: a Soul on the end of a 3.6 m bench, the bench placed far off and turned a quarter, is 1.8 m from
+    /// the bench's origin; a rider of a vehicle is at its seat, wherever the vehicle has gone. A body on a surface is
+    /// where its pose says.
+    #[test]
+    fn e21_a_seated_body_is_at_its_seat() {
+        let bench = replica::rules::json::parse(
+            r#"{"kind":"t:bench","slots":{"middle":{"at_mm":[0,450,0]},"end":{"at_mm":[1800,450,0]}}}"#,
+        )
+        .expect("JSON");
+        let id = |n: u64| Id::new(replica::ids::Scope([7; 16]), n).expect("an id");
+        let (thing, floor) = (id(1), id(2));
+        let seated = |slot: u64| Pose {
+            frame: Frame {
+                node: thing,
+                slot: Some(slot),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        };
+        // The bench (or the vehicle) at x 40 m, z -25 m, turned a quarter about y.
+        let (origin, turn) = (
+            Vec3::new(40_000_000, 0, -25_000_000),
+            Quat::from_yaw_mdeg(90_000).expect("a turn"),
+        );
+        let carry = |n: Id, p: Vec3| {
+            assert_eq!(n, thing, "carried from the thing it is in");
+            Some((floor, origin.plus(turn.rotate(p).ok()?).ok()?))
+        };
+        let (on, end) = body_at(&seated(2), Some(&bench), carry).expect("the end slot");
+        assert_eq!(on, floor);
+        let from_origin = flat([end.x, end.z], [origin.x, origin.z]);
+        assert!(
+            (from_origin - 1_800_000).abs() <= 1_000,
+            "the end slot is 1.8 m from the bench's origin: {from_origin} µm"
+        );
+        assert_eq!(end.y, 450_000, "at the slot's height");
+        let (_, middle) = body_at(&seated(1), Some(&bench), carry).expect("the middle slot");
+        assert!(flat([middle.x, middle.z], [origin.x, origin.z]) <= 1_000);
+        // Its frame's zero, as before, would have put both at the floor's origin, 47 m off.
+        assert!(flat([end.x, end.z], [0, 0]) > 40_000_000);
+        // A slot the entry does not have, or no entry: no place.
+        assert!(body_at(&seated(3), Some(&bench), carry).is_none());
+        assert!(body_at(&seated(1), None, carry).is_none());
+        // A body on its feet is where its pose says, on its surface.
+        let standing = Pose {
+            frame: Frame {
+                node: floor,
+                slot: None,
+            },
+            position: Vec3::new(1, 2, 3),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: floor,
+                height: 0,
+            },
+        };
+        assert_eq!(
+            body_at(&standing, None, |_, _| None),
+            Some((floor, Vec3::new(1, 2, 3)))
+        );
+    }
 
     /// 0.135 E20: a steer whose `at` names the thing's control point keeps it, so the seat's reach to that point
     /// decides ([`in_slot`]) and `toward` is only the heading; a move `toward` a thing argument with no `at` (a swing's

@@ -170,19 +170,45 @@ impl Geometry for Snap {
             Ask::Distance { .. } => None,
         }
     }
-    /// A body where the controller has it. A thing is the tree's to answer (where it is, who holds it).
-    fn plan_walk(&self, body: Id, step: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+    /// A walk to point `at` of node `node`'s frame goes to that point carried onto the ground (0.135 E21), as a served
+    /// world plans it in that frame: a campfire in its site's slot, a line in its guestbook.
+    fn legs(&self, _: Id, node: Id, at: Vec3, _: i64) -> Option<Vec<sim::walk::Leg>> {
+        let to = self.on_ground(node, at)?;
+        Some(vec![sim::walk::Leg { to, link: None }])
+    }
+    fn plan_walk(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+    ) -> replica::host::WalkPlan {
         match self.sit_walks.get(&body).and_then(|w| w.get(&step)) {
             Some(&stand) => replica::host::WalkPlan::Legs(vec![(stand, None)]),
-            None => replica::host::WalkPlan::Unplanned,
+            None => self.legs(body, node, at, reach).map_or(
+                replica::host::WalkPlan::Unplanned,
+                |legs| {
+                    replica::host::WalkPlan::Legs(
+                        legs.into_iter().map(|l| (l.to, l.link)).collect(),
+                    )
+                },
+            ),
         }
     }
+    /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
+    /// it is in, as the served world reads it (`sim::reach::body_at`, 0.135 E21). A thing is the tree's to answer
+    /// (where it is, who holds it).
     fn read(&self, node: Id) -> Option<Seen> {
-        let position = *self.nodes.get(&node)?;
+        let seat = self.poses.get(&node).filter(|p| p.support == Support::Slot);
+        let (parent, position) = match seat {
+            Some(p) => sim::reach::body_at(p, self.entry(p.frame.node), |n, q| Some((n, q)))?,
+            None => (ground_id(), *self.nodes.get(&node)?),
+        };
         Some(Seen {
             id: node,
             kind: name("entry:node"),
-            parent: Some(ground_id()),
+            parent: Some(parent),
             position,
             fields: BTreeMap::new(),
         })
@@ -192,9 +218,9 @@ impl Geometry for Snap {
 impl Reach for Snap {
     /// As the served world measures it (`worldd`'s `Sight`), by the same code (`sim::reach`, 0.135 E19): a thing in the
     /// body's own hand is within reach; a body in a slot of the thing it acts on reaches from its seat
-    /// (`sim::reach::in_slot`); else from the body's edge to the thing's point or its nearest surface, carried onto the
-    /// ground (`sim::reach::to_thing`), else to its place in the tree, across x and z and in height. Every body is of
-    /// the standard build, as the places table takes it here.
+    /// (`sim::reach::in_slot`); else, each body where it is (`sim::reach::body_at`), from the body's edge to the thing's
+    /// point or its nearest surface, carried onto the ground (`sim::reach::to_thing`), else to its place in the tree,
+    /// across x and z and in height. Every body is of the standard build, as the places table takes it here.
     fn distance(
         &self,
         body: Id,
@@ -204,7 +230,6 @@ impl Reach for Snap {
         point: &Name,
     ) -> Option<i64> {
         let me = self.poses.get(&body)?;
-        let a = me.position;
         // C23: a move at the body itself, or at the thing argument its run named (`sim::reach::targets`).
         let target = match point.as_str() {
             sim::reach::AT_SELF => return Some(0),
@@ -218,11 +243,12 @@ impl Reach for Snap {
         if me.support == Support::Slot && me.frame.node == target {
             return sim::reach::in_slot(self.entry(target)?, build, me.frame.slot?, point.as_str());
         }
-        let node_of = |p: &Pose| match p.support {
-            Support::Surface { surface, .. } => surface,
-            _ => p.frame.node,
+        // Each body where it is (0.135 E21): a seated, lying or riding one at its slot of what it is in, on the ground.
+        let at = |p: &Pose| {
+            let carry = |n: Id, q: Vec3| Some((ground_id(), self.on_ground(n, q)?));
+            sim::reach::body_at(p, self.entry(p.frame.node), carry)
         };
-        let floor = node_of(me);
+        let (floor, a) = at(me)?;
         let on = |p: Vec3| {
             (floor == ground_id())
                 .then(|| self.on_ground(target, p))
@@ -236,7 +262,10 @@ impl Reach for Snap {
         }
         let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
         let (b, top) = match self.poses.get(&target) {
-            Some(t) => (t.position, height(node_of(t), t.position.y)),
+            Some(t) => {
+                let (on, b) = at(t)?;
+                (b, height(on, b.y))
+            }
             None => {
                 let b = self.place(target)?;
                 (b, Some(b.y))
@@ -2105,12 +2134,20 @@ impl Stage {
                     .iter()
                     .filter_map(|(lt, _)| {
                         let ty = replica::audience::link_type(&t.kind, lt);
+                        // An end that is a body's Soul is named by its body, as the case names it (0.135 E21), so a
+                        // rule's `most_per` on the actor counts a link a form made (a signed line, a vote).
+                        let by_body = |id: Id| {
+                            self.souls_of
+                                .iter()
+                                .find(|(_, s)| **s == id)
+                                .map_or(id, |(b, _)| *b)
+                        };
                         let ends: Vec<J> = self
                             .tree
                             .links_at(t.id)
                             .iter()
                             .filter(|e| self.tree.ty(e).as_str() == ty)
-                            .map(|e| J::Str(call(e.other)))
+                            .map(|e| J::Str(call(by_body(e.other))))
                             .collect();
                         (!ends.is_empty()).then(|| (lt.clone(), J::Arr(ends)))
                     })

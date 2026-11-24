@@ -1098,17 +1098,23 @@ impl Geometry for Sight<'_> {
         }
     }
 
+    /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
+    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin.
     fn read(&self, node: Id) -> Option<Seen> {
         let b = self.bodies.get(&node)?;
         let mut fields = BTreeMap::new();
         if self.carrying.contains(&node) {
             fields.insert(F_CROSSING, replica::encode::Value::Uint(1));
         }
+        let within = self.entry_at(b.pose.frame.node);
+        let (parent, position) =
+            sim::reach::body_at(&b.pose, within.as_deref(), |n, p| Some((n, p)))
+                .unwrap_or((sim::index::place_of(b).0, b.pose.position));
         Some(Seen {
             id: node,
             kind: self.kind.clone(),
-            parent: Some(sim::index::place_of(b).0),
-            position: b.pose.position,
+            parent: Some(parent),
+            position,
             fields,
         })
     }
@@ -1158,31 +1164,60 @@ impl Sight<'_> {
                 if own_floor {
                     return Some(p);
                 }
-                if let Some(on) = view
-                    .on_floor(target, p)
-                    .filter(|(f, ..)| self.same_frame(*f, floor))
-                {
-                    return Some(on.1);
-                }
-                // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
-                let place = n.place()?;
-                let up = place
-                    .position
-                    .plus(place.orientation.rotate(p).ok()?)
-                    .ok()?;
-                // A loose thing the view's tree does not hold (a bench a world placed, #4072): carried from its parent.
-                if let Some(on) = view
-                    .on_floor(n.parent()?, up)
-                    .filter(|(f, ..)| self.same_frame(*f, floor))
-                {
-                    return Some(on.1);
-                }
-                self.floor_of(n.parent()?, up)
-                    .filter(|(f, _)| self.same_frame(*f, floor))
+                self.carry(view, target, p, &|f| self.same_frame(f, floor))
                     .map(|(_, p)| p)
             };
             sim::reach::to_thing(&entry, build, from, point.as_str(), on)
         })?
+    }
+
+    /// Point `p` of node `target`'s frame on a floor `keep` keeps, with that floor: the view's floor under it, else,
+    /// for a thing of a building with floors (an inner door, #3688), from a body on that building's floor, or a loose
+    /// thing the view's tree does not hold (a bench a world placed, #4072), carried from its parent.
+    fn carry(
+        &self,
+        view: &View<'_>,
+        target: Id,
+        p: Vec3,
+        keep: &dyn Fn(Id) -> bool,
+    ) -> Option<(Id, Vec3)> {
+        if let Some((f, at, _)) = view.on_floor(target, p).filter(|(f, ..)| keep(*f)) {
+            return Some((f, at));
+        }
+        let n = self.tree.node(self.tree.handle(target)?)?;
+        let place = n.place()?;
+        let up = place
+            .position
+            .plus(place.orientation.rotate(p).ok()?)
+            .ok()?;
+        if let Some((f, at, _)) = view.on_floor(n.parent()?, up).filter(|(f, ..)| keep(*f)) {
+            return Some((f, at));
+        }
+        self.floor_of(n.parent()?, up).filter(|(f, _)| keep(*f))
+    }
+
+    /// The entry of the thing `node` is.
+    fn entry_at(&self, node: Id) -> Option<std::borrow::Cow<'_, Json>> {
+        entry_in(
+            self.kinds,
+            self.tree,
+            &self.tree.node(self.tree.handle(node)?)?,
+        )
+    }
+
+    /// Where body `b` is on a floor, seen for `body`'s build ([`sim::reach::body_at`], 0.135 E21): a seated, lying or
+    /// riding body at its slot's point of the thing it is in, carried onto the floor under it; any other at its pose.
+    /// A seat whose entry or floor is not found leaves the pose as it is.
+    fn body_on_floor(&self, body: Id, b: &Moved) -> (Id, Vec3) {
+        let within = self.entry_at(b.pose.frame.node);
+        let found = self.with_view(body, |view| {
+            sim::reach::body_at(&b.pose, within.as_deref(), |n, p| {
+                self.carry(view, n, p, &|_| true)
+            })
+        });
+        found
+            .flatten()
+            .unwrap_or((sim::walk::node_of(b), b.pose.position))
     }
 }
 
@@ -1201,7 +1236,8 @@ impl Sight<'_> {
 }
 
 impl Reach for Sight<'_> {
-    /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
+    /// To another body, from feet to feet, each where it is ([`Sight::body_on_floor`]: a seated one at its seat); to a
+    /// thing, from the body's edge to its point or its nearest surface
     /// ([`Sight::to_thing`]), else to its place in the tree; across x and z, and in height beyond the body's reach
     /// above and below its feet ([`off_height`]).
     fn distance(
@@ -1213,7 +1249,6 @@ impl Reach for Sight<'_> {
         point: &Name,
     ) -> Option<i64> {
         let me = self.bodies.get(&body)?;
-        let a = me.pose.position;
         // C23: a move at the body itself, or at the thing argument its run named.
         let target = match point.as_str() {
             AT_SELF => return Some(0),
@@ -1233,17 +1268,18 @@ impl Reach for Sight<'_> {
         if me.pose.support == replica::pose::Support::Slot && me.pose.frame.node == target {
             return self.reach_in_slot(body, target, me.pose.frame.slot?, point);
         }
-        let floor = sim::walk::node_of(me);
+        // Each body where it is (0.135 E21): a seated one at its slot of the thing it is in, not its slot frame's zero.
+        let (floor, a) = self.body_on_floor(body, me);
         if let Some(d) = self.to_thing(body, floor, a, target, point) {
             return Some(d);
         }
         // Heights in the tree's frame: a body's feet on its floor's place, as a thing's place is found.
         let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
         let (b, top) = match self.bodies.get(&target) {
-            Some(t) => (
-                t.pose.position,
-                height(sim::walk::node_of(t), t.pose.position.y),
-            ),
+            Some(t) => {
+                let (on, b) = self.body_on_floor(body, t);
+                (b, height(on, b.y))
+            }
             None => {
                 let b = self.place(target)?;
                 (b, Some(b.y))
