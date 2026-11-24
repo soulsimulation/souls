@@ -77,6 +77,10 @@ const WALL: &str = "test:wall";
 const CARRY: &str = "test:carry";
 /// A carry whose offer lapses in half a second (0.135 C3).
 const BRIEF: &str = "test:brief_carry";
+/// A carry that takes up to six (the crew test): the kind's members at most.
+const CREW: &str = "test:crew_carry";
+/// How many Souls the crew test's world holds.
+const CREW_SOULS: u64 = 5;
 const FRONT: &str = "test:front";
 const BACK: &str = "test:back";
 
@@ -87,7 +91,7 @@ fn name(s: &str) -> Name {
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
     [
-        PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY, BRIEF,
+        PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY, BRIEF, CREW,
     ]
     .iter()
     .enumerate()
@@ -115,9 +119,10 @@ fn id(n: u64) -> Id {
     Id::new(Scope([0x7e; 16]), n).unwrap()
 }
 
-/// The two Souls (each Soul's id is its body's here), the loads and the passage's two walls.
+/// The Souls (each Soul's id is its body's here; the crew test's third to fifth after the walls), the loads and the
+/// passage's two walls.
 fn soul(n: u64) -> Id {
-    id(n)
+    if n <= 2 { id(n) } else { id(20 + n) }
 }
 fn beam() -> Id {
     id(3)
@@ -201,8 +206,12 @@ fn place(middle: Vec3, along: i64, east: bool) -> Vec3 {
 fn at_end(middle: Vec3, along: i64) -> Vec3 {
     Vec3::new(middle.x, 0, middle.z + along)
 }
-/// Each Soul starts 4 m west of its place at the beam: Soul 1 in front (north), Soul 2 behind.
+/// Each Soul starts 4 m west of its place at the beam: Soul 1 in front (north), Soul 2 behind. The crew test's
+/// third to fifth stand 4 m west of the crate and south of it, off every carry's way.
 fn start(n: u64) -> Vec3 {
+    if n > 2 {
+        return Vec3::new(crate_at().x - 4 * M, 0, crate_at().z - (n as i64) * M);
+    }
     let [back, front] = places(&beam_entry());
     let p = at_end(beam_at(), if n == 1 { front } else { back });
     Vec3::new(p.x - 4 * M, 0, p.z)
@@ -297,7 +306,7 @@ fn tree_rules() -> TreeRules {
             (full(PLACE), k("place", &[GROUND], &[], None)),
             (
                 full(GROUND),
-                k("place", &["body", "thing", CARRY, BRIEF], &[], None),
+                k("place", &["body", "thing", CARRY, BRIEF, CREW], &[], None),
             ),
             (full(WALKER), k("family", &[], &[1, 2], None)),
             (full(BEAM), k("thing", &[], &[], Some(2))),
@@ -306,8 +315,9 @@ fn tree_rules() -> TreeRules {
             (full(WALL), k("thing", &[], &[], None)),
             (full(CARRY), k("activity", &[], &[1], None)),
             (full(BRIEF), k("activity", &[], &[1], None)),
+            (full(CREW), k("activity", &[], &[1], None)),
         ]),
-        souls: [soul(1), soul(2)].into(),
+        souls: (1..=CREW_SOULS).map(soul).collect(),
         audiences: BTreeMap::new(),
     }
 }
@@ -319,6 +329,11 @@ fn carry_kind() -> ActivityKind {
 
 /// A carry's kind of plain name `plain`, whose offer lasts `lasts` µs.
 fn carry_of(plain: &str, lasts: u64) -> ActivityKind {
+    carry_most(plain, lasts, None)
+}
+
+/// [`carry_of`] taking up to `most` members (two when none), as a dance offered to several does (0.134 T3).
+fn carry_most(plain: &str, lasts: u64, most: Option<u64>) -> ActivityKind {
     let role = |r: &str| {
         Value::Map(BTreeMap::from([
             (1, Value::Text(name(r))),
@@ -332,14 +347,17 @@ fn carry_of(plain: &str, lasts: u64) -> ActivityKind {
             ),
         ]))
     };
-    ActivityKind::from_value(&Value::Map(BTreeMap::from([
+    let mut m = BTreeMap::from([
         (1, Value::Text(name(&full(plain)))),
         (2, Value::Uint(1)),
         (3, Value::Array(vec![role(FRONT), role(BACK)])),
         (4, Value::Uint(lasts)),
         (5, Value::Uint(400_000)),
-    ])))
-    .expect("the carry's kind")
+    ]);
+    if let Some(most) = most {
+        m.insert(6, Value::Uint(most));
+    }
+    ActivityKind::from_value(&Value::Map(m)).expect("the carry's kind")
 }
 
 fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
@@ -368,6 +386,11 @@ fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
 
 /// The world as built: the two Souls at their starts, the three loads and the two walls.
 fn world() -> Replica {
+    world_of(2)
+}
+
+/// [`world`] with `souls` Souls at their starts (the crew test's five).
+fn world_of(souls: u64) -> Replica {
     let g = ground();
     let root = id(100);
     let h = header(root);
@@ -376,14 +399,13 @@ fn world() -> Replica {
     if let Change::Create { pose, .. } = &mut open {
         pose.support = Support::None;
     }
-    let changes = vec![
-        (root, open),
-        create(soul(1), WALKER, g, start(1)),
-        create(soul(2), WALKER, g, start(2)),
+    let mut changes = vec![(root, open)];
+    changes.extend((1..=souls).map(|n| create(soul(n), WALKER, g, start(n))));
+    changes.extend([
         create(beam(), BEAM, g, beam_at()),
         create(upright(), UPRIGHT, g, upright_at()),
         create(crate_(), CRATE, g, crate_at()),
-    ];
+    ]);
     let solid = |hz: i64| {
         Value::Array(vec![Value::Array(
             [0, 0, 100, hz / 1000, 0, 0, 2_500]
@@ -392,7 +414,6 @@ fn world() -> Replica {
                 .collect(),
         )])
     };
-    let mut changes = changes;
     for (n, (at, hz)) in walls().into_iter().enumerate() {
         let (parent, mut c) = create(wall(n as u64 + 1), WALL, g, at);
         if let Change::Create { fields, .. } = &mut c {
@@ -435,16 +456,23 @@ fn world() -> Replica {
 
 /// The bodies, each where the log last had it on a restart (`placed`), else at its start.
 fn bodies(placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
+    bodies_of(2, placed)
+}
+
+/// [`bodies`] of `souls` Souls.
+fn bodies_of(souls: u64, placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let frame = Frame {
         node: ground,
         slot: None,
     };
-    let p1 = town.surfaces[&ground].place(soul(1), frame, start(1), Quat::IDENTITY)?;
-    let p2 = town.surfaces[&ground].place(soul(2), frame, start(2), Quat::IDENTITY)?;
+    let at = (1..=souls)
+        .map(|n| town.surfaces[&ground].place(soul(n), frame, start(n), Quat::IDENTITY))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut b = Bodies::new(town, 50_000)?;
-    b.add_body_at(humanoid(), p1, placed)?;
-    b.add_body_at(humanoid(), p2, placed)?;
+    for p in at {
+        b.add_body_at(humanoid(), p, placed)?;
+    }
     Ok(b)
 }
 
@@ -722,10 +750,27 @@ fn socket_path(tag: &str) -> PathBuf {
 /// The world, from `store`'s log if it has one, serving the gateway's link on `path`; `watched`, its stream written
 /// for the old page as K1's [`watch`] says (rungs 0 and 1).
 fn start_world(store: &Mem, path: &std::path::Path, watched: bool) -> answers::World {
+    start_world_of(store, path, watched, 2)
+}
+
+/// [`start_world`] with `souls` Souls (the crew test's five).
+fn start_world_of(
+    store: &Mem,
+    path: &std::path::Path,
+    watched: bool,
+    souls: u64,
+) -> answers::World {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.measures = false;
-    cfg.bodies = Some(Box::new(|p: &Placed| bodies(p)));
-    cfg.engine = Some((tree_rules(), vec![carry_kind(), carry_of(BRIEF, 500_000)]));
+    cfg.bodies = Some(Box::new(move |p: &Placed| bodies_of(souls, p)));
+    cfg.engine = Some((
+        tree_rules(),
+        vec![
+            carry_kind(),
+            carry_of(BRIEF, 500_000),
+            carry_most(CREW, 60_000_000, Some(6)),
+        ],
+    ));
     if watched {
         watch(&mut cfg);
     }
@@ -733,7 +778,8 @@ fn start_world(store: &Mem, path: &std::path::Path, watched: bool) -> answers::W
         kinds: entries(),
         moves: Json::Obj(Vec::new()),
     };
-    let served = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let served =
+        answers::start(world_of(souls), rules, store.clone(), cfg).expect("the world starts");
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path).unwrap();
     let door = served.door();
@@ -753,11 +799,15 @@ struct Gate {
 }
 
 async fn gate(path: &std::path::Path) -> Gate {
+    gate_of(path, 2).await
+}
+
+/// [`gate`] with a token for each of `souls` Souls.
+async fn gate_of(path: &std::path::Path, souls: u64) -> Gate {
     let mut tokens = Tokens::default();
-    let issued: Vec<Token> = [1, 2]
-        .iter()
+    let issued: Vec<Token> = (1..=souls)
         .map(|n| {
-            let grant = Grant::Actor(Actor::Soul(soul(*n)));
+            let grant = Grant::Actor(Actor::Soul(soul(n)));
             let t = Token::issue(grant).unwrap();
             tokens.add(grant, t.hash());
             t
@@ -1255,4 +1305,107 @@ async fn leave(s: &mut Soul, carry: Id, what: &str) -> Duration {
         .await
         .unwrap_or_else(|r| panic!("{what}: {r}"));
     t.elapsed()
+}
+
+/// The crew measure (0.135, crews of up to six): what a crew of five meets today, each step by name. It reaches no
+/// rung yet. A two-role carry (as the served `mars:carry` is: its front and its back take one each,
+/// `content/kinds/construction/carry.json`) makes a second pair at a third Soul's accept, never a crew of three.
+/// Given a kind that takes six, five Souls join one carry, and then:
+/// - the crate, which takes three, is lifted with only its first two members at its grips: the lift counts members,
+///   not carriers, and carries between the first two (`worldd::engine`, `carry:lift`);
+/// - the fifth member, who holds nothing, leaves, and the carry breaks off: the crate is set down
+///   (`souls:partner-left`) though four remain, more than it takes.
+///
+/// Each is asserted as it is today, so the task that carries with up to six changes this test where it changes that.
+#[tokio::test(flavor = "multi_thread")]
+async fn crew_measure_five_souls_today_carry_on_two_and_break_off_at_any_leave() {
+    let store = Mem::with(Vec::new());
+    let path = socket_path("crew");
+    let served = start_world_of(&store, &path, false, CREW_SOULS);
+    let Gate { url, issued } = gate_of(&path, CREW_SOULS).await;
+    let mut crew = Vec::new();
+    for (n, token) in (1..=CREW_SOULS).zip(&issued) {
+        crew.push(Soul::connect(&url, soul(n), token).await);
+    }
+    let g = ground();
+    let offer_to = |kind: &str, to: &[u64]| {
+        BTreeMap::from([
+            (1, pinned(kind)),
+            (2, Value::Text(name(FRONT))),
+            (
+                3,
+                Value::Array(to.iter().map(|n| soul(*n).to_value()).collect()),
+            ),
+        ])
+    };
+
+    // A two-role carry offered to Souls 3 and 4: the second accept makes a second pair, not a crew of three.
+    let offered = crew[0]
+        .act("activity:offer", Some(g), offer_to(CARRY, &[3, 4]))
+        .await
+        .expect("a carry offered to two");
+    let pair = Logged::read(&store).created(&offered, CARRY);
+    crew[2]
+        .act("activity:accept", Some(pair), BTreeMap::new())
+        .await
+        .expect("Soul 3 accepts");
+    let second = crew[3]
+        .act("activity:accept", Some(pair), BTreeMap::new())
+        .await
+        .expect("Soul 4 accepts");
+    let other = Logged::read(&store).created(&second, CARRY);
+    assert_ne!(
+        other, pair,
+        "today: a third Soul's accept makes a second pair"
+    );
+    // Each leaves both pairs, so Soul 1 is free for the crew.
+    for (s, activity) in [(2, pair), (0, pair), (3, other), (0, other)] {
+        crew[s]
+            .act("activity:leave", Some(activity), BTreeMap::new())
+            .await
+            .expect("a leave is always accepted");
+    }
+
+    // The first two walk to the crate's carrying places, at its ends along its length (its z).
+    let [back, front] = places(&crate_entry());
+    let end = |along: i64| Vec3::new(crate_at().x, 0, crate_at().z + along);
+    crew[0].send("eden:walk", Some(g), point(end(front))).await;
+    crew[1].send("eden:walk", Some(g), point(end(back))).await;
+    for s in &mut crew[..2] {
+        s.answer().await.expect("walks to the crate");
+    }
+
+    // A carry that takes six, offered to the other four: each accept joins the one carry.
+    let offered = crew[0]
+        .act("activity:offer", Some(g), offer_to(CREW, &[2, 3, 4, 5]))
+        .await
+        .expect("a crew's carry offered to four");
+    let carry = Logged::read(&store).created(&offered, CREW);
+    for s in &mut crew[1..] {
+        s.act("activity:accept", Some(carry), BTreeMap::new())
+            .await
+            .expect("each of the four joins the carry");
+    }
+    // Today: the crate that takes three is lifted, though only the first two stand at its grips.
+    crew[0]
+        .act("carry:lift", Some(carry), lift(crate_(), None))
+        .await
+        .expect("today: a crate that takes three lifted by two at its grips");
+    // Today: the fifth, who holds nothing, leaves, and the crate is set down with four still in the carry.
+    crew[4]
+        .act("activity:leave", Some(carry), BTreeMap::new())
+        .await
+        .expect("a leave is always accepted");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    served.stop();
+    assert_eq!(
+        Logged::read(&store).set_downs(),
+        vec!["souls:partner-left".to_owned()],
+        "today: any member's leave breaks a crew's carry off"
+    );
+    println!(
+        "team gate: crews of up to six: not reached; a two-role carry makes a second pair at a third accept; five in \
+         one carry lift a crate that takes three with two at its grips; the fifth's leave sets it down \
+         (souls:partner-left) with four left"
+    );
 }
