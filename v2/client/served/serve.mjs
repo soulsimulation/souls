@@ -8,6 +8,7 @@
 //   node v2/client/served/serve.mjs <served dir> [--port <n>] [--upstream <origin>]
 //     a local stand-in: anything else is passed to --upstream (a directory, say), else 404. Prints `listening <url>`.
 
+import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
@@ -20,6 +21,10 @@ const TYPES = {
   'safety.md': 'text/markdown; charset=utf-8',
 };
 
+const REPLICA = new Set(['replica.js', 'replica_bg.wasm']);
+/** An answer's headers as either server writes them: its type, length, no-cache and, for the replica, its ETag. */
+export const headers = (a) => ({ 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-cache', ...(a.etag ? { etag: a.etag } : {}) });
+
 /** The answer for `path` (no query), or null when it is not one of the served addresses. */
 export function answer(dir, path) {
   path = path.replace(/\/llms\.txt$/, '/instructions.md'); // The world's short agent guide is the current instructions.
@@ -27,7 +32,10 @@ export function answer(dir, path) {
   if (!config && !TYPES[name]) return null;
   try {
     if (config) return { status: 200, type: 'application/json', body: Buffer.from(JSON.stringify({ soulClient: JSON.parse(readFileSync(join(dir, 'soul-client.json'), 'utf8')) })) };
-    return { status: 200, type: TYPES[name], body: readFileSync(join(dir, name)) };
+    const body = readFileSync(join(dir, name));
+    // R16: the replica's two files carry their content's hash, so an open page tells a new replica by a HEAD alone.
+    const etag = REPLICA.has(name) ? `"${createHash('sha256').update(body).digest('hex')}"` : undefined;
+    return { status: 200, type: TYPES[name], body, ...(etag ? { etag } : {}) };
   } catch {
     return null;
   }
@@ -43,7 +51,7 @@ if (startedAsScript()) {
     const url = new URL(req.url, 'http://x');
     const a = req.method === 'GET' || req.method === 'HEAD' ? answer(dir, url.pathname) : null;
     if (a) {
-      res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-cache' });
+      res.writeHead(a.status, headers(a));
       return res.end(req.method === 'HEAD' ? undefined : a.body);
     }
     if (!upstream) { res.writeHead(404); return res.end(); }

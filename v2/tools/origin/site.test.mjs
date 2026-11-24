@@ -73,6 +73,23 @@ test('served client: world GET/HEAD routes serve the installed bytes and matchin
   } finally { missing.close(); }
 });
 
+test('R16: the replica\'s two files carry an ETag of their content, the same on GET and HEAD, changed when the file is', async () => {
+  const etag = async (name, method = 'HEAD') => (await fetch(`${base}/w/eden/${name}`, { method })).headers.get('etag');
+  const hashOf = (name) => `"${createHash('sha256').update(readFileSync(join(dir, 'client', name))).digest('hex')}"`;
+  for (const name of ['replica.js', 'replica_bg.wasm']) {
+    assert.equal(await etag(name), hashOf(name), `${name}: its content's hash`);
+    assert.equal(await etag(name, 'GET'), await etag(name));
+  }
+  assert.equal(await etag('eden.mjs'), null, 'only the replica carries one');
+  // A release moves a new client in: the same length, other bytes, another ETag.
+  const wasm = join(dir, 'client', 'replica_bg.wasm'), was = readFileSync(wasm), old = await etag('replica_bg.wasm');
+  writeFileSync(wasm, Buffer.from([0, 97, 115, 109, 1, 0, 0, 1]));
+  try {
+    assert.notEqual(await etag('replica_bg.wasm'), old, 'a changed file has another ETag');
+    assert.equal(await etag('replica_bg.wasm'), hashOf('replica_bg.wasm'));
+  } finally { writeFileSync(wasm, was); }
+});
+
 test('served client: the install bundle carries a self-contained origin adapter', async t => {
   const bins = join(dir, 'bins'), bundle = join(dir, 'bundle');
   mkdirSync(bins);
