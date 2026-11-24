@@ -27,9 +27,12 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   <n> unanswered, the next in <ms> ms`, and `health.json` has `"shipping"`, `"archive"` and `"creator"`, each
   `{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` while it waits and `current` once answered. The log on
   the disk is the truth: shipping catches up from it once the store answers, and the compactor keeps the whole log
-  until it has. While the creator's record waits, no one is the creator and edits are refused. Only a fork's archive
-  base is read before listening, tried the same way. A refusal of another kind (not `store-unreachable`) stops that
-  helper with `"state":"stopped"` and the fault; the world runs on.
+  until it has. The archive writes nothing until the claim is held. While the creator's record waits, no one is the
+  creator and edits are refused; its first try (two reads) holds the start for at most about 10 s. Only a fork's
+  archive base is read before listening, tried the same way. A refusal of another kind (not `store-unreachable`) of
+  the claim or of an unforked world's archive open (`restart-gap`, another writer's claim, a record that does not
+  decode) ends the process by name, `worldd serve: <refusal>`, as before; the unit restarts it and a deploy's canary
+  fails `canary.exited`.
 - **A degraded public stream** (R12). When the public stream cannot recover from the store (refused or out of reach
   after its patient tries), the world does not exit: it serves its Souls with no viewers (no `views/world.json`) and
   tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public

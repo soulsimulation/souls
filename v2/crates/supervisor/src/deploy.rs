@@ -996,20 +996,25 @@ impl Unit for Systemd {
             .ok_or_else(|| format!("restart: systemctl restart {unit}: {st}"))
     }
 
-    // The lowest count seen is the start's: a manual restart may reset the count after it was first read.
     fn exited(&mut self) -> Option<String> {
         let now = self.restarts()?;
-        let low = *self.1.get_or_insert(now);
-        if now > low {
-            return Some(format!(
-                "canary.exited: {} ended while starting ({} automatic restarts since the deploy's)",
-                self.unit(),
-                now - low
-            ));
-        }
-        self.1 = Some(low.min(now));
-        None
+        let unit = self.unit();
+        exits_since(&mut self.1, now, &unit)
     }
+}
+
+/// [`Systemd::exited`]'s rule on a reading `now` of `NRestarts`: the lowest count seen (`low`) is the start's, since a
+/// manual restart may reset the count after it was first read; a count above it means the process ended.
+fn exits_since(low: &mut Option<u64>, now: u64, unit: &str) -> Option<String> {
+    let least = *low.get_or_insert(now);
+    if now > least {
+        return Some(format!(
+            "canary.exited: {unit} ended while starting ({} automatic restarts since the deploy's)",
+            now - least
+        ));
+    }
+    *low = Some(least.min(now));
+    None
 }
 
 /// A deploy's timeline: milliseconds from its start, and what happened.
@@ -1185,6 +1190,32 @@ mod tests {
             let t = format!("[Service]\nEnvironment=WORLD_START_WITHIN_S={bad}\n");
             assert_eq!(start_within(Some(&t)), START_WITHIN, "{bad}");
         }
+    }
+
+    /// R17: `NRestarts` read after the deploy's restart is the start's count; one more is an exit. A count that drops
+    /// (systemd reset it at the manual restart, after it was first read) becomes the start's, and an exit after it still
+    /// shows. No reading at all is no answer.
+    #[test]
+    fn r17_an_exit_is_a_restart_count_above_the_lowest_seen() {
+        let u = "worldd@w.service";
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 5, u), None);
+        let e = exits_since(&mut low, 6, u).expect("an exit");
+        assert!(
+            e.starts_with("canary.exited: worldd@w.service ended"),
+            "{e}"
+        );
+        assert!(e.contains("(1 automatic restarts"), "{e}");
+        // Reset after the first reading: 0 is the start's, 0 again is no exit, 1 is one.
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert_eq!(low, Some(0));
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert!(exits_since(&mut low, 1, u).is_some());
+        // No reading at the restart: the first one is the start's.
+        let mut low = None;
+        assert_eq!(exits_since(&mut low, 3, u), None);
+        assert!(exits_since(&mut low, 4, u).is_some());
     }
 
     /// R17: the canary's wait for a slow start ends at once when the world's process ends, with that fault, and

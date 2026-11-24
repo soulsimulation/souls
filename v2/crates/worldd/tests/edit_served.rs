@@ -1111,6 +1111,54 @@ fn creator(n: u8) -> (Id, Actor) {
     (id, Actor::Creator(id))
 }
 
+/// R17 (0.133): a world whose store does not answer at the start listens with no creator known. The record's own
+/// creator's edit is refused `edit.not-the-creator` meanwhile (closed, never open), and accepted once the store
+/// answers, with no restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn r17_an_edit_while_the_creator_waits_for_the_store_is_refused_then_accepted() {
+    let d = scratch("r17-creator");
+    let w = seed(
+        &d,
+        &testworld::generate(1, 0).expect("the test world").text,
+        1,
+        (-40, 30),
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    // Out of reach: a file where the folder store's folder was.
+    let away = d.join("bucket.away");
+    std::fs::rename(&bucket, &away).unwrap();
+    std::fs::write(&bucket, b"").unwrap();
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    assert_eq!(s.line("creator: ", 60), "creator: none");
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    println!("R17: the creator's edit while its record waits: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.not-the-creator"));
+    // The store answers: the creator's thread reads the record, and the same edit commits.
+    std::fs::remove_file(&bucket).unwrap();
+    std::fs::rename(&away, &bucket).unwrap();
+    assert_eq!(
+        s.line("creator: ", 120),
+        format!("creator: {}", principal_text(c))
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    println!("R17: the creator's edit once the store answers: {got:?}");
+    assert_eq!(got.kind, 1, "the creator's wall commits: {got:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn g1e_a1_the_worlds_record_names_its_one_creator() {
     let d = scratch("g1e");

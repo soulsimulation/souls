@@ -1194,7 +1194,12 @@ fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_a
             std::thread::sleep(Duration::from_millis(100));
         }
     };
-    let parts = || s.paths().iter().filter(|p| p.contains("/part/")).count();
+    let parts = || -> std::collections::BTreeSet<String> {
+        s.paths()
+            .into_iter()
+            .filter(|p| p.contains("/part/"))
+            .collect()
+    };
     // The first start claims the world, ships its log and opens its archive.
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
@@ -1232,6 +1237,8 @@ fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_a
             w.child.try_wait().expect("its state").is_none(),
             "never exits"
         );
+        // Nothing is shipped without the claim.
+        assert_eq!(parts(), shipped, "no part before the claim");
         std::thread::sleep(Duration::from_millis(200));
     }
     let held: Vec<String> = w
@@ -1253,16 +1260,25 @@ fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_a
     s.stall_reads(0, Duration::ZERO, "");
     let epoch = w.line("shipping: epoch ");
     println!("{epoch} at {:?}", begun.elapsed());
+    let n: u64 = epoch
+        .strip_prefix("shipping: epoch ")
+        .and_then(|r| r.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .expect("the epoch");
     until("shipping", "current", Duration::from_secs(90));
     until("archive", "current", Duration::from_secs(90));
     let end = Instant::now() + Duration::from_secs(30);
-    while parts() <= shipped {
+    while parts().len() <= shipped.len() {
         assert!(
             Instant::now() < end,
             "the records written meanwhile are shipped"
         );
         std::thread::sleep(Duration::from_millis(200));
     }
+    // Every part shipped since is under the new claim's epoch.
+    let under = format!("/{n:020}/");
+    let new: Vec<String> = parts().difference(&shipped).cloned().collect();
+    assert!(new.iter().all(|p| p.contains(&under)), "{under}: {new:?}");
     walk(&mut c, body, root.scope(), ground, 2, -33, 30);
     assert_eq!(answer(&mut c).0, 1, "a walk after it ends in a receipt");
     assert!(
@@ -1309,6 +1325,69 @@ fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_a
     );
     w.kill();
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R17 (0.133): only a store that does not answer is waited for. A start whose directory mark is past its own log
+/// (`restart-gap`: its records would be numbered over ones already off the machine) still ends by name, as before,
+/// and never listens on with no claim.
+// A real process on the real clock.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r17_a_start_behind_its_directory_mark_ends_restart_gap() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r17gap");
+    let (dir, body, root, ground) = seeded(&d);
+    // The same world seeded again: its log is the seed's alone, behind what the first one ships.
+    let behind = scratch("r17gap-behind");
+    let (behind_dir, ..) = seeded(&behind);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r17gap", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let parts = || s.paths().iter().filter(|p| p.contains("/part/")).count();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.line("shipping: epoch ");
+    let mut c = connect(&socket);
+    for k in 0..3 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            k + 1,
+            -34 + k as i64,
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {k} ends in a receipt");
+    }
+    let before = parts();
+    let end = Instant::now() + Duration::from_secs(30);
+    while parts() <= before {
+        assert!(Instant::now() < end, "the walks are shipped");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // The directory record's mark follows the pieces.
+    std::thread::sleep(Duration::from_secs(3));
+    w.kill();
+    let mut w = serve_env(&behind_dir, &behind.join("s"), &args, &env);
+    let ended = w.line("worldd serve: ");
+    let status = w.child.wait().expect("it ends");
+    println!("behind its mark: {ended}");
+    assert!(!status.success());
+    assert!(ended.starts_with("worldd serve: restart-gap: "), "{ended}");
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&behind);
 }
 
 /// R12 (0.133): a world whose public stream cannot recover from its store (as production's did on 23 Nov, a read past

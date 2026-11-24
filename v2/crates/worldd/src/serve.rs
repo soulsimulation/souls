@@ -162,6 +162,21 @@ const EVERY: u64 = 8 << 20;
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 
+/// R17: a start's claim or archive open refused for a reason other than a store that does not answer. The process
+/// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
+fn refused_at_start(e: Refusal) -> ! {
+    eprintln!("worldd serve: {}", refusal(e));
+    std::process::exit(1)
+}
+
+/// R17: waits until the world's claim is held (`claimed`, set by the shipping thread), so the archive publishes
+/// nothing for a world whose claim the store has not yet given.
+fn held(claimed: &std::sync::atomic::AtomicBool) {
+    while !claimed.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// R17: one of the start's reads of the store, tried until the store answers. While it answers `store-unreachable`
 /// (no answer in time, or a 5xx), `gauge` says `degraded` with the fault and the next try, after each of
 /// [`STREAM_RETRY_MS`] (the last repeats), and the start's progress is said meanwhile: never an exit on a slow store,
@@ -2283,10 +2298,19 @@ fn off_machine(
         )
     };
     measures::SHIPPING.recovering();
+    // Set once the claim is held; the archive writes nothing before it.
+    let claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let claiming = Arc::clone(&claimed);
     let opening = std::thread::Builder::new()
         .name("shipping".into())
         .spawn(move || -> Result<(), Refusal> {
-            let shipper = until_answered("shipping", &measures::SHIPPING, || patiently(&claim))?;
+            // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
+            // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
+            // would number new records over ones already off the machine.
+            let shipper = until_answered("shipping", &measures::SHIPPING, || patiently(&claim))
+                .unwrap_or_else(|e| refused_at_start(e));
+            // The claim is held: the archive may write.
+            claiming.store(true, std::sync::atomic::Ordering::SeqCst);
             let (to, _, h) = shipper.spawn();
             report("the shipper", h);
             for item in items {
@@ -2314,7 +2338,9 @@ fn off_machine(
         based = true;
         archive_base = base.record;
         let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
+        let claimed = Arc::clone(&claimed);
         let open = move || {
+            held(&claimed);
             let mut a =
                 Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
             archive_bridge(&store, &mut a, &header, first)?;
@@ -2346,12 +2372,21 @@ fn off_machine(
     {
         // R17: its open reads the store (the header, the bundle index, the public history), so it runs on the
         // archiver's thread as a fork's does; parts wait in `rx` meanwhile, in order.
-        let header = built.header.clone();
+        // It writes nothing before the world's claim is held. As with the claim, only a store that does not answer
+        // is waited for; any other refusal ends the process by name, as before R17.
+        let (header, claimed) = (built.header.clone(), Arc::clone(&claimed));
         let open = move || {
-            again.put("header", header.stored(), When::Absent)?;
-            let a = Archiver::open(again.clone(), "", &header, zone, kind.clone())?;
-            again.restore_public()?;
-            Ok(a)
+            held(&claimed);
+            let opened = (|| -> Result<Archiver<Again>, Refusal> {
+                again.put("header", header.stored(), When::Absent)?;
+                let a = Archiver::open(again.clone(), "", &header, zone, kind.clone())?;
+                again.restore_public()?;
+                Ok(a)
+            })();
+            match opened {
+                Err(e) if e.name != "store-unreachable" => refused_at_start(e),
+                opened => opened,
+            }
         };
         let (tx, rx) = channel();
         let parts = Arc::new(crate::compactor::Parts::new(parts_from));
@@ -2390,7 +2425,8 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
-    // R17: one try at the start. A store that does not answer starts the world with no creator known (edits fail
+    // R17: one try at the start: the list and the name record, two reads of up to the client's 5 s each, so about 10 s
+    // at most before listening. A store that does not answer starts the world with no creator known (edits fail
     // closed), `degraded` in health.json, and the creator's thread tries again until the store answers.
     let (first, waiting) = match read() {
         Ok(c) => {
@@ -2809,7 +2845,8 @@ fn serve(args: &[String]) -> R<()> {
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
-    // standalone seeded-world fallback. Lookup failures have already refused startup above.
+    // standalone seeded-world fallback. A lookup refused above ended the start; one the store did not answer (R17)
+    // left no creator known until it does, so edits fail closed meanwhile.
     if let Some(c) = creator {
         cfg.edits = Some(Editing {
             // Not read: the checker takes the creator from `cfg.creator`.
