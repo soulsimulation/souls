@@ -793,10 +793,20 @@ impl Town {
         versions.bump(&touched);
         let mut why = None;
         let fresh = if touched.contains(&ground) {
-            let r = if touched.len() == 1 {
-                Town::recut(&kids, base, &ids, basis)
-            } else {
-                Err("the open ground and a building")
+            // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
+            // read again with the squares cut again, not the whole ground built.
+            let things: Option<BTreeSet<Id>> = touched
+                .iter()
+                .filter(|&&f| f != ground)
+                .map(|&f| parent(base, f).or_else(|| parents.get(&f).copied()))
+                .collect();
+            let r = match things {
+                // TEMPORARY S13 measurement of the old rule; removed before commit.
+                Some(_) if touched.len() > 1 && std::env::var_os("S13_BEFORE").is_some() => {
+                    Err("the open ground and a building")
+                }
+                Some(things) => Town::recut(&kids, base, &ids, basis, &things),
+                None => Err("a floor of no building"),
             };
             match r {
                 Ok(f) => f,
@@ -847,16 +857,32 @@ impl Town {
                 Fresh::Buildings(bs) => bs,
                 Fresh::Whole(_) => unreachable!(),
             };
-            for (_building, surfaces) in buildings {
+            // Each building read again is known with its links and reach as it is read now, as a whole build knows
+            // it (the open ground's gates are neither): the next edit reads it on what it is.
+            let mut known = (*basis.known).clone();
+            let mut reaches = (*basis.reach).clone();
+            for (building, surfaces) in buildings {
                 // Removed floors are absent from the canonical tree; stale immutable sources cannot be selected.
                 floors.retain(|id, _| base.handle(*id).is_some());
                 for (id, surface) in surfaces {
                     floors.insert(*id, Arc::new(surface.clone()));
                 }
+                if building.thing != ground {
+                    known.insert(
+                        building.thing,
+                        building.links.iter().map(|l| l.id).collect(),
+                    );
+                    match reach(building) {
+                        Some(r) => reaches.insert(building.thing, r),
+                        None => reaches.remove(&building.thing),
+                    };
+                }
             }
             after.layout = Arc::new(layout);
             after.flags = Arc::new(flags);
             after.floors = Arc::new(floors);
+            after.known = Arc::new(known);
+            after.reach = Arc::new(reaches);
         }
         after.classes = classes
             .iter()
@@ -874,13 +900,15 @@ impl Town {
     }
 
     /// The open ground's squares `part` changes, cut again alone from `after` (G3b, #3449, `crate::ground::open`),
-    /// with the basis as they leave it; refused with why when the whole ground must be built (a change the index
-    /// cannot cut alone).
+    /// with the basis as they leave it, and the buildings `things` (those whose floors the part touches, S13) read
+    /// again on them; refused with why when the whole ground must be built (a change the index cannot cut alone, or
+    /// a building that cannot be read alone).
     fn recut(
         before: &BTreeSet<Id>,
         after: &Tree,
         ids: &[Id],
         basis: &Basis,
+        things: &BTreeSet<Id>,
     ) -> Result<Fresh, &'static str> {
         let open = &basis.open;
         let cut = |sq: (i32, i32)| {
@@ -931,9 +959,9 @@ impl Town {
             ..basis.clone()
         };
         let ground = basis.index.ground();
-        let (mut things, mut gates) = (BTreeSet::new(), false);
+        let mut things = things.clone();
+        let mut unowned = BTreeSet::new();
         for l in moved {
-            // A link no building holds is the open ground's own: a gate.
             match basis
                 .known
                 .iter()
@@ -942,17 +970,27 @@ impl Town {
                 Some((t, _)) => {
                     things.insert(*t);
                 }
-                None => gates = true,
+                None => {
+                    unowned.insert(l);
+                }
             }
         }
+        let cut: BTreeSet<(i32, i32)> = squares.iter().map(|(sq, ..)| *sq).collect();
         let mut buildings = if things.is_empty() {
             Vec::new()
         } else {
-            Town::read_again(after, ground, &things, &basis)
-                .ok_or("a building on changed meets that cannot be read alone")?
+            Town::read_again(after, ground, &things, &basis, Some(&cut))
+                .ok_or("a building that cannot be read alone")?
         };
-        if gates {
-            buildings.push(Town::gates(after, ground, &basis).ok_or("the gates cannot be read")?);
+        // A link whose meets changed that no building holds, before the change or as read now, is the open ground's
+        // own: a gate. The gates are read as a whole build reads them, without the links the buildings hold now.
+        let held = |l: &Id| buildings.iter().any(|(b, _)| b.links.iter().any(|k| k.id == *l));
+        if unowned.iter().any(|l| !held(l)) {
+            let mut known = (*basis.known).clone();
+            for (b, _) in &buildings {
+                known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
+            }
+            buildings.push(Town::gates(after, ground, &basis, &known).ok_or("the gates cannot be read")?);
         }
         Ok(Fresh::Squares(squares, basis, buildings))
     }
@@ -976,11 +1014,17 @@ impl Town {
         for &f in touched {
             things.insert(parent(after, f).or_else(|| before.get(&f).copied())?);
         }
-        Town::read_again(after, ground, &things, basis)
+        Town::read_again(after, ground, &things, basis, None)
     }
 
-    /// The open ground's own links (its gates) read again from `after` on the open ground of `basis` (G3b).
-    fn gates(after: &Tree, ground: Id, basis: &Basis) -> Option<(Building, BTreeMap<Id, Surface>)> {
+    /// The open ground's own links (its gates) read again from `after` on the open ground of `basis` (G3b): the
+    /// links no building of `known` holds.
+    fn gates(
+        after: &Tree,
+        ground: Id,
+        basis: &Basis,
+        known: &BTreeMap<Id, BTreeSet<Id>>,
+    ) -> Option<(Building, BTreeMap<Id, Surface>)> {
         let open = &basis.open;
         let on =
             |sq: (i32, i32), p: [i64; 2]| open.squares.get(&sq).is_some_and(|ps| on_pieces(ps, p));
@@ -992,8 +1036,7 @@ impl Town {
             doors: &open.doors,
             terrain: open.terrain.as_deref(),
         };
-        let all: BTreeSet<Id> = basis
-            .known
+        let all: BTreeSet<Id> = known
             .iter()
             .filter(|(t, _)| **t != ground)
             .flat_map(|(_, ls)| ls.iter().copied())
@@ -1002,12 +1045,15 @@ impl Town {
     }
 
     /// Each building of `things` read again from `after` on the open ground of `basis`, with its floors' surfaces;
-    /// `None` as [`Town::reread`] says.
+    /// `None` as [`Town::reread`] says. With `cut`, the open ground's squares cut again with it (S13): a building may
+    /// be new, and its links may join or leave it where they meet the open ground on those squares only (their meets
+    /// are cut again); more than one new building is built whole (neither's reach is known to the other).
     fn read_again(
         after: &Tree,
         ground: Id,
         things: &BTreeSet<Id>,
         basis: &Basis,
+        cut: Option<&BTreeSet<(i32, i32)>>,
     ) -> Option<Vec<(Building, BTreeMap<Id, Surface>)>> {
         let gh = after.handle(ground)?;
         let open = &basis.open;
@@ -1024,9 +1070,21 @@ impl Town {
             };
             Building::read_sized(after, thing, Some(o), basis.size.radius_mm()).ok()
         };
+        let none = BTreeSet::new();
         let mut out = Vec::new();
+        let mut new_ones = 0;
         for &thing in things {
-            let old = basis.known.get(&thing)?;
+            let old = match (basis.known.get(&thing), cut) {
+                (Some(old), _) => old,
+                (None, Some(_)) => {
+                    new_ones += 1;
+                    if new_ones > 1 {
+                        return None;
+                    }
+                    &none
+                }
+                (None, None) => return None,
+            };
             // A building that shared a step with another's floor (#3227) before the edit: the whole.
             if basis.joined.contains(&thing) {
                 return None;
@@ -1054,10 +1112,11 @@ impl Town {
                 }
             }
             let now: BTreeSet<Id> = b.links.iter().map(|l| l.id).collect();
-            if old
-                .symmetric_difference(&now)
-                .any(|l| open.meets.iter().any(|m| m.1.link == *l))
-            {
+            if old.symmetric_difference(&now).any(|l| {
+                open.meets
+                    .iter()
+                    .any(|(sq, m)| m.link == *l && !cut.is_some_and(|c| c.contains(sq)))
+            }) {
                 return None;
             }
             let surfaces = b
@@ -1251,14 +1310,9 @@ impl Town {
 
     /// Each building read again replaced on the route map, its floors' surfaces with it.
     fn put_buildings(&mut self, bs: Vec<(Building, BTreeMap<Id, Surface>)>, versions: &Versions) {
-        let known = Arc::make_mut(&mut self.basis.known);
-        let reaches = Arc::make_mut(&mut self.basis.reach);
+        // The basis's `known` and `reach` for them are the rebuild's (`Rebuilt::after`), installed with it.
         for (b, surfaces) in bs {
             self.map.replace(&b, &|n| versions.of(n));
-            known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
-            if let Some(r) = reach(&b) {
-                reaches.insert(b.thing, r);
-            }
             self.surfaces.extend(surfaces);
             match self.buildings.iter().position(|o| o.thing == b.thing) {
                 Some(i) => {
@@ -3538,3 +3592,7 @@ mod passage_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "town_local_tests.rs"]
+mod local_tests;
