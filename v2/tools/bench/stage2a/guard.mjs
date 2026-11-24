@@ -31,7 +31,11 @@ export const BARS = Object.freeze({
 
 const json = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return null; } };
 const num = (f) => { try { const v = readFileSync(f, 'utf8').trim(); return v === 'max' ? null : Number(v); } catch { return null; } };
-const mem = (dir) => ({ current: num(join(dir, 'memory.current')), max: num(join(dir, 'memory.max')) });
+// `inactive`: the cgroup's inactive page cache (memory.stat `inactive_file`), which the kernel drops before it would
+// ever end a world. A world writing its log fills the cache up to its MemoryMax, so `current` alone would read that
+// as pressure; the bars judge the working set, `current` less `inactive`.
+const inactiveFile = (dir) => { try { return Number(/^inactive_file (\d+)$/m.exec(readFileSync(join(dir, 'memory.stat'), 'utf8'))?.[1] ?? 0); } catch { return 0; } };
+const mem = (dir) => ({ current: num(join(dir, 'memory.current')), max: num(join(dir, 'memory.max')), inactive: inactiveFile(dir) });
 
 /** One probe sample, files only. `instance` is Eden's placed instance (from the authority map when not given). */
 export function sample({ root, cgroup, instance, now = Date.now() }) {
@@ -46,7 +50,7 @@ export function sample({ root, cgroup, instance, now = Date.now() }) {
   return { t: now / 1000, h, state: row.state, healthAgeS: row.tick?.health_age_s ?? null, eden, slice: mem(slice), worlds: states, stream, wrss: eden.current == null ? 0 : Math.round(eden.current / 1024) };
 }
 
-const share = (m) => (m?.current != null && m?.max ? m.current / m.max : null);
+const share = (m) => (m?.current != null && m?.max ? (m.current - (m.inactive ?? 0)) / m.max : null);
 /** Ticks on time between two samples' health counters (null when no tick ran). */
 export function onTime(a, b) {
   const n = (b?.h?.ticks?.count ?? 0) - (a?.h?.ticks?.count ?? 0), over = (b?.h?.over_budget ?? 0) - (a?.h?.over_budget ?? 0);
@@ -132,7 +136,7 @@ async function preflight(o) {
   let rtt = null;
   if (o.gateway) { try { rtt = await connectMs(o.gateway.replace(/^ws:/, 'http:')); } catch (e) { why.push(`--gateway does not connect (${e.message})`); } }
   const on = onTime(a, b);
-  const line = `worlds: ${states(b.worlds)}; Eden ${b.state}, ticks on time ${on == null ? '-' : (100 * on).toFixed(2) + ' %'}, memory ${gb(b.eden.current)} of ${gb(b.eden.max)} GB; souls.slice ${gb(b.slice.current)} of ${gb(b.slice.max)} GB; stream ${b.stream ?? '-'}; gateway connect ${rtt ?? '-'} ms`;
+  const line = `worlds: ${states(b.worlds)}; Eden ${b.state}, ticks on time ${on == null ? '-' : (100 * on).toFixed(2) + ' %'}, memory ${gb(b.eden.current - (b.eden.inactive ?? 0))} of ${gb(b.eden.max)} GB (cache ${gb(b.eden.inactive ?? 0)} more); souls.slice ${gb(b.slice.current - (b.slice.inactive ?? 0))} of ${gb(b.slice.max)} GB (cache ${gb(b.slice.inactive ?? 0)} more); stream ${b.stream ?? '-'}; gateway connect ${rtt ?? '-'} ms`;
   if (why.length) { console.error(`preflight: refused: ${why.join('; ')}\npreflight: ${line}`); return 2; }
   console.log(`preflight: ok; ${line}`);
   return 0;
