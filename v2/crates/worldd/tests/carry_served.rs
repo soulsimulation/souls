@@ -803,7 +803,7 @@ async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carri
     }
     let facts = f.to_json();
     let socket = d.join("s");
-    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket);
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
     served.line("listening ", 180);
     let im = import_eden::load(&facts).unwrap();
     let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
