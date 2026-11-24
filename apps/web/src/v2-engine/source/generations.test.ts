@@ -20,7 +20,7 @@ import type { PartRec } from './source.ts';
 const work = mkdtempSync(join(tmpdir(), 'v2-generations-'));
 after(() => rmSync(work, { recursive: true, force: true }));
 
-// The stand-in replica: a part's file holds `n:version`; a baseline's version is its fifth byte (cbor {3: {1: v}}),
+// The stand-in replica: a part's file holds `n:version`; a baseline's version is its last byte (cbor {..., 3: {1: v}}),
 // and the public digest is `d<version>`. It refuses a part out of order as the real one does.
 const fake = join(work, 'replica.mjs');
 writeFileSync(fake, `
@@ -28,7 +28,7 @@ const text = (b) => new TextDecoder().decode(b);
 export default async function init() {}
 export const readPointer = (b) => text(b);
 export class StreamPlayer {
-  static fromBaseline(h, b) { const p = new StreamPlayer(); p.v = b[4]; return p; }
+  static fromBaseline(h, b) { const p = new StreamPlayer(); p.v = b[b.length - 1]; return p; }
   constructor() { this.n = 0; this.v = 0; }
   next() { return BigInt(this.n); }
   played(b) {
@@ -53,9 +53,10 @@ registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: pathToFileURL
 
 // Generation g begins at public version `first` and holds parts 0..count-1, part n at version first+n+1. Its id is its
 // baseline's SHA-256, as the writer names it.
-type Gen = { id: string; first: number; count: number };
-const baselineOf = (first: number) => encode(new Map([[3, new Map([[1, first]])]]));
-const gen = (first: number, count: number): Gen => ({ id: createHash('sha256').update(baselineOf(first)).digest('hex'), first, count });
+// `head`: the baseline's fields before its projection (#4535: field 1 its format).
+type Gen = { id: string; first: number; count: number; head?: [number, number][] };
+const baselineOf = (first: number, head: [number, number][] = []) => encode(new Map<number, unknown>([...head, [3, new Map([[1, first]])]]));
+const gen = (first: number, count: number, head?: [number, number][]): Gen => ({ id: createHash('sha256').update(baselineOf(first, head)).digest('hex'), first, count, head });
 const base = 'https://stream.example.invalid/a/b/c/d/';
 const pointerOf = (g: Gen, newest: number, from?: Gen) => JSON.stringify({
   newest, newestTo: (newest + 1) * PERIOD_US, period: PERIOD_US, anchorWorld: (newest + 1) * PERIOD_US, anchorWallMs: Date.now(),
@@ -64,7 +65,7 @@ const pointerOf = (g: Gen, newest: number, from?: Gen) => JSON.stringify({
 });
 
 async function viewer(gens: Gen[], steps: string[]) {
-  const fetched: string[] = [], parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [];
+  const fetched: string[] = [], parts: PartRec[] = [], errors: string[] = [], formats: number[] = [], polls: (() => Promise<void>)[] = [];
   let snapshots = 0, pointer = steps[0];
   const files = (path: string): Uint8Array | string | null => {
     if (path === '/a/b/c/d/pointer') return pointer;
@@ -73,24 +74,27 @@ async function viewer(gens: Gen[], steps: string[]) {
       const dir = `/a/b/c/d/g/${g.id}/`;
       if (!path.startsWith(dir)) continue;
       const file = path.slice(dir.length);
-      if (file === 'baseline') return baselineOf(g.first);
+      if (file === 'baseline') return baselineOf(g.first, g.head);
       if (/^\d+$/.test(file) && Number(file) < g.count) return `${file}:${g.first + Number(file) + 1}`;
     }
     return null;
   };
   const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
   try {
-    globalThis.fetch = (async (input: string | URL) => {
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
-      fetched.push(path);
+      // #4535: a ranged fetch (a baseline's head) is recorded as `<path>#head` and answered with its first 16 bytes
+      const head = (init?.headers as Record<string, string> | undefined)?.Range === 'bytes=0-15';
+      fetched.push(head ? `${path}#head` : path);
       const body = files(path);
-      return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
+      if (body === null) return new Response(null, { status: 404 });
+      return head ? new Response((typeof body === 'string' ? new TextEncoder().encode(body) : body).slice(0, 16), { status: 206 }) : new Response(body as BodyInit);
     }) as typeof fetch;
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => (polls.push(fn), 1);
     (globalThis as { self?: unknown }).self = {
       onmessage: null as null | ((e: unknown) => void),
-      postMessage: (m: { t: string; p: PartRec; message: string }) =>
-        m.t === 'part' ? parts.push(m.p) : m.t === 'snapshot' ? snapshots++ : m.t === 'error' ? errors.push(m.message) : undefined,
+      postMessage: (m: { t: string; p: PartRec; message: string; format: number }) =>
+        m.t === 'part' ? parts.push(m.p) : m.t === 'snapshot' ? snapshots++ : m.t === 'error' ? errors.push(m.message) : m.t === 'format' ? formats.push(m.format) : undefined,
     };
     await import(new URL(`./worker.ts?generations-${Math.random()}`, import.meta.url).href);
     (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: base } });
@@ -105,7 +109,7 @@ async function viewer(gens: Gen[], steps: string[]) {
     globalThis.setInterval = before.setInterval;
     (globalThis as { self?: unknown }).self = before.self;
   }
-  return { fetched, parts, errors, snapshots };
+  return { fetched, parts, errors, snapshots, formats };
 }
 
 test('a new viewer fetches only the newest generation', async () => {
@@ -122,6 +126,7 @@ test('a live viewer drains the old generation and crosses to the new one with no
   const { parts, errors, snapshots, fetched } = await viewer([a, b], [pointerOf(a, 2), pointerOf(b, 1, a), pointerOf(b, 2, a)]);
   assert.deepEqual(errors, [], 'no stream-generation-gap and no handoff refusal');
   assert.ok(!fetched.includes(`/a/b/c/d/g/${b.id}/baseline`), 'the new baseline is not fetched');
+  assert.ok(fetched.includes(`/a/b/c/d/g/${b.id}/baseline#head`), 'only its first bytes, for its format (#4535)');
   assert.deepEqual(parts.map((p) => p.number), [0, 1, 2, 3, 4, 0, 1, 2], 'every part of A, then B from its first');
   assert.deepEqual(parts.map((p) => p.to), [1, 2, 3, 4, 5, 1, 2, 3].map((n) => n * PERIOD_US));
   assert.equal(snapshots, 1, 'only the first baseline is shown whole; the crossing shows nothing new');
@@ -142,4 +147,31 @@ test('a live viewer whose old generation was pruned starts again from the newest
   assert.deepEqual(errors, []);
   assert.deepEqual(parts.map((p) => p.number), [0, 1, 2, 0, 1]);
   assert.equal(snapshots, 2);
+});
+
+// #4535: the baseline's format (field 1) is what this page's bundle reads, or the page is told to reload for it.
+test('a baseline in a format this page reads plays; one with a field the page does not know plays too', async () => {
+  const a = gen(0, 2, [[1, 1]]), b = gen(2, 2, [[1, 1], [5, 7]]);
+  const { parts, errors, formats } = await viewer([a, b], [pointerOf(a, 1), pointerOf(b, 1)]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(formats, [], 'no reload');
+  assert.deepEqual(parts.map((p) => p.number), [0, 1, 0, 1]);
+});
+
+test('a baseline in a format this page cannot read is not played: the page is told its format, at each try', async () => {
+  const a = gen(0, 2, [[1, 1]]), b = gen(2, 2, [[1, 2]]);
+  const { parts, errors, formats } = await viewer([a, b], [pointerOf(a, 1), pointerOf(b, 1), pointerOf(b, 1)]);
+  assert.deepEqual(parts.map((p) => p.number), [0, 1], 'nothing of the new format is played');
+  assert.deepEqual(formats, [2, 2]);
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /stream-format 2/);
+});
+
+test('a live viewer does not cross a handoff into a format this page cannot read: the page is told its format', async () => {
+  const a = gen(0, 5, [[1, 1]]), b = gen(5, 3, [[1, 2]]);
+  const { parts, errors, formats, fetched } = await viewer([a, b], [pointerOf(a, 2), pointerOf(b, 1, a)]);
+  assert.deepEqual(parts.map((p) => p.number), [0, 1, 2, 3, 4], 'the old generation drained; nothing of the new one played');
+  assert.deepEqual(formats, [2]);
+  assert.match(errors[0] ?? '', /stream-format 2/);
+  assert.ok(!fetched.includes(`/a/b/c/d/g/${b.id}/baseline`), 'its head only');
 });
