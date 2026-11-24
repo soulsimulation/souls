@@ -275,12 +275,13 @@ const logged = [], LOGGED_KEPT = 500;
 let eventN = 0;
 // #3705 (today's `receipt`): each intent this daemon sent, by sequence, with every answer it had, the newest kept;
 // and the acts still going, newest last, that `stop` ends (an order stays until cancelled).
-const receipts = new Map(), RECEIPTS_KEPT = 200, going = [];
+const receipts = new Map(), RECEIPTS_KEPT = 200, going = [], entriesAt = new Map();
 const ANSWER_NAMES = ['', 'receipt', 'refused', 'accepted', 'resolved', 'unread'];
 const ORDERS = new Set(['souls:hold', 'souls:follow', 'souls:queue']);
 function receiptSent(sequence, ranked, { target, replaces, words }) {
   receipts.set(sequence, { sequence, verbs: ranked, ...(target ? { target: String(target) } : {}), ...(replaces !== undefined ? { replaces } : {}), sentAt: new Date().toISOString(), answers: [] });
-  if (receipts.size > RECEIPTS_KEPT) receipts.delete(receipts.keys().next().value);
+  entriesAt.set(sequence, entrySeq); // 0.133: the newest entry seen when it went; its own entries come after it
+  if (receipts.size > RECEIPTS_KEPT) { const old = receipts.keys().next().value; receipts.delete(old); entriesAt.delete(old); }
   if (words === undefined && ranked[0] !== 'souls:cancel') going.push(sequence);
 }
 function receiptAnswered(e) {
@@ -758,10 +759,14 @@ function remember(entries) {
  */
 /** The world's ladder's ended orders of my body, newest last (stuck.mjs). */
 const stuckSeen = [];
-/** 0.133: my walks' ends that say how far from their target they stood, newest last ({at, mm}). */
+/** 0.133: my walks' ends that say how far from their target they stood, newest last ({sequence, mm}). */
 const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
+/** 0.133: the newest entry sequence this daemon has seen, and the receipts waiting for an entry. */
+let entrySeq = -1;
+const entryWaiters = [];
 function onEntry(e) {
   counts.entries++;
+  entrySeq = Math.max(entrySeq, Number(e.sequence));
   // The version after an entry is its sequence and one (`replica::apply`).
   if (e.changes > 0) { owe(e.sequence + 1); followWanted = true; follow(); }
   const actor = e.actor === ME ? soul : e.actor;
@@ -771,8 +776,9 @@ function onEntry(e) {
   for (const ev of events) {
     if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
     const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
-    if (mine.includes(ev.fields[1])) { awayEnded.push({ at: Date.now(), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
   }
+  for (const w of entryWaiters.splice(0)) w();
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
   for (const ev of events) {
     const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
@@ -1799,10 +1805,16 @@ async function answer(req, conn = null) {
       const instead = r.answers.at(-1)?.answer === 'refused' && !stuck ? suggestionFor(r) : null;
       if (instead) got.receipt.try = instead;
       // 0.133: a walk that ended says how far from its target it stood, metres (a fact: 0 is on or in it)
-      const walked = done && r.verbs.some((v) => /:walk$/.test(v)), since = Date.parse(r.sentAt);
-      // its end entry can trail the receipt by a moment
-      for (let i = 0; walked && i < 10 && !awayEnded.some((a) => a.at >= since); i++) await new Promise((ok) => setTimeout(ok, 100));
-      const away = walked ? awayEnded.findLast((a) => a.at >= since) : null;
+      // By sequence: its end is an entry after the newest seen when it went and before the receipt's version (the
+      // version after an entry is its sequence and one). That entry can trail the receipt: it is waited for until the
+      // entries seen reach the receipt's version, at most a second.
+      const walked = done && r.verbs.some((v) => /:walk$/.test(v));
+      const after = entriesAt.get(r.sequence) ?? -1, version = r.answers.at(-1)?.version, before = version ? sequenceOf(version) : Infinity;
+      const endOf = () => awayEnded.findLast((a) => a.sequence > after && a.sequence < before);
+      for (const until = Date.now() + 1000; walked && !endOf() && entrySeq < before - 1 && Date.now() < until;) {
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); entryWaiters.push(() => { clearTimeout(t); ok(); }); });
+      }
+      const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
