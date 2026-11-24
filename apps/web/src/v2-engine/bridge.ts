@@ -32,7 +32,9 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
   moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces };
-type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
+type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null;
+  /** N14: the courses' places up to the time a still world is still to (the worker's), since it writes no part. */
+  courses?: CoursePlaces };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number };
 
 /** N14: the def of a cabin a seat that moves with its cabin is drawn in (WorldRideCars, by LiveWorld). */
@@ -196,6 +198,7 @@ export class V2Bridge {
     // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
     if (m.t === 'pointer') {
+      keepPlaces(this.places, m.p.courses);
       const q = this.stillTo(m.p);
       if (typeof q !== 'number' || q <= (this.view.newestTo ?? -Infinity)) return;
       // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has

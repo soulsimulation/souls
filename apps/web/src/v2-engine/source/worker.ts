@@ -14,7 +14,7 @@ import { readChanged } from './changed.ts';
 import { skyFields } from './sky-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
-import { coursePlaces } from '../course-samples.ts';
+import { coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
@@ -136,6 +136,8 @@ async function run(stream: URL) {
   let version = 0;
   let busy = false;
   let quiet: number | null = null;
+  /** Up to when the courses' places are posted (K4): a still world writes no part, yet its rides go on moving. */
+  let coursedTo = -Infinity;
   const words = new Map<string, string>();
   const known = new Map<string, NodeRec>();
   let drawn = new Set<string>();
@@ -196,6 +198,7 @@ async function run(stream: URL) {
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
     // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
     const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, [...next].map(id => known.get(id)!), rest.from, rest.to) : {};
+    if (rest) coursedTo = Math.max(coursedTo, rest.to);
     if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
@@ -301,7 +304,17 @@ async function run(stream: URL) {
   const tell = () => {
     const q = ptr.quietUntil;
     if (q !== null && (ptr.newest === null || Number(player.next()) > ptr.newest)) quiet = Math.max(quiet ?? q, q);
-    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet } });
+    // N14: a still or sleeping world writes no part, but a balloon and a ride's seats go on along their courses: their
+    // places up to the time it is still to come with its pointer (the bridge's stillTo), else they stand at the last.
+    const now = ptr.anchorWorld + (Date.now() - ptr.anchorWallMs) * 1000;
+    const sleep = ptr as StreamPointer & { asleep?: true; stillUntil?: number | null };
+    const to = sleep.asleep ? Math.max(quiet ?? -Infinity, sleep.stillUntil == null ? now : Math.min(now, sleep.stillUntil)) : quiet;
+    let courses: CoursePlaces = {};
+    if (to !== null && to > coursedTo && Number.isFinite(coursedTo) && replica.courseAt) {
+      courses = coursePlaces(replica.courseAt, [...drawn].map(id => known.get(id)!).filter(Boolean), coursedTo, to);
+      coursedTo = to;
+    }
+    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}) } });
   };
   await install(ptr);
   const poll = async () => {

@@ -122,3 +122,22 @@ test('N14: a Soul in a seat that moves with its cabin is carried by the seat, an
     assert.ok(rec.carrier, 'a ride: the page frames its rider with it');
   }
 });
+
+test('N14: in a still world (no part, only its pointer) the cabin and its rider go on along the course the pointer carries', async () => {
+  const { coursePlaces } = await import('./course-samples.ts');
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, cableCar, rider], removed: [] } });
+  for (let n = 0; n < 2; n++) {
+    const p = part(n).p;
+    b.receive({ t: 'part', p: { ...p, courses: coursePlaces(seatAt, [cableCar], p.from, p.to) } });
+  }
+  // from 1 s on the world writes no part; its pointer says it is quiet up to 6 s, with the courses' places to then
+  const to = T0 + 6_000_000;
+  const pointer = { newest: 1, newestTo: T0 + 1_000_000, period: 500_000, anchorWorld: to, anchorWallMs: 0, quietUntil: to,
+    courses: coursePlaces(seatAt, [cableCar], T0 + 1_000_000, to) };
+  b.receive({ t: 'pointer', p: pointer });
+  const s = 4, tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
+  assert.ok(c, 'the quiet time makes its chunks');
+  const f = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT);
+  assert.deepEqual([f.entities['alpine-cable-car#cabin-1'].p[2], f.entities[E].p[2]].map((x) => +x.toFixed(3)), [s, s], 'cabin and rider 4 m on, not held at 1 m');
+});
