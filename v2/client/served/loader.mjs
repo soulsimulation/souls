@@ -25,9 +25,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const say = (v) => process.stdout.write(JSON.stringify(v) + '\n');
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
 
-function findHome() {
+// 0.133 Q2: a command that adds to a home (home.mjs ADDS: pair, login, adopt, import; `god pair`) never takes a parent
+// folder's: it installs into and pairs in this folder's own `.souls`, unless its person names one (`--home <path>`).
+const ADDS = new Set(['pair', 'login', 'adopt', 'import']);
+function findHome(argv) {
+  const k = argv.indexOf('--home');
+  if (k >= 0 && argv[k + 1]) return resolve(argv[k + 1]);
   if (process.env.SOULS_HOME) return resolve(process.env.SOULS_HOME);
   const start = real(process.cwd()), stop = real(homedir());
+  if (ADDS.has(argv[0] === 'god' ? argv[1] : argv[0])) return join(start, '.souls');
   for (let dir = start; ; dir = dirname(dir)) {
     const h = join(dir, '.souls');
     if (existsSync(join(h, 'config.json')) || existsSync(join(h, 'souls'))) return h;
@@ -40,7 +46,7 @@ const newer = (a, b) => { const x = num(a), y = num(b); for (let i = 0; i < 3; i
 const versionIn = (file) => { try { return /^const VERSION = "(\d+\.\d+\.\d+)";$/m.exec(readFileSync(file, 'utf8'))?.[1]; } catch { return undefined; } };
 
 const args = process.argv.slice(2);
-const home = findHome();
+const home = findHome(args);
 const installed = join(home, 'bin', 'eden.mjs');
 const self = fileURLToPath(import.meta.url);
 

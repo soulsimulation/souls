@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -348,4 +348,22 @@ test('A1: pair <world url> prints the link and code and returns; once the owner 
   assert.ok(answered.answer >= 1, JSON.stringify(answered));
   const secret = creds.souls[soul].local.token.split('.')[1];
   assert.ok(!readFileSync(join(home, 'pairing.log'), 'utf8').includes(secret), 'the token is not in the pairing\'s log');
+
+  // 0.133 Q2: a client started in an empty folder below a folder that holds a Souls home pairs into a new home of its
+  // own; the parent's home is not written to (every file byte-identical before and after).
+  const parent = join(dir, 'someone'), child = join(parent, 'projects', 'new-soul');
+  mkdirSync(join(parent, '.souls', 'souls', 's_theirs', 'memory'), { recursive: true });
+  writeFileSync(join(parent, '.souls', 'config.json'), JSON.stringify({ worlds: { eden: { url: 'https://example.invalid/w/eden' } }, souls: { s_theirs: { world: 'eden' } } }, null, 1));
+  writeFileSync(join(parent, '.souls', 'souls', 's_theirs', 'memory', 'self.md'), 'their own words\n');
+  mkdirSync(child, { recursive: true });
+  const files = (root) => { const out = {}; const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const f = join(d, e.name); if (e.isDirectory()) walk(f); else out[f] = createHash('sha256').update(readFileSync(f)).digest('hex'); } }; walk(root); return out; };
+  const before = files(join(parent, '.souls'));
+  const r = spawnSync(process.execPath, [CLI, 'pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`], { cwd: child, env: { PATH: process.env.PATH, HOME: parent, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+  const own = JSON.parse(r.stdout.trim().split('\n').at(-1));
+  assert.equal(own.step, 'approve', JSON.stringify(own));
+  const approved = await fetch(new URL('/v1/pair/approve', directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: own.code, confirm: true, test_person: 'owner' }) });
+  assert.equal(approved.status, 200);
+  await waitFor(() => existsSync(join(child, '.souls', 'credentials.json')));
+  assert.deepEqual(files(join(parent, '.souls')), before, "the parent folder's home is byte-identical");
+  assert.ok(!existsSync(join(parent, '.souls', 'credentials.json')) && !existsSync(join(parent, '.souls', 'pairing.log')), 'nothing new in it');
 });

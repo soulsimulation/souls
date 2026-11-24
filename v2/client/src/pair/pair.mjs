@@ -172,7 +172,8 @@ if (isMain(import.meta.url)) {
   const say = (v) => console.log(JSON.stringify(v));
   try {
     for (const n of ['--directory', '--world', '--gateway']) if (!opt(n)) throw new Refused('usage', `${n} is needed`);
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    // 0.133 Q2: a pairing never lands in a parent folder's home, unless `--home` names it
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: true, named: opt('--home') ?? null });
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',

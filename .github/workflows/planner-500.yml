@@ -129,6 +129,16 @@ jobs:
                   const t = Object.entries(by).sort((x, y) => y[1].n - x[1].n).map(([key, e]) => `${key} ${e.n} (up to ${Math.round(e.ms / 1000)} s)`).join("; ");
                   if (t) console.log(`long acts ${r} ${rung} ${arm} r${k}: ${t}; stuck ${o.stuck.stuck} (${o.stuck.rule ?? "unanswered 60 s"}), on their way ${o.stuck.onTheirWay ?? "-"} (${o.stuck.unseen ?? "-"} never seen on the stream); refused only ${o.stuck.refusedOnly}, longest stall ${Math.round(o.stuck.stallMaxMs / 1000)} s`);
                 ' "$r" "$rung" "$arm" "$k" "$line"
+                # The driver's refusals by cause (analyze.mjs `byCause`, from its `refusedBy`), per 1,000 acts sent (0.133
+                # Q2): printed, and kept with `refusedBy` as refused.jsonl in the run's artifact.
+                node -e '
+                  const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const by = o.byCause ?? {}, sent = o.sent ?? null;
+                  const per = (n) => (sent ? (n * 1000 / sent).toFixed(1) : "-");
+                  const all = Object.values(by).reduce((a, b) => a + b, 0);
+                  console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${sent ?? "-"} | ${all} (${per(all)}) | ${Object.entries(by).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n} (${per(n)})`).join("; ") || "none"} |`);
+                  require("fs").appendFileSync(process.env.PER_RUN + "/refused.jsonl", JSON.stringify({ build: r, rung, arm, repeat: Number(k), sent, byCause: by, refusedBy: o.refusals ?? {} }) + "\n");
+                ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/refused.md"
               done
             done
           done
@@ -137,6 +147,17 @@ jobs:
             echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
           { echo; echo "| build | rung | arm | repeat | tick p50 / p99 / max ms | tick mean ms | cores world / gateway / origin | phases, mean / p99 ms |"
             echo "|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/phases.md"; } >> "$GITHUB_STEP_SUMMARY"
+          { echo; echo "| build | rung | arm | repeat | acts sent | refused (per 1,000) | by cause (per 1,000) |"
+            echo "|---|---|---|---|---|---|---|"; cat "$PER_RUN/refused.md" 2> /dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$PER_RUN/keep" && cp "$PER_RUN/refused.jsonl" "$PER_RUN/keep/" 2> /dev/null || true
+      - name: Keep the refusals by cause
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: planner-500-refused-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PER_RUN }}/keep/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Clean up
         if: always()
         run: rm -rf "$PER_RUN" "${OUT:-/nonexistent}"

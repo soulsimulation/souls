@@ -209,3 +209,20 @@ test('A3: a changed bundle, or a redirect, writes nothing', async () => {
   await waitFor(() => !existsSync(rt.lock));
   gw.kill();
 });
+
+test('0.133 Q2: the one line, in an empty folder below a Souls home, pairs into a home of its own; that home is not written to', async () => {
+  const below = join(folder, 'projects', 'another');
+  mkdirSync(below, { recursive: true });
+  const before = snapshot();
+  assert.equal((await ran('curl', ['-fsSO', `${site}/eden.mjs`], { cwd: below })).status, 0);
+  const gwPort = await freePort();
+  // no SOULS_HOME: the client finds the home above it, as on a person's machine
+  const r = await ran(process.execPath, ['eden.mjs', 'pair', `${site}?gateway=ws://127.0.0.1:${gwPort}/v2/ws`], { cwd: below, env: { PATH: process.env.PATH, HOME: dir } });
+  const asked = JSON.parse(r.stdout.trim().split('\n').at(-1));
+  assert.equal(asked.step, 'approve', r.stdout + r.stderr);
+  const approve = await fetch(`${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
+  assert.equal(approve.status, 200);
+  await waitFor(() => existsSync(join(below, '.souls', 'credentials.json')));
+  assert.ok(existsSync(join(below, '.souls', 'bin', 'eden.mjs')), 'the client installed in the new home');
+  assert.deepEqual(snapshot(), before, 'the home above is byte-identical');
+});

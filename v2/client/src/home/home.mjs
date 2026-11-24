@@ -32,10 +32,29 @@ export class Refused extends Error {
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
 const isHome = (root) => existsSync(join(root, 'config.json')) || existsSync(join(root, 'souls'));
 
-/** The home: `SOULS_HOME`, else the nearest `.souls` from `cwd` up to `homedir` (home.mjs `findHome`). */
-export function findHome({ cwd, env = {}, homedir }) {
+/** The commands that add to a home (a Soul, an account, a world, a Soul brought in): they never land in a home found in
+ *  a parent folder (0.133 Q2). Reading a parent's home for a Soul it already has still works. */
+export const ADDS = new Set(['pair', 'login', 'adopt', 'import']);
+
+/** `--home <path>` taken out of a command's words: the home its person named, and the words without it. */
+export function namedHome(argv) {
+  const k = argv.indexOf('--home');
+  if (k < 0) return { named: null, argv };
+  if (!argv[k + 1] || argv[k + 1].startsWith('--')) throw new Refused('home-usage', '--home <path to a .souls folder>');
+  return { named: argv[k + 1], argv: [...argv.slice(0, k), ...argv.slice(k + 2)] };
+}
+
+/**
+ * The home: one its person names (`--home <path>`, or `SOULS_HOME`), else the nearest `.souls` from `cwd` up to
+ * `homedir` (home.mjs `findHome`). A command that adds to a home (`adds`, [`ADDS`]) never takes a parent folder's: it
+ * uses `cwd`'s own `.souls`, a new one when there is none (0.133 Q2: a client in a folder below someone's Souls home
+ * must not write into it).
+ */
+export function findHome({ cwd, env = {}, homedir, adds = false, named = null }) {
+  if (named) return resolve(cwd, named);
   if (env.SOULS_HOME) return resolve(cwd, env.SOULS_HOME);
   const start = real(cwd), stop = homedir ? real(homedir) : null;
+  if (adds) return join(start, HOME_NAME);
   for (let dir = start; ; dir = dirname(dir)) {
     if (isHome(join(dir, HOME_NAME))) return join(dir, HOME_NAME);
     if (dir === stop || dirname(dir) === dir) return join(start, HOME_NAME);
