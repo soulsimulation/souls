@@ -71,6 +71,7 @@ try {
   check('Resize places actual actor beside desktop drawer', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: output + '/desktop-follow.png' });
   await page.waitForFunction(() => Number(document.querySelector('.viewer-history')?.getAttribute('data-viewer-tick')) > 1600, null, {timeout:120000});
+  await page.locator('.world-time-button').click(); // the moment controls are in the time panel
   await page.getByRole('button', { name: 'Back 1 min', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation') === 'history');
   check('Typed history seek reports actual drawn tick', Number(await page.locator('.viewer-history').getAttribute('data-viewer-tick')) >= 0);
