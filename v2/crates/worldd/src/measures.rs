@@ -356,6 +356,9 @@ impl Measures {
         SYNCS.json(&mut o);
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
+        SHIPPING.json("shipping", &mut o);
+        ARCHIVE.json("archive", &mut o);
+        CREATOR.json("creator", &mut o);
         o.push_str("}\n");
         o
     }
@@ -478,6 +481,16 @@ pub static STREAM: Stream = Stream(Mutex::new(String::new()));
 /// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
 pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
 
+/// R17: the start's reads of the store that the world no longer waits on (`shipping`, `archive` and `creator` in
+/// `health.json`): `degraded` with the fault, the tries so far and the wait before the next while the store does not
+/// answer, `current` once it did, `stopped` with the fault if that helper ended on a refusal of another kind. The world
+/// listens and serves meanwhile; its log on the disk is the truth, and shipping catches up from it.
+pub static SHIPPING: Stream = Stream(Mutex::new(String::new()));
+/// R17: the history archive's open (its header, bundle index and public history), as [`SHIPPING`].
+pub static ARCHIVE: Stream = Stream(Mutex::new(String::new()));
+/// R17: the creator's record in the directory, as [`SHIPPING`]. While it is degraded, edits fail closed.
+pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
+
 impl Stream {
     pub fn recovering(&self) {
         self.set("{\"state\":\"recovering\"}".to_owned());
@@ -485,6 +498,11 @@ impl Stream {
 
     pub fn serving(&self) {
         self.set("{\"state\":\"serving\"}".to_owned());
+    }
+
+    /// R17: the store answered this start read.
+    pub fn current(&self) {
+        self.set("{\"state\":\"current\"}".to_owned());
     }
 
     /// Its recovery refused `fault` for the `tries`th time; the next try in `next_try_ms`.

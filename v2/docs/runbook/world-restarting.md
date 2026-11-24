@@ -20,6 +20,16 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A store that does not answer at the start** (R17). No read of the store ends a world's start. The claim and
+  shipping, the history archive's open (its header, bundle index and public history) and the creator's record are
+  read on their own threads after the world listens, each tried after 1, 2, 4 … s, then every 60 s, until the store
+  answers. The journal says `worldd: <shipping | the archive | the creator's record> waits for the store: <fault>; try
+  <n> unanswered, the next in <ms> ms`, and `health.json` has `"shipping"`, `"archive"` and `"creator"`, each
+  `{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` while it waits and `current` once answered. The log on
+  the disk is the truth: shipping catches up from it once the store answers, and the compactor keeps the whole log
+  until it has. While the creator's record waits, no one is the creator and edits are refused. Only a fork's archive
+  base is read before listening, tried the same way. A refusal of another kind (not `store-unreachable`) stops that
+  helper with `"state":"stopped"` and the fault; the world runs on.
 - **A degraded public stream** (R12). When the public stream cannot recover from the store (refused or out of reach
   after its patient tries), the world does not exit: it serves its Souls with no viewers (no `views/world.json`) and
   tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public
