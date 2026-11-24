@@ -308,6 +308,21 @@ pub fn position(tree: &Tree, id: Id) -> R<Xz> {
     Ok([x.pos.x, x.pos.z])
 }
 
+/// Twice the area a node's outline covers, µm² (0 for a line or a point): which of a building's rooms is its main one
+/// (0.133 Q2).
+pub fn area2(tree: &Tree, id: Id) -> R<i128> {
+    Ok(match (View { tree }).shape(id)? {
+        Shape::Area(a) => (0..a.len())
+            .map(|i| {
+                let (p, q) = (a[i], a[(i + 1) % a.len()]);
+                i128::from(p[0]) * i128::from(q[1]) - i128::from(q[0]) * i128::from(p[1])
+            })
+            .sum::<i128>()
+            .abs(),
+        _ => 0,
+    })
+}
+
 /// The node a body standing at `id`'s origin stands in (as [`Resolved::frame`]) and that origin in its frame.
 pub fn standing(tree: &Tree, id: Id) -> R<(Id, Vec3)> {
     let v = View { tree };

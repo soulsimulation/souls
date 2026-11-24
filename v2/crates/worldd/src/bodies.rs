@@ -955,6 +955,18 @@ impl Bodies {
         if let Some(s) = place {
             return s.stand().map(|p| Target::new(s.floor, p));
         }
+        // 0.133 Q2: a walk to another Soul's body ends beside it, at speaking distance on the walker's side (a seated
+        // one: at the thing it sits in); a walk to a building ends inside it, in its main room.
+        if node != body
+            && let Some((frame, at)) = self.pose(node)
+        {
+            if self.slots.held_by(node).is_some() {
+                return self.goal(body, frame, None);
+            }
+            let from = self.pose(body).filter(|(f, _)| *f == frame).map(|(_, p)| p);
+            return Ok(Target::new(frame, beside(at, from, SPEAKING)));
+        }
+        let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
         match spot::once(&r) {
             spot::Spot::Stand(t) => Ok(t),
@@ -2036,5 +2048,72 @@ mod map_tests {
         println!(
             "K18d: invalid staged part, real live edit.stale and obsolete map identity leave both trees/map/worker unchanged; independently opened door preserved"
         );
+    }
+}
+
+/// How far from another Soul a walk to its body ends, µm (0.133 Q2): near enough to talk, out of its space.
+const SPEAKING: i64 = 1_200_000;
+
+/// The point `d` from `at` toward `from` (the walker), on the level; along +z when the walker is elsewhere or on it.
+fn beside(at: Vec3, from: Option<Vec3>, d: i64) -> Vec3 {
+    let (dx, dz) = from.map_or((0, 0), |f| (f.x - at.x, f.z - at.z));
+    let len = (i128::from(dx) * i128::from(dx) + i128::from(dz) * i128::from(dz)).isqrt() as i64;
+    if len < 1_000 {
+        return Vec3::new(at.x, at.y, at.z + d);
+    }
+    Vec3::new(at.x + dx * d / len, at.y, at.z + dz * d / len)
+}
+
+/// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with
+/// the largest outline, the first by id on a tie; none when `node` holds no room, or is one.
+fn main_room(tree: &Tree, node: Id) -> Option<Id> {
+    let room = |n: &replica::tree::NodeRef<'_>| {
+        n.kind().as_str().split('@').next() == Some(sim::ground::scene::ROOM)
+    };
+    let h = tree.handle(node)?;
+    if room(&tree.node(h)?) {
+        return None;
+    }
+    let (mut todo, mut best): (Vec<(replica::tree::Handle, u8)>, Option<(i128, Id)>) =
+        (vec![(h, 0)], None);
+    while let Some((h, depth)) = todo.pop() {
+        for c in tree.children(h).unwrap_or_default() {
+            let Some(n) = tree.node(*c) else { continue };
+            if room(&n) {
+                let a = select::area2(tree, n.id()).unwrap_or(0);
+                if best.is_none_or(|(b, id)| a > b || a == b && n.id() < id) {
+                    best = Some((a, n.id()));
+                }
+            } else if depth < 2 {
+                todo.push((*c, depth + 1));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+#[cfg(test)]
+mod beside_tests {
+    use super::*;
+
+    /// 0.133 Q2: a walk to another Soul ends at speaking distance on the walker's side, or along +z with no side.
+    #[test]
+    fn beside_a_body_is_speaking_distance_toward_the_walker() {
+        let at = Vec3::new(10_000_000, 0, 0);
+        assert_eq!(
+            beside(at, Some(Vec3::new(0, 0, 0)), SPEAKING),
+            Vec3::new(10_000_000 - SPEAKING, 0, 0)
+        );
+        assert_eq!(
+            beside(at, None, SPEAKING),
+            Vec3::new(10_000_000, 0, SPEAKING)
+        );
+        assert_eq!(
+            beside(at, Some(at), SPEAKING),
+            Vec3::new(10_000_000, 0, SPEAKING)
+        );
+        let p = beside(at, Some(Vec3::new(13_000_000, 0, 4_000_000)), SPEAKING);
+        let d = (i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt() as i64;
+        assert!((SPEAKING - 2..=SPEAKING).contains(&d), "{d}");
     }
 }
