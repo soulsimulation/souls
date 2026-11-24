@@ -1742,7 +1742,7 @@ impl Forms {
         // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
         if let Some(n) = fr.mv.take() {
             let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
-            let seat = w.places.as_mut().and_then(|p| {
+            let held = w.places.as_mut().and_then(|p| {
                 p.slots.cancel(
                     w.controller,
                     w.due,
@@ -1754,7 +1754,7 @@ impl Forms {
                     name("form-ended"),
                 )
             });
-            match seat {
+            match held {
                 Some(true) if sitting => self.seat_posture(w.tree, run, now),
                 Some(_) => {}
                 None => {
@@ -1927,8 +1927,8 @@ impl Forms {
                     }
                 }
                 // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no
-                // floor to stand on) cancelled the move: its run ends now by the refusal's name (E11c), not at its
-                // deadline waiting on a move that is gone.
+                // floor to stand on, a sit the slot would not take) cancelled the move: its run ends now by the
+                // refusal's name (E11c), not at its deadline waiting on a move that is gone.
                 Fired::Phase { instance, phase: 1 } => {
                     if let Some(&run) = self.by_body.get(&t.node)
                         && let Some(fr) = self.runs.get_mut(&run)
