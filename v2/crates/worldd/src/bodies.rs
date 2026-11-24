@@ -670,7 +670,10 @@ impl Bodies {
                             p.orientation,
                             build,
                         );
-                        resume = r.to().map(|to| (surface, to));
+                        resume = match r {
+                            sim::slots::Resumed::Held => Some((surface, None, p.position)),
+                            _ => r.to().map(|to| (surface, Some(to), p.position)),
+                        };
                         sim::slots::placed_off(
                             s,
                             body.id,
@@ -694,10 +697,37 @@ impl Bodies {
         self.logged.insert(body.id, body.pose);
         let id = body.id;
         self.add_body_built(family, body, build)?;
-        if let Some((floor, to)) = resume {
-            self.runner
-                .controller
-                .carry(id, sim::slots::climb_track(floor, to))?;
+        match resume {
+            Some((floor, Some(to), _)) => {
+                self.runner
+                    .controller
+                    .carry(id, sim::slots::climb_track(floor, to))?;
+            }
+            // No clean way on (E11d): seated again in the seat it was climbing out of, the nearest free one of the
+            // thing it is over, as a restart seats a body the log had seated. Its next rise climbs out or is refused
+            // by name. With none free it is left where the log had it, as a seat gone at a restart leaves a body.
+            Some((floor, None, at)) => {
+                let now = self.runner.now;
+                for thing in self.slots.over(floor, at, build) {
+                    let Some(slot) = self.slots.free(&self.runner.controller, id, thing) else {
+                        continue;
+                    };
+                    if self
+                        .slots
+                        .restore(
+                            &mut self.runner.controller,
+                            id,
+                            (thing, Some(slot)),
+                            sim::controller::Stance::Sit,
+                            now,
+                        )
+                        .is_ok()
+                    {
+                        break;
+                    }
+                }
+            }
+            None => {}
         }
         Ok(())
     }

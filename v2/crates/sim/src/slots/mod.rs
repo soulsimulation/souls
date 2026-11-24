@@ -323,8 +323,9 @@ pub enum Resumed {
     /// Off its floor with no landing within [`CLIMB_BOUND`]: carried to the floor's nearest legal point
     /// ([`crate::ground::exits::nearest`]), the last resort, whose line is a way out all the same.
     Nearest(Vec3),
-    /// Off its floor with no way out: left where the log had it (`resume-held`), standing, never carried through a
-    /// cut.
+    /// Off its floor with no way out: never carried through a cut. The world seats it again in the seat it was
+    /// climbing out of ([`Slots::over`]), so its next rise climbs out or is refused by name; with no such seat free it
+    /// is left where the log had it (`resume-held`).
     Held,
 }
 
@@ -571,15 +572,10 @@ impl Slots {
         if floor.place_built(id, frame, at, facing, build).is_ok() {
             return Resumed::Stood;
         }
-        let grow = (build.size.radius_mm() + crate::ground::MARGIN + 10) * 1000;
         let own: Vec<[[i64; 2]; 4]> = self
-            .footprints
-            .iter()
-            .filter(|(thing, rings)| {
-                self.place(**thing).is_some_and(|p| p.floor == frame.node)
-                    && rings.iter().any(|r| near_ring(r, [at.x, at.z], grow))
-            })
-            .flat_map(|(_, rings)| rings.iter().copied())
+            .over(frame.node, at, build)
+            .into_iter()
+            .flat_map(|t| self.footprints[&t].iter().copied())
             .collect();
         let cl = Climb {
             floor,
@@ -603,6 +599,20 @@ impl Slots {
             return Resumed::Nearest(b.pose.position);
         }
         Resumed::Held
+    }
+
+    /// The things with seats on `floor` whose own boxes (grown by `build`'s clearance) hold `at`, by id: what a body
+    /// standing off the floor there is over (E11d).
+    pub fn over(&self, floor: Id, at: Vec3, build: Build) -> Vec<Id> {
+        let grow = (build.size.radius_mm() + crate::ground::MARGIN + 10) * 1000;
+        self.footprints
+            .iter()
+            .filter(|(thing, rings)| {
+                self.place(**thing).is_some_and(|p| p.floor == floor)
+                    && rings.iter().any(|r| near_ring(r, [at.x, at.z], grow))
+            })
+            .map(|(t, _)| *t)
+            .collect()
     }
 
     /// The climbs out begun since the last call (E11d), in the order they began.

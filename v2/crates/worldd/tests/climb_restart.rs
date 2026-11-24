@@ -225,3 +225,128 @@ fn on_after(b: &Bodies, ground: Id, p: Vec3) -> bool {
         .place(id(99), frame, p, Quat::IDENTITY)
         .is_ok()
 }
+
+/// E11d: a body killed during a climb out, still over the seat's thing with no clean way on (no ground within 0.6 m
+/// of it, no water, its thing's box only round its seat) is seated again in that seat, not left standing off the
+/// floor where nothing moves it. Its next rise climbs out or is refused by name, and it is seated still if refused.
+#[test]
+fn a_restart_with_no_clean_way_on_seats_the_body_again_and_it_rises_by_name() {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let clear = |p: Vec3| {
+        (-3..=3).all(|i| {
+            (-3..=3).all(|j| {
+                !on(
+                    &town,
+                    ground,
+                    Vec3::new(p.x + i * 200_000, 0, p.z + j * 200_000),
+                )
+            })
+        })
+    };
+    let off = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| clear(p))
+        .expect("a point with no ground within 0.6 m");
+    let start = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| on(&town, ground, p))
+        .expect("ground");
+    let body = id(1);
+    let placed = Placed::from([(
+        body,
+        (
+            Pose {
+                frame,
+                position: off,
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: ground,
+                    height: 0,
+                },
+            },
+            None,
+        ),
+    )]);
+    let first = town.surfaces[&ground]
+        .place(body, frame, start, Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    let thing = id(50);
+    b.add_place(PlaceAt {
+        thing,
+        place: Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, 300_000],
+        },
+        point: Vec3::new(off.x, 450_000, off.z),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })
+    .expect("its seat");
+    let (x0, x1, z0, z1) = (
+        off.x - 100_000,
+        off.x + 100_000,
+        off.z - 100_000,
+        off.z + 100_000,
+    );
+    b.slots
+        .footprint(thing, vec![[[x0, z0], [x1, z0], [x1, z1], [x0, z1]]]);
+    b.add_body_at(humanoid(), first, &placed)
+        .expect("a body off its floor starts");
+    b.begin(0);
+    let p = b.runner.controller.body(body).unwrap().pose;
+    assert_eq!(p.support, Support::Slot, "seated again: {p:?}");
+    assert_eq!(p.frame.node, thing);
+    assert_eq!(b.slots.held_by(body), Some(thing), "its seat held");
+    assert!(
+        !b.runner.controller.carried(body),
+        "never carried through a cut"
+    );
+    // Its next rise: no clean way out, so refused by name, and it is seated still.
+    let asked = Asked {
+        body,
+        actor: Actor::Soul(body),
+        ask: Ask::Rise,
+        fallbacks: Vec::new(),
+    };
+    let mut now = 0;
+    let mut got = b.start(vec![(id(100), asked)]);
+    for _ in 0..100 {
+        if !got.is_empty() {
+            break;
+        }
+        now += TICK;
+        b.step(now);
+        got = b.start(Vec::new());
+    }
+    got.remove(0).1.expect("the rise starts");
+    let mut ended = Vec::new();
+    while ended.is_empty() && now < 20 * S {
+        now += TICK;
+        ended = b.step(now);
+    }
+    println!("the rise after the restart: {ended:?}");
+    let [(i, r)] = ended.as_slice() else {
+        panic!("{ended:?}")
+    };
+    assert_eq!(*i, id(100));
+    match r {
+        Ok(()) => assert!(
+            b.runner.controller.carried(body) || b.slots.held_by(body).is_none(),
+            "climbed out"
+        ),
+        Err(e) => {
+            assert!(e.contains("off-surface"), "refused by name: {e}");
+            assert_eq!(b.slots.held_by(body), Some(thing), "seated still");
+            assert_eq!(
+                b.runner.controller.body(body).unwrap().pose.support,
+                Support::Slot
+            );
+        }
+    }
+}
