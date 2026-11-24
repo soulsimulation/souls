@@ -547,7 +547,7 @@ fn other_slots<G: Geometry, R: Reach>(
         if let Some(words) = replica::who_may::private_to(w.tree, on, asker) {
             return refuse("object.private", format!("{key}: who may: {words}"));
         }
-        let seat = w
+        let held = w
             .places
             .as_ref()
             .is_some_and(|p| p.slots.place_in(on, n).is_some());
@@ -560,7 +560,7 @@ fn other_slots<G: Geometry, R: Reach>(
             .as_deref()
             .and_then(|k| slots_of.get(k))
             .is_some_and(|s| s.contains(&n));
-        if !seat && !declared {
+        if !held && !declared {
             return refuse("slot-unknown", format!("{key}: slot {n} of {}", show(on)));
         }
     }

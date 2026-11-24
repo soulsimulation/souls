@@ -1896,9 +1896,9 @@ fn e14_a_slot_of_another_thing_is_refused_when_private_a_body_or_undeclared() {
     let entry = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:lecture", "owner": "thing",
           "forms": {
-            "attend": { "who": "anyone", "takes": { "seat": { "type": "slot" } },
-              "steps": [{ "step": "sit", "slot": { "arg": "seat" } }] },
-            "point_at": { "who": "anyone", "takes": { "seat": { "type": "thing" } },
+            "attend": { "who": "anyone", "takes": { "spot": { "type": "slot" } },
+              "steps": [{ "step": "sit", "slot": { "arg": "spot" } }] },
+            "point_at": { "who": "anyone", "takes": { "spot": { "type": "thing" } },
               "steps": [{ "step": "wait", "us": 50000 }] } } }"#,
     )
     .expect("JSON");
@@ -1907,7 +1907,7 @@ fn e14_a_slot_of_another_thing_is_refused_when_private_a_body_or_undeclared() {
         n += 1;
         b.look();
         let now = b.now;
-        let args = BTreeMap::from([("seat".to_owned(), arg)]);
+        let args = BTreeMap::from([("spot".to_owned(), arg)]);
         let (mut w, forms) = b.world();
         forms
             .commit_with(
@@ -1948,7 +1948,7 @@ fn e14_a_slot_of_another_thing_is_refused_when_private_a_body_or_undeclared() {
     let [e] = b.forms.ended.as_slice() else {
         panic!("{:?}", b.forms.ended)
     };
-    assert_eq!(e.how.as_str(), "done", "the public seat is taken");
+    assert_eq!(e.how.as_str(), "done", "the public place is taken");
 }
 
 /// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand
