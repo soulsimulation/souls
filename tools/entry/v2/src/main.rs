@@ -1751,6 +1751,9 @@ impl Stage {
         for t in things {
             self.seat(t);
         }
+        if let Some(no) = self.reseat(node, &kind, &form, case, &names) {
+            return no;
+        }
         // The world's check at commit: R2's rules on the case's state as it stands, the world seeing all (I3).
         let state = self.state_of(case, ids, &names);
         let asker = obj(vec![("sees", J::s("all"))]);
@@ -2156,7 +2159,10 @@ impl Stage {
     /// One try at [`Self::rise`]; its intents are numbered apart from the acts' (`k` the try).
     fn rise_once(&mut self, k: u64) -> J {
         let Some(node) = self.slots.held_by(self.body) else {
-            return obj(vec![("verdict", J::s("yes")), ("receipt", J::s("completed"))]);
+            return obj(vec![
+                ("verdict", J::s("yes")),
+                ("receipt", J::s("completed")),
+            ]);
         };
         let Ok(entry) = parse(r#"{"forms":{"rise":{"steps":[{"step":"rise"}]}}}"#) else {
             return err("the rise form does not parse");
@@ -2213,6 +2219,112 @@ impl Stage {
             },
         );
         self.wait(&rid)
+    }
+
+    /// A Soul a leave left seated and that then rose (E11) no longer holds the vehicle (E10): before a holder's form
+    /// on it is done again, it sits back in the vehicle's drive seat by the vehicle's own form that sits there (its
+    /// `ride`), run until it ends, never by writing the seat (0.135 E18). Only when the case seats the actor there
+    /// and it holds no seat now. `None` when there was nothing to do or it sat; else the sit's refusal, by name.
+    fn reseat(&mut self, node: Id, kind: &str, form: &str, case: &J, names: &Names) -> Option<J> {
+        let entry = self.entry(kind)?.clone();
+        let who = entry.get("forms")?.get(form)?.get("who").and_then(J::str);
+        let drive = entry.get("vehicle")?.get("drive")?.str()?.to_owned();
+        let actor = case.get("state")?.get("actor")?.str()?;
+        let this = case.get("act")?.get("this")?.str()?;
+        let seat = case
+            .get("state")?
+            .get("nodes")?
+            .get(this)?
+            .get("slots")?
+            .get(&drive);
+        let body = names.to_id.get(actor).copied()?;
+        let in_case = strs(seat).iter().any(|b| b == actor) || seat.and_then(J::str) == Some(actor);
+        if who != Some("holder") || !in_case || self.slots.held_by(body).is_some() {
+            return None;
+        }
+        let refused = |name: &str, detail: String| {
+            obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::Str(format!("reseat.{name}"))),
+                ("code", J::Str(format!("reseat.{name}"))),
+                ("detail", J::Str(detail)),
+                ("receipt", J::s("refused")),
+                ("by", J::s("runner")),
+            ])
+        };
+        let sits = |f: &J| {
+            f.get("starts").and_then(J::str) == Some("act")
+                && f.get("steps")
+                    .and_then(J::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|s| {
+                        s.get("step").and_then(J::str) == Some("sit")
+                            && s.get("slot").and_then(J::str) == Some(drive.as_str())
+                    })
+        };
+        let forms = entry.get("forms").and_then(J::obj).unwrap_or(&[]);
+        let Some(sit) = forms.iter().find(|(_, f)| sits(f)).map(|(k, _)| k.clone()) else {
+            return Some(refused(
+                "no-sit",
+                format!("no form of {kind} sits in its drive seat {drive}"),
+            ));
+        };
+        let n = self.runs.len() as u64 + 1;
+        let id = Id::new(Scope([0xe3; 16]), (3 << 40) + n)?;
+        let mut digest = [0u8; 32];
+        digest[..8].copy_from_slice(&n.to_le_bytes());
+        digest[16] = 0xe2;
+        let intent = Intent {
+            id,
+            expiry: i64::MAX,
+            actor: Actor::Soul(self.souls_of.get(&body).copied().unwrap_or(self.soul)),
+            digest,
+        };
+        let (now, from) = (self.now, self.log.len());
+        let asked = {
+            let (mut w, forms) = self.world();
+            forms.commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                node,
+                &entry,
+                &sit,
+                &Args::default(),
+                intent,
+                Limits::default(),
+                now,
+            )
+        };
+        self.flush();
+        if let Err(r) = asked {
+            return Some(refused(r.name, format!("{sit} into {drive}: {}", r.detail)));
+        }
+        let rid = format!("r{n}");
+        let last = self.forms.at(body);
+        self.runs.insert(
+            rid.clone(),
+            Run {
+                intent: id,
+                last,
+                from,
+                body,
+            },
+        );
+        let w = self.wait(&rid);
+        if w.get("verdict").and_then(J::str) == Some("yes")
+            && self.slots.held_by(body) == Some(node)
+        {
+            return None;
+        }
+        let why = w
+            .get("code")
+            .and_then(J::str)
+            .unwrap_or("not-seated")
+            .to_owned();
+        Some(refused(&why, format!("{sit} into {drive} ended {why}")))
     }
 
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
