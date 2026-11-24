@@ -1835,10 +1835,17 @@ fn other_seat(
         return Some(Err(refusal("arg-malformed", key)));
     };
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    // Never a thing private to someone else (#3700): the body's Soul, or the body with none, as `private_to` asks.
+    let soul = tree
+        .links_at(body)
+        .iter()
+        .find(|e| plain(tree.ty(e)) == "souls:body-of")
+        .map_or(body, |e| e.other);
     // Each thing with a free seat, in the selector's order: its anchor distance, the seat, and the seat's stand
     // point's squared distance from the body across x and z.
     let seats: Vec<(Option<i128>, Id, u64, Option<i128>)> = ranked
         .into_iter()
+        .filter(|(_, t)| replica::who_may::private_to(tree, *t, soul).is_none())
         .filter_map(|(far, t)| {
             let s = b.slots.free(c, body, t)?;
             let near = b
