@@ -675,3 +675,69 @@ fn one_owner_who_may_see_and_who_may_use_as_owner_name_the_same_soul() {
     );
     assert!(with_owner > OWNED / 2);
 }
+
+/// E10: a vehicle's `who: holder` form (its `steer`) is the drive seat's. A body seated in the slot the kind's
+/// `vehicle.drive` names may do it; a body in its other body slot (a passenger) and a body standing beside it are
+/// refused `not-permitted`, naming who may. The drive seat is the made-up kind's second slot, so the slot is found by
+/// its name, not by being first.
+#[test]
+fn e10_a_seated_rider_steers_and_a_passenger_or_a_bystander_is_refused() {
+    let name = "f6:v";
+    let entry = parse(&format!(
+        r#"{{"format":"souls-entry/1","kind":"{name}","owner":"thing",
+        "slots":{{"front":{{"admits":"body","posture":"sit","most":1}},
+                  "back":{{"admits":"body","posture":"sit","most":1}}}},
+        "vehicle":{{"drive":"back","steer":"steer","speed_mm_s":1500,"ground":"deep_water"}},
+        "forms":{{"steer":{{"who":"holder"}}}}}}"#
+    ))
+    .expect("JSON");
+    let text =
+        format!("{KINDS}\n{{1: \"{name}\", 2: \"thing\", 6: {{1: [\"body\"], 2: [\"body\"]}}}}");
+    let kinds = parse_kinds(&text).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let id = |n| Id::new(FIXTURE_SCOPE_A, n).expect("an id");
+    let (root, boat, rider, passenger, beside) = (id(1), id(2), id(3), id(4), id(5));
+    let node = |id, kind: &str, parent, slot| Node {
+        id,
+        kind: full(kind),
+        parent,
+        slot,
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let draft = Draft {
+        kinds: kinds.clone(),
+        nodes: vec![
+            node(root, "souls:place", None, None),
+            node(boat, name, Some(root), None),
+            node(rider, "souls:body", Some(boat), Some(2)),
+            node(passenger, "souls:body", Some(boat), Some(1)),
+            node(beside, "souls:body", Some(root), None),
+        ],
+        ..Draft::default()
+    };
+    let (tree, rules) = Tree::load(&draft).unwrap_or_else(|e| panic!("loads: {e}"));
+    let steer = |body| {
+        may(
+            &tree,
+            &rules.audiences,
+            &|_| None,
+            body,
+            boat,
+            &entry,
+            "steer",
+        )
+    };
+    assert!(steer(rider).is_ok(), "the rider in the drive slot steers");
+    for (who, body) in [("a passenger", passenger), ("someone beside it", beside)] {
+        let r = steer(body).expect_err(who);
+        assert_eq!(r.name, "not-permitted", "{who}: {}", r.detail);
+        assert_eq!(r.detail, "who may: whoever holds it", "{who}");
+    }
+}

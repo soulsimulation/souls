@@ -161,6 +161,61 @@ fn stamp(stage: &str) {
 const EVERY: u64 = 8 << 20;
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
+
+/// R17: a start's claim or archive open refused for a reason other than a store that does not answer. The process
+/// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
+fn refused_at_start(e: Refusal) -> ! {
+    eprintln!("worldd serve: {}", refusal(e));
+    std::process::exit(1)
+}
+
+/// R17: waits until the world's claim is held (`claimed`, set by the shipping thread), so the archive publishes
+/// nothing for a world whose claim the store has not yet given.
+fn held(claimed: &std::sync::atomic::AtomicBool) {
+    while !claimed.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// R17: one of the start's reads of the store, tried until the store answers. While it answers `store-unreachable`
+/// (no answer in time, or a 5xx), `gauge` says `degraded` with the fault and the next try, after each of
+/// [`STREAM_RETRY_MS`] (the last repeats), and the start's progress is said meanwhile: never an exit on a slow store,
+/// so never a crash loop. Any other answer is `f`'s at once; `gauge` then says `current`, or `stopped` with the fault.
+fn until_answered<T>(
+    what: &str,
+    gauge: &measures::Stream,
+    mut f: impl FnMut() -> Result<T, Refusal>,
+) -> Result<T, Refusal> {
+    let mut tries = 0u64;
+    loop {
+        match f() {
+            Err(e) if e.name == "store-unreachable" => {
+                tries += 1;
+                let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                let fault = refusal(e);
+                gauge.degraded(&fault, tries, wait);
+                eprintln!(
+                    "worldd: {what} waits for the store: {fault}; try {tries} unanswered, the next in {wait} ms"
+                );
+                for _ in 0..wait / 100 {
+                    crate::progress();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            Ok(v) => {
+                gauge.current();
+                if tries > 0 {
+                    eprintln!("worldd: {what}: the store answered after {tries} unanswered tries");
+                }
+                return Ok(v);
+            }
+            Err(e) => {
+                gauge.stopped(&refusal(e.clone()));
+                return Err(e);
+            }
+        }
+    }
+}
 /// R15: how long a world going to sleep waits for its stream's backup, at most: under the sleep watch's 5 s wait for
 /// the stream's answer (`sleep.rs` STREAM_WITHIN), with room for the sleeping pointer's own write.
 const SLEEP_DRAIN: std::time::Duration = std::time::Duration::from_secs(3);
@@ -1916,8 +1971,9 @@ struct Off {
     mark: shipping::Mark,
     floor: Option<crate::compactor::Archive>,
     /// R16: the claim this run took, its epoch and the machine's name: the public stream's generations carry the
-    /// epoch, and its backup reads the directory by it before fencing.
-    claim: Option<(u64, Name)>,
+    /// epoch, and its backup reads the directory by it before fencing. R17: the epoch is set by the shipping thread
+    /// once the claim is held.
+    claim: Option<(Arc<std::sync::OnceLock<u64>>, Name)>,
 }
 
 impl Off {
@@ -1972,16 +2028,18 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
 /// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
 /// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
-/// in `rx` in order (#3746).
+/// in `rx` in order (#3746). An open the store does not answer is tried again until it does (R17, `archive` in
+/// `health.json`).
 fn archiving(
-    open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
+    mut open: impl FnMut() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
     closed: impl Fn(u64) + Send + 'static,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
+    measures::ARCHIVE.recovering();
     std::thread::spawn(move || {
-        // A fork's open is the world's start too: its reads are patient (#1960).
-        let mut a = patiently(open)?;
+        // The open is the world's start too: its reads are patient (#1960), and tried again until answered (R17).
+        let mut a = until_answered("the archive", &measures::ARCHIVE, || patiently(&mut open))?;
         // How far its closed objects reach, for the log's compactor (#3837).
         let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
         publish(&a);
@@ -2193,42 +2251,85 @@ fn off_machine(
     )));
     println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
+    // A fork's archive base decides how its records go to the archive, so it is read before the world listens: tried
+    // until the store answers, never an exit on a slow one (R17). An unforked world reads nothing here.
     let fork_base = checkpoint
-        .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
+        .map(|newest| {
+            until_answered("the fork's archive base", &measures::ARCHIVE, || {
+                fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered)
+            })
+        })
         .transpose()
         .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store.clone(), machine.clone());
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
-    match d.world(&lineage, zone) {
-        Err(e) if e.name == "record-missing" => {
-            // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
-            let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
-            let mut build = vec![0x12, 0x20];
-            build.extend_from_slice(&sha256(pin.as_bytes()));
-            d.set_build(&lineage, zone, &build).map_err(refusal)?;
-        }
-        Err(e) => return Err(refusal(e)),
-        Ok(_) => {}
-    }
     let end = first + records.len() as u64;
-    let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
-    let from = claim.takeover.from;
-    let epoch = claim.takeover.epoch;
-    println!("shipping: epoch {epoch} from record {from} of {end}");
-    let shipper = Shipper::open(
-        d,
-        claim,
-        lineage,
-        zone,
-        built.header.stored(),
-        from,
-        Wall::start(),
-    )
-    .map_err(refusal)?
-    .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
-    let (ship, mark, h) = shipper.spawn();
-    report("the shipper", h);
+    // R17: the claim and the shipper's open read the store, so they are made on the shipper's own thread, tried until
+    // the store answers, while the world listens and serves. Records wait in `ship` meanwhile, every one from the
+    // log's first; the shipper passes over those its claim already holds. Until it opens, its marks hold the whole
+    // log from the compactor.
+    let (ship, items) = channel::<Item>();
+    let mark = shipping::Mark::default();
+    let shared = mark.clone();
+    let (claim_store, header, checkpoints, claim_machine) = (
+        store.clone(),
+        built.header.stored().to_vec(),
+        dir.join("checkpoints"),
+        machine.clone(),
+    );
+    let claim = move || -> Result<(Shipper<Bucket, Wall>, u64), Refusal> {
+        let mut d = Directory::new(claim_store.clone(), claim_machine.clone());
+        match d.world(&lineage, zone) {
+            Err(e) if e.name == "record-missing" => {
+                // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
+                let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
+                let mut build = vec![0x12, 0x20];
+                build.extend_from_slice(&sha256(pin.as_bytes()));
+                d.set_build(&lineage, zone, &build)?;
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+        let claim = shipping::take_over(&mut d, &lineage, zone, first..end)?;
+        let (from, epoch) = (claim.takeover.from, claim.takeover.epoch);
+        println!("shipping: epoch {epoch} from record {from} of {end}");
+        Ok((
+            Shipper::open(d, claim, lineage, zone, &header, from, Wall::start())?
+                .checkpoints(&checkpoints, shipping::CHECKPOINT_GAP_US)
+                .sharing(&shared),
+            epoch,
+        ))
+    };
+    measures::SHIPPING.recovering();
+    // Set once the claim is held; the archive writes nothing before it.
+    let claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let claiming = Arc::clone(&claimed);
+    // R16: the held claim's epoch, for the public stream, which waits for it.
+    let epoch = Arc::new(std::sync::OnceLock::new());
+    let epoch_held = Arc::clone(&epoch);
+    let opening = std::thread::Builder::new()
+        .name("shipping".into())
+        .spawn(move || -> Result<(), Refusal> {
+            // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
+            // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
+            // would number new records over ones already off the machine.
+            let (shipper, held_epoch) =
+                until_answered("shipping", &measures::SHIPPING, || patiently(&claim))
+                    .unwrap_or_else(|e| refused_at_start(e));
+            // The claim is held: the archive may write, and the public stream may open with its epoch.
+            let _ = epoch_held.set(held_epoch);
+            claiming.store(true, std::sync::atomic::Ordering::SeqCst);
+            let (to, _, h) = shipper.spawn();
+            report("the shipper", h);
+            for item in items {
+                if to.send(item).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| e.to_string())?;
+    report("shipping", opening);
     let mut based = false;
     let mut archive_base = 0;
     let again = Again {
@@ -2245,7 +2346,9 @@ fn off_machine(
         based = true;
         archive_base = base.record;
         let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
+        let claimed = Arc::clone(&claimed);
         let open = move || {
+            held(&claimed);
             let mut a =
                 Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
             archive_bridge(&store, &mut a, &header, first)?;
@@ -2275,11 +2378,24 @@ fn off_machine(
         .find(|k| k.as_str().starts_with("souls:place@"))
         .cloned()
     {
-        again
-            .put("header", built.header.stored(), When::Absent)
-            .map_err(refusal)?;
-        let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
-        again.restore_public().map_err(refusal)?;
+        // R17: its open reads the store (the header, the bundle index, the public history), so it runs on the
+        // archiver's thread as a fork's does; parts wait in `rx` meanwhile, in order.
+        // It writes nothing before the world's claim is held. As with the claim, only a store that does not answer
+        // is waited for; any other refusal ends the process by name, as before R17.
+        let (header, claimed) = (built.header.clone(), Arc::clone(&claimed));
+        let open = move || {
+            held(&claimed);
+            let opened = (|| -> Result<Archiver<Again>, Refusal> {
+                again.put("header", header.stored(), When::Absent)?;
+                let a = Archiver::open(again.clone(), "", &header, zone, kind.clone())?;
+                again.restore_public()?;
+                Ok(a)
+            })();
+            match opened {
+                Err(e) if e.name != "store-unreachable" => refused_at_start(e),
+                opened => opened,
+            }
+        };
         let (tx, rx) = channel();
         let parts = Arc::new(crate::compactor::Parts::new(parts_from));
         let reach = Arc::clone(&parts);
@@ -2287,7 +2403,7 @@ fn off_machine(
         archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(move || Ok(a), rx, Arc::clone(&text), publish),
+            archiving(open, rx, Arc::clone(&text), publish),
         );
         Some(tx)
     } else {
@@ -2303,20 +2419,9 @@ fn off_machine(
         floor: archive_floor,
         claim: Some((epoch, machine)),
     };
+    // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
     for (k, bytes) in records.iter().enumerate() {
-        let record = first + k as u64;
-        let input = recorder::is_input(bytes);
-        if record >= from {
-            off.take(record, bytes, input);
-        } else if off.based {
-            if let Some(a) = &off.archive
-                && record >= off.archive_base
-            {
-                let _ = a.send((record, bytes.clone()));
-            }
-        } else if !input {
-            off.part(record, bytes);
-        }
+        off.take(first + k as u64, bytes, recorder::is_input(bytes));
     }
     Ok(off)
 }
@@ -2329,16 +2434,42 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
+    // R17: one try at the start: the list and the name record, two reads of up to the client's 5 s each, so about 10 s
+    // at most before listening. A store that does not answer starts the world with no creator known (edits fail
+    // closed), `degraded` in health.json, and the creator's thread tries again until the store answers.
+    let (first, waiting) = match read() {
+        Ok(c) => {
+            measures::CREATOR.current();
+            (c, false)
+        }
+        Err(e) if e.name == "store-unreachable" => {
+            let fault = refusal(e);
+            measures::CREATOR.degraded(&fault, 1, STREAM_RETRY_MS[0]);
+            eprintln!(
+                "worldd: the creator's record waits for the store: {fault}; the world starts without it"
+            );
+            (None, true)
+        }
+        Err(e) => return Err(refusal(e)),
+    };
     let creator = Arc::new(Creator::with_reader(
-        patiently(|| read()).map_err(refusal)?,
+        first,
         Arc::new(move || admission().ok().flatten()),
     ));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
-    println!("creator: {}", say(creator.get()));
+    println!("creator: {}", say(first));
     let watched = Arc::clone(&creator);
     std::thread::Builder::new()
         .name("creator".into())
         .spawn(move || {
+            if waiting
+                && let Ok(c) = until_answered("the creator's record", &measures::CREATOR, || {
+                    patiently(|| read())
+                })
+                && watched.set(c)
+            {
+                println!("creator: {}", say(c));
+            }
             loop {
                 std::thread::sleep(CREATOR_EVERY);
                 match read() {
@@ -2648,22 +2779,22 @@ fn serve(args: &[String]) -> R<()> {
             let parts_from = sim::log::compact::read_cut(&log_path)
                 .map_err(refusal)?
                 .map_or(0, |c| c.note);
-            // The start's reads of the store are patient: one slow answer does not end the world (#1960).
-            Some(patiently(|| {
-                off_machine(
-                    spec,
-                    &machine,
-                    &built,
-                    &name,
-                    &dir,
-                    SourceContext {
-                        recovered: &found,
-                        parts_from,
-                        checkpoint: checkpoint.as_deref(),
-                        text: Arc::clone(&text),
-                    },
-                )
-            })?)
+            // R17: no read of the store here ends the world. The claim, the shipper and the archive open on their own
+            // threads, tried until the store answers (`shipping` and `archive` in health.json); only a fork's archive
+            // base is read before listening, tried the same way.
+            Some(off_machine(
+                spec,
+                &machine,
+                &built,
+                &name,
+                &dir,
+                SourceContext {
+                    recovered: &found,
+                    parts_from,
+                    checkpoint: checkpoint.as_deref(),
+                    text: Arc::clone(&text),
+                },
+            )?)
         }
         None => None,
     };
@@ -2724,7 +2855,8 @@ fn serve(args: &[String]) -> R<()> {
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
-    // standalone seeded-world fallback. Lookup failures have already refused startup above.
+    // standalone seeded-world fallback. A lookup refused above ended the start; one the store did not answer (R17)
+    // left no creator known until it does, so edits fail closed meanwhile.
     if let Some(c) = creator {
         cfg.edits = Some(Editing {
             // Not read: the checker takes the creator from `cfg.creator`.
@@ -2793,7 +2925,8 @@ fn serve(args: &[String]) -> R<()> {
     // R16: the claim this run took. Its epoch goes into every stream generation's baseline, so a machine that took
     // over never makes a lost tail's address; and before fencing, the backup asks the directory whether this run still
     // holds the newest claim: the newest writer puts over an older one's head, and the older one fences.
-    let stream_epoch = off_claim.as_ref().map(|(epoch, _)| *epoch);
+    // R17: the claim is taken on the shipping thread; the public stream's thread waits for its epoch before it opens.
+    let stream_epoch = off_claim.as_ref().map(|(epoch, _)| Arc::clone(epoch));
     // ... and the host its clean-stop mark names (this machine's own identity): a spool copied to another machine
     // never reads as this one's.
     let stream_host = view_out::host_identity();
@@ -2807,9 +2940,11 @@ fn serve(args: &[String]) -> R<()> {
             );
             let (lineage, zone) = (built.header.lineage.0, built.header.zone);
             let newest: view_out::BackupClaim = Box::new(move || {
+                // Asked only after the stream opened, so after the claim is held.
+                let held = epoch.get().copied();
                 Ok(d.world(&lineage, zone)?
                     .current()
-                    .is_some_and(|t| t.epoch == epoch))
+                    .is_some_and(|t| Some(t.epoch) == held))
             });
             Some(newest)
         }
@@ -2933,6 +3068,10 @@ fn serve(args: &[String]) -> R<()> {
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
+                // R16 after R17: the stream's generations carry the claim's epoch, so it opens once the claim is held
+                // (`shipping` in health names a store that holds it up).
+                measures::STREAM.recovering();
+                let stream_epoch = stream_epoch.map(|epoch| *epoch.wait());
                 let recover = || -> Result<_, Refusal> {
                     let start = view_out::PublicStart {
                         root: &views_dir,

@@ -12,7 +12,7 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
+# directoryd, register-world, deploy, gateway-upgrade, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory, souls-origin, souls-agents and souls-alarms (with its drop-in).
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing but the alarm daemon
@@ -30,7 +30,7 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world publish-template)
+PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-world publish-template)
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
@@ -358,7 +358,7 @@ check() {
     ! grep -qE "^would (dir|perms) $ETC " "$tmp/etc.plan2" || die "check: a re-install changes a 751 $ETC"
   )
   echo "check: $ETC is 751 after a fresh install and after a re-install over 750"
-  for p in import-accounts import-world publish-template; do
+  for p in import-world publish-template; do
     cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
     grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
@@ -374,7 +374,7 @@ check() {
     perms() {
       if [ -n "$(find "$1" -prune -perm 755)" ]; then echo '755 root root'; else echo '644 root root'; fi
     }
-    for p in import-accounts import-world; do
+    for p in import-world; do
       CHANGES=0
       ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/missing"
       [ "$CHANGES" = 1 ] || die "check: missing $p was not planned"
@@ -391,7 +391,7 @@ check() {
       [ "$CHANGES" = 1 ] || die "check: $p mode was not repaired"
     done
   )
-  echo 'check: both importers bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
+  echo 'check: the importer bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
   ours=$tmp/ours theirs=$tmp/theirs
   {
     awk '$1 == "would" && $2 ~ /^(dir|file)$/ {print "path " $3} $1 == "would" && $2 == "user" {print "user " $3}' "$tmp/plan"

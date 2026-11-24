@@ -269,7 +269,8 @@ function oneFence(binding) {
       // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
       const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
+      const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -286,6 +287,25 @@ function oneFence(binding) {
         try { if (BODY_FILE.test(body) && !url.search) bytes = readBounded(join(bodiesDir, body), 64 * 1024 * 1024); } catch { bytes = null; }
         if (!bytes) { res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'not-found' })); return true; }
         res.writeHead(200, { 'content-type': bodyType(body), 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
+      }
+      if (capture !== null) {
+        // W4 prep (0.133): the page binds the scenery the published scene.json names, by its hash. The old world keeps a
+        // scene's capture only once one of its takes carried it, so a world loaded for the switch (or one nobody watched
+        // since its scene last changed) answers 404 and the page stops at "World layout could not be prepared". The
+        // published scene is that capture: answered as the old world answers it (`{worldId, ...capture}`, http.ts),
+        // only for this stream's file and this world; any other hash passes through.
+        const m = staticDir ? manifest() : null, world = url.searchParams.get('world');
+        let json = null;
+        try {
+          if (m?.files?.['scene.json'] && m.stream === this.v2Stream(w) && (world === null || world === oldWorldId) && [...url.searchParams.keys()].every((k) => k === 'world')) {
+            const { renderSceneRef: ref, ...scene } = JSON.parse(readBounded(join(staticDir, 'scene.json'), 64 * 1024 * 1024));
+            if (ref?.hash === capture) json = JSON.stringify({ worldId: oldWorldId, contract: 'render-scene-capture/1', ref, body: scene });
+          }
+        } catch { json = null; }
+        if (json === null) return false;
+        res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(json), 'cache-control': 'no-store', 'x-souls-static': 'published' })
+          .end(req.method === 'HEAD' ? undefined : json);
         return true;
       }
       if (SERVED.has(path)) {

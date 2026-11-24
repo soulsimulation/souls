@@ -33,9 +33,21 @@ import { inPlace, merge, parseModel, fitRigid, bakeModel } from '../../web/src/c
 import { decodedGeometry } from './decode-draco.ts';
 import { encodeMesh, simplify, type LodMesh } from '../../web/src/crowd/lod.ts';
 import type { BodyMotion } from '../../../mars/viewer/engine/bodies/motion.ts';
-import { BODY_LIMITS } from '../../../apps/server/src/edge/body/admission.ts';
 
 const REPO = resolve(import.meta.dirname, '../../..');
+/** Today's body admission limits (`apps/server/src/edge/body/admission.ts`, 0.134 D3: a copy, so this tool keeps
+ *  working once the old server is gone). */
+export const BODY_LIMITS = {
+  bytes: 4 * 1024 * 1024,
+  triangles: 10000,
+  images: 2,
+  imageBytes: 1024 * 1024,
+  imageDimension: 1024,
+  nodes: 512,
+  accessors: 1024,
+  rigidDrawCalls: 4,
+  humanoidDrawCalls: 16,
+} as const;
 export const SIMPLE_TRIANGLES = 600;
 export const MEASURE_FPS = 15;
 /** B12's size classes, smallest first: name and radius in mm (`sizes.rs`, `Size::ALL`). */

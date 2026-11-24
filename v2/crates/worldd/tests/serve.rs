@@ -1088,11 +1088,11 @@ fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
 }
 
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
-/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
+/// starts; with the bucket out of reach for good it listens all the same (R17), saying what waits for the store.
 // A real process on the real clock: the stalls and the bound are real time.
 #[allow(clippy::disallowed_methods)]
 #[test]
-fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {
+fn i1960_a_world_starts_through_slow_store_reads_and_listens_on_an_unreachable_store() {
     use directoryd::directory::stand_in::{KEY_ID, StandIn};
     use std::ffi::OsStr;
     let d = scratch("i1960");
@@ -1121,49 +1121,273 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
 
     // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
     // go unanswered for 6 s, past the client's 5 s.
+    // Since R17 the archive opens on its own thread, after the world listens.
     s.stall_reads(2, Duration::from_secs(6), "/header");
     let begun = Instant::now();
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
+    let retried = [w.line("store: out of reach"), w.line("store: out of reach")];
     let took = begun.elapsed();
-    let retried: Vec<String> = w
-        .all
-        .lock()
-        .map(|l| l.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|l| l.starts_with("store: ") && l.contains("out of reach"))
-        .collect();
     println!("restart through 2 stalled reads in {took:?}: {retried:?}");
-    assert_eq!(retried.len(), 2, "the stalled read tried again twice");
     assert!(
         retried.iter().all(|l| l.contains("/header: timeout")),
         "{retried:?}"
     );
     w.kill();
 
-    // The bucket gone: nothing listens at its address. Four tries of the first read, then the refusal.
+    // The bucket gone: nothing listens at its address. R17: the world still listens, and says what waits for it.
     let gone = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let port = gone.local_addr().expect("its address").port();
     drop(gone);
     let args = more(&format!("s3:http://127.0.0.1:{port}/souls/i1960"));
     let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let waits = w.line("worldd: shipping waits for the store: store-unreachable: ");
+    println!("unreachable: {waits}");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R17 (0.133): production's world exited `store-unreachable` when the store timed out on its archive's bundle read
+/// at the start, just after `shipping: epoch N from record M of K`, and systemd restarted it into the same timeout.
+/// On the S3 stand-in, a store that holds every read past the client's timeout for 45 s at the start: the world
+/// never exits, listens long before the store answers, answers a walk meanwhile with `health.json` naming what waits
+/// (`shipping`, `archive`), and once the store answers it claims, ships the records it wrote meanwhile and opens its
+/// archive, with no restart.
+// A real process on the real clock: the stall, the back-off and the health file's writes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_answers() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r17");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r17", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    // Reads `health.json` until `field` says `state`; the deadline only stops a hung test.
+    let until = |field: &str, state: &str, within: Duration| -> String {
+        let want = format!("\"{field}\":{{\"state\":\"{state}\"");
+        let end = Instant::now() + within;
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(
+                Instant::now() < end,
+                "no {field} {state} in health.json: {h}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let parts = || -> std::collections::BTreeSet<String> {
+        s.paths()
+            .into_iter()
+            .filter(|p| p.contains("/part/"))
+            .collect()
+    };
+    // The first start claims the world, ships its log and opens its archive.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    until("shipping", "current", Duration::from_secs(30));
+    until("archive", "current", Duration::from_secs(30));
+    w.kill();
+    let bundles = s.paths().iter().any(|p| p.contains("/bundles/"));
+    println!(
+        "the store after the first start: {} objects, bundles {bundles}",
+        s.paths().len()
+    );
+    let _ = std::fs::remove_file(&health);
+
+    // The restart: every read held 6 s, past the client's 5 s, for 45 s.
+    s.stall_reads(usize::MAX, Duration::from_secs(6), "");
     let begun = Instant::now();
     let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let listened = begun.elapsed();
+    println!("listening {listened:?} into the stall");
+    assert!(
+        listened < Duration::from_secs(30),
+        "listens before the store answers: {listened:?}"
+    );
+    // It serves: a walk is answered while the store is out of reach.
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "the walk ends in a receipt");
+    let shipped = parts();
+    let h = until("shipping", "degraded", Duration::from_secs(44));
+    assert!(h.contains("\"fault\":\"store-unreachable: "), "{h}");
+    assert!(!h.contains("\"archive\":{\"state\":\"current\""), "{h}");
+    while begun.elapsed() < Duration::from_secs(45) {
+        assert!(
+            w.child.try_wait().expect("its state").is_none(),
+            "never exits"
+        );
+        // Nothing is shipped without the claim.
+        assert_eq!(parts(), shipped, "no part before the claim");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let held: Vec<String> = w
+        .all
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| l.contains("out of reach") || l.contains("waits for the store"))
+        .collect();
+    println!(
+        "held for 45 s: {} lines, e.g. {:?}",
+        held.len(),
+        held.first()
+    );
+    assert!(held.iter().all(|l| l.contains("timeout")), "{held:?}");
+
+    // The store answers: shipping claims and catches up, the archive opens, and the world goes on, never restarted.
+    s.stall_reads(0, Duration::ZERO, "");
+    let epoch = w.line("shipping: epoch ");
+    println!("{epoch} at {:?}", begun.elapsed());
+    let n: u64 = epoch
+        .strip_prefix("shipping: epoch ")
+        .and_then(|r| r.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .expect("the epoch");
+    until("shipping", "current", Duration::from_secs(90));
+    until("archive", "current", Duration::from_secs(90));
+    let end = Instant::now() + Duration::from_secs(30);
+    while parts().len() <= shipped.len() {
+        assert!(
+            Instant::now() < end,
+            "the records written meanwhile are shipped"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // Every part shipped since is under the new claim's epoch.
+    let under = format!("/{n:020}/");
+    let new: Vec<String> = parts().difference(&shipped).cloned().collect();
+    assert!(new.iter().all(|p| p.contains(&under)), "{under}: {new:?}");
+    walk(&mut c, body, root.scope(), ground, 2, -33, 30);
+    assert_eq!(answer(&mut c).0, 1, "a walk after it ends in a receipt");
+    assert!(
+        w.child.try_wait().expect("its state").is_none(),
+        "never exits"
+    );
+    println!("caught up at {:?}", begun.elapsed());
+    w.kill();
+
+    // Production's exact read: only the archive's bundle reads held, 45 s, past the reads' own patience (about 34 s).
+    assert!(bundles, "the first start wrote bundles");
+    let _ = std::fs::remove_file(&health);
+    s.stall_reads(usize::MAX, Duration::from_secs(6), "/bundles/");
+    let begun = Instant::now();
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    assert!(
+        begun.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        begun.elapsed()
+    );
+    let held = w.line("store: out of reach (");
+    assert!(
+        held.contains("/bundles/") && held.contains("timeout"),
+        "{held}"
+    );
+    let h = until("archive", "degraded", Duration::from_secs(44));
+    assert!(h.contains("\"shipping\":{\"state\":\"current\""), "{h}");
+    while begun.elapsed() < Duration::from_secs(45) {
+        assert!(
+            w.child.try_wait().expect("its state").is_none(),
+            "never exits"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    s.stall_reads(0, Duration::ZERO, "");
+    until("archive", "current", Duration::from_secs(90));
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 3, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "the walk ends in a receipt");
+    assert!(
+        w.child.try_wait().expect("its state").is_none(),
+        "never exits"
+    );
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R17 (0.133): only a store that does not answer is waited for. A start whose directory mark is past its own log
+/// (`restart-gap`: its records would be numbered over ones already off the machine) still ends by name, as before,
+/// and never listens on with no claim.
+// A real process on the real clock.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r17_a_start_behind_its_directory_mark_ends_restart_gap() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r17gap");
+    let (dir, body, root, ground) = seeded(&d);
+    // The same world seeded again: its log is the seed's alone, behind what the first one ships.
+    let behind = scratch("r17gap-behind");
+    let (behind_dir, ..) = seeded(&behind);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r17gap", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let parts = || s.paths().iter().filter(|p| p.contains("/part/")).count();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.line("shipping: epoch ");
+    let mut c = connect(&socket);
+    for k in 0..3 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            k + 1,
+            -34 + k as i64,
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {k} ends in a receipt");
+    }
+    let before = parts();
+    let end = Instant::now() + Duration::from_secs(30);
+    while parts() <= before {
+        assert!(Instant::now() < end, "the walks are shipped");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // The directory record's mark follows the pieces.
+    std::thread::sleep(Duration::from_secs(3));
+    w.kill();
+    let mut w = serve_env(&behind_dir, &behind.join("s"), &args, &env);
     let ended = w.line("worldd serve: ");
     let status = w.child.wait().expect("it ends");
-    let took = begun.elapsed();
-    println!("unreachable: {ended} after {took:?}");
+    println!("behind its mark: {ended}");
     assert!(!status.success());
-    assert!(
-        ended.starts_with("worldd serve: store-unreachable: "),
-        "{ended}"
-    );
-    assert!(
-        took >= Duration::from_secs(14) && took < Duration::from_secs(60),
-        "four tries over the waits, bounded: {took:?}"
-    );
+    assert!(ended.starts_with("worldd serve: restart-gap: "), "{ended}");
     let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&behind);
 }
 
 /// R12 (0.133): a world whose public stream cannot recover from its store (as production's did on 23 Nov, a read past

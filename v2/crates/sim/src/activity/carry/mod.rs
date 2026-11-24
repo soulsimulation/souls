@@ -42,7 +42,16 @@
 //!   the load down at its last sample, at rest on the ground ([`Carry::set_down_here`]); the world says why
 //!   (`souls:carry-set-down`, worldd's engine).
 //!
-//! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; three carriers; a blocked
+//! - **Carriers at every grip (0.135 C5).** The front and the back are the carry's ends as above; each member after
+//!   them is a side carrier, beside one of the load's grips between its ends ([`Load::inner`], from the back toward
+//!   the front, in join order, alternating sides: [`Load::side_places`]). More members than grips is refused
+//!   `carry-crew-too-large`, and each side is checked at its grip by name ([`Load::check_sides`]). The frame's pose is
+//!   still the front's and the back's: each side walks its own way, and one that drifts more than [`STRETCH`] from
+//!   its place at the lift ([`Carry::sides`]) breaks the carry off. A side's leave with the load's crew left goes on,
+//!   its place empty (worldd's engine, `souls:carrier-left`); below the crew it is set down.
+//!
+//! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; turning with three carriers or
+//! more; a sweep that counts the sides' bodies; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
 //! open ground, whose frame holds the building).
@@ -90,6 +99,9 @@ pub const SWEEP_STEP: i64 = 50_000;
 pub const SLOT: u64 = 1;
 /// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
 pub const GRIP_REACH: i64 = 700_000;
+/// How many grips a load has between its ends, at most, that carriers take (0.135 C5): a crew of six, less its front
+/// and its back.
+pub const INNER: usize = 4;
 
 /// A load as its kind's entry states it (0.135 C2), µm along and across the carry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +112,9 @@ pub struct Load {
     pub half_width: i64,
     /// Its two outermost grips along its length, from its middle: the back's, then the front's.
     pub grips: [i64; 2],
+    /// The grips between those, from the back toward the front (0.135 C5): each a side carrier's, beside it. A crew
+    /// of six has four sides, so a load with more keeps its first four.
+    pub inner: [Option<i64>; INNER],
     /// How many must carry it (`state.hold_crew`'s default; two when it says none).
     pub crew: u64,
     /// The turn from its own frame to the carry's (0.135 C4): its longest side along the carry's +x, from the back
@@ -120,6 +135,7 @@ impl Load {
             half_length: HALF_LENGTH,
             half_width: HALF_WIDTH,
             grips: [-HALF_LENGTH, HALF_LENGTH],
+            inner: [None; INNER],
             crew: 2,
             turn: Quat::IDENTITY,
             middle: Vec3::ZERO,
@@ -139,8 +155,13 @@ impl Load {
     /// does not swing round as it is lifted.
     pub fn reversed(&self) -> R<Load> {
         let half = Quat::from_yaw_mdeg(180_000).map_err(pose_refusal)?;
+        let mut inner = [None; INNER];
+        for (k, g) in self.inner.iter().flatten().rev().enumerate() {
+            inner[k] = Some(-g);
+        }
         Ok(Load {
             grips: [-self.grips[1], -self.grips[0]],
+            inner,
             turn: half.then(self.turn).map_err(pose_refusal)?,
             ..*self
         })
@@ -208,6 +229,11 @@ impl Load {
         if front <= back {
             return Err("a load's grips are apart along its length".into());
         }
+        let mut inner = [None; INNER];
+        let between = &along[1..along.len() - 1];
+        for (k, g) in between.iter().take(INNER).enumerate() {
+            inner[k] = Some(*g);
+        }
         let crew = match entry
             .get("state")
             .and_then(|s| s.get("hold_crew"))
@@ -227,6 +253,7 @@ impl Load {
             half_length: sides[axis] * 500,
             half_width: across * 500,
             grips: [back, front],
+            inner,
             crew,
             turn: turn.map_err(|e| format!("a load's turn: {e:?}"))?,
             middle: Vec3::new(0, h * 500, 0),
@@ -242,6 +269,77 @@ impl Load {
     /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
     pub fn places(&self) -> [i64; 2] {
         [self.grips[0] - REACH, self.grips[1] + REACH]
+    }
+
+    /// How many carriers it takes at most (0.135 C5): one at each grip.
+    pub fn most(&self) -> usize {
+        2 + self.inner.iter().flatten().count()
+    }
+
+    /// Where its side carriers stand (0.135 C5), in join order: each beside its grip between the ends, from the back
+    /// toward the front, [`REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
+    /// from its middle, µm, in the carry's frame: along its +x, from the back toward the front, and across its +z.
+    pub fn side_places(&self) -> Vec<[i64; 2]> {
+        let off = self.half_width + REACH;
+        self.inner
+            .iter()
+            .flatten()
+            .enumerate()
+            .map(|(k, g)| [*g, if k % 2 == 0 { off } else { -off }])
+            .collect()
+    }
+
+    /// The checks before the lift of its side carriers (0.135 C5), after [`Load::check`]'s: `crew` carriers, more than
+    /// its grips refused `carry-crew-too-large`; and each side carrier in `sides` (in join order, where it stands on the
+    /// open ground's plan, µm) within [`GRIP_REACH`] of its grip's edge on the side it stands, or refused
+    /// `carry-grip-out-of-reach`, naming it. The load's middle at `middle`, its grips along `axis` (the front's and the
+    /// back's line when none), from the back at `back` toward the front at `front`.
+    pub fn check_sides(
+        &self,
+        crew: usize,
+        front: Xz,
+        back: Xz,
+        middle: Xz,
+        axis: Option<Xz>,
+        sides: &[(Id, Xz)],
+    ) -> R<()> {
+        if crew > self.most() {
+            return refuse(
+                "carry-crew-too-large",
+                format!("{crew} carrying; it has {} grips", self.most()),
+            );
+        }
+        let a = axis.unwrap_or([front[0] - back[0], front[1] - back[1]]);
+        let l = len(a);
+        for ((who, at), along) in sides.iter().zip(self.inner.iter().flatten()) {
+            let u = scale(a, *along, l);
+            let grip = [middle[0] + u[0], middle[1] + u[1]];
+            // Its edge on the carrier's side: across the axis by half the load's width.
+            let d = [at[0] - grip[0], at[1] - grip[1]];
+            let plus =
+                i128::from(a[0]) * i128::from(d[1]) - i128::from(a[1]) * i128::from(d[0]) > 0;
+            let n = scale([-a[1], a[0]], self.half_width, l);
+            let edge = if plus {
+                [grip[0] + n[0], grip[1] + n[1]]
+            } else {
+                [grip[0] - n[0], grip[1] - n[1]]
+            };
+            let off = len([at[0] - edge[0], at[1] - edge[1]]);
+            if off > GRIP_REACH {
+                return refuse(
+                    "carry-grip-out-of-reach",
+                    format!(
+                        "the side carrier {} stands {} mm from its grip at ({}, {}) mm; at most {} mm",
+                        replica::world_model::show(*who),
+                        off / 1000,
+                        edge[0] / 1000,
+                        edge[1] / 1000,
+                        GRIP_REACH / 1000
+                    ),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The checks before the lift (see the module's notes): `crew` carriers, the front at `front` and the back at
@@ -652,6 +750,10 @@ pub struct Carry {
     /// What it carries, as its kind's entry states it (B9's board when it has none): how it is held and set down
     /// (0.135 C4).
     pub load: Load,
+    /// Its side carriers, beside it between the front and the back (0.135 C5): each body and where it stood at the
+    /// lift, `[along, across]` in the carry's frame, µm ([`Carry::place_of`]). Each walks its own way; one that drifts
+    /// more than [`STRETCH`] from its place breaks the carry off, as its ends do.
+    pub sides: Vec<(Id, [i64; 2])>,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -699,7 +801,34 @@ impl Carry {
             track: Vec::new(),
             span: 0,
             load: Load::board(),
+            sides: Vec::new(),
         }
+    }
+
+    /// Where a carrier at `at` stands in the frame of a carry between `front` and `back` (0.135 C5): `[along,
+    /// across]` from the frame's middle, µm, along its +x (from the back toward the front) and across its +z.
+    pub fn place_of(front: Vec3, back: Vec3, at: Vec3) -> [i64; 2] {
+        let d = [front.x - back.x, front.z - back.z];
+        let l = i128::from(len(d).max(1));
+        let p = [
+            i128::from(at.x - (front.x + back.x) / 2),
+            i128::from(at.z - (front.z + back.z) / 2),
+        ];
+        let (dx, dz) = (i128::from(d[0]), i128::from(d[1]));
+        [
+            ((p[0] * dx + p[1] * dz) / l) as i64,
+            ((p[1] * dx - p[0] * dz) / l) as i64,
+        ]
+    }
+
+    /// The first side carrier, of those standing at `at` (each body's place on the open ground, µm), that has drifted
+    /// more than [`STRETCH`] from its place at the lift, with carriers at `front` and `back` (0.135 C5); a side with no
+    /// place in `at` is not counted here.
+    pub fn side_apart(&self, front: Vec3, back: Vec3, at: &BTreeMap<Id, Vec3>) -> Option<Id> {
+        self.sides.iter().find_map(|(who, was)| {
+            let now = Carry::place_of(front, back, *at.get(who)?);
+            (len([now[0] - was[0], now[1] - was[1]]) > STRETCH).then_some(*who)
+        })
     }
 
     /// Whether carriers at `front` and `back` have drifted more than [`STRETCH`] from their span at the lift: the
