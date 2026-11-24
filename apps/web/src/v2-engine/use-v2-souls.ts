@@ -139,7 +139,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
-      st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
+      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
     return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); };
