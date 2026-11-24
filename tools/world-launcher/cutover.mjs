@@ -42,6 +42,37 @@ const publicStream = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/
 const samePath = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const sameOriginDir = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*\/$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
+// 24 Nov: Explore's places of a moved world, from its published snapshot: the model the new engine's world was imported
+// from (W4), so the same things by the same ids. Each thing at the world root, as the old process lists it
+// (apps/server god/context-view-scene.ts contextTargetRows: its point, radius and viewpoint; meaning.ts humanTitle):
+// `about` marks the ones a plain listing shows (context-views.ts `discoverable`); a search reads them all.
+export const searchText = (text) => String(text).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const humanTitle = (ref) => { const t = ref.replace(/^(land|place|region|g)-/, '').replace(/[-_]+/g, ' ').replace(/\//g, ' / '); return t.charAt(0).toUpperCase() + t.slice(1); };
+const num = (v) => (Number.isFinite(v) ? v : 0);
+export function snapshotPlaces(s) {
+  const box = new Map((Array.isArray(s?.defs) ? s.defs : []).map((d) => [`${d?.name}@${d?.version}`, d?.size?.box]));
+  const out = [];
+  for (const e of Array.isArray(s?.entities) ? s.entities : []) {
+    if (typeof e?.id !== 'string' || e.id.startsWith('h_') || e.in?.parent !== 'world' || !Array.isArray(e.p) || e.p.length !== 3) continue;
+    const [x, y, z] = e.p.map(num), yaw = num(e.r), sc = Number.isFinite(e.s) && e.s > 0 ? e.s : 1, b = box.get(e.def);
+    const [bx, by, bz] = Array.isArray(b) ? b.map(num) : [1, 1, 1];
+    // a thing-local point (an authored viewpoint's eye and at) in the world, as localContextPoint carries it
+    const at = (v) => { const [u, h, w] = v.map(num), c = Math.cos(yaw), si = Math.sin(yaw); return [x + (u * c + w * si) * sc, y + h * sc, z + (-u * si + w * c) * sc]; };
+    let point = [x, y + by * sc / 2, z], radius = Math.max(0.5, Math.hypot(bx, bz) * sc / 2);
+    const area = Array.isArray(e.shape?.area) && e.shape.area.length ? e.shape.area : null;
+    if (area) {
+      point = [area.reduce((n, q) => n + num(q[0]), 0) / area.length, num(e.params?.level), area.reduce((n, q) => n + num(q[1]), 0) / area.length];
+      radius = Math.max(...area.map((q) => Math.hypot(num(q[0]) - point[0], num(q[1]) - point[2])));
+    }
+    const a = e.about && typeof e.about === 'object' ? e.about : null, v = a?.viewpoint;
+    const viewpoint = Array.isArray(v?.eye) && Array.isArray(v?.at) && v.eye.length === 3 && v.at.length === 3 ? { eye: at(v.eye), at: at(v.at) } : undefined;
+    const title = typeof a?.title === 'string' && a.title ? a.title : humanTitle(typeof e.name === 'string' && e.name ? e.name : e.id);
+    const aliases = Array.isArray(a?.aliases) ? a.aliases.filter((s) => typeof s === 'string') : [];
+    out.push({ target: { ref: e.id, title, ...(typeof a?.what === 'string' ? { what: a.what } : {}), point, radius, enclosed: false, ...(viewpoint ? { viewpoint } : {}) },
+      shown: !!a, text: searchText(`${title} ${a?.what ?? ''} ${aliases.join(' ')}`) });
+  }
+  return out;
+}
 /** #4177: the world page with `v2Stream` (and `v2Bodies`, when given) written into its inline config
  *  (page-meta.mjs writes that `<script>` first in <head>; the page's v2-engine reads the fields).
  *  `fields` is the body catalogue's directory, or (B3-2b) an object of the page's other v2 fields (`v2Bodies`,
@@ -102,6 +133,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
     published: (w) => load()?.published(w) ?? false,
     publishedSeq: (w) => load()?.publishedSeq(w) ?? null,
+    publishedPlaces: (w) => load()?.publishedPlaces(w) ?? null,
     handle: (req, res, w, url, o) => load()?.handle(req, res, w, url, o) ?? false,
   };
 }
@@ -144,6 +176,7 @@ function withRouteOnly(fence, bindings) {
     publish: (w, read) => (of(w) ? Promise.resolve(null) : fence.publish(w, read)),
     published: (w) => (of(w) ? false : fence.published(w)),
     publishedSeq: (w) => (of(w) ? null : fence.publishedSeq(w)),
+    publishedPlaces: (w) => (of(w) ? null : fence.publishedPlaces(w)),
     handle: (req, res, w, url, o) => (of(w) ?? fence).handle(req, res, w, url, o),
   };
 }
@@ -165,6 +198,7 @@ function fenceOf(binding) {
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
     published: (w) => of(w)?.published(w) ?? false,
     publishedSeq: (w) => of(w)?.publishedSeq(w) ?? null,
+    publishedPlaces: (w) => of(w)?.publishedPlaces(w) ?? null,
     handle: (req, res, w, url, o) => of(w)?.handle(req, res, w, url, o) ?? false,
   }, binding.worlds);
 }
@@ -181,7 +215,7 @@ function oneFence(binding) {
   let publishing = null, published = null; // the flight, and the stream the files in staticDir were published for
   // 24 Nov: a static folder the launcher cannot write (its unit's ProtectSystem=strict sandbox) never leaves a routed page
   // without its views: they are held here instead, for the stream they were read for, and served as the files would be
-  let held = null, seqOf = null; // seqOf: the published snapshot's seq answer, by its sha256 (publishedSeq)
+  let held = null, seqOf = null; // seqOf: the published snapshot's seq answer and places, by its sha256 (publishedSnapshot)
   // The manifest goes first: without it nothing here is served, so a reader never mixes one routing's files with another's
   // while they are removed or rewritten. Then the six files (and any `.tmp` a stopped publish left).
   const clear = () => {
@@ -304,9 +338,9 @@ function oneFence(binding) {
       })().finally(() => { publishing = null; });
     },
     /** `o.config()`: the routed world's page config, which its `/v1/config` answers beside `soulClient` (else only that).
-     *  `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
-     *  404 `world.new-engine`, as for a world with no old twin, and the page draws the world from its stream (W2,
-     *  stream-scene.ts); it never wakes the old process. A running one answers it live, as before. */
+     *  `o.cold`: the world has no old process to ask (24 Nov; D2b: every moved world, launcher.mjs oldCold): a view not
+     *  published for this stream is then answered 404 `world.new-engine`, as for a world with no old twin, and the page
+     *  draws the world from its stream (W2, stream-scene.ts). */
     /** Whether the old views are published for the world's current stream (its snapshot, in staticDir or held). */
     published(w) {
       const stream = this.v2Stream(w);
@@ -317,16 +351,20 @@ function oneFence(binding) {
     /** 24 Nov: the published snapshot's `/v1/world/seq` answer ({seq, entities, builds}, as apps/server god/routes.ts
      *  gives it), for the page's heartbeat while the old process sleeps (launcher.mjs oldCold); null when none is
      *  published. Parsed once per published snapshot (its sha256), not once per poll. */
-    publishedSeq(w) {
+    publishedSeq(w) { return this.publishedSnapshot(w)?.v ?? null; },
+    /** 24 Nov: the published snapshot's places (`snapshotPlaces`) and its seq, for Explore's `/v1/world/context` while
+     *  the old process sleeps; null when none is published. Read with the seq, once per published snapshot. */
+    publishedPlaces(w) { const p = this.publishedSnapshot(w); return p ? { seq: p.v.seq, places: p.places } : null; },
+    publishedSnapshot(w) {
       const stream = this.v2Stream(w);
       if (!stream || !staticDir) return null;
       const m = manifest(), f = m?.stream === stream ? m.files?.['snapshot.json'] : held?.m.stream === stream ? held.m.files['snapshot.json'] : null;
       if (!f) return null;
-      if (seqOf && seqOf.stream === stream && f.sha256 && seqOf.sha === f.sha256) return seqOf.v;
+      if (seqOf && seqOf.stream === stream && f.sha256 && seqOf.sha === f.sha256) return seqOf;
       let s; try { s = JSON.parse(view(stream, 'snapshot.json')); } catch { return null; }
       const v = { seq: Number.isFinite(s?.seq) ? s.seq : 0, entities: Array.isArray(s?.entities) ? s.entities.length : 0, ...(Number.isFinite(s?.buildsRev) ? { builds: s.buildsRev } : {}) };
-      seqOf = { stream, sha: f.sha256 ?? null, v };
-      return v;
+      seqOf = { stream, sha: f.sha256 ?? null, v, places: snapshotPlaces(s) };
+      return seqOf;
     },
     handle(req, res, w, url, o) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.

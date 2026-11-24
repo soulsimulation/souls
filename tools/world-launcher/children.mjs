@@ -137,9 +137,11 @@ export class ChildPool {
     // pre-warm: the next process loads its code while the previous one still serves (no database, no port yet); until
     // it is ready the world stays 'running' on the old process, so visitors' requests do not wait for the warm-up
     // ...only with memory for a second process of this world beside the first; otherwise it boots cold, as before
-    const noRoom = this.o.prewarm ? prewarmBlocked(this.o.minFreeMb ?? 0) : null;
+    // D2b: a moved world's old process is released (saved, stopped) and nothing of it starts here, not even a standby
+    const moved = !!this.refused(k.world);
+    const noRoom = this.o.prewarm && !moved ? prewarmBlocked(this.o.minFreeMb ?? 0) : null;
     if (noRoom) k.lastWarm = { ok: false, error: `cold: ${noRoom}` };
-    const warm = !this.o.prewarm || noRoom ? null : await this.standby(k).catch((e) => { k.lastWarm = { ok: false, error: e.message }; return null; });
+    const warm = !this.o.prewarm || noRoom || moved ? null : await this.standby(k).catch((e) => { k.lastWarm = { ok: false, error: e.message }; return null; });
     k.status = 'handover'; this.o.onChange?.(slug);
     const prev = k.adopted.pid;
     k.ready = (async () => {
@@ -152,6 +154,7 @@ export class ChildPool {
       catch (e) { warm?.child.kill('SIGTERM'); k.status = 'failed'; k.lastError = `handover: ${e.message}`; this.o.onChange?.(slug); throw e; }
       k.adopted = null; this.savePids();
       if (this.closing || this.fenced) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; throw new Error(`world ${slug}: this launcher is closing`); }
+      if (this.refused(k.world)) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; this.o.onChange?.(slug); return UNLOADED; }
       // #2304: a still world with no visitor is not moved; it loads on this release when next needed
       if (this.o.afterRelease && (await this.o.afterRelease(slug)) === false) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; this.o.onChange?.(slug); return UNLOADED; }
       if (warm && warm.child.exitCode === null && warm.child.signalCode === null) {
@@ -408,6 +411,9 @@ export class ChildPool {
     // closing (closeAll): nothing boots again, e.g. a long-poll's GET retried after its world was stopped under it would
     // otherwise start a world no one stops (lane srv-shed, found with 100 listens open at close)
     if (this.closing) { const e = new Error(`world ${world.slug}: this launcher is closing`); e.code = 'stopping'; return Promise.reject(e); }
+    // D2b (0.134): a world `o.refuse` names (one moved to the new engine) never gets an old process here
+    const refused = this.refused(world);
+    if (refused) return Promise.reject(refused);
     let k = this.kids.get(world.slug);
     if (k?.handedBack) { const e = new Error(`world ${world.slug} is going back to the previous launcher`); e.code = 'handed-back'; return Promise.reject(e); }
     // being stopped (put to sleep, its memory given back): boot it again only once that process is gone (one writer)
@@ -442,6 +448,11 @@ export class ChildPool {
     k.ready.catch((e) => { if (!['capacity', 'handed-over', 'stopping'].includes(e.code) && !k.stopped && !this.closing && !this.fenced) this.noteFailure(k, e.reason ?? 'boot'); });
     this.settlePending(k, k.ready);
     return this.waitFor(k.ready, timeoutMs, world.slug);
+  }
+  /** D2b (0.134): the refusal (code `new-engine`) for a world `o.refuse(world)` names, a world the new engine runs; else null. */
+  refused(world) {
+    const why = world && this.o.refuse?.(world);
+    return why ? Object.assign(new Error(`world ${world.slug} runs on the new engine: ${why}; its old process is not started`), { code: 'new-engine' }) : null;
   }
   /** The caller's own wait for a boot (ensure's timeoutMs): past it the caller is refused (code 'starting'), and the boot
    *  itself goes on, judged by its progress (healthy()). */
@@ -492,6 +503,8 @@ export class ChildPool {
   }
 
   async boot(k, timeoutMs, { queued = true } = {}) {
+    const refused = this.refused(k.world);   // D2b: a restart or a rest's end never boots a moved world either
+    if (refused) { k.status = 'stopped'; this.o.onChange?.(k.slug); throw refused; }
     const done = queued ? await this.loadSlot(k) : () => {};
     try {
       while (this.gate) await this.gate.p;
