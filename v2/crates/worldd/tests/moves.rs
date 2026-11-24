@@ -2331,12 +2331,15 @@ fn q2_a_walk_ends_in_a_buildings_main_room_on_the_ground_or_beside_a_soul() {
 
     // To the building: inside its main room, the stair hall.
     let (h_frame, h_mid) = middle(n("building/r0a"));
+    let mut b = bodies().unwrap();
+    b.begin(0);
     walk(&mut b, 4, n("building")).expect("the walk to the building starts");
     assert_eq!(run(&mut b, soul(4)), Ok(()));
     let (frame, at) = b.pose(body_id()).unwrap();
     println!(
-        "building: on {} at {at:?}, the stair hall's middle {h_mid:?}",
-        replica::world_model::show(frame)
+        "building: on {} at {at:?}, the stair hall's middle {h_mid:?}, after {} ms",
+        replica::world_model::show(frame),
+        b.runner.now / 1000
     );
     assert_eq!(frame, h_frame, "on the stair hall's floor");
     // Inside the stair hall's outline (5.8 m by 11.8 m clear round its middle, in the floor's frame); N9 grants the
