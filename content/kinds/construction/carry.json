@@ -18,6 +18,14 @@
    "audience": {
     "rule": "everyone"
    }
+  },
+  "side": {
+   "n": 3,
+   "from": "body",
+   "most": 4,
+   "audience": {
+    "rule": "everyone"
+   }
   }
  },
  "slots": {
@@ -52,6 +60,13 @@
     "in": "here",
     "within_mm": 4000
    }
+  },
+  "side": {
+   "need": "optional",
+   "places": {
+    "in": "here",
+    "within_mm": 4000
+   }
   }
  },
  "motion": {
@@ -61,10 +76,10 @@
   "ever": true
  },
  "text": {
-  "card": "Two carry a long part: the front leads, the back follows, the part between.",
+  "card": "Two to six carry a long part: the front leads, the back follows, sides between.",
   "construction": "construction",
   "carry": "carry",
-  "howto_carry": "Offer the carry to a partner, each stand at your end, lift, walk together, set it down."
+  "howto_carry": "Offer the carry to your partners, the first at the back and each after beside a grip between, lift, walk together, set it down."
  },
  "card": {
   "text": "card",
