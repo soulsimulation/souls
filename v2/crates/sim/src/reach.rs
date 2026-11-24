@@ -152,11 +152,6 @@ pub const AT_SELF: &str = "souls:self";
 /// place, measured as a move at the form's own thing is ([`to_thing`]).
 pub const AT_ARG: &str = "souls:argument";
 
-/// The point a move with no `at` whose `toward` is a thing argument reaches (C23; 0.135 E20): that thing, as
-/// [`AT_ARG`] does, unless the body is in a slot of the form's own thing. Then the move aims the thing it rides (a
-/// tiller, handlebars, a helm) toward the argument, which is a heading, not a contact: it is in reach from the seat.
-pub const AT_AIM: &str = "souls:aim";
-
 /// The member `key` of object `v`, to change.
 pub fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
     match v {
@@ -173,11 +168,10 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 }
 
 /// A move step's target resolved from the form's arguments (C23, #3494), in a copy of `entry` the binder then reads:
-/// a move with no `at` and no `toward` is at [`AT_SELF`]; one whose `at` is a thing argument is at [`AT_ARG`], one
-/// with no `at` whose `toward` is a thing argument at [`AT_AIM`]; that thing is returned. A point of this thing named
-/// by `at` stays as it is. An argument not given as a thing is refused `arg-missing`. The three points are added to
-/// the copy's points, at its origin, so the binder knows them; the world's reach measures them (`worldd`'s `Sight`,
-/// the run gate's world).
+/// a move with no `at` and no `toward` is at [`AT_SELF`]; one whose `at`, or with no `at` whose `toward`, is a thing
+/// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
+/// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
+/// binder knows them; the world's reach measures them (`worldd`'s `Sight`, the run gate's world).
 pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id>), Refusal> {
     let mut e = entry.clone();
     let mut thing = None;
@@ -197,7 +191,6 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
             (Some(Json::Str(_)), ..) => continue,
             (None, None, None) => AT_SELF,
             (_, Some(a), _) | (None, None, Some(a)) => {
-                let point = if arg("at").is_some() { AT_ARG } else { AT_AIM };
                 match args.get(a) {
                     Some(Arg::Name(_)) => continue,
                     Some(Arg::Node(id)) => {
@@ -209,7 +202,7 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
                     Some(_) => return Err(refusal("step-malformed", a)),
                     None => return Err(refusal("arg-missing", a)),
                 }
-                point
+                AT_ARG
             }
             _ => continue,
         };
@@ -227,7 +220,6 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
     if let Some(Json::Obj(ps)) = obj_mut(&mut e, "points") {
         ps.push((AT_SELF.into(), origin()));
         ps.push((AT_ARG.into(), origin()));
-        ps.push((AT_AIM.into(), origin()));
     }
     Ok((e, thing))
 }
@@ -236,33 +228,32 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
 mod tests {
     use super::*;
 
-    /// 0.135 E20: a move `toward` a thing argument with no `at` is aimed ([`AT_AIM`]: a steer toward a heading),
-    /// one `at` a thing argument reaches it ([`AT_ARG`]); both return the thing, and a named point stays.
+    /// 0.135 E20: a steer whose `at` names the thing's control point keeps it, so the seat's reach to that point
+    /// decides ([`in_slot`]) and `toward` is only the heading; a move `toward` a thing argument with no `at` (a swing's
+    /// push toward the swinger) still reaches that thing ([`AT_ARG`]).
     #[test]
-    fn e20_a_toward_is_an_aim_and_an_at_a_contact() {
+    fn e20_a_steer_at_its_control_keeps_the_point_and_a_push_toward_reaches_the_thing() {
         let entry = replica::rules::json::parse(
             r#"{"kind":"t:x","points":{"tiller":{"at_mm":[0,900,-1500]}},"forms":{
-              "steer":{"steps":[{"step":"move","move":"steer","toward":{"arg":"toward"}}]},
-              "feed":{"steps":[{"step":"move","move":"press","at":{"arg":"toward"}}]},
-              "helm":{"steps":[{"step":"move","move":"steer","at":"tiller","toward":{"arg":"toward"}}]}}}"#,
+              "push":{"steps":[{"step":"move","move":"press","toward":{"arg":"who"}}]},
+              "steer":{"steps":[{"step":"move","move":"steer","at":"tiller","toward":{"arg":"who"}}]}}}"#,
         )
         .expect("JSON");
         let thing = Id::new(replica::ids::Scope([7; 16]), 9).expect("an id");
-        let args = Args::from([("toward".to_owned(), Arg::Node(thing))]);
+        let args = Args::from([("who".to_owned(), Arg::Node(thing))]);
         let at = |form: &str| {
             let (e, t) = targets(&entry, form, &args).expect("resolves");
-            let steps = e
+            let at = e
                 .get("forms")
                 .and_then(|f| f.get(form))
-                .and_then(|f| f.get("steps"));
-            let at = steps
+                .and_then(|f| f.get("steps"))
                 .and_then(Json::arr)
                 .and_then(|s| s.first()?.get("at"))
-                .and_then(Json::str);
-            (at.map(str::to_owned), t)
+                .and_then(Json::str)
+                .map(str::to_owned);
+            (at, t)
         };
-        assert_eq!(at("steer"), (Some(AT_AIM.to_owned()), Some(thing)));
-        assert_eq!(at("feed"), (Some(AT_ARG.to_owned()), Some(thing)));
-        assert_eq!(at("helm"), (Some("tiller".to_owned()), None));
+        assert_eq!(at("push"), (Some(AT_ARG.to_owned()), Some(thing)));
+        assert_eq!(at("steer"), (Some("tiller".to_owned()), None));
     }
 }

@@ -181,7 +181,9 @@ pub struct Route {
     crowd: u32,
     /// How near its last leg's end the walk is done, µm: [`AT_GOAL`], or [`AT_SPOT`] for a form's walk right before a
     /// move, which ends on the stand point its move is reached from, not up to [`AT_GOAL`] short of it on the side
-    /// it came from (0.135 E20). A walk to a granted spot ends within [`AT_SPOT`] whatever this says.
+    /// it came from (0.135 E20). Held by the guard within [`AT_GOAL`] of its goal for [`HOLD`] ticks (a body standing
+    /// by the stand point), it ends short there ([`F_SHORT`]). A walk to a granted spot ends within [`AT_SPOT`]
+    /// whatever this says.
     pub arrive: i64,
 }
 
@@ -826,6 +828,14 @@ impl Skill for Route {
                 && (!self.spot || taken() || {
                     self.crowd += 1;
                     self.crowd >= CROWD_TICKS
+                });
+            // A walk asked to end nearer than AT_GOAL (a form's walk before a move, 0.135 E20) that the guard holds
+            // within AT_GOAL of its goal for HOLD ticks in all is as near as it gets: a body standing just past or
+            // beside the stand point is not nearer the goal, so the rule above never ends it.
+            let held = held
+                || (!self.spot && self.arrive < AT_GOAL && gap <= AT_GOAL && {
+                    self.crowd += 1;
+                    self.crowd >= HOLD
                 });
             if held {
                 // It says so on its body: the world names it in the walk's `done` (A2-4).
