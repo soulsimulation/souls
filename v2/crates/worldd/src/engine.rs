@@ -2658,7 +2658,7 @@ mod feet_tests {
             .expect("one floor")
         };
         let (to, from) = (d(2, 1), d(1, 2));
-        println!("a touch from 0.4 m off the bench's end seat: {to} µm, {from} µm back");
+        println!("a touch from 0.4 m off the end slot: {to} µm, {from} µm back");
         assert!((to - 400_000).abs() <= 10_000, "to the seated Soul: {to}");
         assert_eq!(to, from);
         // With no entry for the bench its seat is not found: the old measure, from the bench's origin, 9.5 m off.
