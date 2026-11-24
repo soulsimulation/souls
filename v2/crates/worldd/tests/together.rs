@@ -1524,7 +1524,7 @@ fn r1_two_souls_walk_hand_in_hand_until_either_lets_go() {
     let (sx, sz) = (f.x - start.x, f.z - start.z);
     let s = ((i128::from(sx).pow(2) + i128::from(sz).pow(2)).isqrt()).max(1);
     let six = |c: i64| (i128::from(c) * 6_000_000 / s) as i64;
-    let legs = [(six(-sz), six(sx)), (six(sx) * -1, six(sz) * -1)];
+    let legs = [(six(-sz), six(sx)), (-six(sx), -six(sz))];
     let mut at = start;
     let mut placed = Vec::new();
     for (dx, dz) in legs {
