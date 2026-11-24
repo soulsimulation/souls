@@ -1911,11 +1911,25 @@ impl crate::mover::Floors for Shared<'_> {
             self.classes.get(&build.size).map(|g| &g.surfaces)
         }
     }
+
+    fn wet(&self, node: Id, at: Vec3) -> bool {
+        wet_on(self.map, node, at)
+    }
 }
 impl crate::mover::Floors for Town {
     fn for_build(&self, build: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
         self.surfaces_for(build.size)
     }
+
+    fn wet(&self, node: Id, at: Vec3) -> bool {
+        wet_on(&self.map, node, at)
+    }
+}
+
+/// Whether `at` on `node` lies on a wet piece of the map: water or wading ground (E11d).
+fn wet_on(map: &Map, node: Id, at: Vec3) -> bool {
+    map.spot_for(node, at, crate::routes::WADE | crate::routes::SWIM)
+        .is_some_and(|s| map.piece(s.piece).ground != crate::gaits::Ground::Dry)
 }
 
 impl<'a> Shared<'a> {
