@@ -77,6 +77,7 @@ const OPEN_GROUND: &str = "eden:ground";
 const WALLS: &str = "test:walls";
 const BAR: &str = "test:bar";
 const LIFT: &str = "test:lift";
+const WHEEL: &str = "test:wheel";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
@@ -95,6 +96,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         WALLS,
         BAR,
         LIFT,
+        WHEEL,
     ]
     .iter()
     .enumerate()
@@ -263,6 +265,15 @@ fn tree_rules() -> TreeRules {
             ),
             (fullname(WALLS), k("thing", &[], &[], None)),
             (
+                fullname(WHEEL),
+                Kind {
+                    slots: (1..=4)
+                        .map(|s| (s, BTreeSet::from(["family".to_owned()])))
+                        .collect(),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
+            (
                 fullname(LIFT),
                 Kind {
                     slots: BTreeMap::from([(1, BTreeSet::from(["family".to_owned()]))]),
@@ -394,6 +405,7 @@ fn entries() -> Json {
         (PLANK.into(), plank),
         (CIRCLE.into(), circle_entry()),
         (LIFT.into(), lift_entry()),
+        (WHEEL.into(), wheel_entry()),
         (BAR.into(), bar_entry()),
     ])
 }
@@ -446,6 +458,7 @@ fn world() -> Replica {
         create(circle(), CIRCLE, g, circle_at()),
         create(bar(), BAR, g, bar_at()),
         create(lift(), LIFT, g, lift_at()),
+        create(wheel(), WHEEL, g, wheel_at()),
     ];
     world_of(zone_place(), changes)
 }
@@ -506,6 +519,10 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     b.add_place(cabin)?;
     b.slots.trip_ends(lift(), r.ends.clone());
     b.slots.run(lift(), r.slot, &r.course, r.stops, &r.own)?;
+    for (p, r) in wheel_places(ground) {
+        b.add_place(p)?;
+        b.slots.run(wheel(), r.slot, &r.course, r.stops, &r.own)?;
+    }
     Ok(b)
 }
 
@@ -2620,5 +2637,121 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)), "aboard again");
     assert_eq!(under_way(&r), Some(Value::Uint(1)), "set off again");
+    run.stop();
+}
+
+/// N14 review: a small wheel of four gondolas (bottom, right, top, left of a ring 2 m across, its bottom 0.45 m up), all
+/// boarded from one stand point 1 m in front of it, 5 m north of the first walker. Its `board` names no gondola.
+fn wheel() -> Id {
+    id(13)
+}
+fn wheel_at() -> Vec3 {
+    Vec3::new(-40_000_000, 0, 36_000_000)
+}
+fn wheel_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:wheel", "owner": "thing",
+      "points": { "boarding": { "role": "stand", "at_mm": [0, 0, -1000] }, "out": { "role": "stand", "at_mm": [0, 0, 1000] } },
+      "slots": {
+        "g1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "boarding" },
+        "g2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [2000, 2450, 0], "stand": "boarding" },
+        "g3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 4450, 0], "stand": "boarding" },
+        "g4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-2000, 2450, 0], "stand": "boarding" } },
+      "geometry": { "bounds_mm": [5000, 5000, 3000] },
+      "forms": {
+        "board": { "who": "anyone", "starts": "act",
+          "takes": { "seat": { "type": "slot",
+            "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+          "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+          "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" }] } },
+      "ride": { "seats": ["g1", "g2", "g3", "g4"], "stops": ["boarding", "out"], "returns": false, "start": "board",
+        "speed_mm_s": 1000, "ground": "level" } }"#,
+    )
+    .unwrap()
+}
+/// The wheel's four places as a served world registers them, and their runs, each step a stop of 40 s, the wheel's
+/// clock set so that at the world's start it stands at the step where gondola 1 is at the top, out of reach, and two
+/// others wait at the platform (world time is real time).
+#[allow(clippy::disallowed_methods)]
+fn wheel_places(ground: Id) -> Vec<(sim::slots::PlaceAt, sim::courses::rides::SeatRun)> {
+    let at = wheel_at();
+    let declared = [
+        (1, Vec3::new(0, 450_000, 0)),
+        (2, Vec3::new(2_000_000, 2_450_000, 0)),
+        (3, Vec3::new(0, 4_450_000, 0)),
+        (4, Vec3::new(-2_000_000, 2_450_000, 0)),
+    ];
+    let registered: BTreeMap<u64, sim::slots::PlaceAt> = declared
+        .iter()
+        .map(|(n, p)| {
+            (
+                *n,
+                sim::slots::PlaceAt {
+                    thing: wheel(),
+                    place: replica::moves::Place {
+                        slot: *n,
+                        height: p.y,
+                        stand: [-p.x, -1_000_000 - p.z],
+                    },
+                    point: p.plus(at).unwrap(),
+                    facing: Quat::IDENTITY,
+                    floor: ground,
+                    more: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    let mut runs = sim::courses::rides::seat_runs(
+        &wheel_entry(),
+        &registered,
+        &|p: Vec3| p.plus(at).ok(),
+        &|_, _| Some(0),
+        0,
+    );
+    assert_eq!(runs.len(), 4, "every gondola runs");
+    for r in &mut runs {
+        for s in &mut r.course.stations {
+            s.dwell = 40_000_000;
+        }
+    }
+    // Gondola 1's third stop (two steps round) is the top; start the clock 1 s into it.
+    let table = runs[0].course.load().unwrap();
+    let top = table
+        .legs
+        .iter()
+        .filter(|l| l.stop.is_some())
+        .nth(2)
+        .unwrap()
+        .start;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    for r in &mut runs {
+        r.course.t0 = now - top - 1_000_000;
+        r.course.within = r.course.load().unwrap().period;
+    }
+    runs.into_iter()
+        .map(|r| (registered[&r.slot].clone(), r))
+        .collect()
+}
+
+/// N14 review: a Soul's `board` on a big wheel names no gondola. At a step where gondola 1 is up the wheel the world
+/// picks one that waits at the platform (not the nearest stand point's first, gondola 1), walks the Soul there and
+/// seats it: it is never sent to a gondola that is aloft.
+#[test]
+fn n14_a_wheel_is_boarded_at_a_gondola_that_waits_while_gondola_1_is_aloft_through_the_gateway() {
+    let (run, mut a, _) = serve("n14w");
+    let boarded = a.act("test:board", Some(wheel()), BTreeMap::new());
+    println!("N14 wheel board: {boarded:?}");
+    boarded.expect("boarded at a waiting gondola");
+    let (parent, slot) = parent(&run.replay(), w1());
+    assert_eq!(parent, Some(wheel()));
+    println!("N14 wheel: in gondola {slot:?}");
+    assert!(
+        matches!(slot, Some(2..=4)),
+        "not gondola 1, aloft: {slot:?}"
+    );
     run.stop();
 }

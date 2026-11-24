@@ -2478,12 +2478,14 @@ impl Acts {
                         continue;
                     }
                     // A seat another Soul's run is on its way to is not free (#4575): two Souls asking for a seat at
-                    // one moment are given different seats.
+                    // one moment are given different seats. Nor is one whose cabin is away from its own stop now (N14):
+                    // a big wheel is boarded at a gondola that waits at the platform.
                     let forms = &self.forms;
                     let free = b
                         .slots
                         .free_unless(&b.runner.controller, body, *node, &|s| {
                             forms.seat_taken(&b.slots, *node, s, body)
+                                || !b.slots.at_own_stop(*node, s, now)
                         });
                     match free.and_then(|s| names.get(usize::try_from(s).ok()?.checked_sub(1)?)) {
                         Some((n, _)) => {
@@ -2499,7 +2501,18 @@ impl Acts {
                 continue;
             }
             if let Some(key) = none_free {
-                first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                // N14: none free only because every free slot's cabin is away: say so, and when the next is back.
+                let away = bodies.as_deref().and_then(|b| {
+                    let free = b
+                        .slots
+                        .free_unless(&b.runner.controller, body, *node, &|s| {
+                            self.forms.seat_taken(&b.slots, *node, s, body)
+                        });
+                    free.and_then(|_| b.slots.boardable_seat(*node, now).err())
+                });
+                first.get_or_insert(
+                    away.unwrap_or_else(|| refusal(sim::commit::bind::NONE_FREE, key)),
+                );
                 continue;
             }
             if let Some(e) = other {
