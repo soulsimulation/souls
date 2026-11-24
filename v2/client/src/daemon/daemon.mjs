@@ -250,6 +250,7 @@ const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.
 const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
 const serving = new Map(); // sequence → the message its act serves
 const replyOf = new Map(); // C15: a message's reply, sent with its close
+const closedMail = new Map(); // Q1: messages this daemon closed (id → state), so a later `--for` or `ack` on one is told, not refused
 const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -508,6 +509,8 @@ function closeMail(id, state, outcome) {
   const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
   replyOf.delete(id);
+  closedMail.set(id, state);
+  if (closedMail.size > 200) closedMail.delete(closedMail.keys().next().value);
   for (const [s, m] of serving) if (m === id) serving.delete(s); // closed once: a later answer closes nothing
   log(`message ${id} closed ${state} (${outcome})`);
   if (ws && signedIn) ws.send(line); else closes.push(line);
@@ -1105,6 +1108,8 @@ function towardOf(req) {
 /** The engine's verbs for a rider of a thing on a course (#3603): `carrier:steer|stop|land:<id>`. */
 const CARRIER = /^carrier:(steer|stop|land)$/;
 const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
+/** Q1: everyday words for the body's hand acts, read only where the thing itself offers no act by that word. */
+const HANDS = { take: 'pick_up', pick: 'pick_up', grab: 'pick_up', pickup: 'pick_up', 'pick-up': 'pick_up' };
 
 /**
  * C10 (#3414): the thin command's act words as candidates, best first. A word is an offered act, `<verb>:<id>` (a
@@ -1114,9 +1119,19 @@ const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take t
  */
 function actsOf(words) {
   const out = [];
-  let kinds = null, rows = null;
+  let kinds = null, rows = null, body = null;
+  // Q1: the Soul's own body and its kind's forms, once per call: a gesture, a pose or a hand's act goes by its name
+  const own = () => {
+    if (body) return body;
+    kinds ??= heldKinds(); rows ??= rowsOf(copy);
+    const me = [...rows.values()].find((r) => r.soul === ME);
+    return (body = me ? { id: me.id, forms: kinds[me.entry ?? me.kind]?.forms ?? {} } : { id: null, forms: {} });
+  };
+  const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); return kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]?.forms ?? {}; };
   for (const w of words.map(String)) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
+    // Q1: a bare id after a plain walk is the next fallback (a walk takes no thing), as the skill's ranked list has it
+    if (out.length && ID.test(w) && out.at(-1).verb === `${NS}:walk` && !out.at(-1).form) { out.push({ verb: `${NS}:walk`, this: w }); continue; }
     if (out.length && (ID.test(w) || arg)) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
@@ -1141,8 +1156,19 @@ function actsOf(words) {
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
+      // Q1: `<verb>:<thing>` where the thing offers no such act and the Soul's own body does, with a thing to take
+      // (`pick_up:<apple>`, `wave_at:<their body>`, `point:<pond>`): that act of the body, on the thing
+      const f = HANDS[form] ?? form.replace(/-/g, '_'), mine = !verb.includes(':') && !MOVES.has(form) && !formsOf(tail)[form] && tail !== own().id ? own().forms[f] : null;
+      const take = mine ? Object.entries(mine.takes ?? {}).find(([, t]) => t?.type === 'thing' && !t.select)?.[0] : null;
+      if (take && own().id) { out.push({ verb: `${NS}:${f}`, this: own().id, form: f, args: { [take]: tail } }); continue; }
       out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
-    } else out.push({ verb: w });
+    } else {
+      // Q1: a bare word that names an act of the Soul's own body (`wave`, `clap`, `lie_down`, `pick_up`): that act on
+      // the body, its thing arguments after it as for any act
+      const f = HANDS[w] ?? w.replace(/-/g, '_');
+      if (/^[a-z][a-z_]*$/.test(f) && own().id && own().forms[f]) out.push({ verb: `${NS}:${f}`, this: own().id, form: f });
+      else out.push({ verb: w });
+    }
   }
   return out;
 }
@@ -1368,6 +1394,12 @@ async function answer(req, conn = null) {
       const id = String(req.id ?? ''), reply = String(req.reply ?? '').replace(/\s+/g, ' ').trim(), close = req.close ?? null;
       if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
       if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
+      if (!mail.has(id) && closedMail.has(id)) {
+        // Q1: closed already by an act's end: the reply goes as a note under it (#3781's line), and the close stands
+        const line = JSON.stringify({ note: { id, reply } });
+        if (ws && signedIn) ws.send(line); else closes.push(line);
+        return { ok: true, acked: id, reply, closed: closedMail.get(id), already: true, sent: signedIn, ...ageNow() };
+      }
       if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
       if (close === null) {
         // #3781 (today's N-C12): an interim note. The owner's page shows it under the message, which stays open, so a
@@ -1469,6 +1501,10 @@ async function answer(req, conn = null) {
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
+      // Q1: an errand's later step (`walk`, then `sit --for`) on a message an earlier step's end already closed goes
+      // unlinked, and says so: the agent's report is then the owner's answer
+      let unlinked = null;
+      if (req.for !== undefined && !mail.has(req.for) && closedMail.has(req.for)) { unlinked = { for: req.for, closed: closedMail.get(req.for), note: `message ${req.for} was already closed (${closedMail.get(req.for)}) by an earlier act's end: this act is not linked to it; put --for on an errand's last act only` }; delete req.for; }
       if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
       const candidates = standsFromSeat(Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf));
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
@@ -1512,7 +1548,7 @@ async function answer(req, conn = null) {
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
-      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
+      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
     case 'set-down': {

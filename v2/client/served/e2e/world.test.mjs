@@ -320,6 +320,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // (b) inspect on my own body lists the family's gestures as its offers (E21, #2791), as `can` reads them.
   const offered = ((await A.cli('inspect', meA)).offers ?? []).map((o) => o.name);
   for (const g of ['wave', 'clap', 'point']) assert.ok(offered.includes(g), `(b) \`inspect <me>\` offers ${g}: ${offered.join(', ')}`);
+  // Q1: the body's own act by its name alone, as an agent first writes it (`act clap`), is that act on A's body
+  const bare = await A.cli('can', 'clap');
+  assert.equal(bare.can, 'yes', `(b) \`can clap\` is the clap of A's own body: ${JSON.stringify(bare)}`);
 
   // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
   // takes a private turn.
@@ -411,7 +414,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
   assert.ok(bench, 'the bench is found by its words');
   const fromPart = v1.parts.length;
-  const walk = await act(A, bench.id);
+  // Q1: a ranked list of bare ids is a walk to the first, the rest its fallbacks (the chair), never the walk's arguments
+  const chair = (await A.cli('find', 'chair')).found.find((r) => r.kind?.startsWith('eden:chair'));
+  const walk = await act(A, bench.id, chair.id);
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
   await ended(A, walk, "A's walk to the bench");
   // A family gesture on A's own body, to its receipt (0.132 B1-3): a point toward the bench, from its stand point (the
@@ -421,13 +426,14 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     assert.ok(accepted(g.answer), `(a) ${words[0]}: ${JSON.stringify(g.answer)}`);
     if (g.answer.answer === 3) assert.equal((await answered(A, g.sent.sequence, 30_000, true)).answer, 1, `(a) ${words[0]} ends with its receipt`);
   }
-  await gesture(`point:${meA}`, `toward=${bench.id}`);
+  // Q1: `point:<bench>`: the bench offers no point, A's body does: A points toward the bench
+  await gesture(`point:${bench.id}`);
   const sit = await act(A, `sit:${bench.id}`);
   assert.ok(accepted(sit.answer), `A's sit on the bench: ${JSON.stringify(sit.answer)}`);
   // A body runs one form at a time and the world queues nothing (v2/docs/intents.md rules 7, 8): a sit answered in
   // progress (3) is followed by its receipt, and only then is the body free for the wave.
   if (sit.answer.answer === 3) assert.equal((await answered(A, sit.sent.sequence, 30_000, true)).answer, 1, "A's sit ends with its receipt");
-  const wave = await act(A, `wave:${meA}`);
+  const wave = await act(A, 'wave'); // Q1: by its name alone
   const words = 'the bread is still warm on the square';
   const secret = 'the key is under the third stone';
   const say = await A.cli('say', words);
