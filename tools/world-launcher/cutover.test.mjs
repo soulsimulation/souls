@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
+import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -84,6 +85,18 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     assert.deepEqual([eden.v2Gateway, eden.v2Directory], ['/w/eden/v2/ws', '/'], 'routed (B3-2b): where the owner\'s box finds the gateway and the directory');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
+  // cdn-walk (24 Nov): the routed page loads the replica by version, so both files are immutable; the plain addresses
+  // the Soul client's upgrade reads, and any other version, are kept nowhere (no-store), and the cdn-walk rule passes
+  const { v2Replica } = await pageConfig('/w/eden/');
+  const version = createHash('sha256').update('test module').update('test wasm').digest('hex').slice(0, 16);
+  assert.equal(v2Replica, `/w/eden/v2/replica/${version}/replica.js`, 'routed: the replica by its version');
+  for (const [path, body, cc] of [[v2Replica, 'test module', 'public, max-age=31536000, immutable'], [v2Replica.replace('replica.js', 'replica_bg.wasm'), 'test wasm', 'public, max-age=31536000, immutable'],
+    ['/w/eden/v2/replica/0000000000000000/replica_bg.wasm', 'test wasm', 'no-store'], [`${v2Replica}?x=1`, 'test module', 'no-store'], ['/w/eden/replica_bg.wasm', 'test wasm', 'no-store'], ['/w/eden/replica.js', 'test module', 'no-store']]) {
+    const r = await fetch(base + path);
+    assert.deepEqual([r.status, r.headers.get('cache-control'), await r.text()], [200, cc, body], path);
+    if (cc !== 'no-store') assert.equal(originCacheProblem({ path, status: 200, headers: Object.fromEntries(r.headers) }), null, path);
+  }
+  assert.equal(originCacheClass(v2Replica.replace('replica.js', 'replica_bg.wasm')), 'stable', 'cdn-walk judges the versioned wasm');
   // #4177: the page's arrival published the old world's static views beside the stream; the page's reads get those files
   for (let i = 0; i < 50 && !existsSync(join(staticDir, 'manifest.json')); i++) await new Promise(r => setTimeout(r, 20));
   const manifest = JSON.parse(readFileSync(join(staticDir, 'manifest.json')));

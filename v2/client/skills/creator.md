@@ -64,12 +64,16 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist mm]` | beside another, in the same parent (default east, 1000 mm; north is -z) |
 | `place <kind> --on <id>` | in or on another, in its first free slot a thing may take |
 | `place ... --facing <id\|n\|e\|s\|w>`, `move <id> --facing ...` | turned to face another thing or a compass point |
+| `place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x\|z]` | a row of `n`, `--gap` mm apart, centred on `--at` (along x unless `--along z`): one batch, all or none; `names` are `1..n` west to east |
+| `place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <mm>[,<mm>]` | a grid, `C` along x and `R` along z, centred on `--at`; at most 64 things. With `--facing n\|e\|s\|w` they all face it. If any spot is refused, nothing is placed and the refusal names the op (`check` first to see) |
 | `undo` | the newest edit taken back; the answer's `changed` says what changed |
 | `redo` | the newest undo done again, with the same ids; a new edit clears it |
 | `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
 | `undo --build <name>` | the whole build undone, step by step, while its steps are your newest edits |
 | `build claim <part> --area x0,z0,x1,z1 --helper [--ttl <minutes>]` | a claim with a helper: prints the helper's home (`SOULS_HOME=<folder>`); a sub-agent run there builds only inside that claim, until it lapses (default 120 minutes) |
 | `build rewind <build> --to <step> [--dry]` | undoes every edit of that build after the step, newest first (`--dry` lists them) |
+| `build start <name> --steps a,b,c [--brief '<words>']` | a build session, on its first step: until `build done`, every edit you send carries its name and current step without `--build --step`. One open at a time |
+| `build step <step>` · `build show [<name>]` · `build done [<name>]` | move on to the next step; its steps, each done, open or waiting, with the edits sent and refused under it; close it (edits are as written again) |
 | `describe` | what is there, and what each kind admits |
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
 | `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
