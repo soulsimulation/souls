@@ -50,7 +50,8 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
   [sleep-and-wake.md](sleep-and-wake.md)): it enables and starts it, and restarts it when its unit or drop-in
   changed. With no world asleep it only waits. Its drop-in (`souls-alarms.service.d/10-install.conf`) keeps it root,
   since it starts worlds, in the group souls with a group-writable socket, so worlds and gateways (the user souls)
-  reach it. Uninstall stops and disables it. Otherwise the one systemd call is `daemon-reload` when a unit file
+  reach it, and gives it `/etc/souls/secrets.env`, where the store is set (0.133 ST2). Uninstall stops and disables
+  it. Otherwise the one systemd call is `daemon-reload` when a unit file
   changed.
 - It never reads or writes today's units, users, data, proxy, DNS or firewall. `install.sh check` (run by CI in
   `v2/tools/ci.sh` and by the workflow) plans into an empty folder and compares every path it would write, and every

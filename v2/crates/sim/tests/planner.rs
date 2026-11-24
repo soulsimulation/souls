@@ -458,7 +458,7 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
     assert!(Arc::ptr_eq(now.map.as_ref().unwrap(), &current));
     assert_eq!(now.forms[&key].generation, 2);
     assert!(
-        matches!(&now.forms[&key].result, sim::planner::FormResult::Walk(legs) if legs.is_empty())
+        matches!(&now.forms[&key].result, sim::planner::FormResult::Walk(Ok(legs)) if legs.is_empty())
     );
     assert_eq!(worker.pending(), 0);
 

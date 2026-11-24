@@ -80,7 +80,9 @@
 //! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
 //! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
 //! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
-//! offer or a proposal on the ground (where bodies are born) makes its node there. Its entry's slots that admit a
+//! offer or a proposal on the ground (where bodies are born) makes its node there. The entry's own thing takes it as a
+//! child too (B10, #4239): one offered or proposed at the thing is the thing's, and each member holds its role's link
+//! (the entry's link of the role's name) on the thing while it is a member (`sim::activity`). Its entry's slots that admit a
 //! thing are its slots, numbered as the entry numbers them, so a carry's load rides its first (0.135 C4,
 //! `content/kinds/construction/carry.json`). A start prints `activities: <plain names>`.
 //! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
@@ -109,7 +111,7 @@ use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
 use directoryd::worlds::list::creator_of as directory_creator_of;
-use replica::activity::{ActivityKind, Role};
+use replica::activity::{ActivityKind, Role, RoleLink};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::edit::World as Editing;
@@ -433,6 +435,30 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                     .collect(),
                 None => Vec::new(),
             };
+            // B10 (#4239): a role is one of the entry's links (SA-G1a); a member holds it on the entry's own thing
+            // while it is a member of an activity offered or proposed there.
+            let link = match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("from"))
+                .and_then(Json::str)
+            {
+                Some(from @ ("body" | "soul")) => Some(RoleLink {
+                    ty: Name::new(&replica::audience::link_type(kind, role))
+                        .ok_or("a role's link")?,
+                    soul: from == "soul",
+                    on: kind.clone(),
+                    most: match entry
+                        .get("links")
+                        .and_then(|l| l.get(role))
+                        .and_then(|l| l.get("most"))
+                    {
+                        Some(Json::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
+                }),
+                _ => None,
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
@@ -440,6 +466,7 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 mv,
                 stands,
                 within,
+                link,
             });
         }
         // 0.135 G3: the stands its roles resolve to (from the entry's slots and points) are part of what is pinned; a
@@ -955,6 +982,16 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             kind.children.insert("body".into());
             boot_body.push(name.clone());
             for a in &activities {
+                kind.children.insert(plain(a.name.as_str()).to_owned());
+            }
+        }
+        // B10: an entry's own thing takes its activity too, so one offered or proposed at the thing is that thing's
+        // (its roles' links are written on it).
+        for a in &activities {
+            if a.roles
+                .iter()
+                .any(|r| r.link.as_ref().is_some_and(|l| l.on == plain(name)))
+            {
                 kind.children.insert(plain(a.name.as_str()).to_owned());
             }
         }
@@ -4924,5 +4961,560 @@ mod header_tests {
         );
         // Everything else, kind lines and boot targets included, is as this build wrote it.
         assert_eq!(b.kinds_text, text.replace(&ours, &theirs));
+    }
+}
+
+/// S10c: the edit checker's lazy body snapshot (S10) in lockstep, on a world with bodies: the checker waits for the
+/// bodies at a job's tick however long the tick takes, so a run fed the same inputs writes the same log.
+#[cfg(test)]
+mod s10c_lockstep {
+    use super::*;
+    use replica::edit::wire::{VERB, parameters};
+    use replica::edit::{Op, Ref, Spot};
+    use replica::effects::{Actor, Body as EffectBody, Change, Part};
+    use replica::ids::Version;
+    use replica::intents::{Intent, Target};
+    use replica::pose::{Quat, Support};
+
+    /// The most world time a step waits for its answers, in ticks.
+    const MOST_TICKS: i64 = 2_000;
+
+    /// N2's test world with a rack bay at its build site (as `tests/edit_served.rs`'s yard world), the construction
+    /// entries and the body's, a beam taken in a hand by a form. The facts, the entries and the bay's slots by name.
+    fn yard() -> (String, Vec<(String, Json)>, BTreeMap<String, u64>) {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(root.join("construction"))
+            .unwrap()
+            .map(|f| f.unwrap().path())
+            .collect();
+        paths.sort();
+        paths.push(root.join("body/humanoid.json"));
+        let mut entries = Vec::new();
+        let mut bay = None;
+        for p in paths {
+            let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+            if p.ends_with("rack_beam.json") {
+                let form = json::parse(
+                    r#"{"take": {"who": "anyone", "starts": "act", "needs": [{"need": "hand", "free": true}],
+                        "steps": [{"step": "take"}],
+                        "effects": [{"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}]}}"#,
+                )
+                .unwrap();
+                if let Json::Obj(o) = &mut e {
+                    o.push(("forms".into(), form));
+                }
+            }
+            if p.ends_with("rack_bay.json") {
+                bay = Some(e.to_json());
+            }
+            let kind = e.get("kind").and_then(Json::str).unwrap().to_owned();
+            entries.push((kind, e));
+        }
+        let kind = replica::kinds::entry::entry_to_kind(&bay.unwrap()).unwrap();
+        let mut kinds = replica::kinds::Kinds::default();
+        kinds.load(&[("rack_bay", kind.as_str())]);
+        let def = kinds
+            .admits()
+            .into_keys()
+            .find_map(|k| {
+                kinds
+                    .get(&k)
+                    .filter(|d| d.name.as_str().starts_with("mars:rack_bay@"))
+            })
+            .expect("the bay's kind");
+        let slots: Vec<(u64, String, [i64; 3])> = def
+            .slots
+            .iter()
+            .map(|(n, s)| {
+                (
+                    *n,
+                    s.name.as_ref().unwrap().as_str().to_owned(),
+                    s.at_mm.unwrap_or([0, 0, 0]),
+                )
+            })
+            .collect();
+        let numbers = slots.iter().map(|s| (s.1.clone(), s.0)).collect();
+        let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let Json::Obj(top) = &mut f else {
+            panic!("facts")
+        };
+        let num = |v: i64| Json::Int(i128::from(v));
+        for (k, v) in top.iter_mut() {
+            match (k.as_str(), v) {
+                ("kinds", Json::Arr(a)) => a.push(
+                    json::parse(&format!(
+                        r#"{{"ref": "testworld-rack-bay@1", "hash": "{}", "name": "mars:rack_bay", "form": "point"}}"#,
+                        to_hex(&sha256(b"souls/testworld/testworld-rack-bay@1"))
+                    ))
+                    .unwrap(),
+                ),
+                ("things", Json::Arr(a)) => {
+                    let slots = slots
+                        .iter()
+                        .map(|(n, id, at)| {
+                            Json::Obj(vec![
+                                ("n".into(), num(*n as i64)),
+                                ("id".into(), Json::s(id)),
+                                ("kind".into(), Json::s("bay")),
+                                ("at".into(), Json::Arr(at.iter().map(|&v| num(v)).collect())),
+                                ("yaw".into(), num(0)),
+                                ("capacity".into(), num(1)),
+                            ])
+                        })
+                        .collect();
+                    a.push(Json::Obj(vec![
+                        ("id".into(), Json::s("site-bay")),
+                        ("def".into(), Json::s("testworld-rack-bay@1")),
+                        ("ref".into(), Json::s("testworld-rack-bay@1")),
+                        ("parent".into(), Json::Null),
+                        (
+                            "pose".into(),
+                            Json::Arr([65_000, 0, -24_000, 0].iter().map(|&v| num(v)).collect()),
+                        ),
+                        ("scale_ppm".into(), num(1_000_000)),
+                        ("name".into(), Json::s("the site's rack bay")),
+                        ("slots".into(), Json::Arr(slots)),
+                    ]));
+                }
+                _ => {}
+            }
+        }
+        (f.to_json(), entries, numbers)
+    }
+
+    fn int(v: i64) -> Value {
+        u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+    }
+
+    /// An act's final answer: its kind (1 a receipt, 2 a refusal), its reason (read in a failure's message) and its
+    /// entries.
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct Got {
+        kind: u64,
+        reason: String,
+        entries: Vec<u64>,
+    }
+
+    fn read(frame: &[u8]) -> Got {
+        let Value::Map(m) = decode(frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer: {m:?}")
+        };
+        Got {
+            kind: match a.get(&3) {
+                Some(Value::Uint(k)) => *k,
+                _ => 0,
+            },
+            reason: match a.get(&4) {
+                Some(Value::Text(t)) => t.as_str().to_owned(),
+                _ => String::new(),
+            },
+            entries: match a.get(&5) {
+                Some(Value::Array(e)) => e
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::Uint(n) => Some(*n),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
+        }
+    }
+
+    /// The yard world served in lockstep in this process, as `serve` builds it: the engine, a static creator's edits,
+    /// births by the entry, and the bodies on the served town and planner.
+    struct Lock {
+        world: answers::World,
+        store: sim::log::Mem,
+        initial: Replica,
+        built: Built,
+        tick: i64,
+        /// How many ticks after the last run an intent sent now is taken.
+        ahead: i64,
+        sequences: BTreeMap<Id, u64>,
+    }
+
+    impl Lock {
+        fn start(facts: &str, entries: &[(String, Json)], creator: Id) -> Lock {
+            let mut kinds = entries.to_vec();
+            let built = build(facts, &kinds).unwrap();
+            replica::kinds::entry::family_forms(&mut kinds, plain(&built.body_kind));
+            let initial = Replica::start(built.header.stored()).unwrap();
+            let (mut log, _) = Log::open(sim::log::Mem::with(Vec::new()), EPOCH).unwrap();
+            let n = log.append(built.part.clone()).unwrap();
+            log.wait_durable(n + 1).unwrap();
+            let store = log.close();
+            let (mut town, planner) =
+                recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
+            let (places, ..) = worldd::places::register(&mut town, &kinds);
+            let rules = Rules {
+                kinds: Json::Obj(kinds),
+                moves: Json::Obj(Vec::new()),
+            };
+            let mut cfg = Config::new(built.header.lineage, EPOCH);
+            cfg.lockstep = true;
+            cfg.measures = false;
+            cfg.engine = Some((built.rules.clone(), built.activities.clone()));
+            cfg.edits = Some(Editing {
+                creator,
+                kinds: built.rules.kinds.clone(),
+            });
+            let ground = built.ground;
+            cfg.join = Some(Join {
+                entry: (ground, Vec3::new(36_000_000, 0, -20_000_000)),
+                family: humanoid().unwrap(),
+                kind: Name::new(&built.body_kind).unwrap(),
+                per_tick: 8,
+            });
+            cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
+                bodies(town, planner, ground, placed, places, builds)
+            }));
+            let world = answers::start(initial.frozen(), rules, store.clone(), cfg).unwrap();
+            Lock {
+                world,
+                store,
+                initial,
+                built,
+                tick: 0,
+                ahead: 1,
+                sequences: BTreeMap::new(),
+            }
+        }
+
+        fn records(&self) -> Vec<Vec<u8>> {
+            let log = self.store.0.lock().unwrap().bytes.clone();
+            sim::log::recover(&log).unwrap().records
+        }
+
+        /// The world as its log has it now.
+        fn replay(&self) -> Replica {
+            let mut r = self.initial.frozen();
+            for rec in self.records() {
+                if !recorder::is_input(&rec) {
+                    let p = Part::read(&rec).unwrap();
+                    if !p.effects.is_empty() {
+                        r.apply(&p).unwrap();
+                    }
+                }
+            }
+            r
+        }
+
+        /// `actor`'s intent (its id `who`), taken at the next tick; its answers on the receiver.
+        fn send(
+            &mut self,
+            (actor, who): (Actor, Id),
+            verb: &str,
+            target: Option<Id>,
+            parameters: BTreeMap<u64, Value>,
+            planned: u64,
+        ) -> Receiver<Vec<u8>> {
+            let sequence = self.sequences.entry(who).or_insert(0);
+            *sequence += 1;
+            let lineage = self.built.header.lineage;
+            let i = Intent {
+                actor,
+                verb: Name::new(verb).unwrap(),
+                target: target.map(Target::Node),
+                parameters,
+                sequence: *sequence,
+                basis: Version {
+                    lineage,
+                    zone: Id::new(lineage, 0).unwrap(),
+                    epoch: EPOCH,
+                    sequence: planned,
+                }
+                .to_value(),
+                // Lockstep world time starts at 0: an expiry far ahead, the same in every run.
+                expiry: i64::MAX,
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+                reflex: false,
+            };
+            let (reply, rx) = channel();
+            self.world
+                .events
+                .send(answers::Event::ArrivalAt {
+                    tick: self.tick + self.ahead,
+                    bytes: encode(&i.to_value()).unwrap(),
+                    reply,
+                })
+                .unwrap();
+            rx
+        }
+
+        fn soul(
+            &mut self,
+            soul: Id,
+            verb: &str,
+            target: Option<Id>,
+            p: BTreeMap<u64, Value>,
+        ) -> Receiver<Vec<u8>> {
+            self.send((Actor::Soul(soul), soul), verb, target, p, 0)
+        }
+
+        fn walk(&mut self, soul: Id, at: Vec3) -> Receiver<Vec<u8>> {
+            let g = self.built.ground;
+            self.soul(
+                soul,
+                "eden:walk",
+                Some(g),
+                BTreeMap::from([(1, Value::Array(vec![int(at.x), int(0), int(at.z)]))]),
+            )
+        }
+
+        /// Runs ticks until each of `rxs` has its final answer, in order.
+        fn answers(&mut self, rxs: Vec<Receiver<Vec<u8>>>) -> Vec<Got> {
+            let mut got: Vec<Option<Got>> = rxs.iter().map(|_| None).collect();
+            let mut ran = 0;
+            while got.iter().any(Option::is_none) {
+                assert!(ran < MOST_TICKS, "no answer in {ran} ticks: {got:?}");
+                self.tick += 10;
+                ran += 10;
+                let (done, rx) = channel();
+                self.world
+                    .events
+                    .send(answers::Event::RunTo {
+                        tick: self.tick,
+                        done,
+                    })
+                    .unwrap();
+                rx.recv().unwrap();
+                for (rx, g) in rxs.iter().zip(got.iter_mut()) {
+                    for frame in rx.try_iter() {
+                        if answers::progress_of(&frame).is_none() {
+                            *g = Some(read(&frame));
+                        }
+                    }
+                }
+            }
+            got.into_iter().map(Option::unwrap).collect()
+        }
+
+        fn one(&mut self, rx: Receiver<Vec<u8>>) -> Got {
+            self.answers(vec![rx]).pop().unwrap()
+        }
+
+        fn body_of(&self, soul: Id) -> Id {
+            let r = self.replay();
+            let t = r.tree();
+            t.links_at(soul)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body")
+        }
+
+        /// Where `id` is in the open ground's frame.
+        fn at(&self, id: Id) -> Vec3 {
+            let r = self.replay();
+            let t = r.tree();
+            sim::ground::scene::xform_to(
+                t,
+                t.handle(id).unwrap(),
+                t.handle(self.built.ground).unwrap(),
+            )
+            .unwrap()
+            .pos
+        }
+
+        /// The node of a kind starting `prefix` the entries numbered `entries` created.
+        fn created(&self, entries: &[u64], prefix: &str) -> Id {
+            for rec in self.records() {
+                if recorder::is_input(&rec) {
+                    continue;
+                }
+                for e in Part::read(&rec).unwrap().effects {
+                    if !entries.contains(&e.envelope.sequence) {
+                        continue;
+                    }
+                    if let EffectBody::Changes(cs) = e.body {
+                        for c in cs {
+                            if let Change::Create { node, kind, .. } = c.change
+                                && kind.as_str().starts_with(prefix)
+                            {
+                                return node;
+                            }
+                        }
+                    }
+                }
+            }
+            panic!("no {prefix} created by {entries:?}")
+        }
+
+        fn bytes(self) -> Vec<u8> {
+            let b = self.store.0.lock().unwrap().bytes.clone();
+            self.world.stop();
+            b
+        }
+    }
+
+    /// The activity kind named `plain_name` as the world pins it, as an intent names it.
+    fn built_activity(built: &Built, plain_name: &str) -> Value {
+        let a = built
+            .activities
+            .iter()
+            .find(|a| plain(a.name.as_str()) == plain_name)
+            .unwrap_or_else(|| panic!("the world pins {plain_name}"));
+        let hex = a.name.as_str().split_once('@').unwrap().1;
+        Value::Array(vec![
+            Value::Text(Name::new(plain_name).unwrap()),
+            Value::Bytes(from_hex(hex).unwrap()),
+        ])
+    }
+
+    /// One run: three Souls join; two take frame A off the yard's stand as a crew, carry it to the bay and seat it in
+    /// `upright_a` (a crew's seating, checked with the bodies); the third takes a beam in its hand and sets it down (a
+    /// set-down); the world's creator places an upright on the open ground (an edit). The log's bytes.
+    fn run(facts: &str, entries: &[(String, Json)], slots: &BTreeMap<String, u64>) -> Vec<u8> {
+        let creator = Id::new(Scope([0x5c; 16]), 1).unwrap();
+        let mut w = Lock::start(facts, entries, creator);
+        let im = import_eden::load(facts).unwrap();
+        let (bay, fa, b3) = (
+            im.nodes["site-bay"],
+            im.nodes["yard-frame-1"],
+            im.nodes["yard-beam-3"],
+        );
+        let g = w.built.ground;
+        let souls: Vec<Id> = (1..=3)
+            .map(|k| Id::new(Scope([0x5d; 16]), k).unwrap())
+            .collect();
+        let joins = souls
+            .iter()
+            .map(|s| w.soul(*s, answers::JOIN, None, BTreeMap::new()))
+            .collect();
+        for got in w.answers(joins) {
+            assert_eq!(got.kind, 1, "joined: {got:?}");
+        }
+        let v3 = |x, z| Vec3::new(x, 0, z);
+        let ends = |at: Vec3| (v3(at.x, at.z - 2_200_000), v3(at.x, at.z + 2_200_000));
+        // The crew to frame A's ends, the third Soul beside beam 3.
+        let (p, q) = ends(w.at(fa));
+        let beam = w.at(b3);
+        let walks = vec![
+            w.walk(souls[0], p),
+            w.walk(souls[1], q),
+            w.walk(souls[2], v3(beam.x + 700_000, beam.z)),
+        ];
+        for got in w.answers(walks) {
+            assert_eq!(got.kind, 1, "walked: {got:?}");
+        }
+        let carry = built_activity(&w.built, "mars:carry_activity");
+        let second = w.body_of(souls[1]);
+        let rx = w.soul(
+            souls[0],
+            "activity:offer",
+            Some(g),
+            BTreeMap::from([
+                (1, carry),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![second.to_value()])),
+            ]),
+        );
+        let got = w.one(rx);
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let crew = w.created(&got.entries, "mars:carry_activity@");
+        let rx = w.soul(souls[1], "activity:accept", Some(crew), BTreeMap::new());
+        let got = w.one(rx);
+        assert_eq!(got.kind, 1, "accepted: {got:?}");
+        let take = w.soul(
+            souls[0],
+            "part:take",
+            Some(crew),
+            BTreeMap::from([(1, fa.to_value())]),
+        );
+        let hand = w.soul(souls[2], "mars:take", Some(b3), BTreeMap::new());
+        for got in w.answers(vec![take, hand]) {
+            assert_eq!(got.kind, 1, "taken: {got:?}");
+        }
+        // The crew to the slot; the beam set down; the creator's upright on the open ground.
+        let ua = {
+            let r = w.replay();
+            let t = r.tree();
+            sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+                .unwrap()
+                .into_iter()
+                .find(|(n, _)| *n == slots["upright_a"])
+                .unwrap()
+                .1
+        };
+        let (p, q) = ends(ua);
+        let upright = w
+            .built
+            .rules
+            .kinds
+            .keys()
+            .find(|k| k.starts_with("mars:rack_upright@"))
+            .unwrap()
+            .clone();
+        let place = |x: i64| Op::Place {
+            name: 1,
+            kind: Name::new(&upright).unwrap(),
+            parent: Ref::Node(g),
+            at: Spot {
+                slot: None,
+                position: v3(x, -30_000_000),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: g,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let planned = w.replay().version();
+        // Body-reading jobs in consecutive ticks (the set-down, then two edits): each reads its own tick's bodies.
+        let mut rxs = vec![
+            w.walk(souls[0], p),
+            w.walk(souls[1], q),
+            w.soul(
+                souls[2],
+                "hands:set-down",
+                Some(b3),
+                BTreeMap::from([(1, Value::Text(Name::new("place:here").unwrap()))]),
+            ),
+        ];
+        for (k, x) in [50_000_000, 54_000_000].into_iter().enumerate() {
+            w.ahead = 2 + k as i64;
+            rxs.push(w.send(
+                (Actor::Creator(creator), creator),
+                VERB,
+                None,
+                parameters(&[place(x)]),
+                planned,
+            ));
+        }
+        w.ahead = 1;
+        let got = w.answers(rxs);
+        println!("S10c: walks, set-down, edits: {got:?}");
+        for g in &got {
+            assert_eq!(g.kind, 1, "done: {g:?}");
+        }
+        let rx = w.soul(
+            souls[0],
+            "part:put",
+            Some(crew),
+            BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots["upright_a"]))]),
+        );
+        let got = w.one(rx);
+        println!("S10c: seated: {got:?}");
+        assert_eq!(got.kind, 1, "seated: {got:?}");
+        w.bytes()
+    }
+
+    #[test]
+    fn s10c_a_lockstep_edit_set_down_and_seating_with_bodies_log_the_same_bytes_twice() {
+        let (facts, entries, slots) = yard();
+        let a = run(&facts, &entries, &slots);
+        let b = run(&facts, &entries, &slots);
+        println!("S10c: logs of {} and {} bytes", a.len(), b.len());
+        assert_eq!(sha256(&a), sha256(&b), "the same inputs write the same log");
     }
 }
