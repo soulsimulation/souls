@@ -686,6 +686,7 @@ impl Bodies {
                 &mut self.runner.controller,
                 body,
                 (pose.frame.node, pose.frame.slot),
+                Some(pose.position),
                 stance.unwrap_or(Stance::Sit),
                 at,
             );

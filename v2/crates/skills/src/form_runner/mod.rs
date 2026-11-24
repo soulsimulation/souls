@@ -132,11 +132,17 @@ pub enum Step {
     Hand,
     /// A pause of a fixed length, µs.
     Wait(Micros),
-    /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
-    /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`. With `stand`, the body is handed
+    /// Sit, or lie, in slot `slot` of the node (C17), or of thing `on` (a slot argument on another thing, E14): B3's
+    /// seat taken by B2's sit or lie move, as the gateway's sit takes it. It lies when the slot's posture is `lie` or
+    /// the step is a `lie` (for a slot of another thing, when the step is a `lie`). With `stand`, the body is handed
     /// into a standing slot on its feet by the same hand-off (C33, #3598): no form writes this step, the binding adds
     /// it for a form's `reparent` of the actor into a standing slot ([`bind_with`]).
-    Sit { slot: u64, lie: bool, stand: bool },
+    Sit {
+        slot: u64,
+        lie: bool,
+        stand: bool,
+        on: Option<Id>,
+    },
     /// Rise (C25, #3496): out of the body's seat by B3's rise, onto its stand point; up from a ground posture a
     /// `settle` took; nothing for a body already standing, as today's `stand` is. The form's `reparent` of the actor
     /// to `here` is the rise's own hand-off.
@@ -170,13 +176,16 @@ pub const SIT_REACH: i64 = 600_000 - crate::route::AT_GOAL;
 
 /// An argument of a Soul's act, as the world hands it to the forms (F14, #3384): a name from the kind's own lists (a
 /// `part`, `slot`, `field` or `value` argument), a thing by its id (`thing`), words kept by their reference (`text`:
-/// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`).
+/// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`). A
+/// `slot` argument on another thing (`Slot`: a lecture's seat on a bench of its hall, a collage's patch on a board,
+/// 0.135 E14) is that thing's id and the slot's number, 1 up in that thing's entry's order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Arg {
     Name(String),
     Node(Id),
     Text(Id),
     Int(i64),
+    Slot(Id, u64),
 }
 
 /// A form's arguments by name.
@@ -257,7 +266,8 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
 }
 
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
-/// it names, a thing argument as the thing itself (`on`; its own origin, read when the step starts). Refused
+/// it names, a thing argument as the thing itself (`on`; its own origin, read when the step starts), a slot argument on
+/// another thing as that thing (the world aims a walk before a sit at the seat's own stand point). Refused
 /// `arg-missing` for an argument not given, `point-unknown` for a name the kind does not declare, `step-malformed`
 /// for any other value. Returns the name, its place in µm and the thing.
 fn aim(
@@ -278,7 +288,7 @@ fn aim(
     };
     match args.get(a) {
         Some(Arg::Name(p)) => named(p),
-        Some(Arg::Node(id)) => Ok((a_name(a)?, Vec3::ZERO, Some(*id))),
+        Some(Arg::Node(id) | Arg::Slot(id, _)) => Ok((a_name(a)?, Vec3::ZERO, Some(*id))),
         Some(_) => refuse(
             "step-malformed",
             format!("{what}: argument {a} is not a place"),
@@ -374,6 +384,15 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                     let named = match at.get("arg").and_then(Value::str) {
                         Some(a) => match args.get(a) {
                             Some(Arg::Name(n)) => n.as_str(),
+                            // A seat of another thing (E14): its number is that thing's; it lies by a `lie` step.
+                            Some(&Arg::Slot(on, slot)) => {
+                                return Ok(Step::Sit {
+                                    slot,
+                                    lie: kind == "lie",
+                                    stand: false,
+                                    on: Some(on),
+                                });
+                            }
                             Some(_) => {
                                 return refuse(
                                     "step-malformed",
@@ -394,6 +413,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         slot,
                         lie: kind == "lie" || posture == Some("lie"),
                         stand: false,
+                        on: None,
                     })
                 }
                 "move" | "take" | "put" => {
@@ -432,14 +452,16 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         .collect::<Result<Vec<_>, _>>()?;
     approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
-    if let Some((_, slot)) = stand_in(entry, f, args)? {
+    let into = stand_in(entry, f, args)?;
+    if let Some((_, slot)) = into {
         bound.push(Step::Sit {
             slot,
             lie: false,
             stand: true,
+            on: None,
         });
     }
-    if rises_out(f) {
+    if rises_out(f, into.is_some()) {
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
@@ -584,21 +606,25 @@ fn stand_in(entry: &Value, f: &Value, args: &Args) -> Result<Option<(usize, u64)
     Ok(None)
 }
 
-/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here` and has no `rise`,
-/// `sit` or `lie` step of its own.
-fn rises_out(f: &Value) -> bool {
+/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here`, or into a standing
+/// slot (`standing`: a stage's `step_up` from one spot to another, 0.135 E17), and has no `rise`, `sit` or `lie` step of
+/// its own. Its run starts with a rise, done at once for a body standing, so a body in a slot of the thing is stood up
+/// by the rise move before the form's own walk, never walked by legs the slot holds.
+fn rises_out(f: &Value, standing: bool) -> bool {
     let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    effects.iter().any(|e| {
-        e.get("change").and_then(Value::str) == Some("reparent")
-            && e.get("what").and_then(Value::str) == Some("actor")
-            && e.get("into").and_then(Value::str) == Some("here")
-    }) && !steps.iter().any(|s| {
-        matches!(
-            s.get("step").and_then(Value::str),
-            Some("rise" | "sit" | "lie")
-        )
-    })
+    (standing
+        || effects.iter().any(|e| {
+            e.get("change").and_then(Value::str) == Some("reparent")
+                && e.get("what").and_then(Value::str) == Some("actor")
+                && e.get("into").and_then(Value::str) == Some("here")
+        }))
+        && !steps.iter().any(|s| {
+            matches!(
+                s.get("step").and_then(Value::str),
+                Some("rise" | "sit" | "lie")
+            )
+        })
 }
 
 /// Turns the points bound `steps` walk to by `q`, the orientation of the node the form is done at (C13, #3440): an
@@ -646,8 +672,9 @@ pub enum Effect {
     Remove { what: Of },
     /// A `take` step's transfer (B4's, at its contact): `what` into a free hand of the body.
     Take { what: Of },
-    /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
-    Put { what: Of, slot: u64 },
+    /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node, or of
+    /// thing `on` (a slot argument on another thing, E14).
+    Put { what: Of, slot: u64, on: Option<Id> },
     /// A link of type `ty` (the tree's, `replica::audience::link_type`) from the actor to the node, owned by the node
     /// and seen by everyone (F15): its end the actor's Soul when `soul`, else its body. At most `most` of that type
     /// on the node (the kind's `most`, C24).
@@ -856,6 +883,8 @@ pub fn bind_effects_with(
 
 /// A form's arguments as an intent carries them (C12, #3427): things by id, and slots of the node by number, 1, 2, ...
 /// in the entry's order, each as the slot's name ([`Arg::Name`]). A number the kind has no slot for is `slot-unknown`.
+/// An argument given both as a thing and as a number is that slot of that thing ([`Arg::Slot`], E14: a seat on a
+/// bench of the hall), numbered in that thing's entry, which the world checks when the seat is taken.
 pub fn args_in(
     entry: &Value,
     things: &BTreeMap<String, Id>,
@@ -867,6 +896,10 @@ pub fn args_in(
         .map(|(k, id)| (k.clone(), Arg::Node(*id)))
         .collect();
     for (k, &n) in slots {
+        if let Some(&on) = things.get(k) {
+            args.insert(k.clone(), Arg::Slot(on, n));
+            continue;
+        }
         let slot = usize::try_from(n)
             .ok()
             .and_then(|n| n.checked_sub(1))
@@ -970,19 +1003,21 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     name: "step-malformed",
                     detail: "put.slot: a slot or {\"arg\": name}".into(),
                 })?;
-                let slot = match into.get("arg").and_then(Value::str) {
+                let (slot, on) = match into.get("arg").and_then(Value::str) {
                     Some(a) => match args.get(a) {
-                        Some(Arg::Name(n)) => slot_n(entry, n)?,
+                        Some(Arg::Name(n)) => (slot_n(entry, n)?, None),
+                        Some(&Arg::Slot(on, slot)) => (slot, Some(on)),
                         Some(_) => {
                             return refuse("step-malformed", format!("argument {a} is not a slot"));
                         }
                         None => return refuse("arg-missing", a),
                     },
-                    None => slot_n(entry, text(Some(into), "put.slot")?)?,
+                    None => (slot_n(entry, text(Some(into), "put.slot")?)?, None),
                 };
                 out.push(Effect::Put {
                     what: what(s, into)?,
                     slot,
+                    on,
                 });
             }
             _ => {}
@@ -1141,19 +1176,21 @@ fn reparent_alone(entry: &Value, e: &Value, args: &Args) -> Result<Effect, Refus
             "a thing set down where there is no slot (E4)",
         ),
         (false, _) => {
-            let slot = match into.get("arg").and_then(Value::str) {
+            let (slot, on) = match into.get("arg").and_then(Value::str) {
                 Some(a) => match args.get(a) {
-                    Some(Arg::Name(n)) => slot_n(entry, n)?,
+                    Some(Arg::Name(n)) => (slot_n(entry, n)?, None),
+                    Some(&Arg::Slot(on, slot)) => (slot, Some(on)),
                     Some(_) => {
                         return refuse("effect-malformed", format!("argument {a} is not a slot"));
                     }
                     None => return refuse("arg-missing", a),
                 },
-                None => slot_n(entry, text(Some(into), "reparent.into")?)?,
+                None => (slot_n(entry, text(Some(into), "reparent.into")?)?, None),
             };
             Ok(Effect::Put {
                 what: of(e.get("what"), args)?,
                 slot,
+                on,
             })
         }
     }
@@ -1705,6 +1742,12 @@ pub struct Runner {
     /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
     /// point again from the floor it came onto.
     again: bool,
+    /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
+    /// body out again by a rise, then ends `left`.
+    backing: bool,
+    /// That rise is under way: the run ends `left` when it ends, not at its contact, so the world writes the body
+    /// standing (the rise's `done`) before the run is over.
+    rising_out: bool,
 }
 
 impl Runner {
@@ -1739,6 +1782,8 @@ impl Runner {
             effected: false,
             leaving: false,
             again: false,
+            backing: false,
+            rising_out: false,
         }
     }
 
@@ -1836,6 +1881,12 @@ impl Runner {
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));
                     }
+                    // The planner's own refusal (the ground changed under the walk, its answer failed), approach or
+                    // not: the form ends with that cause (S13d).
+                    replica::host::WalkPlan::Refused(why) => {
+                        self.planning = false;
+                        return self.end(host, why);
+                    }
                     replica::host::WalkPlan::Legs(l) => {
                         self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
@@ -1861,11 +1912,16 @@ impl Runner {
                     at,
                 }
             }
-            Step::Sit { slot, lie, stand } => {
+            Step::Sit {
+                slot,
+                lie,
+                stand,
+                on,
+            } => {
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Sit {
-                    node: self.node,
+                    node: on.unwrap_or(self.node),
                     slot,
                     lie,
                     stand,
@@ -1928,10 +1984,38 @@ impl Runner {
             return self.end(host, name("left"));
         }
         if self.leaving {
+            // A seat of another thing (E14) that its sit hands the body into after the Soul left has no effect, so the
+            // Soul would keep that thing's seat with nothing it did there: the sit's move ends, then a rise takes the
+            // body out onto the seat's stand point by B3's own rise (no teleport), and the run ends `left`.
+            let other_seat = matches!(
+                step,
+                Some(Step::Sit {
+                    on: Some(_),
+                    stand: false,
+                    ..
+                })
+            );
             return match why {
                 Woke::Timer(id) if self.timer == Some(id) => {
                     self.timer = None;
                     self.end(host, name("left"))
+                }
+                Woke::Contact if self.rising_out => Next::Sleep,
+                Woke::Contact if other_seat && !self.effected => {
+                    self.backing = true;
+                    Next::Sleep
+                }
+                Woke::Moved(how) if self.backing && how.as_str() == "done" => {
+                    self.backing = false;
+                    if let Some(t) = self.timer.take() {
+                        host.clear_timer(t);
+                    }
+                    self.timer =
+                        Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                    // The step in progress is the rise now, so the world writes the body standing when it ends.
+                    self.steps[self.at] = Step::Rise;
+                    self.rising_out = true;
+                    Next::Rise
                 }
                 Woke::Contact | Woke::Moved(_) => self.end(host, name("left")),
                 _ => Next::Sleep,
