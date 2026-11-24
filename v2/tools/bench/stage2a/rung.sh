@@ -74,7 +74,7 @@ STREAM_URL="http://127.0.0.1:$OPORT/${STREAM#/}"
 echo "rung $N $ARM $RATE cpus=$CPUS: world $WP gateway $GP ($ADDR) origin $OP ($STREAM_URL)"
 if [ "${VIEWERS:-0}" -gt 0 ]; then
   taskset -c "${VIEWER_CPUS:-$DRIVER_CPUS}" node "$V2/tools/bench/stage2a/viewers.mjs" "http://127.0.0.1:$OPORT/" "${STREAM_URL#*://*/}" \
-    "${REPLICA_PKG:-$B/../wasm-load/pkg}" "$VIEWERS" "$ARM" "$SECS" "$D/driver.out" "$D" > "$D/viewers.log" 2>&1 &
+    "${REPLICA_PKG:-$B/../wasm-load/pkg}" "$VIEWERS" "$ARM" "$SECS" "$D/win.txt" "$D" > "$D/viewers.log" 2>&1 &
   VP=$!
 fi
 

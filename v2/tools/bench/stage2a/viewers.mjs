@@ -4,17 +4,18 @@
 // loopback only: they read the rung's own origin and nothing else.
 //
 //   node v2/tools/bench/stage2a/viewers.mjs <origin url> <stream path> <replica pkg> <m> <even|uneven> <seconds> \
-//        <driver.out> <out folder> [procs]
+//        <load start file> <out folder> [procs]
 //
 // even: the m viewers arrive spread over 30 s and stay. uneven: they arrive in one wave within 5 s, and half as many
-// again arrive in a second wave at the load's middle (people come in waves). The load starts when the driver prints
-// its `bodies:` line (every agent signed in), or 60 s after this starts if it never does. Every 10 s the readers'
+// again arrive in a second wave at the load's middle (people come in waves). The load starts at the Unix time on the
+// first line of <load start file> (rung.sh's win.txt, written as the driver starts), or 60 s after this starts if
+// that file never appears. Every 10 s the readers'
 // counters go to <out>/viewers.jsonl; on SIGTERM the run's summary goes to <out>/viewers.json and the readers stop.
 import { fork } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hcount, hq, merge } from '../../../../tools/bench/capacity/viewers/v2-stats.mjs';
 
-const [base, stream, pkg, mArg, arm, secsArg, driverOut, out, procsArg] = process.argv.slice(2);
+const [base, stream, pkg, mArg, arm, secsArg, startFile, out, procsArg] = process.argv.slice(2);
 const M = Number(mArg), SECS = Number(secsArg), PROCS = Number(procsArg ?? Math.max(1, Math.ceil(M / 250)));
 const TAKE_MS = 10_000, READERS = new URL('../../../../tools/bench/capacity/viewers/v2-readers.mjs', import.meta.url).pathname;
 const t0 = Date.now();
@@ -36,7 +37,8 @@ add(M, arm === 'uneven' ? 5_000 : 30_000);
 let loadAt = null, second = false;
 const windows = [];
 const tick = async () => {
-  if (loadAt == null && (/^bodies:/m.test(existsSync(driverOut) ? readFileSync(driverOut, 'utf8') : '') || Date.now() - t0 > 60_000)) loadAt = Date.now();
+  if (loadAt == null && existsSync(startFile)) loadAt = 1000 * Number(readFileSync(startFile, 'utf8').split('\n')[0]) || null;
+  if (loadAt == null && Date.now() - t0 > 60_000) loadAt = Date.now();
   if (arm === 'uneven' && !second && loadAt != null && Date.now() - loadAt >= (SECS * 1000) / 2) { second = true; add(Math.round(M / 2), 5_000); }
   const takes = await take();
   const w = { t: (Date.now() - t0) / 1000, load: loadAt == null ? null : (Date.now() - loadAt) / 1000, latency: {}, firstPicture: {}, errors: 0, behind: 0, reinstalls: 0, viewers: 0, waiting: 0, cpuSeconds: 0, loopP99Ms: 0 };
