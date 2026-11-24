@@ -4177,6 +4177,22 @@ fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
     BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))])
 }
 
+/// `part:put` by `a` for crew `c`, asked again while it is refused at its commit because a walker moved while the
+/// walkers' maps were prepared (`edit.body-stale`: the part comes back to its crew, which may put again) or while it
+/// is still on its way back (`part.setting-in`). Six Souls walk at once here, so a commit can meet a moving body.
+async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
+    for _ in 0..10 {
+        let got = a.act("part:put", c, to.clone()).await;
+        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        {
+            return got;
+        }
+        println!("asked again after {}", got.reason);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("a put refused ten times while walkers moved");
+}
+
 /// Where a part's carriers stand for it: [`frame_ends`] or [`beam_ends`].
 type Ends = fn(Vec3) -> (Vec3, Vec3);
 
@@ -4215,7 +4231,7 @@ async fn carry_in(
     what: &str,
 ) -> Id {
     let c = take_along(s, a, b, part, ends, via, what).await;
-    let got = a.act("part:put", c, to).await;
+    let got = put_part(a, c, to).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}");
     c
@@ -4297,7 +4313,7 @@ async fn beam_out(
         (1, s.g.to_value()),
         (3, Value::Array(vec![int(home.x), int(home.y), int(home.z)])),
     ]);
-    let got = a.act("part:put", c, on_ground).await;
+    let got = put_part(a, c, on_ground).await;
     assert_eq!(got.kind, 1, "{what}: laid in the yard: {got:?}");
     leave_crew(a, c, what).await;
     leave_crew(b, c, what).await;
@@ -4340,7 +4356,7 @@ async fn frame_home(
     for at in via.iter().chain([&home]) {
         walk_two(s, a, b, frame_ends(*at), what).await;
     }
-    let got = a.act("part:put", c, into_slot(stand, k)).await;
+    let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
     leave_crew(a, c, what).await;
     leave_crew(b, c, what).await;
@@ -4540,7 +4556,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         "holder 3 takes frame A from Soul 1",
     )
     .await;
-    let got = s4.act("part:put", crew_mb, into_slot(bm, ub)).await;
+    let got = put_part(s4, crew_mb, into_slot(bm, ub)).await;
     println!("team 2 seats frame B in the middle bay, Soul 2 gone: {got:?}");
     assert_eq!(got.kind, 1, "frame B seated");
     leave_crew(s4, crew_mb, "Soul 4 lets go of frame B; Soul 5 holds it").await;
