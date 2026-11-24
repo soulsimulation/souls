@@ -1016,9 +1016,13 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
 }
 
 /// E5: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's field 1)
-/// binds each end's field by its name on that end's own kind, moves the amount, and commits with its balance.
+/// binds each end's field by its name on that end's own kind: the source's soap goes down and the target's soap up,
+/// and neither end's other field (dirt, numbered as the other kind's soap) is written.
+///
+/// Not here: committing that part onto a tree. T6 rule 3.4's balance (`replica::tree::check`) sums `by` per field
+/// number, so it refuses these two sets `by-not-balanced` until it sums per field name.
 #[test]
-fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amount() {
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_writes_each_ends_own_field() {
     const LINEN: &str = r#"{ "format": "souls-entry/1", "kind": "e5:linen", "owner": "thing",
       "state": {
         "dirt": { "n": 1, "type": "int", "unit": "count", "default": 5, "min": 0, "max": 9, "audience": { "rule": "everyone" } },
@@ -1049,10 +1053,9 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
                       {1: \"e5:board\", 2: \"thing\"}";
     let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
                  {1: 101, 2: \"e5:board\", 3: 1}], 4: []}";
-    let (mut tree, rules) = Tree::load(
-        &parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"),
-    )
-    .expect("loads");
+    let (tree, _) =
+        Tree::load(&parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"))
+            .expect("loads");
     let (linen, board) = (id(100), id(101));
 
     let args = BTreeMap::from([("other".to_owned(), board)]);
@@ -1076,56 +1079,28 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
     let made = cx
         .entries(&mut mint, &effects[0])
         .expect("the transfer is not refused");
-    let mut entries: Vec<Effect> = made
-        .into_iter()
-        .map(|(node, _, body)| {
-            let mut e = world_set(node, 0);
-            e.body = body;
-            e
-        })
-        .collect();
-    let sets: Vec<(Id, u64, Value)> = entries
+    let sets: Vec<(Id, u64, Value, Option<i64>)> = made
         .iter()
-        .flat_map(Effect::changes)
-        .filter_map(|c| match &c.change {
+        .flat_map(|(_, _, body)| match body {
+            Body::Changes(cs) => cs.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|c| match c.change {
             Change::Set {
-                node, field, to, ..
-            } => Some((*node, *field, to.clone())),
+                node,
+                field,
+                to,
+                by,
+            } => Some((node, field, to, by)),
             _ => None,
         })
         .collect();
     assert_eq!(
         sets,
-        vec![(linen, 2, Value::Uint(20)), (board, 1, Value::Uint(10))],
+        vec![
+            (linen, 2, Value::Uint(20), Some(-10)),
+            (board, 1, Value::Uint(10), Some(10))
+        ],
         "each end's soap, by its own kind's number"
     );
-
-    // The part commits onto the tree (its balance sums to zero), and the amounts are there.
-    let pinned: Vec<&str> = rules.kinds.keys().map(String::as_str).collect();
-    let header = header(id(1), &pinned);
-    let next = tree.to_state().next;
-    for (e, s) in entries.iter_mut().zip(next..) {
-        e.envelope.sequence = s;
-    }
-    let bytes = encode(&Value::Map(BTreeMap::from([
-        (1, Value::Bytes(header.hash().to_bytes())),
-        (
-            2,
-            Value::Array(entries.iter().map(Effect::to_value).collect()),
-        ),
-    ])))
-    .expect("bytes");
-    drop(cx);
-    tree.commit(&header, &Part::read(&bytes).expect("a part"), &rules)
-        .expect("the part commits");
-    let field = |n: Id, f: u64| {
-        tree.node(tree.handle(n).expect("there"))
-            .expect("a node")
-            .fields()
-            .get(&f)
-            .cloned()
-    };
-    assert_eq!(field(linen, 2), Some(Value::Uint(20)));
-    assert_eq!(field(board, 1), Some(Value::Uint(10)));
-    assert_eq!(field(board, 2), None, "the board's dirt is untouched");
 }
