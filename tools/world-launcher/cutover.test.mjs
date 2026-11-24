@@ -329,3 +329,36 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   assert.equal((await get('/w/fresh/')).status, 404);
   assert.equal((await (await get('/__sim/worlds.json', { accept: 'application/json' })).json()).worlds.some(w => w.slug === 'fresh'), false);
 });
+
+test('a routed world whose old process is unloaded still gets its page with its inline config, never the bare web page', async t => {
+  // live, 24 Nov: with --unload-still the bare web page went out (no inline config); the page then read /v1/config, which
+  // a routed world answers with the new client's fields only, and said "There is no world at this address"
+  const dir = mkdtempSync(new URL('unloaded-routed-', scratch)), data = join(dir, 'data'), clientDir = join(dir, 'served'), routesFile = join(dir, 'routes.json'), webDir = join(dir, 'web');
+  mkdirSync(data); mkdirSync(clientDir); mkdirSync(join(webDir, 'assets'), { recursive: true });
+  writeFileSync(join(webDir, 'index.html'), '<!doctype html><html><head><title>Souls</title><link rel="canonical" href="https://x/"></head><body></body></html>');
+  writeFileSync(join(webDir, 'assets', 'app.js'), 'console.log(1)');
+  const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(clientDir, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
+  const client = described('eden.mjs', 'served fixture bytes'), skill = described('skill.md', 'test skill');
+  const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
+  writeFileSync(join(clientDir, 'soul-client.json'), JSON.stringify({ ...client, contract: 'souls-v2/1', version: '3.0.0', skill, files }));
+  const worlds = [{ slug: 'eden', worldId: 'eden-original-1' }, { slug: 'other' }].map(w => ({ ...w, name: w.slug, template: 'empty', createdAt: 1, owner: 'synthetic-owner' }));
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: ['/worlds'], worlds }));
+  writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical: true } } }));
+  const P = await testPort(3), base = `http://127.0.0.1:${P}`;
+  const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
+  const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, webDir, eager: 0, base: '/', log: () => {}, unloadStill: true, keepAlive: false, prewarm: false, stillEveryMs: 1e9, stillAlarmMs: 1e9,
+    cutoverBinding: { oldWorldId: 'eden-original-1', canonicalSlug: 'eden', routesFile, clientDir, staticDir: join(dir, 'origin/s/eden/static') },
+    command: (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }) });
+  t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
+  const page = (slug) => fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } });
+  assert.equal((await fetch(`${base}/w/eden/assets/app.js`)).status, 200, 'the build\'s files still come from here');
+  assert.equal(launcher.pool.status('eden').status, 'stopped', 'and load nothing');
+  const eden = await page('eden');
+  assert.equal(eden.status, 200); assert.notEqual(eden.headers.get('x-sim-cache'), 'unloaded', 'not the bare web page');
+  const config = JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await eden.text())?.[1] ?? 'null');
+  assert.equal(config?.worldKey, 'eden'); assert.equal(config?.v2Stream, '/s/eden/');
+  assert.equal(launcher.pool.status('eden').status, 'running', 'the page loaded its old world');
+  // a world not routed keeps the unloaded page (#2304 A3)
+  const other = await page('other');
+  assert.equal(other.headers.get('x-sim-cache'), 'unloaded'); assert.equal(launcher.pool.status('other').status, 'stopped');
+});
