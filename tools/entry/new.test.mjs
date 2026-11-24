@@ -63,7 +63,7 @@ test('A1: a taken name, a defined kind or a bad name is refused, and nothing is 
   assert.equal(again.status, 2);
   assert.match(JSON.parse(again.stdout).error, /exists/);
   const other = run('other', 'tide_gauge', '--root', root);
-  assert.match(JSON.parse(other.stdout).error, /already defined in content\/kinds\/gauges\/tide_gauge\.json/);
+  assert.match(JSON.parse(other.stdout).error, /tide_gauge\.json exists/);
   assert.equal(existsSync(join(root, 'content/kinds/other')), false);
   // A kind committed in this checkout is refused by default (no --root).
   const real = run('lights', 'bollard_light');
