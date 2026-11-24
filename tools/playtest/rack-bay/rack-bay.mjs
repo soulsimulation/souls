@@ -3,15 +3,16 @@
 // own client commands (`v2/client/src/cli/souls.mjs`: `carry …`, `part …`). Nothing reaches into the world any other
 // way: every step below is one Soul's own command line, logged with its answer.
 //
-// The Mars College templates (worlds/templates/mars-camp.json, mars-two.json) hold no rack yard in the construction
-// kinds (content/kinds/construction: mars:frame_stand, mars:rack_upright, mars:rack_beam, mars:rack_bay). mars-camp's
-// stock pile is two old `core:pallet_rack` fixtures with four `core:rack_beam`s in their sockets: they import with their
-// socket slots, but no kind entry makes them parts a crew can take. So a world for this needs the yard added:
+// The Mars College camp template (worlds/templates/mars-camp.json) holds a rack yard in the construction kinds
+// (content/kinds/construction: mars:frame_stand, mars:rack_upright, mars:rack_beam, mars:rack_bay): a frame stand with
+// two frames, two loose beams and one bay site on the open ground south of the campfire. The Mars map
+// (content/worlds/mars/map.json) names their copies those kinds, so the template exported with it is a buildable world
+// as it is; nothing is seeded.
 //
-//   local   the yard is seeded from facts (`yardFacts`: N2's test-world yard things, the Mars College template's facts
-//           around them), the world served like production under the old page (arena/new-engine/old-page.mjs), four
-//           test Souls paired, the steps run, and with --record <seconds> one uncut clip of the old page at a fixed
-//           camera on the yard.
+//   local   the template's world served like production under the old page (arena/new-engine/old-page.mjs), four
+//           test Souls paired, the steps run against the template's own yard, and with --record <seconds> one uncut
+//           clip of the old page at a fixed camera on the yard. Then the creator places one more frame live with a
+//           title ("spare frame"), and Ada and Bo take it and lay it down again, naming it only by that title.
 //             node tools/playtest/rack-bay/rack-bay.mjs local [--template worlds/templates/mars-camp.json] [--dir <folder>] [--record 240]
 //           With --stage live the yard is placed instead by the world's creator in one `souls-god.mjs batch`, as a staged
 //           world on soul.game would get it. Until a thing placed live gets its slots' points (another lane), the first
@@ -27,7 +28,7 @@
 // and Cy frame 2 into upright_b, Cy holding it; the change of crew: Di takes frame 1 over from Bo; Ada and Bo seat both
 // low beams; everyone lets go and the bay stands unheld. Take-down: hold crews on the frames, Bo and Di lift each beam
 // out and lay it where it lay, then each frame back into its stand slot. The run's transcript is `<dir>/rack-bay.json`.
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isMain } from '../../lib/is-main.mjs';
@@ -36,51 +37,33 @@ import { exportFacts } from '../arena/new-engine/world.mjs';
 import { PAIR, lastJson, pairArgs, pairSeat, seatEnv, seatOf } from '../arena/new-engine/seat.mjs';
 
 export const TEMPLATE = 'worlds/templates/mars-camp.json';
-/** The yard on mars-camp's open ground south of the campfire (metres): the stand, the two beams' places, the bay. */
-export const AT = { stand: [-6, 20], beams: [[-4, 20], [-3.7, 20]], bay: [6, 20] };
+/** The Mars map: its rows name the rack yard's copies the construction kinds. */
+export const MAP = 'content/worlds/mars/map.json';
+/** The yard on mars-camp's open ground south of the campfire (metres): the stand, the two beams' places, the bay, and
+ *  where the creator places the spare frame live. */
+export const AT = { stand: [-6, 20], beams: [[-4, 20], [-3.7, 20]], bay: [6, 20], spare: [-1, 22] };
 /** The fixed camera on the yard for the clip: the camp's halls behind it. */
 export const CAMERA = { position: [0, 6, 31], target: [0, 1, 20.5], fov: 50 };
+/** The title the creator gives the frame it places live; the Souls name it only by this. */
+export const SPARE = 'spare frame';
 const LABELS = ['ada', 'bo', 'cy', 'di'];
-const BIN = process.env.V2_BIN ?? join(REPO_ROOT, 'v2/target/debug');
 const GOD = join(REPO_ROOT, 'v2/client/src/creator/souls-god.mjs');
 
-/** The template's facts with N2's test-world yard added at `at` (a frame stand with two frames in its slots, two loose
- *  beams) and a rack bay with its entry's slots. → the facts' path */
-export function yardFacts({ template = TEMPLATE, out, at = AT }) {
-  mkdirSync(out, { recursive: true });
-  const f = JSON.parse(readFileSync(exportFacts(template, join(out, 'template.facts.json')), 'utf8'));
-  execFileSync(join(BIN, 'testworld'), ['--out', join(out, 'tw')], { stdio: 'ignore' });
-  const tw = JSON.parse(readFileSync(join(out, 'tw/testworld-s1-t0.facts.json'), 'utf8'));
-  const bayEntry = JSON.parse(readFileSync(join(REPO_ROOT, 'content/kinds/construction/rack_bay.json'), 'utf8'));
-  for (const k of tw.kinds.filter((k) => /frame-stand|rack-upright|rack-beam/.test(k.ref))) f.kinds.push(k);
-  f.kinds.push({ ref: 'mars-rack-bay@1', hash: 'b'.repeat(64), name: 'mars:rack_bay', form: 'point' });
-  const mm = ([x, z]) => [Math.round(x * 1000), Math.round(z * 1000)];
-  const byId = Object.fromEntries(tw.things.map((t) => [t.id, t]));
-  const place = (t, p, yaw = 0) => { const [x, z] = mm(p); return { ...t, pose: [x, 0, z, yaw], world: [x, 0, z, yaw] }; };
-  const [sx, sz] = mm(at.stand);
-  const stand = place(byId['yard-stand'], at.stand);
-  const frames = ['yard-frame-1', 'yard-frame-2'].map((id) => { const t = byId[id]; return { ...t, world: [sx + t.pose[0], t.pose[1], sz + t.pose[2], 0] }; });
-  const beams = ['yard-beam-1', 'yard-beam-2'].map((id, k) => place(byId[id], at.beams[k]));
-  const slots = Object.entries(bayEntry.slots).map(([name, s], k) => ({ n: k + 1, id: name, kind: 'bay', at: s.at_mm, yaw: 0, capacity: 1 }));
-  const [bx, bz] = mm(at.bay);
-  const bay = { id: 'site-bay', def: 'mars-rack-bay@1', ref: 'mars-rack-bay@1', parent: null, pose: [bx, 0, bz, 0], world: [bx, 0, bz, 0], scale_ppm: 1_000_000, name: 'the rack bay', slots };
-  f.things.push(stand, ...frames, ...beams, bay);
-  for (const [ref, n] of [['testworld-frame-stand@1', 1], ['testworld-rack-upright@1', 2], ['testworld-rack-beam@1', 2], ['mars-rack-bay@1', 1]]) f.byRef[ref] = (f.byRef[ref] ?? 0) + n;
-  const file = join(out, 'yard.facts.json');
-  writeFileSync(file, JSON.stringify(f));
-  return file;
+/** The template's facts with its own rack yard, exported with the Mars map. Nothing is added. → the facts' path */
+export function templateFacts({ template = TEMPLATE, out }) {
+  return exportFacts(template, join(out, 'template.facts.json'), MAP);
 }
 
 /** The yard as one creator edit (`souls-god.mjs batch`, all or none): the stand with a frame in each slot, two beams on
- *  the ground, the bay; each named (field 1, text as hex: a plain string is refused `intent.text-not-a-name`). */
+ *  the ground, the bay; each with the title Souls see it by. */
 export function stageBatch(ground, at = AT) {
-  const m = (v) => Math.round(v * 1000), name = (t) => ({ 1: { hex: Buffer.from(t).toString('hex') } });
+  const m = (v) => Math.round(v * 1000);
   return [
-    { op: 'place', name: 1, kind: 'mars:frame_stand', in: ground, at: [m(at.stand[0]), 0, m(at.stand[1])], fields: name('frame-stand') },
-    { op: 'place', name: 2, kind: 'mars:rack_upright', in: 1, slot: 1, fields: name('rack-frame-1') },
-    { op: 'place', name: 3, kind: 'mars:rack_upright', in: 1, slot: 2, fields: name('rack-frame-2') },
-    ...at.beams.map((p, k) => ({ op: 'place', name: 4 + k, kind: 'mars:rack_beam', in: ground, at: [m(p[0]), 0, m(p[1])], fields: name(`rack-beam-${k + 1}`) })),
-    { op: 'place', name: 6, kind: 'mars:rack_bay', in: ground, at: [m(at.bay[0]), 0, m(at.bay[1])], fields: name('rack-bay') },
+    { op: 'place', name: 1, kind: 'mars:frame_stand', in: ground, at: [m(at.stand[0]), 0, m(at.stand[1])], title: 'frame stand' },
+    { op: 'place', name: 2, kind: 'mars:rack_upright', in: 1, slot: 1, title: 'rack frame 1' },
+    { op: 'place', name: 3, kind: 'mars:rack_upright', in: 1, slot: 2, title: 'rack frame 2' },
+    ...at.beams.map((p, k) => ({ op: 'place', name: 4 + k, kind: 'mars:rack_beam', in: ground, at: [m(p[0]), 0, m(p[1])], title: `rack beam ${k + 1}` })),
+    { op: 'place', name: 6, kind: 'mars:rack_bay', in: ground, at: [m(at.bay[0]), 0, m(at.bay[1])], title: 'rack bay' },
   ];
 }
 
@@ -129,15 +112,50 @@ export async function stageLive(god, log = () => {}, at = AT) {
     return a;
   };
   try {
-    let ground = null;   // a daemon just started has no copy yet: its first describe is empty
-    for (let i = 0; i < 40 && !ground; i++) { ground = ((await go('describe')).nodes ?? []).find((n) => /ground/.test(n.kind ?? ''))?.id; if (!ground) await new Promise((r) => setTimeout(r, 500)); }
-    if (!ground) throw new Error("the creator's describe names no ground");
-    await go('batch', JSON.stringify(stageBatch(ground, at)));
+    await go('batch', JSON.stringify(stageBatch(await groundOf(god), at)));
     let nodes = [];
     for (let i = 0; i < 40 && !nodes.some((n) => n.kind === 'mars:rack_bay'); i++) { nodes = (await god('describe')).nodes ?? []; await new Promise((r) => setTimeout(r, 250)); }
     const id = (k) => nodes.find((n) => n.kind === k)?.id;
     return { ok: true, steps, bay: await god('describe', String(id('mars:rack_bay'))), stand: await god('describe', String(id('mars:frame_stand'))) };
   } catch (e) { return { ok: false, steps, failed: e.answer ?? e.message }; }
+}
+
+/** The open ground's id in the creator's copy (a daemon just started has no copy yet: its first describe is empty). */
+async function groundOf(god) {
+  for (let i = 0; i < 40; i++) {
+    const ground = ((await god('describe')).nodes ?? []).find((n) => /ground/.test(n.kind ?? ''))?.id;
+    if (ground) return ground;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error("the creator's describe names no ground");
+}
+
+/** One more frame, placed live by the creator with a title, which Ada and Bo find, take and lay down again by that
+ *  title alone: no id passes from the creator to them. → {placed: the creator's answer, seen: Ada's find of it} */
+export async function spareFrame(god, { run, both }, seats, bodies, at = AT, log = () => {}) {
+  const [x, z] = at.spare, ground = await groundOf(god);
+  const placed = await god('place', 'mars:rack_upright', '--in', ground, '--at', `${x * 1000},0,${z * 1000}`, '--title', SPARE);
+  log(`creator: place mars:rack_upright --title "${SPARE}" -> ${placed.ok ? 'ok' : `REFUSED ${placed.code ?? ''} ${placed.detail ?? ''}`}`);
+  if (!placed.ok) throw Object.assign(new Error(`the creator's place was refused ${placed.code}`), { answer: placed });
+  let seen = [];
+  for (let i = 0; i < 40 && !seen.length; i++) {
+    await run('ada', 'look');   // a query reads the copy as it is; a look brings it current first
+    seen =((await seats.ada.cli('query', JSON.stringify([{ find: 'spare' }]))).answers ?? []).flatMap((a) => a.found ?? []).filter((f) => f.name === SPARE);
+    if (!seen.length) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!seen.length) {
+    const frames = ((await seats.ada.cli('query', JSON.stringify([{ find: 'rack_upright' }]))).answers ?? []).flatMap((a) => a.found ?? []);
+    throw new Error(`Ada's copy shows nothing named "${SPARE}" (its frames: ${frames.map((f) => `${f.id} "${f.name}"`).join(', ')}; placed ${JSON.stringify(placed.names ?? placed)})`);
+  }
+  await both(['ada', 'carry', 'grip', SPARE, 'back'], ['bo', 'carry', 'grip', SPARE, 'front']);
+  const { crew } = await run('ada', 'carry', 'offer', bodies.bo);
+  await run('bo', 'carry', 'accept', crew);
+  await run('ada', 'part', 'take', crew, SPARE);
+  const to = `${x + 1.5},${z}`;
+  await both(['ada', 'carry', 'to', crew, to], ['bo', 'carry', 'to', crew, to]);
+  await run('ada', 'part', 'put', crew, to);
+  await both(['ada', 'carry', 'leave', crew], ['bo', 'carry', 'leave', crew]);
+  return { placed, seen };
 }
 
 /** A runner over seats: `run(who, ...words)` logs and returns the answer; a refused step throws with the refusal. */
@@ -159,14 +177,11 @@ export function runner(seats, log = console.log, t0 = Date.now()) {
 export async function findIds(seat) {
   const a = await seat.cli('query', JSON.stringify([{ find: 'rack' }, { find: 'stand' }]));
   const found = (a.answers ?? []).flatMap((x) => x.found ?? []);
-  // seeded names ("the yard's frame stand", "rack frame 1") and staged ones (frame-stand, rack-frame-1) alike
+  // the template's names (frame-stand, rack-frame-1) and the titles a creator stages live ("rack frame 1") alike
   const key = (n) => String(n ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  // a thing staged live shows as its kind and number ("rack_bay 136"): then by kind, in the order the creator placed them
-  const n = (id) => Number(String(id).split('-').pop());
-  const ofKind = (k) => found.filter((x) => x.kind === k).sort((a, b) => n(a.id) - n(b.id));
-  const named = (want, kind, k = 0) => { const f = found.find((x) => key(x.name).endsWith(want)) ?? ofKind(kind)[k]; if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => x.name).join(', ')})`); return f.id; };
-  return { bay: named('rackbay', 'mars:rack_bay'), stand: named('framestand', 'mars:frame_stand'), fa: named('rackframe1', 'mars:rack_upright', 0), fb: named('rackframe2', 'mars:rack_upright', 1),
-    beams: [named('rackbeam1', 'mars:rack_beam', 0), named('rackbeam2', 'mars:rack_beam', 1)] };
+  // of the construction kinds only: a template exported without the Mars map has the yard as plain things
+  const named = (want) => { const f = found.find((x) => key(x.name) === want && /^mars:/.test(x.kind ?? '')); if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => x.name).join(', ')})`); return f.id; };
+  return { bay: named('rackbay'), stand: named('framestand'), fa: named('rackframe1'), fb: named('rackframe2'), beams: [named('rackbeam1'), named('rackbeam2')] };
 }
 
 /** Build the bay from the stand's frames and two loose beams, change a crew, and take it down to where each part was. */
@@ -284,14 +299,14 @@ async function main() {
   if (mode !== 'local') { console.error('usage: rack-bay.mjs local [--template t] [--dir d] [--record s] | stage | print | run --folder f --souls ada=..,bo=..,cy=..,di=..'); process.exit(2); }
   const { startOldPage } = await import('../arena/new-engine/old-page.mjs');
   const template = opt('template', TEMPLATE), record = Number(opt('record', 0));
-  const live = opt('stage', 'facts') === 'live';
-  const world = await startOldPage({ template, dir: join(dir, 'world'), facts: live ? null : yardFacts({ template, out: dir }), history: false, marsWeb: opt('mars-web', undefined), log });
+  const live = opt('stage', 'template') === 'live';
+  const world = await startOldPage({ template, dir: join(dir, 'world'), facts: live ? null : templateFacts({ template, out: dir }), history: false, marsWeb: opt('mars-web', undefined), log });
   out.page = world.page; out.template = template; out.stage = live ? 'live' : 'facts';
   const seats = {}, bodies = {};
   let god = null;
   try {
+    god = await pairCreator({ world: world.world, worldDir: join(dir, 'world', 'world'), dir });
     if (live) {
-      god = await pairCreator({ world: world.world, worldDir: join(dir, 'world', 'world'), dir });
       out.staged = await stageLive(god, log); save();
       if (!out.staged.ok) { log(`staging stopped: ${JSON.stringify(out.staged.failed)}`); return; }
     }
@@ -306,6 +321,10 @@ async function main() {
       const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
       try { const v = await buildAndTakeDown(r, bodies, out.ids); out.builtAtS = (v.built - t0) / 1000; out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
       out.ms = Date.now() - t0; save();
+      // a frame the creator places live, titled, which Ada and Bo name only by its title
+      const n = r.lines.length;
+      try { out.spare = { ...(await spareFrame(god, r, seats, bodies, AT, log)), ok: true }; } catch (e) { out.spare = { ok: false, failed: e.message }; }
+      out.spare.steps = r.lines.slice(n); out.steps = r.lines.slice(0, n); save();
     };
     if (record) {
       const { capture } = await import('../../launch-video/capture.mjs');
@@ -317,6 +336,7 @@ async function main() {
     } else await play();
     out.after = await partsWhere(seats.ada, out.ids); save();
     log(out.ok ? `done: ${out.steps.length} commands, 0 refused, ${(out.ms / 1000).toFixed(0)} s` : `stopped: ${out.failed}`);
+    log(out.spare?.ok ? `spare frame: ${out.spare.steps.length} commands by its title, 0 refused` : `spare frame stopped: ${out.spare?.failed}`);
   } finally {
     // every daemon this run started ends with it, the creator's too
     for (const s of Object.values(seats)) await s.stop();

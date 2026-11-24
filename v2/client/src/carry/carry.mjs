@@ -160,6 +160,26 @@ export function pointOf(word) {
   return m ? [Math.round(Number(m[1]) * M), Math.round(Number(m[2]) * M)] : null;
 }
 
+/**
+ * The request with each thing it names by its name rather than its id (a creator's title for it: `part take <crew>
+ * "rack frame 1"`) as that thing's id, from the copy's rows (`rowsOf`). Crews and bodies stay ids. A name is matched
+ * whole, in any case, against each row's name and aliases; a refusal by name when no thing or several go by it.
+ */
+export function byName(req, rows) {
+  const out = { ...req }, all = [...rows.values()];
+  for (const k of ['part', 'into', 'thing', 'load', 'where', 'on']) {
+    const v = out[k];
+    if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
+    const want = String(v).trim().toLowerCase();
+    const hits = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    if (hits.length === 1) { out[k] = hits[0].id; continue; }
+    return hits.length
+      ? no('carry-name-ambiguous', `${hits.length} things go by "${v}": ${hits.map((r) => r.id).join(', ')}; name one by its id`)
+      : no('carry-name-unknown', `nothing in the copy goes by "${v}": look or find, then name it as shown or by its id`);
+  }
+  return out;
+}
+
 const walk = (ns, ground, [x, z]) => ({ verb: `${ns}:walk`, target: ground, params: { 1: [Math.round(x), 0, Math.round(z)] } });
 
 /**
