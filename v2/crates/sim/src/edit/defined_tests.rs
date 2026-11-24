@@ -54,6 +54,7 @@ impl W {
             children: children.iter().map(|s| (*s).to_owned()).collect(),
             slots: BTreeMap::new(),
             hands: None,
+            fields: Default::default(),
         };
         let kinds = BTreeMap::from([
             (

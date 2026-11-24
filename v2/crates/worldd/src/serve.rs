@@ -774,6 +774,29 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
         im => im?,
     };
     stamp("facts");
+    // Each content kind's state fields by name, from its entry (the numbers K3 gives them): the tree balances a part's
+    // amounts by name, so a transfer between two kinds that number a field differently commits (T6 rule 3.4, E5b).
+    // They are not in the kind's line, so no kind's hash changes.
+    let named: BTreeMap<&str, BTreeMap<u64, String>> = entries
+        .iter()
+        .filter_map(|(_, e)| {
+            let fields = e
+                .get("state")?
+                .obj()?
+                .iter()
+                .filter_map(|(name, f)| match f.get("n")? {
+                    Json::Int(n) => Some((u64::try_from(*n).ok()?, name.clone())),
+                    _ => None,
+                })
+                .collect();
+            Some((e.get("kind")?.str()?, fields))
+        })
+        .collect();
+    for (full, kind) in im.rules.kinds.iter_mut() {
+        if let Some(fields) = named.get(plain(full)) {
+            kind.fields = fields.clone();
+        }
+    }
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
         println!(
             "punt: rowing-punt-{} is {}",
@@ -792,6 +815,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
                 children: Default::default(),
                 slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }
@@ -4204,6 +4228,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// E5b: the tree's kinds know each content kind's state fields by name, from its entry, so the balance sums a
+    /// transfer's two ends by name; the names are not in the kind's line, so the header (every kind's hash) is the same.
+    #[test]
+    fn the_trees_kinds_name_their_fields_from_the_entries_and_no_hash_changes() {
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let entry = |state: &str| {
+            vec![(
+                "testworld:planter".to_owned(),
+                replica::rules::json::parse(&format!(r#"{{"kind":"testworld:planter"{state}}}"#))
+                    .expect("an entry"),
+            )]
+        };
+        let with = build(
+            &facts,
+            &entry(
+                r#","state":{"soil":{"n":3,"type":"int","unit":"g","default":0,"min":0,"max":10,"audience":{"rule":"everyone"}}}"#,
+            ),
+        )
+        .expect("builds");
+        let without = build(&facts, &entry("")).expect("builds");
+        let fields = |b: &Built| {
+            b.rules
+                .kinds
+                .iter()
+                .find(|(k, _)| plain(k) == "testworld:planter")
+                .map(|(_, k)| k.fields.clone())
+                .expect("the planter is pinned")
+        };
+        assert_eq!(fields(&with), BTreeMap::from([(3, "soil".to_owned())]));
+        assert!(fields(&without).is_empty());
+        assert_eq!(with.header.hash(), without.header.hash());
+    }
+
     /// #1960: a creator places a thing of a kind the world has an entry for but no seeded thing of. Without the
     /// entry, the kind is not pinned and the place is refused `edit.kind-unknown`; with it, the place commits.
     #[test]
@@ -4307,6 +4364,7 @@ mod tests {
                         children: Default::default(),
                         slots: Default::default(),
                         hands: None,
+                        fields: Default::default(),
                     },
                 );
             }

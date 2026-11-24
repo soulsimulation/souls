@@ -305,6 +305,7 @@ fn fixture() -> (NamedRun, Client) {
                 children: BTreeSet::new(),
                 slots: BTreeMap::new(),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }

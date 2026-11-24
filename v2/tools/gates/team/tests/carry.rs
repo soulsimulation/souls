@@ -290,6 +290,7 @@ fn tree_rules() -> TreeRules {
             .map(|s| (*s, BTreeSet::from(["thing".to_owned()])))
             .collect(),
         hands,
+        fields: Default::default(),
     };
     TreeRules {
         kinds: BTreeMap::from([

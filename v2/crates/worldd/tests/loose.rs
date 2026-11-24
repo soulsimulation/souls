@@ -157,6 +157,7 @@ fn built(serve_header: bool) -> Built {
                     children: Default::default(),
                     slots: Default::default(),
                     hands: None,
+                    fields: Default::default(),
                 },
             );
         }
