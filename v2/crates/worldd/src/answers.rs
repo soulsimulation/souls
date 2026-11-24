@@ -1578,8 +1578,10 @@ fn has_words(v: &Value) -> bool {
     }
 }
 
-/// The longest the edit checker waits for the bodies at a job's tick (S10, [`buildsafe::Moving::fresh`]): two ticks.
-/// Past that the job is refused `edit.stale`, which its sender may try again, never checked on older bodies.
+/// The longest the edit checker waits for the bodies at a job's tick (S10, [`buildsafe::Moving::fresh`]) on a
+/// free-running clock: 100 ms of the machine's time, whatever the world's tick length. Past that the job is refused
+/// `edit.stale`, which its sender may try again, never checked on older bodies. Lockstep has no such bound: its
+/// checker waits for the snapshot however long the tick takes, so the same inputs write the same log (S10c).
 const FRESH_WAIT: Duration = Duration::from_millis(100);
 
 /// The body an intent drives: the Soul's own, or the one a creator names.
@@ -5571,6 +5573,8 @@ pub fn start<S: Storage + 'static>(
                 Arc::clone(&m),
                 events.clone(),
                 rules.kinds.clone(),
+                // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
+                (!cfg.lockstep).then_some(FRESH_WAIT),
             )
             .map(|tx| EditQueue {
                 tx,
@@ -6053,6 +6057,7 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     entries: replica::rules::json::Value,
+    fresh_wait: Option<Duration>,
 ) -> R<Sender<(u64, CheckJob)>> {
     let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
@@ -6112,7 +6117,7 @@ fn edit_checker(
                     // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
                     CheckJob::Undo(job) => {
                         let (id, actor, redo, effects) = *job;
-                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                             Ok(s) => (s, false),
                             Err(s) => (s, true),
                         };
@@ -6160,7 +6165,7 @@ fn edit_checker(
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {
-                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                             Ok(s) => (s, false),
                             Err(s) => (s, true),
                         };
@@ -6229,7 +6234,7 @@ fn edit_checker(
                     // A crew's take or seating (0.135 A2): the walkers' maps from its part, as a set-down's.
                     CheckJob::Part(job) => {
                         let (r, planned) = *job;
-                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                             Ok(s) => (s, false),
                             Err(s) => (s, true),
                         };
@@ -6313,7 +6318,7 @@ fn edit_checker(
                         continue;
                     }
                 };
-                let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                     Ok(s) => (s, false),
                     Err(s) => (s, true),
                 };
