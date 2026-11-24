@@ -41,7 +41,8 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 | `place --near/--inside/--on/--along/--against/--between/--facing/--count/--row/--grid` | none | gap: #3694 (beside, on, facing) |
 | `place <path-def> --from --to`, `place <area-def> --rect/--circle/--area` | none | gap: roads and areas; zones in #3700, the rest no task |
 | `move <ref> --by / relations / --in` | `move <id> --at` (same parent) | partial: `--by` and relations with #3694; a new parent is a crossing |
-| `set --param --state`, `recolor` | `set <id> <field number> <value>` | partial: named params and colour no task |
+| `set --param --state` | `set <id> <field number> <value>` | partial: named params no task |
+| `recolor` | `recolor <id> '#rrggbb' [--part <part>]`: a tint on the thing or one named part (field 145, `replica::tint`), the world's creator only (`edit.tint-malformed` for one that does not read); the old page multiplies the picture by it; `undo` takes it back | done (0.134 R4) |
 | `remove` | `remove <id>` (and its subtree) | done |
 | `clone`, `select [filters] [--remove ...]` | `batch` | partial: no task |
 | `plan`, `preview`, `commit`, `act`, `dryrun` | `check` (on the copy, free) and `batch` (all or none) | done |

@@ -41,6 +41,7 @@ pub mod stream;
 pub mod sync;
 pub mod time;
 pub mod timed;
+pub mod tint;
 pub mod tree;
 pub mod views;
 pub mod walk;

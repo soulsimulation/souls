@@ -504,6 +504,56 @@ fn a4_a_batch_that_added_a_claim_list_is_undone_to_the_empty_list() {
     );
 }
 
+/// 0.134 R4: a recolour is undone to the colour before it, and the first one to no tint (the empty list); redo gives
+/// the colour back.
+#[test]
+fn r4_undoing_a_recolour_gives_back_the_colour_before_it_and_the_first_one_none() {
+    use replica::tint::F_TINT;
+    let mut w = W::new(KEPT_MOST);
+    let (_, cr, _, _) = w.furnish(None);
+    let tint = |rows: &[(&str, u64)]| {
+        Value::Array(
+            rows.iter()
+                .map(|(p, c)| {
+                    Value::Array(vec![
+                        Value::Text(Name::new(p).expect("a name")),
+                        Value::Uint(*c),
+                    ])
+                })
+                .collect(),
+        )
+    };
+    let held = |w: &W| {
+        let tree = w.live.tree();
+        tree.node(tree.handle(cr).expect("the crate"))
+            .expect("the crate")
+            .fields()
+            .get(&F_TINT)
+            .cloned()
+    };
+    let recolour = |w: &mut W, to: Value| {
+        w.edit(
+            vec![Op::Set {
+                node: Ref::Node(cr),
+                field: F_TINT,
+                to,
+            }],
+            None,
+        )
+    };
+    let red = tint(&[("tint:whole", 0xff0000)]);
+    let red_seat = tint(&[("tint:whole", 0xff0000), ("part:seat", 0x0000ff)]);
+    recolour(&mut w, red.clone());
+    recolour(&mut w, red_seat.clone());
+    assert_eq!(held(&w), Some(red_seat.clone()));
+    w.undo(&mut ok()).expect("the seat's colour is undone");
+    assert_eq!(held(&w), Some(red.clone()), "the colour before it");
+    w.undo(&mut ok()).expect("the first recolour is undone");
+    assert_eq!(held(&w), Some(tint(&[])), "no tint: the empty list");
+    w.redo().expect("redone");
+    assert_eq!(held(&w), Some(red));
+}
+
 // --- A5 ---------------------------------------------------------------------------------------------------------------
 
 #[test]

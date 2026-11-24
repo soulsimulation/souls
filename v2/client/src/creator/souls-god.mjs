@@ -76,6 +76,8 @@
 //   souls-god.mjs build claims | build release <claim>    the live claims (ids c:k<8 hex>); a claim released
 //   souls-god.mjs own <id> <soul id|god|group:<name>|none> [--private|--public]   who owns a thing or a place (#3700)
 //   souls-god.mjs access <id> private|public|none   a private thing is its owner's alone; what is inside takes its mark
+//   souls-god.mjs recolor <id> '#rrggbb' [--part <part>]   a tint on a thing, or on one named part of it (R4); the
+//                                                page multiplies its picture by it; undo takes it back
 //   souls-god.mjs zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]'   a land-use zone (mm)
 //   souls-god.mjs zone-suggest <use> | layers | secret   what suits a use; zones and marks; secret places (off)
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
@@ -143,6 +145,7 @@ import { describeThing } from './thing.mjs';
 import { mapOf } from './map.mjs';
 import { kindsIn } from '../check/state.mjs';
 import { inSession, recordEdit, sessionAct } from './session.mjs';
+import { recolorOf, runRecolor } from './recolor.mjs';
 /** R8e: the build acts answered from the home's sessions. */
 const SESSION_ACTS = ['start', 'step', 'show', 'done'];
 
@@ -179,6 +182,7 @@ export const VERBS = [
   'pending',
   'place',
   'recommend',
+  'recolor',
   'redo',
   'remove',
   'secret',
@@ -308,6 +312,7 @@ export const FIX = {
   'district.plot': 'build district <id> lists its plots',
   'claim.unknown': 'build claims lists the live claims',
   'edit.owner-malformed': 'own <id> <soul id|god|group:<name>|none>; access <id> private|public|none',
+  'edit.tint-malformed': "recolor <id> '#rrggbb' [--part <part>]: one colour per part, at most 16",
   'edit.zone-malformed': `zone <name> <${'residential|commercial|park|farm|civic|industrial|wild'}> with an outline of 3 to 64 points`,
   'zone.unknown': 'layers lists the zones',
   'secret.off': 'secret places are off, as on soul.game today: every place is on every Soul\'s map',
@@ -586,6 +591,7 @@ export function requestOf(argv) {
   }
   if (verb === 'build') return { build: buildOf(rest), creator };
   if (LAYER_VERBS.includes(verb)) return { layer: layerOf(verb, rest), creator };
+  if (verb === 'recolor') return { recolor: recolorOf(rest), creator };
   if (verb === 'undo') { const build = takeOpt(rest, '--build'); return { req: { op: 'undo', ...(build !== undefined ? { build } : {}) }, creator }; }
   if (verb === 'check' && isWorld(rest[0], rest.slice(1))) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)), ...under }, creator };
   if (isWorld(verb, rest)) return { req: { op: 'edit', world: worldVerbOf(verb, rest), ...under }, creator };
@@ -1048,7 +1054,7 @@ if (isMain(import.meta.url)) {
     }
     // R8e: an edit sent while a build session is open carries its name and step, and is recorded under them
     req = inSession(home, req);
-    const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
+    const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : asked.recolor ? await runRecolor(asked.recolor, ask) : await ask(req);
     recordEdit(home, req, answer);
     out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
