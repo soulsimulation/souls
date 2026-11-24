@@ -1836,6 +1836,55 @@ fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
     b.clean();
 }
 
+/// E11c review: a sit whose hand-off into the slot is refused at its contact (forced here: the body is already off
+/// its surface when contact comes, `support-not-surface`) ends its run at once by that name, its move cancelled and
+/// the seat given back: no seat is left held by a body that never got into it.
+#[test]
+fn e11c_a_sit_refused_into_its_slot_ends_by_name_and_frees_the_seat() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.until_moving(body, 0);
+    let d =
+        *b.c.claims(body)
+            .expect("a body")
+            .running()
+            .keys()
+            .next()
+            .expect("the sit's driver");
+    let frame = Frame {
+        node: chair,
+        slot: Some(slot),
+    };
+    let asked = b.now;
+    b.c.slot_in(body, d, frame, asked)
+        .expect("off its surface before contact");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(
+        e.how.as_str(),
+        "support-not-surface",
+        "ends by the refusal's name"
+    );
+    assert!(
+        e.at - asked < Limits::default().step_move / 2,
+        "at its contact, not its deadline: {} µs",
+        e.at - asked
+    );
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.held_by(body), None, "the seat given back");
+    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    b.clean();
+}
+
 /// #4187 review: a take that waited on its body's seat step, behind a long walk (20 m, well past an act's 10 s), is
 /// listed as started late when its run starts, so `worldd` gives it its run's own deadline (its start plus its
 /// steps' span) and its progress answer then; it runs to its end.

@@ -1923,8 +1923,8 @@ impl Forms {
                     }
                 }
                 // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no
-                // floor to stand on) cancelled the move: its run ends now by the refusal's name (E11c), not at its
-                // deadline waiting on a move that is gone.
+                // floor to stand on, a sit the slot would not take) cancelled the move: its run ends now by the
+                // refusal's name (E11c), not at its deadline waiting on a move that is gone.
                 Fired::Phase { instance, phase: 1 } => {
                     if let Some(&run) = self.by_body.get(&t.node)
                         && let Some(fr) = self.runs.get_mut(&run)
