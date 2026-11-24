@@ -84,9 +84,6 @@ agent's wave sent while the world sleeps.
 
 - **A world's start is part of an intent's answer.** Imported Eden starts in about 1.5 s on a laptop (0.133 S5: its
   prepared facts kept in `facts.courses`, the town assembled from one parallel cut, the checkpoint read while the
-  facts load), 2.4 s on a loaded one, so an intent to a sleeping Eden was answered in 2.75 s. With its body catalogue
-  (large and giant classes) it starts in about 2.6 s (0.133 S12: each class's ground cut once, beside the standard
-  one, the planner given a copy). A world's first start after its facts, entries or build change is slower (about
-  4.4 s for Eden): it prepares its facts again. `worldd seed` keeps them for its own build, so a freshly seeded
-  world's first start does not.
+  facts load), 2.4 s on a loaded one, so an intent to a sleeping Eden was answered in 2.75 s. A world's first start
+  after its facts or entries change is slower (about 4.5 s for Eden): it prepares them again.
 - "Nothing unshipped" (O3) before a world sleeps is not checked yet.

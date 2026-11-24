@@ -61,45 +61,6 @@ fn a_point_with_no_room_is_acted_at_from_the_nearest_place_within_reach_on_the_a
     );
 }
 
-/// 0.133 Q1: a walk to the middle of a pond wider than the rings (no standing within 10 m) has places on the first
-/// ring past it that has any, its bank; one with none out to [`OVERFLOW`] still has none.
-#[test]
-fn a_target_wider_than_the_rings_has_places_on_its_nearest_bank() {
-    let pond = Block { half: 10_000_000 };
-    let tb = Table::new(&pond, target(0));
-    assert!(!tb.places.is_empty(), "places on the bank");
-    let nearest = tb
-        .places
-        .iter()
-        .map(|p| flat(p.at, Vec3::ZERO))
-        .min()
-        .expect("a place");
-    assert!(
-        (10_000_000..=10_000_000 + 2 * PITCH).contains(&nearest),
-        "{nearest}"
-    );
-    assert!(tb.places.iter().all(|p| pond.stand(node(), p.at).is_some()));
-    assert!(
-        tb.places.iter().all(|p| i64::from(p.ring) > RINGS),
-        "only past the rings"
-    );
-    let sea = Block {
-        half: OVERFLOW + PITCH,
-    };
-    assert!(
-        Table::new(&sea, target(0)).places.is_empty(),
-        "none out to the overflow's reach"
-    );
-    // a target with places on its rings keeps exactly those
-    let lawn = Block { half: 1_000_000 };
-    assert!(
-        Table::new(&lawn, target(0))
-            .places
-            .iter()
-            .all(|p| i64::from(p.ring) <= RINGS)
-    );
-}
-
 #[test]
 fn a_point_with_no_place_within_reach_has_none() {
     let mut g = Block { half: 1_400_000 };

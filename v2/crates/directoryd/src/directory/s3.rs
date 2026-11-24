@@ -385,29 +385,14 @@ fn now() -> (String, String) {
     (date, stamp)
 }
 
-/// Sorts an answer's status into the store's refusals. R18: a rate-limited store (429, or S3's 503 Slow Down) is
-/// `store-unreachable`, so it is tried again as any 5xx is; its `Retry-After` in seconds, when it gives one, goes in
-/// the detail as `retry after <s> s` for the caller's wait ([`super::store::retry_after`]).
-fn status(res: &ureq::http::Response<ureq::Body>, what: &str) -> R<()> {
-    let code = res.status().as_u16();
+/// Sorts an answer's status into the store's refusals.
+fn status(code: u16, what: &str) -> R<()> {
     match code {
         200..=299 => Ok(()),
         // 412: the condition failed; 409: another conditional write to the key is in flight (S3 asks for a retry);
         // 404 on a write: `If-Match` named a key that is gone.
         404 | 409 | 412 => refuse("precondition-failed", format!("{what}: HTTP {code}")),
-        429 | 500..=599 => {
-            // Seconds only: an HTTP date is passed over, and the caller's own waits apply.
-            let after = res
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<u64>().ok());
-            let detail = match after {
-                Some(s) => format!("{what}: HTTP {code}, retry after {s} s"),
-                None => format!("{what}: HTTP {code}"),
-            };
-            refuse("store-unreachable", detail)
-        }
+        500..=599 => refuse("store-unreachable", format!("{what}: HTTP {code}")),
         _ => refuse("store-error", format!("{what}: HTTP {code}")),
     }
 }
@@ -424,10 +409,11 @@ impl Store for S3 {
             req = req.header(k, v);
         }
         let mut res = req.call().or_else(|e| unreachable(key, e))?;
-        if res.status().as_u16() == 404 {
+        let code = res.status().as_u16();
+        if code == 404 {
             return Ok(None);
         }
-        status(&res, key)?;
+        status(code, key)?;
         let etag = etag(&res, key)?;
         let body = res.body_mut();
         let bytes = match self.read_limit {
@@ -453,7 +439,7 @@ impl Store for S3 {
         let answered = req
             .send(bytes)
             .or_else(|e| unreachable(key, e))
-            .and_then(|res| status(&res, key).map(|()| res));
+            .and_then(|res| status(res.status().as_u16(), key).map(|()| res));
         match answered {
             Ok(res) => etag(&res, key),
             // A create-only write the store may have applied, though its answer was a 5xx or never came (#4014).
@@ -472,10 +458,11 @@ impl Store for S3 {
             req = req.header(k, v);
         }
         let res = req.call().or_else(|e| unreachable(key, e))?;
-        if res.status().as_u16() == 404 {
+        let code = res.status().as_u16();
+        if code == 404 {
             return Ok(None);
         }
-        status(&res, key)?;
+        status(code, key)?;
         let len = res
             .headers()
             .get("content-length")
@@ -499,7 +486,7 @@ impl Store for S3 {
             .header("x-amz-copy-source", &source)
             .send_empty()
             .or_else(|e| unreachable(to, e))?;
-        status(&res, to)?;
+        status(res.status().as_u16(), to)?;
         let xml = res
             .body_mut()
             .read_to_string()
@@ -528,7 +515,7 @@ impl Store for S3 {
         let res = req.call().or_else(|e| unreachable(key, e))?;
         match res.status().as_u16() {
             404 => Ok(()),
-            _ => status(&res, key),
+            code => status(code, key),
         }
     }
 
@@ -554,7 +541,7 @@ impl Store for S3 {
                 req = req.header(k, v);
             }
             let mut res = req.call().or_else(|e| unreachable(prefix, e))?;
-            status(&res, prefix)?;
+            status(res.status().as_u16(), prefix)?;
             let xml = res
                 .body_mut()
                 .read_to_string()

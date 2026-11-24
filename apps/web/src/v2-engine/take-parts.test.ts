@@ -2,7 +2,7 @@
 // way; a part with an entry and no def in the layer is handed to CreatorKinds as a definition, once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { placedOf, WorldState } from './world-state.ts';
+import { placedOf } from './world-state.ts';
 import { CarriedParts, bundledEntries, headingAt, sampleAt, type PartNode } from './take-parts.ts';
 import { kindDef } from './creator-kinds.ts';
 
@@ -123,40 +123,4 @@ test('W4: a bay placed live (its record has no slot points) is handed on with it
   // a bay whose record has its slot points (an import) is left as it is
   parts.receive({ t: 'part', p: { nodes: [{ ...bay, slots: [[1, 0, 0, -1448, 0, 1]] }], removed: [], samples: [] } });
   assert.deepEqual(parts.frames(0), []);
-});
-
-// K5 (0.135): a thing of the captured world (an old entity the layer draws) carried laid flat moves with its carry's
-// samples, turned off its feet; it is lifted and set down when the time drawn reaches the part that does it.
-test('K5: a carried thing of the captured world moves with its carriers laid flat, lifted and set down on time', () => {
-  const ws = new WorldState(), parts = new CarriedParts({ apply: () => {} });
-  const entities = new Map<string, Record<string, unknown>>([['e_frame', { id: 'e_frame', in: { parent: 'world' }, p: [8, 0, 0], r: 0 }]]);
-  const l = { seq: 1, model: { entities } };
-  const step = (s: number) => {
-    ws.frames(parts.frames(T0 + s * 1e6));
-    const d = ws.next(l as never, 0);
-    if (!d) return null;
-    l.seq = d.seq;
-    for (const e of d.diff.upserts as { id: string }[]) entities.set(e.id, e as never);
-    return d.diff.upserts[0] as { p: number[]; r: number | number[] };
-  };
-  const frame = node('u.1', 'mars:rack_upright_6m@1', 'g.1', [8_000_000, 0, 0], { origin: 'e_frame' });
-  const both = (m: object) => { parts.receive(m as never); ws.receive(m as never); };
-  both({ t: 'snapshot', s: { nodes: [place, ground, carry, frame], removed: [] } });
-  assert.equal(step(0), null, 'at rest where the layer has it');
-  // lifted at 0.5 s, laid flat (a quarter turn about z), and carried east 1 m a second from x = 10 m
-  const flat: [number, number, number, number] = [Math.round(Math.cos(-Math.PI / 4) * Q), 0, 0, Math.round(Math.sin(-Math.PI / 4) * Q)];
-  const samples = [0, 1, 2, 3, 4].map((k) => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0]);
-  both({ t: 'part', p: { from: T0, to: T0 + 500_000, nodes: [{ ...frame, parent: 'c.7', pos: [0, 900_000, 0], rot: flat }], removed: [], samples } });
-  assert.equal(step(0.2), null, 'not lifted before the time drawn reaches its lift');
-  const up = step(2)!;
-  assert.ok(up.p.every((v, k) => Math.abs(v - [12, 0.9, 0][k]) < 1e-6), `with its carriers, 2 m on: ${up.p}`);
-  assert.ok(Array.isArray(up.r) && Math.abs(up.r[0]) < 1e-6 && Math.abs(up.r[1]) < 1e-6 && Math.abs(up.r[2] + Math.PI / 2) < 1e-6, `laid flat: ${up.r}`);
-  // set down standing at 14 m in the part ending at 4.5 s: until then it is where the carry's last sample has it
-  both({ t: 'part', p: { from: T0 + 4e6, to: T0 + 4_500_000, nodes: [{ ...frame, pos: [14_000_000, 0, 0] }], removed: [], samples: [] } });
-  const late = step(4.2)!;
-  assert.ok(late.p.every((v, k) => Math.abs(v - [14, 0.9, 0][k]) < 1e-6), `still carried: ${late.p}`);
-  const down = step(5)!;
-  assert.deepEqual(down.p, [14, 0, 0], 'set down');
-  assert.deepEqual(down.r, [0, 0, 0], 'stood up again');
-  assert.equal(step(6), null, 'and left there');
 });

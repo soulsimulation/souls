@@ -1,8 +1,7 @@
 //! Standing spots, approach, and a crowd around a point (Engine v2 N9, #2678): each body sent to a point gets its
 //! own legal place to stand near it, so thirty sent to one point form a crowd, not a knot.
 //!
-//! - **Places.** Round a target, on rings [`PITCH`] apart out to [`RINGS`] of them (on out to [`OVERFLOW`], to the first
-//!   ring with one, when those have none: a pond's bank), `⌊2πk⌋` places on ring `k` (so
+//! - **Places.** Round a target, on rings [`PITCH`] apart out to [`RINGS`] of them, `⌊2πk⌋` places on ring `k` (so
 //!   neighbours on a ring are at least about a pitch apart), the target itself ring 0. A place is kept only where the
 //!   target's node has walkable ground ([`Ground::stand`]), and never in a doorway or on a stair
 //!   ([`Ground::passage`]). That rule is about the engine's choice only: a body whose own order is to stay in a
@@ -42,7 +41,7 @@
 //!   The walk there ends `done`, as near as the crowd allows ([`Granted::overflow`]). One pass chooses at most
 //!   [`OVERFLOW_EACH`] overflow points; the rest of a burst are answered in the passes after, never refused.
 //!
-//! Refusals: `spot-none-near` (no walkable place on the rings, nor on the rings past them out to [`OVERFLOW`]), `spot-none-free` (every place held or out of reach,
+//! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach,
 //! and no free standing point within [`OVERFLOW`] of the target either).
 //! Not here: seats (B3), facing (B11), formations and conversation circles, spots described in words (E2), perches
 //! and staying in a doorway or on a stair (E3), spots by a thing's kind (K3).
@@ -310,16 +309,11 @@ pub fn to_segment(p: Vec3, a: Vec3, b: Vec3) -> i64 {
 }
 
 impl Table {
-    /// The places round `target`: on walkable ground, out of doorways and off stairs. A target with no place on its
-    /// [`RINGS`] (the middle of a pond wider than they reach) has the rings go on out to [`OVERFLOW`], to the first ring
-    /// that has one, so a walk to it ends on its nearest bank instead of being refused (0.133 Q1).
+    /// The places round `target`: on walkable ground, out of doorways and off stairs.
     pub fn new(g: &dyn Ground, target: Target) -> Table {
         let t = target.point();
         let mut places = Vec::new();
-        for ring in 0..=OVERFLOW / PITCH {
-            if ring > RINGS && !places.is_empty() {
-                break;
-            }
+        for ring in 0..=RINGS {
             let n = if ring == 0 { 1 } else { 6_283 * ring / 1_000 };
             for k in 0..n {
                 let off = Quat::from_yaw_mdeg(k * 360_000 / n)

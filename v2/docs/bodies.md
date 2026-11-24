@@ -83,11 +83,7 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    nearest free standing point round it on the open ground (never in a room), out to 15 m, a body's room from every
    other and joined to the place on foot; it walks there, holds it like any spot (kept across a change of the ground
    while it is still one), and its walk ends `done.as-near-as-the-crowd-allows`. A place the walker cannot reach at
-   all, or with no such point within 15 m, is refused `spot-none-free`. A target with no standing place on its 10 rings
-   (the middle of a pond wider than they reach) has the rings go on out to 15 m, to the first with one: the walk ends on
-   its nearest bank, and only a target with none within 15 m is refused `spot-none-near` (0.133). Every walk's
-   `souls:move-ended` carries field 7: how far from its target the body ended, mm (0 on or inside its area; to a body,
-   from that body), which the client gives as `away_m` on the walk's receipt.
+   all, or with no such point within 15 m, is refused `spot-none-free`.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).

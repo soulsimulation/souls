@@ -205,11 +205,6 @@ pub struct Bodies {
     pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
-    /// Each started walk's target, kept to its end however it ends (0.133): how far from it a done walk ended is
-    /// measured then.
-    walked_to: BTreeMap<Id, Id>,
-    /// How far from its target each done walk ended, mm, until its end is written ([`Bodies::away`]).
-    away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
     /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
@@ -412,8 +407,6 @@ impl Bodies {
             ended: Vec::new(),
             short: BTreeSet::new(),
             took: BTreeMap::new(),
-            walked_to: BTreeMap::new(),
-            away_of: BTreeMap::new(),
             logged: BTreeMap::new(),
             shown: BTreeMap::new(),
             hearing: Hearing::new(),
@@ -942,7 +935,6 @@ impl Bodies {
         if let Some(&(old, Live::Walk)) = self.live.get(&body) {
             self.runner.end_order(body);
             self.live.remove(&body);
-            self.walked_to.remove(&old);
             self.ended.push((old, Err("claim-taken".into())));
         }
     }
@@ -1028,30 +1020,6 @@ impl Bodies {
         }
     }
 
-    /// How far from its target done walk `id` ended, mm, once (0.133): taken when its end is written.
-    pub fn away(&mut self, id: Id) -> Option<u64> {
-        self.away_of.remove(&id)
-    }
-
-    /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
-    pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len()
-    }
-
-    /// The gap from where `body` stands to `target`'s shape (0 inside its area), or to a body it walked to, mm; none
-    /// when the two are in different frames and `target` is a body.
-    fn gap_of(&self, target: Id, body: Id) -> Option<u64> {
-        let (frame, at) = self.pose(body)?;
-        let gap = match self.pose(target) {
-            Some((f, p)) if f == frame => {
-                ((i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt()) as i64
-            }
-            Some(_) => return None,
-            None => select::gap(&self.town.tree, target, frame, at).ok()?,
-        };
-        u64::try_from(gap / 1000).ok()
-    }
-
     /// The candidate intent `id` took when it started, its rank in its ranked list and its target, read once.
     pub fn took(&mut self, id: Id) -> Option<(usize, Option<Id>)> {
         self.took.remove(&id)
@@ -1081,9 +1049,6 @@ impl Bodies {
                 continue;
             }
             self.took.insert(id, (rank, ask.target()));
-            if let (Ask::Walk { .. }, Some(t)) = (&ask, ask.target()) {
-                self.walked_to.insert(id, t);
-            }
             match ask {
                 Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);
@@ -1092,8 +1057,6 @@ impl Bodies {
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
-                    } else {
-                        self.walked_to.remove(&id);
                     }
                     out.push((id, r));
                 }
@@ -1356,15 +1319,6 @@ impl Bodies {
                     None => Err("claim-taken".to_owned()),
                 };
                 self.live.remove(&body);
-                // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end
-                if let Some(mm) = self
-                    .walked_to
-                    .remove(&id)
-                    .filter(|_| how.is_ok())
-                    .and_then(|t| self.gap_of(t, body))
-                {
-                    self.away_of.insert(id, mm);
-                }
                 out.push((id, how));
             }
         }
@@ -1455,7 +1409,6 @@ impl Bodies {
         }
         self.runner.end_order(body);
         self.live.remove(&body);
-        self.walked_to.remove(&id);
         Some(Cut::Stopped)
     }
 
@@ -1509,10 +1462,6 @@ impl Bodies {
             &mut self.due,
         )?;
         let open = self.live.remove(&r.body).map(|(intent, _)| intent);
-        if let Some(i) = open {
-            self.walked_to.remove(&i);
-            self.away_of.remove(&i);
-        }
         self.logged.remove(&r.body);
         self.shown.remove(&r.body);
         self.wind.remove(r.body);

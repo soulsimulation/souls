@@ -119,15 +119,12 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
         // B2-3: a still world's pointer moving its time on is the stream alive, not silent
         if (v.newestTo !== seenTo) { seenTo = v.newestTo; if (seenTo !== null) lastPartAt = performance.now(); }
-        // K1, K5: the moving frames where the page draws now (the newest chunk's end, less the play delay, and the time
-        // since): the creator's kinds and the world's own things both move with them
-        const moving = parts.frames((v.takes.serverTick - v.takes.playDelay) * TICK_US + (performance.now() - v.takes.receivedAt) * 1000);
-        world.frames(moving);
         const diff = world.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
         // what the Souls said aloud (take-speech.ts; the speech layer and dialogue dock read it as public) and the world
         // diffs, in one log: a diff is never dropped when the speech changes
         st.edge = edges.step(said, diff) as typeof st.edge;
-        kinds.apply(moving, []);
+        // K1: the moving frames where the page draws now (the newest chunk's end, less the play delay, and the time since)
+        kinds.apply(parts.frames((v.takes.serverTick - v.takes.playDelay) * TICK_US + (performance.now() - v.takes.receivedAt) * 1000), []);
         const made = kinds.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now(), diff?.seq);
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }

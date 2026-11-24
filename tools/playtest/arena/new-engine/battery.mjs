@@ -12,9 +12,7 @@
 // board); its `calendar` is announced there before the instruction by a second scripted Soul (`by`), which takes a
 // blank notice, writes it and puts it up with the new client's `calendar add`.
 // The result and REPORT.md are the old run's (eval/report.mjs). A step the new client has no verb for is listed under
-// the run's `skipped` and in the report, not re-made. Fake minds in the world. A live seat (`--seat
-// eval/seats/claude-sonnet.json`, 0.133 Q1) is a real agent through the same client (live.mjs), on the existing Claude
-// login: each episode records its world intents and their refusals by cause.
+// the run's `skipped` and in the report, not re-made. Fake minds; nothing is spent.
 import { mkdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
@@ -24,7 +22,6 @@ import { judge, summarize, cardClosed } from '../../eval/measure.mjs';
 import { renderReport } from '../../eval/report.mjs';
 import { newEngineModules, placeIn } from './director.mjs';
 import { exportFacts } from './world.mjs';
-import { liveSeat, intentsOf, useSeatLogin } from './live.mjs';
 
 /** The battery's place id for a place name of the new engine (import-eden: today's place id is `g-` and its name). */
 export const placeIds = (path) => path.map((n) => `g-${n}`);
@@ -32,8 +29,7 @@ export const placeIds = (path) => path.map((n) => `g-${n}`);
 /** The seat's acts as receipts (`{capability: "<verb>:<target>", phase}`), from its command log, after `sinceMs`. */
 export function receiptsOf(commands, sinceMs, kindOf = () => null) {
   return commands.filter((c) => c.at >= sinceMs && c.words?.[0] === 'act' && c.answer?.receipt).map((c) => {
-    // a ranked list's receipt names every candidate's target, space-separated: the first is the one judged (Q1)
-    const r = { ...c.answer.receipt, target: String(c.answer.receipt.target ?? '').split(' ')[0] }, verb = String(r.verbs?.[0] ?? '').split(':').at(-1) || 'walk';
+    const r = c.answer.receipt, verb = String(r.verbs?.[0] ?? '').split(':').at(-1) || 'walk';
     const phase = c.answer.phase === 'done' ? 'completed' : c.answer.phase === 'refused' ? 'refused' : 'started';
     return { id: `${c.at}`, capability: `${verb}:${r.target}`, phase, chosen: { target: r.target }, kind: kindOf(r.target) };
   });
@@ -82,15 +78,11 @@ export async function episodeV2({ dir, genesis, item, seatCfg, sampleMs = 500, h
   }
   await mods.provision.startWorld({ genesis, facts, dataDir: join(dir, 'world') });
   const bootMs = Date.now() - t0;
-  // 0.133 Q1: a live seat (claude-headless) is a real agent through the same client (live.mjs); else the scripted one
-  const live = seatCfg.adapter === 'claude-headless';
-  const seat = live ? await liveSeat({ world: mods.world(), dir, model: seatCfg.model ?? 'sonnet', effort: seatCfg.effort ?? null, maxWallSec: item.timeoutSec ?? 240, log })
-    : await mods.seat.createSeat({ runDir: dir, seat: { ...seatCfg, id: 'wren', soulName: seatCfg.soulName ?? 'Wren' } });
+  const seat = await mods.seat.createSeat({ runDir: dir, seat: { ...seatCfg, id: 'wren', soulName: seatCfg.soulName ?? 'Wren' } });
   let other = null;
   try {
     const ob = await seat.onboard();
     if (!ob.ok) throw new Error('the Soul did not join');
-    if (live) mods.track(ob.soulId, ob.body);
     const soulId = ob.soulId, truth = mods.swarmTruth();
     const kinds = (id) => truth.node(id)?.kind ?? null;
     const first = await truth.soul(soulId), before = { place: first.placePath?.[0] ?? null, posture: first.posture };
@@ -110,7 +102,6 @@ export async function episodeV2({ dir, genesis, item, seatCfg, sampleMs = 500, h
     const sentLocal = Date.now();
     const sent = await mods.owner.sendCard({ soulId, identity: 'wren', text: item.instruction });
     log(`${item.id}: sent ${sent.messageId}`);
-    if (live) seat.deliver({ id: sent.messageId, text: item.instruction });
     const deadline = sentLocal + (item.timeoutSec ?? 240) * 1000;
     let verdict = { ok: false, why: 'timeout' }, card = null, successAt = null, closedAt = null, firstMotionMs = null, endedBy = 'timeout';
     const samples = [];
@@ -133,19 +124,15 @@ export async function episodeV2({ dir, genesis, item, seatCfg, sampleMs = 500, h
       if (verdict.ok && t - successAt >= (item.holdSec ?? holdSec) * 1000) { endedBy = 'success-held'; break; }
       if (closed && !verdict.ok && t - closedAt >= graceSec * 1000) { endedBy = 'closed-unmet'; break; }
     }
-    if (live) await seat.settle();   // the agent's turn ends (its last report and ack) before its commands are counted
     // the seat's own polls of its owner's messages are its scheduler's, as long polls were: counted apart
     const all = readLines(seat.commands()).filter((c) => c.at >= sentLocal), cmds = all.filter((c) => c.words[0] !== 'pending'), cliCalls = {};
     for (const c of cmds) cliCalls[c.words[0]] = (cliCalls[c.words[0]] ?? 0) + 1;
     const ms = cmds.map((c) => c.ms).filter(Number.isFinite);
-    const intents = intentsOf(cmds), refusals = {};
-    for (const i of intents) if (i.end === 'refused') refusals[i.cause] = (refusals[i.cause] ?? 0) + 1;
     const rec = {
       item: item.id, instruction: item.instruction, engine: 'v2', succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: Date.now() - sentLocal,
       firstMotionMs, successMs: verdict.ok ? successAt : null, cardClosedMs: closedAt, card: card ? { state: card.state, outcome: card.outcome, closed: cardClosed(card) } : null,
-      seat: live ? { adapter: 'claude-headless', model: seat.info.model, modelTurns: seat.usage.turns, apiCalls: 0, tokensIn: seat.usage.tokensIn, tokensOut: seat.usage.tokensOut, costUsd: seat.usage.costUsd, denied: seat.usage.denied, cliCalls }
-        : { modelTurns: 0, apiCalls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, cliCalls }, skipped: [...seat.skipped],
-      kickoff: { costUsd: 0 }, worldCalls: cmds.length, longPolls: all.length - cmds.length, routes: [], refusals, intents, clientMsPerCall: ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) : null, serverMsPerCall: null,
+      seat: { modelTurns: 0, apiCalls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, cliCalls }, skipped: [...seat.skipped],
+      kickoff: { costUsd: 0 }, worldCalls: cmds.length, longPolls: all.length - cmds.length, routes: [], refusals: {}, clientMsPerCall: ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) : null, serverMsPerCall: null,
       client: { cli: 'v2', skill: 'v2' }, samples: samples.length, bootMs, ...(calendarFirst ? { calendarFirst } : {}),
     };
     writeJson(join(dir, 'episode.json'), rec);
@@ -158,11 +145,10 @@ export async function episodeV2({ dir, genesis, item, seatCfg, sampleMs = 500, h
 export const kindName = (k) => (k ? `core-${String(k).split('@')[0].split(':').at(-1)}` : null);
 
 export async function runBatteryV2({ battery, seatCfg, genesis, out, items: pick = null, repeats = 1, log = () => {} }) {
-  if (!['scripted-owner', 'claude-headless'].includes(seatCfg.adapter)) throw new Error('a battery on the new engine runs the scripted seat or a live claude-headless one');
+  if (seatCfg.adapter !== 'scripted-owner') throw new Error('only the scripted seat runs a battery on the new engine (no model runs)');
   out = resolve(out); mkdirSync(out, { recursive: true });
-  if (seatCfg.adapter === 'claude-headless') useSeatLogin();
   const items = battery.items.filter((it) => !pick || pick.has(it.id));
-  const meta = { schema: 'soul-eval/1', battery: battery.battery, world: `local:${battery.world} (new engine)`, engine: 'v2', deliver: 'inbox', seat: { adapter: seatCfg.adapter, model: seatCfg.model ?? null },
+  const meta = { schema: 'soul-eval/1', battery: battery.battery, world: `local:${battery.world} (new engine)`, engine: 'v2', deliver: 'inbox', seat: { adapter: 'scripted-owner' },
     repeats, warmSec: 0, items: items.map((i) => i.id), maxUsd: 0, startedAt: new Date().toISOString() };
   writeJson(join(out, 'run.json'), meta);
   const episodes = []; let n = 0;

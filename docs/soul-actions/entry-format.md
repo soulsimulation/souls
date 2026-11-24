@@ -82,8 +82,7 @@ by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answ
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
-hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
-`state.hold_crew`'s, how many hold it standing: 0.135 C6, so a part one holds standing can take four to carry). Before the
+hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
 too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
 Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned

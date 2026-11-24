@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use body_script::{TICK, ground, ground_id, humanoid, place};
+use body_script::{TICK, ground_id, humanoid, place};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
     TransferRec, schema_hash,
@@ -58,6 +58,26 @@ use skills::form_runner::{Arg, Args, Limits, check};
 
 /// How far from the body a thing is placed, µm: the body walks to it as the form asks.
 const AWAY: i64 = 3_000_000;
+/// Half the side of the runner's open ground, mm. A long run of cases walks the body a little further each time (a
+/// thing is placed beside it, its stand points are where they are), and a thing's points reach up to 60 m from it (a
+/// cable car's stations): on body-script's 40 m square both walked off its edge, and a walk to a point beyond it, or a
+/// restart that set the body down there, failed (`deadline-passed`, `off-surface`, `place-no-stand-point`).
+const HALF_SIDE: i32 = 1_000_000;
+
+/// Flat open ground, 2 km square, centred on the origin, at height 0: body-script's ground, wider.
+fn ground() -> Surface {
+    let (a, b) = (-HALF_SIDE, HALF_SIDE);
+    let corners = vec![[a, 0, a], [b, 0, a], [b, 0, b], [a, 0, b]];
+    Surface::new(
+        ground_id(),
+        vec![sim::ground::Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    )
+}
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
 /// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
@@ -1843,6 +1863,7 @@ impl Stage {
                 .or_else(|| names.to_id.get(n).copied())
                 .or_else(|| self.things.get(n).map(|t| t.id))
         };
+        let this = act.get("this").and_then(thing);
         let mut out = Args::new();
         for (k, v) in act.get("args").and_then(J::obj).unwrap_or(&[]) {
             let ty = takes
@@ -1862,9 +1883,15 @@ impl Stage {
                     Ok(n) => Arg::Int(n),
                     Err(_) => continue,
                 },
-                (_, J::Obj(_)) => match v.get("node").and_then(thing) {
-                    Some(id) => Arg::Node(id),
-                    None => continue,
+                // A slot of the act's own thing goes as the slot's name, as a served world hands a slot argument
+                // (`skills::form_runner::args_in`: slots of the node, by name); any other node as the thing.
+                (_, J::Obj(_)) => match (
+                    v.get("node").and_then(thing),
+                    v.get("slot").and_then(J::str),
+                ) {
+                    (Some(id), Some(slot)) if Some(id) == this => Arg::Name(slot.to_owned()),
+                    (Some(id), _) => Arg::Node(id),
+                    (None, _) => continue,
                 },
                 (Some("thing"), _) => match thing(v) {
                     Some(id) => Arg::Node(id),

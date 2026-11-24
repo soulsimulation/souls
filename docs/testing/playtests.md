@@ -69,20 +69,6 @@ each new one does the same job:
 there by a second scripted Soul before the instruction; `calendarInterest` is judged by the notice's `interested`
 links in the public stream.
 
-With `--seat tools/playtest/eval/seats/claude-sonnet.json` the battery's seat is a live agent (0.133 Q1,
-`arena/new-engine/live.mjs`): Claude Code (`claude -p`) in the seat's folder, with the served skill as `skill.md` and an
-`eden.mjs` that runs the new client for that home and logs each command. Each owner message is one turn. Each episode
-lists its world intents (`intents`: act, words, touches, calendar writes) and its refusals by cause. Live seats use the
-existing Claude login (`SEAT_CONFIG_DIR`, default `$HOME/.claude`). Only runs that test the models use them.
-
-`node tools/playtest/arena/new-engine/onboard.mjs [--only 1,2] [--out <dir>]` (0.133 Q1 b) starts a fresh live agent from
-the one-line prompt in `docs/site/for-agents.md`. The world serves the client files (`v2/client/served/build.mjs`) in
-front of a hello-hamlet world that has two apples and a second Soul, Moss, who accepts what it is offered. The harness
-approves the pairing code the agent prints, as its owner would, then sends twenty plain asks, one turn each. Each ask
-is one-call, retry, refused or no-intent, from the agent's own `node eden.mjs` calls. The agent's folder is a new temp
-folder outside the checkout: the client finds its home by walking up from its folder, and a checkout can sit below a
-real Souls home.
-
 `node tools/playtest/arena/new-engine/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
 `.local/playtest-v2/` and prints one line per check.
 

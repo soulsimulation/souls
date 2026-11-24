@@ -119,8 +119,6 @@ export class CarriedParts {
   private readonly points = new Map<string, number[][]>();
   /** Each moving frame's heading when its record last changed (its record's turn is the turn at that heading). */
   private readonly base = new Map<string, number>();
-  /** K5: a load's record before it was lifted or set down, drawn until the time drawn reaches the end of that part. */
-  private readonly prior = new Map<string, { until: number; record: PartNode }>();
   private readonly kinds: { apply(nodes: PartNode[], removed: string[]): void };
   private readonly entries: ReadonlyMap<string, Uint8Array>;
   /** `kinds`: the page's CreatorKinds; `entries`: kind entries by plain name (a part drawn from its own shape). */
@@ -139,11 +137,8 @@ export class CarriedParts {
   receive(m: Msg): void {
     const nodes = m.t === 'part' && 'p' in m ? m.p.nodes : m.t === 'snapshot' && 's' in m ? m.s.nodes : [];
     const removed = m.t === 'part' && 'p' in m ? m.p.removed : m.t === 'snapshot' && 's' in m ? m.s.removed : [];
-    for (const id of removed) { this.nodes.delete(id); this.tracks.delete(id); this.unheld.delete(id); this.prior.delete(id); }
-    const before = new Map<string, PartNode>();
+    for (const id of removed) { this.nodes.delete(id); this.tracks.delete(id); this.unheld.delete(id); }
     for (const n of nodes) {
-      const old = this.nodes.get(n.id);
-      if (old) before.set(n.id, old);
       this.nodes.set(n.id, n);
       this.base.delete(n.id);
       const k = plain(n.kind);
@@ -167,15 +162,6 @@ export class CarriedParts {
       t.push({ at, frame, slot, p: [x, y, z] });
       while (t.length > 2 && t[1].at < at - KEEP_US) t.shift();
     }
-    // K5: a load lifted into a moving frame or set down from one changes when the part ends, as world-state.ts has a
-    // change; the page draws its carriers a little behind the newest part, so until then it is drawn as it was
-    const to = (m.p as { to?: number }).to;
-    if (typeof to !== 'number') return;
-    for (const n of m.p.nodes) {
-      const was = before.get(n.id);
-      if (!was || was.parent === n.parent) continue;
-      if ((was.parent && this.tracks.has(was.parent)) || (n.parent && this.tracks.has(n.parent))) this.prior.set(n.id, { until: to, record: this.prior.get(n.id)?.record ?? was });
-    }
   }
 
   /** Listens to the reader's worker, as WorldState.watch does; returns it. */
@@ -190,22 +176,12 @@ export class CarriedParts {
    *  W4: each holder whose record has no slot points (placed live), with its kind's. */
   frames(at: number): PartNode[] {
     const out: PartNode[] = [], carrying = new Set<string>();
-    // K5: a load lifted or set down after `at` is still as it was; one whose change the time drawn has reached is handed
-    // on as it is now, once (the layer's own things then rest where world-state.ts has them)
-    const held = new Map<string, PartNode>();
-    for (const [id, p] of this.prior) {
-      if (at < p.until) { held.set(id, p.record); continue; }
-      this.prior.delete(id);
-      const n = this.nodes.get(id);
-      if (n && !this.unheld.has(id)) out.push(n);
-    }
-    for (const [id, n] of held) if (!this.unheld.has(id)) out.push(n);
-    for (const id of this.unheld) { const n = held.get(id) ?? this.nodes.get(id); if (n) out.push({ ...n, origin: undefined }); }
+    for (const id of this.unheld) { const n = this.nodes.get(id); if (n) out.push({ ...n, origin: undefined }); }
     for (const n of this.nodes.values()) {
       const p = n.slots?.length ? undefined : this.points.get(plain(n.kind));
       if (p) out.push({ ...n, slots: p });
     }
-    for (const r of this.nodes.values()) { const n = held.get(r.id) ?? r; if (n.parent && this.tracks.has(n.parent)) carrying.add(n.parent); }
+    for (const n of this.nodes.values()) if (n.parent && this.tracks.has(n.parent)) carrying.add(n.parent);
     for (const id of carrying) {
       const n = this.nodes.get(id), s = this.tracks.get(id)!, here = sampleAt(s, at);
       if (!n || !here || !n.rot) continue;
