@@ -1846,3 +1846,118 @@ fn a_revoke_or_retire_lands_in_the_gateways_file_at_once_whatever_the_store_answ
     std::fs::create_dir(file.with_extension("tmp")).unwrap();
     assert_eq!(p.revoke("acct_owner", &souls[2].1), Err("tokens-file"));
 }
+
+/// `n` operator test Souls paired in `world`, each with its token delivered: (token, grant).
+fn test_souls(p: &Pairing, world: &str, n: usize) -> Vec<(String, String)> {
+    (0..n)
+        .map(|_| {
+            let (secret, code) = ask(p, "operator load", None, false, T0);
+            p.ask_world(&code, world).expect("a world");
+            let grant = p.operator_approve(world, &code, T0).expect("approved");
+            let Poll::Token { token, .. } = p.poll(&secret, T0 + INTERVAL) else {
+                panic!("a token")
+            };
+            (token, grant)
+        })
+        .collect()
+}
+
+/// The gateway's line for a Soul's token.
+fn token_line((token, grant): &(String, String)) -> String {
+    format!("{grant} {}", to_hex(&sha256(token.as_bytes())))
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // The retire of 500 Souls is held to a wall-time bound.
+fn retiring_500_test_souls_of_a_world_is_one_pass_well_under_30_s_with_no_failure() {
+    use replica::ids::{Id, Scope};
+    use std::sync::{Arc, RwLock};
+    let (mut p, _) = store();
+    let a = Id::new(Scope([1; 16]), 0).unwrap();
+    let garden: Answer = Arc::new(RwLock::new(owned_by(Some(a), 0)));
+    let file = two_worlds(&mut p, garden, None);
+    p.reconcile_current_authority().unwrap();
+    let souls = test_souls(&p, "garden", 500);
+    let forest = test_souls(&p, "forest", 1);
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .contains(&token_line(&souls[499]))
+    );
+    let started = std::time::Instant::now();
+    assert_eq!(p.operator_retire_all("garden", T0 + 20), Ok(500));
+    let took = started.elapsed();
+    eprintln!("retired 500 test Souls in {took:?}");
+    assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.starts_with("# World-bound pairing authority\n# souls-creator/1 0 "),
+        "{text}"
+    );
+    assert!(
+        souls.iter().all(|s| !text.contains(&token_line(s))),
+        "{text}"
+    );
+    let notices = std::fs::read_to_string(file.with_file_name("tokens.souls")).unwrap();
+    assert!(
+        souls
+            .iter()
+            .all(|(_, g)| notices.contains(&format!("retired {g}")))
+    );
+    let left = p.mine("operator:test-souls").unwrap();
+    assert_eq!(left.len(), 1, "only forest's Soul is left");
+    assert_eq!(left[0].soul, forest[0].1);
+    assert!(!p.copy_owed(), "nothing is owed");
+    assert_eq!(p.operator_retire_all("garden", T0 + 30), Ok(0));
+}
+
+#[test]
+fn a_retire_whose_file_write_keeps_failing_stands_and_is_owed_to_the_copier() {
+    use replica::ids::{Id, Scope};
+    use std::sync::{Arc, RwLock};
+    let (mut p, _) = store();
+    let a = Id::new(Scope([1; 16]), 0).unwrap();
+    let garden: Answer = Arc::new(RwLock::new(owned_by(Some(a), 0)));
+    let file = two_worlds(&mut p, garden, None);
+    p.reconcile_current_authority().unwrap();
+    let souls = test_souls(&p, "garden", 4);
+    // The tokens file cannot be replaced while a folder holds its temporary name.
+    let blocker = file.with_extension("tmp");
+    std::fs::create_dir(&blocker).unwrap();
+    p.retire("operator:test-souls", &souls[0].1, T0 + 20)
+        .expect("a retire is never refused for a file write");
+    assert_eq!(
+        p.operator_retire_all("garden", T0 + 20),
+        Ok(3),
+        "the pass goes on"
+    );
+    assert!(p.mine("operator:test-souls").unwrap().is_empty());
+    assert!(p.copy_owed(), "owed while the write fails");
+    std::fs::remove_dir(&blocker).unwrap();
+    assert!(copy_until_done(&p, std::time::Duration::from_secs(5)));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        souls.iter().all(|s| !text.contains(&token_line(s))),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_removal_write_is_tried_again_after_a_short_failure() {
+    let mut tries = 0;
+    let written = authority::retried(|| {
+        tries += 1;
+        if tries < 3 {
+            Err(std::io::Error::other("transient"))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(written.is_ok() && tries == 3, "{tries}");
+    let mut tries = 0;
+    let failed = authority::retried(|| {
+        tries += 1;
+        Err(std::io::Error::other("lasting"))
+    });
+    assert!(failed.is_err() && tries == 3, "{tries}");
+}

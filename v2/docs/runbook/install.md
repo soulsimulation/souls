@@ -158,8 +158,9 @@ in the journal (`degraded: world-owner-unavailable <world>`). Only a store out o
 way: a world the store answers is missing, or whose record differs from the map, is refused by name
 (`world-authority-missing`, `world-authority-mismatch`, `world-authority-invalid`). A tokens file is never written with
 an owner older than the one it names, so a handoff is never undone by a slow read. A revoke or retire rewrites the
-world's tokens file at once with the owner it already names, reading no owner, and is refused (`tokens-file`) if that
-write fails. The directory writes only the files of the world a change is for. A world whose files it could not write,
+world's tokens file at once with the owner it already names, reading no owner. A write that fails is tried twice more
+within about 150 ms; if it still fails, the world is retried in the background as below, a revoke is refused
+(`tokens-file`, so it never answers before the gateway stops taking the token) and a retire stands. The directory writes only the files of the world a change is for. A world whose files it could not write,
 or wrote from the owner last read, is retried in the background with back-off until the store answers. A start whose store does not answer logs
 `degraded: world-authority-unavailable` and serves, keeping the files already written.
 
