@@ -178,8 +178,14 @@ export const SAVED = {
     edge_comms_speech: { by: ['soul_id'], cols: ['world_id', 'id', 'soul_id', 'tick', 'at', 'channel', 'text', 'heard_by'] },
     edge_plans_v1: { by: ['soul_id'], cols: ['world_id', 'plan_id', 'soul_id', 'state', 'body', 'created_at', 'updated_at'] },
     edge_personal_reminders_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'id', 'request', 'kind', 'due_world_minute', 'due_real_ms', 'state', 'created_at', 'created_tick', 'delivered_at'] },
+    god_prayers_v1: { by: ['soul_id'], cols: ['world_id', 'id', 'soul_id', 'soul_name', 'text', 'at', 'answer', 'answered_at'] },
+    god_notices_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'n', 'body'] },
+    gov_amendments_v1: { by: ['soul_id'], cols: ['world_id', 'id', 'soul_id', 'soul_name', 'title', 'text', 'full', 'base_version', 'at', 'status', 'decided_at', 'reason', 'version'] },
+    gov_support_v1: { by: ['soul_id'], cols: ['world_id', 'amendment_id', 'soul_id', 'soul_name', 'at'] },
+    travel_events_v1: { by: ['soul_id'], cols: ['world_id', 'at', 'traveller', 'soul_id', 'name', 'kind', 'other', 'other_name', 'code'] },
     edge_items_v1: { by: ['holder'], cols: ['world_id', 'item_id', 'state', 'holder', 'place_id', 'body', 'updated_at'] },
-    soul_inbox_queue_v1: { by: ['scope'], cols: ['world_id', 'scope', 'n', 'text', 'sent_at', 'delivered_at', 'acknowledged_at', 'reply', 'outcome', 'result', 'result_at'] },
+    // A Soul's owner inbox is scoped `soul:<id>` (apps/server/src/inbox.ts).
+    soul_inbox_queue_v1: { by: ['scope'], prefix: 'soul:', cols: ['world_id', 'scope', 'n', 'text', 'sent_at', 'delivered_at', 'acknowledged_at', 'reply', 'outcome', 'result', 'result_at'] },
   },
   relationships: {
     edge_comms_turns: { by: ['soul_id'], cols: ['world_id', 'conversation_id', 'seq', 'soul_id', 'tick', 'at', 'text'] },
@@ -225,7 +231,7 @@ export function saveSoul(row, stages) {
       if (!present.has(t)) continue;
       const have = new Set(columns(db, t));
       const by = (spec.by ?? []).filter((c) => have.has(c));
-      const where = [...by.map((c) => [`"${c}" = ?`, row.soul]), ...(spec.owner ? [['"owner" = ?', row.owner]] : []), ...(spec.mentions && have.has('body') ? [['"body" LIKE ?', `%${row.soul}%`]] : [])];
+      const where = [...by.map((c) => [`"${c}" = ?`, `${spec.prefix ?? ''}${row.soul}`]), ...(spec.owner ? [['"owner" = ?', row.owner]] : []), ...(spec.mentions && have.has('body') ? [['"body" LIKE ?', `%${row.soul}%`]] : [])];
       if (!where.length) continue;
       const rows = db.prepare(`SELECT ${pick(t, spec.cols)} FROM "${t}" WHERE ${where.map((w) => w[0]).join(' OR ')}`).all(...where.map((w) => w[1]));
       if (t === 'edge_comms_turns') for (const r of rows) conversations.add(r.conversation_id);

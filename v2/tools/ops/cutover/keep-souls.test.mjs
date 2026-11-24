@@ -39,6 +39,10 @@ test('setup: a fake host with three people\'s Souls, memories and relationships'
   hamlet.prepare('INSERT INTO edge_comms_turns VALUES (?, ?, ?, ?, 12, 3, ?)').run('x11-hamlet', 'c_1', 2, wren, 'Thank you, Oriel.');
   hamlet.prepare('INSERT INTO edge_follows_v1 VALUES (?, ?, ?)').run('x11-hamlet', 'r_2', JSON.stringify({ follower: wren, followed: oriel }));
   hamlet.prepare('INSERT INTO edge_comms_subscriptions VALUES (?, ?, ?, ?, 0, 0, 0)').run('x11-hamlet', wren, 'https://hook.test/bearer-url-not-to-copy', 'webhook-secret-not-to-copy');
+  // Its owner's message (the inbox today's server writes, scoped `soul:<id>`) and a prayer it made.
+  hamlet.prepare('INSERT INTO soul_inbox_queue_v1 (world_id, scope, owner, n, id, text, sent_at, reply) VALUES (?, ?, ?, 1, ?, ?, 5, ?)').run('x11-hamlet', `soul:${wren}`, fx.stage.bob, 'm_1', 'Sing at the fair tonight.', 'On my way.');
+  hamlet.exec('CREATE TABLE god_prayers_v1 (world_id TEXT NOT NULL, id TEXT NOT NULL, soul_id TEXT NOT NULL, soul_name TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL, answer TEXT, answered_at INTEGER, PRIMARY KEY (world_id, id))');
+  hamlet.prepare('INSERT INTO god_prayers_v1 VALUES (?, ?, ?, ?, ?, 6, ?, 7)').run('x11-hamlet', 'p_1', wren, 'Wren', 'A stage by the well, please.', 'Built.');
   // Sign-in, pairing and replay records that name the Soul: none of it is saved.
   hamlet.exec(`CREATE TABLE account_approvals_v1 (id TEXT PRIMARY KEY, world_id TEXT, soul_id TEXT, request_nonce TEXT, poll_hash TEXT);
     CREATE TABLE edge_idempotency_v1 (world_id TEXT NOT NULL, soul_id TEXT NOT NULL, route TEXT NOT NULL, key TEXT NOT NULL, hash TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
@@ -106,6 +110,8 @@ test('2: one private, checksummed save of each real person\'s Soul: identity, bo
   const all = readFileSync(tar, 'utf8');
   assert.doesNotMatch(all, /not-to-copy|hook\.test/, 'no token, secret, webhook URL, nonce, idempotency key, client ref or device id');
   assert.equal(wren.memories.edge_receipts_v1[0].capability, 'sing', 'the receipt itself is kept');
+  assert.deepEqual(wren.memories.soul_inbox_queue_v1.map((m) => [m.text, m.reply]), [['Sing at the fair tonight.', 'On my way.']], 'its owner\'s messages');
+  assert.deepEqual(wren.memories.god_prayers_v1.map((p) => [p.text, p.answer]), [['A stage by the well, please.', 'Built.']]);
   assert.ok(!Object.keys(files).some((f) => /Oriel|Bram/.test(JSON.stringify(files[f].identity?.soul?.name ?? ''))), 'no Soul of Gene\'s');
   // A changed byte is refused.
   const bad = join(DIR, 'bad.tar');
