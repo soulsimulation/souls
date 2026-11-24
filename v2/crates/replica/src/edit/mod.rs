@@ -636,6 +636,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         "the engine's own links are not made by an edit",
                     );
                 }
+                if *field == crate::tint::F_TINT {
+                    return refuse(
+                        here,
+                        "edit.tint-malformed",
+                        "a tint's rows are [part, rgb], never a link's",
+                    );
+                }
                 if *field == DOOR_GEOMETRY
                     || *field == 7
                     || ends[0] == ends[1]

@@ -1802,7 +1802,7 @@ fn tint_of(live: &Replica, id: Id) -> Option<Value> {
 fn r4_a_recolour_is_the_creators_alone_logged_streamed_and_kept_across_a_restart() {
     use replica::tint::F_TINT;
     let mut w = W::new();
-    let (_, cr, _) = w.furnish();
+    let (room, cr, _) = w.furnish();
     assert_eq!(tint_of(&w.live, cr), None, "an old thing has no tint");
     let set = |to: Value| Op::Set {
         node: Ref::Node(cr),
@@ -1854,6 +1854,23 @@ fn r4_a_recolour_is_the_creators_alone_logged_streamed_and_kept_across_a_restart
         )
         .expect_err("a second seat row");
     assert_eq!(r.name, "edit.tint-malformed");
+    // Nor a link's row (R4 review): its row would land in the owner's field 145 as `[link, ...]`.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Link {
+                name: 1,
+                ty: Name::new("test:link").expect("a name"),
+                ends: [Ref::Node(cr), Ref::Node(room)],
+                owner: replica::world_model::End::First,
+                field: F_TINT,
+                row: vec![Value::Uint(7)],
+                door: None,
+            }],
+        )
+        .expect_err("a link into the tint");
+    assert_eq!((r.op, r.name), (Some(0), "edit.tint-malformed"));
     assert_eq!(w.log_hash(), log, "nothing refused reached the log");
     assert_eq!(tint_of(&w.live, cr), Some(seat.clone()));
 

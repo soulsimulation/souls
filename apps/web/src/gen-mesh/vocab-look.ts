@@ -24,6 +24,18 @@ export type Look = { sx: number; sy: number; sz: number; taper: number; bend: nu
    *  colour and each named part's, a part found by its `role` or its object's name. */
   recolour?: Recolour };
 export type Recolour = { all: string | null; parts: Record<string, string> };
+/** The entity layer's `MeshCtx.tint` (WorldEntityLayer build): a creator's recolour of a palette key (`state.tint`'s
+ *  `<key>=#rrggbb`, R4) sets that part's colour exactly; else the instance's param, the def's palette, the fallback. */
+export function paletteTint(def: { palette?: Record<string, string> }, params: Record<string, unknown>, state: Record<string, unknown> | undefined): (key: string | undefined, fallback: string) => string {
+  const recoloured = recolourOf(state?.tint)?.parts ?? {};
+  return (key, fallback) => {
+    if (!key) return fallback;
+    const r = recoloured[key.toLowerCase()];
+    if (r) return r;
+    const v = params[key];
+    return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback;
+  };
+}
 /** `state.tint` read: `#rrggbb` for the whole thing and `<part>=#rrggbb` for a part, space-separated; null when none. */
 export function recolourOf(t: unknown): Recolour | null {
   if (typeof t !== 'string' || !t.trim()) return null;
@@ -111,7 +123,9 @@ function paintSubtree(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const mul = new THREE.Color(1, 1, 1);
   if (look.tint) mul.multiply(new THREE.Color(look.tint));
   if (look.recolour?.all) mul.multiply(new THREE.Color(look.recolour.all));
-  const parts = look.recolour?.parts ?? {}, partNames = Object.keys(parts);
+  // a part named by a palette key was coloured exactly by the layer's tint (paletteTint): never multiplied again here
+  const palette = new Set(Object.keys(ctx.def.palette ?? {}).map((k) => k.toLowerCase()));
+  const parts = Object.fromEntries(Object.entries(look.recolour?.parts ?? {}).filter(([k]) => !palette.has(k))), partNames = Object.keys(parts);
   // a named part's colour: the nearest object at or above the mesh, inside the picture, whose role or name is the part
   const partOf = (o: THREE.Object3D | null): string | null => {
     for (let x = o; x; x = x === root ? null : x.parent) {
