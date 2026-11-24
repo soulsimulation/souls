@@ -3,15 +3,18 @@
 // (the world's own shotCamera, which only places the viewer's camera: it never moves a body).
 // On the new engine a ride is a thing on a course (a balloon): it takes riders only while it is home, between laps, and
 // the page carries it in its takes keyed by the page's own id for the thing, its name as the label (K4, bridge.ts things()).
-import { find, soul } from './cast.mjs';
+import { soul } from './cast.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Each Soul walks to what its copy finds for `words`, then acts its `board` form until it is aboard: a ride away on its
- *  course refuses (`boarding-frame-away`) until it is home again. Returns the ride's id once all are aboard, or throws
- *  after `limitS` or on any other refusal five times over (more than one lap: a rider aboard rides the lap, and the next waits for the ride to come home). */
+/** Each Soul walks to the thing its copy finds for `words` (not a place of that name: a landmark is named as its thing),
+ *  then acts its `board` form until it is aboard: a ride away on its course refuses (`boarding-frame-away`) until it is
+ *  home again. Returns the ride's id once all are aboard, or throws after `limitS` (more than one lap: a rider aboard
+ *  rides the lap, and the next waits for the ride to come home) or on any other refusal five times over. */
 export async function board(names, words, limitS = 600) {
-  const ride = await find(names[0], words);
+  const found = (await soul(names[0]).cli('find', ...words.split(/\s+/), '--limit', '50')).found ?? [];
+  const things = found.filter((x) => !/^souls:body|:place$/.test(x.kind ?? ''));
+  const ride = things.find((x) => x.name === words) ?? things[0] ?? null;
   if (!ride) throw Error(`kit: nothing found for "${words}"`);
   console.error(`kit: ${words} is ${ride.id} (${ride.kind})`);
   for (const n of names) {
@@ -38,11 +41,23 @@ export async function board(names, words, limitS = 600) {
   return ride.id;
 }
 
-/** Open the world as a ?shot=1 page (the camera holds exactly where shotCamera puts it) and wait for its scene. */
-export async function shotPage(page, world) {
-  await page.goto(`${world}?dev=1&shot=1`);
+/** Open the page the recorder opened (`url`: its address, with the take's `?hour=`) as a ?shot=1 page (the camera holds
+ *  exactly where shotCamera puts it) and wait for its scene. */
+export async function shotPage(page, url) {
+  const u = new URL(url);
+  u.searchParams.set('dev', '1'); u.searchParams.set('shot', '1');
+  await page.goto(u.href);
   await page.locator('canvas').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForFunction(() => window.__soulsEntity?.shotCamera && window.__soulsEntity.transportFrame?.()?.entities, null, { timeout: 90_000 });
+}
+
+/** Wait `ms` on camera, logging where the page has `carrier` every 5 s (so the log says whether the ride moved). */
+export async function hold(page, carrier, ms) {
+  for (const until = Date.now() + ms; Date.now() < until;) {
+    const c = await carrierPose(page, carrier, 0);
+    console.error(`kit: ${carrier} on the page at ${c ? c.p.map((v) => v.toFixed(1)).join(', ') : 'none'}`);
+    await page.waitForTimeout(Math.min(5000, Math.max(0, until - Date.now())));
+  }
 }
 
 /** Hold the camera at world `eye`, looking at `at` (metres). Stops any tracking shot. */

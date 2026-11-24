@@ -17,8 +17,8 @@ const view = (ground, front, across, dist, up) => ({
   eye: [WHEEL[0] + (FRONT[0] * front + ACROSS[0] * across) * dist, ground + up, WHEEL[1] + (FRONT[1] * front + ACROSS[1] * across) * dist],
   at: [WHEEL[0], ground + HUB - 1, WHEEL[1]] });
 
-export default async function steps(page, { mark }) {
-  await shotPage(page, process.env.CLIP_WORLD);
+export default async function steps(page, { mark, url }) {
+  await shotPage(page, url);
   // the ground under the wheel, from the car's place before it leaves (riders board it on the ground in front of the wheel)
   const car = await carrierPose(page, CARRIER, 10_000), ground = car?.p[1] ?? 0;
   console.error(`kit: car ${JSON.stringify(car)}`);
