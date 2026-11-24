@@ -37,7 +37,9 @@ command line win over `.env`; to use another port set both `PORT` and `PUBLIC_UR
 
 `pnpm build` builds the web app (`apps/web/dist`) and then the Mars viewer's static site, `mars/viewer/dist/client`
 (`MARS_WEB_DIR`), which holds the humanoid kit and the character models and animations the server serves under
-`/modular`. The viewer step (`pnpm build:viewer`, `tools/assets/mars-web.mjs`) is skipped when nothing under
+`/modular`, and the page's Draco decoder under `/mars-assets/draco/` (copied from the web app's three; without it a
+moved world's Draco bodies, Little Martians among them, never decode: "Initial ceramic bodies could not be prepared").
+The viewer step (`pnpm build:viewer`, `tools/assets/mars-web.mjs`) is skipped when nothing under
 `mars/viewer` changed since the last build (a stamp of input paths, sizes and times), so it costs well under a second
 when the site is current. `pnpm dev` runs it too. The server mounts the site only if it exists when it starts and
 warns at startup when the character set is missing: without it every world shows "The world could not be prepared:

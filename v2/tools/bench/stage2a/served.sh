@@ -17,6 +17,8 @@ V2=$(cd "$(dirname "$0")/../../.." && pwd)
 B=${CARGO_TARGET_DIR:-$V2/target}/release
 for v in GATEWAY TOKENS_FILE PROBE STREAM DRIVER_CPUS; do [ -n "${!v:-}" ] || { echo "served.sh: $v is not set" >&2; exit 2; }; done
 rm -rf "$D"; mkdir -p "$D/run"
+# 500 agents are 500 sockets: a soft limit of 1024 open files is too near (24 Nov), and raising it needs no root.
+ulimit -n "$(ulimit -Hn)" 2> /dev/null || true
 cat /proc/loadavg > "$D/loadavg.before"
 GP= VP= DP=
 stop_all() { for p in $DP $VP $GP; do kill "$p" 2> /dev/null; done; }
@@ -27,6 +29,15 @@ node "$V2/tools/driver/loads.mjs" "mix-$N-$ARM-$RATE" --seconds "$SECS" --seed 1
 node "$V2/tools/bench/stage2a/guard.mjs" watch --probe "$PROBE" --samples "$D/samples.jsonl" --pids "$D/pids" \
   --abort "$D/abort.txt" > "$D/guard.log" 2>&1 &
 GP=$!
+taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run" --tokens "$TOKENS_FILE" \
+  --remote "$GATEWAY" --speech --stream "$STREAM" > "$D/driver.out" 2>&1 &
+DP=$!
+echo "$DP" > "$D/pids"
+# The viewers come once the driver's agents are in and it has read the world's copy (its `targets:` line, at most
+# 120 s): from a load machine far from the world, 100 viewers' first pictures (about 9 MB each) share its link with
+# that read and starve it (24 Nov: `no answer to a sync request in 30 s` at 500 agents with 100 viewers, none without).
+for _ in $(seq 1 240); do grep -q '^targets:\|^driver: targets' "$D/driver.out" 2> /dev/null && break; kill -0 "$DP" 2> /dev/null || break; sleep 0.5; done
+date +%s > "$D/win.txt"
 if [ "${VIEWERS:-0}" -gt 0 ]; then
   U=${VIEWER_URL:?VIEWER_URL is not set}
   [ "${U%/}" = "$U" ] && U="$U/"
@@ -35,11 +46,6 @@ if [ "${VIEWERS:-0}" -gt 0 ]; then
     "${REPLICA_PKG:-$B/../wasm-load/pkg}" "$VIEWERS" "$ARM" "$SECS" "$D/win.txt" "$D" > "$D/viewers.log" 2>&1 &
   VP=$!
 fi
-sleep 1
-date +%s > "$D/win.txt"
-taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run" --tokens "$TOKENS_FILE" \
-  --remote "$GATEWAY" --speech --stream "$STREAM" > "$D/driver.out" 2>&1 &
-DP=$!
 echo "$DP $VP" > "$D/pids"
 echo "rung $N $ARM $RATE served: driver $DP viewers ${VP:--} guard $GP"
 wait "$DP"

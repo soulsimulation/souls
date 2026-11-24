@@ -19,7 +19,7 @@ command with `750` as its argument, once the first table is in.
 ## The topology it runs on (24 Nov 2026)
 
 - **The production machine** serves all 11 moved worlds. Each world is `worldd@<instance>.service` in
-  `souls.slice`. The slice's `MemoryMax` is 14G. Eden's own `MemoryMax` is 4G and its `MemoryLow` 2G
+  `souls.slice`. The slice's `MemoryMax` is 18G (14G until 24 Nov). Eden's own `MemoryMax` is 4G and its `MemoryLow` 2G
   (`v2/tools/ops/units/world-limits.json`). Every other world keeps the unit's 2G
   ([world restarting](world-restarting.md)). Eden's gatewayd listens on loopback 7330, the viewers' origin on 7320.
   The front door sends `/s/*` to the origin with `/s` stripped, and `/w/eden/v2/*` to Eden's gatewayd
@@ -45,12 +45,16 @@ Fixed before the run (`guard.mjs` `BARS`):
 | Before each rung (preflight; refused = exit 2, the run stops) | Eden's supervisor state | `running` |
 | | Eden's `health.json` | written within 30 s |
 | | Eden's ticks on time, over two samples 10 s apart | at least 99 % |
-| | Eden's memory, and `souls.slice`'s | at most 60 % of its `MemoryMax` (2.4 of 4 GB; 8.4 of 14 GB) |
+| | Eden's memory, and `souls.slice`'s | at most 60 % of its `MemoryMax` (2.4 of 4 GB; 10.8 of 18 GB) |
 | | the driver's stream (`STREAM`) and the viewers' (`VIEWER_URL`) | each `pointer` answers |
 | | the gateway (`GATEWAY`) | connects |
 | During the rung (abort: driver and viewers stopped, `abort.txt`, the run stops) | Eden's ticks on time over the last 30 s | below 95 % |
-| | Eden's memory, or `souls.slice`'s | above 85 % of its `MemoryMax` (3.4 of 4 GB; 11.9 of 14 GB) |
+| | Eden's memory, or `souls.slice`'s | above 85 % of its `MemoryMax` (3.4 of 4 GB; 15.3 of 18 GB) |
 | | the probe | silent for 30 s |
+
+On 24 Nov 2026 the first preflight against production refused: the 11 moved worlds, idle, held 10.4 of the
+slice's 14 GB (74 %), above the 60 % start bar, while Eden itself stood at 1.8 of 4 GB. Gene chose a larger slice:
+`MemoryMax` 18G, set live with `systemctl set-property` and in `v2/tools/ops/units/souls.slice`.
 
 An aborted rung is in the table as `aborted by the guard (<reason>)`, beside what it measured until the stop.
 `limits.sh` exits 4 after an abort or a refusal, and 0 when every rung ran.
@@ -89,7 +93,10 @@ ssh "$PROD" 'DIRECTORY_ORIGIN=<its loopback origin> node $REL/v2/tools/ops/test-
 
 **4. The forward and the run, on the build machine,** in `screen` or `tmux`. Choose the cores of a timed runner
 with no job running (`souls-timed-<n>` owns physical cores 3(n-1) to 3n-1 and their siblings, +24). The stream
-path is Eden's `views/world.json` `stream`, printed by the preflight as `stream ...`:
+path is `w/<Eden's instance>/` followed by Eden's `views/world.json` `stream`, which the preflight prints as
+`stream ...` (the origin serves each world under `w/<instance>/`; the bare `stream` answers 404). A release from
+before 24 Nov 2026 has a `guard.mjs` that exits silently when started by the symlinked `$REL` path: there, run the
+probe as `cd $REL && node v2/tools/bench/stage2a/guard.mjs probe --every 5`.
 
 ```sh
 ssh -fN -o ExitOnForwardFailure=yes -L "$LO:17330:$LO:7330" -L "$LO:17320:$LO:7320" "$PROD"
@@ -113,6 +120,24 @@ world's state, Eden's memory and the gateway's connect time.
 
 **Join time and frame rate** are read from the old page in a real browser, at `https://soul.game/w/eden/` during
 a rung. That is P3's own step, not this script's.
+
+## What the first production run met (24 Nov 2026)
+
+No 10-minute rung finished; the published result is on pull request #4642. Read these before the next run:
+
+- **The agents' path.** 500 agents through the SSH forwards (relayed through a laptop) never got the driver's read of
+  Eden's copy: `no answer to a sync request in 30 s`. Through the front door it works. The driver carries no TLS, so
+  a plain-to-TLS proxy on the load machine's loopback carries each agent on its own connection:
+  `rewrite /v2/* /w/eden{uri}` then `reverse_proxy https://soul.game` with `header_up Host soul.game`, and
+  `GATEWAY=ws://<that loopback address and port>`. The driver needs more than 1,024 open files at 500 agents
+  (`served.sh` raises its soft limit).
+- **The viewers come after the driver's read** (`served.sh`): from a load machine 175 ms away, their first pictures
+  (about 9 MB each) starve it.
+- **The viewers' origin gives way first.** `souls-origin` (MemoryMax 256 MB) was killed for memory each time 100
+  viewers joined, and real visitors saw "View unavailable". The guard watches Eden only, so watch the origin's
+  `NRestarts` beside it, and stop at the first restart.
+- **At 500 agents without viewers,** Eden kept every tick on time, but the old page showed "Catching up · This world's
+  stream is not available right now" within two minutes. The run was stopped there.
 
 ## How long it takes
 

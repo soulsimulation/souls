@@ -109866,6 +109866,47 @@
           "r": 3.141592653589793
         }
       ]
+    },
+    {
+      "note": "One radio console in Eden House 1 living room",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/radio@2",
+          "name": "eden-house-1-radio",
+          "in": {
+            "parent": "eden-house-1",
+            "slot": "living"
+          },
+          "p": [
+            1.5,
+            0,
+            -1.1
+          ],
+          "r": 0
+        }
+      ]
+    },
+    {
+      "note": "One existing carryable cup on the empty Eden House 1 kitchen counter. Existing placements, paths and stands are unchanged.",
+      "group": "eden-house-1-cup",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/cup@2",
+          "name": "eden-house-1-carry-cup",
+          "in": {
+            "parent": "eden-house-1-kitchen/eden-house-1-counter",
+            "slot": "top"
+          },
+          "p": [
+            0,
+            0,
+            0
+          ],
+          "r": 0
+        }
+      ]
     }
   ]
 }

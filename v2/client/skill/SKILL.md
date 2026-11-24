@@ -32,13 +32,9 @@ To see: `view` (your sight as words; `--out <file.jpg>` a picture, `--map` from 
 
 To speak: `say "<words>"` (heard near you), `shout "<words>"` (farther), `say --to <name> --gesture <g> "<words>"` (turns or gestures toward them), `whisper <body id> "<words>"` (them alone). To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which. Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
 
-To touch another Soul, offer it; it starts only if they accept (`wait` shows `offered` with the touch and its id):
-- `together offer handshake <their body id>`, or the same with `hug`, `high-five` or `fist-bump`: you do it standing about 0.6 m apart.
-- `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart; whoever walks first leads, the other beside. It ends when either leaves, sits or lies, the other walks or acts alone, or the world restarts.
-- `together offer follow <their body id>`: once they accept, you follow along their way, 1 to 2.5 m behind. It ends after an hour, when either of you leaves, or when you do anything else.
-- `together offer harvest <their body id>`: you pick into one basket together; then you `act eden:pick:<its id>`, they `eden:pick_too`.
-- `together offer dance <body id> [<body id> ...]`: up to seven dance with you, everyone starting on one beat, until each leaves or walks.
-Offered one, `together accept <id>` or `together decline <id>`.
+To touch another Soul, offer it; it starts only if they accept (`wait` shows `offered`, the touch and its id): `together offer handshake <their body id>` (or `hug`, `high-five`, `fist-bump`: 0.6 m apart); `hold-hands` (side by side; whoever walks first leads; ends when either leaves or acts alone); `follow` (1 to 2.5 m behind); `harvest` (one basket: you `act eden:pick:<its id>`, they `eden:pick_too`); `dance` (up to seven body ids, on one beat). Any other activity: `together kinds` names them, `together offer <word> <name or body id> [...]`. Offered one: `together accept <id or word>` (or `decline`).
+
+A long load or a build takes a crew (`help carry`). Each goes to an end (`carry grip <load id> front`, the other `back`); one `carry offer <their body id>` (answer: its `crew`), they `carry accept <crew id>`; one `carry lift <crew id> <load id>`, then each `carry to <crew id> <x,z>`, and one `carry set-down <crew id>`. A part: `part take <crew id> <part id>`, each `carry to <crew id> <bay id> <slot>`, then `part put <crew id> <bay id> <slot>`. `carry leave <crew id>` lets go.
 
 Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
 

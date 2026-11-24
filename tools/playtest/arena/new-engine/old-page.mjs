@@ -11,7 +11,11 @@
 //      that world's page to the launcher and its stream, agents and pairing to run.sh's programs.
 //   4. `v2-switch.mjs` binds the world to the new engine's stream (run.sh's routes file gains its entry).
 //
-//   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>] [--create]
+//   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>] [--create] [--bodies <dir>]
+//
+// --bodies: a built body catalogue (`v2/tools/import-body/presets.ts --out <dir>`), served at the world's `v2/bodies/`
+// as soul.game's binding `bodiesDir` serves it, so the page draws a body kind a Soul wears (`souls.mjs wear <preset>`;
+// the engine's world needs the same `bodies.json` in its folder to admit the wear).
 //
 // --create (0.135 W1): no old world at all. The launcher makes worlds on the new engine (on wherever it has a binding): the
 // home page's New world goes to the directory's create as the signed-in person, and the world is served at /w/<slug>/
@@ -156,7 +160,7 @@ export async function localCreate({ directory, routesFile, slugs, template, from
 
 /** Brings the old page up on a new-engine world of `template` (with `add`'s things placed), or of `facts` (the template's
  *  facts, edited: the engine's world; the template stays the page's shell). → {page, slug, world, stop()} */
-export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, log = () => {} } = {}) {
+export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, bodies = null, log = () => {} } = {}) {
   dir = resolve(dir);
   const genesis = genesisFor({ template, add, dir });
   for (const [f, what] of [[join(REPO_ROOT, 'apps/web/dist/index.html'), 'apps/web is not built (pnpm --filter web build)'],
@@ -201,7 +205,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     const client = join(dir, 'client');
     execFileSync(process.execPath, [CLIENT_BUILD, '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: REPO_ROOT, stdio: 'ignore' });
     const sw = JSON.parse(execFileSync(process.execPath, [SWITCH, '--binding', binding, '--slug', slug, '--stream', routes.worlds[slug].stream,
-      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--port', String(launcher)], { cwd: REPO_ROOT, encoding: 'utf8' }));
+      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--port', String(launcher), ...(bodies ? ['--bodies', resolve(bodies)] : [])], { cwd: REPO_ROOT, encoding: 'utf8' }));
     if (!sw.page?.v2Stream) throw new Error(`the switch did not take: ${JSON.stringify(sw).slice(0, 300)}`);
     const page = `${base}/w/${slug}/`;
     // the page's inline config names the stream once the launcher has the binding (within a second)
@@ -242,7 +246,7 @@ async function withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPo
 if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
-  const run = await startOldPage({ template: opt('template'), dir: opt('dir', join(REPO_ROOT, '.local/old-page', stamp)), marsWeb: opt('mars-web', MARS_WEB), create: argv.includes('--create'), log: (s) => console.error(`old-page: ${s}`) })
+  const run = await startOldPage({ template: opt('template'), dir: opt('dir', join(REPO_ROOT, '.local/old-page', stamp)), marsWeb: opt('mars-web', MARS_WEB), create: argv.includes('--create'), bodies: opt('bodies', null), log: (s) => console.error(`old-page: ${s}`) })
     .catch((e) => { console.error(`old-page: ${e.message}`); process.exit(1); });
   const quit = async () => { await run.stop(); process.exit(0); };
   process.on('SIGINT', quit); process.on('SIGTERM', quit);

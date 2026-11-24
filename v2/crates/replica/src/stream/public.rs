@@ -616,8 +616,11 @@ struct Plan {
     rows: Vec<(usize, Value)>,
     /// The rows of the nodes the delta makes, each with the index of the old row it goes before, in id order.
     added: Vec<(usize, Value)>,
-    /// Whether the rows made are in the state now.
+    /// Whether the rows made are in the state now (and the rows of the nodes gone out of it).
     added_in: bool,
+    /// The nodes the delta takes out (a Soul's body retired, a thing removed), each with its old row's index and,
+    /// while the plan is in the state, that row; in index order. Never with rows made.
+    removed: Vec<(usize, Id, Value)>,
     timers: Option<Value>,
     links: Option<Value>,
     /// The nodes whose frame the delta changes or makes, each with its new parent (#4192).
@@ -625,9 +628,10 @@ struct Plan {
 }
 
 impl Plan {
-    /// Where old row `i` is once the rows made are in the state.
+    /// Where old row `i` is once the rows made are in the state and the rows gone are out of it.
     fn index_after(&self, i: usize) -> usize {
         i + self.added.iter().filter(|(at, _)| *at <= i).count()
+            - self.removed.iter().filter(|(at, ..)| *at < i).count()
     }
     fn swap(&mut self, state: &mut Value) {
         let Value::Map(m) = state else {
@@ -643,6 +647,10 @@ impl Plan {
                 for (k, (at, _)) in self.added.iter().enumerate().rev() {
                     nodes.remove(at + k);
                 }
+                // The rows gone back at their old indices, the first first, so that each old index holds.
+                for (at, _, row) in &mut self.removed {
+                    nodes.insert(*at, std::mem::replace(row, Value::Array(Vec::new())));
+                }
             }
             for (i, row) in &mut self.rows {
                 std::mem::swap(&mut nodes[*i], row);
@@ -650,6 +658,9 @@ impl Plan {
             if !self.added_in {
                 for (at, row) in self.added.iter().rev() {
                     nodes.insert(*at, row.clone());
+                }
+                for (at, _, row) in self.removed.iter_mut().rev() {
+                    *row = nodes.remove(*at);
                 }
             }
             self.added_in = !self.added_in;
@@ -710,6 +721,15 @@ impl Frames {
             self.children.entry(p).or_default().insert(id);
         }
     }
+    /// A node gone out of the state (it has no children: `in_place` takes out no other).
+    fn remove(&mut self, id: Id) {
+        if let Some(Some(old)) = self.parent.remove(&id)
+            && let Some(c) = self.children.get_mut(&old)
+        {
+            c.remove(&id);
+        }
+        self.children.remove(&id);
+    }
     /// Whether `validate`'s frame walk passes for every node whose frame chain the moves change: the moved nodes and
     /// everything under them. Any other node's chain is as it was, already valid.
     fn allow(&self, moved: &BTreeMap<Id, Option<Id>>) -> bool {
@@ -763,8 +783,13 @@ impl Frames {
 /// still passes for the node and everything under it; rows of key 3, links added, changed or removed, each added one
 /// public and owned by a live node; and rows of key 6, timers set, changed or cleared, each owned by a node of the
 /// state. A row of a node not in the state is a node made (T-late): checked as `validate` checks a node, its id in no
-/// other row, its frame walked as a moved node's. No node goes and no flight changes, so the whole-state checks read
-/// nothing that changes but these rows. Its plan; none when the delta is any other, or when it is unsure: the whole path then decides.
+/// other row, its frame walked as a moved node's. A row of key 2 with no value is a live node gone (a Soul's body
+/// retired, a thing removed): one no node, opaque or flying, has as its frame, that is not a definition, the root or of
+/// a kind the header does not pin, that owns no link and no timer left, and never in a delta that also makes nodes.
+/// No flight changes, so the whole-state checks read nothing that changes but these rows. Its plan; none when the delta
+/// is any other, or when it is unsure: the whole path then decides. (Before a node gone was played in place, every part
+/// that took one out cloned and checked the whole state: about 100 ms a part on Eden's 10,000 nodes, so a viewer
+/// joining late in a generation of such parts waited seconds for its first frame.)
 fn in_place(
     header: &Header,
     state: &Value,
@@ -784,9 +809,10 @@ fn in_place(
     let mut added: Vec<(usize, Id, Value)> = Vec::new();
     let mut ids = BTreeSet::new();
     let mut moved = BTreeMap::new();
+    let mut removed: Vec<(usize, Id, Value)> = Vec::new();
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
         let r = arr(row)?;
-        if r.len() != 2 {
+        if !(1..=2).contains(&r.len()) {
             return Ok(None);
         }
         let id = read_id(&r[0])?;
@@ -794,6 +820,25 @@ fn in_place(
             return Ok(None);
         }
         let none = BTreeSet::new();
+        if r.len() == 1 {
+            // A node gone: a live one, not the root, a definition or of a kind the header does not pin.
+            let Ok(i) = row_position(rows, id)? else {
+                return Ok(None);
+            };
+            let old = NodeState::read(&arr(&rows[i])?[1])?;
+            if id == header.zone
+                || !pinned(header, &none, &old.kind)
+                || crate::kinds::defined::is_definition(old.kind.as_str())
+            {
+                return Ok(None);
+            }
+            // The swap and the encodings' update take the rows gone in index order: any other is left to the whole path.
+            if removed.last().is_some_and(|(last, ..)| *last >= i) {
+                return Ok(None);
+            }
+            removed.push((i, id, Value::Array(Vec::new())));
+            continue;
+        }
         let i = match row_position(rows, id)? {
             Ok(i) => i,
             // A node the cut makes (T-late): a live row of its own, its id in no other row of the state (opaque or in
@@ -839,7 +884,30 @@ fn in_place(
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
     let made: BTreeSet<Id> = added.iter().map(|(_, id, _)| *id).collect();
-    let live = |id: Id| -> R<bool> { Ok(made.contains(&id) || row_index(rows, id)?.is_some()) };
+    let gone: BTreeSet<Id> = removed.iter().map(|(_, id, _)| *id).collect();
+    if !gone.is_empty() && !added.is_empty() {
+        return Ok(None);
+    }
+    let live = |id: Id| -> R<bool> {
+        Ok(made.contains(&id) || (!gone.contains(&id) && row_index(rows, id)?.is_some()))
+    };
+    // No node is moved into a node gone, and none (live, opaque or flying) is left in one.
+    if moved.values().any(|p| p.is_some_and(|p| gone.contains(&p))) {
+        return Ok(None);
+    }
+    if !gone.is_empty() {
+        let mut f = frames.borrow_mut();
+        if f.is_none() {
+            *f = Some(Frames::of(state)?);
+        }
+        let f = f.as_ref().expect("built");
+        if gone
+            .iter()
+            .any(|id| f.children.get(id).is_some_and(|c| !c.is_empty()))
+        {
+            return Ok(None);
+        }
+    }
     // A node made goes into a frame the state already holds (live or opaque) or one made with it: one made inside a
     // private node made with it brings that node's opaque row too, which the whole path works out.
     for (_, id, _) in &added {
@@ -935,11 +1003,33 @@ fn in_place(
             Some(paired(t))
         }
     };
+    if !gone.is_empty() {
+        // The links and timers left: none owned by a node gone (`validate`'s owner checks).
+        for row in arr(links.as_ref().map_or_else(|| field(m, 3), Ok)?)? {
+            let r = arr(row)?;
+            let Some(Ok(link)) = r.get(1).map(LinkState::read) else {
+                return Ok(None);
+            };
+            if gone.contains(&link.ends[usize::from(link.owner == End::Second)]) {
+                return Ok(None);
+            }
+        }
+        for row in arr(timers.as_ref().map_or_else(|| field(m, 6), Ok)?)? {
+            let r = arr(row)?;
+            let Some(t) = r.get(1) else {
+                return Ok(None);
+            };
+            if gone.contains(&read_id(field(map(t)?, 1)?)?) {
+                return Ok(None);
+            }
+        }
+    }
     Ok(Some(Plan {
         v1: v1.clone(),
         rows: out,
         added: added.into_iter().map(|(at, _, row)| (at, row)).collect(),
         added_in: false,
+        removed,
         timers,
         links,
         moved: moved.into_iter().collect(),
@@ -967,11 +1057,18 @@ fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec
                 }
                 // The rows a delta makes go before the old row whose index they carry (T-late).
                 let added: &[(usize, Value)] = plan.map_or(&[], |p| &p.added);
-                h.update(&head(4, (rows.len() + added.len()) as u64));
+                // The rows of the nodes a delta takes out are left out.
+                let gone: BTreeSet<usize> = plan.map_or_else(BTreeSet::new, |p| {
+                    p.removed.iter().map(|(at, ..)| *at).collect()
+                });
+                h.update(&head(4, (rows.len() + added.len() - gone.len()) as u64));
                 let mut made = added.iter().peekable();
                 for (i, e) in enc.iter().enumerate() {
                     while let Some((_, row)) = made.next_if(|(at, _)| *at == i) {
                         h.update(&encoded(row)?);
+                    }
+                    if gone.contains(&i) {
+                        continue;
                     }
                     match over.get(&i) {
                         Some(v) => h.update(&encoded(v)?),
@@ -1296,13 +1393,19 @@ impl PublicPlayer {
                             for (at, e) in made.into_iter().rev() {
                                 enc.insert(at, e);
                             }
+                            for (at, ..) in p.removed.iter().rev() {
+                                enc.remove(*at);
+                            }
                         }
-                        if p.links.is_some() {
+                        if p.links.is_some() || !p.removed.is_empty() {
                             self.incident.replace(None);
                         }
                         if let Some(f) = self.frames.borrow_mut().as_mut() {
                             for (id, to) in &p.moved {
                                 f.reparent(*id, *to);
+                            }
+                            for (_, id, _) in &p.removed {
+                                f.remove(*id);
                             }
                         }
                     }
@@ -1397,6 +1500,11 @@ impl PublicPlayer {
             Some(_) => Ok(nodes.contains_key(id)),
             None => row_index(rows, *id).map(|i| i.is_some()),
         };
+        // In place, a node gone was in the old state and is not in the next.
+        let gone: BTreeSet<Id> = match (whole, old) {
+            (None, Some(p)) => p.removed.iter().map(|(_, id, _)| *id).collect(),
+            _ => BTreeSet::new(),
+        };
         let mut changes = BTreeMap::new();
         for row in arr(field(c, 8)?)? {
             let row = arr(row)?;
@@ -1405,7 +1513,10 @@ impl PublicPlayer {
             };
             let id = read_id(&row[0])?;
             let v = uint(&row[1])?;
-            let (was, is) = (has(&id, &old_nodes)?, has(&id, &new_nodes)?);
+            let (was, is) = (
+                has(&id, &old_nodes)? || gone.contains(&id),
+                has(&id, &new_nodes)?,
+            );
             let reenters = !was && is && flying.contains(&id);
             // Return/Settle need not touch each carried child. A checkpoint-restored flying child has
             // canonical fallback zero; a previously observed child retains its exact known version.
@@ -1433,11 +1544,14 @@ impl PublicPlayer {
                     return bad("missing changed node version");
                 }
             }
-            // A node made (T-late) is a changed node.
+            // A node made (T-late) is a changed node, and so is a node gone.
             for (_, row) in &p.added {
                 if !changes.contains_key(&read_id(&arr(row)?[0])?) {
                     return bad("missing changed node version");
                 }
+            }
+            if gone.iter().any(|id| !changes.contains_key(id)) {
+                return bad("missing changed node version");
             }
         }
         Ok((next_digest, changes, part, version))
@@ -1940,6 +2054,240 @@ mod w16_snapshot_tests {
         assert!(
             corrupt.snapshot().is_err(),
             "duplicate source nodes stay refused"
+        );
+    }
+}
+
+#[cfg(test)]
+mod gone_in_place_tests {
+    use super::*;
+    use crate::effects::{FIXTURE_HEADER, TimerState, fixture_bytes};
+    use crate::ids::Scope;
+    use crate::pose::{Frame, Quat, Support, Vec3};
+
+    fn id(n: u64) -> Id {
+        Id::new(Scope([95; 16]), n).unwrap()
+    }
+
+    /// The zone with public bodies 1 and 2 beside each other, 3 inside 2, and link 6 owned by 1 (to 2).
+    fn world(header: &Header) -> State {
+        let mut state = State::start(header.zone, header.kinds[0].clone());
+        state.next = 40;
+        for (n, parent) in [(1, header.zone), (2, header.zone), (3, id(2))] {
+            let Value::Map(mut local) = (Pose {
+                frame: Frame {
+                    node: parent,
+                    slot: None,
+                },
+                position: Vec3::new(0, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: parent,
+                    height: 0,
+                },
+            })
+            .to_value() else {
+                unreachable!()
+            };
+            local.remove(&1);
+            state.nodes.insert(
+                id(n),
+                NodeState {
+                    kind: header.kinds[0].clone(),
+                    parent: Some(parent),
+                    slot: None,
+                    audience: Audience::Everyone,
+                    fields: BTreeMap::from([(30, Value::Uint(n))]),
+                    place: Some(Value::Map(local)),
+                    motion: None,
+                },
+            );
+        }
+        state.links.insert(
+            id(6),
+            LinkState {
+                ty: header.kinds[0].clone(),
+                ends: [id(1), id(2)],
+                owner: End::First,
+                audience: Audience::Everyone,
+            },
+        );
+        state
+    }
+
+    fn delta_of(header: &Header, before: &State, after: &State) -> BTreeMap<u64, Value> {
+        let d = observation_delta(
+            header,
+            &project(header, before).unwrap(),
+            &project(header, after).unwrap(),
+        )
+        .unwrap();
+        map(&d).unwrap().clone()
+    }
+
+    /// A part that takes a body and its link out plays in place: the same state and digest as the whole path, and
+    /// swapped back it is the state before.
+    #[test]
+    fn a_node_gone_is_played_in_place_with_the_whole_paths_state_and_digest() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let before = world(&header);
+        let mut after = before.clone();
+        after.next += 1;
+        after.nodes.remove(&id(1));
+        after.links.remove(&id(6));
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
+        );
+        let frames = std::cell::RefCell::new(None);
+        let mut plan = in_place(&header, &old, &delta, &frames)
+            .unwrap()
+            .expect("played in place");
+        assert_eq!(plan.removed.len(), 1);
+        let enc: Vec<Vec<u8>> = arr(field(map(&old).unwrap(), 2).unwrap())
+            .unwrap()
+            .iter()
+            .map(|r| encoded(r).unwrap())
+            .collect();
+        assert_eq!(
+            streamed_digest(&old, &enc, Some(&plan)).unwrap(),
+            digest(&new).unwrap(),
+            "the whole path's digest"
+        );
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(s, new, "the whole path's state");
+        plan.swap(&mut s);
+        assert_eq!(s, old, "swapped back, the state before");
+    }
+
+    /// Two nodes gone: in id order they play in place to the whole path's state; with their rows reversed they are
+    /// left to the whole path, which makes the same state.
+    #[test]
+    fn nodes_gone_out_of_id_order_are_left_to_the_whole_path() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut before = world(&header);
+        let four = before.nodes[&id(1)].clone();
+        before.nodes.insert(id(4), four);
+        let mut after = before.clone();
+        after.next += 1;
+        after.nodes.remove(&id(1));
+        after.nodes.remove(&id(4));
+        after.links.remove(&id(6));
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
+        );
+        let frames = || std::cell::RefCell::new(None);
+        let mut plan = in_place(&header, &old, &delta, &frames())
+            .unwrap()
+            .expect("in id order, played in place");
+        assert_eq!(plan.removed.len(), 2);
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(
+            s,
+            apply_observation(&header, &old, &Value::Map(delta.clone())).unwrap()
+        );
+        assert_eq!(s, new);
+        let mut reversed = delta.clone();
+        let Some(Value::Array(rows)) = reversed.get_mut(&2) else {
+            unreachable!()
+        };
+        rows.reverse();
+        assert!(
+            in_place(&header, &old, &reversed, &frames())
+                .unwrap()
+                .is_none(),
+            "out of id order: the whole path"
+        );
+        assert_eq!(
+            apply_observation(&header, &old, &Value::Map(reversed)).unwrap(),
+            new,
+            "the whole path's state"
+        );
+    }
+
+    /// A node gone that something still needs is left to the whole path: one with a node inside it, one owning a link
+    /// left, one owning a timer left, and one gone in a delta that also makes a node.
+    #[test]
+    fn a_node_gone_that_is_still_needed_is_left_to_the_whole_path() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let before = world(&header);
+        let old = project(&header, &before).unwrap();
+        let frames = || std::cell::RefCell::new(None);
+        let gone = |delta: &mut BTreeMap<u64, Value>, n: u64| {
+            let Some(Value::Array(rows)) = delta.get_mut(&2) else {
+                unreachable!()
+            };
+            rows.push(Value::Array(vec![id(n).to_value()]));
+            rows.sort_by_key(|r| read_id(&arr(r).unwrap()[0]).unwrap());
+        };
+        let touched = |s: &State| {
+            let mut after = s.clone();
+            after.next += 1;
+            after
+                .nodes
+                .get_mut(&id(3))
+                .unwrap()
+                .fields
+                .insert(30, Value::Uint(99));
+            delta_of(&header, s, &after)
+        };
+        let mut d = touched(&before);
+        gone(&mut d, 2);
+        assert!(
+            in_place(&header, &old, &d, &frames()).unwrap().is_none(),
+            "a node with a node inside it"
+        );
+        let mut d = touched(&before);
+        gone(&mut d, 1);
+        assert!(
+            in_place(&header, &old, &d, &frames()).unwrap().is_none(),
+            "a node owning a link left"
+        );
+        let mut with_timer = before.clone();
+        with_timer.links.clear();
+        with_timer.timers.insert(
+            id(8),
+            TimerState {
+                node: id(1),
+                due: 5,
+                name: header.kinds[0].clone(),
+            },
+        );
+        let mut d = touched(&with_timer);
+        gone(&mut d, 1);
+        assert!(
+            in_place(
+                &header,
+                &project(&header, &with_timer).unwrap(),
+                &d,
+                &frames()
+            )
+            .unwrap()
+            .is_none(),
+            "a node owning a timer left"
+        );
+        let mut after = before.clone();
+        after.next += 1;
+        after.links.clear();
+        let mut made = after.nodes[&id(2)].clone();
+        made.fields.insert(30, Value::Uint(7));
+        after.nodes.insert(id(7), made);
+        after.nodes.remove(&id(1));
+        assert!(
+            in_place(
+                &header,
+                &old,
+                &delta_of(&header, &before, &after),
+                &frames()
+            )
+            .unwrap()
+            .is_none(),
+            "a node made beside it"
         );
     }
 }

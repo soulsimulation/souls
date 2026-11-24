@@ -96,3 +96,61 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   assert.equal(run(['reseed', sha, 'run', 'tomorrow'], env).status, 1);
   assert.equal(run(['reseed-undo', 'nope', 'check'], env).status, 2);
 });
+
+test('a move gives each world the page\'s body catalogue before its deploy, and the binding the page\'s catalogue folder', () => {
+  const root = join(dir, 'bodies'), bins = join(root, 'bins'), page = join(root, 'page'), out = join(root, 'bundle');
+  const data = join(root, 'data'), etc = join(root, 'etc'), lib = join(root, 'lib'), worlds = join(data, 'worlds/worlds');
+  for (const d of [etc, lib, join(page, 'assets/bodies')]) mkdirSync(d, { recursive: true });
+  const h = (c) => c.repeat(64), cat = (...hs) => JSON.stringify({ format: 'souls/bodies/1', bodies: hs.map((hash, i) => ({ preset: `p${i}`, hash, size: 'standard', height: 1000, hover: 0 })) });
+  const released = cat(h('a'), h('b'));
+  writeFileSync(join(page, 'assets/bodies/bodies.json'), released);
+  exe(join(bins, 'worldd'), 'exit 0');
+  exe(join(bins, 'gatewayd'), 'exit 0');
+  // deploy restarts the world: the stand-in says whether the world's folder held a catalogue then
+  const deployed = join(root, 'deployed');
+  exe(join(bins, 'deploy'), `if [ -f "$WORLDS_ROOT/worlds/$1/bodies.json" ]; then echo "$1 has" >> "${deployed}"; else echo "$1 none" >> "${deployed}"; fi`);
+  exe(join(bins, 'gateway-upgrade'), 'exit 0');
+  exe(join(bins, 'world-aside'), 'exit 0');
+  exe(join(bins, 'assets-check'), 'exit 0');
+  const client = join(root, 'client'), pkg = join(root, 'pkg');
+  for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  mkdirSync(pkg, { recursive: true });
+  // none: no catalogue; fork: none, and a fork's boot pins it; older: one the release's admits; other: one with a body
+  // the release's lacks
+  const world = (name, meta, bodies) => {
+    mkdirSync(join(worlds, name), { recursive: true });
+    writeFileSync(join(worlds, name, 'world.json'), meta);
+    if (bodies) writeFileSync(join(worlds, name, 'bodies.json'), bodies);
+  };
+  world('none', '{"format":"souls/world/1"}');
+  world('fork', '{"format":"souls/world/1","fork":true}');
+  world('older', '{"format":"souls/world/1"}', cat(h('a')));
+  world('other', '{"format":"souls/world/1"}', cat(h('c')));
+  writeFileSync(join(etc, 'cutover-binding.json'), JSON.stringify({ schema: 'souls/cutover-binding/2', worlds: [
+    { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile: '/r.json', clientDir: '/c' },
+    { oldWorldId: 'lab-1', canonicalSlug: 'lab', routesFile: '/r.json', clientDir: '/c', v2Bodies: '/elsewhere/' }] }, null, 2));
+  const bundled = run(['bundle', out, sha, '0.135', bins, page, client, pkg]);
+  assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc };
+  const staged = run(['stage', out], env);
+  assert.equal(staged.status, 0, staged.stdout + staged.stderr);
+  const moved = run(['move', sha, 'none'], env);
+  assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+  const read = (...p) => readFileSync(join(...p), 'utf8');
+  assert.equal(read(worlds, 'none/bodies.json'), released);
+  assert.equal(read(worlds, 'older/bodies.json'), released);
+  assert.equal(read(worlds, 'other/bodies.json'), cat(h('c')));
+  assert.throws(() => read(worlds, 'fork/bodies.json'));
+  assert.deepEqual(read(deployed).trim().split('\n').sort(), ['fork none', 'none has', 'older has', 'other has']);
+  assert.match(moved.stdout, /bodies: other keeps its own catalogue \(this release's does not admit every body it does\)/);
+  const binding = JSON.parse(read(etc, 'cutover-binding.json'));
+  assert.equal(binding.worlds[0].bodiesDir, join(lib, 'web/assets/bodies'));
+  assert.equal(binding.worlds[1].bodiesDir, undefined, 'a world that names its catalogue keeps it');
+  assert.equal(read(lib, 'web/assets/bodies/bodies.json'), released);
+  assert.match(moved.stdout, /bodies: the binding serves .* for eden; 1 already named a catalogue/);
+  // again: nothing changes
+  assert.match(run(['bodies', 'binding'], env).stdout, /for no other world; 2 already named a catalogue/);
+  const pageHash = /"name":"page.tar","hash":"(1220[0-9a-f]{64})"/.exec(read(data, 'releases', sha, 'manifest.json'))[1];
+  assert.match(run(['bodies', 'worlds', join(data, 'worlds/builds', pageHash, 'page.tar')], env).stdout, /bodies: none has this release's catalogue/);
+});
