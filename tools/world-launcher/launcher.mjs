@@ -710,6 +710,19 @@ export async function openLauncher(cfg = {}) {
       return r.ok ? directorySouls((await r.json())?.souls, moved, (w) => describe(w).url) : [];
     } catch { return []; }   // the directory unreachable: the moved world's Souls are not listed, every other world's are
   }
+  /** A world the new engine runs: the signed-in person's agents (the page's "your agents", join-api.ts) are the directory's
+   *  account logins (account.rs: POST /v1/account/agents, POST /v1/account/agents/<id>/revoke), asked there with their own
+   *  sign-in as movedSouls asks; the page's GET list and POST revoke keep their old shape and paths. */
+  async function movedAgents(req, res, rest) {
+    if (req.method !== (rest === '/v1/account/agents' ? 'GET' : 'POST')) { json(res, 405, { ok: false, code: 'method', message: 'Method not allowed.' }, { 'cache-control': 'no-store' }); return; }
+    const tok = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1], dev = !auth && !!tok?.startsWith('dev:');
+    if (!tok) { json(res, 401, { ok: false, code: 'signin-required', message: 'Sign in first.' }, { 'cache-control': 'no-store' }); return; }
+    try {
+      const r = await fetch(`${directoryUrl}${rest}`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${tok}` }) }, body: JSON.stringify(dev ? { test_person: tok.slice(4, 40) } : {}) });
+      res.writeHead(r.status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(await r.text());
+    } catch { json(res, 503, { ok: false, code: 'directory.unreachable', message: 'Your agents cannot be read just now; try again.' }, { 'retry-after': '5', 'cache-control': 'no-store' }); }
+  }
   // D2 (0.134): a world with no old twin, one the routes file routes to the new engine and no binding binds (cutover.mjs
   // withRouteOnly). It has no registry row and no old process: the launcher serves its page (routeOnlyPage) and lists it.
   // Its name, template and unlisted flag come from the directory's world list (`GET /v1/worlds`, asked at most every
@@ -1652,6 +1665,9 @@ export async function openLauncher(cfg = {}) {
       }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
       const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
+      // before the fence, which refuses a moved world's writes: its agents' revoke is the directory's, not the old world's
+      const agentsRest = cutoverSlug ? path.replace(/^\/(?:w|__sim\/worlds)\/[^/]+/, '') : '';
+      if (cutoverWorld && /^\/v1\/account\/agents(?:\/[^/]{1,128}\/revoke)?$/.test(agentsRest) && cutover.v2Stream(cutoverWorld)) { await movedAgents(req, res, agentsRest); return; }
       if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld), config: () => movedConfig(cutoverWorld) })) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
