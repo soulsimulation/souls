@@ -70,7 +70,13 @@ AWS_ACCESS_KEY_ID=stand-in-key
 AWS_SECRET_ACCESS_KEY=new-provider-secret
 EOF
 chmod 600 "$D/etc/store-new.env"
-install -m 755 "$t/store-copy" "$D/data/oneoff/store-copy"
+cat > "$D/data/oneoff/store-copy" << EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$D/copy.log"
+case " \$* " in *" --world \$(cat "$D/fail-copy" 2> /dev/null) "*) echo "store-copy: planted failure" >&2; exit 1 ;; esac
+exec "$t/store-copy" "\$@"
+EOF
+chmod 755 "$D/data/oneoff/store-copy"
 
 # systemd's part: a unit is a loop that starts its command again 100 ms after it ends, with the environment its
 # EnvironmentFile= lines give at that start (the unit's own list, then each drop-in's, as systemd orders them).
@@ -99,6 +105,10 @@ case $1 in
     p=$(pid); [ -z "$p" ] || { kill "$p" 2> /dev/null; for _ in $(seq 150); do kill -0 "$p" 2> /dev/null || break; sleep 0.1; done; kill -9 "$p" 2> /dev/null; }
     rm -f "$D/units/$u.loop" "$D/units/$u.pid"
     ;;
+  restart)
+    "$0" stop "$u.service"
+    exec "$0" start "$u.service"
+    ;;
   start)
     t=${u%%@*} i=${u#*@}
     [ "$t" = "$u" ] && i=
@@ -115,6 +125,8 @@ case $1 in
           env | grep -E "^(DIRECTORY_STORE_|SOULS_BACKUP_URL|WORLDD_STORE|AWS_)" > "$D/units/$u.env"
           # The planted fault: a unit whose store is the one named in fail-on exits at once.
           if [ -f "$D/fail-on" ] && grep -qF "$(cat "$D/fail-on")" "$D/units/$u.env"; then exit 1; fi
+          # And a unit named in fail-unit exits at once, whatever its store.
+          if [ -f "$D/fail-unit" ] && [ "$(cat "$D/fail-unit")" = "$u" ]; then exit 1; fi
           exec bash -c "exec $cmd"
         ) >> "$D/units/$u.out" 2>&1 &
         echo $! > "$D/units/$u.pid"
@@ -141,7 +153,7 @@ echo "env WORLDS_ROOT=. SUPERVISOR_WAKE=/usr/bin/true $t/supervisor alarms" > "$
 echo "sleep 86400" > "$D/units/souls-directory.cmd"
 
 export SWITCH_DRY=$D SWITCH_ETC=$D/etc SWITCH_DATA=$D/data SWITCH_UNITS=$D/systemd SWITCH_SYSTEMCTL=$D/shim/systemctl
-export D SWITCH_START_S=60 SWITCH_STEADY_S=5 SWITCH_UNIT_ENV="cat_env"
+export D SWITCH_START_S=30 SWITCH_STEADY_S=5 SWITCH_UNIT_ENV="cat_env"
 cat_env() { cat "$D/units/$1.env" 2> /dev/null; }
 export -f cat_env
 SW="bash $repo/v2/tools/ops/store-switch.sh"
@@ -214,14 +226,45 @@ echo "--- check"
 out=$($SW check 2>&1) && ok "check passed" || no "check: $out"
 echo "$out"
 
-echo "--- undo"
-out=$($SW undo 2>&1) && ok "undo ran" || no "undo: $out"
+echo "--- undo, with the directory planted to fail at its start"
+echo souls-directory > "$D/fail-unit"
+calls=$(wc -l < "$D/copy.log")
+out=$($SW undo 2>&1) && no "undo said it was done with the directory down" || ok "undo failed, and said so"
 echo "$out"
-cmp -s "$D/etc/secrets.env" "$D/secrets.before" && ok "secrets.env is the backup again" || no "secrets.env not restored"
+printf '%s' "$out" | grep -q "souls-directory: NOT up" && printf '%s' "$out" | grep -q "the settings are restored, but these are not up: souls-directory" &&
+  ! printf '%s' "$out" | grep -q "^store-switch: undone" && ok "undo named the unit not up and did not say undone" || no "undo's report"
+cmp -s "$D/etc/secrets.env" "$D/secrets.before" && ok "the settings were restored first" || no "secrets.env not restored"
+$SYS is-active --quiet souls-alarms.service && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/souls-alarms.env" && ok "the alarm daemon was still started, on the old store" || no "alarms not up after a failed undo"
+rm -f "$D/fail-unit"
+out=$($SW undo 2>&1) && ok "undo run again finished" || no "undo again: $out"
+echo "$out"
+$SYS is-active --quiet souls-directory.service && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/souls-directory.env" && ok "the directory is up on the old store" || no "directory not up"
+[ "$(wc -l < "$D/copy.log")" = "$calls" ] && ok "undo called the copy tool not once: it writes to no bucket" || no "undo copied: $(tail -n +$((calls + 1)) "$D/copy.log")"
 for w in "${NAMES[@]}"; do
   $SYS is-active --quiet "worldd@$w.service" && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/worldd@$w.env" && ok "world ${w:0:12}… back on the old store" || no "world ${w:0:12}… not back"
 done
+calls=$(wc -l < "$D/copy.log")
 out=$($SW check 2>&1) && ok "check passes after undo" || no "check after undo: $out"
+printf '%s' "$out" | grep -q "probe skipped" && [ "$(wc -l < "$D/copy.log")" = "$calls" ] && ok "check after undo probed nothing: it never writes to the old bucket" || no "check after undo wrote"
+
+# A world whose copy fails mid-move: the run stops there, that world back on the old store at once; the world before
+# it stays moved, and undo brings it back.
+echo "--- the second world's copy fails"
+echo "${NAMES[1]}" > "$D/fail-copy"
+out=$($SW apply 2>&1) && no "apply went through a failed copy" || true
+echo "$out" | tail -6
+rm -f "$D/fail-copy"
+printf '%s' "$out" | grep -q "world ${NAMES[1]}: the copy of its writes failed; switching it back now" && printf '%s' "$out" | grep -q "stopped at world ${NAMES[1]}" &&
+  ok "the failed copy was caught and the run stopped at that world" || no "the failed copy was not caught"
+w=${NAMES[1]}
+[ ! -f "$D/systemd/worldd@$w.service.d/50-store-switch.conf" ] && $SYS is-active --quiet "worldd@$w.service" && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/worldd@$w.env" &&
+  ok "world ${w:0:12}… is up on the old store, never started on the new one" || no "world ${w:0:12}… after the failed copy"
+grep -q "^DIRECTORY_STORE_URL=$NEW/" "$D/units/worldd@${NAMES[0]}.env" && ok "the world before it stays moved" || no "the first world"
+cmp -s "$D/etc/secrets.env" "$D/secrets.before" && ok "secrets.env unchanged" || no "secrets.env changed"
+out=$($SW undo 2>&1) && ok "undo of the stopped run ran" || no "undo of the stopped run: $out"
+for w in "${NAMES[@]}"; do
+  $SYS is-active --quiet "worldd@$w.service" && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/worldd@$w.env" && ok "world ${w:0:12}… back on the old store" || no "world ${w:0:12}… not back"
+done
 
 # A world that does not come back on the new store is switched back at once (a planted fault: a world unit whose
 # store is the new bucket exits at start), and the run stops there.

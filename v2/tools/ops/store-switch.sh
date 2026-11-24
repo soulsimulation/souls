@@ -19,10 +19,10 @@
 #
 #   bash store-switch.sh plan  [<new store file>]   what would change, and the copy's counts; changes nothing
 #   bash store-switch.sh apply [<new store file>]   the steps above; run again after a stop, it resumes
-#   bash store-switch.sh check                      each store unit's effective store against secrets.env, and a probe
-#                                                   write, read and delete under probe/store-switch/ in each bucket
-#   bash store-switch.sh undo                       the last apply backwards: each world, then the services, back on the
-#                                                   backed-up settings, with what they wrote meanwhile copied back
+#   bash store-switch.sh check                      each store unit's effective store against secrets.env, and, when
+#                                                   a move installed it, a probe write, read and delete in each bucket
+#   bash store-switch.sh undo                       the last apply backwards: the backed-up settings first, then each
+#                                                   world and every service restarted on them; writes to no bucket
 #
 # The new store file (default /etc/souls/store-new.env, root, mode 600) holds STORE_BASE, AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY and optionally AWS_DEFAULT_REGION (R2's `auto` when absent). Keys are read from files by path
@@ -154,70 +154,121 @@ healthy() {
   return 1
 }
 
-# <from> <to> [--world <w>]...: each bucket setting, checked by count and size. Its manifest in $MANIFESTS (each key's
-# target ETag as last written) keeps what a moved world has written at the target since from being copied over.
+# <from> <to> [--world <w>]...: each bucket setting, checked by count and size; fails on the first that fails. Its
+# manifest in $MANIFESTS (each key's target ETag as last written) keeps what a moved world has written at the target
+# since from being copied over. Every step in the functions below checks its own status: they run under `if` and
+# `||`, where `set -e` does not stop them.
 copy_all() {
-  local from=$1 to=$2 n
+  local from=$1 to=$2 n names
   shift 2
-  for n in $(buckets "$from"); do
-    "$COPY" copy --from "$from" --to "$to" --setting "$n" ${MANIFESTS:+--manifest "$MANIFESTS/manifest.$n"} "$@"
+  names=$(buckets "$from") || return 1
+  for n in $names; do
+    "$COPY" copy --from "$from" --to "$to" --setting "$n" ${MANIFESTS:+--manifest "$MANIFESTS/manifest.$n"} "$@" || return 1
   done
+  return 0
 }
 
 dropin() { echo "$UNITS/worldd@$1.service.d/$DROPIN"; }
 
-# One world onto the store `to` names: stopped, its writes since copied, pointed there, started, checked.
+# A world back on the store it was on: its drop-in removed, started, checked. Says which.
+back_on_old() {
+  local w=$1
+  $SYSTEMCTL stop "worldd@$w.service" || true
+  rm -f "$(dropin "$w")"
+  $SYSTEMCTL daemon-reload || say "world $w: daemon-reload failed"
+  if $SYSTEMCTL start "worldd@$w.service" && healthy "worldd@$w.service"; then
+    say "world $w: up again on the store it was on"
+  else
+    say "world $w: NOT up on either store: see 'supervisor health $w'"
+  fi
+}
+
+# One world onto the store `to` names: stopped, its writes since copied, pointed there, started, checked. Any step
+# that fails switches it back at once and returns 1.
 switch_world() {
   local w=$1 from=$2 to=$3 store=$4 d
   d=$(dropin "$w")
   say "world $w: stopping"
-  $SYSTEMCTL stop "worldd@$w.service"
-  copy_all "$from" "$to" --world "$w"
-  mkdir -p "$(dirname "$d")"
-  printf '# store-switch.sh (0.133 ST2): this world alone on the store it moves to, until the move ends.\n[Service]\nEnvironmentFile=%s\n' "$store" > "$d.tmp"
-  chmod 644 "$d.tmp"
-  mv "$d.tmp" "$d"
-  $SYSTEMCTL daemon-reload
-  $SYSTEMCTL start "worldd@$w.service"
-  if healthy "worldd@$w.service"; then
+  if ! $SYSTEMCTL stop "worldd@$w.service"; then
+    say "world $w: did not stop; starting it again where it was"
+    back_on_old "$w"
+    return 1
+  fi
+  if ! copy_all "$from" "$to" --world "$w"; then
+    say "world $w: the copy of its writes failed; switching it back now (it never ran on the store it moves to)"
+    back_on_old "$w"
+    return 1
+  fi
+  if ! { mkdir -p "$(dirname "$d")" &&
+    printf '# store-switch.sh (0.133 ST2): this world alone on the store it moves to, until the move ends.\n[Service]\nEnvironmentFile=%s\n' "$store" > "$d.tmp" &&
+    chmod 644 "$d.tmp" && mv "$d.tmp" "$d" && $SYSTEMCTL daemon-reload; }; then
+    say "world $w: its drop-in could not be written; switching it back now"
+    rm -f "$d.tmp"
+    back_on_old "$w"
+    return 1
+  fi
+  if $SYSTEMCTL start "worldd@$w.service" && healthy "worldd@$w.service"; then
     say "world $w: up on the store it moves to"
     return 0
   fi
   say "world $w: did not stay up on the store it moves to; switching it back now"
-  $SYSTEMCTL stop "worldd@$w.service"
-  rm -f "$d"
-  $SYSTEMCTL daemon-reload
-  $SYSTEMCTL start "worldd@$w.service"
-  healthy "worldd@$w.service" && say "world $w: up again on the store it was on" || say "world $w: NOT up on either store: see 'supervisor health $w'"
+  back_on_old "$w"
   return 1
 }
 
-# The move from the settings `from` to `to`, its working files in `run`; resumes a stopped run.
+# Starts each of SERVICES, checked; prints and returns 1 if any is not up, having tried them all.
+start_services() {
+  local u bad=0
+  for u in "${SERVICES[@]}"; do
+    if $SYSTEMCTL start "$u.service" && healthy "$u.service"; then say "$u: up"; else
+      say "$u: NOT up"
+      bad=1
+    fi
+  done
+  return $bad
+}
+
+# The move from the settings `from` to `to`, its working files in `run`; resumes a stopped run. A failed step stops
+# it with every unit running: a world switched back, or the services started again on the settings they had; a
+# service that does not come up on the new settings undoes the whole move at once.
 move() {
   local from=$1 to=$2 run=$3 w u
   MANIFESTS=$run
-  store_only "$to" > "$run/store.env"
+  store_only "$to" > "$run/store.env" || die "cannot write $run/store.env"
   say "copying every object to the store it moves to (the one it leaves is only read)"
-  copy_all "$from" "$to"
+  copy_all "$from" "$to" || die "the copy failed; no world was switched: run the same command again to resume"
   for w in $(worlds); do
     if grep -qxF "$w" "$run/worlds" 2> /dev/null; then
       say "world $w: already moved"
       continue
     fi
-    switch_world "$w" "$from" "$to" "$run/store.env" || die "stopped at world $w (switched back). The worlds listed in $run/worlds are on the store it moves to: run the same command again to go on, or undo"
-    echo "$w" >> "$run/worlds"
+    if ! switch_world "$w" "$from" "$to" "$run/store.env"; then
+      die "stopped at world $w (switched back). The worlds listed in $run/worlds are on the store it moves to: run the same command again to go on, or undo"
+    fi
+    echo "$w" >> "$run/worlds" || die "cannot record world $w in $run/worlds: undo"
   done
   say "stopping ${SERVICES[*]}; copying what they wrote since"
-  for u in "${SERVICES[@]}"; do $SYSTEMCTL stop "$u.service"; done
-  copy_all "$from" "$to"
-  install -m 600 "$to" "$SECRETS.next"
-  mv "$SECRETS.next" "$SECRETS"
-  for w in $(cat "$run/worlds" 2> /dev/null); do rm -f "$(dropin "$w")"; done
-  $SYSTEMCTL daemon-reload
   for u in "${SERVICES[@]}"; do
-    $SYSTEMCTL start "$u.service"
-    healthy "$u.service" || die "$u did not stay up on the new settings: run undo"
+    if ! $SYSTEMCTL stop "$u.service"; then
+      start_services || true
+      die "$u did not stop; the services run on the settings they had. Run the same command again, or undo"
+    fi
   done
+  if ! copy_all "$from" "$to"; then
+    start_services || true
+    die "the last copy failed; the services run on the settings they had. Run the same command again, or undo"
+  fi
+  if ! { install -m 600 "$to" "$SECRETS.next" && mv "$SECRETS.next" "$SECRETS"; }; then
+    start_services || true
+    die "secrets.env could not be written; the services run on the settings they had. Run the same command again, or undo"
+  fi
+  for w in $(cat "$run/worlds" 2> /dev/null); do rm -f "$(dropin "$w")"; done
+  $SYSTEMCTL daemon-reload || say "daemon-reload failed"
+  if ! start_services; then
+    say "a service did not come up on the new settings: undoing the move now"
+    undo
+    die "the move was undone: every unit is back on the settings it had"
+  fi
   say "secrets.env names the store it moved to; every world and service reads it"
 }
 
@@ -265,42 +316,56 @@ apply() {
   say "done. Check: bash $0 check. Undo: bash $0 undo"
 }
 
+# The last move, or one that stopped partway, backwards. It writes nothing to either bucket: the settings first
+# (secrets.env and directory.env from the backup, every move drop-in removed), then each world that ran on the store
+# moved to is restarted on them, one at a time, then every service. A unit that does not come up is reported and
+# the rest still go on; the move's record stays, so undo can be run again. A world's records written since the move
+# ship again from its own log to the store it is back on.
 undo() {
-  local run w back
-  if [ -L "$STATE/current" ]; then
-    # A move that stopped partway: its worlds back, with what they wrote meanwhile; secrets.env never changed.
-    run=$(cd "$STATE/current" && pwd)
-    back=$run/undo
-    mkdir -p -m 700 "$back"
-    MANIFESTS=$back
-    for w in $(cat "$run/worlds" 2> /dev/null); do
-      say "world $w: stopping"
-      $SYSTEMCTL stop "worldd@$w.service"
-      copy_all "$run/secrets.env.after" "$run/secrets.env.before" --world "$w"
-      rm -f "$(dropin "$w")"
-      $SYSTEMCTL daemon-reload
-      $SYSTEMCTL start "worldd@$w.service"
-      healthy "worldd@$w.service" || die "world $w did not stay up on the old store: see 'supervisor health $w'"
-    done
-    rm "$STATE/current"
-    say "undone: every world back on the settings in $run/secrets.env.before"
-    return
+  local run link w u failed=() list d
+  if [ -L "$STATE/current" ]; then link=current; elif [ -L "$STATE/last" ]; then link=last; else die "no move to undo"; fi
+  run=$(cd "$STATE/$link" && pwd)
+  if ! cmp -s "$SECRETS" "$run/secrets.env.after" && ! cmp -s "$SECRETS" "$run/secrets.env.before"; then
+    die "secrets.env is neither the move's nor the backup: restore $run/secrets.env.before by hand"
   fi
-  [ -L "$STATE/last" ] || die "no move to undo"
-  run=$(cd "$STATE/last" && pwd)
-  cmp -s "$SECRETS" "$run/secrets.env.after" || die "secrets.env is not what the last move installed: restore $run/secrets.env.before by hand"
-  back=$run/undo
-  mkdir -p -m 700 "$back"
-  rm -f "$back/worlds" "$back"/manifest.*
-  move "$run/secrets.env.after" "$run/secrets.env.before" "$back"
-  [ ! -f "$run/directory.env.before" ] || install -m "$(stat -c %a "$run/directory.env.before" 2> /dev/null || stat -f %Lp "$run/directory.env.before")" "$run/directory.env.before" "$ETC/directory.env"
-  rm "$STATE/last"
-  say "undone: secrets.env is $run/secrets.env.before again"
+  # 1. The settings, before any unit is touched.
+  if ! cmp -s "$SECRETS" "$run/secrets.env.before"; then
+    { install -m 600 "$run/secrets.env.before" "$SECRETS.next" && mv "$SECRETS.next" "$SECRETS"; } || die "secrets.env could not be restored; no unit was touched"
+  fi
+  if [ -f "$run/directory.env.before" ]; then
+    cp -p "$run/directory.env.before" "$ETC/directory.env" || die "directory.env could not be restored; no unit was touched"
+  fi
+  for d in "$UNITS"/worldd@*.service.d/"$DROPIN"; do [ ! -f "$d" ] || rm -f "$d" || die "cannot remove $d"; done
+  $SYSTEMCTL daemon-reload || failed+=(daemon-reload)
+  say "settings restored from $run/secrets.env.before"
+  # 2. The worlds that read the store moved to: the moved ones, and after a finished move every running world.
+  list=$(cat "$run/worlds" 2> /dev/null || true)
+  [ "$link" = current ] || list=$(printf '%s\n%s\n' "$list" "$(worlds)")
+  for w in $(printf '%s\n' "$list" | sed '/^$/d' | sort -u); do
+    if $SYSTEMCTL restart "worldd@$w.service" && healthy "worldd@$w.service"; then say "world $w: up on the settings it had"; else
+      say "world $w: NOT up: see 'supervisor health $w'"
+      failed+=("worldd@$w")
+    fi
+  done
+  # 3. Every service, started whatever state a stopped move left it in.
+  for u in "${SERVICES[@]}"; do
+    if $SYSTEMCTL restart "$u.service" && healthy "$u.service"; then say "$u: up on the settings it had"; else
+      say "$u: NOT up"
+      failed+=("$u")
+    fi
+  done
+  if [ ${#failed[@]} -gt 0 ]; then
+    say "undo: the settings are restored, but these are not up: ${failed[*]}. Fix them, then run undo again"
+    exit 1
+  fi
+  rm -f "$STATE/$link"
+  say "undone: every unit runs on $run/secrets.env.before"
 }
 
 check() {
-  local u n want got bad=0 env w units
+  local u n want got bad=0 env w units moved=0
   [ -r "$SECRETS" ] || die "no $SECRETS"
+  [ -L "$STATE/last" ] && cmp -s "$SECRETS" "$STATE/last/secrets.env.after" && moved=1
   units=("${SERVICES[@]}")
   for w in $(worlds); do units+=("worldd@$w"); done
   for u in "${units[@]}"; do
@@ -319,7 +384,12 @@ check() {
     done
   done
   for w in $(worlds); do [ ! -f "$(dropin "$w")" ] || { echo "  worldd@$w: still has the move's drop-in"; bad=1; }; done
-  for n in $(buckets "$SECRETS"); do "$COPY" probe --settings "$SECRETS" --setting "$n" || bad=1; done
+  # The probe writes, so only in the bucket a move installed; the store from before a move is never written here.
+  if [ "$moved" = 1 ]; then
+    for n in $(buckets "$SECRETS"); do "$COPY" probe --settings "$SECRETS" --setting "$n" || bad=1; done
+  else
+    echo "  probe skipped: secrets.env names the store from before any move, which check never writes"
+  fi
   [ "$bad" = 0 ] && say "check passed" && return 0
   say "check found the differences above"
   return 1

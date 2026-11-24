@@ -45,8 +45,9 @@ alone (object read and write). Creating it and the token is the release owner's 
    command line.
 3. Build the copy tool from the release's commit, `cargo build --release --locked -p ops --bin store-copy` in `v2/`,
    and put it at `/var/lib/souls/oneoff/store-copy` (root, 755), its SHA-256 noted in the release record.
-4. If the install predates 0.133 ST2, run the install again, so `souls-alarms` reads secrets.env (the plan refuses
-   until it does).
+4. Run the install from this release (`install.sh apply`). Production has no `souls-alarms` unit yet: this step
+   installs the alarm daemon for the first time (enables and starts it), with its drop-in reading secrets.env. The plan
+   refuses until it does.
 
 ## Commands
 
@@ -89,12 +90,20 @@ ends `secrets.env names the store it moved to; every world and service reads it`
 secrets.env's` for each, a `probe write, read back, delete and empty listing: ok` per bucket, and `check passed`.
 No line names a host, a bucket's address or a key.
 
+Every step checks its own result. A world whose stop, copy, drop-in or start fails is switched back at once and the
+run stops there, every unit running. A failed last copy starts the services again on the settings they had. A service
+that does not come up on the new settings undoes the whole move at once.
+
 ## Undo
 
-`undo` after a finished move runs the same steps backwards: each world back on the backed-up settings, with what it
-wrote to the new bucket meanwhile copied back to its keys in the old one (the new engine's own keys only), then the
-services, and the backed-up `secrets.env` installed. After a run that stopped partway, it brings back only the worlds
-the run moved; `secrets.env` was never changed.
+`undo` writes to no bucket. It restores the settings first: the backed-up `secrets.env` and `directory.env`, and every
+move drop-in removed. Then it restarts each world that read the store moved to (after a finished move, every running
+world; after a run that stopped, the worlds it moved), one at a time, and then every service, whatever state a stopped
+run left it in. A unit that does not come up is named and the rest still go on; undo then ends with `the settings are
+restored, but these are not up: ...` and exit 1, and keeps the move's record so it can be run again. Only when every
+unit is up does it print `undone`. A world's records written to the new bucket meanwhile ship again from its own log
+to the old one; the directory's writes there (claims, list rows) are not carried back. `check` writes only to a
+bucket a move installed: after an undo it reads, and skips the probe.
 
 ## The dry run
 
@@ -103,4 +112,6 @@ machine: two worlds seeded and served by `worldd serve` under the supervisor, th
 (the old provider) and moved to a second (the new), with a `systemctl` that reads each unit's environment files at
 each start as systemd does. It checks the plan changes nothing, each world and the alarm daemon run on the new store
 after apply, the old bucket's objects are unchanged, check passes, undo brings both back, and a world planted to fail
-on the new store is switched back at once.
+on the new store, and one whose copy fails mid-move, are each switched back at once. An undo with a service planted to
+fail restores the settings first, starts the rest, says which unit is not up and does not say `undone`; neither undo
+nor check after it calls the copy tool.
