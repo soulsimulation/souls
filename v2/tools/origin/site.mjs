@@ -159,7 +159,8 @@ export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/soul
     if (isClient) {
       const a = answer(client, path);
       if (!a) json(res, 404, { ok: false, code: 'not-found' });
-      else res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : a.body);
+      // R16: the replica's files carry their content hash as an ETag (serve.mjs), for an open page's renewal check.
+      else res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-cache', ...(a.etag ? { etag: a.etag } : {}) }).end(req.method === 'HEAD' ? undefined : a.body);
       return true;
     }
     if (path === '/v1/feed') feed.serve(req, res, url);

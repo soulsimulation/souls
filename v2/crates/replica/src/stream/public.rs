@@ -419,13 +419,34 @@ pub fn baseline(header: &Header, state: &State, record: u64) -> R<Vec<u8>> {
     baseline_from_projection(header, project(header, state)?, record)
 }
 pub fn baseline_from_projection(header: &Header, state: Value, record: u64) -> R<Vec<u8>> {
+    baseline_claimed(header, state, record, None)
+}
+/// [`baseline_from_projection`] made under a directory claim (R16): field 5 is the claim's epoch. A generation's
+/// address is its baseline's SHA-256 and the stream is deterministic, so two writers on one chain (a lost machine's
+/// tail and the machine that took over) could make the same baseline at the same cursor; each claim's epoch is its
+/// own, so theirs never share an address. With `None`, the four fields of a baseline made before.
+pub fn baseline_claimed(
+    header: &Header,
+    state: Value,
+    record: u64,
+    epoch: Option<u64>,
+) -> R<Vec<u8>> {
     validate(header, &state)?;
-    encoded(&Value::Map(BTreeMap::from([
+    let mut m = BTreeMap::from([
         (1, Value::Uint(FORMAT)),
         (2, Value::Bytes(header.hash().to_bytes())),
         (3, state),
         (4, Value::Uint(record)),
-    ])))
+    ]);
+    if let Some(epoch) = epoch {
+        m.insert(5, Value::Uint(epoch));
+    }
+    encoded(&Value::Map(m))
+}
+/// The claim's epoch a baseline was made under (R16, field 5), or none for a baseline made with no claim or before.
+pub fn baseline_epoch(baseline: &[u8]) -> R<Option<u64>> {
+    let m = read_map(baseline, "public baseline")?;
+    m.get(&5).map(uint).transpose()
 }
 /// Integrity-bound observation, computed only after the producer canonically applied a whole source part.
 /// The delta replaces only changed top-level projection fields; no historical effects are manufactured.
@@ -1020,7 +1041,9 @@ impl PublicPlayer {
     pub fn start(header: &[u8], baseline: &[u8]) -> R<Self> {
         let header = Header::read(header)?;
         let m = read_map(baseline, "public baseline")?;
-        if m.len() != 4
+        // Four fields, or five with the claim's epoch (R16, [`baseline_claimed`]).
+        let claimed = m.len() == 5 && matches!(m.get(&5), Some(Value::Uint(_)));
+        if !(m.len() == 4 || claimed)
             || uint(field(&m, 1)?)? != FORMAT
             || bytes(field(&m, 2)?)? != header.hash().to_bytes()
         {
@@ -1941,5 +1964,56 @@ mod w16_snapshot_tests {
             corrupt.snapshot().is_err(),
             "duplicate source nodes stay refused"
         );
+    }
+}
+
+#[cfg(test)]
+mod r16_claimed_baseline_tests {
+    use super::*;
+    use crate::effects::{FIXTURE_HEADER, fixture_bytes};
+    use crate::ids::sha256;
+
+    /// R16: a baseline made under a claim carries its epoch, so two claims' generations at the same state and cursor
+    /// have different addresses; each plays to the same state, and a baseline made before (four fields) still plays.
+    #[test]
+    fn r16_a_claimed_baseline_has_its_own_address_and_an_old_one_still_plays() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let state = project(&header, &State::start(header.zone, header.kinds[0].clone())).unwrap();
+        let old = baseline_from_projection(&header, state.clone(), 7).unwrap();
+        let a = baseline_claimed(&header, state.clone(), 7, Some(1)).unwrap();
+        let b = baseline_claimed(&header, state.clone(), 7, Some(2)).unwrap();
+        assert_eq!(
+            baseline_claimed(&header, state.clone(), 7, None).unwrap(),
+            old,
+            "no epoch: the bytes made before"
+        );
+        assert_eq!(
+            baseline_claimed(&header, state, 7, Some(1)).unwrap(),
+            a,
+            "deterministic"
+        );
+        let ids: BTreeSet<_> = [&old, &a, &b].iter().map(|x| sha256(x)).collect();
+        assert_eq!(ids.len(), 3, "each claim's generation has its own address");
+        let players: Vec<PublicPlayer> = [&old, &a, &b]
+            .iter()
+            .map(|x| PublicPlayer::start(header.stored(), x).unwrap())
+            .collect();
+        for p in &players {
+            assert_eq!(p.hash().unwrap(), players[0].hash().unwrap());
+            assert_eq!(p.record(), 7);
+        }
+        assert_eq!(baseline_epoch(&old).unwrap(), None);
+        assert_eq!(baseline_epoch(&b).unwrap(), Some(2));
+        // A fifth field that is not an epoch, or a sixth, is refused.
+        let Value::Map(mut m) = crate::encode::decode(&a).unwrap().value else {
+            unreachable!()
+        };
+        m.insert(5, Value::Bytes(vec![1]));
+        let bad = encoded(&Value::Map(m.clone())).unwrap();
+        assert!(PublicPlayer::start(header.stored(), &bad).is_err());
+        m.insert(5, Value::Uint(1));
+        m.insert(6, Value::Uint(1));
+        let bad = encoded(&Value::Map(m)).unwrap();
+        assert!(PublicPlayer::start(header.stored(), &bad).is_err());
     }
 }

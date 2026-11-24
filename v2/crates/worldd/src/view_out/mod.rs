@@ -74,7 +74,9 @@ mod backup;
 #[cfg(test)]
 mod tests;
 
-pub use backup::{Drain as BackupDrain, State as BackupState, beside as backup_beside};
+pub use backup::{
+    Claim as BackupClaim, Drain as BackupDrain, State as BackupState, beside as backup_beside,
+};
 
 use std::fs;
 use std::io::Write as _;
@@ -1201,6 +1203,11 @@ pub struct PublicWriter<S> {
     /// passed `fresh_at`, the cursor recovered ([`PublicWriter::fresh_generation`]).
     fresh: bool,
     fresh_at: u64,
+    /// R16: the directory claim's epoch this writer runs under, carried in every baseline it makes, so its generations
+    /// never share an address with another claim's ([`replica::stream::public::baseline_claimed`]); none: no claim.
+    epoch: Option<u64>,
+    /// R16: the host its spool's clean-stop mark names ([`PublicWriter::mark_clean`]).
+    host: String,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1353,6 +1360,28 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
     }
+}
+/// R16: this machine's identity for a spool's clean-stop mark: `/etc/machine-id` where there is one, else its host
+/// name. Never a claim's machine name, which is `local` on every machine that sets none.
+pub fn host_identity() -> String {
+    if let Ok(id) = fs::read_to_string("/etc/machine-id")
+        && !id.trim().is_empty()
+    {
+        return format!("machine-id:{}", id.trim());
+    }
+    let name = fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        });
+    if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
+        return format!("host:{}", name.trim());
+    }
+    String::new()
 }
 pub struct PublicStart<'a> {
     pub root: &'a Path,
@@ -1538,7 +1567,7 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// [`PublicWriter::open`] for a world whose kinds declare `closed` (#3948): what such a container holds is kept
     /// out of the stream, its state and its entries, until it is taken out.
     pub fn open_hiding(start: PublicStart<'_>, store: S, closed: Closed) -> R<Self> {
-        Self::open_spooled(start, store, closed, None)
+        Self::open_spooled(start, store, closed, None, None)
     }
     /// [`PublicWriter::open_hiding`] with its recovery chain in `spool` first (R15, [`backup`]): it recovers from the
     /// spool's head where there is one, and writes no part's recovery objects to the store itself;
@@ -1547,7 +1576,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         start: PublicStart<'_>,
         store: S,
         closed: Closed,
-        spool: Option<(PathBuf, String)>,
+        spool: Option<(PathBuf, String, String)>,
+        epoch: Option<u64>,
     ) -> R<Self> {
         let PublicStart {
             root,
@@ -1570,10 +1600,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         if initial.header().stored() != header.stored() {
             return Err(fault("header-mismatch", "stream initial header"));
         }
-        let baseline = replica::stream::public::baseline_from_projection(
+        let baseline = replica::stream::public::baseline_claimed(
             header,
             shown(header, Some(&closed), initial.tree())?,
             record,
+            epoch,
         )?;
         let player = PublicPlayer::start(header.stored(), &baseline)?;
         let mut inside = Inside::new(&closed);
@@ -1634,9 +1665,11 @@ impl<S: ObjectStore> PublicWriter<S> {
             closed_kinds: closed,
             inside,
             hides: true,
-            spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
+            host: spool.as_ref().map(|s| s.2.clone()).unwrap_or_default(),
+            spool: spool.map(|(dir, store, _)| backup::Spool::new(dir, store)),
             fresh: false,
             fresh_at: 0,
+            epoch,
         };
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
@@ -1654,10 +1687,13 @@ impl<S: ObjectStore> PublicWriter<S> {
         // what an earlier writer published from its own spool: it starts a new generation below, so it never cuts a
         // part at an address of that lost tail (rule: exact bytes before exposure).
         let mut fresh = false;
+        // R16: the claim's epoch the recovered generation was made under, when one was recovered.
+        let mut recovered_epoch = None;
         if let Some(head) = head {
             let h = object_map(&head.bytes)?;
             let hash = obj_bytes(&h, 1)?;
             w.recover(&hash)?;
+            recovered_epoch = Some(replica::stream::public::baseline_epoch(&w.baseline)?);
             if from_store && let Some(spool) = &w.spool {
                 // The store's head as this writer found it: what its backup writes against, and fences on.
                 spool.confirm(&head_key, &head.bytes, &head.etag)?;
@@ -1793,10 +1829,11 @@ impl<S: ObjectStore> PublicWriter<S> {
                 } else {
                     record
                 };
-                w.baseline = replica::stream::public::baseline_from_projection(
+                w.baseline = replica::stream::public::baseline_claimed(
                     header,
                     prefix,
                     public_record,
+                    epoch,
                 )?;
                 w.player = PublicPlayer::start(header.stored(), &w.baseline)?;
                 w.legacy = Some((target, reader.next(), digest(&expected)?));
@@ -1862,7 +1899,25 @@ impl<S: ObjectStore> PublicWriter<S> {
         let fresh = fresh && !w.force_remainder && w.migration_cut.is_none();
         w.fresh = fresh;
         w.fresh_at = w.cursor;
-        if w.rollover_due() && !fresh {
+        // R16: a generation recovered under another claim (a restart, or a takeover from a copied spool while the
+        // old machine may still cut parts of it) gets no new part from this writer: it rolls over now, under this
+        // claim, with the hand-off, so this writer's parts are at addresses no other claim's writer uses. Not when the
+        // spool says its last writer stopped cleanly on this host, in this folder, at the head recovered, under the
+        // claim just before this one (a stop or a sleep, then a start or a wake): it cuts nothing more, and no claim
+        // came between, so no other writer can have cut parts of it, and a rollover would only cost a whole seed and
+        // baseline. A copied spool, a crash, a claim between or an unknown state rolls over.
+        let clean = !from_store
+            && w.spool
+                .as_ref()
+                .zip(w.epoch)
+                .is_some_and(|(s, epoch)| s.take_clean(&head_key, &w.host, epoch));
+        let retake = !fresh
+            && !clean
+            && w.epoch.is_some()
+            && recovered_epoch.is_some_and(|e| e != w.epoch)
+            && !w.force_remainder
+            && w.migration_cut.is_none();
+        if (w.rollover_due() && !fresh) || retake {
             w.rollover()?;
         }
         w.prune();
@@ -2086,12 +2141,13 @@ impl<S: ObjectStore> PublicWriter<S> {
     fn hidden(&self, tree: &replica::tree::Tree, id: Id) -> bool {
         self.hides && self.closed_kinds.hides(tree, id)
     }
-    /// The next generation's baseline: the public state now, at the source cursor (#3825).
-    fn generation_baseline(&self) -> R<Vec<u8>> {
-        replica::stream::public::baseline_from_projection(
+    /// The next generation's baseline: the public state now, at the source cursor (#3825), made under `epoch` (R16).
+    fn generation_baseline(&self, epoch: Option<u64>) -> R<Vec<u8>> {
+        replica::stream::public::baseline_claimed(
             &self.header,
             self.player.state().clone(),
             self.cursor,
+            epoch,
         )
     }
     /// Starts the next generation from `baseline` (#3825), keeping how a live viewer crosses over: the old
@@ -2139,14 +2195,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                 Some(&self.closed_kinds),
                 self.canonical.tree(),
             )?;
-            let baseline = replica::stream::public::baseline_from_projection(
+            let baseline = replica::stream::public::baseline_claimed(
                 &self.header,
                 state.clone(),
                 self.cursor,
+                self.epoch,
             )?;
             (baseline, state)
         } else {
-            (self.generation_baseline()?, self.player.state().clone())
+            (
+                self.generation_baseline(self.epoch)?,
+                self.player.state().clone(),
+            )
         };
         // A new generation's baseline text holds every public name, as the first baseline's does (#3574).
         let words = self.words(&state, &state)?;
@@ -2196,7 +2256,8 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// R15: the fresh generation of a writer recovered from the store alone, once the source has moved past the
     /// recovered cursor: its baseline holds the records taken since, at a later cursor than any the store names, so
     /// it is not the id of a generation an earlier writer may have published from its own spool. Those records are in
-    /// the baseline, not in a part.
+    /// the baseline, not in a part. R16: and it carries this writer's claim epoch, as every baseline it makes does, so
+    /// even an earlier writer's lost rollover at that very cursor had another address.
     fn fresh_generation(&mut self) -> R<()> {
         self.rollover()?;
         self.fresh = false;
@@ -2606,11 +2667,22 @@ impl<S: ObjectStore> PublicWriter<S> {
         &mut self,
         store: T,
         report: Box<dyn Fn(BackupState) + Send>,
+        claim: Option<BackupClaim>,
     ) -> R<()> {
         let prefix = self.prefix.clone();
         match &mut self.spool {
-            Some(spool) => backup::start(spool, store, prefix, report),
+            Some(spool) => backup::start(spool, store, prefix, report, claim),
             None => Ok(()),
+        }
+    }
+    /// R16: says in the spool that this writer has stopped cleanly and cuts nothing more (a stop or a sleep), so the
+    /// next start on this host, in this folder, keeps its generation rather than rolling it over. Called only once
+    /// nothing more is cut; a cut after it moves the head and voids the mark. Best effort.
+    pub fn mark_clean(&self) {
+        if let (Some(spool), Some(epoch)) = (&self.spool, self.epoch)
+            && let Err(e) = spool.mark_clean(&format!("{}head", self.prefix), &self.host, epoch)
+        {
+            eprintln!("worldd: the public stream's clean-stop mark was not written: {e}");
         }
     }
     /// R15: what a stop waits on, bounded, for the backup to hold the spool's head; none before [`Self::back_up`].
@@ -2782,12 +2854,13 @@ impl<S: ObjectStore> PublicWriter<S> {
                     return Err(fault("stream-recovery", "initial cursor"));
                 }
                 if let Some(id) = m.get(&8) {
-                    // A rollover (#3825): the same baseline worked out again from the same state.
+                    // A rollover (#3825): the same baseline worked out again from the same state. A rollover in
+                    // its chain predates #3833's chain per generation, and so the claim's epoch (R16).
                     self.player.verify()?;
                     if obj_uint(&m, 4)? != self.player.next() {
                         return Err(fault("stream-recovery", "rollover part number"));
                     }
-                    let baseline = self.generation_baseline()?;
+                    let baseline = self.generation_baseline(None)?;
                     if *id != Value::Bytes(replica::ids::sha256(&baseline).to_vec()) {
                         return Err(fault("stream-recovery", "rollover baseline differs"));
                     }

@@ -2063,6 +2063,10 @@ struct Off {
     /// The log compactor's floors from here (#3837): the shipper's marks, and how far the archive has closed.
     mark: shipping::Mark,
     floor: Option<crate::compactor::Archive>,
+    /// R16: the claim this run took, its epoch and the machine's name: the public stream's generations carry the
+    /// epoch, and its backup reads the directory by it before fencing. R17: the epoch is set by the shipping thread
+    /// once the claim is held.
+    claim: Option<(Arc<std::sync::OnceLock<u64>>, Name)>,
 }
 
 impl Off {
@@ -2360,13 +2364,14 @@ fn off_machine(
     let (ship, items) = channel::<Item>();
     let mark = shipping::Mark::default();
     let shared = mark.clone();
-    let (claim_store, header, checkpoints) = (
+    let (claim_store, header, checkpoints, claim_machine) = (
         store.clone(),
         built.header.stored().to_vec(),
         dir.join("checkpoints"),
+        machine.clone(),
     );
-    let claim = move || -> Result<Shipper<Bucket, Wall>, Refusal> {
-        let mut d = Directory::new(claim_store.clone(), machine.clone());
+    let claim = move || -> Result<(Shipper<Bucket, Wall>, u64), Refusal> {
+        let mut d = Directory::new(claim_store.clone(), claim_machine.clone());
         match d.world(&lineage, zone) {
             Err(e) if e.name == "record-missing" => {
                 // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
@@ -2379,22 +2384,25 @@ fn off_machine(
             Ok(_) => {}
         }
         let claim = shipping::take_over(&mut d, &lineage, zone, first..end)?;
-        let from = claim.takeover.from;
+        let (from, epoch) = (claim.takeover.from, claim.takeover.epoch);
         let _ = writeln!(
             std::io::stdout(),
-            "shipping: epoch {} from record {from} of {end}",
-            claim.takeover.epoch
+            "shipping: epoch {epoch} from record {from} of {end}"
         );
-        Ok(
+        Ok((
             Shipper::open(d, claim, lineage, zone, &header, from, Wall::start())?
                 .checkpoints(&checkpoints, shipping::CHECKPOINT_GAP_US)
                 .sharing(&shared),
-        )
+            epoch,
+        ))
     };
     measures::SHIPPING.recovering();
     // Set once the claim is held; the archive writes nothing before it.
     let claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let claiming = Arc::clone(&claimed);
+    // R16: the held claim's epoch, for the public stream, which opens once it is set.
+    let epoch = Arc::new(std::sync::OnceLock::new());
+    let epoch_held = Arc::clone(&epoch);
     let opening = std::thread::Builder::new()
         .name("shipping".into())
         .spawn(move || -> Result<(), Refusal> {
@@ -2406,9 +2414,11 @@ fn off_machine(
             // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
             // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
             // would number new records over ones already off the machine.
-            let shipper = until_answered("shipping", &measures::SHIPPING, || patiently(&claim))
-                .unwrap_or_else(|e| refused_at_start(e));
-            // The claim is held: the archive may write.
+            let (shipper, held_epoch) =
+                until_answered("shipping", &measures::SHIPPING, || patiently(&claim))
+                    .unwrap_or_else(|e| refused_at_start(e));
+            // The claim is held: the archive may write, and the public stream may open with its epoch.
+            let _ = epoch_held.set(held_epoch);
             claiming.store(true, std::sync::atomic::Ordering::SeqCst);
             let (to, _, h) = shipper.spawn();
             // R18: the shipper stopping while the world runs (a panic, or a refused push such as `ship-gap`) would
@@ -2537,6 +2547,7 @@ fn off_machine(
         archive_base,
         mark,
         floor: archive_floor,
+        claim: Some((epoch, machine)),
     };
     // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
     for (k, bytes) in records.iter().enumerate() {
@@ -2917,6 +2928,7 @@ fn serve(args: &[String]) -> R<()> {
         None => None,
     };
     let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
+    let off_claim = off.as_ref().and_then(|o| o.claim.clone());
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
@@ -3039,6 +3051,35 @@ fn serve(args: &[String]) -> R<()> {
     // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
     // store moved to another bucket is learned again rather than fenced on.
     let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
+    // R16: the claim this run took. Its epoch goes into every stream generation's baseline, so a machine that took
+    // over never makes a lost tail's address; and before fencing, the backup asks the directory whether this run still
+    // holds the newest claim: the newest writer puts over an older one's head, and the older one fences.
+    // R17: the claim is taken on the shipping thread; until its epoch is set, the public stream is degraded
+    // (`stream-unclaimed`).
+    let stream_epoch = off_claim.as_ref().map(|(epoch, _)| Arc::clone(epoch));
+    // ... and the host its clean-stop mark names (this machine's own identity): a spool copied to another machine
+    // never reads as this one's.
+    let stream_host = view_out::host_identity();
+    let backup_claim = match off_claim {
+        Some((epoch, machine)) => {
+            let mut d = Directory::new(
+                supervisor::bucket::Bucket::from_spec(&stream_spec)
+                    .map_err(refusal)?
+                    .for_world(),
+                machine,
+            );
+            let (lineage, zone) = (built.header.lineage.0, built.header.zone);
+            let newest: view_out::BackupClaim = Box::new(move || {
+                // Asked only after the stream opened, so after the claim is held.
+                let held = epoch.get().copied();
+                Ok(d.world(&lineage, zone)?
+                    .current()
+                    .is_some_and(|t| Some(t.epoch) == held))
+            });
+            Some(newest)
+        }
+        None => None,
+    };
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -3157,7 +3198,18 @@ fn serve(args: &[String]) -> R<()> {
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
+                // R16 after R17: the stream's generations carry the claim's epoch, so it opens once the claim is held.
+                // Until then each try is refused by name (`stream-unclaimed`): the stream is degraded, never a wait
+                // that holds a fresh world from listening while the store does not answer.
+                let claim_held = || stream_epoch.as_ref().is_none_or(|epoch| epoch.get().is_some());
                 let recover = || -> Result<_, Refusal> {
+                    let stream_epoch = match &stream_epoch {
+                        None => None,
+                        Some(epoch) => Some(*epoch.get().ok_or_else(|| Refusal {
+                            name: "stream-unclaimed",
+                            detail: "the world's claim is not held yet (`shipping` in health says why)".into(),
+                        })?),
+                    };
                     let start = view_out::PublicStart {
                         root: &views_dir,
                         header: &stream_header,
@@ -3180,7 +3232,9 @@ fn serve(args: &[String]) -> R<()> {
                             Some((
                                 view_out::backup_beside(&views_dir),
                                 backup_identity.clone(),
+                                stream_host.clone(),
                             )),
+                            stream_epoch,
                         )
                     })?;
                     // Both the pointer and placement bootstrap resolve the existing strict public history export.
@@ -3214,6 +3268,7 @@ fn serve(args: &[String]) -> R<()> {
                         Err(e) => {
                             tries += 1;
                             let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                            let unclaimed = e.name == "stream-unclaimed";
                             let fault = refusal(e);
                             // Degraded before the pointer goes: the main thread's check of it reads both.
                             measures::STREAM.degraded(&fault, tries, wait);
@@ -3225,6 +3280,10 @@ fn serve(args: &[String]) -> R<()> {
                             // The wait, answering each ask to sleep meanwhile: a degraded stream writes no sleeping
                             // pointer, so the world stays awake.
                             for _ in 0..wait / 100 {
+                                // The claim held: tried again now, not at the end of the back-off.
+                                if unclaimed && claim_held() {
+                                    break;
+                                }
                                 if let Ok((_, answer)) =
                                     sleep_rx.recv_timeout(std::time::Duration::from_millis(100))
                                 {
@@ -3248,6 +3307,7 @@ fn serve(args: &[String]) -> R<()> {
                 writer.back_up(
                     backup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
+                    backup_claim,
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
                 // unit's 10 s stop timeout; best effort.
@@ -3283,6 +3343,8 @@ fn serve(args: &[String]) -> R<()> {
                 loop {
                     // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
                     if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
+                        // R16: nothing more is cut, so the next start here keeps this generation.
+                        writer.mark_clean();
                         stopping.1.store(true, std::sync::atomic::Ordering::Release);
                         loop {
                             std::thread::park();
@@ -3321,6 +3383,11 @@ fn serve(args: &[String]) -> R<()> {
                         // wait for this answer (`sleep.rs` STREAM_WITHIN, 5 s).
                         if done && let Some(d) = writer.drainer() {
                             d.drain(SLEEP_DRAIN);
+                        }
+                        // R16: a sleeping world cuts nothing more, so its wake keeps this generation. If the watch gave
+                        // up and the stream stays awake, its next cut moves the head and voids the mark.
+                        if done {
+                            writer.mark_clean();
                         }
                         // The sleep is taken only when the watch hears it; one that gave up waiting stays awake, and so
                         // does the stream: its next idle writes the pointer without the sleep.
@@ -3864,6 +3931,7 @@ mod tests {
             archive_base: 4,
             mark: shipping::Mark::default(),
             floor: None,
+            claim: None,
         };
         for (record, bytes, is_input) in [
             (0, &part, false),
@@ -3890,6 +3958,7 @@ mod tests {
             archive_base: 4,
             mark: shipping::Mark::default(),
             floor: None,
+            claim: None,
         };
         for (record, bytes, is_input) in
             [(10, &input, true), (11, &part, false), (12, &part, false)]

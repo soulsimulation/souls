@@ -3429,6 +3429,398 @@ fn again_objects_bound() -> usize {
     2 * (4 + 3 * 4) + 1
 }
 
+/// R16: the generations a writer under claim `epoch` begins over `records` records, a generation every 2 parts,
+/// reopened from its store after each record in `restarts` under `reopened`'s epoch; and the public digest it ends at.
+fn r16_run(
+    tag: &str,
+    epoch: Option<u64>,
+    records: u64,
+    restarts: &[u64],
+    reopened: Option<u64>,
+) -> (Vec<String>, Vec<u8>) {
+    let h = header();
+    let d = scratch(&format!("r16-{tag}"));
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |epoch| {
+        let mut w = PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &views,
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            None,
+            epoch,
+        )
+        .unwrap();
+        w.generation_parts = 2;
+        w
+    };
+    let body = Id::new(Scope([73; 16]), 1).unwrap();
+    let mut out = open(epoch);
+    let id = |w: &PublicWriter<_>| replica::encode::to_hex(&replica::ids::sha256(&w.baseline));
+    let mut began = vec![id(&out)];
+    for r in 0..records {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(r)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        out.push(r, &w3e_packet(&h, vec![effect])).unwrap();
+        out.flush().unwrap();
+        if began.last() != Some(&id(&out)) {
+            began.push(id(&out));
+        }
+        if restarts.contains(&r) {
+            drop(out);
+            out = open(reopened);
+        }
+    }
+    (began, out.player.hash().unwrap())
+}
+
+/// Every file under `dir`, by its path below it.
+fn r16_tree(dir: &Path, below: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+    for e in fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            r16_tree(&p, below, out);
+        } else {
+            out.insert(
+                p.strip_prefix(below).unwrap().to_owned(),
+                fs::read(&p).unwrap(),
+            );
+        }
+    }
+}
+
+/// R16: a takeover from a copied spool. The old writer A (claim 4) runs; its world's folder (views and spool) is copied
+/// while it runs, and B (claim 5) starts from the copy. Both cut parts on, from different records (two machines live at
+/// once). B's first act is a rollover under its own claim, so no address the two publish holds different bytes.
+#[test]
+fn r16_a_takeover_from_a_copied_spool_never_cuts_an_address_the_old_writer_cuts() {
+    let h = header();
+    let d = scratch("r16-copied");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |at: &Path, epoch| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &at.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((at.join("stream-backup"), "store".into(), "here".into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([74; 16]), 1).unwrap();
+    let record = |r: u64, value: u64| {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(value)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        w3e_packet(&h, vec![effect])
+    };
+    let (a_dir, b_dir) = (d.join("a"), d.join("b"));
+    let mut a = open(&a_dir, 4);
+    for r in 0..3 {
+        a.push(r, &record(r, r)).unwrap();
+        a.flush().unwrap();
+    }
+    // Even a spool marked clean (A stopped, say, and was started again after the copy) is not clean in another folder.
+    a.mark_clean();
+    let status = Command::new("cp")
+        .arg("-R")
+        .arg(&a_dir)
+        .arg(&b_dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let mut b = open(&b_dir, 5);
+    let a_generation = replica::ids::sha256(&a.baseline);
+    let b_generation = replica::ids::sha256(&b.baseline);
+    for r in 3..7 {
+        a.push(r, &record(r, r)).unwrap();
+        a.flush().unwrap();
+        b.push(r, &record(r, r + 100)).unwrap();
+        b.flush().unwrap();
+    }
+    let (mut at_a, mut at_b) = (BTreeMap::new(), BTreeMap::new());
+    r16_tree(&a_dir.join("views"), &a_dir, &mut at_a);
+    r16_tree(&b_dir.join("views"), &b_dir, &mut at_b);
+    let shared: Vec<_> = at_a.keys().filter(|k| at_b.contains_key(*k)).collect();
+    let g = replica::encode::to_hex(&a_generation);
+    assert!(
+        shared
+            .iter()
+            .any(|k| k.to_string_lossy().contains(&format!("g/{g}/2"))),
+        "the copy holds A's first parts"
+    );
+    for k in shared {
+        if k.ends_with("pointer") {
+            continue;
+        }
+        assert_eq!(at_a[k], at_b[k], "{} holds different bytes", k.display());
+    }
+    assert!(
+        at_a.keys()
+            .any(|k| k.to_string_lossy().contains(&format!("g/{g}/6"))),
+        "A cut on in its generation"
+    );
+    assert_ne!(b_generation, a_generation, "B rolled over at its open");
+}
+
+/// R16: a clean stop (SIGTERM, or a sleep) marks the spool, so the next start on this host in this folder (a restart,
+/// a wake), under a new claim, keeps the generation: no seed and baseline written again. The mark is used once: after
+/// a crash (no mark) the next start rolls over, as it does for a mark of another host or a head moved since.
+#[test]
+fn r16_a_clean_stop_then_a_start_keeps_the_generation_and_a_crash_rolls_it() {
+    let h = header();
+    let d = scratch("r16-clean");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |epoch, host: &str| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &d.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((d.join("stream-backup"), "store".into(), host.into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([75; 16]), 1).unwrap();
+    let record = |r: u64| {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(r)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        w3e_packet(&h, vec![effect])
+    };
+    let generation = |w: &PublicWriter<_>| replica::ids::sha256(&w.baseline);
+    let generations = || {
+        fs::read_dir(d.join("views").join(stream::dir(&h, &key(&h))).join("g"))
+            .unwrap()
+            .count()
+    };
+    let mut w = open(4, "here");
+    w.push(0, &record(0)).unwrap();
+    w.flush().unwrap();
+    let first = generation(&w);
+    // A sleep (or a stop): nothing more is cut; then the wake, under claim 5.
+    w.mark_clean();
+    drop(w);
+    let mut w = open(5, "here");
+    assert_eq!(
+        generation(&w),
+        first,
+        "a wake after a clean sleep keeps the generation"
+    );
+    assert_eq!(generations(), 1, "and writes no new one");
+    w.push(1, &record(1)).unwrap();
+    w.flush().unwrap();
+    // A crash: no mark (the one read at the wake was taken away), so the next start rolls over.
+    drop(w);
+    let w = open(6, "here");
+    let second = generation(&w);
+    assert_ne!(second, first, "a start after a crash rolls over");
+    assert_eq!(generations(), 2);
+    // A mark that names another host, or one voided by a cut after it, is not clean either.
+    w.mark_clean();
+    drop(w);
+    let mut w = open(7, "elsewhere");
+    let third = generation(&w);
+    assert_ne!(third, second, "a mark of another host");
+    w.mark_clean();
+    w.push(2, &record(2)).unwrap();
+    w.flush().unwrap();
+    drop(w);
+    let w = open(8, "elsewhere");
+    assert_ne!(generation(&w), third, "a mark the head moved past");
+}
+
+/// R16: a copy of the folder taken during a clean stop, then A starts again and B starts from the copy. Even where
+/// the copy sits at the same path and its host reads as the same (machine names are `local` everywhere), at most one
+/// of them keeps the generation: the mark names the stopping writer's claim, and only the claim directly after it
+/// (no claim between) keeps it. Either order.
+#[test]
+fn r16_a_copy_taken_during_a_clean_stop_lets_at_most_one_start_keep_the_generation() {
+    let h = header();
+    let store = directoryd::directory::store::Memory::default();
+    let open = |at: &Path, epoch| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &at.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((at.join("stream-backup"), "store".into(), "same".into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([76; 16]), 1).unwrap();
+    for (tag, a_first) in [("a-first", true), ("b-first", false)] {
+        let d = scratch(&format!("r16-copy-{tag}"));
+        let (a_dir, copy) = (d.join("w"), d.join("copy"));
+        let mut a = open(&a_dir, 4);
+        a.push(
+            0,
+            &w3e_packet(
+                &h,
+                vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+            ),
+        )
+        .unwrap();
+        a.flush().unwrap();
+        let first = replica::ids::sha256(&a.baseline);
+        a.mark_clean();
+        drop(a);
+        let status = Command::new("cp")
+            .arg("-R")
+            .arg(&a_dir)
+            .arg(&copy)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // A on its machine, and B on another whose folder (the copy, at the same path) and host read the same: each
+        // takes the next claim in turn, in this order or the other.
+        let mut kept = 0;
+        for (n, epoch) in [5, 6].into_iter().enumerate() {
+            let a_turn = (n == 0) == a_first;
+            if !a_turn {
+                // B's machine: the copy at the same path.
+                let held = d.join("held");
+                fs::rename(&a_dir, &held).unwrap();
+                fs::rename(&copy, &a_dir).unwrap();
+                let w = open(&a_dir, epoch);
+                kept += usize::from(replica::ids::sha256(&w.baseline) == first);
+                drop(w);
+                fs::rename(&a_dir, &copy).unwrap();
+                fs::rename(&held, &a_dir).unwrap();
+            } else {
+                let w = open(&a_dir, epoch);
+                kept += usize::from(replica::ids::sha256(&w.baseline) == first);
+            }
+        }
+        assert_eq!(
+            kept, 1,
+            "{tag}: one start keeps the generation, the other rolls over"
+        );
+    }
+}
+
+/// R16: every baseline a writer under a directory claim makes carries the claim's epoch, so two claims' writers on
+/// the same records, rolling over at the very same cursors, never make one generation address; each is deterministic
+/// for its own claim, and with no claim the addresses are those made before. A restart under a new claim keeps the
+/// generations already made (recovered, not made again) and makes its later ones under its own epoch.
+#[test]
+fn r16_a_claim_s_generations_never_share_an_address_with_another_claim_s() {
+    let (none, public) = r16_run("none", None, 7, &[], None);
+    let (a, a_public) = r16_run("a", Some(4), 7, &[], None);
+    let (a_again, _) = r16_run("a-again", Some(4), 7, &[], None);
+    let (b, b_public) = r16_run("b", Some(5), 7, &[], None);
+    assert_eq!(none.len(), 4, "a generation every 2 parts");
+    assert_eq!(a.len(), none.len());
+    assert_eq!(a, a_again, "one claim's generations are deterministic");
+    assert_eq!(a_public, public, "the epoch changes nothing a viewer plays");
+    assert_eq!(b_public, public);
+    for (x, y) in [(&none, &a), (&a, &b), (&none, &b)] {
+        for g in x {
+            assert!(!y.contains(g), "no generation address is shared");
+        }
+    }
+    // The four fields made before R16, with no claim: the first baseline as `baseline_from_projection` makes it.
+    let h = header();
+    let first = replica::stream::public::baseline_from_projection(
+        &h,
+        shown(
+            &h,
+            Some(&Closed::default()),
+            Replica::start(h.stored()).unwrap().tree(),
+        )
+        .unwrap(),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        none[0],
+        replica::encode::to_hex(&replica::ids::sha256(&first))
+    );
+    // Claim 4 runs to record 2, then a restart takes claim 5: the first two generations are claim 4's, recovered, and
+    // the later ones claim 5's.
+    let (moved, moved_public) = r16_run("moved", Some(4), 7, &[2], Some(5));
+    assert_eq!(moved_public, public);
+    assert_eq!(moved[..2], a[..2], "recovered with the bytes made");
+    for g in &moved[2..] {
+        assert!(!a.contains(g), "made again under the new claim: {g}");
+    }
+}
+
 // ---- #3948: what a closed container holds stays out of the public stream ----------------------------------------
 
 /// The fixture header's crate kind is closed (to its creator alone).

@@ -38,7 +38,9 @@
 //! 8. **Checkpoint public observations** (#3639, [`public::PublicPlayer`]). The old constructor and fields retain
 //!    their meanings. An explicit pointer field8 is a 32-byte SHA-256 baseline/generation id. Its immutable files
 //!    are `g/<hex>/baseline`, `baseline.text`, and numbered parts/text. A baseline is
-//!    `{1: 1, 2: exact header hash, 3: authorized projection, 4: physical source cursor}`. The projection retains
+//!    `{1: 1, 2: exact header hash, 3: authorized projection, 4: physical source cursor}`, with `5: the directory
+//!    claim's epoch` when a writer under a claim made it (R16): two claims' writers never make one address, even at
+//!    the same state and cursor. A reader takes either form; the epoch changes nothing it plays. The projection retains
 //!    exact root kind/fields, live nodes/links, public flight context, public timers/time and opaque public flying
 //!    nodes/owned links; it never includes the global arrived ledger or private ancestors. Opaque references are not nodes.
 //!    Public queries keep all six R1 shapes; unresolved frame paths refuse `frame-unavailable` without stopping
