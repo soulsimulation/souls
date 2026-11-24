@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:pool_table",
   "owner": "thing",
-  "state": { "racked": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "racked": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "links": { "player": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
   "points": {
     "by_break_end": { "role": "stand", "at_mm": [-1600, 0, 0] },

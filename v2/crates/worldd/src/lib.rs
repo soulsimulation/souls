@@ -5,6 +5,7 @@
 
 pub mod acts;
 pub mod answers;
+pub mod assembly;
 pub mod bodies;
 pub mod buildsafe;
 pub mod carrier;
@@ -26,6 +27,7 @@ mod syncs;
 pub use syncs::SEAL_EVERY;
 pub mod testbodies;
 pub mod undo;
+pub mod unstick;
 pub mod view_out;
 pub mod views;
 pub mod words;

@@ -1,0 +1,8 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:volleyball_net (0.135 E2): play on either side of the net; it needs nothing.",
+ "cases": [
+  {"name": "play_every_need_met", "act": {"this": "v1", "form": "play"}, "state": {"actor": "b1", "nodes": {"v1": {"kind": "eden:volleyball_net"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "play_far_side_every_need_met", "act": {"this": "v1", "form": "play_far_side"}, "state": {"actor": "b1", "nodes": {"v1": {"kind": "eden:volleyball_net"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}}
+ ]
+}

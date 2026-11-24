@@ -1,44 +1,19 @@
-// Clip kit (#2434): in Eden 2026, one walk from far away into an upstairs room behind two closed doors. The townhouse
-// canal-west-home-3 (core/townhouse@3) has a real door in every doorway: its front door (closed) and, on the first floor,
-// the bedroom's door (canal-west-home-3-door-3). Before the take, admin's Soul Clara goes up to the landing, shuts the
-// bedroom door by hand, goes out to the front step and shuts the front door by hand, and runs to the bakery's front,
-// about 45 m away. On camera
-// (Ctrl+K, Enter follows Clara) one walk takes her from there through the front door, up the stairs and through the
-// bedroom door, opening each by hand and closing it behind her.
-import { execFile, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
-import { cast } from '../_shared/cast.mjs';
+// Clip kit (#2434; 0.135 P6 on the new engine): in Eden 2026, one walk from far away into an upstairs room behind two
+// closed doors. The townhouse canal-west-home-3 has a real door in every doorway: its front door and, on the first floor,
+// the bedroom's door. Before the take, admin's Soul Clara goes up to the landing, shuts the bedroom door by hand, goes out
+// to the front step and shuts the front door by hand, and walks to the bakery's front, about 45 m away. On camera (Ctrl+K,
+// Enter follows Clara) one walk takes her from there through the front door, up the stairs and through the bedroom door,
+// opening each by hand and closing it behind her.
+import { actOn, cast, walk } from '../_shared/cast.mjs';
 
-cast({ souls: [{ name: 'Clara', owner: 'admin' }] });
-const { CLIP_CHECKOUT = '.', CLIP_WORK } = process.env;
-const EDEN = join(CLIP_CHECKOUT, 'tools/world-launcher/soul/eden.mjs');
-const DIR = join(CLIP_WORK, 'soul-clara');
-const run = (args, ms = 170_000) => {
-  const r = spawnSync(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms });
-  console.error(`kit: ${args.slice(0, 3).join(' ')} -> ${r.status}: ${(r.stdout + r.stderr).slice(0, 1200)}`);
-  return r;
-};
-
-for (let i = 0; i < 30; i++) {                            // a world just up may not give its catalog yet (503)
-  if (run(['catalog'], 90_000).status === 0) break;
-  spawnSync('sleep', ['2']);
-}
-// off camera: up to the landing, the bedroom door shut by hand, then out to the bakery's front (~45 m away)
-run(['act', 'walk:canal-west-home-3/landing', '--run', '--wait', '150', '--json']);
-const caps = run(['caps', '--search', 'canal-west-home-3-door-3'], 90_000), out = caps.stdout + caps.stderr;
-// the door's id from whichever of its offers is listed (open or close); closing a shut door is a no-op refusal
-const idOf = (text, label) => new RegExp(`"id": "object:([^:"]+):\\w+",\\s*"label": "${label}"`).exec(text)?.[1];
-const door = idOf(out, 'canal-west-home-3/canal-west-home-3-door-3');
-if (door) run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);
-// fitted doors start open (the coordinator's call): out to the front step, and the front door shut by hand behind her
-run(['act', 'walk:canal-west-home-3', '--run', '--wait', '150', '--json']);
-const caps1 = run(['caps', '--search', 'canal-west-home-3-door-1'], 90_000), out1 = caps1.stdout + caps1.stderr;
-const front = idOf(out1, 'canal-west-home-3-door-1');
-if (front) run(['act', `object:${front}:close`, '--wait', '60', '--json'], 90_000);
-run(['act', 'walk:int-bakery', '--run', '--wait', '150', '--json']);
-
-const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
-  (e, out, err) => { console.error(`kit: ${args.join(' ')} -> ${e ? (e.code ?? 1) : 0}: ${String(out || err).slice(0, 1200)}`); res(!e); }));
+await cast({ souls: [{ name: 'Clara', owner: 'admin' }] });
+// off camera: up to the landing, the bedroom door shut by hand, then out, the front door shut, and to the bakery's front
+await walk('Clara', 'Landing in canal-west-home-3');
+await actOn('Clara', 'close', 'canal-west-home-3-door-3');
+await walk('Clara', 'canal-west-home-3');
+await walk('Clara', 'canal-west-home-3-door-1');
+await actOn('Clara', 'close', 'canal-west-home-3-door-1');
+await walk('Clara', 'int-bakery');
 
 export default async function steps(page, { mark }) {
   await page.waitForTimeout(2000);
@@ -47,10 +22,10 @@ export default async function steps(page, { mark }) {
   await page.keyboard.type('Clara', { delay: 120 });
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
-  mark('follow Clara at the bakery front, ~45 m from canal-west-home-3; its front door and its first-floor bedroom door closed');
-  await page.waitForTimeout(1200);
-  mark('one walk: run to the upstairs bedroom, through both doors');
-  await eden(['act', 'walk:canal-west-home-3/bedroom', '--run', '--wait', '84', '--json'], 88_000);
+  mark('follow Clara at the bakery front, ~45 m from the townhouse, both doors closed');
+  await page.waitForTimeout(1500);
+  mark('one walk: to the upstairs bedroom, through both doors');
+  await walk('Clara', 'Bedroom in canal-west-home-3');
   mark('in the upstairs bedroom, both doors closed behind');
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(2500);
 }

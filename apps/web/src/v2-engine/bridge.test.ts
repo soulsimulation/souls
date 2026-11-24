@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { V2Bridge, doingOf } from './bridge.ts';
-import { TICK_US, TICKS } from './takes.ts';
+import { BEHIND_US, CHUNK, PLAY_DELAY, V2Bridge, doingOf } from './bridge.ts';
+import { DT, TICK_US } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 
 /** The body's take entity: its id with the letter that gives it the v2 page's default look (take-bodies.ts). */
@@ -27,9 +27,12 @@ test('a body in a turned building is drawn in the world frame, with the page\'s 
   // walks 2 m along the floor's +x over 2 s, sampled every 0.5 s; the parts run 6 s on so whole chunks are made
   for (let n = 0; n < 12; n++) b.receive(part(n, n <= 4 ? [['b.7', 'w.2', null, T0 + n * 500_000, 1_000_000 + n * 500_000, 0, 0]] : []));
   assert.deepEqual([...b.view.souls.values()], [{ id: 's_abc-7', entityId: E, name: 'Ada', description: '', doing: 'standing', state: 'awake' }],
-    'shown 2 s behind the newest part, its last step 2 s before that: standing');
-  const take = b.view.takes.chunks.find((c) => c.fromTick === T0 / TICK_US)!.take as unknown as Take;
-  const at = (s: number) => sampleTake(take, s).entities[E];
+    'shown 0.3 s behind the newest part, its last step long before that: standing');
+  // the chunk that holds `s` seconds in, sampled there
+  const at = (s: number) => {
+    const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
+    return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+  };
   // a quarter turn about +y takes the floor's +x to the world's -z: (100 + 0, 3, -1) m at the start
   assert.deepEqual(at(0).p.map((x) => +x.toFixed(3)), [100, 3, -1]);
   assert.deepEqual(at(1).p.map((x) => +x.toFixed(3)), [100, 3, -2]);
@@ -41,25 +44,24 @@ test('no chunk until the world is past it by the v2 page\'s lag; a body the copy
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
   b.receive(part(0, [['b.7', 'w.2', null, T0, 1_000_000, 0, 0]]));
-  assert.equal(b.view.takes.chunks.length, 0, 'half a second in: nothing whole yet');
-  for (let n = 1; n < 5; n++) b.receive(part(n, []));
-  assert.equal(b.view.takes.chunks.length, 0, '2.5 s in: the first chunk ends 1 s in, within the 2 s lag');
-  b.receive(part(5, []));
-  assert.equal(b.view.takes.chunks.length, 1, '3 s in: the world is 2 s past the first chunk');
+  assert.equal(b.view.takes.chunks.length, 0, 'half a second in: the first chunk ends there, within the 0.3 s lag');
+  b.receive(part(1, []));
+  assert.equal(b.view.takes.chunks.length, 1, 'a second in: the world is past the first chunk by the lag');
+  for (let n = 2; n < 6; n++) b.receive(part(n, []));
   b.receive(part(6, [], { removed: ['b.7'] })); // into a frame that is not public: the worker says it is gone
   for (let n = 7; n < 16; n++) b.receive(part(n, []));
   const chunks = b.view.takes.chunks, hidden = chunks.filter((c) => c.fromTick * TICK_US >= T0 + 6 * 500_000);
   assert.ok(chunks.some((c) => E in (c.take as { tracks: object }).tracks), 'drawn before it went');
   assert.ok(hidden.length && hidden.every((c) => !(E in (c.take as { tracks: object }).tracks)), 'not drawn after');
   assert.equal(b.view.takes.serverTick, chunks.at(-1)!.toTick);
-  assert.equal((chunks.at(-1)!.toTick - chunks[0].fromTick) % TICKS, 0);
+  assert.equal((chunks.at(-1)!.toTick - chunks[0].fromTick) % CHUNK, 0);
 });
 
 test('B3-3: a Soul\'s card fields from the stream: its description, and what it is doing now as the v2 page says it', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, { ...body, description: 'Keeps the bees.' }], removed: [] } });
   const soul = () => b.view.souls.get('s_abc-7')!;
-  // walking: a step every half second up to the time shown (2 s behind the newest part)
+  // walking: a step every half second up to the time shown (0.3 s behind the newest part)
   for (let n = 0; n < 8; n++) b.receive(part(n, [['b.7', 'w.2', null, T0 + n * 500_000, 1_000_000 + n * 100_000, 0, 0]]));
   assert.equal(soul().description, 'Keeps the bees.');
   assert.equal(soul().doing, 'walking');
@@ -75,4 +77,71 @@ test('B3-3: a Soul\'s card fields from the stream: its description, and what it 
   // seated while it is in a slot
   assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined), 'seated');
   assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined), 'standing', 'one placement is not a walk');
+});
+
+test('B3-4: a walker\'s chunks are made 0.3 s behind the newest part and played 0.6 s behind them, and never stutter', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  // a body walking 1.4 m/s along the floor, sampled every 0.2 s (as a walker is at 100 Souls), in 0.5 s parts
+  const speed = 1.4, step = 200_000, lags: number[] = [];
+  for (let n = 0; n < 40; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = [];
+    for (let at = T0 + n * 500_000; at < T0 + (n + 1) * 500_000; at += step) samples.push(['b.7', 'w.2', null, at, 1_000_000 + Math.round((at - T0) * speed), 0, 0]);
+    b.receive(part(n, samples));
+    // where the page plays as this part comes (LiveWorld: serverTick less the source's play delay), behind the part's end
+    if (n >= 2) lags.push(T0 + (n + 1) * 500_000 - (b.view.takes.serverTick - b.view.takes.playDelay) * TICK_US);
+  }
+  assert.equal(b.view.takes.playDelay, PLAY_DELAY);
+  // as a part comes, what the page plays is at most the lag rounded to a whole chunk, plus the play delay, behind the
+  // part's end: 1.1 s, so with the stream's own half second an act shows within 2 s (it was 2 s + 1 s + 1.5 s)
+  const most = Math.ceil(BEHIND_US / (CHUNK * TICK_US)) * CHUNK * TICK_US + PLAY_DELAY * TICK_US;
+  assert.equal(Math.max(...lags), most);
+  assert.ok(most + 500_000 < 2_000_000, `${most} µs`);
+  // smooth: tick to tick across every chunk and every chunk boundary, the body moves its walking step, never held and jumped
+  const pos: number[][] = [];
+  for (const c of b.view.takes.chunks) {
+    const take = c.take as unknown as Take;
+    for (let k = c === b.view.takes.chunks[0] ? 0 : 1; k <= CHUNK; k++) pos.push(sampleTake(take, k * DT).entities[E].p);
+  }
+  const steps = pos.slice(1).map((p, i) => Math.hypot(p[0] - pos[i][0], p[2] - pos[i][2]));
+  assert.ok(steps.length > 100 && Math.max(...steps) <= speed * DT * 1.5 && Math.min(...steps) >= speed * DT * 0.5, `steps ${Math.min(...steps)}..${Math.max(...steps)} m`);
+});
+
+/** LiveWorld's live clock (LiveWorld.tsx's frame loop) at 60 frames a second over the bridge's takes, `delay` ticks
+ *  behind: the frames whose played tick is held at the newest chunk's end (nothing on the page moves). */
+function heldFrames(arrivals: { at: number; m: Parameters<V2Bridge['receive']>[0] }[], delay: number): number {
+  let clock = 0, liveTick: number | null = null, last: number | null = null, held = 0, i = 0;
+  const b = new V2Bridge({ rulesVersion: 'test/1' }), now = performance.now;
+  performance.now = () => clock;
+  try {
+    for (clock = arrivals[0].at; clock <= arrivals.at(-1)!.at; clock += 1000 / 60) {
+      while (i < arrivals.length && arrivals[i].at <= clock) b.receive(arrivals[i++].m);
+      const t = b.view.takes;
+      if (!t.chunks.length) continue;
+      const step = last === null ? 0 : Math.min(0.1, (clock - last) / 1000), before = liveTick;
+      last = clock;
+      const target = t.serverTick + Math.min(2, Math.max(0, (clock - t.receivedAt) / 1000)) * 20 - delay;
+      liveTick = liveTick === null || Math.abs(target - liveTick) > 80 ? target : liveTick + step * 20 + (target - liveTick) * Math.min(1, step * 1.5);
+      liveTick = Math.max(t.chunks[0].fromTick, Math.min(t.chunks.at(-1)!.toTick, liveTick));
+      if (before !== null && clock > arrivals[0].at + 5000 && liveTick - before < step * 10 && liveTick === t.chunks.at(-1)!.toTick) held++;
+    }
+  } finally { performance.now = now; }
+  return held;
+}
+
+test('PL: on the stream\'s own cadence the page never plays up to the newest chunk; two ticks less play delay would', () => {
+  // a part every half second, give or take 30 ms (PL, a local Eden with 16 and 20 Souls
+  // walking: gaps p10 0.49 s, p90 0.51 s; the few parts later than that, about 4 %, hold the page at any delay under 1 s)
+  const lag = [180, 190, 175, 185, 200, 170, 180, 195];
+  const arrivals: { at: number; m: Parameters<V2Bridge['receive']>[0] }[] = [{ at: 0, m: { t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } } }];
+  for (let n = 0; n < 60; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = [];
+    for (let at = T0 + n * 500_000; at < T0 + (n + 1) * 500_000; at += 200_000) samples.push(['b.7', 'w.2', null, at, 1_000_000 + Math.round((at - T0) * 1.4), 0, 0]);
+    arrivals.push({ at: (n + 1) * 500 + lag[n % lag.length], m: part(n, samples) });
+  }
+  assert.equal(heldFrames(arrivals, PLAY_DELAY), 0);
+  assert.ok(heldFrames(arrivals, PLAY_DELAY - 2) > 0, 'the play delay is the least that holds no frame');
+  // BEHIND_US: a part ends on the half-second grid the chunks are on, so up to one chunk it costs nothing more; it must
+  // cover a walker's next sample (every 0.2 s, p99 0.25 s)
+  assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
 });

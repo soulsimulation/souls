@@ -1,11 +1,14 @@
-# Keeps main's committed tools/world-launcher/soul/eden.mjs what inline.mjs builds from its modules (soul/*.mjs and
-# packages/form-rules/src/rules.ts). Pull requests do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file):
-# CI builds it before every check and the release stamp (release-client.mjs) rebuilds a stale one, so this workflow only
-# keeps the copy in git current for checkouts, tools and local worlds that read it as committed.
+# Keeps main's committed Soul client current and stamped: tools/world-launcher/soul/eden.mjs what inline.mjs builds
+# from its modules (soul/*.mjs and packages/form-rules/src/rules.ts), and, once the client changed since the last
+# release, stamped with the next client version (release-client.mjs stamp: eden.mjs, skill.md and SOURCES.json). Pull
+# requests do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file); CI builds it before every check. The
+# stamp is made here, on main, before a release head is picked (0.133 R13): release.yml only checks it, so a release
+# never makes a new head that needs CI again.
 #
-# After a push to main that leaves eden.mjs stale, it opens one pull request (branch bot/eden-sync-<sha12>) carrying
-# only the rebuilt file, labelled no-changelog and merge:ready, so the merge train lands it like any other T1 change. An
-# open sync PR that already carries the same file is kept; an older one that does not is closed with its branch. Nothing
+# After a push to main that leaves the client stale or unstamped, it opens one pull request (branch
+# bot/eden-sync-<sha12>) carrying only those files, labelled no-changelog and merge:ready, so the merge train lands it
+# like any other T1 change. An open sync PR that already carries the same files is kept; an older one is closed with its
+# branch. Nothing
 # is pushed to main directly (the main ruleset refuses it). The PR is created with MERGE_TRAIN_TOKEN when present, as
 # publish.yml does, so CI and the merge train run on it; with github.token alone it opens, but CI waits for a push.
 name: eden-sync
@@ -14,6 +17,7 @@ on:
     branches: [main]
     paths:
       - tools/world-launcher/soul/*.mjs
+      - tools/world-launcher/soul/skill.md
       - packages/form-rules/src/**
       - .github/workflows/eden-sync.yml
   workflow_dispatch:
@@ -29,48 +33,54 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }   # the stamp compares with the last release tag
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
-      - name: Build eden.mjs from its modules
+      - name: Build eden.mjs from its modules and stamp the client
         id: build
         run: |
-          node tools/world-launcher/soul/inline.mjs
-          if git diff --quiet -- tools/world-launcher/soul/eden.mjs; then
-            echo "eden.mjs on main is current" >> "$GITHUB_STEP_SUMMARY"; echo "stale=0" >> "$GITHUB_OUTPUT"
-          else echo "stale=1" >> "$GITHUB_OUTPUT"; fi
+          set -o pipefail
+          node tools/world-launcher/deploy/ship/release-client.mjs stamp | tee "$RUNNER_TEMP/stamp.txt"
+          if git diff --quiet -- tools/world-launcher/soul/eden.mjs tools/world-launcher/soul/skill.md tools/world-launcher/soul/SOURCES.json; then
+            echo "the client on main is current and stamped" >> "$GITHUB_STEP_SUMMARY"; echo "stale=0" >> "$GITHUB_OUTPUT"
+          else echo "stale=1" >> "$GITHUB_OUTPUT"; echo "client=$(tail -1 "$RUNNER_TEMP/stamp.txt" | sed -n 's/^client=\([0-9.]*\).*/\1/p')" >> "$GITHUB_OUTPUT"; fi
       - name: Open the sync pull request
         if: steps.build.outputs.stale == '1'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
+          CLIENT: ${{ steps.build.outputs.client }}
         run: |
           set -euo pipefail
-          file=tools/world-launcher/soul/eden.mjs
-          sha=$(git rev-parse HEAD); short=${sha:0:12}; blob=$(git hash-object "$file")
+          files="tools/world-launcher/soul/eden.mjs tools/world-launcher/soul/skill.md tools/world-launcher/soul/SOURCES.json"
+          sha=$(git rev-parse HEAD); short=${sha:0:12}
           for pr in $(gh pr list --state open --limit 50 --json number,headRefName -q '.[] | select(.headRefName | startswith("bot/eden-sync-")) | .number'); do
             ref=$(gh pr view "$pr" --json headRefName -q .headRefName)
             git fetch -q origin "refs/heads/$ref"
-            if [ "$(git rev-parse "FETCH_HEAD:$file")" = "$blob" ]; then
-              echo "#$pr already carries this eden.mjs" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            # shellcheck disable=SC2086 # the three files, one argument each
+            if git diff --quiet FETCH_HEAD -- $files; then
+              echo "#$pr already carries this client" >> "$GITHUB_STEP_SUMMARY"; exit 0
             fi
-            gh pr close "$pr" --delete-branch --comment "Superseded: main is now $short and eden.mjs builds differently; a new sync pull request follows."
+            gh pr close "$pr" --delete-branch --comment "Superseded: main is now $short and the client builds or stamps differently; a new sync pull request follows."
           done
           branch="bot/eden-sync-$short"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -c "$branch"
-          git commit -q -m "chore(soul): rebuild eden.mjs from its modules at $short" -m "node tools/world-launcher/soul/inline.mjs on main $sha (eden-sync.yml run $GITHUB_RUN_ID)." -- "$file"
+          # shellcheck disable=SC2086
+          git commit -q -m "chore(soul): rebuild eden.mjs from its modules and stamp client $CLIENT at $short" -m "node tools/world-launcher/deploy/ship/release-client.mjs stamp on main $sha (eden-sync.yml run $GITHUB_RUN_ID)." -- $files
           git push -q origin "HEAD:refs/heads/$branch"
           cat > "$RUNNER_TEMP/body.md" <<EOF
           ## Problem
 
-          eden.mjs on main ($short) is not what inline.mjs builds from main's modules: a merged change edited a module
+          The Soul client on main ($short) is stale or unstamped: a merged change edited a module
           (tools/world-launcher/soul/*.mjs or packages/form-rules/src/rules.ts) and, as intended, did not carry the
-          rebuilt file. Opened by eden-sync.yml run $GITHUB_RUN_ID; see docs/testing.md#the-soul-client-file.
+          rebuilt eden.mjs, or the client changed since the last release and needs its next version (client $CLIENT).
+          Opened by eden-sync.yml run $GITHUB_RUN_ID; see docs/testing.md#the-soul-client-file.
 
           ## Acceptance
 
-          - [x] **A1** The PR changes only tools/world-launcher/soul/eden.mjs, and that file is what inline.mjs builds from main $short — evidence: \`node tools/world-launcher/soul/inline.mjs\` on $sha, then \`node tools/world-launcher/soul/inline.mjs --check\` -> exit 0 at this head
+          - [x] **A1** The PR changes only the client's eden.mjs, skill.md and SOURCES.json: eden.mjs is what inline.mjs builds from main $short, stamped $CLIENT when the client changed since the last release — evidence: \`node tools/world-launcher/deploy/ship/release-client.mjs stamp\` on $sha, then \`node tools/world-launcher/soul/stamp.mjs --check\` -> exit 0 at this head
 
           ## Proof
 
@@ -81,7 +91,7 @@ jobs:
 
           ## Self-audit
 
-          - **Checks run**: \`node tools/world-launcher/soul/inline.mjs\` -> eden.mjs rebuilt; CI runs every check on this head
+          - **Checks run**: \`release-client.mjs stamp\` -> eden.mjs rebuilt and stamped; CI runs every check on this head
           - **Failed attempts**: none
           - **Long tail / externalities**: none; one generated file
           - **Known limits**: a later push to main that changes a module again replaces this PR with a newer one
@@ -96,5 +106,5 @@ jobs:
           None beyond the merged modules it reflects. Rollback: revert, then eden-sync.yml opens it again.
           EOF
           GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --label merge:ready \
-            --title "chore(soul): rebuild eden.mjs from its modules at $short" --body-file "$RUNNER_TEMP/body.md"
+            --title "chore(soul): rebuild eden.mjs from its modules and stamp client $CLIENT at $short" --body-file "$RUNNER_TEMP/body.md"
           echo "Opened the sync pull request for $branch" >> "$GITHUB_STEP_SUMMARY"

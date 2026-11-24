@@ -4,11 +4,13 @@
 #
 # On the runner:
 #   bash release.sh checks <sha>                       refuses `release.missing-check: <name>` for each check of
-#                                                      v2/docs/release.md's list the head has not passed (gh api)
+#                                                      v2/docs/release.md's list the head has not passed (gh api); the
+#                                                      merge queue's green `ci` run at <sha> counts for its CI checks
 #   bash release.sh bundle <out> <sha> <version> <cargo release dir> <page dist dir> <client dir> [<wasm pkg dir>]
 #                                                      the four artifacts, the tools and manifest.json (name, hash);
 #                                                      client.tar is the served client (v2/client/served/build.mjs,
-#                                                      R17 #2818), each served file a `served` line of the manifest
+#                                                      R17 #2818), each served file a `served` line of the manifest;
+#                                                      reseed/ holds Eden's reseed, its undo and content/kinds
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -17,10 +19,13 @@
 #   stage <bundle>                 each artifact to $WORLDS_ROOT/builds/<hash>/<name> if its bytes hash to the
 #                                  manifest's; the release's record to $DATA/releases/<sha>/; then verify
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
-#   move <sha> [<canary world>]    the canary's pin by `deploy` (O7), then every other world's, then the gateway by
+#   move <sha> [<canary world>|@eden]   the canary's pin by `deploy` (O7), then every other world's, then the gateway by
 #                                  `gateway-upgrade` (O16), then the page, then the served client
 #                                  ($LIB/client, which a world's address serves); each step done once per release
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
+#   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
+#                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
+#   reseed-undo <label> check|run  undoes that reseed, with the undo the release it moved to carried
 #   news <sha> <version> <link> <date>   one release entry in $DATA/news.jsonl, keyed by its link; refuses
 #                                  `release.not-live` unless this release moved every world
 # A refusal prints `refused: <name>: <why>` and exits 3; it changes nothing it has not already done.
@@ -33,8 +38,10 @@ ETC=${RELEASE_ETC:-/etc/souls}
 export WORLDS_ROOT
 # The four artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7).
 ARTIFACTS=(worldd gatewayd page.tar client.tar)
-# What moves them, carried with the release.
-TOOLS=(deploy gateway-upgrade)
+# What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13).
+TOOLS=(deploy gateway-upgrade world-aside)
+# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
+RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
 die() {
   echo "release: $*" >&2
@@ -58,14 +65,23 @@ field() { sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p" "$1" | head -1; }
 artifact() { entries "$1" | awk -v n="$2" '$1 == n {print $2}'; }
 
 # A4: every check v2/docs/release.md lists (between its release-checks markers) passed at <sha>: a run of that name
-# concluded success there (the merge queue's run; main's own push run is often cancelled by the next merge).
+# concluded success there. 0.133 R13: for `ci-ok` and the v2 legs, so does the merge queue's `ci` run concluding
+# success at <sha> (a queued commit lands on main as itself): a pull request enters the queue only with ci-ok green at
+# its own head, which needs every v2 leg its paths select, and the queue's run checks that the combined code
+# compiles. Main's own push run is often cancelled by the next merge, and runs no leg its paths do not select.
 checks() {
-  local sha=$1 doc=${RELEASE_DOC:-$(dirname "$0")/../../../docs/release.md} names passed n missing=()
+  local sha=$1 doc=${RELEASE_DOC:-$(dirname "$0")/../../../docs/release.md} names passed n queued missing=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "checks <full 40-hex sha>"
   names=$(sed -n '/<!-- release-checks -->/,/<!-- \/release-checks -->/s/^- `\([^`]*\)`.*/\1/p' "$doc")
   [ -n "$names" ] || die "no checks listed in $doc"
   passed=$(gh api --paginate "repos/${GITHUB_REPOSITORY:?}/commits/$sha/check-runs?per_page=100" --jq \
     '.check_runs[] | select(.conclusion == "success") | .name' | sort -u)
+  queued=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/runs?head_sha=$sha&event=merge_group&per_page=100" --jq \
+    '[.workflow_runs[] | select(.name == "ci" and .conclusion == "success")] | length')
+  if [ "${queued:-0}" -gt 0 ]; then
+    echo "checks: the merge queue's ci run passed at ${sha:0:12}, so ci-ok and the v2 legs count as passed"
+    passed=$(printf '%s\n' "$passed" "$(grep -xE 'ci-ok|v2-.+' <<< "$names")" | sort -u)
+  fi
   while IFS= read -r n; do
     grep -qxF -- "$n" <<< "$passed" || missing+=("$n")
   done <<< "$names"
@@ -100,6 +116,9 @@ bundle() {
   rm -rf "$out/served"
   for t in "${TOOLS[@]}"; do install -m 755 "$bins/$t" "$out/bin/$t"; done
   install -m 755 "$0" "$out/release.sh"
+  mkdir -p "$out/reseed"
+  for t in "${RESEED[@]}"; do install -m 755 "$(dirname "$0")/../cutover/$t" "$out/reseed/$t"; done
+  cp -R "$(dirname "$0")/../../../../content/kinds" "$out/reseed/kinds"
   for a in "${ARTIFACTS[@]}"; do
     lines+=("$(printf '{"name":"%s","hash":"%s","bytes":%s}' "$a" "$(hash "$out/artifacts/$a")" "$(wc -c < "$out/artifacts/$a" | tr -d ' ')")")
   done
@@ -155,6 +174,8 @@ stage() {
   install -m 644 "$from/manifest.json" "$rel/manifest.json"
   install -m 755 "$from/release.sh" "$rel/release.sh"
   for n in "${TOOLS[@]}"; do install -m 755 "$from/bin/$n" "$rel/bin/$n"; done
+  rm -rf "$rel/reseed"
+  cp -R "$from/reseed" "$rel/reseed"
   verify "$sha"
 }
 
@@ -189,6 +210,11 @@ move() {
   page=$(artifact "$rel/manifest.json" page.tar) client=$(artifact "$rel/manifest.json" client.tar)
   all=$(worlds)
   [ -n "$all" ] || refuse "release.no-worlds: nothing under $WORLDS_ROOT/worlds"
+  # @eden: Eden's world (the cut-over's, $ETC/cutover.env), the canary of a release that reseeded it (0.133 R13)
+  if [ "$canary" = @eden ]; then
+    canary=$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ETC/cutover.env" 2> /dev/null)
+    [ -n "$canary" ] || refuse "release.no-such-world: no Eden world in $ETC/cutover.env"
+  fi
   canary=${canary:-$(head -1 <<< "$all")}
   grep -qxF -- "$canary" <<< "$all" || refuse "release.no-such-world: $canary"
   order=("$canary")
@@ -261,6 +287,31 @@ rollback() {
     fi
   done
   return $status
+}
+
+# 0.133 R13: Eden's reseed as a release step, by the scripts, world-aside and kinds this release staged. The script
+# finds this release's world-aside and kinds itself (reseed-eden.sh); `check` reads and prints, changing nothing.
+reseed() {
+  local sha=$1 act=${2:-} label=${3:-} rel=$DATA/releases/$1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed <sha> check|run [<label>]"
+  [ -f "$rel/reseed/reseed-eden.sh" ] || refuse "release.no-reseed: release ${sha:0:12} carries no reseed (staged by an older release-v2)"
+  if [ -n "$label" ]; then
+    bash "$rel/reseed/reseed-eden.sh" "$sha" resume "$label" "$act"
+  else
+    bash "$rel/reseed/reseed-eden.sh" "$sha" "$act"
+  fi
+}
+
+# Undoes the reseed <label>, with the undo of the release the reseed moved Eden to (its receipt's `new` build).
+reseed_undo() {
+  local label=$1 act=${2:-} receipt new rel
+  [[ $label =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed-undo <label> check|run"
+  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1)
+  [ -f "$receipt" ] || refuse "release.no-reseed: no reseed receipt for $label"
+  new=$(sed -n 's/^new=//p' "$receipt")
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  [ -n "$rel" ] && [ -f "$(dirname "$rel")/reseed/reseed-eden-undo.sh" ] || refuse "release.no-reseed: no staged release carries the undo for $label"
+  RESEED_TOOL=${RESEED_TOOL:-$(dirname "$rel")/bin/world-aside} bash "$(dirname "$rel")/reseed/reseed-eden-undo.sh" "$label" "$act"
 }
 
 news() {
@@ -338,8 +389,9 @@ main() {
   local cmd=${1:-}
   shift || true
   case $cmd in
-    checks | bundle | stage | verify | move | rollback | news | publish | remote) "$cmd" "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|rollback|news (see the top of this file)" ;;
+    checks | bundle | stage | verify | move | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
+    reseed-undo) reseed_undo "$@" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 

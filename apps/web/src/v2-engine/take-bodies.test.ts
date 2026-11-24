@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view/people-light.ts';
-import { readFileSync } from 'node:fs';
 import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
 import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
@@ -86,11 +85,9 @@ test('the pure parts: seats, postures, props and what is held when', () => {
 });
 
 test('a body with no body kind is the same default person on both pages', () => {
-  // the v2 page's BODIES (crowd/bodies.ts, which needs three to import), read as text: its people in its order
-  const src = readFileSync(new URL('../../../../v2/web/src/crowd/bodies.ts', import.meta.url), 'utf8');
-  const v2Bodies = [...src.matchAll(/^  \['([a-z]+)', 'animated-/gm)].map((m) => m[1]);
-  // and its id hash (FNV-1a), which picks a default person by `hash(id) % defaults`
-  assert.ok(src.includes('let h = 2166136261;') && src.includes('h = Math.imul(h ^ s.charCodeAt(i), 16777619);') && src.includes('hash(id) % this.defaults'));
+  // the v2 page's BODIES (crowd/bodies.ts), its people in its order, and its id hash (FNV-1a), which picks a default
+  // person by `hash(id) % defaults`: pinned here (X1), so this needs nothing from v2/web
+  const v2Bodies = ['casual', 'punk', 'woman'];
   const v2Hash = (x: string) => { let h = 2166136261; for (let i = 0; i < x.length; i++) h = Math.imul(h ^ x.charCodeAt(i), 16777619); return h >>> 0; };
   assert.deepEqual([...LOOKS], v2Bodies, 'the v2 page\'s people, in its order');
   assert.deepEqual([...LOOKS], [...PEOPLE], 'the old page\'s people, in the same order');
@@ -171,4 +168,30 @@ test('a sit that moves the record into a seat with no motion sample is drawn sea
   b.receive(part(12, [], [['b.7', 'w.99', 2, T0 + 6_100_000, 0, 0, 0]]));
   assert.equal(b.view.unplaced, 1);
   assert.deepEqual(b.view.unplacedFrames, ['w.99/2 (not in the public copy)']);
+});
+
+test('K2: a walk to a seat and the sit in one part is drawn seated, not standing on the walk\'s last sample', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, chair, body], removed: [] } as never });
+  b.receive(part(0));
+  b.receive(part(1));
+  // one part: the walk's samples to the chair (1.0 to 1.4 s), and the sit's record in its slot (`at`: its newest sample)
+  const walk = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number] => ['b.7', 'w.0', null, T0 + 1_000_000 + k * 100_000, 500_000 * k, 0, 0]);
+  b.receive(part(2, [{ ...body, parent: 'w.3', slot: 0, pos: [0, 0, 0], at: T0 + 1_400_000 }], walk));
+  for (let n = 3; n < 12; n++) b.receive(part(n));
+  assert.equal(on(b, 1.2).activity, 'walk');
+  assert.equal(on(b, 2).activity, 'sit', 'seated once there');
+  assert.equal(on(b, 2).state.seatHeight, 0.45);
+  assert.equal(on(b, 4).activity, 'sit', 'and while it stays');
+});
+
+test('V5: a state that lists a seated body before its chair (a history bundle\'s) draws it seated, not nowhere', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  // as history.ts replays a bundle: its whole state in one part, the body ahead of the chair it sits in, no motion
+  b.receive(part(0, [{ ...body, parent: 'w.3', slot: 0, pos: [0, 0, 0] }, world, chair]));
+  for (let n = 1; n < 10; n++) b.receive(part(n));
+  assert.equal(b.view.unplaced, 0, 'its frame was found');
+  const seated = on(b, 1);
+  assert.equal(seated?.activity, 'sit');
+  assert.deepEqual(seated.p.map((x) => +x.toFixed(3)), [2, 0, 0]);
 });

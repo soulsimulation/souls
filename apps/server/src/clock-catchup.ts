@@ -7,6 +7,9 @@
 // gap would have reached (clock-catchup.test.ts compares the hashes, needs, day turns and moments included). Not yet for
 // listener state kept in memory or on the wall clock (#2236): the edge ambient-life idle clock starts over at the boot,
 // and the body rule's wall timers (doze, asleep, drift) see the whole gap at the first catch-up ticks.
+// The god layer's first perception pass (#2501) and its places pass (R14) run in slices during a catch-up, as on a
+// running world, so the tick they publish at depends on the CPU's speed: steps due in that window (the body rule's) are
+// delayed until they publish, never stuck.
 //
 // How many ticks it missed comes from the wall anchor in <DATA_DIR>/clock-wall.json: a (wall time, tick) pair saved
 // every few seconds while the world runs and once more as it stops. The ticks owed on boot are the wall time since the

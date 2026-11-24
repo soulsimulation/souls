@@ -19,7 +19,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "k1", "field": "stock", "n": 1, "to": 0 },
+              { "change": "set", "node": "k1", "field": "stock", "n": 28, "to": 0 },
               { "change": "create", "node": "rk1.0", "kind": "eden:kindling_bundle", "to": { "node": "k1", "slot": "out" } }
             ],
             "events": [

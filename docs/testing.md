@@ -49,7 +49,9 @@ blocks as they are, so two PRs that change form rules never collide on eden.mjs.
 - **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
   opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
   checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
-- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+- **Stamp**: the same sync pull request stamps the client when it changed since the last release
+  (`release-client.mjs stamp`), and release.yml refuses a head whose copy is stale or unstamped (`release-client.mjs
+  check`), so the client a world serves
   (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
 
 Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
@@ -160,9 +162,13 @@ Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci
   separate `security` (gitleaks, path-guard, scrub-guard), `proof` and `changelog` workflows. Labels start no run.
 - **A draft** runs `scope` and `repo` only. When its paths select heavier jobs, `ci-ok` fails as "Full CI deferred"
   until it is marked ready for review, which starts a full run. Docs or tools-only drafts are never deferred.
-- **The merge queue runs nothing again.** A PR enters only with its required checks green at its head, so a
-  `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke` and `ci-ok` passes at once. The push to main
-  that lands it runs its paths' light set; that, the daily full run and the remote gate are the net after merging.
+- **The merge queue runs no test again; it compiles the group.** A PR enters only with its required checks green at
+  its head, so a `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke`. Two PRs green alone can still
+  combine into code that does not build, so `group-check` compiles the combined code: `cargo check --workspace
+  --all-targets --locked` of `v2/` and `tsc --noEmit -p apps/web`, each only when the group changed what it builds
+  from (`groupChecks` in `.github/scripts/ci-scope.mjs`). It runs on the self-hosted pool with its toolchain and cargo
+  target kept per runner, and `ci-ok` waits for it. The push to main that lands it runs its paths' light set; that,
+  the daily full run and the remote gate are the net after merging.
 - **`proof-ok` and `fragment` never block.** Both report success on every PR and merge group: no proof tier, journal
   entry, maintainer sign-off or changelog fragment is required. `fragment` logs a warning for a malformed fragment.
 - **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
@@ -394,8 +400,21 @@ node tools/release/check-0132.mjs --bin <release worldd, gatewayd, directoryd, d
   - pairs of bodies closer than 0.3 m in two chunks running, sampled on the page.
 - **4.** A browser smoke of home, sign-in, sound, music and the camera.
 
-It prints a pass/fail table and writes `report.json`. Exit 0 when every line passes. Run the 100-agent line on the
-shared build machine when the laptop is busy.
+It prints a pass/fail table and writes `report.json` and `table.md`. Exit 0 when every line passes. The browser uses
+the first of the proof recorder's GPU flag sets (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) whose
+`WEBGL_debug_renderer_info` names a hardware renderer; with none, or `--gl soft`, lines 3 and 4 run on SwiftShader and
+line 2 is not reported.
+
+On the shared build machine, with its GPU, one command provisions everything in the run's own directory (node 22,
+pnpm install, media, the old page and the character set, Playwright's Chromium, the release builds and replica's WASM,
+the new page, caddy), runs the check and removes the run's world folders and checkout after:
+
+```sh
+gh workflow run timed-run.yml --ref main -f command=check-0132 -f ref=main -f args='--agents 100 --seconds 600 --only 2,3,4'
+gh run download <run-id> -D .local/check-0132-<run-id>   # report.json, table.md, check.log, clip/*.webm
+```
+
+The table is also in the run's summary.
 
 ## Playtests and the swarm director
 
@@ -434,8 +453,13 @@ sign-off; T4 is the release head. "Done" means walked on the real URL with real 
 
 When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
 `tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
-`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
-push it to an `agent/` branch, then dispatch the timed run from that branch:
+`{"sim.dev": "admin"}`, and `steps.mjs`), push it to an `agent/` branch, then dispatch the timed run from that branch.
+The runner brings up the ref's old page on a new-engine world of the template
+(`tools/playtest/arena/new-engine/old-page.mjs`, built in the job); `_shared/cast.mjs` pairs the kit's Souls through
+the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. The
+ride kits board by the ride's `board` form, waiting while it is away on its course (`_shared/ride.mjs`). A kit whose
+verbs have no new-engine form yet (the television, the core ferris wheel) carries `skip` in its kit.json, saying why
+and what is missing, and the runner refuses it by name:
 
 ```bash
 gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'

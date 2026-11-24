@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flower_bed",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      2200,
+      540,
+      2200
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A round flower bed of mixed blooms, edged with stones.",
+    "plant": "plant",
+    "flowers": "flowers",
+    "bed": "bed"
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "flowers",
+      "bed"
+    ]
+  }
+}

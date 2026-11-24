@@ -15,9 +15,23 @@ use super::store::{Object, R, Store, When, refuse};
 /// directory's caller, not the tick, that makes these calls.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The largest object a world's store reads ([`S3::for_world`]): 1 GiB, the largest legitimate object (a large
+/// world's stream-recovery object or checkpoint, tens of MB) with a wide margin.
+pub const WORLD_READ_LIMIT: u64 = 1 << 30;
+
+/// How long an operator's request may wait for one phase (the lookup, the connection, the request, the answer's
+/// head) before it is given up on ([`S3::for_operator`]).
+const OPERATOR_PHASE: Duration = Duration::from_secs(30);
+
+/// How long one object's body may take to send or receive in a world's store ([`S3::for_world`]).
+const BODY_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// One bucket of an S3-compatible store, and the prefix every key is put under.
 pub struct S3 {
     agent: ureq::Agent,
+    /// The largest object a read takes, in bytes: `None` is ureq's own cap (10 MiB), which every program but an
+    /// operator's copy keeps ([`S3::for_operator`]).
+    read_limit: Option<u64>,
     /// `scheme://host[:port]`, with no path.
     endpoint: String,
     host: String,
@@ -75,6 +89,7 @@ impl S3 {
             .into();
         Ok(S3 {
             agent,
+            read_limit: None,
             endpoint: endpoint.to_owned(),
             host: host.to_owned(),
             bucket: bucket.to_owned(),
@@ -83,6 +98,60 @@ impl S3 {
             secret_access_key: secret_access_key.to_owned(),
             prefix: prefix.to_owned(),
         })
+    }
+
+    /// This store as a world's (`worldd`'s history, checkpoints, log parts and stream recovery): reads of whole objects
+    /// up to [`WORLD_READ_LIMIT`], where ureq's own cap is 10 MiB and a fresh Eden's stream-recovery object is already
+    /// 11.8 MB (its checkpoint 10.1 MB, its import part 9.6 MB). A store out of reach is still found within [`TIMEOUT`]:
+    /// the name's lookup, the connection, the request and the answer's head each have that long; only an object's body, sent or
+    /// received, has [`BODY_TIMEOUT`].
+    pub fn for_world(mut self) -> S3 {
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(None)
+            .timeout_resolve(Some(TIMEOUT))
+            .timeout_connect(Some(TIMEOUT))
+            .timeout_send_request(Some(TIMEOUT))
+            .timeout_recv_response(Some(TIMEOUT))
+            .timeout_send_body(Some(BODY_TIMEOUT))
+            .timeout_recv_body(Some(BODY_TIMEOUT))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(WORLD_READ_LIMIT);
+        self
+    }
+
+    /// This store for an operator's tool that copies whole objects (`world-aside`): reads of any size up to
+    /// `read_limit` bytes and `timeout` per request, where every other program keeps ureq's 10 MiB cap and
+    /// [`TIMEOUT`]. A world's stream-recovery objects pass 10 MiB.
+    pub fn for_operator(mut self, read_limit: u64, timeout: Duration) -> S3 {
+        // Each phase on its own bound: a store that stalls mid-answer is given up on and the caller tries again,
+        // rather than one request holding the whole `timeout` (0.132.1: a bucket over IPv6 that stalls 30 s and more).
+        let phase = Some(timeout.min(OPERATOR_PHASE));
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .timeout_resolve(phase)
+            .timeout_connect(phase)
+            .timeout_send_request(phase)
+            .timeout_recv_response(phase)
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(read_limit);
+        self
+    }
+
+    /// This store for `store-probe` (0.133), which measures the link itself: one bound, `timeout`, on each whole request
+    /// and no bound per phase, so a stall shows as its own length up to `timeout`; reads of whole objects up to
+    /// `read_limit` bytes.
+    pub fn for_probe(mut self, read_limit: u64, timeout: Duration) -> S3 {
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(read_limit);
+        self
     }
 
     /// The store the environment names: [`URL_ENV`] in the offsite form ([`S3::from_url`], O3c #3529), else [`ENV`]
@@ -166,13 +235,35 @@ impl S3 {
         query: &str,
         payload: &[u8],
     ) -> [(&'static str, String); 3] {
+        self.sign_with(method, path, query, payload, &[])
+    }
+
+    /// [`S3::sign_query`] with `extra` headers (lowercase `x-amz-*` names) signed too, as SigV4 asks of every
+    /// `x-amz-*` header a request sends (CopyObject's `x-amz-copy-source`).
+    fn sign_with(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        payload: &[u8],
+        extra: &[(&str, &str)],
+    ) -> [(&'static str, String); 3] {
         let (date, stamp) = now();
         let body = to_hex(digest::digest(&digest::SHA256, payload).as_ref());
-        let signed = "host;x-amz-content-sha256;x-amz-date";
-        let canonical = format!(
-            "{method}\n{path}\n{query}\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
-            self.host
-        );
+        let mut headers: Vec<(&str, &str)> = vec![
+            ("host", self.host.as_str()),
+            ("x-amz-content-sha256", body.as_str()),
+            ("x-amz-date", stamp.as_str()),
+        ];
+        headers.extend_from_slice(extra);
+        headers.sort();
+        let signed = headers
+            .iter()
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>()
+            .join(";");
+        let lines: String = headers.iter().map(|(k, v)| format!("{k}:{v}\n")).collect();
+        let canonical = format!("{method}\n{path}\n{query}\n{lines}\n{signed}\n{body}");
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
         let to_sign = format!(
             "AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}",
@@ -324,10 +415,12 @@ impl Store for S3 {
         }
         status(code, key)?;
         let etag = etag(&res, key)?;
-        let bytes = res
-            .body_mut()
-            .read_to_vec()
-            .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
+        let body = res.body_mut();
+        let bytes = match self.read_limit {
+            Some(n) => body.with_config().limit(n).read_to_vec(),
+            None => body.read_to_vec(),
+        }
+        .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
         Ok(Some(Object { etag, bytes }))
     }
 
@@ -355,6 +448,61 @@ impl Store for S3 {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// HeadObject: the object's length and ETag, with no body.
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        let path = self.path(key);
+        let mut req = self.agent.head(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign("HEAD", &path, b"") {
+            req = req.header(k, v);
+        }
+        let res = req.call().or_else(|e| unreachable(key, e))?;
+        let code = res.status().as_u16();
+        if code == 404 {
+            return Ok(None);
+        }
+        status(code, key)?;
+        let len = res
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+        let Some(len) = len else {
+            return refuse("store-error", format!("{key}: the answer has no length"));
+        };
+        Ok(Some((len, etag(&res, key)?)))
+    }
+
+    /// CopyObject: the bucket copies `from` to `to` itself, so no byte of the object passes through this machine. An
+    /// error the store reports in the body of a 200 (as S3 may for a long copy) is a refusal.
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        let (path, source) = (self.path(to), self.path(from));
+        let mut req = self.agent.put(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign_with("PUT", &path, "", b"", &[("x-amz-copy-source", &source)]) {
+            req = req.header(k, v);
+        }
+        let mut res = req
+            .header("x-amz-copy-source", &source)
+            .send_empty()
+            .or_else(|e| unreachable(to, e))?;
+        status(res.status().as_u16(), to)?;
+        let xml = res
+            .body_mut()
+            .read_to_string()
+            .or_else(|e| refuse("store-unreachable", format!("{to}: {e}")))?;
+        if xml.contains("<Error>") {
+            return refuse(
+                "store-unreachable",
+                format!("{to}: the copy failed in the store"),
+            );
+        }
+        let etag = xml
+            .split_once("<ETag>")
+            .and_then(|(_, r)| r.split_once("</ETag>"))
+            .map(|(e, _)| e.replace("&quot;", "").trim_matches('"').to_owned())
+            .unwrap_or_default();
+        Ok(etag)
     }
 
     /// DeleteObject; a key that is not there is no refusal.

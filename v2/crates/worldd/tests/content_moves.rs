@@ -176,3 +176,53 @@ fn parity_nod_and_shake_head_are_head_gestures_of_today_s_length() {
         }
     }
 }
+
+/// 0.134 B2 (for lane T's touch activities): handshake, hug, high-five and (0.135 E1) fist bump are contact moves
+/// within an arm's reach (at most `REACH_MOST`), each reaching a named point of the other body that the move fixes.
+#[test]
+fn the_touch_moves_reach_a_named_point_of_the_other_body_within_an_arm() {
+    let lib = worldd::acts::library().unwrap();
+    for (mv, point) in [
+        ("handshake", "souls:hand-right"),
+        ("hug", "souls:chest"),
+        ("high_five", "souls:hand-right"),
+        ("fist_bump", "souls:hand-right"),
+    ] {
+        let m = lib
+            .iter()
+            .find(|m| m.name.as_str() == format!("souls:{mv}"))
+            .unwrap_or_else(|| panic!("{mv} in the library"));
+        assert_eq!(m.contact.as_str(), point, "{mv}: its contact point");
+        assert!(
+            m.reach > 0 && m.reach <= replica::moves::REACH_MOST,
+            "{mv}: reach {} within an arm",
+            m.reach
+        );
+        assert!(
+            m.claims.contains(&Want::One(Class::Manipulator)),
+            "{mv}: a hand"
+        );
+    }
+    // A move that names no contact point still takes the step's `at`.
+    let touch = lib
+        .iter()
+        .find(|m| m.name.as_str() == "souls:touch")
+        .unwrap();
+    assert_eq!(touch.contact.as_str(), "souls:surface");
+}
+
+/// 0.134 (lane T's T2): `hold_hand` reaches the other body's left hand within an arm, and its last phase holds until
+/// the move is released.
+#[test]
+fn hold_hand_reaches_the_other_hand_and_holds_until_released() {
+    let lib = worldd::acts::library().unwrap();
+    let m = lib
+        .iter()
+        .find(|m| m.name.as_str() == "souls:hold_hand")
+        .expect("hold_hand in the library");
+    assert_eq!(m.contact.as_str(), "souls:hand-left");
+    assert!(m.reach <= replica::moves::REACH_MOST);
+    let last = m.phases.last().expect("phases");
+    assert!(last.held, "the last phase holds");
+    assert!(m.phases.iter().rev().skip(1).all(|p| !p.held));
+}

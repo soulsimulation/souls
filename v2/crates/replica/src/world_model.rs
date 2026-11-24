@@ -22,6 +22,8 @@ pub const FIXTURE_SCOPE_SOULS: Scope = Scope([0xdd; 16]);
 pub const SECTION_OWNER: u64 = 2;
 /// The entry format's section for a kind's slots, each with what it admits.
 pub const SECTION_SLOTS: u64 = 6;
+/// The entry format's section for a kind's state fields (K3), read here for each field's name only.
+pub const SECTION_STATE: u64 = 3;
 /// The entry format's section for the children a kind admits (SA-F6a, #2846; numbered by the coordinator, #2641).
 pub const SECTION_CHILDREN: u64 = 11;
 /// The entry format's section for how a thing moves (SA-F10, #2882), read here as `{1: how}`: `one_hand` and
@@ -37,6 +39,9 @@ pub struct Kind {
     pub slots: BTreeMap<u64, BTreeSet<String>>,
     /// The hands a thing of this kind occupies when held, 1 or 2 (section 18). None: it is not held in a hand.
     pub hands: Option<u8>,
+    /// Its state fields' names by number (section 3): the amounts a part moves balance by name, so a transfer between
+    /// two kinds that number a field differently balances ([`crate::tree::Rules`], T6 rule 3.4).
+    pub fields: BTreeMap<u64, String>,
 }
 
 /// Whether an admit list takes a child of kind `name` (plain `namespace:name`) whose kind's owner is `owner`.
@@ -542,11 +547,26 @@ pub fn parse_kinds(text_: &str) -> Result<BTreeMap<String, Kind>, Refusal> {
             },
             Some(_) => return source(format!("{name}: section 18 is {{1: how}}")),
         };
+        // Each state field's name (its entry's 1); the rest of section 3 is K3's to read.
+        let fields = match k.get(&SECTION_STATE) {
+            Some(Value::Map(s)) => s
+                .iter()
+                .filter_map(|(n, f)| match f {
+                    Value::Map(f) => match f.get(&1) {
+                        Some(Value::Text(t)) => Some((*n, t.as_str().to_owned())),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         let kind = Kind {
             owner: text(k.get(&SECTION_OWNER), "a kind's owner, section 2")?,
             children: names(k.get(&SECTION_CHILDREN), "section 11")?,
             slots,
             hands,
+            fields,
         };
         let Some(full_name) = full.get(&name) else {
             return source(format!("{name} was not named by T3's kind reader"));

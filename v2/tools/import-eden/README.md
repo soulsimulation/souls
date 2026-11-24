@@ -53,6 +53,10 @@ a log's only text is `namespace:name`. Kinds are named as the world's Soul Actio
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
 
+A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
+as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
+stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none.
+
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for
 a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entries this way

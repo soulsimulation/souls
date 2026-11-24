@@ -26,7 +26,7 @@ pub mod stall;
 pub mod town;
 
 use crate::mover::Body;
-use crate::spots::Target;
+use crate::spots::{Granted, Target};
 use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::pose::{Support, Vec3};
@@ -67,10 +67,14 @@ pub trait World {
     fn spots(&mut self, _marks: &[Mark], _at: Micros) -> Result<(), Refusal> {
         Ok(())
     }
-    /// What `who`, sent to `target`, was given: its place (µm, the target node's frame) or a refusal's name; `None`
-    /// until its ask is read.
-    fn spot(&self, _who: Id, _target: &Target) -> Option<Result<Vec3, &'static str>> {
+    /// What `who`, sent to `target`, was given: its place (the node it stands on, the point there, and whether it is
+    /// an overflow point round a crowded target, A2-5) or a refusal's name; `None` until its ask is read.
+    fn spot(&self, _who: Id, _target: &Target) -> Option<Result<Granted, &'static str>> {
         None
+    }
+    /// The walkers whose granted place a change of the ground took away since the last call (A2-5).
+    fn revoked(&mut self) -> Vec<Id> {
+        Vec::new()
     }
 }
 

@@ -930,6 +930,10 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         }
     };
 
+    let fields = state
+        .iter()
+        .map(|(n, f)| (*n, f.name.as_str().to_owned()))
+        .collect();
     Ok(Sections {
         body,
         geometry,
@@ -942,6 +946,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             children,
             slots,
             hands,
+            fields,
         },
         slots: named_slots,
         links,

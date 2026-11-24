@@ -22,6 +22,26 @@
 //!   arrive under one transfer id, in one part with the frame's first or last sample. Setting down puts the board, at
 //!   rest, on the node it is in (the floor both carriers stand on, or the open ground), in that node's frame.
 //!
+//! - **A load from its own entry (0.135 C2).** A load whose kind has an entry is carried as the entry states it
+//!   ([`Load::of`]): its longest side is carried lengthways, its width on the plan is the larger of its other two
+//!   sides, its two outermost grips along its length are where its carriers hold it, each carrier standing [`REACH`]
+//!   beyond its grip, and its `hold_crew` is how many must carry it. Before the lift ([`Load::check`]) a crew smaller
+//!   than that is refused `carry-crew-too-small`, a carrier more than [`GRIP_REACH`] from its grip
+//!   `carry-grip-out-of-reach`, and, when the lift names where the front goes, a load whose outline would meet fixed
+//!   geometry on the straight way there `carry-board-clips` ([`sweep_load`]); nothing is written. A load whose kind
+//!   has no entry is B9's 2 m board, as before.
+//!
+//! - **Held lengthwise (0.135 C4).** The carry's +x runs from the back carrier to the front, so a load is held in the
+//!   carry's slot turned so its longest side runs along it ([`Load::turn`]: a quarter turn about y for a beam whose
+//!   length is its z; an upright, whose length is its y, laid flat), its middle at the slot's origin ([`Load::held`]);
+//!   set down, it lies the same way, its middle between the carriers and its lowest side on the floor
+//!   ([`Load::resting`]). B9's board, whose length is its x, is held as before.
+//! - **A carry that breaks off sets its load down where it is (0.135 C3).** A partner's leave, carriers drifted more
+//!   than [`STRETCH`] from their span at the lift (one stopped, or its connection is gone, while the other walked
+//!   on), and a restart (a carry is not stored, so the load found riding is set down at the first tick) each set
+//!   the load down at its last sample, at rest on the ground ([`Carry::set_down_here`]); the world says why
+//!   (`souls:carry-set-down`, worldd's engine).
+//!
 //! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; three carriers; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
@@ -36,11 +56,12 @@ use replica::effects::{Body as EffectBody, Change, ChangeRec, Header, Refusal, R
 use replica::group::{Belonging, Group, Leave, Member, Outline};
 use replica::ids::Id;
 use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
+use replica::rules::json::Value as Json;
 use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
-use crate::ground::scene::{FLOOR, Scene, Xz, xform_to};
+use crate::ground::scene::{FLOOR, Scene, Terrain, Xz, xform_to};
 use crate::ground::{BODY_HIGH, BODY_LOW};
 use crate::slots::hands::{Entry, Log};
 
@@ -67,6 +88,212 @@ pub const HEIGHT: i64 = 900_000;
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
 pub const SLOT: u64 = 1;
+/// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
+pub const GRIP_REACH: i64 = 700_000;
+
+/// A load as its kind's entry states it (0.135 C2), µm along and across the carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Load {
+    /// Half its longest side, carried lengthways.
+    pub half_length: i64,
+    /// Half its width on the plan while carried: the larger of its other two sides.
+    pub half_width: i64,
+    /// Its two outermost grips along its length, from its middle: the back's, then the front's.
+    pub grips: [i64; 2],
+    /// How many must carry it (`state.hold_crew`'s default; two when it says none).
+    pub crew: u64,
+    /// The turn from its own frame to the carry's (0.135 C4): its longest side along the carry's +x, from the back
+    /// carrier to the front; a load whose length lies flat keeps its up, one whose length stands is laid flat.
+    pub turn: Quat,
+    /// The middle of its bounds in its own frame, µm: held at the carry's slot, set down between its carriers.
+    pub middle: Vec3,
+    /// Half its side that stands upright once turned, µm: how high its middle rests when it is set down.
+    pub rest: i64,
+    /// The end of its long axis in its own frame, from its middle, µm (half its length along that axis, +).
+    pub long: Vec3,
+}
+
+impl Load {
+    /// B9's 2 m board, held at its ends: a load whose kind has no entry.
+    pub fn board() -> Load {
+        Load {
+            half_length: HALF_LENGTH,
+            half_width: HALF_WIDTH,
+            grips: [-HALF_LENGTH, HALF_LENGTH],
+            crew: 2,
+            turn: Quat::IDENTITY,
+            middle: Vec3::ZERO,
+            rest: 0,
+            long: Vec3::new(HALF_LENGTH, 0, 0),
+        }
+    }
+
+    /// Its long axis on the plan, lying turned `o` (µm, from its middle to the + end of its length); none when that
+    /// axis stands more than half upright (a standing frame: its carriers take it along the line they stand on).
+    pub fn lies_along(&self, o: Quat) -> R<Option<Xz>> {
+        let v = o.rotate(self.long).map_err(pose_refusal)?;
+        Ok((2 * len([v.x, v.z]) >= self.half_length).then_some([v.x, v.z]))
+    }
+
+    /// The load lifted the other way round, its + end behind (0.135 C4): its grips swapped, and a half turn more so it
+    /// does not swing round as it is lifted.
+    pub fn reversed(&self) -> R<Load> {
+        let half = Quat::from_yaw_mdeg(180_000).map_err(pose_refusal)?;
+        Ok(Load {
+            grips: [-self.grips[1], -self.grips[0]],
+            turn: half.then(self.turn).map_err(pose_refusal)?,
+            ..*self
+        })
+    }
+
+    /// Where the load is held in the carry's slot (0.135 C4): its middle at the slot's origin, its long axis between
+    /// the carriers. Its position and orientation in the carry's frame.
+    pub fn held(&self) -> R<(Vec3, Quat)> {
+        let m = self.turn.rotate(self.middle).map_err(pose_refusal)?;
+        Ok((Vec3::new(-m.x, -m.y, -m.z), self.turn))
+    }
+
+    /// Where the load rests when set down (0.135 C4): its middle over `c` (on the floor, in the floor's frame, µm)
+    /// and its long axis along `q`'s +x. Its position and orientation in the floor's frame.
+    pub fn resting(&self, c: Vec3, q: Quat) -> R<(Vec3, Quat)> {
+        let o = q.then(self.turn).map_err(pose_refusal)?;
+        let m = o.rotate(self.middle).map_err(pose_refusal)?;
+        Ok((Vec3::new(c.x - m.x, c.y + self.rest - m.y, c.z - m.z), o))
+    }
+
+    /// A load from its kind's entry (`souls-entry/1`): `geometry.bounds_mm`, the `grip` points and
+    /// `state.hold_crew`. An entry with no bounds, or fewer than two grips apart along its length, is not a load.
+    pub fn of(entry: &Json) -> Result<Load, String> {
+        let bounds: Vec<i64> = entry
+            .get("geometry")
+            .and_then(|g| g.get("bounds_mm"))
+            .and_then(Json::arr)
+            .ok_or("a load states geometry.bounds_mm")?
+            .iter()
+            .map(|v| match v {
+                Json::Int(n) => i64::try_from(*n).map_err(|_| "a side in mm"),
+                _ => Err("a side in mm"),
+            })
+            .collect::<Result<_, _>>()?;
+        let [w, h, d] = bounds[..] else {
+            return Err("bounds_mm are three sides".into());
+        };
+        let sides = [w, h, d];
+        let axis = (0..3).max_by_key(|i| (sides[*i], 3 - *i)).unwrap_or(2);
+        let across = (0..3)
+            .filter(|i| *i != axis)
+            .map(|i| sides[i])
+            .max()
+            .unwrap_or(0);
+        // The entry's frame: x and z centred, y from the floor up (entry-format.md, section 5).
+        let middle = if axis == 1 { h / 2 } else { 0 };
+        let mut along: Vec<i64> = entry
+            .get("points")
+            .and_then(Json::obj)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|(_, p)| p.get("role").and_then(Json::str) == Some("grip"))
+            .filter_map(
+                |(_, p)| match p.get("at_mm").and_then(Json::arr)?.get(axis)? {
+                    Json::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                },
+            )
+            .map(|c| (c - middle) * 1000)
+            .collect();
+        along.sort_unstable();
+        let (Some(&back), Some(&front)) = (along.first(), along.last()) else {
+            return Err("a load names its grips".into());
+        };
+        if front <= back {
+            return Err("a load's grips are apart along its length".into());
+        }
+        let crew = match entry
+            .get("state")
+            .and_then(|s| s.get("hold_crew"))
+            .and_then(|c| c.get("default"))
+        {
+            Some(Json::Int(n)) => u64::try_from(*n).map_err(|_| "hold_crew is a count")?,
+            _ => 2,
+        };
+        // Its longest side onto the carry's +x (0.135 C4): x stays; z by a quarter turn about y; y laid flat, by the
+        // turn that takes y to x, x to z and z to y, so its wider side lies across as `half_width` has it.
+        let (turn, up) = match axis {
+            0 => (Ok(Quat::IDENTITY), h),
+            1 => (Quat::new(1 << 29, -(1 << 29), -(1 << 29), -(1 << 29)), d),
+            _ => (Quat::from_yaw_mdeg(90_000), h),
+        };
+        Ok(Load {
+            half_length: sides[axis] * 500,
+            half_width: across * 500,
+            grips: [back, front],
+            crew,
+            turn: turn.map_err(|e| format!("a load's turn: {e:?}"))?,
+            middle: Vec3::new(0, h * 500, 0),
+            rest: up * 500,
+            long: match axis {
+                0 => Vec3::new(w * 500, 0, 0),
+                1 => Vec3::new(0, h * 500, 0),
+                _ => Vec3::new(0, 0, d * 500),
+            },
+        })
+    }
+
+    /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
+    pub fn places(&self) -> [i64; 2] {
+        [self.grips[0] - REACH, self.grips[1] + REACH]
+    }
+
+    /// The checks before the lift (see the module's notes): `crew` carriers, the front at `front` and the back at
+    /// `back`, the load's middle at `middle` (each the open ground's plan, µm), its grips along `axis` on the plan from
+    /// the back toward the front ([`Load::lies_along`]; the carriers' own line when it stands); and, if the lift names
+    /// one, the front's destination `to` and the fixed geometry on the way. `carry-crew-too-small`,
+    /// `carry-grip-out-of-reach`, `carry-board-clips`, `carry-route-too-short`.
+    pub fn check(
+        &self,
+        crew: usize,
+        front: Xz,
+        back: Xz,
+        middle: Xz,
+        axis: Option<Xz>,
+        to: Option<(Xz, &Fixed)>,
+    ) -> R<()> {
+        if (crew as u64) < self.crew {
+            return refuse(
+                "carry-crew-too-small",
+                format!("{crew} carrying; it takes {}", self.crew),
+            );
+        }
+        let d = [front[0] - back[0], front[1] - back[1]];
+        let l = len(d);
+        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips.
+        let a = axis.unwrap_or(d);
+        for (who, at, along) in [
+            ("front", front, self.grips[1]),
+            ("back", back, self.grips[0]),
+        ] {
+            let u = scale(a, along, len(a));
+            let grip = [middle[0] + u[0], middle[1] + u[1]];
+            let off = len([at[0] - grip[0], at[1] - grip[1]]);
+            if off > GRIP_REACH {
+                return refuse(
+                    "carry-grip-out-of-reach",
+                    format!(
+                        "the {who} stands {} mm from its grip at ({}, {}) mm; at most {} mm",
+                        off / 1000,
+                        grip[0] / 1000,
+                        grip[1] / 1000,
+                        GRIP_REACH / 1000
+                    ),
+                );
+            }
+        }
+        if let Some((to, fixed)) = to {
+            sweep_load(&[back, front, to], fixed, self, l)?;
+        }
+        Ok(())
+    }
+}
 
 /// The carry as E23's group (`v2/docs/moving-group.md`, the `carried-load` fixture with this carry's ids): the board
 /// rides `activity`'s node, `leader` walks in front and steers, `follower` walks behind.
@@ -115,11 +342,17 @@ fn scale(d: Xz, by: i64, of: i64) -> Xz {
 /// The board between a leader standing at `front` and a follower at `back`: centred between them, along the line
 /// from one to the other.
 pub fn board(front: Xz, back: Xz) -> Quad {
+    outline(front, back, &Load::board())
+}
+
+/// `load`'s outline between a leader at `front` and a follower at `back`, centred between them, along the line from
+/// one to the other.
+pub fn outline(front: Xz, back: Xz, load: &Load) -> Quad {
     let c = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2];
     let d = [front[0] - back[0], front[1] - back[1]];
     let l = len(d);
-    let u = scale(d, HALF_LENGTH, l);
-    let n = scale([-d[1], d[0]], HALF_WIDTH, l);
+    let u = scale(d, load.half_length, l);
+    let n = scale([-d[1], d[0]], load.half_width, l);
     [
         [c[0] + u[0] + n[0], c[1] + u[1] + n[1]],
         [c[0] + u[0] - n[0], c[1] + u[1] - n[1]],
@@ -179,10 +412,19 @@ impl Fixed {
     /// The fixed geometry of the open ground `ground` and the lowest floor of each building standing on it.
     pub fn of(tree: &Tree, ground: Id) -> Result<Fixed, String> {
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let mut quads: Vec<Quad> = Scene::of(tree, ground)?
+        // On the open ground a box is read against the ground's height under it (its terrain's, raised or sloped).
+        let scene = Scene::of(tree, ground)?;
+        let t = scene.terrain.as_ref();
+        let mut quads: Vec<Quad> = scene
             .solids
             .iter()
-            .filter(|s| spans(s.y0, s.y1, 0))
+            .filter(|s| {
+                let c = s
+                    .ring
+                    .iter()
+                    .fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
+                spans(s.y0, s.y1, Terrain::ground(t, c[0], c[1], s.y0))
+            })
             .map(|s| s.ring)
             .collect();
         // The lowest floor of each building: by parent, the floor whose frame stands lowest on the ground.
@@ -282,13 +524,13 @@ fn at(path: &[Xz], along: i64) -> Xz {
 
 /// Where the follower is on the trail when the leader is `along` µm from its start: the point behind it, on the
 /// path, [`SPAN`] away (to within a millimetre).
-fn trail(path: &[Xz], along: i64) -> Xz {
+fn trail(path: &[Xz], along: i64, span: i64) -> Xz {
     let lead = at(path, along);
     let (mut lo, mut hi) = (0, along);
     while hi - lo > 1_000 {
         let mid = (lo + hi) / 2;
         let p = at(path, mid);
-        if len([lead[0] - p[0], lead[1] - p[1]]) > SPAN {
+        if len([lead[0] - p[0], lead[1] - p[1]]) > span {
             lo = mid;
         } else {
             hi = mid;
@@ -301,24 +543,29 @@ fn trail(path: &[Xz], along: i64) -> Xz {
 /// [`SPAN`] along it, the leader walking on to its end and the follower keeping to its trail. Refused before the lift
 /// as `carry-board-clips` at the first pose whose board overlaps fixed geometry: how far along, and where.
 pub fn sweep(path: &[Xz], fixed: &Fixed) -> R<u64> {
+    sweep_load(path, fixed, &Load::board(), SPAN)
+}
+
+/// [`sweep`] for `load`, its carriers `span` µm apart (0.135 C2).
+pub fn sweep_load(path: &[Xz], fixed: &Fixed, load: &Load, span: i64) -> R<u64> {
     let total: i64 = path
         .windows(2)
         .map(|w| len([w[1][0] - w[0][0], w[1][1] - w[0][1]]))
         .sum();
-    if total < SPAN {
+    if total < span {
         return refuse("carry-route-too-short", format!("{total} µm"));
     }
     let mut poses = 0;
-    let mut along = SPAN;
+    let mut along = span;
     loop {
         let lead = at(path, along);
-        let q = board(lead, trail(path, along));
+        let q = outline(lead, trail(path, along, span), load);
         if let Some(f) = fixed.hit(&q) {
             return refuse(
                 "carry-board-clips",
                 format!(
                     "{} mm along the route, the board between ({}, {}) and ({}, {}) mm meets the box at ({}, {}) mm",
-                    (along - SPAN) / 1000,
+                    (along - span) / 1000,
                     q[0][0] / 1000,
                     q[0][1] / 1000,
                     q[2][0] / 1000,
@@ -400,7 +647,16 @@ pub struct Carry {
     /// Every sample written of the activity's node: the board's track (at, its centre in the open ground's frame,
     /// µm, and its turn).
     pub track: Vec<(Micros, Vec3, Quat)>,
+    /// How far apart its carriers stood at the lift, µm on the plan (0.135 C3).
+    pub span: i64,
+    /// What it carries, as its kind's entry states it (B9's board when it has none): how it is held and set down
+    /// (0.135 C4).
+    pub load: Load,
 }
+
+/// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
+/// who stops (or whose connection is gone) while the other walks on.
+pub const STRETCH: i64 = 1_000_000;
 
 fn sample(node: Id, at: Micros, frame: Id, position: Vec3, orientation: Quat) -> Change {
     Change::Motion(HandOff {
@@ -441,7 +697,33 @@ impl Carry {
             audience,
             log: Log::new(header, rules, 0),
             track: Vec::new(),
+            span: 0,
+            load: Load::board(),
         }
+    }
+
+    /// Whether carriers at `front` and `back` have drifted more than [`STRETCH`] from their span at the lift: the
+    /// carry has broken off (0.135 C3).
+    pub fn stretched(&self, front: Vec3, back: Vec3) -> bool {
+        let d = len([front.x - back.x, front.z - back.z]);
+        (d - self.span).abs() > STRETCH
+    }
+
+    /// Sets the board down where the carry last had it (its last sample, or `at` the frame's pose `here` when it has
+    /// none: a carry found riding after a restart), at rest on `node` (0.135 C3: a carry that breaks off).
+    pub fn set_down_here(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        here: Option<(Vec3, Quat)>,
+        transfer: Id,
+    ) -> R<()> {
+        let Some((mut c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
+            return refuse("carry-set-down-nowhere", "no sample of the carry");
+        };
+        c.y -= HEIGHT;
+        self.put(tree, at, node, c, q, transfer)
     }
 
     fn write(&mut self, tree: &mut Tree, at: Micros, entries: Vec<Entry>) -> R<()> {
@@ -470,6 +752,7 @@ impl Carry {
         transfer: Id,
     ) -> R<()> {
         let (c, q) = Carry::pose(front, back)?;
+        let (position, orientation) = self.load.held()?;
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -480,8 +763,8 @@ impl Carry {
                     node: self.activity,
                     slot: Some(SLOT),
                 },
-                position: Vec3::ZERO,
-                orientation: Quat::IDENTITY,
+                position,
+                orientation,
                 support: Support::Slot,
             },
         };
@@ -506,6 +789,7 @@ impl Carry {
         ];
         self.write(tree, at, entries)?;
         self.track.push((at, c, q));
+        self.span = len([front.x - back.x, front.z - back.z]);
         Ok(())
     }
 
@@ -538,6 +822,20 @@ impl Carry {
     ) -> R<()> {
         let (mut c, q) = Carry::pose(front, back)?;
         c.y -= HEIGHT;
+        self.put(tree, at, node, c, q, transfer)
+    }
+
+    /// The board, at rest at `c` turned `q`, on `node`: its leave and its arrival under `transfer`.
+    fn put(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        c: Vec3,
+        q: Quat,
+        transfer: Id,
+    ) -> R<()> {
+        let (position, orientation) = self.load.resting(c, q)?;
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -545,8 +843,8 @@ impl Carry {
             zone: self.log.header.zone,
             pose: Pose {
                 frame: Frame { node, slot: None },
-                position: c,
-                orientation: q,
+                position,
+                orientation,
                 support: Support::Surface {
                     surface: node,
                     height: 0,

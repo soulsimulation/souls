@@ -219,7 +219,7 @@ const PROTOCOL = 2;
 /** A box-only view socket, as v2/web/src/owner/mail-socket.ts `MailSocket` (that file's cborg resolves from v2/web,
  *  which this app does not install): hello, sign in with the view token, then only the box's text frames; the token
  *  is renewed on the open socket before it expires, and the socket comes back after a drop. */
-class BoxSocket implements Sock {
+export class BoxSocket implements Sock {
   onText: ((t: string) => void) | null = null;
   private ws: WebSocket | null = null;
   private open = false;
@@ -276,6 +276,8 @@ const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unkno
 const PAGE_STREAM = typeof window === 'undefined' ? null : v2Stream();
 /** This page's v2 stream as its inline config named it when the page loaded; null on an old-engine world. */
 export const v2World = (): string | null => PAGE_STREAM;
+/** R3b: where this page's view socket and directory are, as the box reaches them; null on an old-engine world. */
+export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof location !== 'undefined' ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null);
 
 /** B3-2: the page's Soul ids the signed-in person owns on this v2 world (the view token's grants), for the old card's
  *  owner view; empty on an old-engine world, signed out, or while the directory cannot be asked. */

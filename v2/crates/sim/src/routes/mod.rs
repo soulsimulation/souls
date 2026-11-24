@@ -146,6 +146,9 @@ struct PieceRec {
     portals: Vec<u32>,
     /// Per triangle (counter-clockwise), the triangle across each edge `k` (vertex `k` to `k + 1`), or `NONE`.
     adj: Option<Vec<[u32; 3]>>,
+    /// Per triangle, its box (x min, z min, x max, z max, mm, the piece's frame): [`Map::locate`] and [`Map::gap`] skip
+    /// a triangle whose box `p` is not in or near (S7, [`bounds_of`]).
+    bounds: Vec<[i64; 4]>,
     /// Portal to portal, the line's length inside this piece, mm: filled on first use.
     dist: HashMap<(u32, u32), u32>,
 }
@@ -440,6 +443,10 @@ fn stretches(pc: &Piece, sq: (i32, i32), id: u32, lines: &mut BTreeMap<(bool, i6
     }
 }
 
+/// What [`Map::build_cut`] gives: the map, the buildings it read (the open ground's gates last), before their floors
+/// were joined, and those joins.
+pub type Cut = (Map, Vec<Building>, Vec<(usize, Link)>);
+
 impl Map {
     /// The map of everything on the open ground `ground`: its squares, and every building on it with its floors and
     /// links. `version` gives each node's version (a floor's, or the open ground's for all its squares). For today's
@@ -455,6 +462,23 @@ impl Map {
         size: Size,
         version: &dyn Fn(Id) -> u64,
     ) -> Result<Map, String> {
+        let open = OpenGround::of(tree, ground, size.radius_mm())?;
+        let cuts = open.cut_all(1);
+        Ok(Map::build_cut(tree, ground, size, version, &open, &cuts, 1)?.0)
+    }
+
+    /// As [`Map::build_for`], on the open ground `open_ground` already cut into `cuts` (in its squares' order), and
+    /// with the buildings it read, before their floors were joined, the open ground's gates last, and the joins found
+    /// between their floors ([`floor_joins`]) (S5: the town assembles from the same cut, reads and joins).
+    pub fn build_cut(
+        tree: &Tree,
+        ground: Id,
+        size: Size,
+        version: &dyn Fn(Id) -> u64,
+        open_ground: &OpenGround,
+        cuts: &[((i32, i32), crate::ground::Patch)],
+        threads: usize,
+    ) -> Result<Cut, String> {
         let radius = size.radius_mm();
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let mut m = Map {
@@ -472,13 +496,13 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open_ground = OpenGround::of(tree, ground, radius)?;
-        let open = &open_ground;
+        let open = open_ground;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
-        for (i, j) in open.squares() {
-            let p = open.cut_square(i, j);
+        for ((i, j), p) in cuts {
+            let (i, j) = (*i, *j);
+            let p = p.clone();
             let at = PatchAt {
                 node: ground,
                 square: Some((i, j)),
@@ -523,19 +547,43 @@ impl Map {
         let gdoors = ground_doors(tree, ground)?;
         let mut known = BTreeSet::new();
         let mut buildings = Vec::new();
+        // Each building read on its own, on at most `threads` threads (S5; one but at a world's start): a read sees only the tree and
+        // the open ground's squares, which no floor changes, so reading them all first and putting their floors on in
+        // order gives what reading and putting on one by one gave.
+        let mut placed = Vec::with_capacity(things.len());
         for h in things {
             let id = tree.node(h).ok_or("a node that is gone")?.id();
-            let place = xform_to(tree, h, gh)?;
-            let on = |sq: (i32, i32), p: [i64; 2]| m.on_square(ground, sq, p);
-            let open = Open {
-                ground,
-                place,
-                meets: &ground_meets,
-                on: &on,
-                doors: &gdoors,
-                terrain: open.terrain(),
+            placed.push((id, xform_to(tree, h, gh)?));
+        }
+        let reads = {
+            let m = &m;
+            let read = |&(id, place): &(Id, Xform)| {
+                let on = |sq: (i32, i32), p: [i64; 2]| m.on_square(ground, sq, p);
+                let open = Open {
+                    ground,
+                    place,
+                    meets: &ground_meets,
+                    on: &on,
+                    doors: &gdoors,
+                    terrain: open.terrain(),
+                };
+                Building::read_sized(tree, id, Some(open), radius)
             };
-            let b = match Building::read_sized(tree, id, Some(open), radius) {
+            let threads = crate::ground::fan_out(threads, placed.len());
+            let chunk = placed.len().div_ceil(threads).max(1);
+            std::thread::scope(|s| {
+                let parts: Vec<_> = placed
+                    .chunks(chunk)
+                    .map(|c| s.spawn(move || c.iter().map(read).collect::<Vec<_>>()))
+                    .collect();
+                parts
+                    .into_iter()
+                    .flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                    .collect::<Vec<_>>()
+            })
+        };
+        for ((id, place), b) in placed.into_iter().zip(reads) {
+            let b = match b {
                 Ok(b) => b,
                 Err(e) => {
                     m.unread.push((id, e));
@@ -558,8 +606,11 @@ impl Map {
         };
         let gates = Building::of_ground(tree, open, &known)?;
         buildings.push((gates, HashMap::new()));
+        // What was read, before the joins: the town's own list (S5), which it joins itself.
+        let read: Vec<Building> = buildings.iter().map(|(b, _)| b.clone()).collect();
         // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
-        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+        let joins = floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>());
+        for (i, l) in joins.iter().cloned() {
             buildings[i].0.join(l);
         }
         let all: HashMap<Id, (u32, u32)> = buildings
@@ -569,11 +620,11 @@ impl Map {
         for (b, _) in &buildings {
             m.add_links(b, &all);
         }
-        m.add_water(&open_ground, ground, gv);
+        m.add_water(open_ground, ground, gv, threads);
         // The open ground's gates are kept as a building of the ground's own, replaced when a square cut again
         // changes their meets (G3b, #3449).
         m.scratch.fit(m.portals.len());
-        Ok(m)
+        Ok((m, read, joins))
     }
 
     /// Replaces building `b`'s floors and links with those it was read with again after an edit (G3, #3276): the
@@ -594,6 +645,7 @@ impl Map {
                         ground: Ground::Dry,
                     };
                     rec.adj = None;
+                    rec.bounds = Vec::new();
                     rec.dist = HashMap::new();
                     for p in portals {
                         self.drop_portal(p);
@@ -692,6 +744,7 @@ impl Map {
                     triangles: Vec::new(),
                     ground: Ground::Dry,
                 };
+                rec.bounds = Vec::new();
                 rec.adj = None;
                 rec.dist = HashMap::new();
                 for p in portals {
@@ -897,6 +950,7 @@ impl Map {
             self.pieces.push(PieceRec {
                 at,
                 frame,
+                bounds: bounds_of(&pc),
                 piece: pc,
                 water: None,
                 portals: Vec::new(),
@@ -911,15 +965,16 @@ impl Map {
     /// meet) share a portal, and pieces of two grounds a shore link whose two ends are the stretch of edge they share.
     /// Dry ground and wading ground are joined by a [`Kind::Wade`]; wading ground, or dry ground, and swimming water
     /// by a [`Kind::Swim`]. End 0 is on the drier piece.
-    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64) {
+    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64, threads: usize) {
         let first_wet = self.pieces.len() as u32;
-        for (i, j) in open.squares() {
+        // Cut on at most `threads` threads, put on in the squares' order (S5).
+        for ((i, j), wet) in open.cut_all_water(threads) {
             let at = PatchAt {
                 node: ground,
                 square: Some((i, j)),
                 version,
             };
-            for (w, pc) in open.cut_water(i, j) {
+            for (w, pc) in wet {
                 let q = self.pieces.len() as u32;
                 self.by_patch
                     .entry((ground, Some((i, j))))
@@ -928,6 +983,7 @@ impl Map {
                 self.pieces.push(PieceRec {
                     at,
                     frame: 0,
+                    bounds: bounds_of(&pc),
                     piece: pc,
                     water: Some(w),
                     portals: Vec::new(),
@@ -1336,11 +1392,18 @@ impl Map {
 
     /// The triangle of piece `q` holding `p` (edges included), counter-clockwise.
     fn locate(&self, q: u32, p: [i64; 2], y: i64) -> Option<u32> {
-        let pc = &self.pieces[q as usize].piece;
+        let rec = &self.pieces[q as usize];
+        let pc = &rec.piece;
         if pc.vertices.first().is_none_or(|v| i64::from(v[1]) != y) {
             return None;
         }
         (0..pc.triangles.len() as u32).find(|&t| {
+            // A triangle holds only points in its box (its edges included): the others are not tried (S7).
+            if let Some(bx) = rec.bounds.get(t as usize)
+                && (p[0] < bx[0] || p[1] < bx[1] || p[0] > bx[2] || p[1] > bx[3])
+            {
+                return false;
+            }
             let [a, b, c] = self.tri(q, t);
             cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0
         })
@@ -1354,7 +1417,8 @@ impl Map {
     /// The triangle of piece `q` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p`
     /// itself inside).
     fn gap(&self, q: u32, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
-        gap(&self.pieces[q as usize].piece, p)
+        let rec = &self.pieces[q as usize];
+        gap_in(&rec.piece, &rec.bounds, p)
     }
 
     /// Triangle `t` of piece `q`, its corners counter-clockwise.
@@ -1900,6 +1964,65 @@ fn gap(pc: &Piece, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
         })
         .min()
         .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+}
+
+/// Each triangle's box of `pc` (x min, z min, x max, z max, mm): what [`Map::locate`] and [`gap_in`] skip by.
+fn bounds_of(pc: &Piece) -> Vec<[i64; 4]> {
+    (0..pc.triangles.len() as u32)
+        .map(|t| {
+            let [a, b, c] = tri(pc, t);
+            [
+                a[0].min(b[0]).min(c[0]),
+                a[1].min(b[1]).min(c[1]),
+                a[0].max(b[0]).max(c[0]),
+                a[1].max(b[1]).max(c[1]),
+            ]
+        })
+        .collect()
+}
+
+/// [`gap`], skipping each triangle whose box `bounds` lies farther from `p` than the nearest triangle found so far
+/// (S7): the same answer. Its nearest point is rounded down to whole mm, less than a mm on each axis, so a triangle is
+/// skipped only when its box is more than 2 mm on each axis beyond that: no triangle that could be the nearest, or tie
+/// with it, is skipped. With no boxes (or not one a triangle), every triangle is tried.
+fn gap_in(pc: &Piece, bounds: &[[i64; 4]], p: [i64; 2]) -> (u32, i64, [i64; 2]) {
+    if bounds.len() != pc.triangles.len() {
+        return gap(pc, p);
+    }
+    let seg = |a: [i64; 2], b: [i64; 2]| {
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
+        let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
+        (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
+    };
+    let mut best: Option<(i64, u32, [i64; 2])> = None;
+    for (t, bx) in (0..pc.triangles.len() as u32).zip(bounds) {
+        if let Some((d, _, _)) = best {
+            let dx = (bx[0] - p[0])
+                .max(p[0] - bx[2])
+                .max(0)
+                .saturating_sub(2)
+                .max(0);
+            let dz = (bx[1] - p[1])
+                .max(p[1] - bx[3])
+                .max(0)
+                .saturating_sub(2)
+                .max(0);
+            if sq(dx) + sq(dz) > d {
+                continue;
+            }
+        }
+        let [a, b, c] = tri(pc, t);
+        let one = if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
+            (0, t, p)
+        } else {
+            let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
+            (d, t, at)
+        };
+        best = Some(best.map_or(one, |b| b.min(one)));
+    }
+    best.map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
 }
 
 /// Whether `p` (mm, the ground's frame) lies on one of `pieces` (a square's), within the grid's rounding: as

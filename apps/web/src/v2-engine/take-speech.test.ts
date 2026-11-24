@@ -5,7 +5,8 @@ import { takeEvents } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
-import { isPublic, talkOf } from './take-speech.ts';
+import { hearersOf, isPublic, talkOf } from './take-speech.ts';
+import { candidates } from '../WorldDirector.ts';
 import { channelChip, speechFromEdge } from '../WorldSpectatorSpeech.ts';
 import { createDialogueStore, ingestDialogue } from '../dialogue-threads.ts';
 
@@ -19,9 +20,9 @@ test('a said is a talk line from its Soul, in world-time order, once, and not be
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, body('b.1', 'soul-abc-1', 'Ada'), body('b.2', 'soul-abc-2', 'Bo')], removed: [] } as never });
   b.receive(part(0, [said('b.2', 0.4, 'second'), said('b.1', 0.1, 'first')]));
+  assert.equal(b.view.speech.length, 0, 'nothing shown before its chunk is drawn');
   b.receive(part(1, [said('b.1', 0.1, 'first')])); // the same said again (a replayed part): kept once
   b.receive(part(2, [said('b.1', 1.2, 'private', { private: { conversation: 'c', members: [] } }), said('b.2', 1.3, null)]));
-  assert.equal(b.view.speech.length, 0, 'nothing shown before its chunk is drawn');
   for (let n = 3; n < 10; n++) b.receive(part(n));
   assert.deepEqual(b.view.speech.map((l) => [l.kind, l.from, l.text]), [['speech', { soulId: 's_abc-1', name: 'Ada' }, 'first'], ['speech', { soulId: 's_abc-2', name: 'Bo' }, 'second']]);
   assert.ok(b.view.speech[0].id !== b.view.speech[1].id && b.view.speech[0].at <= b.view.speech[1].at);
@@ -63,4 +64,31 @@ test('the old page shows a v2 say as said aloud by the Soul, never as a private 
   assert.deepEqual(threads.flatMap((t) => t.lines.map((l) => [l.name, l.text])), [['Ada', 'hello all'], ['Soul 6', 'hi Ada']]);
   ingestDialogue(store, b.view.speech, [], b.view.speech[0].at + 2000);
   assert.equal(threads.flatMap((t) => t.lines).length, 2, 'folded once');
+});
+
+test('two Souls speaking aloud near each other are heard by each other: one thread, and broadcast takes their two-shot', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const unnamed = { ...body('b.2', 'x', 'Bo'), soul: undefined }; // a body the stream gives no Soul grant: known by its node id
+  b.receive({ t: 'snapshot', s: { nodes: [world, body('b.1', 'soul-abc-1', 'Ada'), unnamed, body('b.3', 'soul-abc-3', 'Cy')], removed: [] } as never });
+  // Ada and Bo 3 m apart, Cy 40 m off (the stream's µm, in the world frame); a 10 m reach.
+  const at = (id: string, x: number) => [id, 'w.0', null, T0, x, 0, 0];
+  b.receive({ t: 'part', p: { number: 0, from: T0, to: T0 + 500_000, nodes: [], removed: [], samples: [at('b.1', 0), at('b.2', 3_000_000), at('b.3', 40_000_000)],
+    said: [said('b.1', 0.1, 'hello Bo'), said('b.2', 0.3, 'hello Ada'), said('b.3', 0.4, 'anyone?')] } as never });
+  for (let n = 1; n < 10; n++) b.receive(part(n));
+  assert.deepEqual(b.view.speech.map((x) => [x.from.name, x.heardBy]), [['Ada', ['s_b_2']], ['Bo', ['s_abc-1']], ['Cy', []]]);
+  const store = createDialogueStore();
+  ingestDialogue(store, b.view.speech, [], b.view.speech[0].at + 1000);
+  const threads = [...store.threads.values()].map((t) => t.lines.map((l) => l.name));
+  assert.deepEqual(threads, [['Ada', 'Bo'], ['Cy']], 'Ada and Bo are one scene; Cy talks alone');
+  // the director (WorldBroadcast feeds it the dock's threads by entity): Ada and Bo are a conversation two-shot
+  const thread = [...store.threads.values()][0].id;
+  const speaking = new Map([['v2_b_1', { thread, at: 100 }], ['v2_b_2', { thread, at: 101 }]]);
+  const best = candidates({ bodies: [{ id: 'v2_b_1', p: [0, 0, 0] }, { id: 'v2_b_2', p: [3, 0, 0] }], speaking, now: 102, landmarks: [] })[0];
+  assert.equal(best.kind === 'subjects' && best.twoShot, true);
+});
+
+test('hearers are the other Souls within earshot of the speaker, once each; an unplaced speaker is heard by none', () => {
+  const others = [{ soul: 'a', p: [1000, 0, 0] }, { soul: 'b', p: [0, 0, 12_500] }, { soul: 'c', p: null }, { soul: 'a', p: [2000, 0, 0] }];
+  assert.deepEqual(hearersOf([0, 0, 0], 12_000, others), ['a']);
+  assert.deepEqual(hearersOf(null, 12_000, others), []);
 });

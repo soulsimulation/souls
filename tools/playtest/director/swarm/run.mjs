@@ -36,7 +36,7 @@ const within = (p, ms) => { let t; return Promise.race([p, new Promise((r) => { 
  *  before anything is created unless hooks.allowLiveModels is true. Without hooks the behavior is unchanged. */
 export async function cmdDirect(a, hooks = null, { log = (...x) => console.error('[direct]', ...x) } = {}) {
   const castPath = resolve(a._[1] ?? '');
-  if (!existsSync(castPath)) { log(`usage: playtest.mjs direct <cast.json> [--server-root dir] [--world <url>] [--headless] [--script file] [--only a,b] [--out dir] [--no-planner] [--force-machine] [--keep-world]`); return 1; }
+  if (!existsSync(castPath)) { log(`usage: playtest.mjs direct <cast.json> [--engine v2] [--server-root dir] [--world <url>] [--headless] [--script file] [--only a,b] [--out dir] [--no-planner] [--force-machine] [--keep-world]`); return 1; }
   let cast = loadCast(castPath);
   if (a.only) { const only = String(a.only).split(','); cast = { ...cast, seats: cast.seats.filter((s) => only.includes(s.id)), order: cast.order.filter((id) => only.includes(id)), console: { script: (cast.console?.script ?? []).filter((e) => { const m = String(e.line).match(/^redirect\s+([^:]+):/i); const at = String(e.at ?? '').split(':')[1]; return (!m || only.includes(m[1].trim().toLowerCase())) && (!at || only.includes(at)); }) } }; }
   if (a['no-planner']) cast = { ...cast, orchestrator: { ...cast.orchestrator, planner: null } };
@@ -65,7 +65,9 @@ export async function cmdDirect(a, hooks = null, { log = (...x) => console.error
   receipt(runDir, 0, 'preflight', { ok: !!pfOk, allow: pf.allow, machineOk: pf.checks.machineOk });
   if (!pfOk) { log('preflight failed', JSON.stringify(pf.checks)); return 2; }
 
-  const mods = hooks?.modules ?? {};
+  // 0.135 P2: `--engine v2` plays the cast on the new engine (arena/new-engine/director.mjs): its world, seats, owners
+  // and truth in place of the old world's; the orchestrator, the verdict and the report are the same.
+  const mods = hooks?.modules ?? (a.engine === 'v2' ? (await import('../../arena/new-engine/director.mjs')).newEngineModules({ log }) : {});
   // A module given as null (a lifecycle whose observer check failed sets browser: null) stays off; undefined loads it.
   const pick = async (k, p) => (mods[k] !== undefined ? mods[k] : import(p));
   const provision = await pick('provision', '../../arena/provision.mjs');

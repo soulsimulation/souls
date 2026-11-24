@@ -44,7 +44,12 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | Verb | What it does |
 | --- | --- |
 | `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
+| `place <kind> --path '[[x,z],...]' [--width m]` | a road, footpath, hedge or wall along a line (metres), on the open ground unless `--in` |
+| `place <kind> --area '[[x,z],...]' \| --rect cx,cz,w,d \| --circle cx,cz,r` | a lawn, pitch, bed or named area (`eden:place`, with `--field 15=<its kind>`) over an area |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
+| `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
+| `select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m]` | what matches (id, kind, name, spot in metres); add `--remove` or `--by dx,dz [--yaw r]` to remove or move all of it in one edit |
+| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
 | `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
@@ -126,12 +131,42 @@ the root, which `describe` shows), and from then on you place it like any other 
 - **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
   `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
   millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass, and a `create` names
-  the made kind's full name (`namespace:name@hash`, from `describe`).
+  the made kind's full name (`namespace:name@hash`, from `describe`). Souls then use them as they use the world's own:
+  `inspect <id>` lists each form as an offer, `act <form>:<id>` runs it, and a wrong act is refused by the same name.
 - **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
 - **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
   `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.
 - **Removing a kind:** `remove <its souls:kind id>`, once nothing of that kind is left and no other kind's form
   creates it, or in the same batch as the last of them (`kind.in-use`).
+
+## Export and import
+
+- `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
+  default: kinds, places, fields and poses, and the world's public names.
+- `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
+  What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
+  changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
+  `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
+  ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+
+## Furnishing
+
+- `node souls-god.mjs furnish <building or room id> [--style <s>]` furnishes a building's rooms (or one room) with
+  today's recipes: the building's own style (townhouse, cottage, shop and 36 more), or `--style`. Each piece goes in
+  the room's free space, out of doorways and off the stairs; a piece that does not fit, or whose kind the world does
+  not pin, is dropped and named in the answer. A piece already there (by its recipe name) is left as it is.
+- `check furnish <id>` shows what it would place, and sends nothing.
+
+## Growing the world
+
+- `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
+- `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
+  `--bounds x0,z0,x1,z1` (metres) to cover a box.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
+  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
+  land edit, so a ground past about 16 MB is refused `edit.too-large`.
 
 ## Your own models and pictures
 
@@ -159,9 +194,10 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
-| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, or its timers start each other sooner than 50 ms in a ring |
+| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
 | `kind.audience` | a kind is defined for everyone |
 | `kind.namespace` | that namespace is not yours |
 | `kind.collision` | that kind is defined already: place it by the name `describe` lists |
@@ -169,6 +205,7 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 | `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 | `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
 | `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
+| `solid-into-slot` | a Soul's form would put a thing of your kind that has solids into a slot with a fixed point, where it would stand unjudged: such a thing is made into a hand and set down, which is judged |
 | `undo.conflict` | something the undo would change has changed since: put it back by hand |
 
 ## Good habits

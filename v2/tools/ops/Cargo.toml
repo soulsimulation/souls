@@ -14,6 +14,17 @@ path = "src/main.rs"
 name = "deploy"
 path = "src/deploy.rs"
 
+# `world-aside <world> [--back <label>] [--dry-run]`: one world's objects in the directory's store set aside and back.
+[[bin]]
+name = "world-aside"
+path = "src/world_aside.rs"
+
+# `store-probe [--count <n>] [--big <n>] [--endpoint <url>] [--dry-run]`: this machine's link to the directory's store,
+# measured (0.133): PUT+GET pairs of 1 KiB and 20 MB, each call timed, none tried again.
+[[bin]]
+name = "store-probe"
+path = "src/store_probe.rs"
+
 # The planted bad builds' world: dies at start, stalls, or refuses every act, only when served.
 [[bin]]
 name = "o7-plant"

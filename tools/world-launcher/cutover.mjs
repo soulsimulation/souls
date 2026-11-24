@@ -3,7 +3,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, re
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
-import { scriptJson } from '../../apps/server/src/inline-config.ts';
+import { scriptJson } from './page-meta.mjs';
 
 const files = new Set(['/v1/config', '/eden.mjs', '/skill.md', '/creator.md', '/instructions.md', '/llms.txt', '/replica.js', '/replica_bg.wasm']);
 const types = { 'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8', 'replica_bg.wasm': 'application/wasm',
@@ -43,7 +43,7 @@ const samePath = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*$/.test(s) 
 const sameOriginDir = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*\/$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
 /** #4177: the world page with `v2Stream` (and `v2Bodies`, when given) written into its inline config
- *  (apps/server/src/inline-config.ts writes that `<script>` first in <head>; the page's v2-engine reads the fields).
+ *  (page-meta.mjs writes that `<script>` first in <head>; the page's v2-engine reads the fields).
  *  `fields` is the body catalogue's directory, or (B3-2b) an object of the page's other v2 fields (`v2Bodies`,
  *  `v2Gateway`, `v2Directory`). A page without one is returned unchanged. */
 export function withV2Stream(html, stream, fields = null) {
@@ -93,8 +93,10 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   };
   load(true);
   return {
+    routeOnly: () => load()?.routeOnly() ?? [],
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
+    v2World: (w) => load()?.v2World(w) ?? null,
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
@@ -106,22 +108,59 @@ export const BINDINGS = 'souls/cutover-binding/2';
 /** The bindings a binding file holds: a list's worlds, or the one world of a single binding. */
 export const bindingsOf = (binding) => (Array.isArray(binding?.worlds) ? binding.worlds : [binding]);
 
+/** D2 (0.134): the registry id the launcher gives a world with no old twin, one the routes file routes to the new engine
+ *  that no binding binds (registry ids are `<slug>-<n>`, so the two never meet). */
+export const routeOnlyId = (slug) => `v2:${slug}`;
+
+/** D2 (0.134): a world with no old twin. Every world the binding's routes file routes to the new engine (`canonical`, not
+ *  `archived`, a public stream) that no binding binds is served as one: the launcher builds its page (the old page) and
+ *  lists it, and the fence answers its client, body and refused-write reads as for a bound world. It takes the first
+ *  binding's routes file, client and body folders; it has no static folder (no old views: the page draws from the stream). */
+function withRouteOnly(fence, bindings) {
+  const first = bindings[0], bound = new Set(bindings.map((b) => b.canonicalSlug)), fences = new Map();
+  const routeOnly = () => {
+    let value; try { value = JSON.parse(readBounded(first.routesFile, 32 * 1024 * 1024)); } catch { return []; }
+    if (value?.schema !== 'souls/world-routes/1' || !value.worlds || typeof value.worlds !== 'object' || Array.isArray(value.worlds)) return [];
+    return Object.entries(value.worlds).filter(([slug, r]) => !bound.has(slug) && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug) && r && typeof r === 'object'
+      && r.canonical === true && r.archived !== true && publicStream(r.stream)).map(([slug]) => slug);
+  };
+  const of = (w) => {
+    const slug = typeof w?.worldId === 'string' && w.worldId.startsWith('v2:') ? w.worldId.slice(3) : null;
+    if (!slug || bound.has(slug) || !routeOnly().includes(slug)) return null;
+    let f = fences.get(slug);
+    if (!f) fences.set(slug, f = oneFence({ oldWorldId: routeOnlyId(slug), canonicalSlug: slug, routesFile: first.routesFile, clientDir: first.clientDir,
+      ...(first.bodiesDir ? { bodiesDir: first.bodiesDir } : first.v2Bodies ? { v2Bodies: first.v2Bodies } : {}), ...(first.v2Directory ? { v2Directory: first.v2Directory } : {}) }));
+    return f;
+  };
+  return {
+    routeOnly,
+    inspect: (registry) => ({ ...fence.inspect(registry), routeOnly: routeOnly() }),
+    v2Stream: (w) => (of(w) ?? fence).v2Stream(w),
+    v2World: (w) => (of(w) ?? fence).v2World(w),
+    v2Bodies: (w) => (of(w) ?? fence).v2Bodies(w),
+    v2Fields: (w) => (of(w) ?? fence).v2Fields(w),
+    publish: (w, read) => (of(w) ? Promise.resolve(null) : fence.publish(w, read)),
+    handle: (req, res, w, url) => (of(w) ?? fence).handle(req, res, w, url),
+  };
+}
+
 function fenceOf(binding) {
-  if (!binding || typeof binding !== 'object' || (binding.worlds === undefined && binding.schema === undefined)) return oneFence(binding);
+  if (!binding || typeof binding !== 'object' || (binding.worlds === undefined && binding.schema === undefined)) return withRouteOnly(oneFence(binding), [binding]);
   if (binding.schema !== BINDINGS || !Array.isArray(binding.worlds) || !binding.worlds.length) throw Error('cutover.binding-invalid');
   const fences = binding.worlds.map(oneFence);
   const distinct = (key) => { const v = binding.worlds.map((b) => b[key]).filter((x) => x !== undefined); return new Set(v).size === v.length; };
   // one entry per world, and never two worlds publishing into one static folder (each clears its own on rollback)
   if (!distinct('canonicalSlug') || !distinct('oldWorldId') || !distinct('staticDir')) throw Error('cutover.binding-invalid');
   const of = (w) => fences.find((f) => f.bound(w));
-  return {
+  return withRouteOnly({
     inspect: (registry) => ({ configured: true, worlds: fences.map((f) => f.inspect(registry)) }),
     v2Stream: (w) => of(w)?.v2Stream(w) ?? null,
+    v2World: (w) => of(w)?.v2World(w) ?? null,
     v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
     handle: (req, res, w, url) => of(w)?.handle(req, res, w, url) ?? false,
-  };
+  }, binding.worlds);
 }
 
 function oneFence(binding) {
@@ -180,6 +219,9 @@ function oneFence(binding) {
       if (!stream && staticDir && !publishing && existsSync(join(staticDir, 'manifest.json'))) clear();
       return stream;
     },
+    /** The world's name in the new engine (its routes key, the `world` its Souls are paired for), under the same rule as
+     *  `v2Stream` (routed, else null): the home page's My Souls reads a moved world's Souls from the directory by it. */
+    v2World(w) { return this.v2Stream(w) ? canonicalSlug : null; },
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body
@@ -220,9 +262,12 @@ function oneFence(binding) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
       const read = req.method === 'GET' || req.method === 'HEAD';
-      const mutating = !read || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
+      // V4 (0.133): Explore's place pictures are asked for by POST but change nothing: the old world renders its own
+      // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
+      const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
+      const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -239,6 +284,25 @@ function oneFence(binding) {
         try { if (BODY_FILE.test(body) && !url.search) bytes = readBounded(join(bodiesDir, body), 64 * 1024 * 1024); } catch { bytes = null; }
         if (!bytes) { res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'not-found' })); return true; }
         res.writeHead(200, { 'content-type': bodyType(body), 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
+      }
+      if (capture !== null) {
+        // W4 prep (0.133): the page binds the scenery the published scene.json names, by its hash. The old world keeps a
+        // scene's capture only once one of its takes carried it, so a world loaded for the switch (or one nobody watched
+        // since its scene last changed) answers 404 and the page stops at "World layout could not be prepared". The
+        // published scene is that capture: answered as the old world answers it (`{worldId, ...capture}`, http.ts),
+        // only for this stream's file and this world; any other hash passes through.
+        const m = staticDir ? manifest() : null, world = url.searchParams.get('world');
+        let json = null;
+        try {
+          if (m?.files?.['scene.json'] && m.stream === this.v2Stream(w) && (world === null || world === oldWorldId) && [...url.searchParams.keys()].every((k) => k === 'world')) {
+            const { renderSceneRef: ref, ...scene } = JSON.parse(readBounded(join(staticDir, 'scene.json'), 64 * 1024 * 1024));
+            if (ref?.hash === capture) json = JSON.stringify({ worldId: oldWorldId, contract: 'render-scene-capture/1', ref, body: scene });
+          }
+        } catch { json = null; }
+        if (json === null) return false;
+        res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(json), 'cache-control': 'no-store', 'x-souls-static': 'published' })
+          .end(req.method === 'HEAD' ? undefined : json);
         return true;
       }
       if (SERVED.has(path)) {

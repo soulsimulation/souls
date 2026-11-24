@@ -47,3 +47,47 @@ test('the history export: the route\'s, else beside the stream\'s views', () => 
   assert.equal(historyBase('/s/eden/', {}), null);
   assert.equal(historyBase('/s/eden/', { v2History: 'https://elsewhere/h/' }), null);
 });
+
+test('K3: the first moment is the first bundle of the first day with public events, back through the years; none is null', async () => {
+  const { encode } = await import('cborg');
+  const DAY = 86_400_000_000, now = 20780 * DAY + 5_000_000; // a world day in year 56
+  // year 55 holds days 55*365+300 (the world's first) and later; year 56 its newer days; nothing before year 55
+  const files: Record<string, unknown> = {
+    'history/everyone/counts/year/0056': new Map<number, unknown>([[1, 1], [2, 2], [3, 56], [5, [[340, 0, 12]]]]),
+    'history/everyone/counts/year/0055': new Map<number, unknown>([[1, 1], [2, 2], [3, 55], [5, [[310, 1, 4], [300, 0, 0], [301, 0, 7]]]]),
+    [`bundles/${String(55 * 365 + 301).padStart(8, '0')}/index`]: new Map<number, unknown>([[1, 1], [2, 55 * 365 + 301], [3, [[(55 * 365 + 301) * DAY + 120_000_000, 'k', new Uint8Array(32)], [(55 * 365 + 301) * DAY + 60_000_000, 'k', new Uint8Array(32)]]]]),
+  };
+  const asked: string[] = [];
+  const realFetch = globalThis.fetch, realLocation = (globalThis as { location?: unknown }).location;
+  (globalThis as { location?: unknown }).location = { href: 'http://example.invalid/w/a/' };
+  globalThis.fetch = (async (u: URL) => {
+    const path = String(u).replace('http://example.invalid/s/x/history/', ''); asked.push(path);
+    return files[path] ? new Response(encode(files[path])) : new Response(null, { status: 404 });
+  }) as typeof fetch;
+  try {
+    const h = new V2History('/s/x/history/', () => ({}) as Worker, { rulesVersion: 'test/1' });
+    assert.equal(await h.first(now), (55 * 365 + 301) * DAY + 60_000_000, 'the first day with events (a slot with none is skipped), its first bundle');
+    assert.ok(asked.includes('history/everyone/counts/year/0054'), 'read back past the first year to a missing one');
+    files['history/everyone/counts/year/0056'] = new Map<number, unknown>([[1, 1], [5, []]]);
+    delete files['history/everyone/counts/year/0055'];
+    assert.equal(await new V2History('/s/x/history/', () => ({}) as Worker, { rulesVersion: 'test/1' }).first(now), null, 'no events: no first moment');
+  } finally {
+    globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
+  }
+});
+
+test('V6: hour=HH:MM draws the past in that light, as live: the chunks\' clock at that hour, its day the world\'s', async () => {
+  (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/x/' };
+  // the world's calendar (its own node's sky: a 24 h day from 2026-06-21 10:30 UTC), so its chunks carry a clock
+  const origin = Date.UTC(2026, 5, 21, 10, 30) * 1000, sky = { 60: 86_400, 61: origin };
+  const sun = (hour?: string) => {
+    const { w } = fakeWorker(), post = w.postMessage.bind(w);
+    w.postMessage = (m) => { post(m); const on = w.onmessage!; w.onmessage = (e) => { (e.data.s.nodes[0] as { sky?: unknown }).sky = sky; on(e); w.onmessage = on; }; };
+    return new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' }, hour);
+  };
+  const from = (T0 + 30_000_000) / TICK_US, to = from + 4 * TICKS;
+  const at = (c: { take: unknown }) => (c.take as { finalState: { env: { datetime: string | null } } }).finalState.env.datetime;
+  const recorded = (await sun().chunks(from, to, 4)).map(at), lit = (await sun('21:30').chunks(from, to, 4)).map(at);
+  assert.ok(recorded.every((d) => d && !d.includes('T21:30')), `the recorded clock without hour=: ${recorded[0]}`);
+  assert.ok(lit.every((d, i) => d === `${recorded[i]!.slice(0, 11)}21:30${recorded[i]!.slice(16)}`), `with hour=21:30: ${lit[0]}`);
+});

@@ -109,7 +109,7 @@ use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
-use replica::world_model::{Audience, End, show};
+use replica::world_model::{Audience, End, plain, show};
 use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
@@ -117,6 +117,26 @@ use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
+
+/// A form's `create` with its kind as the zone's header pins it (`<kind>@<hash>`), the name every other entry gives
+/// its kind: an entry naming a kind's plain name is refused (`name-not-pinned`). `None` for any other effect, a kind
+/// already pinned, or one the header does not pin (its create is then refused by name, as before).
+fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_runner::Effect> {
+    let form_runner::Effect::Make { kind, into } = e else {
+        return None;
+    };
+    if kind.as_str().contains('@') {
+        return None;
+    }
+    let pinned = header?
+        .kinds
+        .iter()
+        .find(|n| plain(n.as_str()) == kind.as_str())?;
+    Some(form_runner::Effect::Make {
+        kind: pinned.clone(),
+        into: *into,
+    })
+}
 
 /// What a form's run reaches in the world: the tree as of the tick's start, the geometry's answers, the controller,
 /// the due list, the moves in progress and the moves' library (data), and the seed of the tick's draws.
@@ -691,6 +711,16 @@ impl Forms {
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
         self.runs.get(run)?.runner.at()
+    }
+
+    /// Whether `body`'s run is in a hand step (a `move`, `take`, `put` or `hand` step): one a walk of its own Soul does
+    /// not end by its claim on the legs, so the world leaves it (intents rule 10, 0.134 I4).
+    pub fn in_hand_move(&self, body: Id) -> bool {
+        self.by_body
+            .get(&body)
+            .and_then(|run| self.runs.get(run))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(|s| matches!(s, Step::Move { .. } | Step::Hand))
     }
 
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends
@@ -1308,7 +1338,8 @@ impl Forms {
                 reserved: &reserved,
                 now: at,
             };
-            let entries = match cx.entries(mint, e) {
+            let made = pin_made(self.header.as_ref(), e);
+            let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {
                 Ok(x) => x,
                 Err(r) => {
                     self.out.truncate(len);
@@ -1410,6 +1441,16 @@ impl Forms {
         };
         let body = fr.body;
         let long = fr.long.is_some();
+        // The route claim a plan was awaited with (`Next::Planning`) belongs to the walk: a step that is not a walk
+        // (an approach with no way goes straight to its move) gives it back, so a Soul's own walk during that move
+        // leaves the run at the move's phase end, as rule 10 says, and a move that moves the body is not its own rival
+        // (S11 review).
+        if !matches!(next, Next::Walk(_) | Next::Planning | Next::Sleep)
+            && !self.walks.iter().any(|r| r.body == body)
+            && let Some(d) = fr.walk.take()
+        {
+            let _ = w.controller.release(body, d);
+        }
         match next {
             Next::Sleep => {}
             Next::Planning => {
@@ -1582,6 +1623,10 @@ impl Forms {
                         fr.mv = Some(n);
                         // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
                         if let Some(r) = w.moves.record(n) {
+                            let mut r = r.clone();
+                            if let Some(t) = w.reach.aimed(body, &r.contact) {
+                                r.target = t;
+                            }
                             let o = Open {
                                 run,
                                 body,
@@ -1772,6 +1817,29 @@ impl Forms {
                 continue;
             }
             self.wake(w, run, Woke::Planning, now);
+        }
+        // A run whose walk is running (an entry in the walks) and lost its claim on the legs (its Soul's own walk took
+        // them, intents rule 10) ends `claim-taken`, as one waiting for its plan does (S11): its walk's inputs went
+        // nowhere, it asked no way, so C21's watch never saw it, and the run stood at its walk step, its act never
+        // answered. A run in any other step holds no route claim (`handle` gives it back), so a move in progress is
+        // left at its phase end instead.
+        let walking: BTreeSet<Id> = self.walks.iter().map(|r| r.body).collect();
+        let lost: Vec<RunId> = self
+            .runs
+            .iter()
+            .filter(|(run, fr)| {
+                !self.planning.contains(run)
+                    && walking.contains(&fr.body)
+                    && fr.walk.is_some_and(|driver| {
+                        !w.controller
+                            .claims(fr.body)
+                            .is_some_and(|c| c.running().contains_key(&driver))
+                    })
+            })
+            .map(|(run, _)| *run)
+            .collect();
+        for run in lost {
+            self.finish(w, run, name("claim-taken"), now);
         }
         if self.walks.is_empty() {
             return;

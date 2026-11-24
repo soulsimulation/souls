@@ -1,39 +1,81 @@
-// Setup shared by the ride clip kits (#1976, #1977): Souls made by cast() board a ride by its join offer before the page
-// opens, so the take starts with them aboard; and a camera the steps drive on a ?shot=1 page (the world's own shotCamera,
-// which only places the viewer's camera: it never moves a body).
-import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+// Setup shared by the ride clip kits (#1976, #1977; 0.135 on the new engine): Souls made by cast() board a ride by its
+// `board` form before the page opens, so the take starts with them aboard; and a camera the steps drive on a ?shot=1 page
+// (the world's own shotCamera, which only places the viewer's camera: it never moves a body).
+// On the new engine a ride is a thing on a course (a balloon): it takes riders only while it is home, between laps, and
+// the page carries it in its takes keyed by the page's own id for the thing, its name as the label (K4, bridge.ts things()).
+import { soul } from './cast.mjs';
 
-const { CLIP_CHECKOUT = '.', CLIP_WORK } = process.env;
-const EDEN = join(CLIP_CHECKOUT, 'tools/world-launcher/soul/eden.mjs');
-const eden = (name, args, ms = 60_000) => spawnSync(process.execPath, [EDEN, ...args], { cwd: join(CLIP_WORK, `soul-${name.toLowerCase()}`), encoding: 'utf8', timeout: ms });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Each Soul acts `offer` (a ride's join); returns once all are aboard (posture riding), or throws after `limitS`. */
-export function board(names, offer, limitS = 240) {
+/** Each Soul walks to the thing its copy finds for `words` (not a place of that name: a landmark is named as its thing),
+ *  then acts its `board` form until it is aboard: a ride away on its course refuses (`boarding-frame-away`) until it is
+ *  home again. Returns the ride's id once all are aboard, or throws after `limitS` (more than one lap: a rider aboard
+ *  rides the lap, and the next waits for the ride to come home) or on any other refusal five times over. */
+export async function board(names, words, limitS = 600) {
+  const found = (await soul(names[0]).cli('find', ...words.split(/\s+/), '--limit', '50')).found ?? [];
+  const things = found.filter((x) => !/^souls:body|:place$/.test(x.kind ?? ''));
+  const ride = things.find((x) => x.name === words) ?? things[0] ?? null;
+  if (!ride) throw Error(`kit: nothing found for "${words}"`);
+  console.error(`kit: ${words} is ${ride.id} (${ride.kind})`);
   for (const n of names) {
-    let r;
-    for (let i = 0; i < 20; i++) {                       // a world just up may not offer the ride yet
-      r = eden(n, ['act', offer, '--json']);
-      if (/"accepted": true/.test(r.stdout)) break;
-      spawnSync('sleep', ['3']);
-    }
-    console.error(`kit: ${n} act ${offer}: ${(r.stdout || r.stderr).slice(0, 300)}`);
-    if (!/"accepted": true/.test(r.stdout)) throw Error(`kit: ${n} could not join ${offer}`);
+    const r = await soul(n).cli('act', ride.id, '--wait');
+    console.error(`kit: ${n} walk to ${words}: ${JSON.stringify(r.receipt?.answers?.at(-1) ?? r).slice(0, 300)}`);
   }
-  const t0 = Date.now(), aboard = new Set();
-  let last = '';
+  const t0 = Date.now(), aboard = new Set(), last = {}, same = {};
   while (aboard.size < names.length) {
-    if (Date.now() - t0 > limitS * 1000) throw Error(`kit: only ${[...aboard].join(', ') || 'nobody'} aboard after ${limitS} s; last wait: ${last.slice(0, 1500)}`);
-    for (const n of names) { if (aboard.has(n)) continue; last = eden(n, ['wait', '3', '--json'], 20_000).stdout; if (/"posture": "riding"/.test(last)) aboard.add(n); }
+    if (Date.now() - t0 > limitS * 1000) throw Error(`kit: only ${[...aboard].join(', ') || 'nobody'} aboard ${words} after ${limitS} s; last answers ${JSON.stringify(last)}`);
+    for (const n of names) {
+      if (aboard.has(n)) continue;
+      const r = await soul(n).cli('act', `board:${ride.id}`, '--wait'), a = r.receipt?.answers?.at(-1) ?? {};
+      const said = a.reason ?? a.answer ?? r.code ?? r.raw ?? 'no answer';
+      if (said !== last[n]) console.error(`kit: ${n} board ${words}: ${said} after ${Math.round((Date.now() - t0) / 1000)} s`);
+      same[n] = said === last[n] ? (same[n] ?? 0) + 1 : 0;
+      last[n] = said;
+      // only a ride away on its course is waited for; any other refusal five times over is the kit's failure
+      if (said !== 'boarding-frame-away' && same[n] >= 5) throw Error(`kit: ${n} cannot board ${words}: ${JSON.stringify(r).slice(0, 600)}`);
+      if (r.ok && a.answer !== 'refused') aboard.add(n);
+    }
+    if (aboard.size < names.length) await sleep(1500);
   }
-  console.error(`kit: ${names.join(', ')} aboard after ${Math.round((Date.now() - t0) / 1000)} s`);
+  console.error(`kit: ${names.join(', ')} aboard ${words} after ${Math.round((Date.now() - t0) / 1000)} s`);
+  return ride.id;
 }
 
-/** Open the world as a ?shot=1 page (the camera holds exactly where shotCamera puts it) and wait for its scene. */
-export async function shotPage(page, world) {
-  await page.goto(`${world}?dev=1&shot=1`);
+/** Open the page the recorder opened (`url`: its address, with the take's `?hour=`) as a ?shot=1 page (the camera holds
+ *  exactly where shotCamera puts it) and wait for its scene. */
+export async function shotPage(page, url) {
+  const u = new URL(url);
+  u.searchParams.set('dev', '1'); u.searchParams.set('shot', '1');
+  await page.goto(u.href);
   await page.locator('canvas').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForFunction(() => window.__soulsEntity?.shotCamera && window.__soulsEntity.transportFrame?.()?.entities, null, { timeout: 90_000 });
+}
+
+/** Installs `window.__rideKey(ride)` on the page: the key the take's frame has a ride under. The frame keys a thing by the
+ *  page's own id for it (an `e_…` hash on a launcher-made world), and its entries carry no name, so a ride is found by that
+ *  id, else by the entity layer's thing of that name, else by the layer's thing whose def names `ride.def` (`balloon`)
+ *  among those the frame carries. */
+async function rideKey(page) {
+  await page.evaluate(() => {
+    window.__rideKey ??= ({ name, def }) => {
+      const E = window.__soulsEntity, all = E.transportFrame()?.entities ?? {};
+      if (all[name]) return name;
+      const layer = E.layer?.model?.entities;
+      if (!layer) return null;
+      for (const e of layer.values()) if ((e.name === name || e.label === name) && all[e.id]) return e.id;
+      if (def) for (const k of Object.keys(all)) { const e = layer.get(k); if (e && JSON.stringify([e.def, e.kind, e.model]).includes(def)) return k; }
+      return null;
+    };
+  });
+}
+
+/** Wait `ms` on camera, logging where the page has the ride every 5 s (so the log says whether it moved). */
+export async function hold(page, ride, ms) {
+  for (const until = Date.now() + ms; Date.now() < until;) {
+    const c = await carrierPose(page, ride, 0);
+    console.error(`kit: ${ride.name} on the page at ${c ? `${c.p.map((v) => v.toFixed(1)).join(', ')} (${c.key}, tick ${c.tick})` : 'none'}`);
+    await page.waitForTimeout(Math.min(5000, Math.max(0, until - Date.now())));
+  }
 }
 
 /** Hold the camera at world `eye`, looking at `at` (metres). Stops any tracking shot. */
@@ -41,15 +83,16 @@ export async function fixed(page, eye, at) {
   await page.evaluate(({ eye, at }) => { window.__rideCam = (window.__rideCam ?? 0) + 1; window.__soulsEntity.shotCamera(eye, at); }, { eye, at });
 }
 
-/** Drive the camera every frame round a carrier (its pose in the depicted frame, Core convention: +x = (cos yaw, sin yaw)):
- *  `dist` metres out at `from` radians from its +x, turning `rate` rad/s, the eye `eyeUp` and the look `atUp` over its floor.
- *  Runs in the page until the next fixed/orbit call replaces it. */
-export async function orbit(page, carrier, { dist, from = 0, rate = 0, eyeUp = 1.5, atUp = 1 }) {
-  await page.evaluate(({ carrier, dist, from, rate, eyeUp, atUp }) => {
+/** Drive the camera every frame round a ride (`{name, def}`: its pose in the depicted frame, found by window.__rideKey):
+ *  `dist` metres out at `from` radians from its +x, turning `rate` rad/s, the eye `eyeUp` and the look `atUp` over its
+ *  floor. Runs in the page until the next fixed/orbit call replaces it. */
+export async function orbit(page, ride, { dist, from = 0, rate = 0, eyeUp = 1.5, atUp = 1 }) {
+  await rideKey(page);
+  await page.evaluate(({ ride, dist, from, rate, eyeUp, atUp }) => {
     const E = window.__soulsEntity, t0 = performance.now(), run = (window.__rideCam = (window.__rideCam ?? 0) + 1);
     const step = () => {
       if (window.__rideCam !== run) return;
-      const c = E.transportFrame()?.entities?.[carrier];
+      const key = window.__rideKey(ride), c = key ? E.transportFrame()?.entities?.[key] : null;
       if (c?.p) {
         const a = (c.yaw ?? 0) + from + rate * (performance.now() - t0) / 1000;
         try { E.shotCamera([c.p[0] + dist * Math.cos(a), c.p[1] + eyeUp, c.p[2] + dist * Math.sin(a)], [c.p[0], c.p[1] + atUp, c.p[2]]); } catch { /* the next frame */ }
@@ -57,8 +100,21 @@ export async function orbit(page, carrier, { dist, from = 0, rate = 0, eyeUp = 1
       requestAnimationFrame(step);
     };
     step();
-  }, { carrier, dist, from, rate, eyeUp, atUp });
+  }, { ride, dist, from, rate, eyeUp, atUp });
 }
 
-/** The carrier's pose in the depicted frame ({p, yaw}), or null. */
-export const carrierPose = (page, carrier) => page.evaluate((id) => { const c = window.__soulsEntity.transportFrame()?.entities?.[id]; return c?.p ? { p: [...c.p], yaw: c.yaw ?? 0 } : null; }, carrier);
+/** Wait up to `ms` until the page carries the ride (`{name, def}`); → its pose in the depicted frame ({p, yaw, key, tick}),
+ *  or null. */
+export async function carrierPose(page, ride, ms = 30_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const c = await page.evaluate((ride) => {
+      if (!window.__soulsEntity?.transportFrame) return null;
+      const f = window.__soulsEntity.transportFrame(), key = window.__rideKey?.(ride), e = key ? f?.entities?.[key] : null;
+      return e?.p ? { p: [...e.p], yaw: e.yaw ?? 0, key, tick: f.tick } : null;
+    }, ride).catch(() => null);
+    if (!c) await rideKey(page).catch(() => {});
+    if (c || Date.now() > until) return c;
+    await page.waitForTimeout(250);
+  }
+}

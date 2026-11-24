@@ -10,7 +10,10 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
    `world.json`, `facts.json`, `moves.json` and `entries/`, and all but the last `--records` records of its `log` (the
    first, the import's part, always), are copied to `$WORLDS_ROOT/rehearsals/<build>/`, and the new build is started
    on that copy as the launcher starts it, `worldd serve --dir <scratch> --socket <scratch>/gateway.sock`, with
-   `WORLDD_REHEARSAL=1` (its output goes to `<scratch>/worldd.err`). It must serve within the world's start bound
+   `WORLDD_REHEARSAL=1` (its output goes to `<scratch>/worldd.err`) and otherwise only `PATH`, `HOME`, `TMPDIR`,
+   `LANG`, `LC_ALL`, `TZ`, `RUST_LOG` and `RUST_BACKTRACE` from the deploy's environment: no store, backup, socket,
+   pin or service-manager settings reach it, so it never claims the live world or writes its archive, whatever build
+   it is. It must serve within the world's start bound
    (below). It is then fed the intents the last records took (I4's answered rows), one tick's group at a time, and must give every
    one a named end, then answer the probe (below). Invariants, not hashes: two builds fed the same intents need not
    write the same bytes. A failed rehearsal leaves the pin where it was.

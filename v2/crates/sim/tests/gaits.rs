@@ -15,6 +15,19 @@ const TICK: i64 = 50_000;
 /// The gaits on dry ground (wading and swimming are `tests/water.rs`, N11b).
 const DRY: [Gait; 3] = [WALK, JOG, RUN];
 
+/// 0.135 G1: the gaits a walk intent may name (`replica::move_check::GAITS`) are these, each a gait on dry ground.
+#[test]
+fn g1_a_walk_names_the_gaits_on_dry_ground() {
+    let named: Vec<Gait> = replica::move_check::GAITS
+        .into_iter()
+        .map(|n| Gait::named(n).expect("a gait"))
+        .collect();
+    assert_eq!(named, DRY);
+    assert!(DRY.iter().all(|g| g.allowed(sim::gaits::Ground::Dry)));
+    // 0.135 G2: a follower keeps up with a leader at the fastest of them.
+    assert_eq!(skills::close::FASTEST, RUN.speed);
+}
+
 /// Standard base64, for the terrain written in a test.
 fn b64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -327,7 +340,7 @@ fn slope_cases_pass_as_data() {
     assert!(failed.is_empty(), "failed: {failed:?}");
 }
 
-/// A1: walk, jog and run measure 1.35, 2.5 and 4.0 m/s along the surface within 2 %, on the flat and on slopes of
+/// A1: walk, jog and run measure 1.4, 2.5 and 4.0 m/s along the surface within 2 %, on the flat and on slopes of
 /// 0.2, 0.4 and 0.57, up, down and across; two repeats, which must agree to the micrometre.
 #[test]
 fn a1_speed_table() {

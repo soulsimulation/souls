@@ -48,7 +48,7 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::{FLOOR, xform_to};
+use crate::ground::scene::xform_to;
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -59,7 +59,7 @@ use crate::links::{
 };
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
-use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
+use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::host::{F_GRANTED, F_TURNS, Seen};
@@ -68,8 +68,8 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::{plain, show};
-use std::cell::{Cell, OnceCell, RefCell};
+use replica::world_model::show;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -166,6 +166,8 @@ pub struct Town {
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
     link_at: BTreeMap<Id, (usize, usize)>,
+    /// [`in_passage_indexed`]'s index of `buildings` (S7), made with them.
+    passages: Passages,
     /// Each node's ground version (G3).
     pub versions: Versions,
     /// What a building read again off the clock thread needs of the open ground ([`Town::basis`]).
@@ -549,6 +551,7 @@ struct Geometry {
     buildings: Vec<Building>,
     basis: Basis,
     link_at: BTreeMap<Id, (usize, usize)>,
+    passages: Passages,
 }
 type GeometryRead<'a> = (
     &'a Map,
@@ -557,14 +560,16 @@ type GeometryRead<'a> = (
     &'a BTreeMap<Id, (usize, usize)>,
 );
 impl Geometry {
-    fn from((map, surfaces, buildings, basis, _square_pieces): Assembled) -> Self {
+    fn from((map, surfaces, buildings, basis, _square_pieces): Assembled, ground: Id) -> Self {
         let link_at = link_index(&buildings);
+        let passages = passages_of(&buildings, ground);
         Self {
             map,
             surfaces,
             buildings,
             basis,
             link_at,
+            passages,
         }
     }
 }
@@ -600,10 +605,17 @@ fn find_link<'b>(
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
+        Town::new_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::new`], assembled on at most `threads` threads ([`crate::ground::START_THREADS`] at a world's
+    /// start): the same town.
+    pub fn new_on(tree: Tree, ground: Id, doors: Doors, threads: usize) -> Result<Town, String> {
         let versions = Versions::default();
         let (map, surfaces, buildings, basis, square_pieces) =
-            Town::assemble(&tree, ground, &versions)?;
+            Town::assemble_for(&tree, ground, &versions, Size::Standard, threads)?;
         let link_at = link_index(&buildings);
+        let passages = passages_of(&buildings, ground);
         Ok(Town {
             tree,
             classes: BTreeMap::new(),
@@ -613,6 +625,7 @@ impl Town {
             surfaces,
             buildings,
             link_at,
+            passages,
             doors,
             turns: Some(Turns::new()),
             spots: Spots::new(),
@@ -638,6 +651,7 @@ impl Town {
             buildings,
             ground,
             surfaces,
+            passages,
             ..
         } = self;
         let tree: &Tree = tree;
@@ -647,7 +661,7 @@ impl Town {
             surfaces,
             buildings,
             ground: *ground,
-            boxes: OnceCell::new(),
+            passages,
             door: None,
         };
         f(tree, &mut g)
@@ -669,8 +683,8 @@ impl Town {
         for size in sizes {
             if size != Size::Standard && !self.classes.contains_key(&size) {
                 crate::commit::off_clock();
-                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size)?;
-                self.classes.insert(size, Geometry::from(g));
+                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size, 1)?;
+                self.classes.insert(size, Geometry::from(g, self.ground));
             }
         }
         Ok(())
@@ -789,7 +803,7 @@ impl Town {
                 Err(w) => {
                     why = Some(w);
                     Fresh::Whole(Box::new(Town::assemble_for(
-                        base, ground, &versions, basis.size,
+                        base, ground, &versions, basis.size, 1,
                     )?))
                 }
             }
@@ -797,7 +811,7 @@ impl Town {
             match Town::reread(&parents, base, ground, &touched, basis) {
                 Some(bs) => Fresh::Buildings(bs),
                 None => Fresh::Whole(Box::new(Town::assemble_for(
-                    base, ground, &versions, basis.size,
+                    base, ground, &versions, basis.size, 1,
                 )?)),
             }
         };
@@ -805,7 +819,8 @@ impl Town {
             .classes
             .keys()
             .map(|&size| {
-                Self::assemble_for(base, ground, &versions, size).map(|g| (size, Geometry::from(g)))
+                Self::assemble_for(base, ground, &versions, size, 1)
+                    .map(|g| (size, Geometry::from(g, ground)))
             })
             .collect::<Result<_, _>>()?;
         let mut after = match &fresh {
@@ -1166,6 +1181,7 @@ impl Town {
         }
         self.basis = after;
         self.link_at = link_index(&self.buildings);
+        self.passages = passages_of(&self.buildings, self.ground);
         self.versions = versions;
         let ground = self.ground;
         // How far along its squares a walk first reaches a square cut again (0: where it starts), if it does.
@@ -1259,84 +1275,84 @@ impl Town {
     }
 
     /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
-    fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Assembled, String> {
-        Self::assemble_for(tree, ground, versions, Size::Standard)
-    }
     fn assemble_for(
         tree: &Tree,
         ground: Id,
         versions: &Versions,
         size: Size,
+        threads: usize,
     ) -> Result<Assembled, String> {
-        let map = Map::build_for(tree, ground, size, &|n| versions.of(n))?;
-        let mut surfaces = BTreeMap::new();
+        // One cut of the open ground and one read of its buildings, shared with the map (S5, 0.133): the squares cut
+        // on at most `threads` threads, and the buildings the map read, in the same order as reading them again gave.
         let open = OpenGround::of(tree, ground, size.radius_mm())?;
-        let terrain = open.terrain().cloned().map(Arc::new);
-        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
-        let mut square_pieces = BTreeMap::new();
-        let mut square_flags = BTreeMap::new();
-        for (i, j) in open.squares() {
-            let p = open.cut_square(i, j);
-            let first = pieces.len() as u32;
-            square_flags.insert((i, j), open.on_terrain(&p.pieces));
-            square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
-            squares.insert((i, j), Arc::new(p.pieces.clone()));
-            pieces.extend(p.pieces);
-            meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
-        }
-        let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(tree, ground)?;
-        let on = open.on_terrain(&pieces);
-        let mut surface = Surface::new(ground, pieces);
-        if let Some(t) = open.terrain() {
-            surface = surface.on_terrain(t.clone(), on);
-        }
-        surfaces.insert(ground, surface);
-        let mut buildings = Vec::new();
-        let mut stack = vec![gh];
-        while let Some(h) = stack.pop() {
-            let kids = tree.children(h).ok_or("a node that is gone")?;
-            if kids.iter().any(|&c| {
-                tree.node(c)
-                    .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
-            }) {
-                let id = tree.node(h).ok_or("a node that is gone")?.id();
-                let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
-                let open = Open {
-                    ground,
-                    place: xform_to(tree, h, gh)?,
-                    meets: &meets,
-                    on: &on,
-                    doors: &gdoors,
-                    terrain: open.terrain(),
-                };
-                if let Ok(b) = Building::read_sized(tree, id, Some(open), size.radius_mm()) {
-                    for (&floor, (_, patch)) in &b.floors {
-                        surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
-                    }
-                    buildings.push(b);
-                }
+        let cuts = open.cut_all(threads);
+        // The map and the open ground's own surface, from the same cut: on two threads when it may fan out.
+        let ground_of = || {
+            let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
+            let mut square_pieces = BTreeMap::new();
+            let mut square_flags = BTreeMap::new();
+            for ((i, j), p) in &cuts {
+                let (i, j) = (*i, *j);
+                let first = pieces.len() as u32;
+                square_flags.insert((i, j), open.on_terrain(&p.pieces));
+                square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
+                squares.insert((i, j), Arc::new(p.pieces.clone()));
+                pieces.extend(p.pieces.iter().cloned());
+                meets.extend(p.meets.iter().cloned().map(|m| ((i, j), m)));
             }
-            stack.extend(kids.iter().rev().copied());
+            let on = open.on_terrain(&pieces);
+            let mut surface = Surface::new(ground, pieces);
+            if let Some(t) = open.terrain() {
+                surface = surface.on_terrain(t.clone(), on);
+            }
+            (surface, meets, squares, square_pieces, square_flags)
+        };
+        let map_of = || {
+            Map::build_cut(
+                tree,
+                ground,
+                size,
+                &|n| versions.of(n),
+                &open,
+                &cuts,
+                threads,
+            )
+        };
+        let (built, ground_part) = if threads > 1 {
+            std::thread::scope(|s| {
+                let part = s.spawn(ground_of);
+                let built = map_of();
+                (
+                    built,
+                    part.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+                )
+            })
+        } else {
+            (map_of(), ground_of())
+        };
+        let (map, mut read, joins) = built?;
+        let (surface, meets, squares, square_pieces, square_flags) = ground_part;
+        let mut surfaces = BTreeMap::new();
+        let terrain = open.terrain().cloned().map(Arc::new);
+        let gdoors = ground_doors(tree, ground)?;
+        surfaces.insert(ground, surface);
+        // The map's reads end with the open ground's gates (its `of_ground`).
+        let gates = read.pop().ok_or("the map read no open ground")?;
+        let mut buildings = read;
+        for b in &buildings {
+            for (&floor, (_, patch)) in &b.floors {
+                surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
+            }
         }
-        // The open ground's own links: gates in walls and fences.
+        // The open ground's own links: gates in walls and fences (the map read them with the same doorways).
         let known: BTreeMap<Id, BTreeSet<Id>> = buildings
             .iter()
             .map(|b| (b.thing, b.links.iter().map(|l| l.id).collect()))
             .collect();
-        let all = known.values().flatten().copied().collect();
-        let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
-        let open = Open {
-            ground,
-            place: crate::ground::scene::Xform::IDENTITY,
-            meets: &meets,
-            on: &on,
-            doors: &gdoors,
-            terrain: open.terrain(),
-        };
-        buildings.push(Building::of_ground(tree, open, &all)?);
+        buildings.push(gates);
         let mut joined = BTreeSet::new();
-        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+        // The map's joins: its reads, gates last, are this list (S5).
+        for (i, l) in joins {
             joined.insert(buildings[i].thing);
             let far = l.ends.iter().flatten().map(|e| e.floor);
             joined.extend(far.filter_map(|f| {
@@ -1447,6 +1463,7 @@ impl Town {
             surfaces: self.surfaces.clone(),
             buildings: self.buildings.clone(),
             link_at: self.link_at.clone(),
+            passages: self.passages.clone(),
             doors: Doors::new(d.header.clone(), d.rules.clone(), d.next),
             turns: Some(Turns::new()),
             spots: Spots::new(),
@@ -1468,9 +1485,20 @@ impl Town {
     /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
     /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
     pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        Town::with_planner_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::with_planner`], assembled on at most `threads` threads (a world's start-up:
+    /// [`crate::ground::START_THREADS`]).
+    pub fn with_planner_on(
+        tree: Tree,
+        ground: Id,
+        doors: Doors,
+        threads: usize,
+    ) -> Result<(Town, Town), String> {
         let frozen = tree.frozen();
         let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
-        let town = Town::new(tree, ground, doors)?;
+        let town = Town::new_on(tree, ground, doors, threads)?;
         let (map, surfaces, buildings, basis, square_pieces) = (
             town.map.clone(),
             town.surfaces.clone(),
@@ -1479,6 +1507,7 @@ impl Town {
             town.square_pieces.clone(),
         );
         let link_at = town.link_at.clone();
+        let passages = town.passages.clone();
         let planner = Town {
             tree: frozen,
             classes: BTreeMap::new(),
@@ -1488,6 +1517,7 @@ impl Town {
             surfaces,
             buildings,
             link_at,
+            passages,
             doors: planner_doors,
             turns: Some(Turns::new()),
             spots: Spots::new(),
@@ -1556,6 +1586,7 @@ impl Town {
                 surfaces: &self.surfaces,
                 buildings: &self.buildings,
                 link_at: &self.link_at,
+                passages: &self.passages,
                 turns: self.turns.as_ref(),
                 meter: self.meter,
                 ground: self.ground,
@@ -1585,6 +1616,7 @@ pub struct Shared<'a> {
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     link_at: &'a BTreeMap<Id, (usize, usize)>,
+    passages: &'a Passages,
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     ground: Id,
@@ -1630,12 +1662,13 @@ impl<'a> Shared<'a> {
     where
         'a: 'b,
     {
-        let (map, surfaces, buildings, link_at, scratch) = if size == Size::Standard {
+        let (map, surfaces, buildings, link_at, passages, scratch) = if size == Size::Standard {
             (
                 self.map,
                 self.surfaces,
                 self.buildings,
                 self.link_at,
+                self.passages,
                 &mut scratch.standard,
             )
         } else {
@@ -1648,6 +1681,7 @@ impl<'a> Shared<'a> {
                 &g.surfaces,
                 g.buildings.as_slice(),
                 &g.link_at,
+                &g.passages,
                 scratch.other.entry(size).or_default(),
             )
         };
@@ -1658,6 +1692,7 @@ impl<'a> Shared<'a> {
             surfaces,
             buildings,
             link_at,
+            passages,
             turns: self.turns,
             meter: self.meter,
             spent,
@@ -1731,6 +1766,7 @@ pub struct View<'a> {
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     link_at: &'a BTreeMap<Id, (usize, usize)>,
+    passages: &'a Passages,
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     spent: &'a Cell<Spent>,
@@ -1870,6 +1906,36 @@ fn dist2(a: Vec3, b: Vec3) -> i128 {
     d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)
 }
 
+/// [`in_passage_but`]'s index of a town's buildings (S7, 0.133): each building's box on the open ground
+/// ([`ground_boxes`]), and for each node the links with an end on it (building, link), in the buildings' and links'
+/// order. A link with no end on a node is in no passage there, so testing only these gives the same answer as testing
+/// every link; it is made with the buildings and kept with them, not made again for each question.
+#[derive(Clone, Default)]
+pub struct Passages {
+    boxes: Vec<Option<[i64; 4]>>,
+    on: BTreeMap<Id, Vec<(u32, u32)>>,
+}
+
+/// [`Passages`] of `buildings` on the open ground `ground`.
+pub fn passages_of(buildings: &[Building], ground: Id) -> Passages {
+    let mut on: BTreeMap<Id, Vec<(u32, u32)>> = BTreeMap::new();
+    for (bi, b) in buildings.iter().enumerate() {
+        for (li, l) in b.links.iter().enumerate() {
+            let mut nodes: Vec<Id> = l.ends.iter().flatten().map(|e| e.floor).collect();
+            nodes.dedup();
+            nodes.sort();
+            nodes.dedup();
+            for n in nodes {
+                on.entry(n).or_default().push((bi as u32, li as u32));
+            }
+        }
+    }
+    Passages {
+        boxes: ground_boxes(buildings, ground),
+        on,
+    }
+}
+
 /// Each building's reach on the open ground for [`in_passage`] (C8, #3396): the box (x min, z min, x max, z max, µm)
 /// round every link end and placed line point it tests there, each widened by the most it is tested within; `None`
 /// when no link has an end on the ground. A point outside the box is in none of its passages, so skipping the building
@@ -1946,45 +2012,83 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .filter(|l| door.is_none() || l.door != door)
-            // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a
-            // body walks and stands on, no doorway or stair (#1960).
-            .filter(|l| !(l.kind == Kind::Step && l.nodes[0] == l.nodes[1]))
-            .any(|l| {
-                let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
-                let mut on = false;
-                for e in ends {
-                    on = true;
-                    if to_segment(p, e.a, e.b) < CLEAR {
-                        return true;
-                    }
-                }
-                // The line is in the building's frame: read on the open ground or on the building's own floors (not
-                // on another thing's floor a step or a flight lands on).
-                let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
-                let reach = if l.kind == Kind::Step {
-                    CLEAR / 2
-                } else {
-                    l.width / 2 + CLEAR / 2
-                };
-                on && (node == ground || b.floors.contains_key(&node))
-                    && l.line.windows(2).any(|s| {
-                        let (a, c) = if node == ground {
-                            (
-                                b.place.point(s[0]).unwrap_or(s[0]),
-                                b.place.point(s[1]).unwrap_or(s[1]),
-                            )
-                        } else {
-                            (s[0], s[1])
-                        };
-                        if flight && node != ground {
-                            level_part(a, c, p.y).is_some_and(|(a, c)| to_segment(p, a, c) < reach)
-                        } else {
-                            to_segment(p, a, c) < reach
-                        }
-                    })
-            })
+            .any(|l| link_passage(b, l, ground, node, p, door))
     })
+}
+
+/// [`in_passage_but`] through a town's [`Passages`] (S7): only the links with an end on `node`, the same answer.
+pub fn in_passage_indexed(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> bool {
+    passages.on.get(&node).is_some_and(|links| {
+        links.iter().any(|&(bi, li)| {
+            let i = bi as usize;
+            if node == ground
+                && let Some(bx) = passages.boxes.get(i)
+                && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+            {
+                return false;
+            }
+            let b = &buildings[i];
+            link_passage(b, &b.links[li as usize], ground, node, p, door)
+        })
+    })
+}
+
+/// Whether `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`).
+fn link_passage(
+    b: &Building,
+    l: &crate::links::Link,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> bool {
+    if door.is_some() && l.door == door {
+        return false;
+    }
+    // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a body walks
+    // and stands on, no doorway or stair (#1960).
+    if l.kind == Kind::Step && l.nodes[0] == l.nodes[1] {
+        return false;
+    }
+    let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
+    let mut on = false;
+    for e in ends {
+        on = true;
+        if to_segment(p, e.a, e.b) < CLEAR {
+            return true;
+        }
+    }
+    // The line is in the building's frame: read on the open ground or on the building's own floors (not on another
+    // thing's floor a step or a flight lands on).
+    let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
+    let reach = if l.kind == Kind::Step {
+        CLEAR / 2
+    } else {
+        l.width / 2 + CLEAR / 2
+    };
+    on && (node == ground || b.floors.contains_key(&node))
+        && l.line.windows(2).any(|s| {
+            let (a, c) = if node == ground {
+                (
+                    b.place.point(s[0]).unwrap_or(s[0]),
+                    b.place.point(s[1]).unwrap_or(s[1]),
+                )
+            } else {
+                (s[0], s[1])
+            };
+            if flight && node != ground {
+                level_part(a, c, p.y).is_some_and(|(a, c)| to_segment(p, a, c) < reach)
+            } else {
+                to_segment(p, a, c) < reach
+            }
+        })
 }
 
 /// The part of a flight's line segment `a`–`c` (µm) a body standing at height `y` meets ([`in_passage_but`]): from a
@@ -2018,8 +2122,8 @@ struct Grounds<'a> {
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     ground: Id,
-    /// [`ground_boxes`], made at the first passage asked about.
-    boxes: OnceCell<Vec<Option<[i64; 4]>>>,
+    /// The buildings' [`Passages`], kept with them.
+    passages: &'a Passages,
     /// A door whose own doorway is not a passage here ([`in_passage_but`]).
     door: Option<Id>,
 }
@@ -2061,6 +2165,12 @@ impl ClassGround for ClassGrounds<'_> {
     fn may_reach(&self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.may_reach(an, a, bn, b))
     }
+    fn overflow_at(&self, size: Size, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        self.0
+            .get(&size)
+            .map(|g| g.overflow_at(node, p))
+            .unwrap_or_default()
+    }
 }
 
 impl Ground for Grounds<'_> {
@@ -2072,10 +2182,14 @@ impl Ground for Grounds<'_> {
     }
 
     fn passage(&self, node: Id, p: Vec3) -> bool {
-        let boxes = self
-            .boxes
-            .get_or_init(|| ground_boxes(self.buildings, self.ground));
-        in_passage_but(self.buildings, boxes, self.ground, node, p, self.door)
+        in_passage_indexed(
+            self.buildings,
+            self.passages,
+            self.ground,
+            node,
+            p,
+            self.door,
+        )
     }
 
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
@@ -2115,7 +2229,28 @@ impl Ground for Grounds<'_> {
             _ => true,
         }
     }
+
+    /// A crowded target overflows onto the open ground round its point, never into a room: on the open ground as it
+    /// is, and from a floor (a bandstand's, a room's) its point taken into the ground's frame by its node's own pieces
+    /// (A2-5). The routes carry no rule for who may enter a room, so a floor's own ground is not used.
+    fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        if node == self.ground {
+            return vec![(node, p)];
+        }
+        let m = self.map.get();
+        let Some(s) = m.spot_near(node, p, OVERFLOW_FIND) else {
+            return Vec::new();
+        };
+        let w = m.world(s.piece, [p.x / 1000, p.y / 1000, p.z / 1000]);
+        vec![(
+            self.ground,
+            Vec3::new(w[0] * 1000, w[1] * 1000, w[2] * 1000),
+        )]
+    }
 }
+
+/// How far from a thing's target its own walkable ground may lie, mm, for its overflow onto the open ground (A2-5).
+const OVERFLOW_FIND: i64 = 20_000;
 
 impl World for Town {
     fn spots(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
@@ -2151,6 +2286,7 @@ impl World for Town {
             ground,
             surfaces,
             classes,
+            passages,
             ..
         } = self;
         let mut gs = BTreeMap::new();
@@ -2162,7 +2298,7 @@ impl World for Town {
                 surfaces,
                 buildings,
                 ground: *ground,
-                boxes: OnceCell::new(),
+                passages,
                 door: None,
             },
         );
@@ -2175,7 +2311,7 @@ impl World for Town {
                     surfaces: &g.surfaces,
                     buildings: &g.buildings,
                     ground: *ground,
-                    boxes: OnceCell::new(),
+                    passages: &g.passages,
                     door: None,
                 },
             );
@@ -2183,8 +2319,12 @@ impl World for Town {
         spots.write_sized(&mut ClassGrounds(gs), &asks, at)
     }
 
-    fn spot(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
-        self.spots.of(who, target)
+    fn spot(&self, who: Id, target: &Target) -> Option<Result<Granted, &'static str>> {
+        self.spots.granted(who, target)
+    }
+
+    fn revoked(&mut self) -> Vec<Id> {
+        self.spots.revoked()
     }
 
     fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
@@ -2217,8 +2357,18 @@ impl World for Town {
             let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
             };
+            // A wide link is taken in turns while anyone waits for it or is inside it on its turn (A2-4).
             if !narrow(l) {
-                continue;
+                let busy = marks.iter().any(|m| m.waiting.map(|w| w.0) == Some(id))
+                    || (turns.crowded.contains(&id)
+                        && marks.iter().any(|m| m.crossing == Some(id)));
+                if !busy {
+                    if turns.crowded.remove(&id) {
+                        turns.forget(l);
+                    }
+                    continue;
+                }
+                turns.crowded.insert(id);
             }
             let mut f = Facts::default();
             for m in marks {
@@ -2572,7 +2722,7 @@ impl<'a> View<'a> {
             surfaces,
             buildings,
             ground,
-            boxes: OnceCell::new(),
+            passages: self.passages,
             door,
         };
         match ring {
@@ -2991,7 +3141,7 @@ fn link_seen(
     link: Id,
 ) -> Option<Seen> {
     let l = find_link(link_at, buildings, link)?;
-    if !narrow(l) {
+    if !narrow(l) && !turns.is_some_and(|t| t.crowded.contains(&link)) {
         return None;
     }
     let mut fields = BTreeMap::from([(F_TURNS, Value::Uint(1))]);

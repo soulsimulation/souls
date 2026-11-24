@@ -3,10 +3,12 @@
 //! two effects in one tick never read the same stale amount or the same free slot. No code here names a kind.
 //!
 //! - **Amounts** are whole numbers in the field's unit, with the least and the capacity its kind gives (K3 section 3,
-//!   [`replica::kinds::Field`]). A transfer works out one number, the least of what was asked, what the source has
+//!   [`replica::kinds::Field`]). A transfer names its field, and each end finds that field by name on its own kind
+//!   (`field-unknown` when it has none). It works out one number, the least of what was asked, what the source has
 //!   above its least and the room the target has left, and writes the source's set (minus it) and the target's (plus
 //!   it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to zero. Nothing
-//!   to move is refused `nothing-to-move`.
+//!   to move is refused `nothing-to-move`. The two ends' kinds may number the field differently: the tree's balance
+//!   sums by the field's name (T6 rule 3.4, E5b).
 //! - **Take and put** are B4's transfer ([`crate::slots::transfer`], called, not edited): T1's leave and arrive under
 //!   one transfer id, into a free hand of the body or a slot of the node. A put moves a thing the body holds, or one
 //!   standing loose on what the body stands on (wheeled or pushed in, C12).
@@ -51,9 +53,10 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
-/// An amount field as its kind gives it: its default, its least and its capacity, in its unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An amount field as its kind gives it: its name, its default, its least and its capacity, in its unit.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limit {
+    pub name: Name,
     pub default: i64,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -92,6 +95,7 @@ pub fn limits(kinds: &Kinds) -> Limits {
                     Some((
                         *n,
                         Limit {
+                            name: f.name.clone(),
                             default,
                             min: f.min,
                             max: f.max,
@@ -105,7 +109,7 @@ pub fn limits(kinds: &Kinds) -> Limits {
 }
 
 /// The tree as of the tick's start, and the entries written since, latest last.
-pub(super) struct View<'a> {
+pub(crate) struct View<'a> {
     pub tree: &'a Tree,
     pub out: &'a [Effect],
 }
@@ -291,7 +295,7 @@ impl View<'_> {
 
 /// What an effect works on: the view, the amount fields, the zone's header (for B4's transfer), the body, its hands'
 /// slots, and the node the form is done at.
-pub(super) struct Cx<'a> {
+pub(crate) struct Cx<'a> {
     pub view: View<'a>,
     pub limits: &'a Limits,
     pub header: Option<&'a Header>,
@@ -337,10 +341,10 @@ impl Cx<'_> {
         }
     }
 
-    /// Field `field`'s limit on `node`'s kind: by its full name, or, for a kind written without its hash, the one
+    /// The amount fields of `node`'s kind: by its full name, or, for a kind written without its hash, the one
     /// revision loaded of that `namespace:name`.
-    fn limit(&self, node: Id, field: u64) -> R<Limit> {
-        let kind = self.view.kind(node);
+    fn fields(&self, node: Id) -> Option<&BTreeMap<u64, Limit>> {
+        let kind = self.view.kind(node)?;
         let by_plain = |k: &str| {
             let mut same = self.limits.iter().filter(|(n, _)| plain(n) == plain(k));
             match (same.next(), same.next()) {
@@ -348,13 +352,30 @@ impl Cx<'_> {
                 _ => None,
             }
         };
-        kind.as_ref()
-            .and_then(|k| self.limits.get(k.as_str()).or_else(|| by_plain(k.as_str())))
+        self.limits
+            .get(kind.as_str())
+            .or_else(|| by_plain(kind.as_str()))
+    }
+
+    /// Field `field`'s limit on `node`'s kind, refused `field-unknown` when the kind has no such amount field.
+    fn limit(&self, node: Id, field: u64) -> R<&Limit> {
+        self.fields(node)
             .and_then(|fs| fs.get(&field))
-            .copied()
             .ok_or_else(|| Refusal {
                 name: "field-unknown",
                 detail: format!("field {field} of {}", show(node)),
+            })
+    }
+
+    /// The amount field named `name` on `node`'s own kind, with its number (E5: a transfer's two ends may be of kinds
+    /// that number it differently), refused `field-unknown` when the kind has no amount field of that name.
+    fn named(&self, node: Id, name: &Name) -> R<(u64, &Limit)> {
+        self.fields(node)
+            .and_then(|fs| fs.iter().find(|(_, l)| l.name == *name))
+            .map(|(n, l)| (*n, l))
+            .ok_or_else(|| Refusal {
+                name: "field-unknown",
+                detail: format!("field {} of {}", name.as_str(), show(node)),
             })
     }
 
@@ -475,9 +496,9 @@ impl Cx<'_> {
                 if from == into {
                     return refuse("transfer-to-itself", show(from));
                 }
-                let (src, dst) = (self.limit(from, *field)?, self.limit(into, *field)?);
-                let there = self.view.amount(from, *field).unwrap_or(src.default);
-                let has = self.view.amount(into, *field).unwrap_or(dst.default);
+                let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, field)?);
+                let there = self.view.amount(from, nf).unwrap_or(src.default);
+                let has = self.view.amount(into, ni).unwrap_or(dst.default);
                 let above = there.saturating_sub(src.min.unwrap_or(0)).max(0);
                 let room = dst.max.map_or(i64::MAX, |m| m.saturating_sub(has).max(0));
                 let asked = match amount {
@@ -496,8 +517,8 @@ impl Cx<'_> {
                     );
                 }
                 Ok(vec![
-                    set(from, *field, there - moved, -moved),
-                    set(into, *field, has + moved, moved),
+                    set(from, nf, there - moved, -moved),
+                    set(into, ni, has + moved, moved),
                 ])
             }
             Bound::Make { kind, into } => {
@@ -520,7 +541,7 @@ impl Cx<'_> {
                                 support: Support::Slot,
                             },
                             audience: Audience::Everyone,
-                            fields: BTreeMap::new(),
+                            fields: made_fields(self.view.tree, kind),
                         },
                         rest: Rest::new(),
                     }]),
@@ -584,6 +605,7 @@ impl Cx<'_> {
                     );
                 }
                 self.not_in_use(thing)?;
+                self.not_fixed_unjudged(thing, *slot)?;
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
@@ -672,4 +694,54 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+impl Cx<'_> {
+    /// A thing of a creator's kind with solids goes where it is fixed geometry (a slot its holder gives a point,
+    /// N19) only by an edit or a set-down, which judge what it would bury or cut off (BUILDSAFE). A form's put or
+    /// reparent judges nothing, so it is refused `solid-into-slot` (#3697 re-review); a boot thing keeps today's
+    /// behaviour (C12).
+    fn not_fixed_unjudged(&self, thing: Id, slot: u64) -> R<()> {
+        let tree = self.view.tree;
+        let Some(kind) = self.view.kind(thing) else {
+            return Ok(());
+        };
+        if replica::kinds::defined::defined_named(tree, kind.as_str()).is_none() {
+            return Ok(());
+        }
+        let solid = self
+            .view
+            .field(thing, crate::ground::scene::F_SOLIDS)
+            .is_some()
+            || !made_fields(tree, &kind).is_empty();
+        let pointed = matches!(
+            self.view.field(self.node, crate::ground::scene::F_SLOTS),
+            Some(Value::Array(rows)) if rows.iter().any(|r| matches!(
+                r,
+                Value::Array(c) if c.first().and_then(int) == i64::try_from(slot).ok()
+            ))
+        );
+        if solid && pointed {
+            return refuse(
+                "solid-into-slot",
+                format!(
+                    "{} has solids and slot {slot} of {} is fixed ground: set it down instead, where it is judged",
+                    show(thing),
+                    show(self.node)
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// The fields a made thing starts with: a creator's kind's solids (N1's field 12, from its record's bounds), as the
+/// creator's own place gives it (#3697 review). Such a thing is made only into a hand (into a slot is `kind.effects`
+/// at define, since a made thing is not judged for what it would bury), so the set-down that puts it in the world
+/// judges it and walkers then go round it; none for a boot kind, whose solids come from its geometry as today.
+pub(crate) fn made_fields(tree: &Tree, kind: &Name) -> BTreeMap<u64, Value> {
+    replica::kinds::defined::defined_named(tree, kind.as_str())
+        .and_then(|d| replica::kinds::defined::solids_of(&d.entry))
+        .map(|s| BTreeMap::from([(crate::ground::scene::F_SOLIDS, s)]))
+        .unwrap_or_default()
 }

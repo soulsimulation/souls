@@ -13,6 +13,7 @@ import {createInterface} from 'node:readline';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {loadKinds} from '../../packages/form-rules/src/load.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const V2 = join(ROOT, 'v2'), BIN = join(V2, 'target/release/entry-v2');
@@ -25,7 +26,25 @@ export default function v2Transport({build = true} = {}) {
   });
   const call = async q => { const a = await ask(q); if (a.error) throw new Error(`v2 ${q.op}: ${a.error}`); return a; };
   const t = {
-    name: 'v2', stepped: true, timers: false, events: false, reads: [],
+    name: 'v2', stepped: true, timers: false, events: false,
+    // its tree holds list fields (chess_table.pieces, signup_sheet.notes): a case that sets or expects one is played
+    lists: true,
+    // an act's answer carries the changes its run wrote, by the case's names (changeLine)
+    reads: ['reparent', 'link', 'unlink', 'create', 'remove'],
+    // It decides on the case's own state (sceneOf), so a case's hands, links and slots are its scene as they stand,
+    // and it defines every kind it is started with, a case's things from outside the family too.
+    scene: ['hands', 'links', 'slots'], defines: true,
+    // Its world keeps a T2 tree of the placed things (the runner's own doc): the case's hands, links and slots are
+    // set there as the case first acts, and from then on it decides on the world as it stands (`tree`). The one
+    // thing it lacks is the places a seat is taken through (B3), so a form that sits or lies cannot run here.
+    tree: true,
+    treeGap(entry, form) {
+      const f = entry?.forms?.[form];
+      const step = (f?.steps ?? []).find(s => ['sit', 'lie'].includes(s.step));
+      if (step) return `${form}'s ${step.step} step takes a seat through the world's places, which this world does not keep`;
+      // a vehicle's holder is its rider, seated through the same places
+      return entry?.vehicle && f?.who === 'holder' ? `${form} is for the vehicle's rider, seated through the world's places, which this world does not keep` : null;
+    },
     async start(loaded) {
       if (build !== 'no') {
         const r = spawnSync('cargo', ['build', '--release', '--quiet', '--manifest-path', '../tools/entry/v2/Cargo.toml', '--target-dir', 'target'], {cwd: V2, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe']});
@@ -36,7 +55,11 @@ export default function v2Transport({build = true} = {}) {
       lines = createInterface({input: child.stdout});
       lines.on('line', l => waiting.shift()?.ok(JSON.parse(l)));
       child.on('exit', code => { for (const w of waiting.splice(0)) w.no(new Error(`the v2 world ended (${code})`)); });
-      const kinds = Object.fromEntries(loaded.filter(r => r.kind && r.entry?.forms).map(r => [r.kind, r.entry]));
+      const kinds = Object.fromEntries(loaded.filter(r => r.kind && r.entry).map(r => [r.kind, r.entry]));
+      // the kinds the family's forms make (a loaf, a letter) are defined too, so its tree admits what they make
+      const made = Object.values(kinds).flatMap(e => Object.values(e.forms ?? {}).flatMap(f => (f.effects ?? []).filter(x => x.change === 'create').map(x => x.kind)));
+      const all = made.some(k => !kinds[k]) ? loadKinds() : {};
+      for (const k of made) if (!kinds[k] && all[k]) kinds[k] = all[k];
       await call({op: 'define', kinds});
     },
     async stop() { child?.stdin.end(); },
@@ -52,6 +75,8 @@ export default function v2Transport({build = true} = {}) {
     async leave() { await call({op: 'leave'}); },
     async body() { return call({op: 'body'}); },
     async restart() { await call({op: 'restart'}); },
+    async reset() { await call({op: 'reset'}); },
+    async arrange(scene) { return call({op: 'arrange', ...scene}); },
   };
   return t;
 }

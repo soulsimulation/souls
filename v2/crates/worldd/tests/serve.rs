@@ -339,6 +339,152 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 
+/// K16 (0.133): a world seeded by an older build is served by today's, under the header its log names. The older
+/// build is stood for by rewriting the seeded world's header and import part as one whose code differed: its ground's
+/// kind at another revision (an import loader change; every body is born under the ground) and no give (an activity
+/// it did not have). Today's build rebuilds another header, so before K16 every start was refused `header-mismatch`.
+/// It starts, takes the ground's kind at the world's revision, a Soul is born and walks, and it restarts from its
+/// checkpoint with the last logged state (C1's run).
+#[test]
+fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
+    use replica::effects::Header;
+    fn renamed(v: Value, from: &str, to: &str) -> Value {
+        match v {
+            Value::Text(t) if t.as_str() == from => Value::Text(Name::new(to).unwrap()),
+            Value::Array(a) => Value::Array(a.into_iter().map(|v| renamed(v, from, to)).collect()),
+            Value::Map(m) => Value::Map(
+                m.into_iter()
+                    .map(|(k, v)| (k, renamed(v, from, to)))
+                    .collect(),
+            ),
+            v => v,
+        }
+    }
+    let d = scratch("k16");
+    let (dir, body, root, ground) = seeded(&d);
+    let today =
+        Header::read(&std::fs::read(dir.join("header")).expect("the seed keeps its header"))
+            .unwrap();
+    let records = logged(&dir.join("log"));
+    assert_eq!(records.len(), 1, "a seed's log is its import part");
+    let part = Part::read(&records[0]).unwrap();
+    assert_eq!(
+        part.header,
+        today.hash().to_bytes(),
+        "the part names the kept header"
+    );
+
+    // The older build's header: the ground's kind at another revision, and no give.
+    let ground_kind = today
+        .kinds
+        .iter()
+        .find(|k| k.as_str().split('@').next() == Some(import_eden::GROUND))
+        .expect("the ground's kind")
+        .as_str()
+        .to_owned();
+    let (plain, pin) = ground_kind.split_once('@').unwrap();
+    // Another SHA-256 multihash: its code and length, then the digest reversed.
+    let (code, digest) = pin.split_at(4);
+    let older_ground = format!("{plain}@{code}{}", digest.chars().rev().collect::<String>());
+    assert_ne!(older_ground, ground_kind);
+    let Value::Map(mut h) = renamed(
+        decode(today.stored()).unwrap().value,
+        &ground_kind,
+        &older_ground,
+    ) else {
+        panic!("a header is a map")
+    };
+    let Some(Value::Array(kinds)) = h.get_mut(&6) else {
+        panic!("the header's kinds")
+    };
+    kinds.retain(|k| !matches!(k, Value::Text(t) if t.as_str().starts_with("souls:give@")));
+    let older = Header::read(&encode(&Value::Map(h)).unwrap()).unwrap();
+    assert_ne!(older.kinds, today.kinds);
+    let Value::Map(mut p) = renamed(
+        decode(&records[0]).unwrap().value,
+        &ground_kind,
+        &older_ground,
+    ) else {
+        panic!("a part is a map")
+    };
+    p.insert(1, Value::Bytes(older.hash().to_bytes()));
+    std::fs::remove_file(dir.join("log")).unwrap();
+    let (mut log, _) = Log::open(FileStore::open(&dir.join("log")).unwrap(), 1).unwrap();
+    let n = log.append(encode(&Value::Map(p)).unwrap()).unwrap();
+    log.wait_durable(n + 1).unwrap();
+    drop(log.close());
+    std::fs::write(dir.join("header"), older.stored()).unwrap();
+    // The older build's owners: its ground's revision, owned as today's, and no give.
+    let owners: String = std::fs::read_to_string(dir.join("header.kinds"))
+        .expect("the seed keeps its kinds' owners")
+        .lines()
+        .filter(|l| !l.starts_with("souls:give@"))
+        .map(|l| l.replace(&ground_kind, &older_ground) + "\n")
+        .collect();
+    std::fs::write(dir.join("header.kinds"), owners).unwrap();
+
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    let said = w.line("header: ");
+    println!("{said}");
+    assert!(
+        said.contains("not this build's")
+            && said.contains(&format!(
+                "1 kinds taken at the world's revision [{older_ground} as {ground_kind}]"
+            ))
+            && said.contains(
+                "1 this build pins that the world cannot make until it is reseeded [souls:give@"
+            ),
+        "{said}"
+    );
+    w.line("worldd: started at tick");
+    // `world.kinds` still loads as the creator's client loads it (`replica::wasm`'s `creator_kinds`): each boot
+    // line's target is a place kind its own kind lines define.
+    let kinds = std::fs::read_to_string(dir.join("world.kinds")).unwrap();
+    let mut defined = BTreeMap::new();
+    for line in kinds.lines() {
+        defined.extend(replica::world_model::parse_kinds(line).expect("a kind line or a comment"));
+    }
+    let targets: Vec<&str> = kinds
+        .lines()
+        .filter_map(|l| {
+            l.strip_prefix("# souls-boot-body ")
+                .or_else(|| l.strip_prefix("# souls-boot-activity ")?.split(' ').next())
+        })
+        .collect();
+    assert!(!targets.is_empty());
+    for t in targets {
+        assert_eq!(
+            defined.get(t).map(|k| k.owner.as_str()),
+            Some("place"),
+            "{t}"
+        );
+    }
+    serves_walks_and_restarts(w, &d, &dir, body, root, ground);
+}
+
+/// K16: a world seeded before K16 keeps no header file. Served by a build whose header is the one its log names, it
+/// keeps that header and serves; a later start reads it.
+#[test]
+fn k16_a_world_with_no_header_file_keeps_the_one_its_log_names() {
+    let d = scratch("k16b");
+    let (dir, ..) = seeded(&d);
+    let kept = std::fs::read(dir.join("header")).unwrap();
+    let owners = std::fs::read(dir.join("header.kinds")).unwrap();
+    std::fs::remove_file(dir.join("header")).unwrap();
+    std::fs::remove_file(dir.join("header.kinds")).unwrap();
+    let w = serve(&dir, &d.join("s"));
+    assert_eq!(
+        w.line("header: "),
+        "header: kept this build's, the one the log names"
+    );
+    w.line("worldd: started at tick");
+    w.kill();
+    assert_eq!(std::fs::read(dir.join("header")).unwrap(), kept);
+    assert_eq!(std::fs::read(dir.join("header.kinds")).unwrap(), owners);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
 /// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
 #[test]
@@ -833,6 +979,114 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// 0.132.1: a fresh seed whose entries have a stand point C13 moves (Eden's chess table's, inside its own solids)
+/// serves. The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in
+/// its kind every start of a fresh Eden was refused `header-mismatch`. C13 moves a stand point only for a kind the world
+/// places, and the test world places none of them, so this needs Eden's exported facts (`v2/tools/import-eden/export`).
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn a_seed_whose_stand_point_is_moved_serves() {
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-stand");
+    let dir = d.join("w");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let out = worldd()
+        .args(["seed", "--facts"])
+        .arg(&facts)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&entries)
+        .args(["--souls", "0"])
+        .output()
+        .expect("seed runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "seed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("stand point: eden:chess_table"),
+        "the chess table's stand point is moved"
+    );
+    let w = serve_env(&dir, &d.join("s"), &[], &[]);
+    w.line("listening");
+    w.kill();
+}
+
+/// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB.
+/// Production's rehearsal did that on a scratch copy, and the world then started from its own folder and had to read
+/// the object back. Past ureq's 10 MiB cap its public stream stopped before its first flush and the world refused to
+/// serve (`public-stream: stopped before its first flush`), again and again. With the world's read cap
+/// (`S3::for_world`) it serves. Two seeds of the same facts stand for the scratch copy and the world's own folder.
+/// Needs Eden's exported facts (`v2/tools/import-eden/export`): the test world tops out at 4.3 MB, under the cap.
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-eden-s3");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let seed = |dir: &Path| {
+        let out = worldd()
+            .args(["seed", "--facts"])
+            .arg(&facts)
+            .arg("--dir")
+            .arg(dir)
+            .arg("--entries")
+            .arg(&entries)
+            .args(["--souls", "0"])
+            .output()
+            .expect("seed runs");
+        assert!(
+            out.status.success(),
+            "seed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let (scratch_copy, own) = (d.join("rehearsal"), d.join("w"));
+    seed(&scratch_copy);
+    seed(&own);
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/rn", s.url("souls"));
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    // The first start, on the scratch copy: a stream with nothing to recover writes its recovery objects.
+    let w = serve_env(&scratch_copy, &d.join("s1"), &args, &env);
+    w.line("listening");
+    w.kill();
+    assert!(
+        s.paths().iter().any(|p| p.contains("/stream-recovery/")),
+        "the first start wrote its stream's recovery objects"
+    );
+    // The world's own folder starts and reads them back from the store, one of them past 10 MiB.
+    let w = serve_env(&own, &d.join("s2"), &args, &env);
+    w.line("listening");
+    let said = w.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+    assert!(!said.contains("the public stream stopped"), "{said}");
+    w.kill();
+}
+
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
 /// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
 // A real process on the real clock: the stalls and the bound are real time.
@@ -910,6 +1164,765 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
         "four tries over the waits, bounded: {took:?}"
     );
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R12 (0.133): a world whose public stream cannot recover from its store (as production's did on 23 Nov, a read past
+/// the client's cap) never ends for it, which systemd would only repeat: it listens degraded, with no public pointer
+/// (no viewers) and `health.json` naming the fault, and tries again with back-off. Once the store answers, the stream
+/// serves, the pointer is back and it names a valid stream.
+// A real process on the real clock: the back-off and the health file's writes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it_answers() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r12");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r12", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    let pointer = dir.join("views/world.json");
+    // Reads `health.json` until its stream says `state`; the deadline only stops a hung test.
+    let stream_until = |state: &str| -> String {
+        let want = format!("\"stream\":{{\"state\":\"{state}\"");
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(
+                Instant::now() < end,
+                "no stream {state} in health.json: {h}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // The first start writes the stream's recovery objects to the store.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    stream_until("serving");
+    // Its backup puts the recovery chain's head last (R15).
+    let end = Instant::now() + Duration::from_secs(30);
+    while !s
+        .paths()
+        .iter()
+        .any(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+    {
+        assert!(Instant::now() < end, "the stream's backup wrote its head");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    w.kill();
+    // As on a new machine: no views and no spool, so the stream recovers from the store, and the store refuses those
+    // reads.
+    std::fs::remove_dir_all(dir.join("views")).expect("views");
+    std::fs::remove_dir_all(dir.join("stream-backup")).expect("the stream's spool");
+    let _ = std::fs::remove_file(&health);
+    s.refuse_reads(usize::MAX, 403, "stream-recovery");
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    let said = w.line("worldd: the public stream is degraded, no viewers: ");
+    assert!(said.contains("store-error"), "{said}");
+    w.line("listening");
+    let _ = connect(&socket);
+    let h = stream_until("degraded");
+    assert!(h.contains("\"fault\":\"store-error: "), "{h}");
+    assert!(!pointer.exists(), "no viewers while degraded");
+    // Tried again with back-off: a second refused try, a second apart or more.
+    let again = w.line("worldd: the public stream is degraded, no viewers: ");
+    assert!(again.contains("try 2 refused"), "{again}");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+    // The store answers: the next try serves.
+    s.refuse_reads(0, 403, "");
+    w.line("worldd: the public stream recovered after ");
+    stream_until("serving");
+    assert!(pointer.is_file(), "the pointer is back");
+    // Recovered from the store alone, it starts a new generation (R15): a walk gives it a part to validate.
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "the walk ends in a receipt");
+    std::thread::sleep(Duration::from_millis(1_500));
+    let (_, files) = served_stream(&dir);
+    assert!(!files.is_empty(), "it names a valid stream");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): viewers read the public stream from the machine's disk, and the store is its backup only. A 60 s store
+/// stall mid-run (every write's answer lost, every read held past the client's timeout) never delays a viewer or the
+/// world: the newest part or quiet mark on disk stays within 2 s of the world's time throughout, a Soul's walks are
+/// answered, and `health.json` says the backup is degraded while the stream serves. Once the store answers, the backup
+/// catches up by itself, with no restart. A SIGKILL while the backup is behind restarts on the spool's exact bytes;
+/// a new machine (no views, no spool) recovers the same stream from the store alone, with the log's state hash.
+// A real process on the real clock: the stall, the back-off and the pointer's times are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
+    use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
+    use replica::stream::Pointer;
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+    const STALL: Duration = Duration::from_secs(60);
+    let d = scratch("r15");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    let health_says = |want: &str| -> String {
+        let end = Instant::now() + Duration::from_secs(150);
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(want) {
+                return h;
+            }
+            assert!(Instant::now() < end, "no {want} in health.json: {h}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let stall = |on: bool| {
+        if on {
+            s.fail_writes(usize::MAX, Fail::Lost);
+            s.stall_reads(usize::MAX, Duration::from_secs(6), "");
+        } else {
+            s.fail_writes(0, Fail::Lost);
+            s.stall_reads(0, Duration::ZERO, "");
+        }
+    };
+    // The store's head is the spool's: the backup is current.
+    let backed_up = || {
+        // The spool's one head, `stream-recovery/<stream>/head`; its objects come and go as they are backed up.
+        let spool = dir.join("stream-backup");
+        let mut head = None;
+        let mut todo = vec![spool.clone()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).expect("the spool").flatten() {
+                let p = e.path();
+                if p.file_name().is_some_and(|n| n == "head") {
+                    head = Some(p);
+                } else if p.is_dir() && !p.ends_with("objects") {
+                    todo.push(p);
+                }
+            }
+        }
+        let head = head.expect("the spool's head");
+        let key = head
+            .strip_prefix(&spool)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let bucket = supervisor::bucket::Bucket::parse(&spec, |k| {
+            env.iter()
+                .find(|(n, _)| *n == k)
+                .map_or(String::new(), |(_, v)| (*v).to_owned())
+        })
+        .expect("the store");
+        use directoryd::directory::store::Store;
+        let end = Instant::now() + Duration::from_secs(150);
+        loop {
+            let there = bucket.get(&key).ok().flatten().map(|o| o.bytes);
+            if there.is_some() && there == std::fs::read(&head).ok() {
+                return;
+            }
+            assert!(Instant::now() < end, "the store's head is the spool's");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    };
+    // A Soul walks back and forth until told to stop: each walk answered is the world going on.
+    let seq = Arc::new(AtomicU64::new(0));
+    let walker = |stop: Arc<AtomicBool>| {
+        let (socket, seq) = (socket.clone(), Arc::clone(&seq));
+        std::thread::spawn(move || {
+            let mut c = connect(&socket);
+            let mut answered = 0u64;
+            while !stop.load(Ordering::Relaxed) {
+                let n = seq.fetch_add(1, Ordering::Relaxed) + 1;
+                let x = if n % 2 == 0 { -40 } else { -34 };
+                walk(&mut c, body, root.scope(), ground, n, x, 30);
+                assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+                answered += 1;
+            }
+            answered
+        })
+    };
+    // What a viewer sees: how far the newest part or quiet mark on disk is behind the world's time, sampled every
+    // 100 ms; the most, µs.
+    let worst = Arc::new(AtomicI64::new(0));
+    let looking = Arc::new(AtomicBool::new(true));
+    let viewer = {
+        let (dir, worst, looking) = (dir.clone(), Arc::clone(&worst), Arc::clone(&looking));
+        std::thread::spawn(move || {
+            let mut samples = 0u64;
+            while looking.load(Ordering::Relaxed) {
+                let world = json::parse(
+                    &std::fs::read_to_string(dir.join("views/world.json")).unwrap_or_default(),
+                );
+                let stream = world.ok().and_then(|w| {
+                    w.get("stream")
+                        .and_then(json::Value::str)
+                        .map(str::to_owned)
+                });
+                if let Some(p) = stream
+                    .and_then(|s| std::fs::read(dir.join(s).join("pointer")).ok())
+                    .and_then(|b| Pointer::read(&b).ok())
+                {
+                    let wall_ms = i64::try_from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis(),
+                    )
+                    .unwrap();
+                    let world_now = p.anchor_world + (wall_ms - p.anchor_wall_ms as i64) * 1000;
+                    let shown = p.newest_to.max(p.quiet_until).unwrap_or(p.anchor_world);
+                    worst.fetch_max(world_now - shown, Ordering::Relaxed);
+                    samples += 1;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            samples
+        })
+    };
+
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    health_says("\"stream\":{\"state\":\"serving\"}");
+    health_says("\"stream_backup\":{\"state\":\"current\"}");
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    std::thread::sleep(Duration::from_secs(3));
+    backed_up();
+    let before = worst.swap(0, Ordering::Relaxed);
+    println!(
+        "viewer delay before the stall: at most {} ms",
+        before / 1000
+    );
+    // Under 2 s on a quiet machine. On one loaded by other tests (the whole file runs at once, a debug build), the
+    // stream's own cadence slows with no stall at all, so the bar follows what was measured before the stall: what is
+    // measured is that the stall adds nothing a viewer waits on.
+    let bar = 2_000_000.max(before * 3 / 2 + 500_000);
+
+    // The stall: the stream serves on, the backup falls behind and says so.
+    stall(true);
+    let began = Instant::now();
+    let said = w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+    assert!(said.contains("store-unreachable"), "{said}");
+    let h = health_says("\"stream_backup\":{\"state\":\"degraded\"");
+    assert!(h.contains("\"stream\":{\"state\":\"serving\"}"), "{h}");
+    std::thread::sleep(STALL.saturating_sub(began.elapsed()));
+    let h = health_says("\"stream_backup\":{\"state\":\"degraded\"");
+    let behind: u64 = h
+        .split("\"behind\":")
+        .nth(1)
+        .and_then(|r| r.split([',', '}']).next()?.parse().ok())
+        .unwrap_or(0);
+    let during = worst.swap(0, Ordering::Relaxed);
+    println!(
+        "viewer delay during the {} s stall: at most {} ms; {behind} objects wait",
+        STALL.as_secs(),
+        during / 1000
+    );
+    assert!(
+        during < bar,
+        "a viewer is never 2 s behind (or the unstalled delay and 0.5 s on a loaded machine): {during} µs"
+    );
+    assert!(behind > 0, "the backup waits on the store: {h}");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+
+    // The store answers: the backup catches up by itself.
+    stall(false);
+    let answered = Instant::now();
+    w.line("worldd: the public stream's backup caught up after ");
+    health_says("\"stream_backup\":{\"state\":\"current\"}");
+    backed_up();
+    println!(
+        "the backup caught up {} ms after the store answered",
+        answered.elapsed().as_millis()
+    );
+    stop.store(true, Ordering::Relaxed);
+    let walks = walking.join().expect("the walker");
+    println!("{walks} walks answered across the stall");
+    assert!(walks > 3, "the world went on: {walks}");
+    let after = worst.swap(0, Ordering::Relaxed);
+    assert!(after < bar, "nor while it catches up: {after} µs");
+
+    // A SIGKILL while the backup is behind: the restart publishes on from the spool's exact bytes.
+    stall(true);
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::Relaxed);
+    walking.join().expect("the walker");
+    let (_, published) = served_stream(&dir);
+    w.kill();
+    stall(false);
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::Relaxed);
+    walking.join().expect("the walker");
+    let (_, files) = served_stream(&dir);
+    for (path, bytes) in &published {
+        assert_eq!(
+            files.get(path),
+            Some(bytes),
+            "published bytes survive the kill"
+        );
+    }
+    backed_up();
+    looking.store(false, Ordering::Relaxed);
+    println!("{} viewer samples", viewer.join().expect("the viewer"));
+    w.kill();
+
+    // A new machine: no views, no spool. The stream recovers from the store alone, in a new generation, and the world's
+    // state is its log's. Twice: once with the backup current, and once with the store's head behind what viewers
+    // were shown (its head's writes refused, then SIGKILL): no address of that lost tail is cut again.
+    for lagging in [false, true] {
+        let w = serve_env(&dir, &socket, &args, &env);
+        w.line("listening");
+        if lagging {
+            s.refuse_writes(usize::MAX, 503, "/head");
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let walking = walker(Arc::clone(&stop));
+        std::thread::sleep(Duration::from_secs(3));
+        stop.store(true, Ordering::Relaxed);
+        walking.join().expect("the walker");
+        std::thread::sleep(Duration::from_millis(1_500));
+        if lagging {
+            w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+        } else {
+            backed_up();
+        }
+        let shown = views_files(&dir);
+        let generation = generation_of(&dir);
+        w.kill();
+        s.refuse_writes(0, 503, "");
+        let state = last_state(&dir.join("log"));
+        std::fs::remove_dir_all(dir.join("views")).expect("views");
+        std::fs::remove_dir_all(dir.join("stream-backup")).expect("the spool");
+        let w = serve_env(&dir, &socket, &args, &env);
+        let started = w.line("worldd: started at tick");
+        assert!(started.ends_with(&format!("state {state}")), "{started}");
+        w.line("listening");
+        health_says("\"stream\":{\"state\":\"serving\"}");
+        let stop = Arc::new(AtomicBool::new(false));
+        let walking = walker(Arc::clone(&stop));
+        std::thread::sleep(Duration::from_secs(2));
+        stop.store(true, Ordering::Relaxed);
+        walking.join().expect("the walker");
+        served_stream(&dir);
+        assert_ne!(generation_of(&dir), generation, "a new generation");
+        let again = views_files(&dir);
+        let mut same = 0;
+        for (path, bytes) in &again {
+            if let Some(b) = shown.get(path) {
+                assert_eq!(
+                    b, bytes,
+                    "no address viewers were shown is cut again: {path:?}"
+                );
+                same += 1;
+            }
+        }
+        println!(
+            "new machine (store {}): {same} files the same, none cut again",
+            if lagging { "behind" } else { "current" }
+        );
+        w.kill();
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): one writer per chain. An old instance of a world (stopped, not dead) and a new one copied from it
+/// share the store's chain; the new one backs up its head; the old one, woken, finds the store's head neither its own
+/// nor the one it wrote against, and is fenced for good: it never overwrites the new one's head, says so in
+/// `health.json` and the journal, and its stream goes on serving from its disk.
+// A real process on the real clock: the backup's passes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_an_old_writer_is_fenced_and_never_overwrites_a_new_one_s_head() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use directoryd::directory::store::Store;
+    use std::ffi::OsStr;
+    let d = scratch("r15f");
+    let (dir, body, root, ground) = seeded(&d);
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15f", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let bucket = supervisor::bucket::Bucket::parse(&spec, |k| {
+        env.iter()
+            .find(|(n, _)| *n == k)
+            .map_or(String::new(), |(_, v)| (*v).to_owned())
+    })
+    .expect("the store");
+    let head_key = || {
+        s.paths()
+            .into_iter()
+            .find(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+            .map(|p| p.trim_start_matches("souls/r15f/").to_owned())
+    };
+    let store_head = |key: &str| bucket.get(key).ok().flatten().map(|o| o.bytes);
+    let until = |what: &str, ok: &dyn Fn() -> bool| {
+        let end = Instant::now() + Duration::from_secs(60);
+        while !ok() {
+            assert!(Instant::now() < end, "{what}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let walks = |socket: &Path, from: u64| {
+        let mut c = connect(socket);
+        for n in from..from + 2 {
+            let x = if n % 2 == 0 { -40 } else { -34 };
+            walk(&mut c, body, root.scope(), ground, n, x, 30);
+            assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+        }
+    };
+    // The old instance serves and backs up its head.
+    let old_socket = d.join("s-old");
+    let old = serve_env(&dir, &old_socket, &args, &env);
+    old.line("listening");
+    walks(&old_socket, 1);
+    until("the old writer's head is in the store", &|| {
+        head_key().is_some()
+    });
+    let key = head_key().unwrap();
+    let spooled = dir.join("stream-backup").join(&key);
+    until("the store holds the old writer's head", &|| {
+        store_head(&key) == std::fs::read(&spooled).ok()
+    });
+    // It stops (as a hung or partitioned process does), and a new instance starts from a copy of its folder.
+    let pid = old.child.id().to_string();
+    let stopped = Command::new("kill").args(["-STOP", &pid]).status();
+    assert!(stopped.expect("kill").success(), "the old writer stopped");
+    let new_dir = d.join("new");
+    copy_tree(&dir, &new_dir);
+    let _ = std::fs::remove_file(new_dir.join("gateway.sock"));
+    let new_socket = d.join("s-new");
+    let new = serve_env(&new_dir, &new_socket, &args, &env);
+    new.line("listening");
+    walks(&new_socket, 100);
+    let new_spooled = new_dir.join("stream-backup").join(&key);
+    until("the store holds the new writer's head", &|| {
+        let h = store_head(&key);
+        h.is_some() && h == std::fs::read(&new_spooled).ok() && h != std::fs::read(&spooled).ok()
+    });
+    let theirs = store_head(&key);
+    // The old one wakes and writes on: its backup is fenced, the new one's head stays.
+    let woke = Command::new("kill").args(["-CONT", &pid]).status();
+    assert!(woke.expect("kill").success(), "the old writer woke");
+    walks(&old_socket, 200);
+    let said = old.line("worldd: the public stream's backup is fenced, viewers unaffected: ");
+    assert!(said.contains("stream-backup-fenced"), "{said}");
+    let health = dir.join("health.json");
+    until("the old writer's health says fenced", &|| {
+        std::fs::read_to_string(&health)
+            .unwrap_or_default()
+            .contains("\"stream_backup\":{\"state\":\"fenced\"")
+    });
+    walks(&old_socket, 300);
+    std::thread::sleep(Duration::from_secs(3));
+    let after = store_head(&key);
+    assert!(
+        after == theirs || after == std::fs::read(&new_spooled).ok(),
+        "the old writer never put over the new one's head"
+    );
+    assert_ne!(
+        after,
+        std::fs::read(&spooled).ok(),
+        "the store's head is not the old writer's"
+    );
+    assert!(
+        std::fs::read_to_string(&health)
+            .unwrap_or_default()
+            .contains("\"stream\":{\"state\":\"serving\"}"),
+        "the old writer's stream still serves from its disk"
+    );
+    old.kill();
+    new.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): a world whose stream's backup is behind (every write to the store refused) and that goes to sleep
+/// sleeps properly: the stream's bounded wait for its backup stays inside the sleep watch's wait for its answer, so the
+/// watch hears it and the world exits asleep with a sleeping pointer. Never a world that stays up while its stream has
+/// stopped and its pointer says still.
+// A real process on the real clock: the quiet minute before a sleep is real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_a_world_whose_backup_is_behind_sleeps_properly() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    use std::os::unix::net::UnixListener;
+    let d = scratch("r15s");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15s", s.url("souls"));
+    // The machine's alarm daemon, standing in: every alarm acknowledged.
+    let alarms = d.join("alarms");
+    let daemon = UnixListener::bind(&alarms).expect("the alarm socket");
+    std::thread::spawn(move || {
+        for mut c in daemon.incoming().flatten() {
+            let mut line = String::new();
+            let _ = BufReader::new(c.try_clone().unwrap()).read_line(&mut line);
+            let _ = c.write_all(b"ok\n");
+        }
+    });
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+        OsStr::new("--sleep"),
+        alarms.as_os_str(),
+        OsStr::new("--world-name"),
+        OsStr::new("r15s"),
+    ];
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let health = dir.join("health.json");
+    s.refuse_writes(usize::MAX, 503, "");
+    w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+    let end = Instant::now() + Duration::from_secs(150);
+    let status = loop {
+        if let Some(status) = w.child.try_wait().expect("its state") {
+            break Some(status);
+        }
+        if Instant::now() > end {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let said = w.all.lock().unwrap().join("\n");
+    assert!(
+        !said.contains("the public stream did not answer"),
+        "the watch heard the stream:\n{said}"
+    );
+    assert!(
+        !said.contains("the public stream stopped"),
+        "the stream never stopped:\n{said}"
+    );
+    let h = std::fs::read_to_string(&health).unwrap_or_default();
+    let status = status.unwrap_or_else(|| panic!("it never slept:\n{h}\n{said}"));
+    assert_eq!(status.code(), Some(75), "it exits asleep:\n{said}");
+    assert!(said.contains("asleep: next due"), "{said}");
+    let world =
+        json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap()).unwrap();
+    let stream = dir.join(world.get("stream").and_then(json::Value::str).unwrap());
+    let Value::Map(p) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    assert!(p.contains_key(&11), "the pointer says asleep");
+    println!("it slept, its backup behind");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): a store-only recovery (a new machine) whose store head is a generation with no parts serves at once:
+/// its fresh generation waits for the world to move past the recovered cursor, so it never rebuilds the baseline the
+/// store names, and it is never refused or degraded for it.
+// A real process on the real clock: the backup's passes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_a_new_machine_on_a_generation_with_no_parts_serves() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use directoryd::directory::store::Store;
+    use std::ffi::OsStr;
+    let d = scratch("r15g");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let keys = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    // Every part closes its generation: the store's head is a generation with no parts once the backup is current.
+    let every_part = [keys[0], keys[1], ("SOULS_STREAM_GENERATION_PARTS", "1")];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15g", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let bucket = supervisor::bucket::Bucket::parse(&spec, |k| {
+        keys.iter()
+            .find(|(n, _)| *n == k)
+            .map_or(String::new(), |(_, v)| (*v).to_owned())
+    })
+    .expect("the store");
+    let w = serve_env(&dir, &socket, &args, &every_part);
+    w.line("listening");
+    let mut c = connect(&socket);
+    for n in 1..=2u64 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            n,
+            if n % 2 == 0 { -40 } else { -34 },
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+    }
+    std::thread::sleep(Duration::from_millis(1_500));
+    // The store's head, once it is the spool's: a rollover's manifest (no previous manifest, no chunk).
+    let key = s
+        .paths()
+        .into_iter()
+        .find(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+        .map(|p| p.trim_start_matches("souls/r15g/").to_owned())
+        .expect("a head in the store");
+    let spooled = dir.join("stream-backup").join(&key);
+    let prefix = key.trim_end_matches("head").to_owned();
+    // Whether `head` names a generation's first manifest (no previous one) with no part (no chunk).
+    let no_parts = |head: &[u8]| -> bool {
+        let Ok(Value::Map(h)) = decode(head).map(|d| d.value) else {
+            return false;
+        };
+        let Some(Value::Bytes(manifest)) = h.get(&1) else {
+            return false;
+        };
+        let Ok(Some(m)) = bucket.get(&format!("{prefix}objects/{}", to_hex(manifest))) else {
+            return false;
+        };
+        let Ok(Value::Map(m)) = decode(&m.bytes).map(|d| d.value) else {
+            return false;
+        };
+        m.get(&2) == Some(&Value::Bytes(Vec::new())) && m.get(&3) == Some(&Value::Bytes(Vec::new()))
+    };
+    // The world is still now; its last cut rolled over, and its backup puts that head last.
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(there) = bucket.get(&key).ok().flatten().map(|o| o.bytes)
+            && Some(&there) == std::fs::read(&spooled).ok().as_ref()
+            && no_parts(&there)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "the store holds the spool's head, a generation with no parts"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let generation = generation_of(&dir);
+    w.kill();
+    // A new machine: no views, no spool.
+    std::fs::remove_dir_all(dir.join("views")).expect("views");
+    std::fs::remove_dir_all(dir.join("stream-backup")).expect("the spool");
+    let w = serve_env(&dir, &socket, &args, &keys);
+    w.line("listening");
+    let health = dir.join("health.json");
+    let end = Instant::now() + Duration::from_secs(5);
+    while !std::fs::read_to_string(&health)
+        .unwrap_or_default()
+        .contains("\"stream\":{\"state\":\"serving\"}")
+    {
+        assert!(Instant::now() < end, "it serves within one back-off");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let mut c = connect(&socket);
+    for n in 3..=6u64 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            n,
+            if n % 2 == 0 { -40 } else { -34 },
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+    }
+    std::thread::sleep(Duration::from_millis(1_500));
+    let said = w.all.lock().unwrap().join("\n");
+    assert!(
+        !said.contains("the public stream is degraded"),
+        "never degraded:\n{said}"
+    );
+    served_stream(&dir);
+    assert_ne!(generation_of(&dir), generation, "a new generation");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Every file under `dir/views`, but those mid-write (`.tmp`) or gone as they are read.
+fn views_files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut all = BTreeMap::new();
+    let mut todo = vec![dir.join("views")];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.extension().is_none_or(|x| x != "tmp")
+                && !p.ends_with("pointer")
+                && !p.ends_with("world.json")
+                && let Ok(b) = std::fs::read(&p)
+            {
+                all.insert(p, b);
+            }
+        }
+    }
+    all
+}
+
+/// The generation (field 8, its baseline's digest) the served stream's pointer names.
+fn generation_of(dir: &Path) -> Vec<u8> {
+    let world =
+        json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap()).unwrap();
+    let stream = dir.join(world.get("stream").and_then(json::Value::str).unwrap());
+    let Value::Map(fields) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    match fields.get(&8) {
+        Some(Value::Bytes(g)) => g.clone(),
+        other => panic!("the pointer names its generation: {other:?}"),
+    }
 }
 
 /// O3b's kill test over the store `spec` names, with `env` set for the world: every line the world printed.
@@ -1378,5 +2391,121 @@ fn c30_served_subscription_socket_replays_ownership_and_private_words() {
         }
     }
     w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Every file under `dir`, by its path there, with its bytes.
+fn files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut all = BTreeMap::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).expect("reads the folder").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                let rel = p.strip_prefix(dir).expect("under the folder").to_path_buf();
+                all.insert(rel, std::fs::read(&p).expect("reads the file"));
+            }
+        }
+    }
+    all
+}
+
+/// 0.132.1 RH: a deploy's rehearsal serves its scratch copy of the world and never the shared store, even when the
+/// deploy runs with the live store's settings in its environment: the store stays byte for byte as the live world left
+/// it (its claim, its epoch, its history), and the restart of the real deploy after it takes the world over at the
+/// next epoch, as it would with no rehearsal.
+#[test]
+fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
+    use std::ffi::OsStr;
+    const CHILD: &str = "SOULS_RH_REHEARSAL_CHILD";
+    // The rehearsal as the deploy runs it, in a process whose environment names the live store and machine.
+    if let Some(d) = std::env::var_os(CHILD).map(PathBuf::from) {
+        let canary = supervisor::deploy::Canary {
+            window: Duration::from_millis(100),
+            start_within: Duration::from_secs(60),
+            answer_within: Duration::from_secs(5),
+            every: Duration::from_millis(50),
+        };
+        let r = supervisor::deploy::rehearse(
+            Path::new(env!("CARGO_BIN_EXE_worldd")),
+            &d.join("w"),
+            &d.join("r"),
+            0,
+            &canary,
+            &mut supervisor::deploy::Probe::Ask(0),
+        )
+        .expect("the rehearsal passes");
+        assert!(r.served_kept && r.copied > 0, "{r:?}");
+        return;
+    }
+    let d = scratch("rh");
+    let (dir, ..) = seeded(&d);
+    let spec = format!("folder:{}", d.join("store").display());
+    let more = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("live"),
+    ];
+    let socket = d.join("s");
+    // The live world claims its history at epoch 1 and ships; then it is stopped, its claim left in the store.
+    let live = serve_with(&dir, &socket, &more);
+    let shipping = live.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 1 "), "{shipping}");
+    live.line("listening");
+    live.kill();
+    let before = files(&d.join("store"));
+    assert!(!before.is_empty(), "the live claim is in the store");
+    // The live backup bucket, set as production sets it, shipping every second.
+    let (backup, pass) = (d.join("backup"), d.join("backup.key"));
+    std::fs::create_dir_all(&backup).expect("the backup folder");
+    std::fs::write(&pass, "a recovery passphrase for the test\n").expect("the key");
+    let backup_url = format!("folder:{}", backup.display());
+    // The store named either way worldd reads it: `$WORLDD_STORE`, and the directory's `$DIRECTORY_STORE_URL`
+    // (production's).
+    for store_env in ["WORLDD_STORE", "DIRECTORY_STORE_URL"] {
+        let out = Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over",
+                "--nocapture",
+            ])
+            .env(CHILD, &d)
+            .env_remove("WORLDD_STORE")
+            .env_remove("DIRECTORY_STORE_URL")
+            .env(store_env, &spec)
+            .env("WORLDD_MACHINE", "rehearsal")
+            .env("SOULS_BACKUP_URL", &backup_url)
+            .env("SOULS_BACKUP_KEY_FILE", &pass)
+            .env("SOULS_BACKUP_SHIP_S", "1")
+            .output()
+            .expect("the rehearsal runs");
+        let said = || std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
+        assert!(
+            out.status.success(),
+            "the rehearsal with {store_env}: {}{}\nthe build said: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            said()
+        );
+        assert!(
+            files(&d.join("store")) == before,
+            "the rehearsal with {store_env} changed the live store; the build said: {}",
+            said()
+        );
+        assert!(
+            files(&backup).is_empty(),
+            "the rehearsal with {store_env} wrote the live backup; the build said: {}",
+            said()
+        );
+    }
+    // The real deploy's restart after it takes the world over, at the next epoch.
+    let deployed = serve_with(&dir, &socket, &more);
+    let shipping = deployed.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 2 "), "{shipping}");
+    deployed.line("listening");
+    drop(deployed);
     let _ = std::fs::remove_dir_all(&d);
 }

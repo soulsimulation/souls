@@ -39,7 +39,8 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 ## The merge train
 
 When a PR is ready, label it `merge:ready`, or enqueue it directly with `gh pr merge <n> --squash`. Every push to a
-ready PR runs its CI with no label ([CI window](../testing.md#ci-window)), and the merge queue does not run it again.
+ready PR runs its CI with no label ([CI window](../testing.md#ci-window)), and the merge queue does not run its tests again: it only checks that the combined code compiles
+([CI window](../testing.md#ci-window)).
 From there the train takes over, one PR at a time, and first picks how
 the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`). The label event only relays: a `pull_request` job
 dispatches `main`'s copy of `merge-train.yml`, which does the work, so a PR never runs its own train (#1597). A fork PR's token
@@ -48,7 +49,7 @@ the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 
 **GitHub's merge queue is on.** The `main` ruleset requires it, so the train runs in queue mode (read on every pick;
 see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
-green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
+green at its head, and the queue compiles the combination with what is ahead of it (`merge_group` runs `group-check`) and lands it.
 `proof-ok` and `fragment` always pass since 0.132 (F1); the train itself still holds T3–T4 for approval, a direct
 `gh pr merge` does not. Removing `merge:ready` takes a PR out; a PR the
 queue drops loses the label, gets `queue:dropped` (removed when it is enqueued again) and one comment giving the
@@ -144,7 +145,10 @@ branch's commits, so a plain `git merge main` diffs from the old `main` fork poi
 never changed. The restack merge is 3-way against the child's fork point from the old base instead: files the child's
 own diff doesn't touch take the squashed content. The result is an ordinary merge commit, pushed as a fast-forward with
 `MERGE_TRAIN_TOKEN` (never forced), so CI runs on it. A real conflict pushes nothing; the child gets `needs:rebase`
-and a comment naming the files. To redo one by hand, run `gh workflow run restack.yml -f pr=<merged PR>`.
+and a comment naming the files. A PR whose head is in the merged branch's history with no commits of its own (an
+integration branch merged it, perhaps then dropped it) is not stacked on the merged PR: restack leaves it untouched
+and logs why, since a merge-forward would empty it. To redo one by hand, run
+`gh workflow run restack.yml -f pr=<merged PR>`.
 
 ## PR body
 

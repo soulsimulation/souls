@@ -5,6 +5,92 @@ second (N) one world carried, the viewers (Q) it served, each limit's measured v
 Why and how to measure is in [scaling](scaling.md). These are measurements of one build on one machine. They are not
 promises.
 
+## 0.133, 23 Nov 2026: the planner asks each question once (S7, S8)
+
+**Builds:** before = main `9717c6ff2` (with C6, before S7); after = S8's head (#4355): S7's cheaper passages and
+triangles (#4335), and S8's rule that a walk's place, a walker's line and a form's walk question are each asked once
+while out at the planner, and not again once answered. **Machine, placement and load:** a timed runner on the build
+machine, 6 CPUs: the world (worldd, gatewayd, the viewers' origin) on 5, the driver on 1. Stage 2a's rung
+(`v2/tools/bench/stage2a/rung.sh`), 120 s, two repeats, run by `.github/workflows/planner-500.yml`. Figures are
+ranges over the two repeats.
+
+| Rung (agents, rate, arm) | intents/s | planner cores, before / after | ticks on time, before / after | viewer delay p95 ms, before / after | stuck, after |
+| --- | --- | --- | --- | --- | --- |
+| 500, burst, even | 333 | 0.38–1.0 / 0.40–0.41 | 99.78–100 / 99.82–99.96 % | 711–777 / 849–1007 | 0 |
+| 500, burst, uneven | 327 | 0.42–1.0 / 0.43–0.66 | 99.82–100 / 99.91–100 % | 813–851 / 826–1075 | 0–1 |
+| 750, burst, even | 500 | 1.0 / **0.45–0.46** | 99.91 / 98.03–98.47 % | 650–706 / 1150–1249 | 0 |
+| 750, burst, uneven | 503 | 1.0 / **0.45** | 99.05–99.30 / 97.59–97.76 % | 803–806 / 951–1078 | 1–2 |
+| 1,000, `every4`, even | 250 | 1.0 / **0.31** | 99.86–99.91 / 96.87–98.71 % | 925–2269 / 1037–4520 | 0 |
+| 1,000, `every4`, uneven | 246 | (no result) / **0.26–0.28** | — / 98.45–98.71 % | — / 1629–4742 | 19–20 |
+
+**What it shows.** Before S8, a request still out at the planner was asked again every tick. A form's walk question
+was also sent once more in the tick its answer came back, because the questions are sent before the forms read the
+answers. Every form walk question therefore cost at least two full searches, and one per tick behind once the
+planner fell behind. At 500 agents in bursts that tipped the planner to a full core in some runs and not others;
+at 750 and 1,000 it held it there. With each question asked once, the planner is at 0.45 of a core at 750 in
+bursts and 0.26–0.31 at 1,000 `every4`.
+
+**Next limit: the clock.** Now that walks are answered and run, the clock (0.47–0.61 of a core) and the public
+stream (0.45–0.64) do more. Ticks on time fall to 96.9–98.7 % at 750 burst and 1,000 `every4`, under the 99 % bar.
+Before S8 they were above it only because Souls stood waiting for the planner. The 1,000 `every4` uneven rung gave
+no result before, because the gateway's control socket path was too long in the bench's folder; that is fixed in
+the workflow.
+
+**Stuck Souls (S11).** The driver's rule is now: *stuck is an act unanswered for 60 s while its Soul, as the public
+stream shows it, was neither moving at the window's end (its latest motion sample in the window has a speed) nor
+1 m or more, net, from where it was at the window's start* (`stuck.rule` in its report, with `onTheirWay` and
+`unseen`). A Soul moved by others (pushed,
+stepped aside) counts as moving. Before,
+any act unanswered for 60 s counted. On the uneven arm that was 19–22 Souls at 1,000 `every4`, and 18–19 of them were
+long walks still going at walking speed, their agents otherwise silent (the uneven arm's heavy-tailed rates). S11 also
+fixed two real faults found on the way: a walking form run whose legs its Soul's own walk took stood at its walk
+step for good, and a jostled form walker's line question was asked anew at every pose, so its answer never matched.
+At 1,000 `every4` (two repeats) the even arm has 0 stuck, and the uneven arm has 18–19 on their way and 1 counted
+stuck: the same `take` each run, by a Soul whose body the driver does not know (outside the first agent's copy), so
+its motion cannot be read.
+
+## 0.133, 23 Nov 2026: past 500 agents
+
+**Build:** main `456552d8b` with #4325 (C6: whose a thing is reads two marks, which keeps the clock on time at 500
+agents in bursts) merged in. The agent ladder now goes to 750 and 1,000 agents (`v2/tools/driver/loads.mjs`).
+**Machine, placement and load:** as in the run below. The agent ladder ran at 750 and 1,000 agents, `every4` and
+burst, even and uneven, 120 s per rung, two repeats side by side. The viewer ladder's top rungs (2,000, 3,500 and
+5,000) ran with 16 reader processes instead of 8. The readers' event loop stayed at a p99 of 11–24 ms, so the bench
+was not the limit this time.
+
+| | Value |
+| --- | --- |
+| **M** agents in one world | **750** with every limit met (`every4`, about 187 intents a second) |
+| **N** intents a second | **about 330** with every limit met (500 agents, burst, after #4325: ticks on time 100 %, viewer delay p95 639–783 ms) |
+| **Q** viewers of one world | **5,000** held once they are in: stream latency p99 330–610 ms, no drops. A join wave of 1,500 or more newcomers within 5 s misses the first picture (see below). |
+| **Gave way first** | Agents: **the planner thread's route searches**, at 750 agents in bursts (500 intents a second) and at 1,000 agents `every4` (250 a second). The planner is at a full core there. Acts wait for its answers before they start and move, so the viewer delay p95 passes 2 s on every verb alike (2.5–3.1 s by verb at 750 even burst), and in the even burst arm acceptance p95 rises to 1.5 s. The clock still keeps time there (96.7–100 % on time). It gives way only at 1,000 agents in bursts (667 a second: 61–72 % on time). |
+
+### Each limit, measured
+
+| Rung (agents, rate) | intents/s | accepted p95 ms | viewer delay p50 / p95 ms | ticks on time | planner / clock cores |
+| --- | --- | --- | --- | --- | --- |
+| 750, `every4` | 187 | 148–164 | 500–561 / 772–901 | 99.78–99.96 % | 0.38–0.84 / 0.32–0.39 |
+| 750, burst | 500 | 114–1540 | 511–605 / 1507–2652 | 96.67–99.74 % | 0.99–1.0 / 0.42–0.50 |
+| 1,000, `every4` | 246–250 | 79–96 | 434–584 / 1663–2662 | 99.96–100 % | 1.0 / 0.34–0.36 |
+| 1,000, burst | 667–671 | 356–1738 | 621–764 / 1977–8033 | 61.45–72.03 % | 1.0 / 0.71–0.77 |
+
+The stream writer stayed at 0.16–0.39 of a core with `idle.check` at 0. Stuck Souls on the uneven arms grew with
+the count (18–30 at 750, 47–49 at 1,000): the behaviour fault noted below, not a capacity limit.
+
+**Where the planner's core goes** (an in-process 199 Hz sampling profile of `worldd` at 1,000 agents, uneven
+`every4`; a measurement build only): 95 % is `walk::town::View::stand_near_shape`, a form's walk asking where to
+stand near a thing's outline (the planner's `FormQuery::Walk`). Under it: `mover::walk` 16 %, `mover::enter` 12 %,
+`routes::gap` 11 %, `routes::spot_for` 10 %, `routes::locate` 10 %, `walk::town::in_passage_but` 7 %,
+`mover::orient` 4 %, `routes::cross` 3 %. The next step is in routing and town code (lanes A2 and S): make
+`stand_near_shape` cheaper, or answer forms' walk questions on more than one thread. It was not changed here.
+
+**Viewers.** With 16 reader processes, 5,000 viewers keep a latency p99 of 330–610 ms and no drops once they are in.
+A step that starts 2,000 viewers in one 5 s wave gives a first picture p95 of 13–14 s. Adding 1,500 more gives
+3.8–4.6 s at 3,500 and 13.6–17.7 s at 5,000 (bar 3 s). Every joiner fetches an 8.9 MB baseline, so a wave of 1,500 is
+about 13 GB from the viewers' origin within seconds. That points to the origin's sending of baselines to a join wave,
+not to steady viewing. The origin's own processor share is still not sampled (it reads 0), so this is inferred,
+not measured.
+
 ## 0.132, 23 Nov 2026
 
 **Build:** main `ae5bae670`. That is A1, A2-1 (#4220), C1 (#4208), C4 (#4279) and #4003, plus C5 (#4288) merged in for

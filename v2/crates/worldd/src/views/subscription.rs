@@ -740,6 +740,9 @@ impl Hub {
     }
 
     /// The body an entry is of, if any, and whether `sampled` keeps it in any second (all but a plain motion sample).
+    /// An entry that changes no body but names one in an event's field 1 is that body's, kept: a move's start and end
+    /// (`souls:move-started`, `souls:move-ended`, written on the zone with no changes), which a Soul near it reads as
+    /// that body arriving (0.134 I3).
     fn body_of(&self, e: &Effect) -> Option<(Id, bool)> {
         let Body::Changes(cs) = &e.body else {
             return self
@@ -747,6 +750,15 @@ impl Hub {
                 .is_body(e.envelope.node)
                 .then_some((e.envelope.node, true));
         };
+        if cs.is_empty() {
+            return e
+                .events
+                .iter()
+                .flatten()
+                .filter_map(|ev| read_id(ev.fields.get(&1)?).ok())
+                .find(|b| self.places.is_body(*b))
+                .map(|b| (b, true));
+        }
         for c in cs {
             let (node, keep) = match &c.change {
                 Change::Motion(h) => (h.node, h.from != h.to || h.linear == Vec3::ZERO),

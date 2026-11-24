@@ -20,6 +20,47 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A degraded public stream** (R12). When the public stream cannot recover from the store (refused or out of reach
+  after its patient tries), the world does not exit: it serves its Souls with no viewers (no `views/world.json`) and
+  tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public
+  stream is degraded, no viewers: <fault>; try <n> refused, the next in <ms> ms` at each try, and `health.json` has
+  `"stream":{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` (`serving` once it recovers). Fix the store or
+  the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait in
+  memory until the stream catches up. A stream that ends after serving (a local fault, such as the disk) says
+  `"state":"stopped"` with its fault; a restart starts it again.
+- **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
+  its words, its recovery objects and the chain's head are written there first: the parts under `views/`, the recovery
+  chain in the spool `<world>/stream-backup/` (never served, because it holds the world's records). The store gets
+  them from the backup thread, behind the stream, so a stall or refusal delays only the backup. The journal says
+  `worldd: the public stream's backup is behind, viewers unaffected: <fault>; pass <n> refused, <k> objects wait, the
+  next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
+  `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
+  holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
+  log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
+  so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
+  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
+- **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
+  that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,
+  once the world has moved past the recovered cursor, starts a new generation whose baseline holds those records, so
+  it does not cut a part again at an address viewers may hold. If the store was behind, the parts it lacked are a gap
+  in the stream's history. One case is left: a generation's address is its baseline's digest, and the stream is
+  deterministic, so if the old machine's lost tail rolled over at the very cursor the new machine first moves to, the
+  two generations' addresses match. Salting the address with the takeover epoch would fix that; it is a format change,
+  follow-up R16.
+- **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
+  this world still running beside a newer one (on this machine or another). The fenced one never writes over it
+  and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running. If the
+  fenced one is the one that should run (the other is gone for good), unfence it: stop it, remove its confirmed and
+  tried heads, and start it; its backup learns the store's head again and writes over it.
+
+  ```sh
+  sudo systemctl stop worldd@<world>
+  sudo find /var/lib/souls/worlds/worlds/<world>/stream-backup \( -name head.confirmed -o -name head.tried \) -delete
+  sudo systemctl start worldd@<world>
+  ```
+
+  A spool with no confirmed head, or one written for another store (the stream's store moved to another bucket), is
+  learned again the same way by itself; a store whose head is gone gets this writer's.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
@@ -76,6 +117,17 @@ Turning `restart-loop` into a message to a person is O15's.
 | `pin.missing` | no record in the store and no cached copy: the world was never pinned here |
 | `oom-kill` | the world passed its `MemoryMax`: read its last lines in `journalctl -u worldd@<world>` |
 | `tick-stalled`, `watchdog` | the clock was wedged, no tick for 15 s: K7's record of the stalled tick is in the journal |
+
+A world is served under its own header, `<world>/header` (K16), the one its log names, never one the build rebuilds;
+`header.kinds` beside it keeps each pinned kind's owner. When a build pins a kind at another revision, the start's
+`header:` line in `journalctl -u worldd@<world>` lists each kind taken at the world's revision, those the world cannot
+make until it is reseeded, and those with no definition here. A start that refuses its header says why:
+
+| refusal | what to do |
+|---|---|
+| `header-missing` | no `header` file, and the log names another header than this build's: restore the folder's `header` and `header.kinds` from its backup, or reseed the world |
+| `header-mismatch` | the `header` file is not the header the log names: restore it from the backup (never hand-edit it), or reseed |
+| `world-identity-mismatch` | the `header` (or the folder) is another world's: the folder holds files of two worlds; restore it from this world's backup |
 
 ## The runs (O1's proof)
 

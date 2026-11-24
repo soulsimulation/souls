@@ -12,7 +12,7 @@
 //!   with one owner, `v2/docs/zones.md` rule 4), so the node and its links are in the log and survive a restart.
 //!
 //! A kind is decoded from `{1: name, 2: revision, 3: [{1: role, 2: place, 3: [want, ...]}, ...], 4: proposal lasts
-//! µs, 5: leave within µs}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
+//! µs, 5: leave within µs, 6?: members at most (two when absent), 7?: 1 when its moves go on the world's beat, 8?: the role that follows}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
 //! or resource name}`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +21,7 @@ use crate::bodies::{Class, SkillShape, Want};
 use crate::effects::{Refusal, read_id};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
+use crate::pose::Vec3;
 use crate::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -53,6 +54,14 @@ pub struct Role {
     pub name: Name,
     pub place: Name,
     pub claims: Vec<Want>,
+    /// The move this role makes at the other member when the activity starts (0.134 T1: a handshake's), if any.
+    pub mv: Option<Name>,
+    /// Where its members stand, in the activity's own frame, in order (0.135 G3): each a point (µm) and a facing
+    /// (millidegrees of yaw); its k-th member takes the k-th. None: its members stay where they are.
+    pub stands: Vec<(Vec3, i64)>,
+    /// How near the activity's middle a member stands to be walked to its stand, µm (0.135 G3, the entry's
+    /// `within_mm`): one farther keeps where it is. None: any distance.
+    pub within: Option<i64>,
 }
 
 /// An activity's kind, as data.
@@ -66,6 +75,14 @@ pub struct ActivityKind {
     pub proposal_lasts: Micros,
     /// µs a leave may take at most: a body in a move is let go at the move's next phase end, or at this.
     pub leave_within: Micros,
+    /// How many members it takes at most (0.134 T3): two for a pair; a dance's offer, to several, takes up to eight.
+    pub most: usize,
+    /// Its roles' moves go on the world's beat (0.134 T3, `v2/docs/time.md` rule 7): each member's move begins on one
+    /// beat, aimed at its own body, and begins again on the next beat after it ends, until the member leaves.
+    pub beat: bool,
+    /// The role whose member follows the other's (0.135 G2), if any: while the activity runs, the follower's own
+    /// `souls:follow` order on the leader (`v2/docs/intents.md` rule 5) walks it along the leader's trail.
+    pub follows: Option<Name>,
 }
 
 fn uint(v: Option<&Value>, what: &str) -> R<u64> {
@@ -107,7 +124,7 @@ impl ActivityKind {
         let Value::Map(m) = v else {
             return refuse("not-an-activity", "an activity kind is a map");
         };
-        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 5) {
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 8) {
             return refuse("not-an-activity", format!("field {k}"));
         }
         let name = text(m.get(&1), "the name")?;
@@ -120,11 +137,11 @@ impl ActivityKind {
             let Value::Map(r) = r else {
                 return refuse(
                     "not-an-activity",
-                    "a role is {1: name, 2: place, 3: [want, ...]}",
+                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move, 5?: [[x, y, z, yaw], ...], 6?: within}",
                 );
             };
-            if r.keys().any(|k| *k == 0 || *k > 3) {
-                return refuse("not-an-activity", "a role has fields 1 to 3");
+            if r.keys().any(|k| *k == 0 || *k > 6) {
+                return refuse("not-an-activity", "a role has fields 1 to 6");
             }
             let rname = text(r.get(&1), "a role's name")?;
             let place = text(r.get(&2), "a role's place")?;
@@ -138,10 +155,45 @@ impl ActivityKind {
             if roles.iter().any(|x| x.name == rname) {
                 return refuse("role-duplicate", rname.as_str());
             }
+            let mv = match r.get(&4) {
+                None => None,
+                v => Some(text(v, "a role's move")?),
+            };
+            let int = |v: &Value| match v {
+                Value::Uint(n) => i64::try_from(*n).ok(),
+                Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+                _ => None,
+            };
+            let stands = match r.get(&5) {
+                None => Vec::new(),
+                Some(Value::Array(ss)) => ss
+                    .iter()
+                    .map(|s| match s {
+                        Value::Array(p) => {
+                            match p.iter().map(int).collect::<Option<Vec<_>>>().as_deref() {
+                                Some([x, y, z, yaw]) => Ok((Vec3::new(*x, *y, *z), *yaw)),
+                                _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                            }
+                        }
+                        _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                    })
+                    .collect::<R<Vec<_>>>()?,
+                Some(_) => return refuse("not-an-activity", "a role's stands are a list"),
+            };
+            let within = match r.get(&6) {
+                None => None,
+                Some(v) => Some(int(v).filter(|n| *n >= 0).map_or_else(
+                    || refuse("not-an-activity", "a role's within is µm, zero or more"),
+                    Ok,
+                )?),
+            };
             roles.push(Role {
                 name: rname,
                 place,
                 claims,
+                mv,
+                stands,
+                within,
             });
         }
         if roles.len() < 2 {
@@ -161,12 +213,45 @@ impl ActivityKind {
                 format!("{}: {leave_within} µs; 1 to {LEAVE_MOST}", name.as_str()),
             );
         }
+        let most = match m.get(&6) {
+            None => roles.len(),
+            v => usize::try_from(uint(v, "the members at most")?).unwrap_or(usize::MAX),
+        };
+        if most < roles.len() {
+            return refuse(
+                "not-an-activity",
+                format!(
+                    "{}: {most} members for {} roles",
+                    name.as_str(),
+                    roles.len()
+                ),
+            );
+        }
+        let beat = match m.get(&7) {
+            None => false,
+            v => uint(v, "on the beat")? == 1,
+        };
+        let follows = match m.get(&8) {
+            None => None,
+            v => Some(text(v, "the role that follows")?),
+        };
+        if let Some(f) = &follows
+            && !roles.iter().any(|r| r.name == *f)
+        {
+            return refuse(
+                "not-an-activity",
+                format!("{} follows as no role of its", f.as_str()),
+            );
+        }
         Ok(ActivityKind {
             name,
             revision,
             roles,
             proposal_lasts,
             leave_within,
+            most,
+            beat,
+            follows,
         })
     }
 

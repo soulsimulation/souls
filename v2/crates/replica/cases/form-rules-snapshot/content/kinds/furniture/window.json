@@ -2,12 +2,48 @@
   "format": "souls-entry/1",
   "kind": "eden:window",
   "owner": "thing",
+  "state": { "open": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 600], "yaw_mdeg": 180000 },
+    "sash": { "role": "contact", "at_mm": [0, 400, 50] }
+  },
   "geometry": { "bounds_mm": [1200, 1200, 100] },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": false, "says": "already_open" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "slide", "at": "sash" }
+      ],
+      "effects": [{ "change": "set", "field": "open", "to": true, "event": "opened" }]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": true, "says": "already_closed" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "slide", "at": "sash" }
+      ],
+      "effects": [{ "change": "set", "field": "open", "to": false, "event": "closed" }]
+    }
+  },
   "motion": { "how": "fixed" },
   "loose": { "ever": true },
   "looks": { "model": "look:window" },
   "text": {
-    "card": "A window in a wall, which stays where it is."
+    "card": "A window in a wall: open it, or close it.",
+    "already_open": "The window is already open.",
+    "already_closed": "The window is already closed.",
+    "window": "window"
   },
-  "card": { "text": "card" }
+  "card": { "text": "card", "category": "window" }
 }

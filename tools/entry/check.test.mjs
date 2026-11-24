@@ -105,3 +105,14 @@ test('A3: 1,000 entries are checked in under 10 seconds', () => {
     console.log(`1000 entries checked in ${Math.round(took)} ms`);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
+
+test('0.134 B2: a body\'s family may hold up to 48 forms (it cannot be split); a thing still at most 32', () => {
+  const humanoid = JSON.parse(readFileSync(`${root}content/kinds/body/humanoid.json`, 'utf8'));
+  const forms = n => Object.fromEntries(Array.from({length: n}, (_, i) => [`move_${i}`, {who: 'anyone', starts: 'act', needs: [], steps: [{step: 'move', move: 'wave'}], effects: []}]));
+  const bounded = e => (C.checkText(JSON.stringify(e)).findings ?? []).filter(f => f.rule === 'bounded' && f.field === 'forms');
+  assert.ok(Object.keys(humanoid.forms).length > C.BUDGET.forms, 'the humanoid holds more than a thing may');
+  assert.deepEqual(bounded(humanoid), [], 'the humanoid family is within its budget');
+  assert.deepEqual(bounded({...humanoid, forms: forms(48)}), []);
+  assert.equal(bounded({...humanoid, forms: forms(49)}).length, 1, 'a family over 48 is refused');
+  assert.equal(bounded({...humanoid, owner: 'thing', forms: forms(33)}).length, 1, 'a thing over 32 is refused');
+});

@@ -91,12 +91,18 @@ struct Snap {
     /// Every distance is this far, when set.
     far: bool,
     defer_walk: bool,
+    /// Every walk's plan is no way (no legs), when set.
+    no_way: bool,
+    /// The thing every move aims at, when set (worldd's thing argument).
+    aimed: Option<Id>,
 }
 
 impl Geometry for Snap {
     fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
         if self.defer_walk {
             replica::host::WalkPlan::Pending
+        } else if self.no_way {
+            replica::host::WalkPlan::Legs(Vec::new())
         } else {
             replica::host::WalkPlan::Unplanned
         }
@@ -144,6 +150,9 @@ impl Reach for Snap {
             i128::from(t.z + p.z - b.z),
         ];
         i64::try_from((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).isqrt()).ok()
+    }
+    fn aimed(&self, _: Id, _: &Name) -> Option<Id> {
+        self.aimed
     }
 }
 
@@ -630,8 +639,8 @@ fn effecting() -> (json::Value, String) {
         .expect("a kind whose effects bind")
 }
 
-/// `entry` with every `move` step taken out of its forms: a form with no hand step.
-fn without_moves(v: &json::Value) -> json::Value {
+/// `v` with every `walk_to` step taken out of its forms (S11).
+fn without_walks(v: &json::Value) -> json::Value {
     match v {
         json::Value::Obj(o) => json::Value::Obj(
             o.iter()
@@ -641,13 +650,43 @@ fn without_moves(v: &json::Value) -> json::Value {
                         json::Value::Arr(
                             s.iter()
                                 .filter(|st| {
-                                    st.get("step").and_then(json::Value::str) != Some("move")
+                                    st.get("step").and_then(json::Value::str) != Some("walk_to")
                                 })
                                 .cloned()
                                 .collect(),
                         ),
                     ),
-                    _ => (k.clone(), without_moves(x)),
+                    _ => (k.clone(), without_walks(x)),
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// `entry` with every `move` step taken out of its forms: a form with no hand step.
+fn without_moves(v: &json::Value) -> json::Value {
+    without_steps(v, "move")
+}
+
+/// `entry` with every step named `step` taken out of its forms.
+fn without_steps(v: &json::Value, step: &str) -> json::Value {
+    match v {
+        json::Value::Obj(o) => json::Value::Obj(
+            o.iter()
+                .map(|(k, x)| match (k.as_str(), x) {
+                    ("steps", json::Value::Arr(s)) => (
+                        k.clone(),
+                        json::Value::Arr(
+                            s.iter()
+                                .filter(|st| {
+                                    st.get("step").and_then(json::Value::str) != Some(step)
+                                })
+                                .cloned()
+                                .collect(),
+                        ),
+                    ),
+                    _ => (k.clone(), without_steps(x, step)),
                 })
                 .collect(),
         ),
@@ -690,10 +729,15 @@ fn caused(log: &[Effect], intent: &Intent) -> Vec<u64> {
 #[test]
 fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
     let (entry, form) = effecting();
-    let pause = 2_000_000;
     for (case, entry, before_end) in [
-        // The press's recovery (300 ms) and the pause come after contact.
-        ("at the hand step's contact", entry.clone(), 300_000 + pause),
+        // The press is the last step: its recovery (300 ms) comes after contact.
+        (
+            "at the hand step's contact",
+            without_steps(&entry, "wait"),
+            300_000,
+        ),
+        // A pause after the press: the effect waits for it (E7), so a Soul that leaves during it has none.
+        ("at the pause's end, after the hand step", entry.clone(), 0),
         ("at the last step's end", without_moves(&entry), 0),
     ] {
         let mut b = Bench::new();
@@ -720,6 +764,80 @@ fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
             effect.envelope.at, e.at
         );
         assert_eq!(effect.envelope.at, e.at - before_end, "{case}");
+        b.clean();
+    }
+}
+
+/// E7: a Soul that leaves partway through a later, repeated step (the second of two presses, or the pause after them)
+/// gets none of the form's effects: the run ends `left`, nothing of the thing is set, and its reservation is freed, in
+/// the run and in the log.
+#[test]
+fn e7_a_soul_that_leaves_during_a_later_repeated_step_gets_no_effect() {
+    let press = r#"{ "step": "move", "move": "press", "at": "button" },"#;
+    let entry_text = include_str!("../../../skills/src/form_runner/kinds/lamp.json");
+    assert!(entry_text.contains(press), "the kind's press");
+    let entry = parse(&entry_text.replacen(press, &format!("{press}\n{press}"), 1)).expect("JSON");
+    let form = "switch_on";
+    assert_eq!(
+        bind(&entry, form).expect("binds"),
+        bind(&parse(entry_text).expect("JSON"), form)
+            .map(|mut s| {
+                s.insert(2, s[1].clone());
+                s
+            })
+            .expect("binds"),
+        "the press is repeated"
+    );
+    // The second press (step 2, moving), and the pause after it (step 3).
+    for (case, step, moving) in [("the second press", 2, true), ("the pause", 3, false)] {
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+        b.start(body, node, &entry, form, Limits::default());
+        assert_eq!(b.forms.holder(node), Some(body), "reserved");
+        let mut log = Vec::new();
+        while !(b.forms.at(body) == Some(step) && b.forms.in_hand_move(body) == moving) {
+            assert!(!b.forms.is_empty() && b.now < 30_000_000, "{case}: reached");
+            b.tick();
+            b.flush(&mut log);
+        }
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, body, None, now).expect("left");
+        // A pause is left at once, its end written by the leave itself.
+        b.flush(&mut log);
+        while !b.forms.is_empty() && b.now < 30_000_000 {
+            b.tick();
+            b.flush(&mut log);
+        }
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{case}: {:?}", b.forms.ended)
+        };
+        println!(
+            "{case}: left at step {step} at {} µs, ended {} at {} µs; {} log entries, {} effects",
+            now,
+            e.how.as_str(),
+            e.at,
+            log.len(),
+            effect_entries(&log).len()
+        );
+        assert_eq!(e.how.as_str(), "left", "{case}");
+        assert!(effect_entries(&log).is_empty(), "{case}: no effect landed");
+        assert!(
+            log.iter().flat_map(Effect::changes).all(|c| !matches!(
+                c.change,
+                Change::Set { node: n, .. } if n == node
+            )),
+            "{case}: the thing's fields are as they were"
+        );
+        assert_eq!(
+            b.forms.holder(node),
+            None,
+            "{case}: the reservation is freed"
+        );
+        assert!(
+            super::reservations(&log).is_empty(),
+            "{case}: and in the log"
+        );
         b.clean();
     }
 }
@@ -830,6 +948,53 @@ fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
     assert_eq!((a.is_empty(), a.len()), (c.is_empty(), c.len()));
     b.run(now + 60_000_000);
     b.clean();
+}
+
+/// The record a run's first move writes for viewers: its event's record map (field 3).
+fn first_move_record(
+    b: &mut Bench,
+    entry: &json::Value,
+    form: &str,
+    body: Id,
+    node: Id,
+) -> BTreeMap<u64, Value> {
+    let it = intent(body, 11);
+    assert!(matches!(
+        b.ask(body, node, entry, form, Limits::default(), it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !log.iter().any(is_move_record) {
+        assert!(!b.forms.is_empty(), "the run ended without a move record");
+        b.tick();
+        b.flush(&mut log);
+    }
+    let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
+    let Some(Value::Map(m)) = rec.events.as_ref().expect("events")[0].fields.get(&3) else {
+        panic!("a move record")
+    };
+    m.clone()
+}
+
+/// #4330: the record names the move's target, the form's node; a move aimed at a thing argument (a point toward a
+/// lamp) names that thing, so the page turns the body toward it, not toward itself.
+#[test]
+fn a_move_record_names_the_thing_it_aims_at() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&node.to_value())
+    );
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let thing = fixture(77);
+    b.snap.aimed = Some(thing);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&thing.to_value())
+    );
 }
 
 fn splitmix(x: &mut u64) -> u64 {
@@ -1127,6 +1292,93 @@ fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced()
     );
     assert!(b.forms.planning.is_empty());
     b.c.release(body, newer).unwrap();
+    b.clean();
+}
+
+/// S11: a run walking to its thing whose claim on the legs another walk takes (its Soul's own walk, intents rule 10)
+/// ends `claim-taken` in the next tick. Before, only a run waiting for its plan was ended: a walking one stood at its
+/// walk step for good, unwatched (it asks no way) and unanswered.
+#[test]
+fn s11_a_walking_run_whose_legs_another_walk_takes_ends_claim_taken() {
+    let (entry, form) = entries().remove(0);
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::ZERO, Vec3::new(20_000_000, 0, 0));
+    b.start(body, node, &entry, &form, Limits::default());
+    b.tick();
+    let run = b.forms.by_body[&body];
+    assert!(b.forms.runs[&run].walk.is_some(), "walking");
+    assert!(!b.forms.planning.contains(&run), "not waiting for a plan");
+    let other =
+        b.c.claim(body, &skills::route::Route::sent(0, 0).shape())
+            .unwrap();
+    b.tick();
+    assert!(
+        b.forms
+            .ended
+            .iter()
+            .any(|e| e.body == body && e.how.as_str() == "claim-taken"),
+        "ended: {:?}",
+        b.forms.ended
+    );
+    assert!(b.forms.is_empty());
+    assert!(
+        b.c.claims(body).unwrap().running().contains_key(&other),
+        "the other walk keeps its claim"
+    );
+    b.c.release(body, other).unwrap();
+    b.clean();
+}
+
+/// S11 review: an approach whose plan, awaited, is no way goes straight to its move, and gives back the route claim
+/// it awaited the plan with. A Soul's own walk arriving during that move leaves the run at the move's phase end
+/// (`left`, intents rule 10), not `claim-taken` mid-contact.
+#[test]
+fn s11_an_approach_with_no_way_moves_and_a_souls_walk_leaves_it_at_the_phase_end() {
+    // The doorbell's ring without its walk: it starts with a move at the button, so the binding walks there first.
+    let (entry, form) = entries().remove(0);
+    let entry = without_walks(&entry);
+    assert!(matches!(
+        bind(&entry, &form).expect("binds").first(),
+        Some(skills::form_runner::Step::WalkTo { approach: true, .. })
+    ));
+    let mut b = Bench::new();
+    // Within reach of the button: the move needs no walk.
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, -400_000), Vec3::ZERO);
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    let run = b.forms.by_body[&body];
+    assert!(
+        b.forms.runs[&run].walk.is_some(),
+        "the plan is awaited with a route claim"
+    );
+    (b.snap.defer_walk, b.snap.no_way) = (false, true);
+    b.tick();
+    assert!(
+        b.forms.in_hand_move(body),
+        "no way: straight to the move; at {:?}, ended {:?}, planning {:?}",
+        b.forms.at(body),
+        b.forms.ended,
+        b.forms.planning
+    );
+    assert!(
+        b.forms.runs[&run].walk.is_none(),
+        "the route claim is given back"
+    );
+    // The Soul's own walk: its claim on the legs, and the world leaves the run (acts.rs, rule 10).
+    let walk =
+        b.c.claim(body, &skills::route::Route::sent(0, 0).shape())
+            .unwrap();
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.leave(&mut w, body, None, now).unwrap();
+    while b.forms.ended.is_empty() && b.now < 30_000_000 {
+        b.tick();
+    }
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "left", "left at the move's phase end");
+    b.c.release(body, walk).unwrap();
     b.clean();
 }
 
