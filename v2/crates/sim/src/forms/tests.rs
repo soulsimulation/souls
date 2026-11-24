@@ -731,7 +731,11 @@ fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
     let (entry, form) = effecting();
     for (case, entry, before_end) in [
         // The press is the last step: its recovery (300 ms) comes after contact.
-        ("at the hand step's contact", without_steps(&entry, "wait"), 300_000),
+        (
+            "at the hand step's contact",
+            without_steps(&entry, "wait"),
+            300_000,
+        ),
         // A pause after the press: the effect waits for it (E7), so a Soul that leaves during it has none.
         ("at the pause's end, after the hand step", entry.clone(), 0),
         ("at the last step's end", without_moves(&entry), 0),
@@ -825,7 +829,11 @@ fn e7_a_soul_that_leaves_during_a_later_repeated_step_gets_no_effect() {
             )),
             "{case}: the thing's fields are as they were"
         );
-        assert_eq!(b.forms.holder(node), None, "{case}: the reservation is freed");
+        assert_eq!(
+            b.forms.holder(node),
+            None,
+            "{case}: the reservation is freed"
+        );
         assert!(
             super::reservations(&log).is_empty(),
             "{case}: and in the log"

@@ -456,7 +456,10 @@ fn c25_the_runner_runs_every_step_shape() {
     assert!(r.take_effect(), "the effect's instant is the wait's end");
     let mut r = Runner::new(vec![Step::UseHeld], node(), Limits::default());
     assert_eq!(ended(&r.wake(&mut h, Woke::Start)), Some("done"));
-    assert!(r.take_effect(), "the use as the last step is the effect's instant");
+    assert!(
+        r.take_effect(),
+        "the use as the last step is the effect's instant"
+    );
 }
 
 /// C24 (#3495): every effect kind content uses binds: a link with its kind's most and an unlink of every end, a timer
