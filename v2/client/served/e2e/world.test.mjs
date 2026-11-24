@@ -426,6 +426,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const walk = await act(A, bench.id, chair.id);
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
   await ended(A, walk, "A's walk to the bench");
+  // 0.133 Q1: its receipt says how far from the bench it ended, from that walk's own end entry (found by sequence)
+  const walked = await A.cli('receipt', String(walk.sent.sequence));
+  assert.ok(typeof walked.receipt?.away_m === 'number' && walked.receipt.away_m < 2, `A's walk says how far from the bench it ended: ${JSON.stringify(walked.receipt)}`);
   // A family gesture on A's own body, to its receipt (0.132 B1-3): a point toward the bench, from its stand point (the
   // point move reaches 600 mm, so it is made before the sit).
   async function gesture(...words) {
