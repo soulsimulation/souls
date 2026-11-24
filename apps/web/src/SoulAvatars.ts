@@ -18,12 +18,16 @@ const PORTRAIT_FRAME_MS=4;
  * The pixels come back without waiting for the GPU (a pixel buffer and a fence, readRenderTargetPixelsAsync): the copy
  * is queued before the target is drawn again, so several may be in flight. */
 export class WorldSoulAvatars{
- private target:THREE.WebGLRenderTarget|null=null;private failed=false;private frame=-1;private spent=0;private pending=new Set<string>();private keys=new Map<string,string>();
+ private target:THREE.WebGLRenderTarget|null=null;private failed=false;private frame=-1;private spent=0;private pending=new Map<string,Promise<void>>();private latest=new Map<string,[string,THREE.Object3D,boolean]>();private keys=new Map<string,string>();
  private scene=new THREE.Scene();private camera=new THREE.PerspectiveCamera(28,1,.01,100);
  private renderer:THREE.WebGLRenderer;
  constructor(renderer:THREE.WebGLRenderer){this.renderer=renderer;this.scene.background=new THREE.Color('#e9e6dc');this.scene.add(new THREE.HemisphereLight(0xffffff,0x67543f,3));const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(2,4,3);this.scene.add(light);}
  async capture(id:string,key:string,body:THREE.Object3D|null,rigid:boolean,now:number):Promise<void>{
-  if(!body||this.failed||this.pending.has(id))return;if(now!==this.frame){this.frame=now;this.spent=0;}if(this.spent>=PORTRAIT_FRAME_MS)return;const surfaces:string[]=[];body.traverse(o=>{const m=o as THREE.Mesh;if(m.isMesh&&!activityProp(o))surfaces.push(m.geometry.uuid+':'+[m.material].flat().map(material=>material.uuid+':'+((material as THREE.MeshStandardMaterial).map?.uuid??'')).join(','));});key+='|'+surfaces.join(';');if(this.keys.get(id)===key)return;const started=performance.now();
+  if(!body||this.failed)return;
+  // one readback a Soul at a time: a capture asked meanwhile is kept, the latest one only, and drawn when it ends
+  const inFlight=this.pending.get(id);
+  if(inFlight){this.latest.set(id,[key,body,rigid]);return inFlight.then(()=>{const next=this.latest.get(id);if(!next)return this.pending.get(id);/* another waiter drew the latest: wait for it */this.latest.delete(id);return this.capture(id,next[0],next[1],next[2],performance.now());});}
+  if(now!==this.frame){this.frame=now;this.spent=0;}if(this.spent>=PORTRAIT_FRAME_MS)return;const surfaces:string[]=[];body.traverse(o=>{const m=o as THREE.Mesh;if(m.isMesh&&!activityProp(o))surfaces.push(m.geometry.uuid+':'+[m.material].flat().map(material=>material.uuid+':'+((material as THREE.MeshStandardMaterial).map?.uuid??'')).join(','));});key+='|'+surfaces.join(';');if(this.keys.get(id)===key)return;const started=performance.now();
   let portrait:THREE.Object3D|null=null,read:Promise<unknown>|null=null;const pixels=new Uint8Array(96*96*4);
   const fail=()=>{this.failed=true;this.target?.dispose();this.target=null;soulAvatars.images.delete(id);soulAvatars.sources.delete(id);soulAvatars.events.dispatchEvent(new Event('change'));};
   try{
@@ -43,14 +47,15 @@ export class WorldSoulAvatars{
   finally{portrait?.removeFromParent();portrait?.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh)(o as THREE.SkinnedMesh).skeleton.dispose();});}
   this.spent+=performance.now()-started;
   if(!read)return;
-  this.pending.add(id);
-  try{
+  const done=(async()=>{try{
    await read;
    const canvas=document.createElement('canvas');canvas.width=canvas.height=96;const ctx=canvas.getContext('2d');if(!ctx)throw Error('Portrait canvas unavailable');
    const image=ctx.createImageData(96,96);for(let y=0;y<96;y++)image.data.set(pixels.subarray((95-y)*96*4,(96-y)*96*4),y*96*4);ctx.putImageData(image,0,0);const url=canvas.toDataURL('image/png');
    this.keys.set(id,key);soulAvatars.images.set(id,url);soulAvatars.sources.set(id,{entityId:String(body.userData.entity??body.name),model:String(body.userData.bodyModel??'stand-in'),bodyRoot:body.uuid});soulAvatars.events.dispatchEvent(new Event('change'));
   }catch{fail();}
-  finally{this.pending.delete(id);}
+  finally{this.pending.delete(id);}})();
+  this.pending.set(id,done);
+  return done;
  }
  dispose(){this.target?.dispose();this.target=null;this.keys.clear();}
 }

@@ -36,3 +36,22 @@ test('a portrait is wanted while any of its avatars shows',()=>{
  const a=wantPortrait('wanted-test'),b=wantPortrait('wanted-test');
  assert.equal(soulAvatars.wanted.has('wanted-test'),true);a();assert.equal(soulAvatars.wanted.has('wanted-test'),true);b();assert.equal(soulAvatars.wanted.has('wanted-test'),false);
 });
+
+test('a newer capture for a Soul whose readback is still pending is drawn once it ends: the latest look wins',async()=>{
+ const previousDocument=globalThis.document;
+ globalThis.document={createElement:()=>({width:0,height:0,getContext:()=>({createImageData:(w:number,h:number)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData:()=>{}}),toDataURL:()=>'data:image/png;base64,x'})} as unknown as Document;
+ let current:THREE.WebGLRenderTarget|null=null;const reads:number[]=[];
+ const renderer={autoClear:false,getRenderTarget:()=>current,getViewport:(o:THREE.Vector4)=>o,getScissor:(o:THREE.Vector4)=>o,getScissorTest:()=>false,setRenderTarget:(v:THREE.WebGLRenderTarget|null)=>{current=v;},setViewport:()=>{},setScissor:()=>{},setScissorTest:()=>{},render:()=>{},
+  readRenderTargetPixelsAsync:(_t:unknown,_x:number,_y:number,_w:number,_h:number,b:Uint8Array)=>{reads.push(1);return new Promise(ok=>setTimeout(()=>ok(b),5));}};
+ const make=()=>{const g=new THREE.Group();g.add(new THREE.Mesh(new THREE.BoxGeometry(1,2,1),new THREE.MeshBasicMaterial()));return g;};
+ const a=make(),b=make(),c=make(),owner=new WorldSoulAvatars(renderer as unknown as THREE.WebGLRenderer);
+ try{
+  const first=owner.capture('picker-latest','lookA',a,true,1);
+  const second=owner.capture('picker-latest','lookB',b,true,2),third=owner.capture('picker-latest','lookC',c,true,3);
+  await third;
+  assert.equal(soulAvatars.sources.get('picker-latest')?.bodyRoot,c.uuid,'the last caller, awaiting its own capture, sees its look');
+  await Promise.all([first,second]);
+  assert.equal(soulAvatars.sources.get('picker-latest')?.bodyRoot,c.uuid,'the latest look asked is the one shown');
+  assert.equal(reads.length,2,'the look asked in between is skipped, not drawn');
+ }finally{globalThis.document=previousDocument;soulAvatars.images.delete('picker-latest');soulAvatars.sources.delete('picker-latest');}
+});
