@@ -248,6 +248,10 @@ pub struct Bodies {
     /// Its records since the world last took them, cause and actor the world; and the never-stuck ladder's (0.133 N1,
     /// [`crate::unstick`]), which the world writes the same way.
     pub wind_log: Vec<Effect>,
+    /// What a restart did with each body the log had standing off its floor (E11d, killed during a climb out), by
+    /// name: `climb-out`, `resume-nearest`, `resume-seated` (back in the place it was climbing out of),
+    /// `resume-seated-other` (that place taken: another free place of its thing) or `resume-held` (left where it was).
+    pub resumed: Vec<(Id, &'static str)>,
     /// The never-stuck ladder over the bodies' walks (0.133 N1).
     pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
@@ -426,6 +430,7 @@ impl Bodies {
                     .unwrap_or(wind_down::KNOBS),
             ),
             wind_log: Vec::new(),
+            resumed: Vec::new(),
             unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
             place_moves: BTreeMap::new(),
@@ -670,6 +675,9 @@ impl Bodies {
                             p.orientation,
                             build,
                         );
+                        if !matches!(r, sim::slots::Resumed::Stood | sim::slots::Resumed::Held) {
+                            self.resumed.push((body.id, r.name()));
+                        }
                         resume = match r {
                             sim::slots::Resumed::Held => Some((surface, None, p.position)),
                             _ => r.to().map(|to| (surface, Some(to), p.position)),
@@ -703,30 +711,60 @@ impl Bodies {
                     .controller
                     .carry(id, sim::slots::climb_track(floor, to))?;
             }
-            // No clean way on (E11d): seated again in the seat it was climbing out of, the nearest free one of the
-            // thing it is over, as a restart seats a body the log had seated. Its next rise climbs out or is refused
-            // by name. With none free it is left where the log had it, as a seat gone at a restart leaves a body.
+            // No clean way on (E11d): seated again in the place it was climbing out of. A climb starts at its place
+            // and goes straight away from it, so that is the place of the things the body is over nearest where the
+            // log had it (ties by thing, slot, place); held there by the place's own position (`restore`'s `was`),
+            // else, taken, another free place of that thing, named. Its next rise climbs out or is refused by name.
+            // With none free it is left where the log had it, as a seat gone at a restart leaves a body.
             Some((floor, None, at)) => {
                 let now = self.runner.now;
+                let d = |p: Vec3| i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2);
+                let mut left: Vec<(i128, Id, u64, u32, Vec3)> = Vec::new();
                 for thing in self.slots.over(floor, at, build) {
-                    let Some(slot) = self.slots.free(&self.runner.controller, id, thing) else {
-                        continue;
-                    };
-                    if self
-                        .slots
-                        .restore(
-                            &mut self.runner.controller,
-                            id,
-                            (thing, Some(slot)),
-                            None,
-                            sim::controller::Stance::Sit,
-                            now,
-                        )
-                        .is_ok()
-                    {
-                        break;
+                    for pl in self.slots.places_of(thing) {
+                        for k in 0..pl.most() {
+                            let spot = pl.spot(k);
+                            let Ok(off) = pl.facing.rotate(Vec3::new(spot.x, 0, spot.z)) else {
+                                continue;
+                            };
+                            let w = Vec3::new(pl.point.x + off.x, 0, pl.point.z + off.z);
+                            left.push((d(w), thing, pl.place.slot, k, spot));
+                        }
                     }
                 }
+                left.sort_by_key(|&(d, thing, slot, k, _)| (d, thing, slot, k));
+                let name = left.first().copied().and_then(|(_, thing, slot, k, spot)| {
+                    let slots = std::iter::once(Some(slot)).chain(
+                        self.slots
+                            .places_of(thing)
+                            .map(|p| Some(p.place.slot))
+                            .filter(|s| *s != Some(slot))
+                            .collect::<Vec<_>>(),
+                    );
+                    for s in slots {
+                        if self
+                            .slots
+                            .restore(
+                                &mut self.runner.controller,
+                                id,
+                                (thing, s),
+                                Some(spot),
+                                sim::controller::Stance::Sit,
+                                now,
+                            )
+                            .is_ok()
+                        {
+                            let same = self.slots.spot_of(id) == Some((thing, slot, k));
+                            return Some(if same {
+                                "resume-seated"
+                            } else {
+                                "resume-seated-other"
+                            });
+                        }
+                    }
+                    None
+                });
+                self.resumed.push((id, name.unwrap_or("resume-held")));
             }
             None => {}
         }
