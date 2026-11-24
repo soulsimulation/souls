@@ -16,6 +16,10 @@ fn a_forms_effects_the_world_refuses_refuse_its_act_and_write_nothing() {
     let t = r.tree();
     let made = t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len);
     assert_eq!(made, 0, "nothing created");
+    assert!(
+        endings(&run).is_empty(),
+        "a run whose start was refused with its effects writes no end"
+    );
     // The world goes on: the next act of the same body lands.
     let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
     println!("stock after: {stocked:?}");
@@ -91,12 +95,12 @@ fn reserves(run: &Run) -> (BTreeMap<Id, [Id; 2]>, usize) {
     (sim::forms::reservations(&effects), written)
 }
 
-/// Whether the replayed tree holds a `souls:reserves` link at the rack: what keeps a kind refresh from it
+/// Whether the replayed tree holds a `souls:reserves` link at `thing`: what keeps a kind refresh from it
 /// (`Busy("reserved")`).
-fn rack_reserved(run: &Run) -> bool {
+fn reserved(run: &Run, thing: Id) -> bool {
     let r = run.replay();
     let t = r.tree();
-    t.links_at(rack())
+    t.links_at(thing)
         .iter()
         .any(|e| t.ty(e).as_str() == "souls:reserves")
 }
@@ -122,7 +126,7 @@ fn a_refused_last_step_still_ends_its_run_and_frees_its_thing() {
         "the run's start reserved the rack in its own tick"
     );
     assert!(standing.is_empty(), "no reservation left: {standing:?}");
-    assert!(!rack_reserved(&run), "a kind refresh is not held off");
+    assert!(!reserved(&run, rack()), "a kind refresh is not held off");
     assert_eq!(
         endings(&run),
         ["souls:kind-not-in-header"],
@@ -138,6 +142,44 @@ fn a_refused_last_step_still_ends_its_run_and_frees_its_thing() {
         ["souls:kind-not-in-header"],
         "a restart ends nothing more"
     );
-    assert!(reserves(&run).0.is_empty() && !rack_reserved(&run));
+    assert!(reserves(&run).0.is_empty() && !reserved(&run, rack()));
+    run.stop();
+}
+
+/// 0.133 F1b review: a held thing whose own run consumes it, beside an effect the world refuses at the last step. The
+/// run's end has no unlink of its own (the removal would have taken the link), and the removal is refused with the
+/// rest, so the end written alone unlinks the reservation the tree still holds: none stands, live or after a restart.
+#[test]
+fn a_refused_consume_still_frees_the_thing_it_held() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("refused-consume-a", store.clone());
+    a.act("test:take", Some(vessel()), BTreeMap::new())
+        .expect("the take lands");
+    let eat = a.act("test:consume_late", Some(vessel()), BTreeMap::new());
+    println!("consume_late: {eat:?}");
+    assert_eq!(eat, Err("kind-not-in-header".to_owned()), "refused by name");
+    let (standing, written) = reserves(&run);
+    assert_eq!(
+        written, 2,
+        "the take and the consume each reserved the vessel"
+    );
+    assert!(standing.is_empty(), "no reservation left: {standing:?}");
+    assert!(!reserved(&run, vessel()), "a kind refresh is not held off");
+    assert_eq!(
+        parent(&run.replay(), vessel()).0,
+        Some(w1()),
+        "still held: not consumed"
+    );
+    assert_eq!(endings(&run), ["souls:done", "souls:kind-not-in-header"]);
+    run.stop();
+
+    let (run, _, _) = serve_on("refused-consume-b", store);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        endings(&run),
+        ["souls:done", "souls:kind-not-in-header"],
+        "a restart ends nothing more"
+    );
+    assert!(reserves(&run).0.is_empty() && !reserved(&run, vessel()));
     run.stop();
 }

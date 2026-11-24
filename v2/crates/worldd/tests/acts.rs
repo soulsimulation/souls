@@ -261,13 +261,17 @@ fn activity(kind: &str, roles: [&str; 2]) -> ActivityKind {
 /// The forms' entries (`souls-entry/1`): the vessel's take and the rack's put.
 fn entries() -> Json {
     let vessel = parse(
-        r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
+        &r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
       "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
       "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
         "discard": { "who": "anyone", "steps": [{ "step": "use_held" }],
           "effects": [{ "change": "remove", "what": "this", "event": "discarded" }] },
+        "consume_late": { "who": "anyone", "steps": [{ "step": "wait", "us": 300000 }, { "step": "use_held" }],
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "actor_hand", "event": "haunted" },
+            { "change": "remove", "what": "this", "event": "consumed" }] },
         "rest_by": { "who": "anyone",
-          "steps": [{ "step": "settle", "posture": "sit" }, { "step": "wait", "us": 500000 }, { "step": "rise" }] } } }"#,
+          "steps": [{ "step": "settle", "posture": "sit" }, { "step": "wait", "us": 500000 }, { "step": "rise" }] } } }"#
+            .replace("GHOST", &full("test:ghost", 0xff)),
     )
     .unwrap();
     // A create names its kind pinned (C25's `stock`).
