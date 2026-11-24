@@ -750,7 +750,7 @@ impl Pairing {
             params![grant],
         )
         .map_err(|_| "store")?;
-        self.publish(&db, &worlds, || {
+        self.publish_removal(&db, &worlds, false, || {
             self.write_tokens(&db).map_err(|_| "tokens-file")
         })
     }

@@ -651,7 +651,7 @@ impl Pairing {
             "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
             params![grant],
         ))?;
-        self.publish(&db, &worlds, || {
+        self.publish_removal(&db, &worlds, true, || {
             self.write_tokens(&db).map_err(|_| "tokens-file")?;
             self.write_souls(&db).map_err(|_| "souls-file")
         })

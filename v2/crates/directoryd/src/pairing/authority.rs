@@ -18,6 +18,43 @@ pub(super) struct Owners {
     reading: BTreeSet<String>,
 }
 
+impl Owners {
+    /// Keeps `owner` as this world's last read unless the one kept is newer ([`newer`]): a late or stale answer
+    /// never takes a world back from the owner a handoff gave it.
+    fn remember(&mut self, instance: &str, owner: (String, u64)) {
+        if self
+            .known
+            .get(instance)
+            .is_none_or(|kept| !newer(kept, &owner))
+        {
+            self.known.insert(instance.to_owned(), owner);
+        }
+    }
+}
+
+/// Whether owner `a` (`creator`, `generation`) comes after `b`: a later generation, or at the same one a named
+/// creator after none (a handoff is pending at its next generation with no creator, then names the recipient).
+/// Generations only go up, so an older owner is never the current one.
+fn newer(a: &(String, u64), b: &(String, u64)) -> bool {
+    (a.1, !a.0.is_empty()) > (b.1, !b.0.is_empty())
+}
+
+/// The owner a world's tokens file was last written with (`# souls-creator/1 <gen> <creator>`), if it names one.
+fn header(tokens: &Path) -> Option<(String, u64)> {
+    let text = std::fs::read_to_string(tokens).ok()?;
+    let line = text
+        .lines()
+        .take(4)
+        .find_map(|l| l.strip_prefix("# souls-creator/1 "))?;
+    let (generation, creator) = line.split_once(' ')?;
+    let creator = match creator {
+        "none" => String::new(),
+        c if crate::accounts::principal_from_text(c).is_some() => c.to_owned(),
+        _ => return None,
+    };
+    Some((creator, generation.parse().ok()?))
+}
+
 /// The world files owed: every world's (`full`, as at start-up) or these worlds'.
 #[derive(Default)]
 pub(super) struct Owed {
@@ -324,7 +361,9 @@ impl Pairing {
     }
 
     /// This world's owner from the store, if it answers within [`OWNER_WITHIN`]; a late answer still becomes the
-    /// owner last read. `None`: the store did not answer in time, failed, or is being read for this world already.
+    /// owner last read. `None`: the store did not answer in time, is out of reach, or is being read for this world
+    /// already. Any other answer of the store (the world is missing, or its record differs from the registry's or is
+    /// invalid) is a refusal the owner last read never covers, and that owner is forgotten.
     fn read_owner(
         &self,
         read: &super::OwnerReader,
@@ -343,18 +382,29 @@ impl Pairing {
         let (read, owners, row) = (read.clone(), self.owners.clone(), authority.clone());
         std::thread::spawn(move || {
             let found = read(&row.world)
-                .map_err(|_| "world-authority-unavailable")
+                .map_err(|e| match e.as_str() {
+                    // Only a store out of reach (a transport error or a timeout) may pass to the owner last read.
+                    "store-unreachable" | "world-authority-unavailable" => {
+                        "world-authority-unavailable"
+                    }
+                    _ => {
+                        eprintln!("directoryd: world-owner {}: {e}", row.world);
+                        match e.as_str() {
+                            "world-missing" => "world-authority-missing",
+                            "handoff-authority-mismatch" => "world-authority-mismatch",
+                            _ => "world-authority-invalid",
+                        }
+                    }
+                })
                 .and_then(|current| current_owner(&row, &current));
             if let Ok(mut owners) = owners.lock() {
                 owners.reading.remove(&row.instance);
                 match &found {
-                    Ok(owner) => {
-                        owners.known.insert(row.instance.clone(), owner.clone());
-                    }
-                    Err("world-authority-mismatch") => {
+                    Ok(owner) => owners.remember(&row.instance, owner.clone()),
+                    Err("world-authority-unavailable") => {}
+                    Err(_) => {
                         owners.known.remove(&row.instance);
                     }
-                    Err(_) => {}
                 }
             }
             let _ = send.send(found);
@@ -365,29 +415,18 @@ impl Pairing {
         }
     }
 
-    /// The owner last read for this world, else the one its tokens file was last written with (after a restart): what
-    /// the world's gateway holds already.
+    /// The newer ([`newer`]) of the owner last read for this world and the one its tokens file was last written with
+    /// (all there is after a restart): what the world's gateway holds already.
     fn last_owner(&self, authority: &Authority) -> Option<(String, u64)> {
-        if let Some(owner) = self
+        let known = self
             .owners
             .lock()
             .ok()
-            .and_then(|o| o.known.get(&authority.instance).cloned())
-        {
-            return Some(owner);
+            .and_then(|o| o.known.get(&authority.instance).cloned());
+        match (known, header(&authority.tokens)) {
+            (Some(k), Some(f)) => Some(if newer(&f, &k) { f } else { k }),
+            (k, f) => k.or(f),
         }
-        let text = std::fs::read_to_string(&authority.tokens).ok()?;
-        let line = text
-            .lines()
-            .take(4)
-            .find_map(|l| l.strip_prefix("# souls-creator/1 "))?;
-        let (generation, creator) = line.split_once(' ')?;
-        let creator = match creator {
-            "none" => String::new(),
-            c if crate::accounts::principal_from_text(c).is_some() => c.to_owned(),
-            _ => return None,
-        };
-        Some((creator, generation.parse().ok()?))
     }
 
     /// Every placed world, each checked against its current owner record (for the files written for all worlds).
@@ -505,26 +544,46 @@ impl Pairing {
         let Some(rows) = self.authorities().map_err(std::io::Error::other)? else {
             return Ok(false);
         };
-        Self::all_world_tokens(db, &rows)?;
+        self.all_world_tokens(db, &rows)?;
         Ok(true)
     }
 
     /// Every world's tokens file, after the legacy upgrade.
     fn all_world_tokens(
+        &self,
         db: &Connection,
         rows: &BTreeMap<String, Authority>,
     ) -> std::io::Result<()> {
         Self::backfill_world_tokens(db, rows).map_err(std::io::Error::other)?;
         for (key, authority) in rows {
             if key == &authority.world {
-                Self::world_tokens(db, authority)?;
+                self.world_tokens(db, authority)?;
             }
         }
         Ok(())
     }
 
-    /// One world's tokens file, from the store: written whole, then renamed into place.
-    fn world_tokens(db: &Connection, authority: &Authority) -> std::io::Result<()> {
+    /// One world's tokens file, from the store: written whole, then renamed into place. Every writer holds the
+    /// pairing store's lock, and under it the owner written is never older than the one the file names, so an owner
+    /// read before a handoff never takes the world back ([`newer`]). Only an owner read just now may put a pending
+    /// handoff's `none` over its named recipient (a handoff whose final step never came is undone); the world is then
+    /// owed, so the recipient is named again from the next read once the handoff is finished.
+    fn world_tokens(&self, db: &Connection, authority: &Authority) -> std::io::Result<()> {
+        let ours = (authority.creator.clone(), authority.generation);
+        let authority = &match header(&authority.tokens) {
+            Some(file) if file.1 > ours.1 || (newer(&file, &ours) && !authority.fresh) => {
+                Authority {
+                    creator: file.0,
+                    generation: file.1,
+                    ..authority.clone()
+                }
+            }
+            Some(file) if newer(&file, &ours) => {
+                self.owe(Some(&authority.world));
+                authority.clone()
+            }
+            _ => authority.clone(),
+        };
         let mut query = db.prepare("SELECT grant_text, token_hash FROM paired_world_tokens_v1 WHERE world=?1 ORDER BY 1").map_err(std::io::Error::other)?;
         let values = query
             .query_map(params![authority.world], |r| {
@@ -574,7 +633,7 @@ impl Pairing {
                 return Ok(());
             }
         } else {
-            Self::world_tokens(db, authority)?;
+            self.world_tokens(db, authority)?;
         }
         let rows = self.registry().map_err(std::io::Error::other)?;
         Self::world_souls(db, &rows.unwrap_or_default(), authority)
@@ -610,21 +669,78 @@ impl Pairing {
             return legacy();
         }
         for world in worlds {
-            let written = match self.authority(Some(world)) {
-                Ok(Some(a)) => self
-                    .publish_world(db, &a)
-                    .map(|()| a.fresh)
-                    .map_err(|e| e.to_string()),
-                Ok(None) | Err("world-unplaced") => Ok(true),
-                Err(e) => Err(e.to_owned()),
+            let _ = self.publish_one(db, world);
+        }
+        Ok(())
+    }
+
+    /// One world's files, as [`Pairing::publish`] writes them: `Err` (with the reason) when they could not be
+    /// written. Unless they were written from an owner read just now, the world is owed to the copier.
+    fn publish_one(&self, db: &Connection, world: &str) -> Result<(), String> {
+        let written = match self.authority(Some(world)) {
+            Ok(Some(a)) => self
+                .publish_world(db, &a)
+                .map(|()| a.fresh)
+                .map_err(|e| e.to_string()),
+            Ok(None) | Err("world-unplaced") => Ok(true),
+            Err(e) => Err(e.to_owned()),
+        };
+        match written {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                self.owe(Some(world));
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("directoryd: degraded: world-files {world}: {e}; owed to the copier");
+                self.owe(Some(world));
+                Err(e)
+            }
+        }
+    }
+
+    /// After a revoke or retire of a Soul in `worlds`, already kept in the store: lines only leave the files, so each
+    /// world's files are rewritten at once with the owner its tokens file already names, and no owner is read. The
+    /// gateway stops accepting the token before this answers; a file that cannot be written is refused by name
+    /// (`tokens-file`, `souls-file`) and owed to the copier, never reported done. A world whose file names no owner
+    /// yet, or with a token from before the registry still to bind, is written as [`Pairing::publish`] writes it.
+    pub(super) fn publish_removal(
+        &self,
+        db: &Connection,
+        worlds: &BTreeSet<String>,
+        souls: bool,
+        legacy: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<(), &'static str> {
+        if self.authority_file.is_none() {
+            return legacy();
+        }
+        let owe = |world: &str, refusal: &'static str| {
+            eprintln!("directoryd: degraded: world-files {world}: {refusal}; owed to the copier");
+            self.owe(Some(world));
+            refusal
+        };
+        let rows = self
+            .registry()
+            .map_err(|_| "tokens-file")?
+            .unwrap_or_default();
+        let backfill = Self::needs_backfill(db).map_err(|_| "store")?;
+        for world in worlds {
+            let Some(row) = rows.get(world) else {
+                continue;
             };
-            match written {
-                Ok(true) => {}
-                Ok(false) => self.owe(Some(world)),
-                Err(e) => {
-                    eprintln!("directoryd: degraded: world-files {world}: {e}; owed to the copier");
-                    self.owe(Some(world));
-                }
+            let Some((creator, generation)) = header(&row.tokens).filter(|_| !backfill) else {
+                self.publish_one(db, world).map_err(|_| "tokens-file")?;
+                continue;
+            };
+            let authority = Authority {
+                creator,
+                generation,
+                ..row.clone()
+            };
+            self.world_tokens(db, &authority)
+                .map_err(|_| owe(world, "tokens-file"))?;
+            if souls {
+                Self::world_souls(db, &rows, &authority).map_err(|_| owe(world, "souls-file"))?;
             }
         }
         Ok(())
@@ -782,7 +898,7 @@ impl Pairing {
                 .and_then(|()| self.write_souls(&db))
                 .map_err(|_| "world-authority-publication".to_owned());
         };
-        Self::all_world_tokens(&db, &rows)
+        self.all_world_tokens(&db, &rows)
             .and_then(|()| Self::all_world_souls(&db, &rows))
             .map_err(|_| "world-authority-publication".to_owned())?;
         for (key, authority) in &rows {
@@ -876,9 +992,14 @@ impl Pairing {
                 if legacy {
                     self.write_world_tokens(&db)?;
                 }
-                Self::world_tokens(&db, &next)
+                self.world_tokens(&db, &next)
             })
             .map_err(|_| "world-authority-publication".to_owned())?;
+        // The recipient is the owner last read from now on: a store that stalls before the finished handoff is read
+        // never writes the pending `none` back over it.
+        if let Ok(mut owners) = self.owners.lock() {
+            owners.remember(&next.instance, (next.creator.clone(), next.generation));
+        }
         Ok(())
     }
 }

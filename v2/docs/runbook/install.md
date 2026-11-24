@@ -133,13 +133,17 @@ so nothing else puts it in the directory's list. `register-world` writes its nam
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
 with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
-wait (`world-authority-unavailable`) until it is registered.
+are refused (`world-authority-missing`) until it is registered.
 
 A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
 world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so
-in the journal (`degraded: world-owner-unavailable <world>`). The directory writes only the files of the world a
-change is for. A world whose files it could not write, or wrote from the owner last read, is retried in the background
-with back-off until the store answers. A start whose store does not answer logs
+in the journal (`degraded: world-owner-unavailable <world>`). Only a store out of reach or too slow is covered that
+way: a world the store answers is missing, or whose record differs from the map, is refused by name
+(`world-authority-missing`, `world-authority-mismatch`, `world-authority-invalid`). A tokens file is never written with
+an owner older than the one it names, so a handoff is never undone by a slow read. A revoke or retire rewrites the
+world's tokens file at once with the owner it already names, reading no owner, and is refused (`tokens-file`) if that
+write fails. The directory writes only the files of the world a change is for. A world whose files it could not write,
+or wrote from the owner last read, is retried in the background with back-off until the store answers. A start whose store does not answer logs
 `degraded: world-authority-unavailable` and serves, keeping the files already written.
 
 ```sh
