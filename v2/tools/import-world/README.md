@@ -15,7 +15,10 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   it may read the content packages, the core asset index, the map and that one file, write only its facts file, and has
   no network. SQLite opens the file read-only and immutable. It reads the model (meta, defs, things) and the world's
   uploads; never its edits, receipts, snapshots or any other history.
-- **What comes over.** Every thing, room, floor, door, doorway, stair, window and named place, as N1 maps them. An upload
+- **What comes over.** Every thing, room, floor, door, doorway, stair, window and named place, as N1 maps them. A
+  flight between two pieces of one storey (Chiba's upper deck on the Mars campus) is walked as that floor's surfaces and
+  counted as a stair; a window in no room's wall (the Mars kitchen's serving hatch) is the window of the room nearest
+  it, on its level or the nearest level. An upload
   comes by its SHA-256 (its CDN key, `docs/operations/cdn.md`): a thing that names one (a mesh's asset, a picture's media)
   holds the hash in field 24. A thing whose kind has a Soul Actions entry in SA-E11's map
   (`content/worlds/eden/map.json`, or `--map`) names it in field 25; the others are listed with the reason (waiting for
@@ -50,8 +53,9 @@ world is exported once while v1 still exists, and only the exporters' outputs ar
   `models/<hash>.glb` for `eden` (`worlds/templates/eden-2026.json`), `godmode-lab` (`hello-hamlet`) and
   `little-martians-arium` (`littlemartians-two`). Import them with no v1 in the path, from `v2/`:
   `cargo run --release -p import-world -- tools/import-world/kept/*/facts.json`. The rows match today's importer:
-  godmode-lab `fe5c8323496d…` clean with 0 differences, Little Martians `230209a2232e…` clean with 5 differences, all
-  explained, and Eden `ac207c47678a…` clean with 0 differences. Since 0.135 W3 each file also carries every thing's
+  godmode-lab `fe5c8323496d…` clean with 0 differences, Little Martians `ba24261af4af…` clean with 0 differences (its
+  temple's four lantern windows, in no room's wall, are its top room's since 0.133; before, `230209a2232e…` with them
+  left out), and Eden `ac207c47678a…` clean with 0 differences. Since 0.135 W3 each file also carries every thing's
   def params (`params`, the tree's field 19). Apart from those params, Eden's facts are byte for byte the ones it was
   imported from in 0.131 (its template as of then), and godmode-lab's and Little Martians' are byte for byte their earlier
   ones, except for the hash of the backup they were rebuilt from. The files without params stay on the CDN under their
