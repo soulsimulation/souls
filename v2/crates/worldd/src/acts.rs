@@ -1074,13 +1074,20 @@ impl Geometry for Sight<'_> {
             ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
         };
         match planning.ask(key, *me, query, &self.map) {
-            Some(FormResult::Walk(legs)) => {
+            Some(FormResult::Walk(walk)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
                 planning.current.remove(&key);
                 planning.answers.remove(&key);
                 planning.queued.remove(&key);
-                WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect())
+                match walk {
+                    Ok(legs) => WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect()),
+                    // The planner's refusal reaches the form by its own name (S13d); a name the profile does not
+                    // allow (none does today) is no way.
+                    Err(r) => {
+                        Name::new(r.name).map_or(WalkPlan::Legs(Vec::new()), WalkPlan::Refused)
+                    }
+                }
             }
             _ => WalkPlan::Pending,
         }

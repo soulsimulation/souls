@@ -1876,6 +1876,12 @@ impl Runner {
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));
                     }
+                    // The planner's own refusal (the ground changed under the walk, its answer failed), approach or
+                    // not: the form ends with that cause (S13d).
+                    replica::host::WalkPlan::Refused(why) => {
+                        self.planning = false;
+                        return self.end(host, why);
+                    }
                     replica::host::WalkPlan::Legs(l) => {
                         self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
