@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "band_1": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -15,7 +15,7 @@
       }
     },
     "band_2": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -26,7 +26,7 @@
       }
     },
     "band_3": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -37,7 +37,7 @@
       }
     },
     "band_4": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -48,7 +48,7 @@
       }
     },
     "band_5": {
-      "n": 5,
+      "n": 32,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -59,7 +59,7 @@
       }
     },
     "band_6": {
-      "n": 6,
+      "n": 33,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -70,7 +70,7 @@
       }
     },
     "band_7": {
-      "n": 7,
+      "n": 34,
       "type": "int",
       "unit": "count",
       "default": 4,
@@ -81,7 +81,7 @@
       }
     },
     "band_8": {
-      "n": 8,
+      "n": 35,
       "type": "int",
       "unit": "count",
       "default": 4,

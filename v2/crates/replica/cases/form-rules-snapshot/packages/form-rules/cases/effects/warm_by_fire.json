@@ -1,0 +1,109 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "0.135 E1: warm up by a campfire once it is lit, and by a hearth; warming changes nothing.",
+ "cases": [
+  {
+   "name": "light_then_warm_by_the_campfire_and_the_hearth",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "c1",
+       "h1"
+      ]
+     },
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "h1": {
+      "kind": "eden:hearth"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "c1",
+      "form": "warm"
+     },
+     "receipt": "rw1",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "light"
+     },
+     "receipt": "rw2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lit",
+        "n": 28,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "warm"
+     },
+     "receipt": "rw3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": [],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "h1",
+      "form": "warm"
+     },
+     "receipt": "rw4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": [],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "c1": {
+     "kind": "eden:campfire",
+     "fields": {
+      "lit": 1
+     }
+    }
+   }
+  }
+ ]
+}

@@ -3,8 +3,8 @@
   "kind": "eden:pillow_repair_kit",
   "owner": "thing",
   "state": {
-    "air": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "patches": { "n": 2, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "air": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "patches": { "n": 29, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-60, 300, 0] }

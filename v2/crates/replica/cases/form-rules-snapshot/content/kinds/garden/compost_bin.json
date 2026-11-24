@@ -3,13 +3,36 @@
   "kind": "eden:compost_bin",
   "owner": "thing",
   "state": {
-    "compost": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "compost": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 900] }
   },
   "geometry": { "bounds_mm": [700, 560, 600] },
-  "forms": {},
+  "forms": {
+    "fill": {
+      "who": "anyone", "starts": "act",
+      "takes": { "waste": { "type": "thing", "select": { "of": "things", "kind": "eden:weed_bundle", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "hand", "holds": "eden:weed_bundle", "says": "hold_waste_first" },
+        { "need": "state", "field": "compost", "at_most": 2, "says": "full" }
+      ],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "wait", "us": 3000000 }],
+      "effects": [
+        { "change": "remove", "what": { "arg": "waste" }, "event": "waste_added" },
+        { "change": "set", "field": "compost", "by": 1, "event": "composted" }
+      ]
+    },
+    "empty": {
+      "who": "anyone", "starts": "act",
+      "needs": [
+        { "need": "hand", "free": true },
+        { "need": "state", "field": "compost", "at_least": 1, "says": "already_empty" }
+      ],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "wait", "us": 4000000 }],
+      "effects": [{ "change": "set", "field": "compost", "to": 0, "event": "emptied" }]
+    }
+  },
   "motion": { "how": "fixed" },
   "loose": { "ever": true },
   "looks": {
@@ -21,9 +44,16 @@
     "shape": {"round":4,"shapes":[{"kind":"box","at":[0,40,0],"size":[700,80,600],"tint":"wood"},{"kind":"box","at":[-320,300,0],"size":[60,520,600],"tint":"wood"},{"kind":"box","at":[320,300,0],"size":[60,520,600],"tint":"wood"},{"kind":"box","at":[0,300,-270],"size":[580,520,60],"tint":"wood"},{"kind":"box","at":[0,160,270],"size":[580,240,60],"tint":"wood"},{"kind":"box","at":[0,270,0],"size":[570,380,470],"round":30,"tint":"compost","role":"fill","pivot":[0,80,0]}],"palette":{"wood":"#89714e","compost":"#493723"},"tags":["garden","compost","bin","object"]}
   },
   "text": {
-    "card": "A compost bin of three portions, each to feed a growing planter once.",
+    "card": "A compost bin: add weeds to make compost, three portions to feed planters.",
     "garden": "garden",
-    "compost": "compost"
+    "compost": "compost",
+    "hold_waste_first": "Hold a bundle of weeds to add it to the compost.",
+    "full": "The bin is full: three portions of compost wait for a planter.",
+    "already_empty": "The bin has no compost to empty.",
+    "howto_compost": "Weed a planter, carry the bundle to the bin and fill it: each bundle becomes one portion of compost."
+  },
+  "howtos": {
+    "compost": { "text": "howto_compost", "steps": [{ "form": "fill" }] }
   },
   "card": { "text": "card", "category": "garden", "synonyms": ["compost"] }
 }

@@ -64,21 +64,21 @@
         "change": "set",
         "node": "p1",
         "field": "tray",
-        "n": 5,
+        "n": 32,
         "to": 0
        },
        {
         "change": "set",
         "node": "p1",
         "field": "stage",
-        "n": 2,
+        "n": 29,
         "to": "sprout"
        },
        {
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 0,
          "per_s": 1,
@@ -151,14 +151,14 @@
         "change": "set",
         "node": "p1",
         "field": "stage",
-        "n": 2,
+        "n": 29,
         "to": "leafy"
        },
        {
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 0,
          "per_s": 1,
@@ -280,7 +280,7 @@
         "change": "set",
         "node": "p1",
         "field": "weeds",
-        "n": 6,
+        "n": 33,
         "to": 0
        },
        {
@@ -417,14 +417,14 @@
         "change": "set",
         "node": "p1",
         "field": "stage",
-        "n": 2,
+        "n": 29,
         "to": "seed"
        },
        {
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 0,
          "per_s": 1,
@@ -459,7 +459,7 @@
         "change": "set",
         "node": "k1",
         "field": "compost",
-        "n": 1,
+        "n": 28,
         "to": 2,
         "by": -1
        },
@@ -467,7 +467,7 @@
         "change": "set",
         "node": "p1",
         "field": "compost",
-        "n": 7,
+        "n": 34,
         "to": 1,
         "by": 1
        },
@@ -475,7 +475,7 @@
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 86400,
          "per_s": 1,
@@ -562,14 +562,14 @@
         "change": "set",
         "node": "p1",
         "field": "stage",
-        "n": 2,
+        "n": 29,
         "to": "sprout"
        },
        {
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 0,
          "per_s": 1,
@@ -674,14 +674,14 @@
         "change": "set",
         "node": "p1",
         "field": "stage",
-        "n": 2,
+        "n": 29,
         "to": "leafy"
        },
        {
         "change": "set",
         "node": "p1",
         "field": "ripening",
-        "n": 3,
+        "n": 30,
         "to": {
          "value": 0,
          "per_s": 1,

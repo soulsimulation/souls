@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "dirt": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 1,

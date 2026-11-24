@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "small": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["a", "b", "c"],
       "default": "a",
@@ -13,7 +13,7 @@
       }
     },
     "medium": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": ["a", "b", "c"],
       "default": "a",
@@ -22,7 +22,7 @@
       }
     },
     "large": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["a", "b", "c"],
       "default": "a",
@@ -31,7 +31,7 @@
       }
     },
     "moves": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 0,
