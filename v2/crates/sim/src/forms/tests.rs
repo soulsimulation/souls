@@ -774,13 +774,13 @@ fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
 #[test]
 fn e7_a_soul_that_leaves_during_a_later_repeated_step_gets_no_effect() {
     let press = r#"{ "step": "move", "move": "press", "at": "button" },"#;
-    let lamp = include_str!("../../../skills/src/form_runner/kinds/lamp.json");
-    assert!(lamp.contains(press), "the lamp's press");
-    let entry = parse(&lamp.replacen(press, &format!("{press}\n{press}"), 1)).expect("JSON");
+    let entry_text = include_str!("../../../skills/src/form_runner/kinds/lamp.json");
+    assert!(entry_text.contains(press), "the kind's press");
+    let entry = parse(&entry_text.replacen(press, &format!("{press}\n{press}"), 1)).expect("JSON");
     let form = "switch_on";
     assert_eq!(
         bind(&entry, form).expect("binds"),
-        bind(&parse(lamp).expect("JSON"), form)
+        bind(&parse(entry_text).expect("JSON"), form)
             .map(|mut s| {
                 s.insert(2, s[1].clone());
                 s
