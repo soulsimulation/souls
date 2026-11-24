@@ -55,7 +55,10 @@ entry.
 
 A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
 as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
-stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none.
+stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none. A def the
+world defines itself (a template's `define`, which no page's library has: hello-hamlet's reading room) rides its first
+thing as field 102, its whole stored def as JSON text (`def_body`), so that page draws it as the world's own page does
+(its roof) and not from the thing's solids.
 
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for

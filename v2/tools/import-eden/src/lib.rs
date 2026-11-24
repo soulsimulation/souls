@@ -73,6 +73,10 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 pub const F_TILES: u64 = 25;
 pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
 pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
+/// A def the world defines itself (a template's `define`, not the core library's): its whole def/1 record, today's
+/// JSON text as bytes, on the first thing of that def only, so a page drawing from the stream alone draws it as today's
+/// page does (a hall's roof). Above the entries' block (`replica::fields`), as a field the import keeps on things.
+pub const F_DEF_BODY: u64 = 102;
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -653,6 +657,9 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         }
         if let Some(p) = t.get("params").and_then(Json::str) {
             fields.insert(F_PARAMS, Value::Bytes(p.as_bytes().to_vec()));
+        }
+        if let Some(d) = t.get("def_body").and_then(Json::str) {
+            fields.insert(F_DEF_BODY, Value::Bytes(d.as_bytes().to_vec()));
         }
         if let Some(d) = t.get("door") {
             fields.insert(

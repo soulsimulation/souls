@@ -81,6 +81,9 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     // W3: its def's params (import-eden's field 19, today's JSON text)
     const p = f.get(19);
     if (p instanceof Uint8Array) try { const v = JSON.parse(new TextDecoder().decode(p)); if (v && typeof v === 'object' && !Array.isArray(v)) rec.params = v; } catch { /* drawn with the def's defaults */ }
+    // a def the world defines itself, on its first thing (import-eden's field 102, today's JSON text)
+    const b = f.get(102);
+    if (b instanceof Uint8Array) rec.defBody = new TextDecoder().decode(b);
   } else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));

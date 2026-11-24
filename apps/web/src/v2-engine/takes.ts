@@ -53,10 +53,15 @@ export type Body = {
 
 /** K4 (0.135): a thing the take carries beside the bodies, so the camera can follow it and the page can frame a ride with
  *  it: a thing on a course (a balloon) today. `at`: its place (mm) and heading at world time t µs, null where the copy
- *  cannot place it. Drawn by the page's own layers, not by the take: its record is a `vehicle` (never a stand-in box). */
+ *  cannot place it. Drawn by the page's own layers, not by the take: its record is a `vehicle` (never a stand-in box), or
+ *  a `fixture` the take draws for a kind no layer has (FIXTURES). */
 export type Thing = { entity: string; label: string; def: string; at: (t: number) => { p: [number, number, number]; yaw: number } | null;
   /** Whether it is a ride (its record has a `carrier`: the page frames a rider with it). */
   carrier?: boolean };
+
+/** A thing on a course no page library draws, by its kind's plain name: drawn by the take's own fixture views under
+ *  today's def name (mars engine-view fixtures.ts: a rowing punt, its hull and oars). */
+const FIXTURES: Record<string, string> = { rowing_punt: 'rowing-punt' };
 
 export type RecordedChunk = { fromTick: number; toTick: number; take: Record<string, unknown> };
 
@@ -203,7 +208,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     tracks[th.entity] = thin(track);
     changes.push([0, th.entity, 'present', true]);
     const p: [number, number, number] = [last.p[0] / POS_Q, last.p[1] / POS_Q, last.p[2] / POS_Q];
-    entities[th.entity] = { id: th.entity, def: th.def, kind: 'vehicle', label: th.label, pose: { p, yaw: last.yaw },
+    const fixture = FIXTURES[th.def];
+    entities[th.entity] = { id: th.entity, def: fixture ?? th.def, kind: fixture ? 'fixture' : 'vehicle', label: th.label, pose: { p, yaw: last.yaw },
       provenance: { origin: 'simulation', confidence: 'hypothetical' }, ...(th.carrier ? { carrier: { contract: 'carrier-state/1', home: p } } : {}) };
   }
   changes.sort((a, b) => a[0] - b[0]);

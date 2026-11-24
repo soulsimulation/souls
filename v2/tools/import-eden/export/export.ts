@@ -74,6 +74,10 @@ const isDoorDef = (d: { components: Record<string, unknown>; form: string; name:
 const WATER_KINDS = /^core-(lake|river|pond)$/;
 
 const kinds = new Map<string, { ref: string; hash: string; name: string; form: string; layer: string | null; door: boolean; mesh: boolean; slots: number }>();
+/** The defs the world defines itself (a template's `define`): no page carries them, so the first thing of each carries
+ *  its whole def (`def_body`, the tree's field 102), as JSON text. */
+const CORE = coreLibrary(), carried = new Set<string>();
+const defBody = (d: { ref: string }) => (CORE.get(d.ref) || carried.has(d.ref) ? undefined : (carried.add(d.ref), JSON.stringify(d)));
 const defOf = (e: Entity) => { const d = m.resolvedDef(e.def); if (!d) throw new Error(`${e.id}: def ${e.def} unresolved`); return d; };
 const bakeOf = (e: Entity) => m.bake(defOf(e), e.params ?? {}, e.seed ?? 0, e.shape);
 
@@ -130,6 +134,7 @@ for (const e of m.entities.values()) {
     // W3 (0.135): its def's params as today's model holds them, as JSON text (the facts reader takes whole numbers only),
     // which the tree keeps as field 19 so a page drawing from the stream alone draws it as today's page does
     ...(e.params && Object.keys(e.params).length ? { params: JSON.stringify(e.params) } : {}),
+    ...((body) => (body ? { def_body: body } : {}))(defBody(d)),
   };
   if (isDoorDef(d as never)) {
     const v = e.state?.open ?? (d.state as Record<string, { default?: unknown } | undefined>)?.open?.default;
