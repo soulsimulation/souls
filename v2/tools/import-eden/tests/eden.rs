@@ -637,3 +637,53 @@ fn e16_a_slot_of_several_bodies_has_a_place_for_each_inside_its_thing() {
         }
     }
 }
+
+/// A dome at (0, -2.258, 0) m whose one floor holds its garden room (as verdelis-eden's does), with two decor things
+/// inside: a bubble (no entry, so no point but its own) and a cable car whose entry puts a station 60 m past the dome.
+const DOME: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [
+    {"ref": "eden-dome@1", "hash": "aa", "name": "eden:eden_dome", "form": "point", "layer": "solid"},
+    {"ref": "eden-bubble@1", "hash": "bb", "name": "eden:eden_bubble", "form": "point", "layer": "decor"},
+    {"ref": "eden-cable-car@1", "hash": "cc", "name": "eden:eden_cable_car", "form": "point", "layer": "decor"}
+  ],
+  "things": [
+    {"id": "e_dome", "def": "eden-dome@1", "ref": "eden-dome@1", "parent": null, "pose": [0, -2258, 0, 0],
+     "world": [0, -2258, 0, 0], "scale_ppm": 1000000, "name": "dome",
+     "floors": [{"level": 0, "y": 0, "polygon": [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]]}],
+     "rooms": [{"id": "garden", "name": "Garden", "floor": 0, "pose": [1000, 0, 0, 0], "height": 20000,
+                "polygon": [[-19000, -19000], [19000, -19000], [19000, 19000], [-19000, 19000]]}]},
+    {"id": "e_bubble", "def": "eden-bubble@1", "ref": "eden-bubble@1", "parent": null, "pose": [5000, -2258, 3000, 0],
+     "world": [5000, -2258, 3000, 0], "scale_ppm": 1000000, "noEntry": "no row in the map"},
+    {"id": "e_car", "def": "eden-cable-car@1", "ref": "eden-cable-car@1", "parent": null, "pose": [-5000, -2258, 0, 0],
+     "world": [-5000, -2258, 0, 0], "scale_ppm": 1000000}
+  ],
+  "doors": [],
+  "places": [],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+  "bake": {"things": 3, "rooms": 1, "floors": 1, "floor surfaces": 1},
+  "byRef": {"eden-dome@1": 1, "eden-bubble@1": 1, "eden-cable-car@1": 1}
+}"#;
+
+#[test]
+fn scenery_inside_a_building_is_on_its_floor_unless_its_entry_reaches_past_it() {
+    let car = r#"{"format": "souls-entry/1", "kind": "eden:cable_car",
+      "points": {"valley_station": {"role": "stand", "at_mm": [0, 0, 60000]}}}"#;
+    let im = import_eden::load_with(DOME, &[("cable_car.json".into(), car.into())])
+        .expect("the dome loads with its entries");
+    // The bubble stands in the garden room, at its pose there: the open ground is cut out under the floor.
+    assert_eq!(parent_key(&im, "e_bubble"), "e_dome/garden");
+    let h = im.tree.handle(im.nodes["e_bubble"]).unwrap();
+    let p = im.tree.node(h).unwrap().place().unwrap().position;
+    assert_eq!((p.x, p.y, p.z), (4_000_000, 0, 3_000_000));
+    // The cable car's station is 60 m past the dome, so the car stays on the open ground.
+    assert_eq!(parent_key(&im, "e_car"), "ground");
+    // An entry whose points all stand on the floor takes the car in too.
+    let near = car.replace("60000", "6000");
+    let both = import_eden::load_with(DOME, &[("cable_car.json".into(), near)]).unwrap();
+    assert_eq!(parent_key(&both, "e_car"), "e_dome/garden");
+    // With no entries the points are not known: scenery stays where the facts put it, as before.
+    let bare = load(DOME).unwrap();
+    assert_eq!(parent_key(&bare, "e_bubble"), "ground");
+    assert_eq!(parent_key(&bare, "e_car"), "ground");
+}
