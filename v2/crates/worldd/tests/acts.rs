@@ -1034,6 +1034,35 @@ fn e16_two_souls_take_a_slot_of_two_naming_it_through_the_gateway() {
     run.stop();
 }
 
+/// #4575: two Souls take places at one thing at the same moment through the gateway. The second's act is sent while
+/// the first's run is still walking to its place, as Bea's sit on Eden's bench was sent 40 ms after Ada's. A form
+/// that only takes a slot reserves that slot (here one of two places, E16), not the whole thing, so the second is not
+/// refused `thing-reserved`: both runs go on at once, and both end in the slot, each at its own place.
+#[test]
+fn i4575_two_souls_take_places_at_one_thing_at_once_through_the_gateway() {
+    let (run, mut a, mut b) = serve("i4575");
+    let place = || {
+        p(&[(
+            1,
+            Value::Array(vec![Value::Array(vec![
+                Value::Bytes(b"place".to_vec()),
+                Value::Bytes(b"circle".to_vec()),
+            ])]),
+        )])
+    };
+    a.send("test:play", Some(circle()), place());
+    a.started();
+    b.send("test:play", Some(circle()), place());
+    let (first, second) = (a.answer(), b.answer());
+    println!("#4575 at once: first {first:?}, second {second:?}");
+    first.expect("the first takes a place");
+    second.expect("the second takes the other place while the first's run goes on");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(circle()), Some(1)));
+    assert_eq!(parent(&r, w2()), (Some(circle()), Some(1)));
+    run.stop();
+}
+
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]

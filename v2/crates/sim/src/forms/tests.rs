@@ -2394,3 +2394,241 @@ fn a_seat_taken_or_left_writes_the_bodys_posture() {
         );
     }
 }
+
+/// #4575: a two-seat bench (the chair fixture's seat, and a second 800 mm to its side) and two bodies, Ada and Bea,
+/// each standing at one seat's stand point: the bench, its two slots, and the two bodies.
+fn two_seat_bench() -> (Bench, Id, [u64; 2], Id, Id) {
+    let (mut b, ada, bench, slot, _) = seat_bench();
+    let first = b
+        .slots
+        .as_ref()
+        .and_then(|s| s.place_in(bench, slot))
+        .expect("the first seat")
+        .clone();
+    let mut second = first.clone();
+    second.place.slot = slot + 1;
+    second.point = Vec3::new(first.point.x + 800_000, first.point.y, first.point.z);
+    let stand = second.stand().expect("a stand point");
+    b.slots
+        .as_mut()
+        .expect("slots")
+        .add(second)
+        .expect("a place");
+    let bea = b.mint.mint().expect("id");
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    let placed = b.surfaces[&fixture(1)]
+        .place(bea, frame, stand, Quat::IDENTITY)
+        .expect("placed");
+    b.c.add(family(), placed).expect("added");
+    (b, bench, [slot, slot + 1], ada, bea)
+}
+
+/// A sit in `slot` of the thing, then a short wait.
+fn sit_at(slot: u64) -> Vec<skills::form_runner::Step> {
+    use skills::form_runner::Step;
+    vec![
+        Step::Sit {
+            slot,
+            lie: false,
+            stand: false,
+            on: None,
+        },
+        Step::Wait(500_000),
+    ]
+}
+
+/// #4575, the bug seen on Eden: two Souls sit on one two-seat bench at the same moment. Each run reserves only the
+/// seat it takes, so the second is not refused `thing-reserved` for the first's run; both end `done`, each in its
+/// own seat, and nothing is reserved after.
+#[test]
+fn i4575_two_souls_sit_on_one_bench_at_once() {
+    let (mut b, bench, [left, right], ada, bea) = two_seat_bench();
+    let limits = Limits::default();
+    let first = b.steps(ada, bench, sit_at(left), intent(ada, 0), limits);
+    let second = b.steps(bea, bench, sit_at(right), intent(bea, 0), limits);
+    println!("#4575 at once: Ada {first:?}, Bea {second:?}");
+    assert!(matches!(first, Ok(Asked::Started(_))), "{first:?}");
+    assert!(matches!(second, Ok(Asked::Started(_))), "{second:?}");
+    assert_eq!(b.forms.seat_holders(bench, left), vec![ada]);
+    assert_eq!(b.forms.seat_holders(bench, right), vec![bea]);
+    b.run(30_000_000);
+    let hows: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| (e.body, e.how.as_str().to_owned()))
+        .collect();
+    println!("#4575 at once: ended {hows:?}");
+    assert_eq!(hows.len(), 2);
+    assert!(hows.iter().all(|(_, how)| how == "done"), "{hows:?}");
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.holder_in(bench, left), Some(ada));
+    assert_eq!(slots.holder_in(bench, right), Some(bea));
+    assert_eq!(b.forms.holder(bench), None, "nothing reserved after");
+    b.clean();
+}
+
+/// #4575: two Souls racing for the same seat. The first's run reserves it; the second is refused `place-taken`,
+/// naming the first, and takes the other seat while the first's run goes on. A run that ends before its body reaches
+/// its seat gives the reservation back with it, so the seat is never held by nobody: the next Soul takes it.
+#[test]
+fn i4575_two_souls_racing_for_one_seat_one_wins_the_other_is_refused_place_taken() {
+    let (mut b, bench, [left, right], ada, bea) = two_seat_bench();
+    let limits = Limits::default();
+    b.steps(ada, bench, sit_at(left), intent(ada, 0), limits)
+        .expect("Ada's sit starts");
+    let lost = b
+        .steps(bea, bench, sit_at(left), intent(bea, 0), limits)
+        .expect_err("refused");
+    println!("#4575 race: Bea {}: {}", lost.name, lost.detail);
+    assert_eq!(lost.name, "place-taken");
+    assert!(lost.detail.contains(&replica::world_model::show(ada)));
+    assert_eq!(b.forms.seat_holders(bench, left), vec![ada]);
+    let other = b.steps(bea, bench, sit_at(right), intent(bea, 1), limits);
+    assert!(matches!(other, Ok(Asked::Started(_))), "{other:?}");
+    b.run(30_000_000);
+    assert!(
+        b.forms.ended.iter().all(|e| e.how.as_str() == "done"),
+        "{:?}",
+        b.forms.ended
+    );
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(
+        (slots.holder_in(bench, left), slots.holder_in(bench, right)),
+        (Some(ada), Some(bea))
+    );
+    b.clean();
+
+    // Ada's run is left mid-sit: she ends in the seat (E11b), so the seat is held by her body, not by nobody, and
+    // Bea's sit of it ends by the same name. A sit that ends before its body reaches the seat gives the seat and its
+    // reservation back with the run, and Ada takes the seat.
+    let (mut b, bench, [left, _], ada, bea) = two_seat_bench();
+    b.steps(ada, bench, sit_at(left), intent(ada, 0), limits)
+        .expect("Ada's sit starts");
+    let now = b.now;
+    {
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, ada, None, now).expect("left");
+    }
+    b.run(30_000_000);
+    assert_eq!(b.forms.seat_holders(bench, left), Vec::<Id>::new());
+    assert_eq!(
+        b.slots.as_ref().expect("slots").holder_in(bench, left),
+        Some(ada)
+    );
+    b.forms.ended.clear();
+    b.steps(bea, bench, sit_at(left), intent(bea, 0), limits)
+        .expect("Bea's sit starts");
+    b.run(30_000_000);
+    let how: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| e.how.as_str().to_owned())
+        .collect();
+    println!("#4575 race: Ada left mid-sit, seated; Bea's sit ended {how:?}");
+    assert_eq!(how, vec!["place-taken".to_owned()]);
+
+    let (mut b, bench, [left, _], ada, bea) = two_seat_bench();
+    // Bea, at the other seat's stand point, is out of this one's reach: her sit ends before she is in it.
+    b.steps(bea, bench, sit_at(left), intent(bea, 0), limits)
+        .expect("Bea's sit starts");
+    b.run(30_000_000);
+    let ended: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| e.how.as_str().to_owned())
+        .collect();
+    println!("#4575 race: Bea's sit ended before the seat:{ended:?}");
+    assert_ne!(ended, vec!["done".to_owned()]);
+    assert_eq!(b.forms.seat_holders(bench, left), Vec::<Id>::new());
+    assert_eq!(
+        b.slots.as_ref().expect("slots").holder_in(bench, left),
+        None
+    );
+    let taken = b.steps(ada, bench, sit_at(left), intent(ada, 0), limits);
+    println!("#4575 race: then Ada {taken:?}");
+    assert!(matches!(taken, Ok(Asked::Started(_))), "{taken:?}");
+    b.run(60_000_000);
+    assert_eq!(
+        b.slots.as_ref().expect("slots").holder_in(bench, left),
+        Some(ada)
+    );
+    b.clean();
+}
+
+/// #4575: a sit and a pick-up of the bench. A pick-up (a take of the thing into a hand) needs the whole thing: while
+/// Ada's sit holds a seat it is refused `thing-reserved` naming her, and while Bea's pick-up holds the bench Ada's
+/// sit is refused the same way, naming Bea.
+#[test]
+fn i4575_a_sit_and_a_pick_up_of_the_bench_one_holds_it_the_other_is_refused() {
+    use skills::form_runner::{Effect, Of, Step};
+    type Form = (Vec<Step>, Vec<Effect>);
+    let pick_up = || -> Form {
+        (
+            vec![Step::Wait(1_000_000), Step::Hand],
+            vec![Effect::Take { what: Of::This }],
+        )
+    };
+    let limits = Limits::default();
+    let start = |b: &mut Bench, body: Id, node: Id, (steps, effects): Form| {
+        b.look();
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        forms.start(
+            &mut w,
+            body,
+            node,
+            intent(body, 0),
+            steps,
+            effects,
+            limits,
+            now,
+        )
+    };
+
+    // The sit first.
+    let (mut b, bench, [left, _], ada, bea) = two_seat_bench();
+    start(&mut b, ada, bench, (sit_at(left), Vec::new())).expect("Ada's sit starts");
+    let r = start(&mut b, bea, bench, pick_up()).expect_err("refused");
+    println!("#4575 sit, then pick-up: {}: {}", r.name, r.detail);
+    assert_eq!(r.name, "thing-reserved");
+    assert!(r.detail.contains(&replica::world_model::show(ada)));
+
+    // The pick-up first.
+    let (mut b, bench, [left, _], ada, bea) = two_seat_bench();
+    start(&mut b, bea, bench, pick_up()).expect("Bea's pick-up starts");
+    assert_eq!(b.forms.holder(bench), Some(bea));
+    let r = start(&mut b, ada, bench, (sit_at(left), Vec::new())).expect_err("refused");
+    println!("#4575 pick-up, then sit: {}: {}", r.name, r.detail);
+    assert_eq!(r.name, "thing-reserved");
+    assert!(r.detail.contains(&replica::world_model::show(bea)));
+}
+
+/// #4575, the rule per form, on content's own entries as bound: a bench's sit and a locomotive's board take a seat
+/// and reserve only it; a locomotive's drive also sets its fields, so it reserves the whole thing.
+#[test]
+fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
+    use skills::form_runner::{Arg, Args, bind_effects_args, bind_with};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entry =
+        |f: &str| parse(&std::fs::read_to_string(root.join(f)).expect("read")).expect("JSON");
+    let node = fixture(7);
+    for (file, form, seat, whole) in [
+        ("seating/bench.json", "sit", "left", false),
+        ("vehicles/locomotive.json", "board", "fireman", false),
+        ("vehicles/locomotive.json", "drive", "driver", true),
+    ] {
+        let e = entry(file);
+        let args = Args::from([("seat".to_owned(), Arg::Name(seat.to_owned()))]);
+        let steps = bind_with(&e, form, &args).expect("binds");
+        let effects = bind_effects_args(&e, form, &args).expect("binds");
+        let seats = super::seats_taken(node, &steps, &effects, false);
+        println!("#4575 {file} {form}: seats reserved {seats:?} (empty: the whole thing)");
+        assert_eq!(seats.is_empty(), whole, "{file} {form}: {effects:?}");
+    }
+}
