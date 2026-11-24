@@ -117,7 +117,7 @@ async function walkWorld(browser, origin, slug, dir) {
     return `presentation ${(await view()).pres}`;
   });
   await step('Live', async () => {
-    await page.click('.live-pill', { timeout: 10000 });
+    await page.click('.live-pill', { timeout: 10000, force: true });   // the pill re-renders each tick: never "stable"
     await page.locator('input[aria-label="Preview hour"]').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
