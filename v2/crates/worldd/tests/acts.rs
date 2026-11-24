@@ -940,12 +940,12 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
     assert!(r.tree().timers().is_empty());
 }
 
+#[path = "acts/attend.rs"]
+mod attend;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]
 mod named_args;
-#[path = "acts/attend.rs"]
-mod attend;
 
 /// #3888 A1, A2: the world decides a form's needs at commit, links included, by R2's one evaluator, whatever the
 /// client said. A throw to an end nobody plays is refused `not_linked` naming need 1, and nothing changes; with a

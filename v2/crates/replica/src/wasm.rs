@@ -1706,7 +1706,8 @@ fn numbered(
                         Some(Target::Node(id)) => Value::Array(vec![
                             id.to_value(),
                             Value::Uint(
-                                u64::try_from(*n).map_err(|_| JsError::new("param-out-of-range"))?,
+                                u64::try_from(*n)
+                                    .map_err(|_| JsError::new("param-out-of-range"))?,
                             ),
                         ]),
                         _ => return Err(JsError::new("param-unsupported")),

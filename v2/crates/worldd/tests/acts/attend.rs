@@ -161,7 +161,8 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
     base.tree.apply(&header, &part)?;
     base.doors.header = header;
     base.doors.next = base.tree.next();
-    let town = Town::new(base.tree, ground, base.doors).expect("the town with the hall's furniture");
+    let town =
+        Town::new(base.tree, ground, base.doors).expect("the town with the hall's furniture");
     let planner = town.copy().expect("an independent planner town");
     let frame = Frame {
         node: ground,
@@ -328,12 +329,19 @@ fn e14b_a_soul_attends_the_halls_lecture_on_a_bench_seat_through_the_gateway() {
         (west_bench(), 3, "slot-unknown"),
     ] {
         let got = a.act("eden:attend", Some(hall_lecture()), seat(on, slot));
-        println!("E14b hall attend on slot {slot} of {}: {got:?}", replica::world_model::show(on));
+        println!(
+            "E14b hall attend on slot {slot} of {}: {got:?}",
+            replica::world_model::show(on)
+        );
         assert_eq!(got, Err(why.to_owned()));
     }
     let r = replay(&initial, &store);
     assert_eq!(parent(&r, w1()), (Some(ground()), None), "nothing taken");
-    assert_eq!(parent(&r, w2()), (Some(west_bench()), Some(1)), "w2 where it sat");
+    assert_eq!(
+        parent(&r, w2()),
+        (Some(west_bench()), Some(1)),
+        "w2 where it sat"
+    );
     let attended = a.act("eden:attend", Some(hall_lecture()), seat(east_bench(), 1));
     println!("E14b hall attend on the east bench's left: {attended:?}");
     assert!(attended.is_ok(), "a receipt: {attended:?}");
@@ -465,7 +473,9 @@ fn attend_in_lockstep(leave_at: Option<i64>, then_leave: Option<i64>) -> Lock {
 #[test]
 fn e14b_a_soul_that_leaves_mid_sit_is_free() {
     let (done, _, seated_at, seated, r) = attend_in_lockstep(None, None);
-    println!("E14b lockstep attend: {done:?}, in the seat from tick {seated_at:?}, seated {seated:?}");
+    println!(
+        "E14b lockstep attend: {done:?}, in the seat from tick {seated_at:?}, seated {seated:?}"
+    );
     assert!(done.is_ok(), "a receipt: {done:?}");
     let seated_at = seated_at.expect("the body was handed into the seat");
     assert_eq!(seated, vec![(w1(), east_bench())]);
@@ -479,20 +489,31 @@ fn e14b_a_soul_that_leaves_mid_sit_is_free() {
         parent(&r, w1()),
         super::at(&r, w1())
     );
-    assert_eq!(attend, Err("act.stopped".to_owned()), "the attend is stopped");
-    assert!(matches!(cancel, Some(Ok(_))), "the cancel's receipt: {cancel:?}");
+    assert_eq!(
+        attend,
+        Err("act.stopped".to_owned()),
+        "the attend is stopped"
+    );
+    assert!(
+        matches!(cancel, Some(Ok(_))),
+        "the cancel's receipt: {cancel:?}"
+    );
     assert!(seated.is_empty(), "no one holds a seat");
     assert_eq!(parent(&r, w1()), (Some(ground()), None), "standing, free");
     assert_eq!(listeners(&r, hall_lecture()), 0, "not in the audience");
     // Just after the contact: what landed there stays (the seat and the audience, as a hand move's effect does,
     // 0.134 I4), and the lecture's own leave frees the seat.
-    let (attend, cancel, _, seated, r) = attend_in_lockstep(Some(seated_at + 1), Some(seated_at + 100));
+    let (attend, cancel, _, seated, r) =
+        attend_in_lockstep(Some(seated_at + 1), Some(seated_at + 100));
     println!(
         "E14b leave after the contact: attend {attend:?}, cancel {cancel:?}, seated {seated:?}, listeners {}, w1 in {:?}",
         listeners(&r, hall_lecture()),
         parent(&r, w1()),
     );
-    assert!(matches!(cancel, Some(Ok(_))), "the cancel's receipt: {cancel:?}");
+    assert!(
+        matches!(cancel, Some(Ok(_))),
+        "the cancel's receipt: {cancel:?}"
+    );
     assert!(seated.is_empty(), "no one holds a seat");
     assert_eq!(parent(&r, w1()), (Some(ground()), None), "standing, free");
     assert_eq!(listeners(&r, hall_lecture()), 0, "not in the audience");

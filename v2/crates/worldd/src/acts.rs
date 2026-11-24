@@ -1714,6 +1714,9 @@ pub(crate) fn select_thing(
     })
 }
 
+/// Things in a selector's order, each with its squared distance from the anchor (none for a thing with no place).
+type Ranked = Vec<(Option<i128>, Id)>;
+
 /// [`select_thing`]'s set in its order, each with its squared distance from the anchor (none for a thing with no
 /// place), and the selector's rank (`None` for `last`). Reads `in`, `anchor`, `order`, `rank` and `kind`, whatever
 /// `of` says: a seat of another thing (E14b) is chosen from the same set in the same order.
@@ -1724,7 +1727,7 @@ fn ranked_things(
     node: Id,
     body: Id,
     body_at: Option<Vec3>,
-) -> Result<(Vec<(Option<i128>, Id)>, Option<usize>), ()> {
+) -> Result<(Ranked, Option<usize>), ()> {
     let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
     let here = select.get("in").and_then(Json::str) == Some("here");
     let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
@@ -1859,7 +1862,10 @@ fn other_refused(
     }
     let soul = body_of(body).unwrap_or(body);
     if let Some(words) = replica::who_may::private_to(tree, on, soul) {
-        return Some(refusal("object.private", format!("{key}: who may: {words}")));
+        return Some(refusal(
+            "object.private",
+            format!("{key}: who may: {words}"),
+        ));
     }
     if b.slots.place_in(on, slot).is_none() && slot_name(tree, kinds, on, slot).is_none() {
         return Some(refusal("slot-unknown", format!("{key}: slot {slot}")));
@@ -1876,10 +1882,14 @@ fn slot_name(tree: &Tree, kinds: &Json, thing: Id, slot: u64) -> Option<String> 
     names.get(i).map(|(name, _)| name.clone())
 }
 
+/// A free seat [`other_seat`] may choose: its thing's squared distance from the anchor, the thing, the slot, and the
+/// slot's stand point's squared distance from the body across x and z.
+type Open = (Option<i128>, Id, u64, Option<i128>);
+
 /// A body's seat the caller left out that the form selects from the free slots `in` its node's `parent` or `here`
 /// (E14b: a lecture's attendee on a bench of its hall): the things [`ranked_things`] ranks by the select's anchor,
 /// order, rank and `kind`, those with a free seat only, and that thing's free slot whose stand point is nearest the
-/// body (C19's pick). Two seats that rank the same, on different things equally far from the anchor, go to the one
+/// body (C19's pick). Two open that rank the same, on different things equally far from the anchor, go to the one
 /// nearer the body; equally near both, the choice is not the world's: refused `arg-ambiguous`, naming the argument.
 /// None free is refused by name, as on the act's own thing. `None` for a select of the node's own slots (`in`:
 /// `this`, or none), which [`Acts::start`]'s own pick takes.
@@ -1915,7 +1925,7 @@ fn other_seat(
         .map_or(body, |e| e.other);
     // Each thing with a free seat, in the selector's order: its anchor distance, the seat, and the seat's stand
     // point's squared distance from the body across x and z.
-    let seats: Vec<(Option<i128>, Id, u64, Option<i128>)> = ranked
+    let open: Vec<Open> = ranked
         .into_iter()
         .filter(|(_, t)| replica::who_may::private_to(tree, *t, soul).is_none())
         .filter_map(|(far, t)| {
@@ -1930,19 +1940,19 @@ fn other_seat(
         })
         .collect();
     let at = match rank {
-        Some(r) => r.checked_sub(1).filter(|i| *i < seats.len()),
-        None => seats.len().checked_sub(1),
+        Some(r) => r.checked_sub(1).filter(|i| *i < open.len()),
+        None => open.len().checked_sub(1),
     };
     let Some(at) = at else {
         return Some(Err(refusal(sim::commit::bind::NONE_FREE, key)));
     };
-    let far = seats[at].0;
-    let mut even: Vec<&(Option<i128>, Id, u64, Option<i128>)> = seats
+    let far = open[at].0;
+    let mut even: Vec<&Open> = open
         .iter()
         .filter(|s| far.is_some() && s.0 == far)
         .collect();
     if even.len() < 2 {
-        return Some(Ok((seats[at].1, seats[at].2)));
+        return Some(Ok((open[at].1, open[at].2)));
     }
     even.sort_by_key(|s| s.3.unwrap_or(i128::MAX));
     if even[0].3 == even[1].3 {
@@ -2370,7 +2380,8 @@ impl Acts {
                         if let Some(e) = other_refused(tree, &self.kinds, b, body, key, *on, *s) {
                             other = Some(e);
                         } else if b.slots.holder_in(*on, *s).is_some_and(|h| h != body) {
-                            taken = Some(slot_name(tree, &self.kinds, *on, *s).unwrap_or(key.clone()));
+                            taken =
+                                Some(slot_name(tree, &self.kinds, *on, *s).unwrap_or(key.clone()));
                         }
                         continue;
                     }
@@ -2378,11 +2389,11 @@ impl Acts {
                         continue;
                     }
                     if !all.contains_key(key)
-                        && let Some(seat) = take.get("select").and_then(|select| {
+                        && let Some(chosen) = take.get("select").and_then(|select| {
                             other_seat(tree, &self.kinds, b, select, *node, body, key)
                         })
                     {
-                        match seat {
+                        match chosen {
                             Ok((on, s)) => {
                                 all.insert(key.clone(), skills::form_runner::Arg::Slot(on, s));
                                 picked = true;
