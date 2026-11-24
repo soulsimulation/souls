@@ -85,7 +85,9 @@ body path, and publishes into its own static folder. `--stream` is the world's f
 - `--client` holds at least `replica.js` and `replica_bg.wasm` (v2's `target/wasm-load/pkg`), matching the v2 world's
   build. Without the release's `soul-client.json`, the routed `/v1/config` answers 503 and the page uses its inline config.
 - `--bodies` is a built body-assets folder (`V2_BODY_ASSETS`, with `bodies.json`). The launcher serves it at
-  `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another.
+  `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another. A release
+  sets it itself on every bound world that names no catalogue: the install's `/usr/local/lib/souls/web/assets/bodies`
+  (`release.sh bodies binding`, [release.md](release.md)).
 - `--stream` must reach the v2 origin on the page's origin (the front door's `/s/` route).
 - With `--port`, it reads the world's page afterwards and prints the `v2Stream` and `v2Bodies` the page carries.
 

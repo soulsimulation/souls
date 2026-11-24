@@ -21,7 +21,15 @@
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
 #   move <sha> [<canary world>|@eden]   the canary's pin by `deploy` (O7), then every other world's, then the gateway by
 #                                  `gateway-upgrade` (O16), then the page, then the served client
-#                                  ($LIB/client, which a world's address serves); each step done once per release
+#                                  ($LIB/client, which a world's address serves); each step done once per release.
+#                                  Before the deploys, `bodies worlds`; after the page, `bodies binding`
+#   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
+#                                  folder (every world when none is named) that has none, or whose own it admits
+#                                  every body of; a fork keeps its own (its boot pins it). worldd reads it at start
+#   bodies binding                 each world of the launcher's cutover binding (SOULS_CUTOVER_BINDING, else
+#                                  $ETC/cutover-binding.json, as the launcher finds it) that names no catalogue gets
+#                                  bodiesDir $LIB/web/assets/bodies: its page draws the bodies Souls wear, served at
+#                                  /w/<slug>/v2/bodies/ (the launcher reads the file again within a second)
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
@@ -205,6 +213,69 @@ directory_env() {
   fi
 }
 
+# The body catalogue (souls/bodies/1) a release's page carries (bodies.ts) is the one every world admits: a Soul's
+# `wear` is refused by a world without it, and a page whose binding names none draws every body as a default person.
+# ADMITS <old> <new>: exits 0 when <new> is a catalogue that admits every body <old> does (or <old> is none).
+ADMITS='const fs = require("fs"), cat = (f) => { try { const c = JSON.parse(fs.readFileSync(f, "utf8")); return c && c.format === "souls/bodies/1" && Array.isArray(c.bodies) ? new Set(c.bodies.map((b) => b && b.hash)) : null; } catch { return null; } };
+const [o, n] = process.argv.slice(1).map(cat); process.exit(n && (!o || [...o].every((h) => n.has(h))) ? 0 : 1);'
+# BIND <binding> <dir>: bodiesDir <dir> on each world of the binding that names no catalogue (bodiesDir or v2Bodies).
+BIND='const fs = require("fs"), [file, dir] = process.argv.slice(1), b = JSON.parse(fs.readFileSync(file, "utf8"));
+const list = Array.isArray(b.worlds) ? b.worlds : [b], set = list.filter((w) => w && typeof w === "object" && !w.bodiesDir && !w.v2Bodies);
+for (const w of set) w.bodiesDir = dir;
+if (set.length) { const st = fs.statSync(file), tmp = `${file}.bodies.new`; fs.writeFileSync(tmp, JSON.stringify(b, null, 2) + "\n", { mode: st.mode & 0o777 });
+  if (process.getuid() === 0) fs.chownSync(tmp, st.uid, st.gid); fs.renameSync(tmp, file); }
+console.log(`bodies: the binding serves ${dir} for ${set.length ? set.map((w) => w.canonicalSlug).join(", ") : "no other world"}; ${list.length - set.length} already named a catalogue`);'
+
+bodies_worlds() {
+  local tarball=$1 tmp new f w
+  shift
+  # shellcheck disable=SC2046 # a world's name is one word
+  if [ $# -eq 0 ]; then set -- $(worlds); fi
+  tmp=$(mktemp -d)
+  tar -xf "$tarball" -C "$tmp" ./assets/bodies/bodies.json 2> /dev/null || tar -xf "$tarball" -C "$tmp" assets/bodies/bodies.json 2> /dev/null || true
+  new=$tmp/assets/bodies/bodies.json
+  if ! node -e "$ADMITS" "$new" "$new"; then
+    rm -rf "$tmp"
+    echo "bodies: this release's page carries no body catalogue; every world keeps its own"
+    return 0
+  fi
+  for w in "$@"; do
+    f=$WORLDS_ROOT/worlds/$w
+    if grep -q '"fork" *: *true' "$f/world.json" 2> /dev/null; then
+      echo "bodies: $w keeps its own catalogue (a fork's boot pins it)"
+    elif [ -f "$f/bodies.json" ] && cmp -s "$new" "$f/bodies.json"; then
+      echo "bodies: $w has this release's catalogue"
+    elif [ -f "$f/bodies.json" ] && ! node -e "$ADMITS" "$f/bodies.json" "$new"; then
+      echo "bodies: $w keeps its own catalogue (this release's does not admit every body it does)"
+    else
+      install -m 644 "$new" "$f/.bodies.json.new"
+      if [ "$(id -u)" = 0 ]; then chown --reference="$f/world.json" "$f/.bodies.json.new"; fi
+      mv "$f/.bodies.json.new" "$f/bodies.json"
+      echo "bodies: $w gets this release's catalogue (read when its deploy restarts it)"
+    fi
+  done
+  rm -rf "$tmp"
+}
+
+bodies_binding() {
+  local file=${SOULS_CUTOVER_BINDING:-$ETC/cutover-binding.json} dir=$LIB/web/assets/bodies
+  if [ ! -f "$file" ]; then
+    echo "bodies: no cutover binding at $file"
+  elif [ ! -f "$dir/bodies.json" ]; then
+    echo "bodies: no catalogue at $dir; the binding is unchanged"
+  else
+    node -e "$BIND" "$file" "$dir" || echo "bodies: the binding at $file could not be read; it is unchanged"
+  fi
+}
+
+bodies() {
+  case ${1:-} in
+    worlds) shift && [ $# -ge 1 ] || die "bodies worlds <page.tar> [<world>...]"; bodies_worlds "$@" ;;
+    binding) bodies_binding ;;
+    *) die "bodies worlds <page.tar> [<world>...] | bodies binding" ;;
+  esac
+}
+
 move() {
   local sha=$1 canary=${2:-} rel=$DATA/releases/$1 worldd gw page client w order=() all
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
@@ -223,6 +294,8 @@ move() {
   while IFS= read -r w; do [ "$w" = "$canary" ] || order+=("$w"); done <<< "$all"
   directory_env
   echo "move: ${sha:0:12}: worldd ${worldd:0:16}…, canary $canary, then ${#order[@]} worlds in all"
+  # each world's catalogue before its deploy, which restarts it: worldd reads bodies.json at start
+  bodies_worlds "$WORLDS_ROOT/builds/$page/page.tar" "${order[@]}"
   for w in "${order[@]}"; do
     if [ -f "$rel/moved/$w" ]; then
       echo "move: $w already moved by this release"
@@ -255,6 +328,7 @@ move() {
     touch "$rel/moved/page"
     echo "move: the page is ${page:0:16}… ($LIB/web)"
   fi
+  bodies_binding
   if [ -f "$rel/moved/client" ]; then
     echo "move: the served client already moved by this release"
   else
@@ -392,9 +466,9 @@ main() {
   local cmd=${1:-}
   shift || true
   case $cmd in
-    checks | bundle | stage | verify | move | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
+    checks | bundle | stage | verify | move | bodies | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
     reseed-undo) reseed_undo "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 
