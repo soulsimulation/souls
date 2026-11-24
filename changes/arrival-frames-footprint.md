@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A world without Souls about opens on its whole build from outside, not with the camera against a wall of a large building.
+A world that opens on what was built now frames a large building whole, instead of starting with the camera against its wall.
