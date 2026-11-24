@@ -308,6 +308,21 @@ pub fn position(tree: &Tree, id: Id) -> R<Xz> {
     Ok([x.pos.x, x.pos.z])
 }
 
+/// Twice the area a node's outline covers, µm² (0 for a line or a point): which of a building's rooms is its main one
+/// (0.133 Q2).
+pub fn area2(tree: &Tree, id: Id) -> R<i128> {
+    Ok(match (View { tree }).shape(id)? {
+        Shape::Area(a) => (0..a.len())
+            .map(|i| {
+                let (p, q) = (a[i], a[(i + 1) % a.len()]);
+                i128::from(p[0]) * i128::from(q[1]) - i128::from(q[0]) * i128::from(p[1])
+            })
+            .sum::<i128>()
+            .abs(),
+        _ => 0,
+    })
+}
+
 /// How far `at` (a point in `frame`'s own frame) lies from `target`'s shape, on the level, µm: 0 inside its area, else
 /// to its outline, its line or its point (0.133: a walk's end says how far from its target it stood).
 pub fn gap(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<i64> {

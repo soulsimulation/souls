@@ -118,7 +118,7 @@ export function build({ out, version, min = '0.0.0', pkg, strict = false }) {
   const files = Object.fromEntries(payload.map((f) => [f, readFileSync(join(REPO, f), 'utf8')]));
   for (const [name, from] of namedImports(payload)) Object.assign(files, vendored(name, from, { strict }));
   const loader = readFileSync(join(here, 'loader.mjs'), 'utf8');
-  writeFileSync(join(out, 'eden.mjs'), `#!/usr/bin/env node\n// Souls client ${version} (Engine v2 R17): start with \`node eden.mjs pair <world>\`.\n` +
+  writeFileSync(join(out, 'eden.mjs'), `#!/usr/bin/env node\n// Souls client ${version} (Engine v2 R17): in a new empty folder, start with \`node eden.mjs pair <world>\`.\n` +
     `const VERSION = "${version}";\nconst ENTRY = ${JSON.stringify(ENTRY)};\nconst FILES = ${JSON.stringify(files)};\n${loader}`);
   writeFileSync(join(out, 'skill.md'), stampSkill(readFileSync(join(CLIENT, 'skill/SKILL.md'), 'utf8'), version));
   if (existsSync(join(CLIENT, 'skills/creator.md'))) copyFileSync(join(CLIENT, 'skills/creator.md'), join(out, 'creator.md'));

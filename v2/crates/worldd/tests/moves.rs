@@ -2232,3 +2232,120 @@ fn a_walks_target_is_kept_until_it_ends_however_it_ends() {
         "a walk refused at its start keeps nothing"
     );
 }
+
+/// 0.133 Q2: where a walk to a node with no point and no seat ends. A walk to a building ends inside its largest room
+/// (the stair hall, the first by id of the two largest); a walk to the ground stays on the ground at its middle (once
+/// it ended in that room, 62 m off); a walk to another Soul's body ends at speaking distance from it on the walker's
+/// side; a walk to the world's root is refused by name.
+#[test]
+fn q2_a_walk_ends_in_a_buildings_main_room_on_the_ground_or_beside_a_soul() {
+    use worldd::bodies::{Ask, Asked};
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    let n = |k: &str| im.nodes[k];
+    let walk = |b: &mut Bodies, i: u64, to: Id| {
+        b.start(vec![(
+            soul(i),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+        .remove(0)
+        .1
+    };
+    let run = |b: &mut Bodies, id: Id| -> Result<(), String> {
+        for _ in 0..4_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    };
+    // Where a walk to `node`'s middle goes, as E2's shared library resolves it.
+    let middle = |node: Id| {
+        let r = resolve(&im.tree, &Spot::Middle(node), None, &|_, _| false).expect("a middle");
+        (r.frame, r.local)
+    };
+    let flat = |p: Vec3, q: Vec3| {
+        (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt() as i64
+    };
+    // A second Soul, standing 6 m north of the walker on the open ground.
+    let other = Id::new(Scope([7; 16]), 9_020).unwrap();
+    let other_at = Vec3::new(-40_000_000, 0, 36_000_000);
+    let mut b = bodies().unwrap();
+    let (town, ground) = town();
+    let placed = town.surfaces[&ground]
+        .place(
+            other,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            other_at,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    b.add_body(humanoid(), placed).unwrap();
+    b.begin(0);
+
+    // To the world's root: refused by name as it starts.
+    let root = im.tree.node(im.tree.root()).unwrap().id();
+    let r = walk(&mut b, 1, root);
+    assert_eq!(r.map_err(|e| e.name), Err("move.whole-world"));
+
+    // To another Soul: beside it, about 1.2 m away on the walker's side (south of it).
+    walk(&mut b, 2, other).expect("the walk to the other Soul starts");
+    assert_eq!(run(&mut b, soul(2)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    let gap = flat(at, other_at);
+    println!("beside: {gap} um from the other Soul, at {at:?}");
+    assert_eq!(frame, ground);
+    assert!(
+        (900_000..=1_600_000).contains(&gap),
+        "speaking distance: {gap} um"
+    );
+    assert!(at.z < other_at.z, "on the walker's side: {at:?}");
+
+    // To the ground: on the ground, at its middle, never in a building's room.
+    let (g_frame, g_mid) = middle(ground);
+    walk(&mut b, 3, ground).expect("the walk to the ground starts");
+    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    println!(
+        "ground: on {} at {at:?}, middle {g_mid:?}",
+        replica::world_model::show(frame)
+    );
+    assert_eq!((frame, g_frame), (ground, ground), "still on the ground");
+    assert!(
+        flat(at, g_mid) < 1_000_000,
+        "at the ground's middle: {at:?}"
+    );
+
+    // To the building: inside its main room, the stair hall.
+    let (h_frame, h_mid) = middle(n("building/r0a"));
+    let mut b = bodies().unwrap();
+    b.begin(0);
+    walk(&mut b, 4, n("building")).expect("the walk to the building starts");
+    assert_eq!(run(&mut b, soul(4)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    println!(
+        "building: on {} at {at:?}, the stair hall's middle {h_mid:?}, after {} ms",
+        replica::world_model::show(frame),
+        b.runner.now / 1000
+    );
+    assert_eq!(frame, h_frame, "on the stair hall's floor");
+    // Inside the stair hall's outline (5.8 m by 11.8 m clear round its middle, in the floor's frame); N9 grants the
+    // nearest free standing spot to its middle, off the stair.
+    assert!(
+        (at.x - h_mid.x).abs() <= 2_900_000 && (at.z - h_mid.z).abs() <= 5_900_000,
+        "inside the stair hall: {at:?}"
+    );
+}
