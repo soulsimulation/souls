@@ -22,10 +22,11 @@ sign-in bridge); `cdn-trust.snippet` stays in the global options.
 
 ## Prove it locally
 
-Needs `caddy` on the path, a built `v2/web` (`npx vite build` in `v2/web`) and a built `apps/web`:
+Needs `caddy` on the path, a built `apps/web` (it holds the pairing card, `pair.html`) and the install's page folder
+(the body files, `node v2/tools/ops/release/bodies.ts --from <prepared body assets> --out <folder>`):
 
 ```sh
-BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web v2/web/dist --today-web apps/web/dist
+BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <folder> --today-web apps/web/dist
 ```
 
 It runs `front-check.mjs` with everything up (every point), then with today's launcher stopped (the poster, the stream,

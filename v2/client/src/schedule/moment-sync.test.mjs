@@ -4,7 +4,7 @@
 // worldd serve and gatewayd; the act must be sent before the held answer is released.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { decode, idText } from '../brief/copy.mjs';
 import { call, DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { addEntry } from './schedule.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const TICK = 50_000;
 const v2 = resolve(dirname(new URL(import.meta.url).pathname), '../../..');
@@ -84,7 +85,6 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
     procs.push(p);
     return { p, text: () => text };
   };
-  const kill = (p) => new Promise((ok) => { if (p.exitCode !== null || p.signalCode !== null) return ok(); p.once('exit', ok); p.kill('SIGKILL'); });
   const ask = (q) => request(rt.socket, q, 30_000);
   let proxy;
   try {
@@ -142,7 +142,6 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
   } finally {
     await ask({ op: 'stop' }).catch(() => {});
     proxy?.close();
-    for (const p of procs) await kill(p);
-    rmSync(dir, { recursive: true, force: true });
+    await stopThenRemove(procs, dir, { signal: 'SIGKILL' });
   }
 });

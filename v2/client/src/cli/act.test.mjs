@@ -17,6 +17,7 @@ import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { actEnd, lookParams, requestOf, worldOf } from './souls.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -83,8 +84,7 @@ before(async () => {
 
 after(async () => {
   for (const rt of daemons) await request(rt.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('the arguments: pair takes a world url, can and act take act words; a world url names its directory and gateway', () => {

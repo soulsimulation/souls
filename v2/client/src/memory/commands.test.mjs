@@ -12,8 +12,8 @@ import { dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { openMemoryFolder } from '../../../../tools/world-launcher/soul/memory-folder.mjs';
-import { openSoulMemory as shippingMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
+import { openMemoryFolder } from '../soul/memory-folder.mjs';
+import { openSoulMemory as shippingMemory } from '../soul/memory.mjs';
 import { feederFor } from './feeder.mjs';
 import { ALIASES, rememberIn, searchIn, soulDirOf } from './memory.mjs';
 

@@ -30,6 +30,7 @@ the install's, run by the release owner. `node v2/tools/ops/runbook-check.mjs` c
 - [install.md](install.md): what the install put where, and the owner's steps after it.
 - [log-shipping.md](log-shipping.md): how each world's log reaches the bucket, and its two marks.
 - [mcp.md](mcp.md): the MCP endpoint that apps which take only a URL use to run a Soul.
+- [limits-run.md](limits-run.md): the limits run (0.133 P3), measured once on the production machine after every world has moved.
 
 ## Not here until its task merges
 

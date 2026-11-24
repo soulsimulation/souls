@@ -8,7 +8,8 @@
 //
 //   --bin    worldd, gatewayd, directoryd and driver, release builds of the head under check
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
-//   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
+//   --card   the install's page folder (the body files, v2/tools/ops/release/bodies.ts); the pairing card (/pair) is the
+//            old page's pair.html (apps/web/dist, X2)
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
 //   --world-root  the world's folder's parent (default /dev/shm on Linux, else the out folder)
 //   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
@@ -42,7 +43,7 @@ const log = (s) => console.log(`check-0132: ${s}`);
 const need = (ok, what) => { if (!ok) { console.error(`check-0132: ${what}`); process.exit(2); } };
 for (const b of ['worldd', 'gatewayd', 'directoryd', 'driver']) need(existsSync(join(BIN, b)), `--bin has no ${b}`);
 need(existsSync(join(PKG, 'replica.js')), '--pkg has no replica.js');
-need(existsSync(join(CARD, 'src/pairing/card.html')), '--card has no src/pairing/card.html (build v2/web)');
+need(existsSync(join(repo, 'apps/web/dist/pair.html')), 'apps/web/dist has no pair.html (the pairing card: pnpm --filter @souls/web build)');
 need(existsSync(join(repo, 'apps/web/dist/index.html')), 'apps/web/dist is not built');
 need(existsSync(join(MARS_WEB, 'modular/humanoid/kit.json')), `--mars-web ${MARS_WEB} has no people's character set (pnpm build:viewer)`);
 need(existsSync(join(repo, 'tools/world-launcher/v2-switch.mjs')), 'tools/world-launcher/v2-switch.mjs is missing (#4210)');
@@ -131,7 +132,8 @@ writeFileSync(join(OUT, 'Caddyfile'), `{\n\tadmin off\n\tauto_https off\n\tpersi
   .replaceAll('https://soul.game', BASE).replaceAll('localhost:@@PRODUCTION_PORT@@', `127.0.0.1:${port.launcher}`)
   .replaceAll('localhost:7310', `127.0.0.1:${port.directory}`).replaceAll('localhost:7320', `127.0.0.1:${port.origin}`).replaceAll('localhost:7330', `127.0.0.1:${port.agents}`)
   .replaceAll('/usr/local/lib/souls/web', CARD).replaceAll('/var/lib/souls-routes/slugs', slugs)
-  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', join(repo, 'tools/world-launcher/deploy/caddy')));
+  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', join(repo, 'tools/world-launcher/deploy/caddy'))
+  .replaceAll('/srv/sim-worlds/production/apps/web/dist', join(repo, 'apps/web/dist')));
 await start('caddy', 'caddy', ['run', '--adapter', 'caddyfile', '--config', join(OUT, 'Caddyfile')], /serving initial configuration|server running/i, { env: { ...process.env, XDG_CONFIG_HOME: caddyDir, XDG_DATA_HOME: caddyDir } });
 
 // the switch (#4210's one command)
@@ -509,4 +511,11 @@ writeFileSync(join(OUT, 'table.md'), table + '\n');
 console.log(`\n${table}`);
 console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
+// The world's folder is removed on exit, so its worldd (which backs up its stream when stopped, R15) has ended first:
+// v2/tools/teardown/stop.mjs's rule, here because nothing outside v2/ imports from it (K14).
+await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? null : new Promise((ok) => {
+  const hard = setTimeout(() => p.kill('SIGKILL'), 15_000);
+  p.once('exit', () => { clearTimeout(hard); ok(); });
+  p.kill();
+})));
 process.exit(rows.every((r) => r.pass) ? 0 : 1);
