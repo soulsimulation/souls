@@ -278,13 +278,16 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     const [r1, r2] = Object.keys(roles).filter((k) => k !== 'now').map((k) => `${ns}:${k}`);
     const [offered] = await a.act({ op: 'act', verb: 'activity:offer', target: ba.parent, params: { 1: kindName, 2: r1, 3: [bb.id] } });
     assert.equal(offered.outcome, 'receipt', `the ${plainGame} offer lands`);
-    const asked2 = await b.waitEvent((e) => e.kind === 'conversation' && e.what === 'invited' && e.conversation !== conv);
+    // 0.135: an entry's activity reaches the asked Soul as that activity (its word), not as a conversation.
+    const word = plainGame.replace(/^.*:/, '').replace(/_activity$/, '').replace(/_/g, '-');
+    const asked2 = await b.waitEvent((e) => e.kind === 'together' && e.what === 'offered' && e.touch === word);
     console.log('offered', JSON.stringify(asked2), 'roles', r1, r2);
-    const [joined] = await b.act({ op: 'act', verb: 'activity:accept', target: asked2.conversation });
+    assert.ok(!b.events.some((e) => e.kind === 'conversation' && e.what === 'invited' && e.conversation === asked2.offer), 'not as a conversation');
+    const [joined] = await b.act({ op: 'act', verb: 'activity:accept', target: asked2.offer });
     assert.equal(joined.outcome, 'receipt', `the ${plainGame} is joined`);
-    const rows = await waitFor(async () => (await a.find(plainGame.split(':')[1])).find((r) => r.id === asked2.conversation));
+    const rows = await waitFor(async () => (await a.find(plainGame.split(':')[1])).find((r) => r.id === asked2.offer));
     console.log('activity', JSON.stringify(rows));
-    for (const s of [a, b]) await s.act({ op: 'act', verb: 'activity:leave', target: asked2.conversation });
+    for (const s of [a, b]) await s.act({ op: 'act', verb: 'activity:leave', target: asked2.offer });
   } finally {
     for (const s of [a, b, c]) {
       const st = await request(s.rt.socket, { op: 'status' }).catch(() => null);
