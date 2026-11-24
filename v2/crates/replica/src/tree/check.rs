@@ -410,3 +410,217 @@ impl Tree {
         }
     }
 }
+
+/// T6 rule 3.4's balance by name (E5b): each set's field is named on the kind of the node set, and falls back to its
+/// number when any set's name is unknown.
+#[cfg(test)]
+mod balance_tests {
+    use super::*;
+    use crate::effects::Part;
+    use crate::world_model::{parse_kinds, parse_world};
+
+    /// Linen numbers soap 2, the board 1 and the tub 2; `odd` numbers dirt 1, as the board numbers soap; `plain_a` and
+    /// `plain_b` have no section 3. Each kind has one thing: 100 linen, 101 board, 102 tub, 103 odd, 104 plain_a,
+    /// 105 plain_b, on a ground that admits things.
+    const KINDS: &str = "{1: \"t:ground\", 2: \"place\", 11: [\"thing\"]}\n\
+        {1: \"t:linen\", 2: \"thing\", 3: {1: {1: \"dirt\"}, 2: {1: \"soap\"}}}\n\
+        {1: \"t:board\", 2: \"thing\", 3: {1: {1: \"soap\"}, 2: {1: \"dirt\"}}}\n\
+        {1: \"t:tub\", 2: \"thing\", 3: {1: {1: \"water\"}, 2: {1: \"soap\"}}}\n\
+        {1: \"t:odd\", 2: \"thing\", 3: {1: {1: \"dirt\"}}}\n\
+        {1: \"t:plain_a\", 2: \"thing\"}\n\
+        {1: \"t:plain_b\", 2: \"thing\"}";
+    const WORLD: &str = "{1: [], 2: {}, 3: [{1: 1, 2: \"t:ground\"}, {1: 100, 2: \"t:linen\", 3: 1}, \
+        {1: 101, 2: \"t:board\", 3: 1}, {1: 102, 2: \"t:tub\", 3: 1}, {1: 103, 2: \"t:odd\", 3: 1}, \
+        {1: 104, 2: \"t:plain_a\", 3: 1}, {1: 105, 2: \"t:plain_b\", 3: 1}], 4: []}";
+
+    fn id(n: u64) -> Id {
+        Id::new(crate::ids::FIXTURE_SCOPE_A, n).expect("an id")
+    }
+
+    fn world() -> (Tree, Rules, Header) {
+        let kinds = parse_kinds(KINDS).expect("kinds");
+        let (tree, rules) =
+            Tree::load(&parse_world(&kinds, WORLD).expect("a world")).expect("loads");
+        let header = header(id(1), &rules.kinds).expect("a header");
+        (tree, rules, header)
+    }
+
+    fn set(node: u64, field: u64, by: i64) -> Change {
+        Change::Set {
+            node: id(node),
+            field,
+            to: Value::Uint(u64::try_from(20 + by).expect("whole")),
+            by: Some(by),
+        }
+    }
+
+    /// Commits `changes`, one entry each (written by the node changed, or a create's parent), as one part.
+    fn commit(tree: &mut Tree, rules: &Rules, header: &Header, changes: Vec<Change>) -> R<()> {
+        let next = tree.to_state().next;
+        let entries: Vec<Effect> = changes
+            .into_iter()
+            .zip(next..)
+            .map(|(c, s)| {
+                let node = match &c {
+                    Change::Set { node, .. } | Change::Remove { node } => *node,
+                    Change::Create { pose, .. } => pose.frame.node,
+                    _ => unreachable!("sets, creates and removes"),
+                };
+                entry(s, node, Audience::Everyone, vec![c])
+            })
+            .collect();
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(entries.iter().map(Effect::to_value).collect()),
+            ),
+        ]));
+        let part = Part::read(&encode(&v).expect("bytes")).expect("a part");
+        tree.commit(header, &part, rules)
+    }
+
+    fn refused(r: R<()>) -> Option<&'static str> {
+        r.err().map(|e| e.name)
+    }
+
+    #[test]
+    fn a_transfer_between_kinds_that_number_the_field_differently_balances_by_name() {
+        let (mut tree, rules, header) = world();
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(100, 2, -10), set(101, 1, 10)]
+            ),
+            Ok(())
+        );
+        // The tub numbers soap as linen does: by number or by name, the same.
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(100, 2, -10), set(102, 2, 10)]
+            ),
+            Ok(())
+        );
+        // Half a transfer is still refused.
+        assert_eq!(
+            refused(commit(&mut tree, &rules, &header, vec![set(100, 2, -10)])),
+            Some("by-not-balanced")
+        );
+    }
+
+    #[test]
+    fn the_same_number_with_different_names_is_refused() {
+        // The old wrong-field write: linen's soap (2) out, the board's dirt (2) in.
+        let (mut tree, rules, header) = world();
+        assert_eq!(
+            refused(commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(100, 2, -10), set(101, 2, 10)]
+            )),
+            Some("by-not-balanced")
+        );
+        // The board's soap (1) into `odd`'s dirt (1): one number, two names.
+        assert_eq!(
+            refused(commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(101, 1, -10), set(103, 1, 10)]
+            )),
+            Some("by-not-balanced")
+        );
+    }
+
+    #[test]
+    fn with_a_kind_that_has_no_section_3_the_part_balances_by_number() {
+        let (mut tree, rules, header) = world();
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(104, 1, -10), set(105, 1, 10)]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            refused(commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(104, 1, -10), set(105, 2, 10)]
+            )),
+            Some("by-not-balanced")
+        );
+        // One end named and one not: the whole part by number, so soap 2 and field 2 balance.
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![set(100, 2, -10), set(104, 2, 10)]
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_node_made_or_removed_in_the_same_part_is_named_by_its_kind() {
+        let (mut tree, rules, header) = world();
+        let board = rules
+            .kinds
+            .keys()
+            .find(|k| plain(k) == "t:board")
+            .expect("pinned")
+            .clone();
+        let made = Change::Create {
+            node: id(200),
+            kind: Name::new(&board).expect("a name"),
+            pose: Pose {
+                frame: Frame {
+                    node: id(1),
+                    slot: None,
+                },
+                position: Vec3::ZERO,
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: id(1),
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        // A board made in the part takes linen's soap: its soap is field 1, by its kind.
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![made, set(100, 2, -10), set(200, 1, 10)]
+            ),
+            Ok(())
+        );
+        // The board takes soap and is removed in the same part: still named by its kind.
+        assert_eq!(
+            commit(
+                &mut tree,
+                &rules,
+                &header,
+                vec![
+                    set(100, 2, -10),
+                    set(101, 1, 10),
+                    Change::Remove { node: id(101) }
+                ]
+            ),
+            Ok(())
+        );
+    }
+}

@@ -1237,6 +1237,19 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
     assert_eq!(field(board, 2), None, "the board's dirt is untouched");
 }
 
+/// E5: into a kind that numbers the field as the source does (the tub's soap is 2, as linen's), the transfer moves
+/// the amount, each end by its own field.
+#[test]
+fn e5_a_transfer_into_a_kind_that_numbers_the_field_alike_moves_the_amount() {
+    assert_eq!(
+        e5_transfer(0, "wash", &[("other", 102)]),
+        Ok(vec![
+            (id(100), 2, Value::Uint(20), Some(-10)),
+            (id(102), 2, Value::Uint(10), Some(10))
+        ])
+    );
+}
+
 /// E5: each end finds the field by name on its own kind; an end whose kind has no field of that name (the funnel has
 /// no soap) is refused `field-unknown`, from either side.
 #[test]
