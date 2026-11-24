@@ -1380,17 +1380,20 @@ impl Town {
         }
         self.spots.invalidate_geometry();
         // A change that cuts squares again changes the open ground there only (and the buildings read again): the
-        // squares any class cut again (S13b: a larger body's cut reaches further).
+        // squares any class cut again (S13b: a larger body's cut reaches further); all of it when a class was built whole.
         let cut: Option<BTreeSet<(i32, i32)>> = match &fresh {
             Fresh::Squares(sq, _, bs) => {
                 touched.extend(bs.iter().flat_map(|(b, _)| b.floors.keys().copied()));
                 let mut cut: BTreeSet<_> = sq.iter().map(|(k, ..)| *k).collect();
+                let mut whole = false;
                 for (f, _) in classes.values() {
-                    if let Fresh::Squares(sq, ..) = f {
-                        cut.extend(sq.iter().map(|(k, ..)| *k));
+                    match f {
+                        Fresh::Squares(sq, ..) => cut.extend(sq.iter().map(|(k, ..)| *k)),
+                        Fresh::Whole(_) => whole = true,
+                        Fresh::Buildings(_) => {}
                     }
                 }
-                Some(cut)
+                (!whole).then_some(cut)
             }
             _ => None,
         };

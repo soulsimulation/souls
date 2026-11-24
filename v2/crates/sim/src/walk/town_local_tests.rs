@@ -261,6 +261,11 @@ fn building(t: &Town, (x, z): (i64, i64)) -> Part {
 /// A single wall, 3 m by 0.2 m and 2.5 m tall, on the open ground at (x + 2, z + 4) m, half a metre before the open
 /// side of [`building`]'s building: a new box of the kind of the first thing standing there with a box of its own.
 fn wall(t: &Town, (x, z): (i64, i64)) -> Part {
+    wall_at(t, Vec3::new((x + 2) * M, 0, (z + 4) * M))
+}
+
+/// [`wall`]'s wall, its middle at `at` on the open ground (µm).
+fn wall_at(t: &Town, at: Vec3) -> Part {
     let tree = &t.tree;
     let gh = tree.handle(t.ground).unwrap();
     let kind = tree
@@ -282,7 +287,7 @@ fn wall(t: &Town, (x, z): (i64, i64)) -> Part {
         vec![Change::Create {
             node: new_id(t, 10),
             kind,
-            pose: on_ground(t, Vec3::new((x + 2) * M, 0, (z + 4) * M)),
+            pose: on_ground(t, at),
             audience: Audience::Everyone,
             fields: BTreeMap::from([(
                 F_SOLIDS,
@@ -819,6 +824,38 @@ fn a_building_with_front_doors_moved_removed_and_placed_equals_the_whole() {
         d.is_empty(),
         "after {b:?} was placed again, the town equals the whole: {d:?}"
     );
+}
+
+/// S13b review: a wall whose far edge stops short of a square's edge by less than a larger body's clearance changes the
+/// next square for that body: each class cuts it again with its own reach and equals its own whole build. The wall
+/// stops 1.2 m short (inside a giant's clearance, past a standard body's), and exactly each class's clearance short.
+#[test]
+fn a_wall_near_a_square_edge_equals_the_whole_in_each_class() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let edge = crate::ground::SQUARE * 1000;
+    let clearance = |s: Size| (s.radius_mm() + crate::ground::MARGIN + 1) * 1000;
+    let gaps = std::iter::once(1_200_000).chain(
+        [Size::Standard, Size::Large, Size::Giant]
+            .into_iter()
+            .map(clearance),
+    );
+    for gap in gaps {
+        let mut t = town_of(&w.text);
+        t.prepare_classes(CLASSES).unwrap();
+        // The wall is 3 m along x: its far edge `gap` short of x = 16 m, in the middle of the square in z.
+        let p = wall_at(&t, Vec3::new(edge - gap - 1_500_000, 0, edge / 2));
+        let (whole, why, _) = apply(&mut t, &p);
+        assert!(
+            !whole,
+            "the wall {gap} µm short of the edge is rebuilt locally ({why:?})"
+        );
+        let mut w = whole_of(&t);
+        let d = differences(&mut t, &mut w, 300);
+        assert!(
+            d.is_empty(),
+            "a wall {gap} µm short of a square's edge: the town equals the whole: {d:?}"
+        );
+    }
 }
 
 #[test]
