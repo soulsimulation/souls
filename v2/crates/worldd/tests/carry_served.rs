@@ -556,6 +556,7 @@ async fn carry_east(
 /// The load's lift and its set-down, from the log: held in the carry's slot with its `long` axis (its own frame,
 /// µm from its middle) along the carry's +x, and set down with its middle 25 m east of `at` and its long axis still
 /// between where its carriers stood (north to south, or east to west).
+#[allow(clippy::too_many_arguments)]
 fn held_and_set_down(
     dir: &Path,
     name: &str,
@@ -564,6 +565,7 @@ fn held_and_set_down(
     long: Vec3,
     at: Vec3,
     north: bool,
+    carriers: [Id; 2],
 ) {
     let l = Load::of(entry).unwrap();
     let moved = moves_of(dir, load);
@@ -594,14 +596,59 @@ fn held_and_set_down(
         (middle.x - at.x - CARRIED).abs() < 600_000 && (middle.z - at.z).abs() < 600_000,
         "{name}: set down 25 m east: {middle:?}"
     );
-    let (along, across) = match north {
-        true => (end.z, end.x),
-        false => (end.x, end.z),
+    // Its yaw follows where its front and back carriers' walks ended, which is within a walk's reach of their places:
+    // its long axis is checked against the line between where they stood, and that line against the nominal one.
+    let (f, k) = stood_at_set_down(dir, load, carriers);
+    let (dx, dz) = ((f.x - k.x) as f64, (f.z - k.z) as f64);
+    let gap = dx.hypot(dz);
+    let across = (end.x as f64 * dz - end.z as f64 * dx) / gap;
+    let along = (end.x as f64).hypot(end.z as f64);
+    println!(
+        "{name}: its carriers stood {gap:.0} µm apart, its long axis {across:.0} µm off their line"
+    );
+    let nominal = match north {
+        true => dx.abs() / gap,
+        false => dz.abs() / gap,
     };
     assert!(
-        (along.abs() - l.half_length).abs() < 20_000 && across.abs() < 20_000,
-        "{name}: set down lengthwise between where its carriers stood: {end:?}"
+        nominal < 0.05,
+        "{name}: its carriers stood {} its length: {f:?} {k:?}",
+        if north {
+            "north to south"
+        } else {
+            "east to west"
+        }
     );
+    assert!(
+        (along - l.half_length as f64).abs() < 20_000.0 && across.abs() < 20_000.0,
+        "{name}: set down lengthwise between where its carriers stood: {end:?}, {f:?} {k:?}"
+    );
+}
+
+/// Where the bodies `carriers` (front, back) stood when `load` was set down: the log's body rows up to the part that
+/// holds the load's second move.
+fn stood_at_set_down(dir: &Path, load: Id, carriers: [Id; 2]) -> (Vec3, Vec3) {
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    let mut at = BTreeMap::new();
+    let mut moved = 0;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        let Ok(p) = Part::read(&r) else { continue };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                at.insert(b, pose.position);
+            }
+        }
+        moved += p
+            .effects
+            .iter()
+            .filter(|e| matches!(e.body, Body::Transfer(TransferRec::Leave { node, .. }) if node == load))
+            .count();
+        if moved >= 2 {
+            break;
+        }
+    }
+    let [f, k] = carriers.map(|b| *at.get(&b).expect("a carrier's body row"));
+    (f, k)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -687,6 +734,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
     drop(served);
 
     // The beam's length is its z, the upright's its y (from its foot; its middle is half its height up).
+    let carriers = [body_of(&dir, souls[0]), body_of(&dir, souls[1])];
     held_and_set_down(
         &dir,
         "the beam",
@@ -695,6 +743,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         Vec3::new(0, 0, Load::of(&beam_entry).unwrap().half_length),
         beam_at(),
         true,
+        carriers,
     );
     let up = Load::of(&upright_entry).unwrap();
     held_and_set_down(
@@ -705,6 +754,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         Vec3::new(0, up.half_length, 0),
         upright_at(),
         false,
+        carriers,
     );
     println!(
         "C4: a served world carried the beam and the upright 25 m by two Souls' intents through the gateway (walk, \
@@ -829,6 +879,9 @@ async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
         .act("carry:lift", three, BTreeMap::from([(1, beam.to_value())]))
         .await
         .expect("three lift the beam");
+    // Soul 4 is not in this carry: its leave of it sets nothing down (the beam's moves below are its lift and its
+    // set-down only, and no souls:carry-set-down is said).
+    let _ = crew[3].act("activity:leave", three, BTreeMap::new()).await;
     crew[2]
         .act_on("life:leave", None, BTreeMap::new())
         .await
@@ -863,8 +916,9 @@ async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
     };
     assert!(
         words("souls:carry-set-down").is_empty(),
-        "neither broke off"
+        "neither broke off, nor did a stranger's leave"
     );
+    let carriers = [body_of(&dir, souls[0]), body_of(&dir, souls[1])];
     assert_eq!(
         words("souls:carry-going-on"),
         vec![Value::Text(Name::new("souls:carrier-left").unwrap())],
@@ -878,6 +932,7 @@ async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
         Vec3::new(0, 0, bl.half_length),
         beam_at(),
         true,
+        carriers,
     );
     // Its length is its y, from its foot: laid flat when lifted, and set down so, 25 m east.
     let entry = construction("rack_upright_6m.json");
@@ -890,6 +945,7 @@ async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
         Vec3::new(0, load.half_length, 0),
         at,
         false,
+        carriers,
     );
     println!(
         "C6: a served world carried the 6.1 m upright 25 m laid flat by four Souls' intents through the gateway, one \
@@ -967,21 +1023,21 @@ async fn carry_tall(
     arrived(dir, souls, &places).await;
     let bodies: Vec<Value> = souls[1..]
         .iter()
-        .map(|s| body_of(&dir, *s).to_value())
+        .map(|s| body_of(dir, *s).to_value())
         .collect();
     let offered = crew[0]
         .act(
             "activity:offer",
             ground,
             BTreeMap::from([
-                (1, carry_kind(&dir)),
+                (1, carry_kind(dir)),
                 (2, Value::Text(Name::new(FRONT).unwrap())),
                 (3, Value::Array(bodies.clone())),
             ]),
         )
         .await
         .expect("the carry offered to three");
-    let carry = carry_made(&dir, &offered);
+    let carry = carry_made(dir, &offered);
     let lift = || BTreeMap::from([(1, tall.to_value())]);
     for s in &mut crew[1..3] {
         s.act("activity:accept", carry, BTreeMap::new())
@@ -994,7 +1050,7 @@ async fn carry_tall(
         Err("carry-crew-too-small".to_owned()),
         "three are too few"
     );
-    assert!(moves_of(&dir, tall).is_empty(), "nothing moved");
+    assert!(moves_of(dir, tall).is_empty(), "nothing moved");
     crew[3]
         .act("activity:accept", carry, BTreeMap::new())
         .await
