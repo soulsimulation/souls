@@ -73,6 +73,31 @@ impl Pairing {
         Ok(grant)
     }
 
+    /// Retires every active test Soul of `world` by normal retirement, in one pass that writes the world's files
+    /// once. How many were retired.
+    pub fn operator_retire_all(&self, world: &str, now: u64) -> Result<usize, &'static str> {
+        if !super::souls::is_world(world) {
+            return Err("world");
+        }
+        let grants: Vec<String> = {
+            let db = self.db.lock().expect("the store");
+            let mut q = db
+                .prepare(
+                    "SELECT s.grant_text FROM paired_souls_v1 s
+                       JOIN operator_test_souls_v1 t ON t.grant_text = s.grant_text
+                       JOIN soul_profiles_v1 p ON p.grant_text = s.grant_text
+                     WHERE s.account = ?1 AND p.world = ?2 AND p.retired_at IS NULL ORDER BY 1",
+                )
+                .map_err(|_| "store")?;
+            let rows = q
+                .query_map(params![OWNER, world], |r| r.get(0))
+                .map_err(|_| "store")?;
+            rows.collect::<Result<_, _>>().map_err(|_| "store")?
+        };
+        self.retire_many(OWNER, &grants, now)?;
+        Ok(grants.len())
+    }
+
     /// Only this registry is consulted: ordinary and unknown identities have the same answer.
     pub fn is_operator_test(&self, grant: &str) -> Result<bool, &'static str> {
         if !is_soul_grant(grant) {
@@ -156,6 +181,17 @@ pub fn route(app: &App, method: &str, path: &str, body: &[u8], direct: bool) -> 
                     200,
                     json!({"ok": true, "soul": soul, "test": true}),
                     "operator-retired",
+                ),
+                Err(e) => refuse(400, e),
+            },
+            None => refuse(400, "request"),
+        },
+        "/v1/pair/operator/retire-all" => match text("world") {
+            Some(world) => match p.operator_retire_all(world, now()) {
+                Ok(retired) => answer(
+                    200,
+                    json!({"ok": true, "world": world, "retired": retired, "test": true}),
+                    "operator-retired-all",
                 ),
                 Err(e) => refuse(400, e),
             },

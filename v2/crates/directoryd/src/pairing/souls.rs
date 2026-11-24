@@ -637,7 +637,43 @@ impl Pairing {
     pub fn retire(&self, account: &str, grant: &str, now: u64) -> Result<(), &'static str> {
         self.owned(account, grant)?;
         let db = self.db.lock().expect("the store");
-        let worlds = Self::worlds_of(&db, grant)?;
+        let worlds = Self::retire_row(&db, account, grant, now)?;
+        self.publish_removal(&db, &worlds, true, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")?;
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
+    }
+
+    /// Retires each of `grants` as [`Pairing::retire`] does, in one transaction, then writes each world's files once
+    /// for them all, not once per Soul. The grants are `account`'s active Souls, as the caller read them.
+    pub(super) fn retire_many(
+        &self,
+        account: &str,
+        grants: &[String],
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let mut db = self.db.lock().expect("the store");
+        let tx = store(db.transaction())?;
+        let mut worlds = std::collections::BTreeSet::new();
+        for grant in grants {
+            worlds.extend(Self::retire_row(&tx, account, grant, now)?);
+        }
+        store(tx.commit())?;
+        self.publish_removal(&db, &worlds, true, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")?;
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
+    }
+
+    /// The store's half of a retire: the token's hash and world tokens go, the profile is marked retired. The worlds
+    /// whose files then change.
+    fn retire_row(
+        db: &rusqlite::Connection,
+        account: &str,
+        grant: &str,
+        now: u64,
+    ) -> Result<std::collections::BTreeSet<String>, &'static str> {
+        let worlds = Self::worlds_of(db, grant)?;
         store(db.execute(
             "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
             params![grant, account],
@@ -651,9 +687,6 @@ impl Pairing {
             "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
             params![grant],
         ))?;
-        self.publish_removal(&db, &worlds, true, || {
-            self.write_tokens(&db).map_err(|_| "tokens-file")?;
-            self.write_souls(&db).map_err(|_| "souls-file")
-        })
+        Ok(worlds)
     }
 }

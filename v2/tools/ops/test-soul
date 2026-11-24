@@ -40,6 +40,12 @@ export async function run(args, request = fetch) {
   }
   if (out !== undefined) throw new Error('Use --out only with test-soul pair');
   if (action === 'retire-all' && first && args.length === 2) {
+    // One pass in the directory, which writes the world's files once; a directory from before it retires one by one.
+    try {
+      return await post('/v1/pair/operator/retire-all', { world: first });
+    } catch (e) {
+      if (e.message !== 'not-found') throw e;
+    }
     const { souls } = await post('/v1/pair/operator/list', {});
     const mine = souls.filter((s) => s.world === first);
     for (const s of mine) await post('/v1/pair/operator/retire', { soul: s.soul });
