@@ -62,6 +62,18 @@ test('(3) text is carried as a string; a list, schedule or timed field is new en
   assert.equal(newEngineGap(caseNamed('open_a_closed_kiosk'), kinds), null, 'a default the case does not name is not needed');
 });
 
+test('(3b) a transport that carries lists (v2) plays a case that sets one; others keep the skip and its reason', () => {
+  const kinds = new Map([['eden:chess_table', kind('chess_table')]]);
+  const c = {state: {nodes: {t1: {kind: 'eden:chess_table', fields: {pieces: [{square: 4, piece: 6}]}}}}};
+  assert.match(newEngineGap(c, kinds), /pieces \(a list field\): new engine only/);
+  assert.match(newEngineGap(c, kinds, {name: 'today'}), /pieces \(a list field\): new engine only/);
+  assert.equal(newEngineGap(c, kinds, {lists: true}), null);
+  assert.equal(startFields(kind('chess_table'), c.state.nodes.t1).pieces, undefined);
+  assert.deepEqual(startFields(kind('chess_table'), c.state.nodes.t1, {lists: true}).pieces, [{square: 4, piece: 6}]);
+  const kiosk = new Map([['eden:kiosk', kind('kiosk')]]);
+  assert.match(newEngineGap({state: {nodes: {t1: {kind: 'eden:kiosk', fields: {open_times: []}}}}}, kiosk, {lists: true}), /a schedule field/, 'a schedule still skips');
+});
+
 test('(4) a rule case places the other things it names and maps its args to them', async () => {
   const kinds = new Map(['cutting_donor', 'nursery_pot'].map(k => [`eden:${k}`, kind(k)]));
   const row = casesFor([...kinds].map(([k, entry]) => ({kind: k, entry}))).find(r => r.name === 'take_cutting_every_need_met');

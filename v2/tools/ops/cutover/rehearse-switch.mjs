@@ -63,7 +63,9 @@ const node = (args) => execFileSync(process.execPath, args, { cwd: repo, encodin
 // ---- the stack (as check-0132) ----
 const facts = opt('facts') ? resolve(opt('facts')) : join(OUT, 'eden-2026.facts.json');
 if (!opt('facts')) { log('exporting Eden\'s facts'); execFileSync(process.execPath, ['v2/tools/import-eden/export/export.ts', '--out', facts], { cwd: repo, stdio: 'ignore' }); }
-const W = join(OUT, 'world'), E = join(OUT, 'entries');
+// The world as the origin serves a placed one (place-created-world.mjs): views/w/<instance>, its stream /s/w/<instance>/.
+const INSTANCE = 'eden', VIEWS = join(OUT, 'views'), W = join(VIEWS, 'w', INSTANCE), E = join(OUT, 'entries');
+mkdirSync(dirname(W), { recursive: true });
 cpSync(join(repo, 'content/kinds'), E, { recursive: true });
 log(`seeding Eden with ${SOULS} Souls`);
 execFileSync(join(BIN, 'worldd'), ['seed', '--facts', facts, '--dir', W, '--entries', E, '--souls', String(SOULS)], { stdio: 'ignore' });
@@ -72,7 +74,7 @@ const viewKey = keyFile('view.key'), mailKey = keyFile('mailbox.key');
 const port = { front: await freePort(), launcher: await freePort(), directory: await freePort(), gateway: await freePort(), origin: await freePort(), agents: await freePort() };
 const BASE = `http://127.0.0.1:${port.front}`;
 await start('worldd', join(BIN, 'worldd'), ['serve', '--dir', W, '--socket', `${W}.sock`], /listening/);
-const stream = `/s/${JSON.parse(readFileSync(join(W, 'views/world.json'), 'utf8')).stream.replace(/^\/?/, '')}`;
+const stream = `/s/w/${INSTANCE}/${JSON.parse(readFileSync(join(W, 'views/world.json'), 'utf8')).stream.replace(/^\/?/, '')}`;
 // The directory as production names it: its arguments in one file (directory.args), its gateway tokens the world's.
 const accounts = join(OUT, 'accounts.sqlite'), pairing = join(OUT, 'pairing.sqlite'), tokens = join(W, 'tokens');
 const dirArgs = ['--listen', `127.0.0.1:${port.directory}`, '--public-url', BASE, '--store', accounts, '--test-sign-in', '--pairing', pairing,
@@ -83,7 +85,7 @@ const directory = () => start('directoryd', join(BIN, 'directoryd'), dirArgs, /l
 await directory();
 await start('gatewayd', join(BIN, 'gatewayd'), ['--listen', `127.0.0.1:${port.gateway}`, '--world', `${W}.sock`, '--tokens', tokens,
   '--build', `1220${'0'.repeat(64)}`, '--entries', join(W, 'entries')], /listening/);
-await start('origin', process.execPath, [join(repo, 'v2/tools/origin/origin.mjs'), W, String(port.origin), '127.0.0.1'], /^origin/m, { env: { ...process.env, ORIGIN_PROCESSES: '1' } });
+await start('origin', process.execPath, [join(repo, 'v2/tools/origin/origin.mjs'), VIEWS, String(port.origin), '127.0.0.1'], /^origin/m, { env: { ...process.env, ORIGIN_PROCESSES: '1' } });
 const binding = join(OUT, 'binding.json');
 await start('launcher', process.execPath, [join(repo, 'tools/world-launcher/launcher.mjs'), '--port', String(port.launcher), '--data', join(OUT, 'launcher'), '--dev-auth',
   '--range', `${port.launcher + 100}-${port.launcher + 120}`, '--mars-web', MARS_WEB], /\[launcher\] http/, { env: { ...process.env, BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding } });

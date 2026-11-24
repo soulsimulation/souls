@@ -27,6 +27,8 @@ export default function v2Transport({build = true} = {}) {
   const call = async q => { const a = await ask(q); if (a.error) throw new Error(`v2 ${q.op}: ${a.error}`); return a; };
   const t = {
     name: 'v2', stepped: true, timers: false, events: false,
+    // its tree holds list fields (chess_table.pieces, signup_sheet.notes): a case that sets or expects one is played
+    lists: true,
     // an act's answer carries the changes its run wrote, by the case's names (changeLine)
     reads: ['reparent', 'link', 'unlink', 'create', 'remove'],
     // It decides on the case's own state (sceneOf), so a case's hands, links and slots are its scene as they stand,
