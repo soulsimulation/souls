@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { BEHIND_US, CHUNK, PLAY_DELAY, V2Bridge, doingOf } from './bridge.ts';
+import { BEHIND_US, CHUNK, PLAY_DELAY, RENEW_MAX_MS, V2Bridge, doingOf, servedReplica } from './bridge.ts';
 import { DT, TICK_US } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 
@@ -146,7 +146,8 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
   assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
 });
 
-test('R16: a reader whose replica cannot read a baseline is started again, at most every 10 s, and the new copy replaces the old', () => {
+/** A bridge on fake readers and a fake served replica, on a fake wall clock. */
+function renewing() {
   (globalThis as unknown as { location?: { href: string } }).location ??= { href: 'https://example.test/w/eden/' };
   type Fake = { posted: unknown[]; terminated: boolean; onmessage: unknown; onerror: unknown; postMessage: (m: unknown) => void; terminate: () => void };
   const made: Fake[] = [];
@@ -155,35 +156,83 @@ test('R16: a reader whose replica cannot read a baseline is started again, at mo
     made.push(w);
     return w as unknown as Worker;
   };
+  const t = { now: 1_000_000, served: 'v1' as string | null, asked: 0 };
   const b = new V2Bridge({ rulesVersion: 'test/1' });
-  let now = 1_000_000;
-  b.wallNow = () => now;
-  b.start('views/x/', make);
+  b.wallNow = () => t.now;
+  b.start('views/x/', make, async () => { t.asked++; return t.served; });
+  return { b, made, t };
+}
+const settle = () => new Promise((y) => setImmediate(y));
+const refused = 'Error: public-stream-record: baseline identity\n    at install (worker.ts:197)';
+
+test('R16: a reader whose replica cannot read a baseline is started again once the world serves another replica', async () => {
+  const { b, made, t } = renewing();
+  await settle();
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
-  assert.equal(made.length, 1);
   const nodes = () => [...(b as unknown as { nodes: Map<string, unknown> }).nodes.keys()].sort();
   assert.deepEqual(nodes(), ['b.7', 'w.0', 'w.1', 'w.2']);
-  // Another error is shown, and the reader is left as it is.
+  // Another error is shown, and nothing is asked or started.
+  const asked = t.asked;
   b.receive({ t: 'error', message: 'Error: stream-baseline-hash' });
+  await settle();
   assert.equal(made.length, 1);
-  // The old replica refusing a five-field baseline (R16's claim epoch): a new reader, which loads the served replica again.
-  const refused = 'Error: public-stream-record: baseline identity\n    at install (worker.ts:197)';
+  assert.equal(t.asked, asked);
+  // The release moved the client: the served replica is another, so a new reader loads it.
+  t.served = 'v2';
   b.receive({ t: 'error', message: refused });
+  await settle();
   assert.equal(made.length, 2, 'started again');
   assert.ok(made[0].terminated, 'the old reader is stopped');
   assert.deepEqual(made[1].posted, [{ stream: 'https://example.test/w/eden/views/x/' }]);
   assert.equal(b.view.error, refused, 'the page still says why until the new reader plays');
-  // Refused again within 10 s: not again yet (a client not moved yet is not fetched in a loop); after, once more.
-  now += 5_000;
-  b.receive({ t: 'error', message: refused });
-  assert.equal(made.length, 2);
-  now += 5_000;
-  b.receive({ t: 'error', message: refused });
-  assert.equal(made.length, 3);
   // The new reader's whole copy: the body gone meanwhile is gone from the page too.
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor], removed: [] } });
   assert.deepEqual(nodes(), ['w.0', 'w.1', 'w.2'], 'what the new copy leaves out is removed');
   b.stop();
+  t.served = 'v3';
+  t.now += RENEW_MAX_MS;
   b.receive({ t: 'error', message: refused });
-  assert.equal(made.length, 3, 'a stopped bridge starts nothing');
+  await settle();
+  assert.equal(made.length, 2, 'a stopped bridge starts nothing');
+});
+
+test('R16: the same served replica refusing a baseline (a real fault) is never refetched; asked after 10, 20, 40 s … up to 5 min', async () => {
+  const { b, made, t } = renewing();
+  await settle();
+  const startAsks = t.asked;
+  // Asked at the first refusal, then not again until each wait has passed; the waits double up to five minutes.
+  const asks: number[] = [];
+  const begun = t.now;
+  for (let s = 0; s <= 1_500; s++) {
+    t.now = begun + s * 1000;
+    const before = t.asked;
+    b.receive({ t: 'error', message: refused });
+    await settle();
+    if (t.asked > before) asks.push(s);
+  }
+  assert.equal(made.length, 1, 'never started again: the served replica is the one it loaded');
+  assert.equal(startAsks, 1, 'the replica it loaded was asked once at the start');
+  assert.deepEqual(asks.slice(0, 7), [0, 10, 30, 70, 150, 310, 610], 'waits of 10, 20, 40, 80, 160, 300 s');
+  assert.deepEqual(asks.slice(6).map((s, i, a) => (i ? s - a[i - 1] : 300)), asks.slice(6).map(() => 300), 'then every 5 min');
+  // A replica that cannot be asked (null) is not taken for a change either.
+  t.served = null;
+  t.now += RENEW_MAX_MS;
+  b.receive({ t: 'error', message: refused });
+  await settle();
+  assert.equal(made.length, 1);
+});
+
+test('R16: the served replica is told by HEAD alone: ETag, else Last-Modified, else length, for replica.js and the WASM beside it', async () => {
+  const seen: [string, string | undefined][] = [];
+  const answer = (headers: Record<string, string>, ok = true) => async (u: string | URL | Request, init?: RequestInit) => {
+    seen.push([String(u), init?.method]);
+    return { ok, headers: new Headers(headers) } as Response;
+  };
+  const replica = 'https://example.test/w/eden/replica.js';
+  assert.equal(await servedReplica(replica, answer({ etag: '"a"', 'content-length': '9' }) as typeof fetch), '"a" "a"');
+  assert.deepEqual(seen, [[replica, 'HEAD'], ['https://example.test/w/eden/replica_bg.wasm', 'HEAD']]);
+  assert.equal(await servedReplica(replica, answer({ 'last-modified': 'Mon', 'content-length': '9' }) as typeof fetch), 'Mon Mon');
+  assert.equal(await servedReplica(replica, answer({ 'content-length': '9' }) as typeof fetch), '9 9');
+  assert.equal(await servedReplica(replica, answer({}, false) as typeof fetch), null);
+  assert.equal(await servedReplica(replica, (async () => { throw new Error('offline'); }) as typeof fetch), null);
 });

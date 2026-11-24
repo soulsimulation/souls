@@ -60,7 +60,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     void (async () => {
      try {
       const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
-      const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
+      const [{ V2Bridge, servedReplica }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
@@ -80,7 +80,9 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
-      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))))));
+      const replica = new URL(apiPath('/replica.js'), location.href).href;
+      // R16: a reader is started again on a baseline its replica cannot read only once the world serves another replica
+      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))), () => servedReplica(replica));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)

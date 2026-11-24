@@ -30,10 +30,22 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
-/** R16: how often, at most, the reader is started again for a baseline its replica cannot read. */
+/** R16: the first wait before the served replica is asked again after a baseline its replica cannot read, and the
+ *  longest (the wait doubles). */
 export const RENEW_MS = 10_000;
+export const RENEW_MAX_MS = 300_000;
 /** Whether a reader's error is its replica refusing a baseline's format (a replica older than the stream). */
 export const unreadableBaseline = (message: string) => /public-stream-record: baseline identity/.test(message);
+/** R16: which replica the world serves now, by a HEAD of `replica.js` and of the `replica_bg.wasm` beside it: each
+ *  one's ETag, else its Last-Modified, else its length (the served client sends neither today, and a new build's WASM
+ *  differs in length); null when either cannot be asked. No body is fetched. */
+export async function servedReplica(replica: string, get: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const heads = await Promise.all([replica, new URL('replica_bg.wasm', replica).href].map((u) => get(u, { method: 'HEAD', cache: 'no-store' })));
+    if (heads.some((r) => !r.ok)) return null;
+    return heads.map((r) => r.headers.get('etag') ?? r.headers.get('last-modified') ?? r.headers.get('content-length') ?? '').join(' ');
+  } catch { return null; }
+}
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
@@ -168,7 +180,9 @@ export class V2Bridge {
     this.frame = frame; this.hour = hour; this.chunk = chunk; this.keep = Math.round(KEEP_CHUNKS_US / (chunk * TICK_US));
   }
 
-  start(stream: string, make: () => Worker): void {
+  /** `served` says which replica the world serves now (servedReplica): R16's renewal asks it before starting a reader
+   *  again. Without it a reader is never renewed. */
+  start(stream: string, make: () => Worker, served?: () => Promise<string | null>): void {
     this.restart = () => {
       this.worker?.terminate();
       this.worker = make();
@@ -176,13 +190,42 @@ export class V2Bridge {
       this.worker.onerror = (e) => { this.view.error = e.message || 'the v2 reader stopped'; };
       this.worker.postMessage({ stream: new URL(stream, location.href).href });
     };
+    this.served = served ?? null;
+    // The replica this reader loads: what the world serves as it starts.
+    if (served) void served().then((v) => { if (v !== null) this.replica ??= v; });
     this.restart();
   }
   private restart: (() => void) | null = null;
-  /** When the reader was last started again for a baseline its replica could not read (wall ms), and whether the
-   *  next snapshot is a new reader's whole copy. */
-  private renewedAt = -Infinity;
+  private served: (() => Promise<string | null>) | null = null;
+  /** R16: the served replica the reader was last started on; when the served one is next asked (wall ms) and the wait
+   *  after that (RENEW_MS doubling to RENEW_MAX_MS); whether an ask is out; whether the next snapshot is a new
+   *  reader's whole copy. */
+  private replica: string | undefined = undefined;
+  private askAt = -Infinity;
+  private wait = RENEW_MS;
+  private asking = false;
   private renewed = false;
+
+  /** R16: a baseline this reader's replica cannot read. The reader is started again (loading the served replica afresh,
+   *  and the baseline with it) only when the world serves another replica than the one it loaded; a refusal with the
+   *  same replica (a real format or header fault) asks again after 10, 20, 40 s … up to 5 min, never refetching. */
+  private unreadable(): void {
+    if (!this.served || !this.restart || this.asking || this.wallNow() < this.askAt) return;
+    this.asking = true;
+    void this.served().then((v) => {
+      this.asking = false;
+      if (!this.restart) return;
+      if (v !== null && this.replica !== undefined && v !== this.replica) {
+        this.replica = v; this.wait = RENEW_MS; this.askAt = this.wallNow() + RENEW_MS;
+        this.renewed = true;
+        this.restart();
+        return;
+      }
+      if (this.replica === undefined && v !== null) this.replica = v;
+      this.askAt = this.wallNow() + this.wait;
+      this.wait = Math.min(this.wait * 2, RENEW_MAX_MS);
+    });
+  }
 
   /** The world's body catalogue (its `bodies` rows), so each body is drawn in the look the v2 world gives it. */
   looks(bodies: readonly CatalogueBody[]): void { this.catalogue = new Map(bodies.map((b) => [b.hash, b])); }
@@ -193,12 +236,8 @@ export class V2Bridge {
     if (m.t === 'error') {
       this.view.error = m.message;
       // R16: a baseline in a newer stream format than this page's replica reads (a release moves the worlds before the
-      // served client). A new reader loads the served replica again (no-cache), so a tab left open heals itself.
-      if (unreadableBaseline(m.message) && this.restart && this.wallNow() - this.renewedAt >= RENEW_MS) {
-        this.renewedAt = this.wallNow();
-        this.renewed = true;
-        this.restart();
-      }
+      // served client): once the new client is served, a new reader loads it, so a tab left open heals itself.
+      if (unreadableBaseline(m.message)) this.unreadable();
       return;
     }
     // B2-3: a still world writes no part; its pointer says it is quiet up to a time (worldd view_out `idle`, every half

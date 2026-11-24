@@ -1205,6 +1205,8 @@ pub struct PublicWriter<S> {
     /// R16: the directory claim's epoch this writer runs under, carried in every baseline it makes, so its generations
     /// never share an address with another claim's ([`replica::stream::public::baseline_claimed`]); none: no claim.
     epoch: Option<u64>,
+    /// R16: the host its spool's clean-stop mark names ([`PublicWriter::mark_clean`]).
+    host: String,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1551,7 +1553,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         start: PublicStart<'_>,
         store: S,
         closed: Closed,
-        spool: Option<(PathBuf, String)>,
+        spool: Option<(PathBuf, String, String)>,
         epoch: Option<u64>,
     ) -> R<Self> {
         let PublicStart {
@@ -1640,7 +1642,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             closed_kinds: closed,
             inside,
             hides: true,
-            spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
+            host: spool.as_ref().map(|s| s.2.clone()).unwrap_or_default(),
+            spool: spool.map(|(dir, store, _)| backup::Spool::new(dir, store)),
             fresh: false,
             fresh_at: 0,
             epoch,
@@ -1875,8 +1878,16 @@ impl<S: ObjectStore> PublicWriter<S> {
         w.fresh_at = w.cursor;
         // R16: a generation recovered under another claim (a restart, or a takeover from a copied spool while the
         // old machine may still cut parts of it) gets no new part from this writer: it rolls over now, under this
-        // claim, with the hand-off, so this writer's parts are at addresses no other claim's writer uses.
+        // claim, with the hand-off, so this writer's parts are at addresses no other claim's writer uses. Not when the
+        // spool says its last writer stopped cleanly on this host, in this folder, at the head recovered (a stop or a
+        // sleep, then a start or a wake): it cuts nothing more, so no other writer can have cut parts of it, and a
+        // rollover would only cost a whole seed and baseline. A copied spool, a crash or an unknown state rolls over.
+        let clean = !from_store
+            && w.spool
+                .as_ref()
+                .is_some_and(|s| s.take_clean(&head_key, &w.host));
         let retake = !fresh
+            && !clean
             && w.epoch.is_some()
             && recovered_epoch.is_some_and(|e| e != w.epoch)
             && !w.force_remainder
@@ -2637,6 +2648,16 @@ impl<S: ObjectStore> PublicWriter<S> {
         match &mut self.spool {
             Some(spool) => backup::start(spool, store, prefix, report, claim),
             None => Ok(()),
+        }
+    }
+    /// R16: says in the spool that this writer has stopped cleanly and cuts nothing more (a stop or a sleep), so the
+    /// next start on this host, in this folder, keeps its generation rather than rolling it over. Called only once
+    /// nothing more is cut; a cut after it moves the head and voids the mark. Best effort.
+    pub fn mark_clean(&self) {
+        if let Some(spool) = &self.spool
+            && let Err(e) = spool.mark_clean(&format!("{}head", self.prefix), &self.host)
+        {
+            eprintln!("worldd: the public stream's clean-stop mark was not written: {e}");
         }
     }
     /// R15: what a stop waits on, bounded, for the backup to hold the spool's head; none before [`Self::back_up`].

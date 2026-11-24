@@ -1465,6 +1465,10 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
     println!("{walks} walks answered across the stall");
     assert!(walks > 3, "the world went on: {walks}");
     let after = worst.swap(0, Ordering::Relaxed);
+    println!(
+        "viewer delay while it catches up: at most {} ms",
+        after / 1000
+    );
     assert!(after < bar, "nor while it catches up: {after} µs");
 
     // A SIGKILL while the backup is behind: the restart publishes on from the spool's exact bytes.
@@ -1756,6 +1760,24 @@ fn r15_a_world_whose_backup_is_behind_sleeps_properly() {
     };
     assert!(p.contains_key(&11), "the pointer says asleep");
     println!("it slept, its backup behind");
+    // R16: the wake (a new claim) keeps the generation it slept on: the sleep marked the spool clean, so no new seed
+    // and baseline are written.
+    let slept_on = p.get(&8).cloned().expect("a generation");
+    let generations = || std::fs::read_dir(stream.join("g")).unwrap().count();
+    let before = generations();
+    s.refuse_writes(0, 503, "");
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let Value::Map(p) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    assert_eq!(p.get(&8), Some(&slept_on), "the wake keeps the generation");
+    assert_eq!(generations(), before, "and makes no new one");
+    println!("it woke on the generation it slept on");
+    w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
 

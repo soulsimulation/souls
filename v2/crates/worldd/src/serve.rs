@@ -2794,6 +2794,11 @@ fn serve(args: &[String]) -> R<()> {
     // over never makes a lost tail's address; and before fencing, the backup asks the directory whether this run still
     // holds the newest claim: the newest writer puts over an older one's head, and the older one fences.
     let stream_epoch = off_claim.as_ref().map(|(epoch, _)| *epoch);
+    // ... and the host its clean-stop mark names: a spool copied to another machine never reads as this one's.
+    let stream_host = off_claim
+        .as_ref()
+        .map(|(_, machine)| machine.as_str().to_owned())
+        .unwrap_or_default();
     let backup_claim = match off_claim {
         Some((epoch, machine)) => {
             let mut d = Directory::new(
@@ -2953,6 +2958,7 @@ fn serve(args: &[String]) -> R<()> {
                             Some((
                                 view_out::backup_beside(&views_dir),
                                 backup_identity.clone(),
+                                stream_host.clone(),
                             )),
                             stream_epoch,
                         )
@@ -3058,6 +3064,8 @@ fn serve(args: &[String]) -> R<()> {
                 loop {
                     // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
                     if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
+                        // R16: nothing more is cut, so the next start here keeps this generation.
+                        writer.mark_clean();
                         stopping.1.store(true, std::sync::atomic::Ordering::Release);
                         loop {
                             std::thread::park();
@@ -3096,6 +3104,11 @@ fn serve(args: &[String]) -> R<()> {
                         // wait for this answer (`sleep.rs` STREAM_WITHIN, 5 s).
                         if done && let Some(d) = writer.drainer() {
                             d.drain(SLEEP_DRAIN);
+                        }
+                        // R16: a sleeping world cuts nothing more, so its wake keeps this generation. If the watch gave
+                        // up and the stream stays awake, its next cut moves the head and voids the mark.
+                        if done {
+                            writer.mark_clean();
                         }
                         // The sleep is taken only when the watch hears it; one that gave up waiting stays awake, and so
                         // does the stream: its next idle writes the pointer without the sleep.

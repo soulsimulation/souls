@@ -123,6 +123,10 @@ fn confirmed_key(head_key: &str) -> String {
     format!("{head_key}.confirmed")
 }
 
+fn clean_key(head_key: &str) -> String {
+    format!("{head_key}.clean")
+}
+
 fn tried_key(head_key: &str) -> String {
     format!("{head_key}.tried")
 }
@@ -138,6 +142,33 @@ impl Spool {
             prunes: Arc::default(),
             progress: Arc::default(),
         }
+    }
+
+    /// What a clean stop on `host` leaves beside the chain's head (R16): the host, this spool's own folder and the head
+    /// as it stood, so a copied spool (another folder or host) or a head moved since never matches it.
+    fn clean_mark(&self, head_key: &str, host: &str) -> Option<Vec<u8>> {
+        let dir = std::fs::canonicalize(&self.dir).ok()?;
+        let mut b = format!("{host}\n{}\n", dir.display()).into_bytes();
+        b.extend_from_slice(&self.read(head_key)?);
+        Some(b)
+    }
+
+    /// R16: the writer on `host` stopped cleanly (SIGTERM or a sleep): it cuts nothing more, so no other writer can
+    /// have cut parts of its generation. Best effort: without the mark, the next start rolls the generation over.
+    pub(super) fn mark_clean(&self, head_key: &str, host: &str) -> super::R<()> {
+        match self.clean_mark(head_key, host) {
+            Some(b) => self.write(&clean_key(head_key), &b),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether the last writer of this spool stopped cleanly on `host` with the head it holds now; the mark is taken
+    /// away, so a later crash is never read as clean.
+    pub(super) fn take_clean(&self, head_key: &str, host: &str) -> bool {
+        let path = self.path(&clean_key(head_key));
+        let found = std::fs::read(&path).ok();
+        let _ = std::fs::remove_file(&path);
+        found.is_some() && found == self.clean_mark(head_key, host)
     }
 
     pub(super) fn path(&self, key: &str) -> PathBuf {

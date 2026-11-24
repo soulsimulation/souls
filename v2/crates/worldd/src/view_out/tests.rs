@@ -3535,7 +3535,7 @@ fn r16_a_takeover_from_a_copied_spool_never_cuts_an_address_the_old_writer_cuts(
             },
             &store,
             Closed::default(),
-            Some((at.join("stream-backup"), "store".into())),
+            Some((at.join("stream-backup"), "store".into(), "here".into())),
             Some(epoch),
         )
         .unwrap()
@@ -3563,6 +3563,8 @@ fn r16_a_takeover_from_a_copied_spool_never_cuts_an_address_the_old_writer_cuts(
         a.push(r, &record(r, r)).unwrap();
         a.flush().unwrap();
     }
+    // Even a spool marked clean (A stopped, say, and was started again after the copy) is not clean in another folder.
+    a.mark_clean();
     let status = Command::new("cp")
         .arg("-R")
         .arg(&a_dir)
@@ -3602,6 +3604,94 @@ fn r16_a_takeover_from_a_copied_spool_never_cuts_an_address_the_old_writer_cuts(
         "A cut on in its generation"
     );
     assert_ne!(b_generation, a_generation, "B rolled over at its open");
+}
+
+/// R16: a clean stop (SIGTERM, or a sleep) marks the spool, so the next start on this host in this folder (a restart,
+/// a wake), under a new claim, keeps the generation: no seed and baseline written again. The mark is used once: after
+/// a crash (no mark) the next start rolls over, as it does for a mark of another host or a head moved since.
+#[test]
+fn r16_a_clean_stop_then_a_start_keeps_the_generation_and_a_crash_rolls_it() {
+    let h = header();
+    let d = scratch("r16-clean");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |epoch, host: &str| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &d.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((d.join("stream-backup"), "store".into(), host.into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([75; 16]), 1).unwrap();
+    let record = |r: u64| {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(r)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        w3e_packet(&h, vec![effect])
+    };
+    let generation = |w: &PublicWriter<_>| replica::ids::sha256(&w.baseline);
+    let generations = || {
+        fs::read_dir(d.join("views").join(stream::dir(&h, &key(&h))).join("g"))
+            .unwrap()
+            .count()
+    };
+    let mut w = open(4, "here");
+    w.push(0, &record(0)).unwrap();
+    w.flush().unwrap();
+    let first = generation(&w);
+    // A sleep (or a stop): nothing more is cut; then the wake, under claim 5.
+    w.mark_clean();
+    drop(w);
+    let mut w = open(5, "here");
+    assert_eq!(
+        generation(&w),
+        first,
+        "a wake after a clean sleep keeps the generation"
+    );
+    assert_eq!(generations(), 1, "and writes no new one");
+    w.push(1, &record(1)).unwrap();
+    w.flush().unwrap();
+    // A crash: no mark (the one read at the wake was taken away), so the next start rolls over.
+    drop(w);
+    let w = open(6, "here");
+    let second = generation(&w);
+    assert_ne!(second, first, "a start after a crash rolls over");
+    assert_eq!(generations(), 2);
+    // A mark that names another host, or one voided by a cut after it, is not clean either.
+    w.mark_clean();
+    drop(w);
+    let mut w = open(7, "elsewhere");
+    let third = generation(&w);
+    assert_ne!(third, second, "a mark of another host");
+    w.mark_clean();
+    w.push(2, &record(2)).unwrap();
+    w.flush().unwrap();
+    drop(w);
+    let w = open(8, "elsewhere");
+    assert_ne!(generation(&w), third, "a mark the head moved past");
 }
 
 /// R16: every baseline a writer under a directory claim makes carries the claim's epoch, so two claims' writers on
