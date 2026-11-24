@@ -172,7 +172,9 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
       reason: ['completed', 'started', 'accepted', 'act-deadline', 'act-cancelled', 'out-of-reach', 'intent.expired', 'intent.stale-seq', 'intent.no-body', 'intent.ids-exhausted', 'intent.not-a-form-on-a-node'].includes(a.reason) ? a.reason : 'other' }));
     // A walk is answered accepted as its route is planned (C20, W11 #4087), then at its end: count the ends.
     return new Set(answers.filter((a) => a.answer !== 3).map((a) => a.sequence)).size === sent.length;
-  });
+    // 0.133 Q2: a walk to the building goes in, to its main room (the stair hall, by its front door): from -40,30 that
+    // is 39.4 s of walking (worldd `moves` q2_), so the ends get 90 s, not 30
+  }, 90_000);
 
   // `history --at <place>`: the world's own place, which holds everything, answers from the archive with both walks'
   // ends, by the Soul, and the world's day, light and weather; the index is written as it stands every 5 s.
