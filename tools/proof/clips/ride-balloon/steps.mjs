@@ -1,16 +1,18 @@
-// Clip kit (#1977): on eden-district, Ana and Ben board the festival balloon (both seats) before the take; it lifts off five
-// seconds after the basket is full. The camera holds 3.2 m from the basket, first square on to its front rim (the riders
-// face it), then circling it slowly at the riders' eye level, so every wall is seen with both riders' hands. Before the fix
-// their hands and forearms passed through the front wall below the rim.
+// Clip kit (#1977; 0.135 on the new engine): on eden-district, Ana and Ben board the festival balloon before the take,
+// each by its `board` form through the new client, while it is home between laps; it lifts off on its course with them in
+// the basket. The camera holds 3.2 m from the basket, first square on to its front rim (the riders face it), then circling
+// it slowly at the riders' eye level, so every wall is seen with both riders' hands. Before the fix their hands and
+// forearms passed through the front wall below the rim.
 import { cast } from '../_shared/cast.mjs';
-import { board, orbit, shotPage } from '../_shared/ride.mjs';
+import { board, carrierPose, orbit, shotPage } from '../_shared/ride.mjs';
 
 const RIDERS = ['Ana', 'Ben'], CARRIER = 'festival-balloon';
-cast({ souls: [{ name: 'Ana', owner: 'admin' }, { name: 'Ben', owner: 'ben' }] });
-board(RIDERS, `object:ride-${CARRIER}:join`);
+await cast({ souls: [{ name: 'Ana', owner: 'admin' }, { name: 'Ben', owner: 'ben' }] });
+await board(RIDERS, CARRIER);
 
 export default async function steps(page, { mark }) {
   await shotPage(page, process.env.CLIP_WORLD);
+  console.error(`kit: ${CARRIER} on the page at ${JSON.stringify(await carrierPose(page, CARRIER))}`);
   await orbit(page, CARRIER, { dist: 3.2, from: 0, eyeUp: 1.55, atUp: 1.0 });
   mark('the basket\'s front rim, square on');
   await page.waitForTimeout(12_000);
