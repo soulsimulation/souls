@@ -3165,7 +3165,7 @@ impl Clock {
                         names: BTreeMap::new(),
                     });
                 }
-                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(id, |c| c.refused(actor, sequence, &r)),
             }
         }
     }
@@ -3614,7 +3614,7 @@ impl Clock {
         let (r, open) = match retired {
             Ok(x) => x,
             Err(r) => {
-                let a = self.refusal(actor, sequence, r.name);
+                let a = self.refused(actor, sequence, &r);
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
@@ -3680,7 +3680,7 @@ impl Clock {
                 entries: self.receipts.entries(id).to_vec(),
                 names: BTreeMap::new(),
             },
-            Err(e) => self.refusal(actor, sequence, e.name),
+            Err(e) => self.refused(actor, sequence, &e),
         };
         if let Some(i) = open
             && let Some(o) = self.open.get(&i)
@@ -4263,7 +4263,7 @@ impl Clock {
                 Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), None, now),
                 Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
-                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(id, |c| c.refused(actor, sequence, &r)),
             }
         }
         self.forms.release_sight();
@@ -4401,7 +4401,7 @@ impl Clock {
                         now,
                     );
                 }
-                self.end(id, |c| c.refusal(actor, sequence, r.name));
+                self.end(id, |c| c.refused(actor, sequence, &r));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {
