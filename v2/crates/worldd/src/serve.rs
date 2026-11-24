@@ -80,7 +80,9 @@
 //! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
 //! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
 //! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
-//! offer or a proposal on the ground (where bodies are born) makes its node there. Its entry's slots that admit a
+//! offer or a proposal on the ground (where bodies are born) makes its node there. The entry's own thing takes it as a
+//! child too (B10, #4239): one offered or proposed at the thing is the thing's, and each member holds its role's link
+//! (the entry's link of the role's name) on the thing while it is a member (`sim::activity`). Its entry's slots that admit a
 //! thing are its slots, numbered as the entry numbers them, so a carry's load rides its first (0.135 C4,
 //! `content/kinds/construction/carry.json`). A start prints `activities: <plain names>`.
 //! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
@@ -109,7 +111,7 @@ use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
 use directoryd::worlds::list::creator_of as directory_creator_of;
-use replica::activity::{ActivityKind, Role};
+use replica::activity::{ActivityKind, Role, RoleLink};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::edit::World as Editing;
@@ -433,6 +435,30 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                     .collect(),
                 None => Vec::new(),
             };
+            // B10 (#4239): a role is one of the entry's links (SA-G1a); a member holds it on the entry's own thing
+            // while it is a member of an activity offered or proposed there.
+            let link = match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("from"))
+                .and_then(Json::str)
+            {
+                Some(from @ ("body" | "soul")) => Some(RoleLink {
+                    ty: Name::new(&replica::audience::link_type(kind, role))
+                        .ok_or("a role's link")?,
+                    soul: from == "soul",
+                    on: kind.clone(),
+                    most: match entry
+                        .get("links")
+                        .and_then(|l| l.get(role))
+                        .and_then(|l| l.get("most"))
+                    {
+                        Some(Json::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
+                }),
+                _ => None,
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
@@ -440,6 +466,7 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 mv,
                 stands,
                 within,
+                link,
             });
         }
         // 0.135 G3: the stands its roles resolve to (from the entry's slots and points) are part of what is pinned; a
@@ -955,6 +982,16 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             kind.children.insert("body".into());
             boot_body.push(name.clone());
             for a in &activities {
+                kind.children.insert(plain(a.name.as_str()).to_owned());
+            }
+        }
+        // B10: an entry's own thing takes its activity too, so one offered or proposed at the thing is that thing's
+        // (its roles' links are written on it).
+        for a in &activities {
+            if a.roles
+                .iter()
+                .any(|r| r.link.as_ref().is_some_and(|l| l.on == plain(name)))
+            {
                 kind.children.insert(plain(a.name.as_str()).to_owned());
             }
         }
