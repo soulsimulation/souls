@@ -72,3 +72,72 @@ fn a_refused_timer_ring_stalls_nothing() {
     assert_eq!(planks(&run), 1, "the plank, and no ghost");
     run.stop();
 }
+
+/// The `souls:reserves` links `run`'s log leaves standing, link to `[body, thing]`, and how many it ever wrote.
+fn reserves(run: &Run) -> (BTreeMap<Id, [Id; 2]>, usize) {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let effects: Vec<Effect> = recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|rec| !sim::recorder::is_input(rec))
+        .flat_map(|rec| Part::read(rec).unwrap().effects)
+        .collect();
+    let written = effects
+        .iter()
+        .flat_map(Effect::changes)
+        .filter(|c| matches!(&c.change, Change::Link { ty, .. } if ty.as_str() == "souls:reserves"))
+        .count();
+    (sim::forms::reservations(&effects), written)
+}
+
+/// Whether the replayed tree holds a `souls:reserves` link at the rack: what keeps a kind refresh from it
+/// (`Busy("reserved")`).
+fn rack_reserved(run: &Run) -> bool {
+    let r = run.replay();
+    let t = r.tree();
+    t.links_at(rack())
+        .iter()
+        .any(|e| t.ty(e).as_str() == "souls:reserves")
+}
+
+/// 0.133 F1b: a form whose effect the world refuses at its last step, after its start and its reservation were
+/// written in an earlier tick. The act is refused by name, and the run's end still lands, naming the refusal, with
+/// its reservation's unlink: no `souls:reserves` link stands, so a kind refresh is not held off, and a restart finds
+/// no open run to end.
+#[test]
+fn a_refused_last_step_still_ends_its_run_and_frees_its_thing() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("refused-end-a", store.clone());
+    let over = a.act("test:overstock_late", Some(rack()), BTreeMap::new());
+    println!("overstock_late: {over:?}");
+    assert_eq!(
+        over,
+        Err("kind-not-in-header".to_owned()),
+        "refused by name"
+    );
+    let (standing, written) = reserves(&run);
+    assert_eq!(
+        written, 1,
+        "the run's start reserved the rack in its own tick"
+    );
+    assert!(standing.is_empty(), "no reservation left: {standing:?}");
+    assert!(!rack_reserved(&run), "a kind refresh is not held off");
+    assert_eq!(
+        endings(&run),
+        ["souls:kind-not-in-header"],
+        "the run's end names the refusal"
+    );
+    assert_eq!(planks(&run), 0, "nothing created");
+    run.stop();
+
+    let (run, _, _) = serve_on("refused-end-b", store);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        endings(&run),
+        ["souls:kind-not-in-header"],
+        "a restart ends nothing more"
+    );
+    assert!(reserves(&run).0.is_empty() && !rack_reserved(&run));
+    run.stop();
+}

@@ -253,6 +253,40 @@ fn motion_effects(
     out
 }
 
+/// The events of a form run's start and its end (`sim::forms`): field 1 the run, and on the end 3 the ending's name.
+const RUN_STARTED: &str = "souls:form-started";
+const RUN_ENDED: &str = "souls:form-ended";
+
+/// An intent's entries the world refused as `refusal`, split (0.133 F1b): the ends of runs that started in an earlier
+/// part, each now naming the refusal as its ending, and the rest. A run that starts in `group` is written nowhere, so
+/// its end stays with the rest.
+fn refused_ends(group: Vec<Effect>, refusal: &str) -> (Vec<Effect>, Vec<Effect>) {
+    let run_of = |e: &Effect, event: &str| {
+        e.events
+            .iter()
+            .flatten()
+            .find(|v| v.name.as_str() == event)
+            .and_then(|v| v.fields.get(&1).cloned())
+    };
+    let started: Vec<Value> = group
+        .iter()
+        .filter_map(|e| run_of(e, RUN_STARTED))
+        .collect();
+    let how = match refusal.contains(':') {
+        true => refusal.to_owned(),
+        false => format!("souls:{refusal}"),
+    };
+    let (mut ends, rest): (Vec<Effect>, Vec<Effect>) = group
+        .into_iter()
+        .partition(|e| run_of(e, RUN_ENDED).is_some_and(|r| !started.contains(&r)));
+    for v in ends.iter_mut().flat_map(|e| e.events.iter_mut().flatten()) {
+        if v.name.as_str() == RUN_ENDED {
+            v.fields.insert(3, Value::Bytes(how.as_bytes().to_vec()));
+        }
+    }
+    (ends, rest)
+}
+
 fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
     changes
         .into_iter()
@@ -4018,7 +4052,7 @@ impl Clock {
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
     /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
     /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
-    /// written.
+    /// written but the end of a run that started in an earlier part, which names the refusal ([`refused_ends`]).
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         let mut assembled = (Vec::new(), Vec::new());
@@ -4043,7 +4077,15 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
+                // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
+                let (ends, group) = refused_ends(group, r.name);
                 self.forms.unwritten(&group);
+                if !ends.is_empty()
+                    && let Err(e) = self.commit_forms(ends)
+                {
+                    eprintln!("worldd: a refused run's end was not written: {e}");
+                }
                 let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
                     continue;
                 };

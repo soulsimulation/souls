@@ -281,6 +281,8 @@ fn entries() -> Json {
           "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
         "overstock": { "who": "anyone", "steps": [],
           "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] },
+        "overstock_late": { "who": "anyone", "steps": [{ "step": "wait", "us": 300000 }],
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] },
         "haunt": { "who": "anyone", "steps": [],
           "effects": [{ "change": "timer", "form": "haunt_again", "after_us": 1, "event": "haunting" }] },
         "haunt_again": { "who": "anyone", "steps": [],
