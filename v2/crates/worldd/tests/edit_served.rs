@@ -2753,7 +2753,8 @@ fn an_oversize_rows_edit_is_refused_by_name_and_the_world_keeps_answering() {
 /// The 0.132 release check's gesture (#1960): a Soul's wave on its own body in a served world, three times. Its run
 /// starts in the act's tick, its move (`souls:form-move`, the record the page draws the gesture from) starts in the same
 /// tick, and its `done` receipt comes when the move ends, 1.2 s on (`wave`: 0.3 s to the contact, 0.9 s after): the
-/// receipt never goes out before the move plays. World times from the log; the answers' wall times are printed.
+/// receipt never goes out before the move plays. World times from the log, the run found by its id and body; the
+/// answers' wall times are printed, never asserted.
 #[test]
 fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() {
     let d = scratch("gesture");
@@ -2787,6 +2788,36 @@ fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() 
         .filter(|e| t.ty(e).as_str() == "souls:body-of")
         .find_map(|e| Some(t.link(e.link)?.1[0]))
         .expect("the Soul's body");
+    // The body's form runs from the log, by run (event field 1 the run, 2 its body): each event's first world time. A
+    // wave's run is the one run not seen before it, never one picked by the machine's clock, which a loaded world's
+    // ticks run behind.
+    let runs = || {
+        let log = std::fs::read(w.dir.join("log")).unwrap();
+        let mut at: BTreeMap<u64, BTreeMap<String, i64>> = BTreeMap::new();
+        for rec in sim::log::recover(&log).unwrap().records {
+            if sim::recorder::is_input(&rec) {
+                continue;
+            }
+            for e in replica::effects::Part::read(&rec).unwrap().effects {
+                for v in e.events.iter().flatten() {
+                    if !v.name.as_str().starts_with("souls:form-")
+                        || v.fields.get(&2) != Some(&body.to_value())
+                    {
+                        continue;
+                    }
+                    let Some(Value::Uint(run)) = v.fields.get(&1) else {
+                        continue;
+                    };
+                    at.entry(*run)
+                        .or_default()
+                        .entry(v.name.as_str().to_owned())
+                        .or_insert(e.envelope.at);
+                }
+            }
+        }
+        at
+    };
+    let mut seen: std::collections::BTreeSet<u64> = runs().into_keys().collect();
     for round in 0..3u64 {
         let i = Intent {
             actor: Actor::Soul(w.souls[0]),
@@ -2803,7 +2834,7 @@ fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() 
             reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
-        let (sent, from) = (Instant::now(), answers::now());
+        let sent = Instant::now();
         souls
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
@@ -2817,29 +2848,24 @@ fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() 
             }
         }
         // The run's entries, in world time.
-        let log = std::fs::read(w.dir.join("log")).unwrap();
-        let mut at = BTreeMap::new();
-        for rec in sim::log::recover(&log).unwrap().records {
-            if sim::recorder::is_input(&rec) {
-                continue;
-            }
-            for e in replica::effects::Part::read(&rec).unwrap().effects {
-                for v in e.events.iter().flatten().filter(|_| e.envelope.at >= from) {
-                    at.entry(v.name.as_str().to_owned())
-                        .or_insert(e.envelope.at);
-                }
-            }
-        }
+        let at = runs();
+        let new: Vec<u64> = at.keys().copied().filter(|r| !seen.contains(r)).collect();
+        assert_eq!(new.len(), 1, "wave {round} is one new run: {at:?}");
+        seen.extend(&new);
+        let run = &at[&new[0]];
+        let time = |event: &str| {
+            *run.get(event)
+                .unwrap_or_else(|| panic!("wave {round}: no {event} in {run:?}"))
+        };
         let (started, moved, ended) = (
-            at["souls:form-started"],
-            at["souls:form-move"],
-            at["souls:form-ended"],
+            time("souls:form-started"),
+            time("souls:form-move"),
+            time("souls:form-ended"),
         );
         println!(
-            "wave {round}: answers (kind, ms after the send) {kinds:?}; run started +{} ms, move +{} ms, ended +{} ms",
-            (started - from) / 1000,
-            (moved - from) / 1000,
-            (ended - from) / 1000
+            "wave {round}: answers (kind, ms after the send) {kinds:?}; move +{} ms after the run started, ended +{} ms",
+            (moved - started) / 1000,
+            (ended - started) / 1000
         );
         assert_eq!(kinds.first().map(|k| k.0), Some(3), "accepted first");
         assert_eq!(kinds.last().map(|k| k.0), Some(1), "then done");
@@ -2920,25 +2946,6 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
         .map(|r| replica::effects::Part::read(&r).unwrap())
         .filter(|p| !p.effects.is_empty())
         .collect()
-}
-
-/// How many straight tracks (a set-in's, or its way back) the log has handed node `node` to.
-fn set_in_tracks(w: &Seeded, node: Id) -> usize {
-    use replica::effects::{Body, Change};
-    use replica::pose::{Owner, Track};
-    logged(w)
-        .iter()
-        .flat_map(|p| p.effects.iter())
-        .filter_map(|e| match &e.body {
-            Body::Changes(cs) => Some(cs),
-            _ => None,
-        })
-        .flatten()
-        .filter(|c| {
-            matches!(&c.change, Change::Motion(h)
-                if h.node == node && matches!(h.to, Owner::Track(Track::Straight { .. })))
-        })
-        .count()
 }
 
 /// The node of a kind starting `prefix` created by the entries numbered `entries`.
@@ -3591,24 +3598,24 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         v3(br.x + 3_000_000, 0, br.z),
         "Soul 2 walks out",
     );
-    // The leave goes only once the set-in has started: its straight track on crew C's node is in the log. The put and
-    // the leave go over two sockets, so nothing else orders them.
-    let tracks = set_in_tracks(&w, crew_c);
+    // The put and Soul 3's leave go on one connection, the put first: the world takes a connection's intents in order,
+    // so the leave is judged once the put's set-in has started and is queued before its track (1 s at least) can
+    // end, whatever the machine's load. Over two sockets nothing orders them. (A put has no accepted answer to wait
+    // for: its one answer comes when the beam is in.)
+    let one_connection = hands[0].s.try_clone().unwrap();
+    let own = std::mem::replace(&mut hands[2].s, one_connection);
     hands[0].send("part:put", crew_c, into("beam_low_r"));
-    let end = Instant::now() + Duration::from_secs(30);
-    while set_in_tracks(&w, crew_c) == tracks {
-        assert!(Instant::now() < end, "beam 2's set-in starts");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let got = leave(&mut hands, 2, crew_c);
+    hands[2].send("activity:leave", crew_c, BTreeMap::new());
+    hands[2].s = own;
+    let (a, b) = (socket_end(&mut hands[0].s), socket_end(&mut hands[0].s));
+    let (left, put) = if a.kind == 1 { (b, a) } else { (a, b) };
     refused(
-        &got,
+        &left,
         "crew.setting-in",
         "Soul 3 leaves crew C while beam 2 goes in",
     );
-    let got = socket_end(&mut hands[0].s);
-    println!("crew C puts beam 2 in beam_low_r: {got:?}");
-    assert_eq!(got.kind, 1, "beam 2 in");
+    println!("crew C puts beam 2 in beam_low_r: {put:?}");
+    assert_eq!(put.kind, 1, "beam 2 in");
     // Beam 2 out again; crew C may not leave while it holds it; it lays it on the ground.
     let got = hands[0].act("part:unseat", crew_c, part(b2));
     println!("crew C takes beam 2 out of the bay: {got:?}");
