@@ -693,14 +693,15 @@ impl Forms {
     }
 
     /// Each body's run whose step in progress is a walk to its node's own point right before a `sit` or `lie` into a
-    /// slot of that node: the step's number, the node and the slot. The world aims that walk at the seat's own stand
-    /// point, as its places hold it (moved clear when the entry's point is blocked), not the entry's point.
+    /// slot of that node, or a walk to another thing right before a `sit` or `lie` into that thing's slot (E14): the
+    /// step's number, the seat's thing and the slot. The world aims that walk at the seat's own stand point, as its
+    /// places hold it (moved clear when the entry's point is blocked), not the entry's point.
     pub fn seat_walks(&self) -> BTreeMap<Id, (usize, Id, u64)> {
         self.runs
             .values()
             .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
-                (Step::WalkTo { on: None, .. }, Step::Sit { slot, .. }) => {
-                    Some((fr.body, (fr.runner.at()?, fr.node, *slot)))
+                (Step::WalkTo { on, .. }, Step::Sit { slot, on: seat, .. }) if on == seat => {
+                    Some((fr.body, (fr.runner.at()?, seat.unwrap_or(fr.node), *slot)))
                 }
                 _ => None,
             })

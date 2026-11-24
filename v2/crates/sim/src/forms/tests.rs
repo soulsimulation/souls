@@ -1423,6 +1423,7 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             slot: place.slot,
             lie: false,
             stand: false,
+            on: None,
         };
         let (steps, posture) = match mid {
             "sit" => (vec![sit, Step::Wait(500_000)], 0),
@@ -1590,6 +1591,7 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
             slot: place.slot,
             lie: false,
             stand: false,
+            on: None,
         };
         start(&mut b, vec![sit], intent(body, 0)).expect("started");
         b.run(30_000_000);
@@ -1619,6 +1621,163 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
         assert_eq!(e.how.as_str(), "done", "not resource-held");
         assert_eq!(held, Some(chair), "still in its place");
     }
+}
+
+/// 0.135 E14: a form done at one thing takes a seat of another (a lecture's `attend` takes a bench's seat, the hall's
+/// chairs) through the same places: the sit's hand-off puts the body in the chair, another body is refused the taken
+/// seat by name, and the rise of the lecture's `leave` gives it back. A Soul that leaves mid-walk or mid-sit keeps no
+/// seat: mid-sit the hand-off lands with no effect, so the run rises the body out onto the seat's stand point by B3's
+/// rise and then ends `left`.
+#[test]
+fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    // The lecture: a thing of its own, apart from the chair whose seat its form takes.
+    let hall = b.mint.mint().expect("id");
+    b.snap.things.insert(hall, (Vec3::ZERO, BTreeMap::new()));
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: Some(chair),
+    };
+    let seated = |b: &Bench, who: Id| b.slots.as_ref().and_then(|s| s.held_by(who));
+    let ended = |b: &mut Bench| {
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        let how = e.how.as_str().to_owned();
+        b.forms.ended.clear();
+        how
+    };
+    let leave = |b: &mut Bench| {
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, body, None, now).expect("left");
+    };
+    let walk = |at: Vec3| Step::WalkTo {
+        point: Name::new("seat").expect("a name"),
+        at,
+        on: None,
+        approach: false,
+    };
+    // Leave mid-sit, before the hand-off: out again, at the stand point, nothing of the run left.
+    b.steps(
+        body,
+        hall,
+        vec![sit.clone()],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.until_moving(body, 0);
+    leave(&mut b);
+    b.run(30_000_000);
+    let how = ended(&mut b);
+    let pose = b.c.body(body).expect("a body").pose;
+    println!(
+        "E14 leave mid-sit: ended {how}; body in {:?}, support {:?}, at {:?}",
+        seated(&b, body),
+        pose.support,
+        pose.position
+    );
+    assert_eq!(how, "left");
+    assert_eq!(seated(&b, body), None, "no seat kept");
+    assert_ne!(pose.support, replica::pose::Support::Slot);
+    assert_eq!((pose.position.x, pose.position.z), (stand.x, stand.z));
+    assert!(
+        b.moves.is_empty() && b.due.is_empty(),
+        "nothing of the run left"
+    );
+    b.clean();
+    // Leave mid-walk: the walk to the seat ends with the run, and no seat is taken.
+    let away = Vec3::new(stand.x, stand.y, stand.z + 2_000_000);
+    b.steps(
+        body,
+        hall,
+        vec![walk(away)],
+        intent(body, 2),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    assert_eq!(ended(&mut b), "done", "walked away");
+    let to_seat = vec![walk(stand), sit.clone()];
+    b.steps(
+        body,
+        hall,
+        to_seat.clone(),
+        intent(body, 3),
+        Limits::default(),
+    )
+    .expect("started");
+    b.tick();
+    b.tick();
+    assert_eq!(b.forms.at(body), Some(0), "mid-walk");
+    leave(&mut b);
+    b.run(30_000_000);
+    let how = ended(&mut b);
+    println!(
+        "E14 leave mid-walk: ended {how}; body in {:?}",
+        seated(&b, body)
+    );
+    assert_eq!((how.as_str(), seated(&b, body)), ("left", None));
+    b.clean();
+    // Done: the body sits in the chair, a seat the run's own thing does not have.
+    b.steps(body, hall, to_seat, intent(body, 4), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    let how = ended(&mut b);
+    println!("E14 attend: ended {how}; body in {:?}", seated(&b, body));
+    assert_eq!((how.as_str(), seated(&b, body)), ("done", Some(chair)));
+    // Another body is refused the taken seat by name.
+    let other = b.mint.mint().expect("id");
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    let placed = b.surfaces[&fixture(1)]
+        .place(
+            other,
+            frame,
+            Vec3::new(stand.x + 1_000_000, stand.y, stand.z),
+            Quat::IDENTITY,
+        )
+        .expect("placed");
+    b.c.add(family(), placed).expect("added");
+    b.steps(
+        other,
+        hall,
+        vec![sit.clone()],
+        intent(other, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let how = ended(&mut b);
+    println!(
+        "E14 the taken seat: ended {how}; the other body in {:?}",
+        seated(&b, other)
+    );
+    assert_eq!((how.as_str(), seated(&b, other)), ("place-taken", None));
+    assert_eq!(seated(&b, body), Some(chair), "the first keeps its seat");
+    // The lecture's `leave`: its rise gives the seat back.
+    b.steps(
+        body,
+        hall,
+        vec![Step::Rise],
+        intent(body, 5),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let how = ended(&mut b);
+    println!(
+        "E14 leave the lecture: ended {how}; body in {:?}",
+        seated(&b, body)
+    );
+    assert_eq!((how.as_str(), seated(&b, body)), ("done", None));
+    b.clean();
 }
 
 /// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand
@@ -1693,6 +1852,7 @@ fn i4187_a_waiting_act_cancelled_or_timed_out_never_starts() {
             slot,
             lie: false,
             stand: false,
+            on: None,
         };
         let old = intent(body, 0);
         b.steps(
@@ -1777,6 +1937,7 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
         slot,
         lie: false,
         stand: false,
+        on: None,
     };
     b.steps(body, chair, vec![sit, Step::Rise], intent(body, 0), limits)
         .expect("started");
@@ -1876,6 +2037,7 @@ fn a_seat_taken_or_left_writes_the_bodys_posture() {
             slot,
             lie,
             stand: false,
+            on: None,
         };
         let mut written = Vec::new();
         let mut run = |b: &mut Bench, node, steps, n| {

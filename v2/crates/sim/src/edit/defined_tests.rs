@@ -675,6 +675,7 @@ fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
             &Bound::Put {
                 what: Of::Node(thing),
                 slot: 1,
+                on: None,
             },
         )
     };
