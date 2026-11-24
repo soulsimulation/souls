@@ -352,3 +352,111 @@ fn a_restart_with_no_clean_way_on_seats_the_body_again_and_it_rises_by_name() {
         }
     }
 }
+
+/// E11d after E16: a body killed early in a climb out of a bench's second place (200 mm west of its first), with no
+/// clean way on, is seated again in that same place (`resume-seated`), never moved to the bench's lowest free one.
+/// With that place taken by another body, it takes the bench's other free place, named `resume-seated-other`.
+#[test]
+fn a_restart_reseats_a_body_in_the_place_it_was_climbing_out_of() {
+    for taken in [false, true] {
+        let (town, ground) = town();
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        let clear = |p: Vec3| {
+            (-4..=3).all(|i| {
+                (-3..=3).all(|j| {
+                    !on(
+                        &town,
+                        ground,
+                        Vec3::new(p.x + i * 200_000, 0, p.z + j * 200_000),
+                    )
+                })
+            })
+        };
+        let off = (0..400)
+            .flat_map(|i| {
+                (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000))
+            })
+            .find(|&p| clear(p))
+            .expect("a point with no ground within 0.6 m");
+        let start = (0..400)
+            .flat_map(|i| {
+                (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000))
+            })
+            .find(|&p| on(&town, ground, p))
+            .expect("ground");
+        let second = Vec3::new(-200_000, 0, 0);
+        let (body, sitter) = (id(1), id(2));
+        let placed = Placed::from([(
+            body,
+            (
+                Pose {
+                    frame,
+                    position: Vec3::new(off.x + second.x, 0, off.z),
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: ground,
+                        height: 0,
+                    },
+                },
+                None,
+            ),
+        )]);
+        let first = |b| {
+            town.surfaces[&ground]
+                .place(b, frame, start, Quat::IDENTITY)
+                .unwrap()
+        };
+        let (c0, s0) = (first(body), first(sitter));
+        let mut b = Bodies::new(town, TICK).expect("the bodies");
+        let bench = id(50);
+        b.add_place(PlaceAt {
+            thing: bench,
+            place: Place {
+                slot: 1,
+                height: 450_000,
+                stand: [0, 300_000],
+            },
+            point: Vec3::new(off.x, 450_000, off.z),
+            facing: Quat::IDENTITY,
+            floor: ground,
+            more: vec![second],
+        })
+        .expect("the bench");
+        let (x0, x1, z0, z1) = (
+            off.x - 300_000,
+            off.x + 100_000,
+            off.z - 100_000,
+            off.z + 100_000,
+        );
+        b.slots
+            .footprint(bench, vec![[[x0, z0], [x1, z0], [x1, z1], [x0, z1]]]);
+        if taken {
+            b.add_body_at(humanoid(), s0, &Placed::new()).unwrap();
+            b.slots
+                .restore(
+                    &mut b.runner.controller,
+                    sitter,
+                    (bench, Some(1)),
+                    Some(second),
+                    sim::controller::Stance::Sit,
+                    0,
+                )
+                .expect("the other body in the second place");
+        }
+        b.add_body_at(humanoid(), c0, &placed)
+            .expect("a body off its floor starts");
+        let p = b.runner.controller.body(body).unwrap().pose;
+        assert_eq!(p.support, Support::Slot, "seated again: {p:?}");
+        let (want, name) = if taken {
+            (Vec3::ZERO, "resume-seated-other")
+        } else {
+            (second, "resume-seated")
+        };
+        assert_eq!(p.position, want, "the place: {p:?}");
+        assert_eq!(b.slots.spot_of(body), Some((bench, 1, u32::from(!taken))));
+        assert_eq!(b.resumed, vec![(body, name)]);
+    }
+}

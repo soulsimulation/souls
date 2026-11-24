@@ -1266,6 +1266,15 @@ impl Slots {
             let placed = floor.place_built(body, frame, p, at.facing, build)?;
             return c.stand(body, driver, placed, now);
         }
+        // A climb out starts from the body's own place in the seat (E16: a bench's places), never from another.
+        let mut here = at.clone();
+        if !at.more.is_empty()
+            && let Some(p) = c.body(body).map(|b| b.pose.position)
+            && let Ok(d) = at.facing.rotate(Vec3::new(p.x, 0, p.z))
+        {
+            here.point.x += d.x;
+            here.point.z += d.z;
+        }
         let near = c.near();
         let taken = |p: Vec3| {
             near.bodies_within(at.floor, [p.x, p.z], crate::controller::LANDING_ROOM)
@@ -1279,7 +1288,7 @@ impl Slots {
         let to = climb_point(
             floor,
             all,
-            at,
+            &here,
             self.places_of(at.thing),
             own,
             &taken,
@@ -1297,8 +1306,8 @@ impl Slots {
         };
         let landed = floor.place_built(body, frame, to, at.facing, build)?;
         let mut placed = landed;
-        placed.pose.position.x = at.point.x;
-        placed.pose.position.z = at.point.z;
+        placed.pose.position.x = here.point.x;
+        placed.pose.position.z = here.point.z;
         let from = placed.pose.position;
         let h = c.stand(body, driver, placed, now)?;
         c.carry(body, climb_track(at.floor, landed.pose.position))?;
