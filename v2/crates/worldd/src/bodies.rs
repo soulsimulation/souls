@@ -718,6 +718,7 @@ impl Bodies {
                             &mut self.runner.controller,
                             id,
                             (thing, Some(slot)),
+                            None,
                             sim::controller::Stance::Sit,
                             now,
                         )

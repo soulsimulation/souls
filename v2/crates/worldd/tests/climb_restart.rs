@@ -131,6 +131,7 @@ fn restart(own: bool) {
             point: Vec3::new(off.x, 450_000, off.z),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })
         .expect("its seat");
         let (x0, x1, z0, z1) = (off.x - 300_000, near.x, off.z - 300_000, off.z + 300_000);
@@ -286,6 +287,7 @@ fn a_restart_with_no_clean_way_on_seats_the_body_again_and_it_rises_by_name() {
         point: Vec3::new(off.x, 450_000, off.z),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })
     .expect("its seat");
     let (x0, x1, z0, z1) = (
