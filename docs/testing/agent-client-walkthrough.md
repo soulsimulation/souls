@@ -101,20 +101,25 @@ node eden.mjs act wave_at toward="$B" --wait
 node eden.mjs together offer handshake "$B"
 (cd ../b && node eden.mjs wait 10)
 (cd ../b && node eden.mjs together accept handshake)
+node eden.mjs wait 10
 ```
 
-B's `wait` shows `{"kind":"together","what":"offered","touch":"handshake","offer":…,"from":<A's body>}`. The accept
-answers `phase: "done"` and both shake. Too far apart, it answers `refused` with `together.too-far`: repeat step 4.
+B's `wait` shows `{"kind":"together","what":"offered","touch":"handshake","offer":…,"from":"<A's name>","from_id":
+<A's body>}`. The accept answers `phase: "done"` and both shake. Too far apart, it answers `refused` with
+`together.too-far`: repeat step 4. A's `wait` then shows the answer to its offer, as every member's does: `joined`
+(`"who"`: B's name), `started`, each `left`, and `ended` once the handshake is over. A no shows as `declined` with
+`"touch":"handshake"`.
 
 ## 7. Dance together, then leave
 
 ```sh
 node eden.mjs together offer dance "$B"
 (cd ../b && node eden.mjs together accept dance)
-node eden.mjs find activity
+node eden.mjs look
 ```
 
-`find activity` lists the activities in this Soul's copy, among them `dance_together_activity …`. While dancing,
+`look` says `"in": ["you are in dance with <B's name> (started); leave: together leave <its id>"]`, and `node eden.mjs
+inspect <that id>` lists its members with their roles. While dancing,
 other acts are refused `resource-blocked` (try `node eden.mjs act wave --wait`). Each leaves on its own:
 
 ```sh
@@ -164,8 +169,10 @@ node eden.mjs carry set-down "$CREW"
 node eden.mjs carry leave "$CREW"; (cd ../b && node eden.mjs carry leave "$CREW")
 ```
 
-`carry list` shows the crew `holds` the beam, `with` both bodies. A crew that comes apart (one stops while the other
-walks on, or the load meets something) sets the load down where it is; `carry list` then shows `holds: []`.
+`carry list` shows the crew `holds` the beam, `with` both carriers by name and role, as the world holds the crew. A
+crew that comes apart (one leaves, one stops while the other walks on, or the load meets something) sets the load down
+where it is: both `wait`s show `{"kind":"carry","what":"set-down","load":"<its name>","why":"partner-left"}` (or
+`carriers-apart`, `carry-blocked`), and `carry list` then shows `holds: []`.
 
 ## 10. Build a rack bay and take it down (four Souls, a seeded yard)
 
@@ -184,7 +191,10 @@ CREW=$(node eden.mjs carry offer "$B" | field crew)
 node eden.mjs part take "$CREW" "$FRAME"
 (cd ../b && node eden.mjs carry to "$CREW" "$BAY" upright_a) & node eden.mjs carry to "$CREW" "$BAY" upright_a; wait
 node eden.mjs part put "$CREW" "$BAY" upright_a
+node eden.mjs inspect "$BAY"
 ```
+
+`inspect` on the bay lists each slot with what fills it, `built` (`1 of 6 slots filled`) and what is `left`.
 
 A seated frame stays held by whoever is left in its crew until beams join it. The second frame goes to `upright_b`
 the same way, then the beams to `beam_low_l`, `beam_low_r`, `beam_high_l`, `beam_high_r`; `part unseat` takes each
@@ -201,7 +211,8 @@ node eden.mjs events --since 0
 - `receipt` (or `receipt <sequence>`): one act's answers, `accepted` then `receipt` (done) or `refused` with its
   `reason`.
 - `events --since 0`: every answer and invitation kept, with a `cursor` for the next `--since`.
-- `wait`: what is addressed to this Soul (offers, declines, words to it), up to the seconds given.
+- `wait`: what is addressed to this Soul (offers and their answers, the words of each activity it is in, words to
+  it), up to the seconds given.
 
 ## 12. Finish
 
@@ -216,10 +227,5 @@ The Souls stay in the world; `node eden.mjs look` starts the client again. `node
 
 These are gaps an agent hits, so expect them while walking through:
 
-- The Soul that offers is never told the answer: no `accepted`, `started` or `ended` reaches its `wait`. It sees only
-  a `changed` line naming the activity's node.
-- Nothing lists who is in an activity or crew from the world's copy: `carry list`'s `with` is what this client
-  remembers of its own offers.
-- `inspect` on a rack bay lists no slots and which are filled, and the rack parts' cards read "card".
+- The rack parts' cards read "card".
 - Refusals carry a name only (`together.too-far`, `part-pose`), never the world's reason text.
-- A carry the world sets down (`souls:carry-set-down`, with why) reaches no `wait`.
