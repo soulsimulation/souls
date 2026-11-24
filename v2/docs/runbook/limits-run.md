@@ -19,7 +19,7 @@ command with `750` as its argument, once the first table is in.
 ## The topology it runs on (24 Nov 2026)
 
 - **The production machine** serves all 11 moved worlds. Each world is `worldd@<instance>.service` in
-  `souls.slice`. The slice's `MemoryMax` is 14G. Eden's own `MemoryMax` is 4G and its `MemoryLow` 2G
+  `souls.slice`. The slice's `MemoryMax` is 18G (14G until 24 Nov). Eden's own `MemoryMax` is 4G and its `MemoryLow` 2G
   (`v2/tools/ops/units/world-limits.json`). Every other world keeps the unit's 2G
   ([world restarting](world-restarting.md)). Eden's gatewayd listens on loopback 7330, the viewers' origin on 7320.
   The front door sends `/s/*` to the origin with `/s` stripped, and `/w/eden/v2/*` to Eden's gatewayd
@@ -45,16 +45,16 @@ Fixed before the run (`guard.mjs` `BARS`):
 | Before each rung (preflight; refused = exit 2, the run stops) | Eden's supervisor state | `running` |
 | | Eden's `health.json` | written within 30 s |
 | | Eden's ticks on time, over two samples 10 s apart | at least 99 % |
-| | Eden's memory, and `souls.slice`'s | at most 60 % of its `MemoryMax` (2.4 of 4 GB; 8.4 of 14 GB) |
+| | Eden's memory, and `souls.slice`'s | at most 60 % of its `MemoryMax` (2.4 of 4 GB; 10.8 of 18 GB) |
 | | the driver's stream (`STREAM`) and the viewers' (`VIEWER_URL`) | each `pointer` answers |
 | | the gateway (`GATEWAY`) | connects |
 | During the rung (abort: driver and viewers stopped, `abort.txt`, the run stops) | Eden's ticks on time over the last 30 s | below 95 % |
-| | Eden's memory, or `souls.slice`'s | above 85 % of its `MemoryMax` (3.4 of 4 GB; 11.9 of 14 GB) |
+| | Eden's memory, or `souls.slice`'s | above 85 % of its `MemoryMax` (3.4 of 4 GB; 15.3 of 18 GB) |
 | | the probe | silent for 30 s |
 
 On 24 Nov 2026 the first preflight against production refused: the 11 moved worlds, idle, held 10.4 of the
-slice's 14 GB (74 %), above the 60 % start bar, while Eden itself stood at 1.8 of 4 GB. The start bar stays as it is
-until Gene decides between a higher start bar for the slice and a larger slice `MemoryMax`.
+slice's 14 GB (74 %), above the 60 % start bar, while Eden itself stood at 1.8 of 4 GB. Gene chose a larger slice:
+`MemoryMax` 18G, set live with `systemctl set-property` and in `v2/tools/ops/units/souls.slice`.
 
 An aborted rung is in the table as `aborted by the guard (<reason>)`, beside what it measured until the stop.
 `limits.sh` exits 4 after an abort or a refusal, and 0 when every rung ran.
