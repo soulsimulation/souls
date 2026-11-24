@@ -90,6 +90,12 @@ enum Seed {
         a: Id,
         b: Id,
     },
+    /// Three children in that one slot (#4575: over a seat of two places).
+    Three {
+        a: Id,
+        b: Id,
+        c: Id,
+    },
     /// Held by its frame's slot, in no slot.
     Hold {
         node: Id,
@@ -121,6 +127,7 @@ impl Source for Seeded<'_> {
         match self.seed {
             Seed::Parent { child, says } if n.id == child => n.parent = Some(says),
             Seed::OverFull { a, b } if n.id == a || n.id == b => n.slot = Some(9),
+            Seed::Three { a, b, c } if n.id == a || n.id == b || n.id == c => n.slot = Some(9),
             Seed::Hold { node } if n.id == node => {
                 n.support = Some(Support::Slot);
                 n.slot = None;
@@ -316,4 +323,56 @@ fn a1_a2_six_seeded_faults_each_named_within_two_seconds() {
         );
     }
     assert_eq!(tree.to_state(), before, "the auditor repairs nothing");
+}
+
+/// #4575 (E16's false alarm): two children in one slot of their parent are `slot-over-full` when the slot holds one,
+/// and no fault when the slot holds two (a seat's `most`, as a served world tells the auditor); three in a slot of
+/// two are over full again.
+#[test]
+fn a_slot_of_two_places_holding_two_bodies_is_not_over_full() {
+    let tree = eden();
+    let all = census(&tree);
+    let (parent, kids, _) = all
+        .iter()
+        .find(|x| x.1.len() >= 3)
+        .expect("a node of three")
+        .clone();
+    let run = |seed: Seed, most: usize| {
+        let src = Seeded { tree: &tree, seed };
+        let mut a = Auditor::new();
+        let mut faults = Vec::new();
+        loop {
+            let s = a.slice_most(&src, BUDGET, &|n, s| {
+                if n == parent && s == 9 { most } else { 1 }
+            });
+            faults.extend(s.faults);
+            if s.pass_ended {
+                break faults;
+            }
+        }
+    };
+    let two = Seed::OverFull {
+        a: kids[0],
+        b: kids[1],
+    };
+    let one = run(two, 1);
+    println!("two in a slot of one: {one:?}");
+    assert!(
+        one.iter()
+            .any(|f| f.name == "slot-over-full" && f.node == parent)
+    );
+    let ok = run(two, 2);
+    println!("two in a slot of two: {ok:?}");
+    assert!(ok.is_empty(), "{ok:?}");
+    let three = Seed::Three {
+        a: kids[0],
+        b: kids[1],
+        c: kids[2],
+    };
+    let over = run(three, 2);
+    println!("three in a slot of two: {over:?}");
+    assert!(
+        over.iter()
+            .any(|f| f.name == "slot-over-full" && f.node == parent)
+    );
 }

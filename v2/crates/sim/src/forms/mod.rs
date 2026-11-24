@@ -754,6 +754,18 @@ impl Forms {
             .collect()
     }
 
+    /// Whether every place of the seat of `thing` in `slot` is held or reserved by someone other than `body`: a body
+    /// in it, or another run on its way to it (#4575). A pick of a free seat skips such a seat.
+    pub fn seat_taken(&self, slots: &Slots, thing: Id, slot: u64, body: Id) -> bool {
+        let most = slots
+            .place_in(thing, slot)
+            .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX));
+        let mut taken: BTreeSet<Id> = slots.holders_in(thing, slot).into_iter().collect();
+        taken.extend(self.seat_holders(thing, slot));
+        taken.remove(&body);
+        taken.len() >= most
+    }
+
     /// A body other than `body` whose run holds a seat of `thing`, if one does.
     fn other_seat_holder(&self, thing: Id, body: Id) -> Option<Id> {
         self.seats

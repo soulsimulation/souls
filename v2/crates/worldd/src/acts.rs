@@ -2257,7 +2257,14 @@ impl Acts {
                     if all.contains_key(key) {
                         continue;
                     }
-                    let free = b.slots.free(&b.runner.controller, body, *node);
+                    // A seat another Soul's run is on its way to is not free (#4575): two Souls asking for a seat at
+                    // one moment are given different seats.
+                    let forms = &self.forms;
+                    let free = b
+                        .slots
+                        .free_unless(&b.runner.controller, body, *node, &|s| {
+                            forms.seat_taken(&b.slots, *node, s, body)
+                        });
                     match free.and_then(|s| names.get(usize::try_from(s).ok()?.checked_sub(1)?)) {
                         Some((n, _)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Name(n.clone()));

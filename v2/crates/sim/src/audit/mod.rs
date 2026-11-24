@@ -7,7 +7,8 @@
 //! - `parent-disagrees`: a node listed among a parent's children names another parent (T2 rule 1).
 //! - `link-one-end`: a link in the index at one end is missing from the other end's index, or from the links
 //!   (T2 rule 8: the index at each end carries every link).
-//! - `slot-over-full`: two children sit in one slot of their parent (one occupant per slot).
+//! - `slot-over-full`: more children sit in one slot of their parent than it holds: one, or the slot's `most`
+//!   places (E16: a tent of two sleepers), as [`Auditor::slice_most`] is told.
 //! - `hold-without-holder`: a node supported by its frame's slot (a held thing) that is in no slot.
 //! - `timer-orphan`: a pending timer whose node is not in the zone (T6 rule 15: a timer belongs to its node).
 //! - `support-missing`: a node standing on a surface, or floating in a volume, that is not in the zone.
@@ -118,8 +119,18 @@ impl Auditor {
         Auditor::default()
     }
 
-    /// Checks up to `budget` nodes or timers, carrying on where the last slice stopped.
+    /// Checks up to `budget` nodes or timers, carrying on where the last slice stopped. Every slot holds one.
     pub fn slice(&mut self, src: &dyn Source, budget: usize) -> Slice {
+        self.slice_most(src, budget, &|_, _| 1)
+    }
+
+    /// [`Auditor::slice`], with `most` the bodies a slot holds, by thing and slot (E16: a seat's `most`).
+    pub fn slice_most(
+        &mut self,
+        src: &dyn Source,
+        budget: usize,
+        most: &dyn Fn(Id, u64) -> usize,
+    ) -> Slice {
         let mut out = Slice::default();
         if !self.started {
             self.stack.push(src.root());
@@ -160,7 +171,7 @@ impl Auditor {
             };
             out.checked += 1;
             let Some(n) = src.node(h) else { continue };
-            node(src, h, &n, &mut out.faults);
+            node(src, h, &n, most, &mut out.faults);
             let kids = src.children(h);
             // Pushed in reverse, so the walk takes children in id order.
             self.stack.extend(kids.iter().rev());
@@ -170,8 +181,14 @@ impl Auditor {
 }
 
 /// The checks on one node: its children's parent and slots, its links' far ends, and its support.
-fn node(src: &dyn Source, h: Handle, n: &Seen, faults: &mut Vec<Fault>) {
-    let mut slots: BTreeMap<u64, Id> = BTreeMap::new();
+fn node(
+    src: &dyn Source,
+    h: Handle,
+    n: &Seen,
+    most: &dyn Fn(Id, u64) -> usize,
+    faults: &mut Vec<Fault>,
+) {
+    let mut slots: BTreeMap<u64, Vec<Id>> = BTreeMap::new();
     for c in src.children(h) {
         let Some(k) = src.node(c) else { continue };
         if k.parent != Some(n.id) {
@@ -185,13 +202,18 @@ fn node(src: &dyn Source, h: Handle, n: &Seen, faults: &mut Vec<Fault>) {
                 ),
             });
         }
-        if let Some(s) = k.slot
-            && let Some(first) = slots.insert(s, k.id)
-        {
+        if let Some(s) = k.slot {
+            slots.entry(s).or_default().push(k.id);
+        }
+    }
+    for (s, held) in slots {
+        let most = most(n.id, s).max(1);
+        if held.len() > most {
+            let names: Vec<String> = held.iter().map(|k| show(*k)).collect();
             faults.push(Fault {
                 name: "slot-over-full",
                 node: n.id,
-                detail: format!("slot {s} holds {} and {}", show(first), show(k.id)),
+                detail: format!("slot {s} holds {} (most {most})", names.join(" and ")),
             });
         }
     }

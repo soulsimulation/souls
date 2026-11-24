@@ -71,11 +71,12 @@ const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
 const CIRCLE: &str = "test:circle";
+const BAR: &str = "test:bar";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
     [
-        PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CIRCLE,
+        PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CIRCLE, BAR,
     ]
     .iter()
     .enumerate()
@@ -238,6 +239,16 @@ fn tree_rules() -> TreeRules {
                     ..k("thing", &[], &[], None)
                 },
             ),
+            (
+                fullname(BAR),
+                Kind {
+                    slots: BTreeMap::from([
+                        (1, BTreeSet::from(["family".to_owned()])),
+                        (2, BTreeSet::from(["family".to_owned()])),
+                    ]),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -352,6 +363,7 @@ fn entries() -> Json {
         (CAN.into(), can),
         (PLANK.into(), plank),
         (CIRCLE.into(), circle_entry()),
+        (BAR.into(), bar_entry()),
     ])
 }
 
@@ -402,6 +414,7 @@ fn world() -> Replica {
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
         create(circle(), CIRCLE, g, circle_at()),
+        create(bar(), BAR, g, bar_at()),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -448,6 +461,9 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     b.add_body(humanoid(), p1)?;
     b.add_body(humanoid(), p2)?;
     b.add_place(circle_place(ground))?;
+    for p in bar_places(ground) {
+        b.add_place(p)?;
+    }
     Ok(b)
 }
 
@@ -487,6 +503,50 @@ fn circle_place(ground: Id) -> sim::slots::PlaceAt {
         floor: ground,
         more: import_eden::more_places(Vec3::ZERO, 2, Some([3_000_000, 3_000_000])),
     }
+}
+
+/// #4575: a counter with two places of one body each along z, 5 m south of the circle. Place 1 (`a`) is nearer the
+/// walkers than place 2 (`b`), and the walkers stand as far from it as each other, so the nearest free pick gives
+/// both of them `a` unless it skips a place another Soul's run is on its way to.
+fn bar() -> Id {
+    id(11)
+}
+fn bar_at() -> Vec3 {
+    Vec3::new(-41_350_000, 0, 25_000_000)
+}
+fn bar_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:bar", "owner": "thing",
+      "points": { "a_by": { "role": "stand", "at_mm": [0, 0, 1600] }, "b_by": { "role": "stand", "at_mm": [0, 0, -400] } },
+      "slots": { "a": { "admits": "body", "most": 1, "at_mm": [0, 0, 1000], "stand": "a_by" },
+        "b": { "admits": "body", "most": 1, "at_mm": [0, 0, -1000], "stand": "b_by" } },
+      "geometry": { "bounds_mm": [600, 100, 3000] },
+      "forms": { "stand_at": { "who": "anyone", "starts": "act",
+        "takes": { "place": { "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+        "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+        "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+        "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }] } } }"#,
+    )
+    .unwrap()
+}
+/// The counter's two places as a served world registers them, each with its stand point 600 mm north of it.
+fn bar_places(ground: Id) -> Vec<sim::slots::PlaceAt> {
+    [(1, 1_000_000), (2, -1_000_000)]
+        .into_iter()
+        .map(|(slot, dz)| sim::slots::PlaceAt {
+            thing: bar(),
+            place: replica::moves::Place {
+                slot,
+                height: 0,
+                stand: [0, 600_000],
+            },
+            point: Vec3::new(bar_at().x, 0, bar_at().z + dz),
+            facing: Quat::IDENTITY,
+            floor: ground,
+            more: Vec::new(),
+        })
+        .collect()
 }
 
 /// An answer frame's sequence and its receipt's entries, or its refusal's reason.
@@ -1060,6 +1120,27 @@ fn i4575_two_souls_take_places_at_one_thing_at_once_through_the_gateway() {
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(circle()), Some(1)));
     assert_eq!(parent(&r, w2()), (Some(circle()), Some(1)));
+    run.stop();
+}
+
+/// #4575: two Souls ask for a place at the counter at the same moment, naming none. The world's nearest free pick
+/// skips a place another Soul's run is on its way to, so the second is given the other place, not the first's (and
+/// refused `place-taken`, as on Eden's bench). Both end in their own places.
+#[test]
+fn i4575_two_souls_asking_for_a_place_at_once_are_given_different_places() {
+    let (run, mut a, mut b) = serve("i4575-pick");
+    a.send("test:stand_at", Some(bar()), BTreeMap::new());
+    a.started();
+    b.send("test:stand_at", Some(bar()), BTreeMap::new());
+    let (first, second) = (a.answer(), b.answer());
+    println!("#4575 pick: first {first:?}, second {second:?}");
+    first.expect("the first takes the nearer place");
+    second.expect("the second is given the other place");
+    let r = run.replay();
+    let (pa, pb) = (parent(&r, w1()), parent(&r, w2()));
+    println!("#4575 pick: places {pa:?} {pb:?}");
+    assert_eq!(pa, (Some(bar()), Some(1)));
+    assert_eq!(pb, (Some(bar()), Some(2)));
     run.stop();
 }
 

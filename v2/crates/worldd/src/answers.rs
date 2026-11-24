@@ -4801,7 +4801,16 @@ impl Clock {
         self.since += bytes as u64;
         at[7] = mark();
         // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped.
-        let slice = self.auditor.slice(self.replica.tree(), self.audit);
+        // A seat of several places (E16) holds its `most` bodies; every other slot one.
+        let slots = self.bodies.as_ref().map(|b| &b.slots);
+        let most = |thing: Id, slot: u64| {
+            slots
+                .and_then(|s| s.place_in(thing, slot))
+                .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX))
+        };
+        let slice = self
+            .auditor
+            .slice_most(self.replica.tree(), self.audit, &most);
         for f in &slice.faults {
             eprintln!("worldd: audit: {f:?}");
         }
