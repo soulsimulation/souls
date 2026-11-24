@@ -414,6 +414,14 @@ fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
     log.wait_durable(n + 1).unwrap();
     drop(log.close());
     std::fs::write(dir.join("header"), older.stored()).unwrap();
+    // The older build's owners: its ground's revision, owned as today's, and no give.
+    let owners: String = std::fs::read_to_string(dir.join("header.kinds"))
+        .expect("the seed keeps its kinds' owners")
+        .lines()
+        .filter(|l| !l.starts_with("souls:give@"))
+        .map(|l| l.replace(&ground_kind, &older_ground) + "\n")
+        .collect();
+    std::fs::write(dir.join("header.kinds"), owners).unwrap();
 
     let socket = d.join("s");
     let w = serve(&dir, &socket);
@@ -422,8 +430,7 @@ fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
     assert!(
         said.contains("not this build's")
             && said.contains(&format!(
-                "1 kinds taken at the world's revision [{}]",
-                import_eden::GROUND
+                "1 kinds taken at the world's revision [{older_ground} as {ground_kind}]"
             ))
             && said.contains(
                 "1 this build pins that the world cannot make until it is reseeded [souls:give@"
@@ -431,11 +438,28 @@ fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
         "{said}"
     );
     w.line("worldd: started at tick");
+    // `world.kinds` still loads as the creator's client loads it (`replica::wasm`'s `creator_kinds`): each boot
+    // line's target is a place kind its own kind lines define.
     let kinds = std::fs::read_to_string(dir.join("world.kinds")).unwrap();
-    assert!(
-        kinds.contains(&format!("# souls-boot-body {older_ground}\n")),
-        "the creator's boot lines name the world's revision"
-    );
+    let mut defined = BTreeMap::new();
+    for line in kinds.lines() {
+        defined.extend(replica::world_model::parse_kinds(line).expect("a kind line or a comment"));
+    }
+    let targets: Vec<&str> = kinds
+        .lines()
+        .filter_map(|l| {
+            l.strip_prefix("# souls-boot-body ")
+                .or_else(|| l.strip_prefix("# souls-boot-activity ")?.split(' ').next())
+        })
+        .collect();
+    assert!(!targets.is_empty());
+    for t in targets {
+        assert_eq!(
+            defined.get(t).map(|k| k.owner.as_str()),
+            Some("place"),
+            "{t}"
+        );
+    }
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 
@@ -446,7 +470,9 @@ fn k16_a_world_with_no_header_file_keeps_the_one_its_log_names() {
     let d = scratch("k16b");
     let (dir, ..) = seeded(&d);
     let kept = std::fs::read(dir.join("header")).unwrap();
+    let owners = std::fs::read(dir.join("header.kinds")).unwrap();
     std::fs::remove_file(dir.join("header")).unwrap();
+    std::fs::remove_file(dir.join("header.kinds")).unwrap();
     let w = serve(&dir, &d.join("s"));
     assert_eq!(
         w.line("header: "),
@@ -455,6 +481,7 @@ fn k16_a_world_with_no_header_file_keeps_the_one_its_log_names() {
     w.line("worldd: started at tick");
     w.kill();
     assert_eq!(std::fs::read(dir.join("header")).unwrap(), kept);
+    assert_eq!(std::fs::read(dir.join("header.kinds")).unwrap(), owners);
     let _ = std::fs::remove_dir_all(&d);
 }
 

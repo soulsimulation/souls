@@ -86,10 +86,11 @@ pub const REHEARSAL_ENV: [&str; 8] = [
 ];
 
 /// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
-const FOLDER: [&str; 5] = [
+const FOLDER: [&str; 6] = [
     "world.json",
     "facts.json",
     "header",
+    "header.kinds",
     "moves.json",
     "entries",
 ];

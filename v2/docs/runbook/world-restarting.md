@@ -77,6 +77,17 @@ Turning `restart-loop` into a message to a person is O15's.
 | `oom-kill` | the world passed its `MemoryMax`: read its last lines in `journalctl -u worldd@<world>` |
 | `tick-stalled`, `watchdog` | the clock was wedged, no tick for 15 s: K7's record of the stalled tick is in the journal |
 
+A world is served under its own header, `<world>/header` (K16), the one its log names, never one the build rebuilds;
+`header.kinds` beside it keeps each pinned kind's owner. When a build pins a kind at another revision, the start's
+`header:` line in `journalctl -u worldd@<world>` lists each kind taken at the world's revision, those the world cannot
+make until it is reseeded, and those with no definition here. A start that refuses its header says why:
+
+| refusal | what to do |
+|---|---|
+| `header-missing` | no `header` file, and the log names another header than this build's: restore the folder's `header` and `header.kinds` from its backup, or reseed the world |
+| `header-mismatch` | the `header` file is not the header the log names: restore it from the backup (never hand-edit it), or reseed |
+| `world-identity-mismatch` | the `header` (or the folder) is another world's: the folder holds files of two worlds; restore it from this world's backup |
+
 ## The runs (O1's proof)
 
 `v2/tools/ops/o1-leak.sh`, `o1-builds.sh` and `o1-crashloop.sh`, as root on a disposable Linux machine with cgroup v2
