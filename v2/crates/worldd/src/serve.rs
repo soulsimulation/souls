@@ -2417,13 +2417,13 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     std::thread::Builder::new()
         .name("creator".into())
         .spawn(move || {
-            if waiting {
-                if let Ok(c) = until_answered("the creator's record", &measures::CREATOR, || {
+            if waiting
+                && let Ok(c) = until_answered("the creator's record", &measures::CREATOR, || {
                     patiently(|| read())
-                }) && watched.set(c)
-                {
-                    println!("creator: {}", say(c));
-                }
+                })
+                && watched.set(c)
+            {
+                println!("creator: {}", say(c));
             }
             loop {
                 std::thread::sleep(CREATOR_EVERY);
