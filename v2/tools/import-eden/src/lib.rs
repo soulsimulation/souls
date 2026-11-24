@@ -595,9 +595,15 @@ fn mesh_fill(t: &Json, level: i64, lowest: bool) -> R<(Vec<Value>, i64, i64)> {
                         continue;
                     }
                     let gap = out(c);
-                    let (lo, hi) = (along(c).min(along(d)).max(0), along(c).max(along(d)).min(len));
+                    let (lo, hi) = (
+                        along(c).min(along(d)).max(0),
+                        along(c).max(along(d)).min(len),
+                    );
                     if gap > 0 && gap <= i128::from(SEAM_MOST) && hi > lo {
-                        rows.push(ring_row(*y, vec![at(lo, 0), at(hi, 0), at(hi, gap), at(lo, gap)]));
+                        rows.push(ring_row(
+                            *y,
+                            vec![at(lo, 0), at(hi, 0), at(hi, gap), at(lo, gap)],
+                        ));
                         seams += 1;
                     }
                 }

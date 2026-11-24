@@ -119,7 +119,10 @@ fn go(c: &mut Runner, t: &mut Town, who: Body, node: Id, goal: Vec3) -> (String,
         c.tick(t)
             .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
     }
-    (crossed.join(", "), arrived(c, who.id).map(|a| (a - from) / 1000))
+    (
+        crossed.join(", "),
+        arrived(c, who.id).map(|a| (a - from) / 1000),
+    )
 }
 
 #[test]
@@ -153,10 +156,7 @@ fn a_soul_walks_into_chiba_from_the_town_and_across_every_storey() {
         let mine: Vec<u32> = (0..pieces as u32)
             .filter(|&q| map.patch_of(q).node == *f)
             .collect();
-        let reached = mine
-            .iter()
-            .filter(|&&q| parts[q as usize] == town)
-            .count();
+        let reached = mine.iter().filter(|&&q| parts[q as usize] == town).count();
         println!(
             "Chiba floor {level}: {} pieces, {reached} reached from the town",
             mine.len()
@@ -184,21 +184,21 @@ fn a_soul_walks_into_chiba_from_the_town_and_across_every_storey() {
         "every piece of Chiba a body has room on (a slip between solids aside) is reached from the town"
     );
     // The campus's other mesh floors the entrance treads reach (printed, not held): how much of each the town reaches.
-    for d in [
-        &b"core-mars-tool-camp@"[..],
-        b"mars-fidelity-freeside@",
-        b"core-mars-west-racks@",
-    ] {
+    for d in [&b"core-mars-tool-camp@"[..], b"mars-fidelity-freeside@"] {
         let t = &im.tree;
         let mut of = BTreeMap::<Id, (usize, usize)>::new();
         for q in 0..pieces as u32 {
             let node = map.patch_of(q).node;
-            let Some(thing) = t.handle(node).and_then(|h| t.node(h)).and_then(|n| n.parent()) else {
+            let Some(thing) = t
+                .handle(node)
+                .and_then(|h| t.node(h))
+                .and_then(|n| n.parent())
+            else {
                 continue;
             };
-            let is = t.handle(thing).and_then(|h| t.node(h)).is_some_and(|n| {
-                matches!(n.fields().get(&F_DEF), Some(Value::Bytes(b)) if b.starts_with(d))
-            });
+            let is = t.handle(thing).and_then(|h| t.node(h)).is_some_and(
+                |n| matches!(n.fields().get(&F_DEF), Some(Value::Bytes(b)) if b.starts_with(d)),
+            );
             if is && area_mm2(map.piece(q)) >= SLIP_MM2 {
                 let e = of.entry(thing).or_default();
                 e.0 += 1;

@@ -22,7 +22,7 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   150 mm grid) has its seams of up to 360 mm between surfaces at one height closed, so a partition's doorways join the
   areas either side (Chiba's ground storey). Its lowest storey, when it stands more than a step (220 mm) but no more
   than two above the ground, gets an entrance tread at half its height along each open edge, as today's page stepped
-  onto it from the terrain (Chiba, 374 mm up; the Mars tool camp, Freeside and the west racks). Neither is counted
+  onto it from the terrain (Chiba, 374 mm up; the Mars tool camp and Freeside). Neither is counted
   among the floor surfaces, as the bake has none. An upload
   comes by its SHA-256 (its CDN key, `docs/operations/cdn.md`): a thing that names one (a mesh's asset, a picture's media)
   holds the hash in field 24. A thing whose kind has a Soul Actions entry in SA-E11's map
