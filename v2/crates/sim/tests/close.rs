@@ -17,7 +17,9 @@ use replica::time::Micros;
 use sim::controller::{Controller, Driver, Part};
 use sim::ground::{HUMAN_RADIUS, OpenGround, Piece, Scene};
 use sim::mover::Surface;
-use skills::close::{Circle, FELL_BACK, Follow, Near, SPEED, Side, Step, THERE, Target, WALLED};
+use skills::close::{
+    Circle, FELL_BACK, Follow, LOST_PLACE, Near, SPEED, Side, Step, THERE, Target, WALLED,
+};
 
 const TICK: Micros = 50_000;
 
@@ -652,4 +654,105 @@ fn a4_no_input_searches_a_route_but_follows_one_fall_back_which_is_recorded() {
     assert_eq!(h.events, [name(FELL_BACK)]);
     // It walked to the route's point, off the held stretch, and went on after the leader.
     assert!(h.me.z > 3_000_000, "{:?}", mm(h.me));
+}
+
+/// A fake host for walking beside (0.135 R1), as [`Fake`]: the leader is where the test says.
+fn fake(me: Vec3, leader: Vec3) -> Fake {
+    Fake {
+        me,
+        leader,
+        now: 0,
+        held: false,
+        asks: 0,
+        events: Vec::new(),
+    }
+}
+
+/// 0.135 R1, walking hand in hand: a follower beside its leader keeps its place 0.5 m to the side it stood on, square
+/// to the way the leader walks: the leader walks 5 s north, then turns and walks 5 s east. Each time it has settled
+/// (a second into each leg) the follower is within 0.15 m of its place, and it never moves more than a run's tick (it
+/// walks, never placed). Standing first, it waits: the leader has no heading yet.
+#[test]
+fn r1_a_follower_beside_keeps_its_place_through_a_turn() {
+    let mut f = Follow::beside(id(2), 500_000, None);
+    // Well clear of the fake's gap (x 0.6 m to 2.5 m, z under 1 m).
+    let mut h = fake(
+        Vec3::new(500_000, 0, 10_000_000),
+        Vec3::new(0, 0, 10_000_000),
+    );
+    for _ in 0..20 {
+        assert_eq!(f.step(&mut h), Progress::Going);
+        h.now += TICK;
+    }
+    assert_eq!(
+        h.me,
+        Vec3::new(500_000, 0, 10_000_000),
+        "it waits for a heading"
+    );
+    let (mut worst, mut most) = ([0_i64; 2], 0_i64);
+    for n in 0..200u32 {
+        let t = i64::from(n) * TICK;
+        let north = (SPEED * t / 1_000_000).min(7_000_000);
+        let east = (SPEED * t / 1_000_000 - 7_000_000).max(0);
+        h.leader = Vec3::new(east, 0, 10_000_000 + north);
+        let was = h.me;
+        assert_eq!(f.step(&mut h), Progress::Going);
+        most = most.max(apart(was, h.me));
+        h.now += TICK;
+        // Its place: east of a leader walking north, south of a leader walking east.
+        let (leg, place) = if east == 0 {
+            (0, Vec3::new(h.leader.x + 500_000, 0, h.leader.z))
+        } else {
+            (1, Vec3::new(h.leader.x, 0, h.leader.z - 500_000))
+        };
+        let settled = if leg == 0 {
+            t >= 1_000_000
+        } else {
+            t >= 6_000_000
+        };
+        if settled {
+            worst[leg] = worst[leg].max(apart(h.me, place));
+        }
+    }
+    println!(
+        "r1: walking north, within {} mm of its place; walking east, within {} mm; at most {} mm a tick",
+        worst[0] / 1000,
+        worst[1] / 1000,
+        most / 1000
+    );
+    assert!(worst.iter().all(|w| *w <= 150_000), "{worst:?}");
+    assert!(most <= 200_000, "walked: {most} µm in a tick");
+}
+
+/// 0.135 R1: a follower beside its leader that cannot keep its place (held where it stands, as by the fake's gap)
+/// lets go: after 2 s farther than 1.5 m from its place it ends by name, and the order ends with it.
+#[test]
+fn r1_a_follower_beside_that_cannot_keep_its_place_lets_go() {
+    let mut f = Follow::beside(id(2), 500_000, None);
+    let mut h = fake(Vec3::new(0, 0, 0), Vec3::new(0, 0, 500_000));
+    let mut ended = None;
+    for n in 0..200u32 {
+        let t = i64::from(n) * TICK;
+        // The leader walks east at walking pace; its place, 0.5 m south of it, runs into the gap.
+        h.leader = Vec3::new(SPEED * t / 1_000_000, 0, 500_000);
+        match f.step(&mut h) {
+            Progress::Going => {}
+            other => {
+                ended = Some((t, other));
+                break;
+            }
+        }
+        h.now += TICK;
+    }
+    println!(
+        "r1: held at {:?} mm, the leader at {:?} mm: {ended:?}",
+        mm(h.me),
+        mm(h.leader)
+    );
+    let (t, how) = ended.expect("it let go");
+    assert_eq!(how, Progress::Failed(name(LOST_PLACE)));
+    assert!(
+        t <= 6_000_000,
+        "within 6 s of the leader setting off: {t} µs"
+    );
 }

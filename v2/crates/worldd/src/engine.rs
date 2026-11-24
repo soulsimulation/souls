@@ -2189,7 +2189,7 @@ impl Engine {
     /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
     /// [`Engine::out`].
     pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
-        let Some((_, _, follower, _)) = self
+        let Some((_, _, follower, _, _)) = self
             .activities
             .following()
             .into_iter()
@@ -2228,7 +2228,11 @@ impl Engine {
 
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+        if self.activities.lead(&self.moves, body) {
+            return;
+        }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
@@ -2289,8 +2293,9 @@ impl Engine {
         self.collect(None);
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and the width
+    /// of a place beside the leader (R1, hand in hand).
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
     }
 

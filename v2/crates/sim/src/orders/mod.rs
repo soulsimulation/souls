@@ -114,8 +114,13 @@ fn xyz(p: Vec3) -> Value {
 pub enum What {
     /// Hold `stance` (parameter 1: 1 stand, 2 sit, 3 lie) and the hands named (parameter 2).
     Hold { stance: Stance, hands: Vec<Name> },
-    /// Follow `leader` (the target) within `band` µm (parameters 1 and 2).
-    Follow { leader: Id, band: (i64, i64) },
+    /// Follow `leader` (the target) within `band` µm (parameters 1 and 2), or keep a place `beside` it, that many µm
+    /// to its side (parameter 3, 0.135 R1: walking hand in hand).
+    Follow {
+        leader: Id,
+        band: (i64, i64),
+        beside: Option<i64>,
+    },
     /// Stand in line for the slot of `slot` (the target), and take it at the head by `act` (parameter 1), if named.
     Queue { slot: Id, act: Option<Name> },
 }
@@ -232,13 +237,19 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
             What::Hold { stance, hands }
         }
         FOLLOW => {
-            has(&[1, 2])?;
+            has(&[1, 2, 3])?;
             let near = p.get(&1).map_or(Some(BAND.0), read_int);
             let far = p.get(&2).map_or(Some(BAND.1), read_int);
+            let beside = match p.get(&3).map(read_int) {
+                None => None,
+                Some(Some(w)) if w > 0 => Some(w),
+                Some(_) => return bad("a place beside is a width over 0, µm"),
+            };
             match (near, far) {
                 (Some(n), Some(f)) if 0 <= n && n <= f => What::Follow {
                     leader: node()?,
                     band: (n, f),
+                    beside,
                 },
                 _ => return bad("a band is 0 <= nearest <= furthest, µm"),
             }
@@ -338,6 +349,11 @@ impl Orders {
     /// The open order on `body`, if any.
     pub fn open(&self, body: Id) -> Option<&Order> {
         self.open.get(&body).map(|o| &o.order)
+    }
+
+    /// Every open order, by body.
+    pub fn opened(&self) -> impl Iterator<Item = &Order> {
+        self.open.values().map(|o| &o.order)
     }
 
     /// The line for the slot of `slot`, head first.
@@ -447,7 +463,11 @@ impl Orders {
                 hands: hands.clone(),
                 until,
             }),
-            What::Follow { leader, band } => Box::new(follow(*leader, *band, until)),
+            What::Follow {
+                leader,
+                band,
+                beside,
+            } => Box::new(follow(*leader, *band, *beside, until)),
             What::Queue { .. } => Box::new(Queue { until }),
         };
         let driver = c.claim(body, &skill.shape())?;

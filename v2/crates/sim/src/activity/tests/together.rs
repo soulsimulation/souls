@@ -312,3 +312,81 @@ fn t2_hands_held_while_both_stay_and_freed_when_either_leaves() {
         "t2: held past {LASTS} µs with no timer; one leave freed both hands, each written `released`"
     );
 }
+
+/// 0.135 R1, walking hand in hand: in a hold, the first member to walk leads (its walk does not let go), and the other
+/// follows beside it, half a metre to its side, by its own order (`following`); the other's walk still lets go. A
+/// restart ends the hold for both at its first tick (its hands came apart: moves are not stored), each member leaving
+/// as its own leave would, so neither is kept in it and both are free.
+#[test]
+fn r1_the_first_to_walk_leads_the_other_walks_beside_and_a_restart_ends_the_hold() {
+    let mut w = with_move(2, 0x74, "souls:hold_hand");
+    let (b0, b1) = (w.bodies[0], w.bodies[1]);
+    let offer = w.offer_to(0, 1, 1_000);
+    let ask = w.ask(1, 2_000);
+    let pair = w
+        .acts
+        .accept(
+            &mut w.tree,
+            &mut w.mint,
+            &mut w.c,
+            &mut w.due,
+            ask,
+            b1,
+            offer,
+        )
+        .expect("accepted");
+    assert!(w.begin(2_000).is_empty());
+    assert!(w.acts.following().is_empty(), "standing, nobody follows");
+    assert!(w.acts.lead(&w.moves, b0), "the first to walk leads");
+    assert!(w.acts.lead(&w.moves, b0), "and goes on leading");
+    assert!(!w.acts.lead(&w.moves, b1), "the other does not lead");
+    assert_eq!(
+        w.acts.walk_leaves(&w.moves, b1),
+        Some(pair),
+        "the other's own walk lets go"
+    );
+    let soul1 = w.souls[1];
+    assert_eq!(
+        w.acts.following(),
+        vec![(pair, b0, b1, soul1, Some(500_000))],
+        "the other walks beside the leader, half a metre off"
+    );
+
+    // The restart: the tree from the log alone; a new controller, no moves, no timers.
+    let header = w.acts.header.clone();
+    let mut log = w.setup.clone();
+    log.extend(w.acts.stream.iter().cloned());
+    let mut tree = super::Tree::start(w.root, n(super::GROUND));
+    tree.apply(&header, &super::part(&header, &log))
+        .expect("the log replays");
+    let mut c = super::controller(w.root, &w.bodies);
+    let rules = w.acts.rules.clone();
+    let mut kind = super::pair();
+    for r in &mut kind.roles {
+        r.mv = Some(n("souls:hold_hand"));
+    }
+    w.acts = Activities::restore(header, rules, vec![kind], &tree, &mut c).expect("restored");
+    w.tree = tree;
+    w.c = c;
+    w.moves = super::Moves::new();
+    w.due = super::DueList::new();
+    assert!(w.acts.following().is_empty(), "no leader after a restart");
+    assert!(w.acts.finishing(), "the hold ends at the first tick");
+    let refused = w.acts.finish(
+        &mut w.tree,
+        &mut w.c,
+        &mut w.moves,
+        &mut w.due,
+        &mut w.mint,
+        10_000,
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    assert!(w.acts.members(pair).is_none(), "the hold is over");
+    for b in [b0, b1] {
+        assert!(w.memberships(b).is_empty(), "{b:?} is in no hold");
+        assert!(w.free(b), "{b:?} holds nothing");
+    }
+    println!(
+        "r1: the first walker leads, the other follows 0.5 m beside; a restart ends the hold for both"
+    );
+}

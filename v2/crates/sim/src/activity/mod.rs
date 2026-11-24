@@ -32,6 +32,14 @@
 //!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
 //!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
 //!   way ([`Activities::walk_leaves`] names the activity; worldd sends the leave).
+//! - **Walking hand in hand (0.135 R1).** In a hold, the first member to walk leads ([`Activities::lead`]): its walk
+//!   does not let go, and the other keeps its place beside it, the width of the kind's two stands apart
+//!   (`v2/docs/moving-group.md`, a walker steering to its place), by its own `souls:follow` order, as a follower
+//!   does ([`Activities::following`]). The other's own walk lets go, as before; so does its order ending (its own
+//!   act, or a place it could not keep). When the leader stops, both stand holding hands.
+//! - **A touch or a hold does not outlast a restart.** Its moves are not stored, so a started activity whose roles
+//!   name moves (not a dance) is ended at the first tick after a restart, each member leaving as its own leave
+//!   would ([`Activities::restore`], [`Activities::finish`]): nobody is kept in a hold whose hands came apart.
 //! - **Dancing together on one beat (0.134 T3).** A kind whose moves go on the beat (`beat`) takes up to its `most`
 //!   members, offered to several at once; each later accept joins the offer's own activity ([`offer`]). Its first
 //!   beat is fixed when it starts: the last whole beat of the world's clock at most 2 s ahead (`v2/docs/time.md`
@@ -161,6 +169,9 @@ fn create(id: Id, kind: &Name, place: Id, audience: Audience, node: &Node) -> Ch
     }
 }
 
+/// How far apart two Souls walking hand in hand keep, µm, when the kind's stands do not say (0.135 R1).
+const HAND_IN_HAND: i64 = 500_000;
+
 /// The due list's name for the timer that lets a leaving body go.
 const LEAVE_TIMER: &str = "souls:activity-leave";
 
@@ -220,6 +231,8 @@ pub struct Activities {
     placing: BTreeMap<Id, BTreeSet<Id>>,
     frames: BTreeMap<Id, Option<(Id, places::Frame)>>,
     stands: BTreeMap<Id, BTreeMap<Id, usize>>,
+    /// The member leading each hold that walks hand in hand (0.135 R1), by activity.
+    leaders: BTreeMap<Id, Id>,
 }
 
 impl Activities {
@@ -243,6 +256,7 @@ impl Activities {
             placing: BTreeMap::new(),
             frames: BTreeMap::new(),
             stands: BTreeMap::new(),
+            leaders: BTreeMap::new(),
         }
     }
 
@@ -1170,6 +1184,9 @@ impl Activities {
         if let Some(s) = self.stands.get_mut(&activity) {
             s.remove(&body);
         }
+        if self.leaders.get(&activity) == Some(&body) || !self.live.contains_key(&activity) {
+            self.leaders.remove(&activity);
+        }
         if !self.live.contains_key(&activity) {
             self.placing.remove(&activity);
             self.frames.remove(&activity);
@@ -1227,16 +1244,58 @@ impl Activities {
         (kind.beat || follower || l.moves.values().any(|n| held(moves, *n))).then_some(a)
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Whether a walk `body` sends leads the hold it is in (0.135 R1, walking hand in hand): a hold of two whose
+    /// leader is none yet (then `body` leads it from now on) or `body`. The other member's walk still lets go.
+    pub fn lead(&mut self, moves: &Moves, body: Id) -> bool {
+        let Some(&a) = self.holding.get(&body) else {
+            return false;
+        };
+        let Some(l) = self.live.get(&a) else {
+            return false;
+        };
+        let kind = &self.kinds[&l.kind];
+        let hold = !kind.beat
+            && kind.follows.is_none()
+            && l.node.members.len() == 2
+            && l.moves.values().any(|n| held(moves, *n));
+        if !hold || self.leaders.get(&a).is_some_and(|b| *b != body) {
+            return false;
+        }
+        self.leaders.insert(a, body);
+        true
+    }
+
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and for a
+    /// hold walking hand in hand (R1) the width of the follower's place beside the leader, µm: the distance between
+    /// the kind's first two stands, or half a metre.
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.live
             .iter()
             .filter(|(_, l)| l.node.state == State::Started)
             .filter_map(|(a, l)| {
-                let f = self.kinds[&l.kind].follows.as_ref()?;
+                let kind = &self.kinds[&l.kind];
+                if let Some(lead) = self.leaders.get(a) {
+                    let leader = l.node.members.iter().find(|m| m.body == *lead)?;
+                    let follower = l.node.members.iter().find(|m| m.body != *lead)?;
+                    let at = |m: &Member| {
+                        kind.role(&m.role)
+                            .and_then(|r| r.stands.first())
+                            .map(|s| s.0)
+                    };
+                    let width = match (at(leader), at(follower)) {
+                        (Some(p), Some(q)) => {
+                            let (dx, dz) = (i128::from(q.x - p.x), i128::from(q.z - p.z));
+                            i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(HAND_IN_HAND)
+                        }
+                        _ => HAND_IN_HAND,
+                    };
+                    let width = if width > 0 { width } else { HAND_IN_HAND };
+                    return Some((*a, leader.body, follower.body, follower.soul, Some(width)));
+                }
+                let f = kind.follows.as_ref()?;
                 let follower = l.node.members.iter().find(|m| m.role == *f)?;
                 let leader = l.node.members.iter().find(|m| m.role != *f)?;
-                Some((*a, leader.body, follower.body, follower.soul))
+                Some((*a, leader.body, follower.body, follower.soul, None))
             })
             .collect()
     }
@@ -1434,6 +1493,10 @@ impl Activities {
             let mut drivers = BTreeMap::new();
             if node.state == State::Started {
                 let kind = &a.kinds[&n.kind];
+                // 0.135 R1: a touch or a hold whose moves did not come back is over; the first tick ends it.
+                if !kind.beat && kind.roles.iter().any(|r| r.mv.is_some()) {
+                    a.ending.insert(*id);
+                }
                 for m in &node.members {
                     let shape = kind.shape(kind.role(&m.role).ok_or_else(|| Refusal {
                         name: "role-unknown",
