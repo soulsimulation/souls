@@ -336,6 +336,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         point: Vec3::new(s.x, 450_000, s.z - 300_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -439,12 +440,22 @@ fn serve_on(
     store: Mem,
     text: Option<std::sync::Arc<sim::text::Store>>,
 ) -> (Run, Client, Client) {
+    serve_at(tag, store, text, entry())
+}
+
+/// [`serve_on`] with its births by the entry at `at` (µm, the open ground's frame).
+fn serve_at(
+    tag: &str,
+    store: Mem,
+    text: Option<std::sync::Arc<sim::text::Store>>,
+    at: Vec3,
+) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.text = text;
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((tree_rules(), vec![pair_kind()]));
     cfg.join = Some(Join {
-        entry: (ground(), entry()),
+        entry: (ground(), at),
         family: humanoid(),
         kind: name(&fullname(BODY)),
         per_tick: 8,
@@ -611,6 +622,31 @@ fn a1_a_first_intent_births_the_body_named_by_its_join_and_it_takes_and_puts() {
     let t = r.tree();
     let n = t.node(t.handle(bo_body).unwrap()).unwrap();
     assert!(n.fields().get(&NAME).is_none(), "unnamed");
+    run.stop();
+}
+
+#[test]
+fn a5_a_join_no_place_can_hold_is_refused_by_name_and_a_second_is_too() {
+    // An entry far past N2's test world, where no ground is cut: every spot of the search is off the surface.
+    let (run, mut a, mut b) = serve_at(
+        "a5",
+        Mem::with(Vec::new()),
+        None,
+        Vec3::new(-900_000_000, 0, 30_000_000),
+    );
+    let joined = a.act(JOIN, None, p(&[(1, words("Ada"))]));
+    println!("A5 join off the ground: {joined:?}");
+    assert_eq!(joined, Err("birth-off-surface".to_owned()));
+    assert!(run.body_of(ada()).is_none(), "no body");
+    // The birth was withdrawn, not left waiting: a join sent again is asked and answered again, as is another Soul's.
+    assert_eq!(
+        a.act(JOIN, None, p(&[(1, words("Ada"))])),
+        Err("birth-off-surface".to_owned())
+    );
+    assert_eq!(
+        b.act("activity:propose", Some(ground()), BTreeMap::new()),
+        Err("birth-off-surface".to_owned())
+    );
     run.stop();
 }
 

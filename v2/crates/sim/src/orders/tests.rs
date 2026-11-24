@@ -178,6 +178,7 @@ fn world() -> World {
             place,
             facing: Quat::IDENTITY,
             floor,
+            more: Vec::new(),
         })
         .expect("a place");
     World {

@@ -139,6 +139,7 @@ fn hall(place: &Place, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
                     point,
                     facing: Quat::IDENTITY,
                     floor: floor_id(),
+                    more: Vec::new(),
                 })
                 .expect("a place");
             chairs.push(thing);

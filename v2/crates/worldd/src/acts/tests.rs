@@ -223,6 +223,24 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         !planning.borrow().answers.contains_key(&line_key),
         "duplicate old line result cannot be reinstalled"
     );
+    // S13d: a walk the planner refuses reaches the form by the planner's own name, not as a walk with no legs.
+    assert_eq!(sight.plan_walk(id, 0, ground, goal, 0), WalkPlan::Pending);
+    let generation = planning.borrow().current[&walk_key].0.generation;
+    planning.borrow_mut().receive(BTreeMap::from([(
+        walk_key,
+        FormAnswer {
+            generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Err(Refusal {
+                name: sim::planner::GROUND_CHANGED,
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert_eq!(
+        sight.plan_walk(id, 0, ground, goal, 0),
+        WalkPlan::Refused(Name::new(sim::planner::GROUND_CHANGED).unwrap())
+    );
     planning.borrow_mut().keep(&BTreeMap::new());
     assert!(
         planning.borrow().current.is_empty(),
@@ -271,7 +289,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     let old = FormAnswer {
         generation: 1,
         map: Arc::clone(&map),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.ask(key, body, question(Vec3::new(1, 0, 0)), &map);
     planning.receive(BTreeMap::from([(key, old.clone())]));
@@ -286,7 +304,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     let current = FormAnswer {
         generation: 3,
         map: Arc::clone(&changed),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.receive(BTreeMap::from([(key, current.clone())]));
     assert!(planning.answer(&key, &map).is_none(), "old map refused");
@@ -444,7 +462,7 @@ fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it(
         FormAnswer {
             generation: first[0].generation,
             map: Arc::clone(&map),
-            result: FormResult::Walk(Vec::new()),
+            result: FormResult::Walk(Ok(Vec::new())),
         },
     );
     planning.ask(key, body, walk.clone(), &map);
