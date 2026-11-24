@@ -844,7 +844,10 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
         // B10: an entry's own thing takes its activity too, so one offered or proposed at the thing is that thing's
         // (its roles' links are written on it).
         for a in &activities {
-            if a.roles.iter().any(|r| r.link.as_ref().is_some_and(|l| l.on == plain(name))) {
+            if a.roles
+                .iter()
+                .any(|r| r.link.as_ref().is_some_and(|l| l.on == plain(name)))
+            {
                 kind.children.insert(plain(a.name.as_str()).to_owned());
             }
         }

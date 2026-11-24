@@ -58,9 +58,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use replica::activity::{
-    ActivityKind, F_MEMBERS, F_STATE, MEMBER, Member, Node, RoleLink, State,
-};
+use replica::activity::{ActivityKind, F_MEMBERS, F_STATE, MEMBER, Member, Node, RoleLink, State};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
 };
@@ -515,8 +513,7 @@ impl Activities {
             *id != activity
                 && o.kind == l.kind
                 && parent(tree, *id) == Some(place)
-                && o
-                    .node
+                && o.node
                     .members
                     .iter()
                     .any(|x| x.body == m.body && x.role == m.role)

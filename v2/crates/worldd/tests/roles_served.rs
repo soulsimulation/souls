@@ -301,7 +301,9 @@ fn changes(e: &Effect) -> impl Iterator<Item = &Change> {
 fn body_of(dir: &Path, soul: Id) -> Id {
     in_log(dir, |es| {
         es.iter().flat_map(changes).find_map(|c| match c {
-            Change::Link { ty, ends, .. } if ty.as_str() == "souls:body-of" && ends.contains(&soul) => {
+            Change::Link { ty, ends, .. }
+                if ty.as_str() == "souls:body-of" && ends.contains(&soul) =>
+            {
                 ends.iter().copied().find(|e| *e != soul)
             }
             _ => None,
@@ -330,12 +332,17 @@ fn role_links(dir: &Path, board: Id) -> (Vec<(String, Id, Actor, Cause)>, usize)
     for e in effects(dir).iter().filter(|e| e.envelope.node == board) {
         for c in changes(e) {
             match c {
-                Change::Link {
-                    link, ty, ends, ..
-                } if ty.as_str() == FIRST || ty.as_str() == SECOND => {
+                Change::Link { link, ty, ends, .. }
+                    if ty.as_str() == FIRST || ty.as_str() == SECOND =>
+                {
                     live.push((
                         *link,
-                        (ty.as_str().to_owned(), ends[0], e.envelope.actor, e.envelope.cause),
+                        (
+                            ty.as_str().to_owned(),
+                            ends[0],
+                            e.envelope.actor,
+                            e.envelope.cause,
+                        ),
                     ));
                 }
                 Change::Unlink { link } => {
@@ -348,6 +355,10 @@ fn role_links(dir: &Path, board: Id) -> (Vec<(String, Id, Actor, Cause)>, usize)
         }
     }
     (live.into_iter().map(|(_, r)| r).collect(), gone)
+}
+
+fn int(v: i64) -> Value {
+    u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
 }
 
 async fn next(ws: &mut Ws) -> Value {
@@ -520,6 +531,21 @@ async fn b10_two_souls_accept_the_sides_of_a_turn_game_and_each_makes_only_its_o
     let (url, tokens) = gateway(&socket, &souls).await;
     let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
     let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+    // Each walks up to the board first: a body is born at its Soul's first intent.
+    let ground = im.nodes["ground"];
+    for (s, dx) in [(&mut a, -1_500_000), (&mut b, 1_500_000)] {
+        let to = BTreeMap::from([(
+            1,
+            Value::Array(vec![
+                int(BOARD_AT[0] * 1000 + dx),
+                int(0),
+                int(BOARD_AT[2] * 1000 + 1_000_000),
+            ]),
+        )]);
+        s.act("eden:walk", ground, to)
+            .await
+            .expect("walked to the board");
+    }
     let (body_a, body_b) = (body_of(&dir, a.id), body_of(&dir, b.id));
 
     // Nobody holds a side: no move is anyone's, and no link is on the board.
@@ -552,9 +578,21 @@ async fn b10_two_souls_accept_the_sides_of_a_turn_game_and_each_makes_only_its_o
     let (links, _) = role_links(&dir, board);
     println!("role links on the board: {links:?}");
     let sides: Vec<(&str, Id)> = links.iter().map(|(t, e, ..)| (t.as_str(), *e)).collect();
-    assert_eq!(sides, vec![(FIRST, body_a), (SECOND, body_b)], "each holds its own side's link");
-    assert_eq!(links[0].2, Actor::Soul(a.id), "the offer's, acted by Soul 1");
-    assert_eq!(links[1].2, Actor::Soul(b.id), "the accept's, acted by Soul 2");
+    assert_eq!(
+        sides,
+        vec![(FIRST, body_a), (SECOND, body_b)],
+        "each holds its own side's link"
+    );
+    assert_eq!(
+        links[0].2,
+        Actor::Soul(a.id),
+        "the offer's, acted by Soul 1"
+    );
+    assert_eq!(
+        links[1].2,
+        Actor::Soul(b.id),
+        "the accept's, acted by Soul 2"
+    );
     assert!(
         links.iter().all(|l| matches!(l.3, Cause::Intent(_))),
         "each caused by its Soul's intent"
@@ -607,7 +645,10 @@ async fn b10_two_souls_accept_the_sides_of_a_turn_game_and_each_makes_only_its_o
     tokio::time::sleep(Duration::from_millis(300)).await;
     let (links, gone) = role_links(&dir, board);
     drop(served);
-    assert!(links.is_empty(), "no role link outlives the game: {links:?}");
+    assert!(
+        links.is_empty(),
+        "no role link outlives the game: {links:?}"
+    );
     assert_eq!(gone, 2);
     let _ = std::fs::remove_dir_all(&d);
     println!(

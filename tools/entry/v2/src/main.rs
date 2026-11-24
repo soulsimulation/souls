@@ -24,6 +24,8 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use body_script::{TICK, ground, ground_id, humanoid, place};
+use replica::activity::{ActivityKind, Role, RoleLink};
+use replica::bodies::{Class, Want};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
     TransferRec, schema_hash,
@@ -39,8 +41,6 @@ use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
-use replica::activity::{ActivityKind, Role, RoleLink};
-use replica::bodies::{Class, Want};
 use sim::activity::{Activities, Ask as Asking};
 use sim::controller::Controller;
 use sim::forms::{Asked, Forms, Intent, World};
@@ -275,8 +275,8 @@ fn role_of(kind: &str, t: &str) -> String {
 }
 
 /// The activity kinds the entries' roles make (B10), as worldd serves them (`worldd::serve::activity_kinds`): one
-/// for each entry with two or more roles, each role claiming a hand and holding its entry's link of its name on the
-/// entry's own thing. Its pin here is the gate's own, not the served one.
+/// for each entry with two roles (an offer takes two), each role holding its entry's link of its name on the entry's
+/// own thing. Its pin here is the gate's own, not the served one.
 fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
     let mut out = BTreeMap::new();
     for (kind, entry) in kinds.obj().unwrap_or(&[]) {
@@ -288,7 +288,8 @@ fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
             .filter(|(n, v)| n != "now" && v.obj().is_some())
             .map(|(n, _)| n)
             .collect();
-        if roles.len() < 2 {
+        // An offer takes two roles: a kind of more (a frisbee's three) keeps the case's links as written.
+        if roles.len() != 2 {
             continue;
         }
         let mut most = 0usize;
@@ -314,12 +315,15 @@ fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
                 }),
             });
         }
-        let pin: String = Hash::of(Purpose::Fixture, format!("souls/entry-v2/activity/{kind}").as_bytes())
-            .to_bytes()
-            .iter()
-            .skip(2)
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let pin: String = Hash::of(
+            Purpose::Fixture,
+            format!("souls/entry-v2/activity/{kind}").as_bytes(),
+        )
+        .to_bytes()
+        .iter()
+        .skip(2)
+        .map(|b| format!("{b:02x}"))
+        .collect();
         out.insert(
             kind.clone(),
             ActivityKind {
@@ -1082,7 +1086,10 @@ impl Stage {
             return Ok(());
         }
         let [r1, r2] = &a.roles[..] else {
-            return Err(format!("{kind}: {} roles; an offer takes two", a.roles.len()));
+            return Err(format!(
+                "{kind}: {} roles; an offer takes two",
+                a.roles.len()
+            ));
         };
         let ends = |r: &Role| {
             seats
@@ -1135,8 +1142,15 @@ impl Stage {
         for b in asked {
             let ask = self.asking(b);
             self.with_acts(|s| {
-                s.acts
-                    .accept(&mut s.tree, &mut s.mint, &mut s.c, &mut s.acts_due, ask, b, offer)
+                s.acts.accept(
+                    &mut s.tree,
+                    &mut s.mint,
+                    &mut s.c,
+                    &mut s.acts_due,
+                    ask,
+                    b,
+                    offer,
+                )
             })?;
         }
         for b in stand_ins {
@@ -1208,7 +1222,8 @@ impl Stage {
         }
         // A leave lets a body in a move go at the move's next phase end: let every one go now.
         while let Some(t) = self.acts_due.fire(Micros::MAX) {
-            self.acts.fire(&mut self.c, &mut self.moves, &mut self.acts_due, &t);
+            self.acts
+                .fire(&mut self.c, &mut self.moves, &mut self.acts_due, &t);
         }
         Ok(())
     }
@@ -1500,11 +1515,11 @@ impl Stage {
                     .filter_map(|e| names.to_id.get(e).copied())
                     .collect();
                 // B10: a role's link is never written here: its ends take the role (below).
-                if self
-                    .roles
-                    .get(&kind)
-                    .is_some_and(|a| a.roles.iter().any(|r| r.name.as_str() == role_of(&kind, &t)))
-                {
+                if self.roles.get(&kind).is_some_and(|a| {
+                    a.roles
+                        .iter()
+                        .any(|r| r.name.as_str() == role_of(&kind, &t))
+                }) {
                     seats.push((role_of(&kind, &t), want));
                     continue;
                 }

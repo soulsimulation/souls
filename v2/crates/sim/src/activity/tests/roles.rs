@@ -92,15 +92,17 @@ fn linked(w: &World, thing: Id, ty: &str) -> BTreeSet<Id> {
         .collect()
 }
 
-/// The effects written since `from` (an index into the stream) that link or unlink at `node`.
+/// The effects written since `from` (an index into the stream) that write or take down a role link at `node`.
 fn at_node(w: &World, from: usize, node: Id) -> Vec<&Effect> {
     w.acts.stream[from..]
         .iter()
         .filter(|e| e.envelope.node == node)
         .filter(|e| {
-            e.changes()
-                .iter()
-                .any(|c| matches!(c.change, Change::Link { .. } | Change::Unlink { .. }))
+            e.changes().iter().any(|c| match &c.change {
+                Change::Link { ty, .. } => ty.as_str().starts_with("test:"),
+                Change::Unlink { .. } => true,
+                _ => false,
+            })
         })
         .collect()
 }
@@ -150,14 +152,19 @@ fn b10_an_accepted_role_gives_its_member_the_role_link_on_the_activitys_thing() 
     // A leave takes the leaver's link down, in its own part; the other keeps its own.
     let from = w.acts.stream.len();
     w.leave(1, pair, 3_000);
-    assert!(linked(&w, board, "test:second").is_empty(), "the leaver's link is gone");
+    assert!(
+        linked(&w, board, "test:second").is_empty(),
+        "the leaver's link is gone"
+    );
     assert_eq!(linked(&w, board, "test:first"), BTreeSet::from([b0]));
     assert_eq!(at_node(&w, from, board).len(), 1);
     // The last leave ends the activity, and its links with it.
     w.leave(0, pair, 3_500);
     assert!(w.acts.members(pair).is_none(), "the activity ended");
     assert!(linked(&w, board, "test:first").is_empty());
-    println!("b10: offered and accepted at the board, both sides linked; each leave took its own link down");
+    println!(
+        "b10: offered and accepted at the board, both sides linked; each leave took its own link down"
+    );
 }
 
 #[test]
@@ -182,16 +189,22 @@ fn b10_a_lapsed_offer_takes_its_askers_link_down_and_the_ground_binds_nothing() 
         .expect("offered");
     assert_eq!(linked(&w, board, "test:first"), BTreeSet::from([b0]));
     w.lapse_until(120_000_000);
-    assert!(linked(&w, board, "test:first").is_empty(), "lapsed: no link left");
+    assert!(
+        linked(&w, board, "test:first").is_empty(),
+        "lapsed: no link left"
+    );
 
     // On the open ground nothing is the activity's thing: no role link is written anywhere.
     let from = w.acts.stream.len();
     let offer = w.offer(0, BTreeSet::from([b1]), 130_000_000);
-    w.accept(1, offer, 130_001_000).expect("accepted on the ground");
+    w.accept(1, offer, 130_001_000)
+        .expect("accepted on the ground");
     let links: usize = w.acts.stream[from..]
         .iter()
         .flat_map(|e| e.changes())
-        .filter(|c| matches!(&c.change, Change::Link { ty, .. } if ty.as_str().starts_with("test:")))
+        .filter(
+            |c| matches!(&c.change, Change::Link { ty, .. } if ty.as_str().starts_with("test:")),
+        )
         .count();
     assert_eq!(links, 0, "no role link on the ground");
     assert!(linked(&w, board, "test:second").is_empty());
