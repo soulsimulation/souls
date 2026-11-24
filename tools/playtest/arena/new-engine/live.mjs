@@ -50,7 +50,7 @@ export const kickoffText = (name) => `Your Soul ${name} lives in this folder; it
 export const messageText = (m) => `[background task] node eden.mjs listen --follow printed:\n${JSON.stringify({ kind: 'owner-message', id: m.id, text: m.text })}`;
 
 /** The commands that ask the world for something (a write), by their first words. */
-const WRITES = new Set(['act', 'say', 'shout', 'whisper', 'converse', 'together', 'set-down', 'stop', 'pray', 'now']);
+const WRITES = new Set(['act', 'say', 'shout', 'whisper', 'converse', 'together', 'give', 'set-down', 'stop', 'pray', 'now']);
 export function isIntent(words) {
   const [w0, w1] = words;
   if (WRITES.has(w0)) return !(w0 === 'converse' && ['list'].includes(w1));
