@@ -7,6 +7,9 @@
 //!   ground, 20 of them walking; the 21st walks to its place first, since no Soul stands until it acts (C3). A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
 //!   the same wall commits. Each edit's answer is timed through the gateway, beside the 20 walkers.
 //! - **#3923** (N2's test world, in CI): the same refusal for a Soul that has acted, standing where its walk ended.
+//! - **G1f A1, K18d** (N2's test world with one Eden chair, in CI; Eden with `EDEN_FACTS`, `--release`): a creator's
+//!   chair, and building, rooms, door and chair, are sat in; an occupied seat or the door to it is not removed, and
+//!   a wall over the seated Soul is refused.
 
 // A real process and a real gateway on the real clock: the waits and the times are real time.
 #![allow(clippy::disallowed_methods)]
@@ -1106,6 +1109,18 @@ async fn send(ws: &mut Ws, bytes: Vec<u8>) -> (Got, Duration) {
     (got, t.elapsed())
 }
 
+/// `bytes` sent, and its act's own answer: a Soul's act that starts a form or a move is first answered in progress
+/// (kind 3, C20) in the tick it starts (#4133, W11 #4087), and its receipt or refusal follows.
+async fn send_ended(ws: &mut Ws, bytes: Vec<u8>) -> Got {
+    put(ws, bytes).await;
+    loop {
+        let got = read_answer(&next(ws).await);
+        if got.kind != 3 {
+            return got;
+        }
+    }
+}
+
 fn creator(n: u8) -> (Id, Actor) {
     let id = Id::new(Scope([n; 16]), 1).unwrap();
     (id, Actor::Creator(id))
@@ -1274,6 +1289,46 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
+/// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:
+/// Eden's (`EDEN_FACTS`, its cabin chair; run with `--release`, as a building's whole-ground rebuild of Eden takes
+/// about 15 s in a debug build, past an act's 10 s), else N2's test world with one Eden chair on the square, as the
+/// export writes it (`core:chair`, loaded as `eden:chair` to find its entry), so CI runs them without Eden.
+fn seat_world() -> (String, &'static str) {
+    if let Ok(path) = std::env::var("EDEN_FACTS") {
+        return (std::fs::read_to_string(path).unwrap(), "e_0fc49dc9");
+    }
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(
+                json::parse(&format!(
+                    r#"{{"ref": "core-chair@1", "hash": "{}", "name": "core:chair", "form": "point", "layer": "solid",
+                        "door": false, "mesh": false, "slots": 1}}"#,
+                    replica::encode::to_hex(&replica::ids::sha256(b"souls/testworld/core-chair@1"))
+                ))
+                .unwrap(),
+            ),
+            ("things", json::Value::Arr(a)) => a.push(
+                json::parse(
+                    r#"{"id": "fixture-chair", "def": "core-chair@1", "ref": "core-chair@1", "parent": null,
+                        "pose": [25000, 0, 25000, 0], "scale_ppm": 1000000, "name": "a chair on the square",
+                        "solids": [[-160, -150, 22, 22, 0, 0, 430, 0, 0], [160, -150, 22, 22, 0, 0, 430, 0, 0],
+                                   [-160, 150, 22, 22, 0, 0, 430, 0, 0], [160, 150, 22, 22, 0, 0, 430, 0, 0],
+                                   [-200, -190, 20, 20, 0, 465, 915, 0, 0], [200, -190, 20, 20, 0, 465, 915, 0, 0]],
+                        "slots": [{"n": 1, "id": "seat", "kind": "seat", "at": [0, 470, 20], "yaw": 0,
+                                   "capacity": 1}]}"#,
+                )
+                .unwrap(),
+            ),
+            _ => {}
+        }
+    }
+    (f.to_json(), "fixture-chair")
+}
+
 fn clear_row(text: &str) -> (i64, i64) {
     let im = import_eden::load(text).expect("Eden loads");
     let ground = im.nodes["ground"];
@@ -1451,13 +1506,12 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
 
 /// G1f A1: an actual creator edit registers the declared seat before its receipt, and removal is safe and complete.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs the exported static Eden facts file"]
 async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
-    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let (text, chair) = seat_world();
     let im = import_eden::load(&text).unwrap();
     let source = im
         .tree
-        .node(im.tree.handle(im.nodes["e_0fc49dc9"]).unwrap())
+        .node(im.tree.handle(im.nodes[chair]).unwrap())
         .unwrap();
     let kind = source.kind().clone();
     let fields = source.fields().clone();
@@ -1512,7 +1566,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         )
         .unwrap()
     };
-    let (sat, _) = send(&mut soul, ask(1, "eden:sit", Some(chair))).await;
+    let sat = send_ended(&mut soul, ask(1, "eden:sit", Some(chair))).await;
     println!(
         "G1f placed receipt {:?}; sat receipt {:?}",
         placed.entries, sat.entries
@@ -1569,7 +1623,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
     )
     .await;
     assert_eq!((blocked.kind, blocked.reason.as_str()), (2, "edit.in-use"));
-    let (rose, _) = send(&mut soul, ask(2, "eden:rise", None)).await;
+    let rose = send_ended(&mut soul, ask(2, "eden:rise", None)).await;
     assert_eq!(rose.kind, 1, "the Soul rises: {rose:?}");
     let (removed, _) = send(
         &mut creator,
@@ -1580,7 +1634,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         removed.kind, 1,
         "unoccupied seat removal commits: {removed:?}"
     );
-    let (gone, _) = send(&mut soul, ask(3, "eden:sit", Some(chair))).await;
+    let gone = send_ended(&mut soul, ask(3, "eden:sit", Some(chair))).await;
     assert_eq!(gone.kind, 2, "a retired seat cannot take a body: {gone:?}");
     println!(
         "G1f occupied removal: {}; rise receipt {:?}; removal receipt {:?}; retired seat: {}",
