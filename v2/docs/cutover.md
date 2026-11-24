@@ -36,7 +36,7 @@ routed page publishes the old world's read-only views there (`scene.json`, `snap
 `platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
 files. So is the page's read of that scene's capture (`/v1/scenes/<the published scene's hash>`): the old world keeps a
 scene's capture only once one of its takes carried it, so a world nobody watched since its scene last changed would
-answer 404, and the page would stop at "World layout could not be prepared". `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
+answer 404, and the page would stop at "World layout could not be prepared". `/v1/config` answers the routed world's page config (the launcher's `movedConfig`: every field an old world's config gives, from the launcher's sign-in, the registry and the route, never from the old process) beside the served client's `soulClient`; the launcher-built page inlines the same config. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
 the launcher serves from `clientDir` for the routed world, by version: the page's config names
 `v2Replica`, `/w/<world>/v2/replica/<version>/replica.js` (the version is the first 16 hex of sha256 over both files), and
 the current version's two files answer `public, max-age=31536000, immutable`, so viewers and the CDN keep the 2 MB wasm;

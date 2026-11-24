@@ -303,7 +303,8 @@ function oneFence(binding) {
         return m;
       })().finally(() => { publishing = null; });
     },
-    /** `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
+    /** `o.config()`: the routed world's page config, which its `/v1/config` answers beside `soulClient` (else only that).
+     *  `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
      *  404 `world.new-engine`, as for a world with no old twin, and the page draws the world from its stream (W2,
      *  stream-scene.ts); it never wakes the old process. A running one answers it live, as before. */
     /** Whether the old views are published for the world's current stream (its snapshot, in staticDir or held). */
@@ -407,7 +408,13 @@ function oneFence(binding) {
         res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'world.new-engine', message: 'This world uses the new engine. Run: node eden.mjs upgrade' }));
         return true;
       }
-      const a = answer(clientDir, path);
+      let a = answer(clientDir, path);
+      // the routed world's page config (launcher.mjs movedConfig, `o.config`) beside the client's `soulClient`, as an old
+      // world's /v1/config gives both: a page that reads the route gets what its inline config says
+      if (a && path === '/v1/config' && o?.config) {
+        let page = null; try { page = o.config(); } catch { page = null; }
+        if (page) a = { ...a, body: Buffer.from(JSON.stringify({ ...page, soulClient: JSON.parse(a.body).soulClient })) };
+      }
       if (!a) {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.client-unavailable', message: 'The new engine client is unavailable. Ask the operator to restore the served bundle.' }));
