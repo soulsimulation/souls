@@ -452,7 +452,8 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         .collect::<Result<Vec<_>, _>>()?;
     approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
-    if let Some((_, slot)) = stand_in(entry, f, args)? {
+    let into = stand_in(entry, f, args)?;
+    if let Some((_, slot)) = into {
         bound.push(Step::Sit {
             slot,
             lie: false,
@@ -460,7 +461,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
             on: None,
         });
     }
-    if rises_out(f) {
+    if rises_out(f, into.is_some()) {
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
@@ -605,21 +606,25 @@ fn stand_in(entry: &Value, f: &Value, args: &Args) -> Result<Option<(usize, u64)
     Ok(None)
 }
 
-/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here` and has no `rise`,
-/// `sit` or `lie` step of its own.
-fn rises_out(f: &Value) -> bool {
+/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here`, or into a standing
+/// slot (`standing`: a stage's `step_up` from one spot to another, 0.135 E17), and has no `rise`, `sit` or `lie` step of
+/// its own. Its run starts with a rise, done at once for a body standing, so a body in a slot of the thing is stood up
+/// by the rise move before the form's own walk, never walked by legs the slot holds.
+fn rises_out(f: &Value, standing: bool) -> bool {
     let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    effects.iter().any(|e| {
-        e.get("change").and_then(Value::str) == Some("reparent")
-            && e.get("what").and_then(Value::str) == Some("actor")
-            && e.get("into").and_then(Value::str) == Some("here")
-    }) && !steps.iter().any(|s| {
-        matches!(
-            s.get("step").and_then(Value::str),
-            Some("rise" | "sit" | "lie")
-        )
-    })
+    (standing
+        || effects.iter().any(|e| {
+            e.get("change").and_then(Value::str) == Some("reparent")
+                && e.get("what").and_then(Value::str) == Some("actor")
+                && e.get("into").and_then(Value::str) == Some("here")
+        }))
+        && !steps.iter().any(|s| {
+            matches!(
+                s.get("step").and_then(Value::str),
+                Some("rise" | "sit" | "lie")
+            )
+        })
 }
 
 /// Turns the points bound `steps` walk to by `q`, the orientation of the node the form is done at (C13, #3440): an

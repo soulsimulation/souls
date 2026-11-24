@@ -92,6 +92,7 @@ fn world(placed: &Placed, at: i64) -> Result<Bodies, Refusal> {
         point: Vec3::new(-38_000_000, 450_000, 30_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     let refused = b.seat_placed(placed, at);
     assert!(refused.is_empty(), "handed back into the slot: {refused:?}");

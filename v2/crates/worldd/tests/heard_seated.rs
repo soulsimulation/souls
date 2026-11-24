@@ -117,6 +117,7 @@ fn hall(listeners: &[(u64, Vec3, Stance, &str)]) -> Result<Bodies, Refusal> {
             point: Vec3::new(at.x + off.x, 450_000, at.z + off.z + 300_000),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })?;
         let pose = Pose {
             frame: Frame {

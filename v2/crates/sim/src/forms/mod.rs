@@ -1114,18 +1114,56 @@ impl Forms {
         // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
         // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
         // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
+        // A form that leaves the body in that slot (no rise or sit of its own, nor the rise the binding adds to a form
+        // that moves the actor, `form_runner::rises_out`) is done from inside: its own walks to the thing's points are
+        // dropped too (a phone box opened from inside, 0.135 E17), never walked by legs the slot holds.
         let in_its_slot = w.places.as_ref().and_then(|p| p.slots.held_by(body)) == Some(node);
+        let stays = in_its_slot
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. }));
         if node == body || in_its_slot {
-            steps.retain(|s| {
-                !matches!(
-                    s,
-                    Step::WalkTo {
-                        on: None,
-                        approach: true,
-                        ..
-                    }
-                )
+            steps.retain(|s| match s {
+                Step::WalkTo {
+                    on: None, approach, ..
+                } => !*approach && !stays,
+                _ => true,
             });
+        }
+        // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
+        // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
+        // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
+        // is as it was.
+        let soul = match intent.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        let rises_first = in_its_slot && !stays;
+        let mut unlinked: Vec<&Name> = Vec::new();
+        for e in effects.iter().filter(|_| rises_first) {
+            if let form_runner::Effect::Unlink { ty, .. } = e {
+                unlinked.push(ty);
+            }
+            if let form_runner::Effect::Link { ty, soul: s, .. } = e
+                && !unlinked.contains(&ty)
+            {
+                let end = if *s { soul } else { body };
+                if w.tree
+                    .links_at(node)
+                    .iter()
+                    .any(|l| w.tree.ty(l) == ty && l.other == end)
+                {
+                    return Err(Refusal {
+                        name: "already_linked",
+                        detail: format!(
+                            "{} is already a {} of {}",
+                            show(end),
+                            ty.as_str(),
+                            show(node)
+                        ),
+                    });
+                }
+            }
         }
         let reserves = node != body && !self.shared.contains(&node);
         // The body's own run, which this act preempts, holds nothing against it.
@@ -1820,19 +1858,44 @@ impl Forms {
         now: Micros,
     ) {
         self.planning.remove(&run);
+        let Some(fr) = self.runs.get_mut(&run) else {
+            return;
+        };
+        let body = fr.body;
+        if let Some(d) = fr.walk.take() {
+            self.walks.retain(|r| r.body != body);
+            let _ = w.controller.release(body, d);
+        }
+        // A seat's move ends through the places (E11b), as a cancel under it does in `Slots::fire`: a sit not yet in
+        // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
+        if let Some(n) = fr.mv.take() {
+            let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
+            let held = w.places.as_mut().and_then(|p| {
+                p.slots.cancel(
+                    w.controller,
+                    w.due,
+                    w.moves,
+                    p.floors,
+                    body,
+                    n,
+                    now,
+                    name("form-ended"),
+                )
+            });
+            match held {
+                Some(true) if sitting => self.seat_posture(w.tree, run, now),
+                Some(_) => {}
+                None => {
+                    w.moves
+                        .cancel(w.controller, w.due, n, now, name("form-ended"));
+                }
+            }
+        }
         let Some(fr) = self.runs.remove(&run) else {
             return;
         };
         self.by_body.remove(&fr.body);
         self.by_intent.remove(&fr.intent.id);
-        if let Some(d) = fr.walk {
-            self.walks.retain(|r| r.body != fr.body);
-            let _ = w.controller.release(fr.body, d);
-        }
-        if let Some(n) = fr.mv {
-            w.moves
-                .cancel(w.controller, w.due, n, now, name("form-ended"));
-        }
         let mine: Vec<Id> = self
             .by_timer
             .iter()
