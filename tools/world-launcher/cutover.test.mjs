@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
@@ -192,6 +192,36 @@ test('#4177: a rollback removes the published views, and a re-route whose snapsh
   await assert.rejects(fence.publish(w, (path) => (path === '/v1/world/snapshot' ? { status: 503, body: Buffer.from('{}') } : old(path))), /cutover.static-snapshot-unavailable/);
   assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
   assert.equal(served(), null, 'the snapshot falls through to the live old view');
+});
+test('24 Nov: a static folder the launcher cannot write holds the views in memory; the page reads them the same, and a rollback drops them', async t => {
+  const dir = mkdtempSync(new URL('static-ro-', scratch)), routesFile = join(dir, 'routes.json'), staticDir = join(dir, 'static');
+  mkdirSync(staticDir); chmodSync(staticDir, 0o555);
+  t.after(() => { chmodSync(staticDir, 0o755); rmSync(dir, { recursive: true, force: true }); });
+  // read-only as the unit's sandbox makes it (EROFS there; EACCES here). Root writes past a mode: then a file stands in its place
+  let ro = staticDir;
+  try { writeFileSync(join(staticDir, 'probe'), ''); rmSync(join(staticDir, 'probe')); writeFileSync(join(dir, 'file'), ''); ro = join(dir, 'file', 'static'); } catch { /* read-only, as wanted */ }
+  const routed = (canonical) => writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical } } }));
+  const fence = cutoverFence({ binding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir: join(dir, 'client'), staticDir: ro } }), w = { slug: 'eden', worldId: 'eden-1' };
+  let reads = 0;
+  const hash = 'c'.repeat(64);   // the scene's capture: a freshly loaded old world answers it 404 (W4 prep), so it must be served
+  const old = (path) => { reads++; return { status: path === '/v1/scene' || path === '/v1/world/snapshot' ? 200 : 404, body: Buffer.from(JSON.stringify({ path, at: 'held', ...(path === '/v1/scene' ? { renderSceneRef: { hash } } : {}) })) }; };
+  const ask = (path) => { let out = null; const res = { writeHead: (status, headers) => ({ end: (b) => { out = { status, headers, body: String(b) }; } }) };
+    return fence.handle({ method: 'GET' }, res, w, new URL(`http://x/w/eden${path}`)) ? out : null; };
+  routed(true);
+  const m = await fence.publish(w, old);
+  assert.deepEqual(Object.keys(m.files), ['scene.json', 'snapshot.json']);
+  assert.match(m.unwritable, /^.+: E[A-Z]+$/, 'the flight that held them names the folder and why, for the launcher\'s one log line');
+  const got = ask('/v1/world/snapshot');
+  assert.equal(got.status, 200); assert.equal(got.headers['x-souls-static'], 'published'); assert.match(got.body, /"at":"held"/, 'the page reads the held snapshot');
+  assert.equal(ask('/v1/edge/items'), null, 'a view the old world did not answer: it answers live, as before');
+  const capture = ask(`/v1/scenes/${hash}?world=eden-1`);
+  assert.equal(capture.status, 200, 'the page\'s scenery from the held scene'); assert.equal(JSON.parse(capture.body).worldId, 'eden-1');
+  const n = reads, again = await fence.publish(w, old);
+  assert.equal(reads, n, 'once per routing: a later page arrival reads nothing again'); assert.equal(again.unwritable, undefined, 'and logs nothing again');
+  routed(false);
+  assert.equal(fence.v2Stream(w), null);
+  routed(true);
+  assert.equal(ask('/v1/world/snapshot'), null, 'rolled back: the held views are gone; a re-route publishes afresh');
 });
 test('W4 prep: a routed page\'s scenery is answered from the published scene, which the page verifies; any other hash passes through', async t => {
   const { captureRenderScene } = await import('../../packages/engine-contract/src/scene-capture.ts');

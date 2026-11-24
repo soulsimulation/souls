@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
+import { staticWritable, unitWritable, v2Switch } from './v2-switch.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -54,4 +55,19 @@ test('one command switches the old page to the v2 stream and --back switches it 
   assert.notEqual((await fetch(`${base}/w/eden/v2/bodies/bodies.json`)).headers.get('content-type'), 'application/json', 'back: the body folder is not served');
 
   assert.equal((await run('--binding', binding, '--port', String(P))).page.v2Stream, '/s/eden/', 'the same command with the binding alone switches it on again');
+});
+
+test('24 Nov: a static folder the launcher unit cannot write is refused before anything is written', () => {
+  assert.deepEqual(unitWritable('production'), ['/srv/sim-worlds-data/production'], 'from deploy/sim-worlds@.service ReadWritePaths');
+  assert.throws(() => staticWritable('/var/lib/souls/eden-static'), /v2-switch.static-not-writable/, 'EROFS under ProtectSystem=strict');
+  assert.throws(() => staticWritable('/srv/sim-worlds-data/staging/eden-static'), /v2-switch.static-not-writable/, 'another stage\'s data');
+  staticWritable('/srv/sim-worlds-data/production/eden-static');
+  staticWritable('/srv/sim-worlds-data/staging/eden-static', 'staging');
+  const dir = mkdtempSync(new URL('static-unit-', scratch)), binding = join(dir, 'binding.json'), client = join(dir, 'client');
+  try {
+    mkdirSync(client); writeFileSync(join(client, 'replica.js'), 'm'); writeFileSync(join(client, 'replica_bg.wasm'), 'w');
+    assert.throws(() => v2Switch({ binding, slug: 'eden', stream: '/s/eden/', routes: join(dir, 'routes.json'), client, staticDir: '/var/lib/souls/eden-static' }), /v2-switch.static-not-writable/);
+    assert.equal(existsSync(binding), false, 'nothing written'); assert.equal(existsSync(join(dir, 'routes.json')), false);
+    staticWritable(join(dir, 'static'));   // a checkout's or laptop's folder is not the unit's to judge
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
