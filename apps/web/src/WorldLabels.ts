@@ -1,6 +1,7 @@
 import type { VisibleViewport } from './WorldViewport.ts';
 
-export type LabelBox = { id: string; x: number; y: number; width: number; height: number; selected: boolean; previous?: LabelOffset };
+/** `up`: the plate's anchor is its bottom centre (a seated body's plate over its head), so it moves up, not down. */
+export type LabelBox = { id: string; x: number; y: number; width: number; height: number; selected: boolean; previous?: LabelOffset; up?: boolean };
 export type LabelOffset = { dx: number; dy: number };
 type Rect = { x: number; y: number; width: number; height: number };
 const gap = 6;
@@ -16,6 +17,18 @@ export function plateAnchor(ground: readonly [number,number,number], eye: {x:num
   if (!(n>1e-6) || !(radius>0)) return [ground[0],ground[1],ground[2]];
   return [ground[0]+x/n*radius, ground[1], ground[2]+z/n*radius];
 }
+
+/** A seated body's plate sits over its head, not under it (24 Nov: two Souls side by side on a bench, the near one's
+ * plate under its legs read as the far one's, and its own floated a metre below it). → the height above the body's
+ * ground point of the plate's bottom centre: the seat's height (metres, when the take records it) and a seated body's
+ * height above its seat, or null for a body that is not seated (its plate hangs under it, C2). */
+export function seatedPlate(activity: string | undefined, seatHeight: unknown): number | null {
+  if (activity !== 'sit') return null;
+  const seat = typeof seatHeight === 'number' && Number.isFinite(seatHeight) && seatHeight > 0 && seatHeight <= 1.2 ? seatHeight : 0.45;
+  return seat + SEATED_TOP;
+}
+/** A seated adult's head top above the seat (0.9 m), its hair, and a hand's gap. */
+const SEATED_TOP = 1.1;
 
 /** How a shown doing line is displayed: a line box clamped to `DOING_LINES` lines (#1645). */
 export const DOING_DISPLAY = '-webkit-box', DOING_LINES = 2;
@@ -34,7 +47,8 @@ export function nameTag(doc: Pick<Document,'createElement'>) {
 /** Pack projected nameplates only. Selected first, stable IDs thereafter. Keep
  * an existing valid placement to avoid changing lanes on every moving frame.
  * A plate only ever moves sideways or further down from its anchor (never up over
- * its body), at most 180 px. Offscreen anchors and overflow stay hidden; no
+ * its body), at most 180 px; a plate over a seated body's head (`up`) only sideways
+ * or further up. Offscreen anchors and overflow stay hidden; no
  * actor/camera/recording changes. */
 export function placeWorldLabels(boxes: readonly LabelBox[], area: VisibleViewport | null): Map<string, LabelOffset> {
   const result = new Map<string, LabelOffset>(), placed: Rect[] = [];
@@ -44,15 +58,15 @@ export function placeWorldLabels(boxes: readonly LabelBox[], area: VisibleViewpo
     if (![b.x,b.y,b.width,b.height].every(Number.isFinite) || b.width<=0 || b.height<=0 || b.width>area.width || b.height>area.height) continue;
     // A label's top centre is its anchor under the body. Do not pull an offscreen
     // resident into view simply because its nameplate extends over the edge.
-    const anchorX=b.x+b.width/2, anchorY=b.y;
+    const up=!!b.up, anchorX=b.x+b.width/2, anchorY=up?b.y+b.height:b.y;
     if (anchorX<area.left || anchorX>right || anchorY<area.top || anchorY>bottom) continue;
     const dx=Math.max(area.left,Math.min(right-b.width,b.x))-b.x;
     // The plate's own spot first (centred under its body); when that is taken, the previous placement (so a crowd does
     // not change lanes every frame), then the nearest free spot below or beside the plates already placed.
     const tail: LabelOffset[] = [];
-    for(const p of placed) tail.push({dx,dy:p.y+p.height+gap-b.y},{dx:p.x-gap-b.width-b.x,dy:0},{dx:p.x+p.width+gap-b.x,dy:0});
-    tail.sort((a,b)=>Math.hypot(a.dx,a.dy)-Math.hypot(b.dx,b.dy) || a.dy-b.dy || a.dx-b.dx);
-    const candidates=[{dx,dy:0},...(b.previous?[b.previous]:[]),...tail].filter(c=>c.dy>=0);
+    for(const p of placed) tail.push({dx,dy:up?p.y-gap-b.height-b.y:p.y+p.height+gap-b.y},{dx:p.x-gap-b.width-b.x,dy:0},{dx:p.x+p.width+gap-b.x,dy:0});
+    tail.sort((a,b)=>Math.hypot(a.dx,a.dy)-Math.hypot(b.dx,b.dy) || Math.abs(a.dy)-Math.abs(b.dy) || a.dx-b.dx);
+    const candidates=[{dx,dy:0},...(b.previous?[b.previous]:[]),...tail].filter(c=>up?c.dy<=0:c.dy>=0);
     for(const c of candidates) {
       const rect={x:b.x+c.dx,y:b.y+c.dy,width:b.width,height:b.height};
       if(!Number.isFinite(c.dx)||!Number.isFinite(c.dy)||Math.hypot(c.dx,c.dy)>180 || rect.x<area.left || rect.y<area.top || rect.x+rect.width>right || rect.y+rect.height>bottom || placed.some(p=>intersects(rect,p))) continue;
