@@ -1,6 +1,7 @@
-//! Every planner question gets exactly one answer (S13d): a form walk the planner cannot plan for the body's class is
-//! refused by name, a walk whose place has no answer and a batch on a map the planner stays behind are asked again a
-//! bounded number of times, then refused by name, and one body's panic refuses only its own questions.
+//! Every planner question gets exactly one answer (S13d). A walk the planner cannot plan for the body's class is
+//! refused by name. A walk the spot tables hold back on purpose (mid-stair, a crowd's overflow) waits and is answered,
+//! never refused. A planner left behind by a failed install refuses by name. One body's panic refuses only its own
+//! questions.
 //!
 //! `cargo test -p sim --lib planner::answers_tests -- --nocapture`.
 
@@ -9,9 +10,11 @@ use crate::links::Doors;
 use crate::mover::Body;
 use crate::spots::Target;
 use crate::walk::{Mark, node_of};
+use replica::encode::{Value, encode};
 use replica::ids::Scope;
 use replica::kinds::sizes::Size;
 use replica::pose::{Frame, Quat};
+use std::collections::BTreeMap;
 
 fn id(n: u64) -> Id {
     Id::new(Scope([7; 16]), n).unwrap()
@@ -130,105 +133,160 @@ fn walk_refusal(p: &Planned, who: Id) -> Option<&'static str> {
     }
 }
 
-/// (1) A form's walk for a body whose class the planner has no geometry for is refused by that name in the batch
-/// that asks, never left unanswered (before: `view_for` refused -> `continue`, asked again every tick).
-#[test]
-fn a_form_walk_for_an_unprepared_class_is_refused_by_name() {
-    let t = town();
-    let a = stand(&t, id(10), Vec3::new(0, 0, 0));
-    let to = stand(
-        &t,
+/// A point 3 m along x from `a` that a body can stand on.
+fn goal(t: &Town, a: &Body) -> Vec3 {
+    stand(
+        t,
         id(11),
         Vec3::new(a.pose.position.x + 3_000_000, 0, a.pose.position.z),
     )
     .pose
-    .position;
+    .position
+}
+
+/// (1) A body whose class the planner has no geometry for: its form walk and its place are refused by that name in
+/// the batch that asks, never left unanswered (before: `view_for` refused -> `continue`, and `spot` `None` for ever).
+#[test]
+fn a_walk_for_an_unprepared_class_is_refused_by_name() {
+    let t = town();
+    let a = stand(&t, id(10), Vec3::new(0, 0, 0));
+    let to = goal(&t, &a);
     let map = Arc::new(t.versions.clone());
     let mut planner = Planner::new(t);
     let mut w = wants(&[a], to, true, &map);
     w.classes.insert(a.id, Size::Large);
     let p = planner.answer(&w);
-    // Its line and both form questions answered in this batch (its place waits on the spot tables: (2) bounds it).
-    assert!(p.lines.contains_key(&a.id));
-    assert!(p.forms.contains_key(&key(a.id, FormKind::Line)));
-    assert_eq!(walk_refusal(&p, a.id), Some("body-class-unprepared"));
-    println!("S13d (1): an unprepared class's form walk: refused body-class-unprepared");
+    all_answered(&w, &p, a.id);
+    assert_eq!(p.places[&a.id].1.as_ref().err(), Some(&UNPREPARED));
+    assert_eq!(walk_refusal(&p, a.id), Some(UNPREPARED));
+    println!("S13d (1): an unprepared class's walk and form walk: refused {UNPREPARED}");
 }
 
-/// (2) A walk whose place the spot tables never answer (its mark asks for none) is left unanswered at most
-/// `UNANSWERED - 1` times, then refused `planner.no-spot`; an answered one is forgotten.
+/// (2a) A walk sent while its Soul is part way up a stair (#4171: the tables hold its ask back until it lands) waits
+/// as long as the crossing lasts, here 40 batches, and is granted once it lands: never refused.
 #[test]
-fn a_walk_whose_place_is_never_answered_is_refused_after_a_bounded_number_of_asks() {
+fn a_walk_sent_mid_stair_waits_and_is_granted_on_landing() {
     let t = town();
     let a = stand(&t, id(10), Vec3::new(0, 0, 0));
-    let to = stand(
-        &t,
-        id(11),
-        Vec3::new(a.pose.position.x + 3_000_000, 0, a.pose.position.z),
-    )
-    .pose
-    .position;
+    let to = goal(&t, &a);
     let map = Arc::new(t.versions.clone());
     let mut planner = Planner::new(t);
-    let w = wants(&[a], to, false, &map);
-    for n in 1..UNANSWERED {
+    let mut w = wants(&[a], to, true, &map);
+    w.marks.as_mut().unwrap()[0].crossing = Some(id(99));
+    for n in 0..40 {
         let p = planner.answer(&w);
-        assert!(!p.places.contains_key(&a.id), "ask {n} waits for its place");
+        assert!(!p.places.contains_key(&a.id), "batch {n}: waits mid-stair");
         assert!(p.lines.contains_key(&a.id) && p.forms.len() == 2);
     }
+    w.marks.as_mut().unwrap()[0].crossing = None;
     let p = planner.answer(&w);
-    assert_eq!(p.places[&a.id], (id(ORDER), Err(NO_SPOT)));
-    assert!(planner.waits.is_empty(), "the refused walk is forgotten");
-    // The same walk asked for its place is answered at once.
-    let p = planner.answer(&wants(&[a], to, true, &map));
     assert!(
         p.places[&a.id].1.is_ok(),
         "{:?}",
         p.places[&a.id].1.as_ref().err()
     );
-    println!("S13d (2): a walk with no spot answer: refused {NO_SPOT} at ask {UNANSWERED}");
+    println!("S13d (2a): a walk sent mid-stair: waited 40 batches, granted on landing");
 }
 
-/// (3) A batch on a map the planner does not hold waits for its install at most `UNANSWERED - 1` batches in a row,
-/// then every question in it is refused `planner.map-stale`, stamped with the batch's map; a batch on the planner's
-/// map is answered as ever and starts the count again.
+/// (2b) A crowd at one target, more Souls than its own places (about 300 on its rings): those places fill, and at
+/// least 100 Souls need overflow points at once, which the tables spread over passes (A2-5, `OVERFLOW_EACH` a pass).
+/// Every Soul is answered, none refused.
 #[test]
-fn batches_on_a_map_the_planner_stays_behind_are_refused_after_a_bounded_number() {
+fn a_hundred_souls_needing_overflow_spots_at_once_are_all_answered() {
+    const CROWD: u64 = 500;
+    let t = town();
+    let near = stand(&t, id(10), Vec3::new(0, 0, 0)).pose.position;
+    let bodies: Vec<Body> = (0..CROWD)
+        .map(|k| {
+            let at = Vec3::new(
+                near.x + i64::try_from(k % 25).unwrap() * 1_000_000,
+                near.y,
+                near.z + i64::try_from(k / 25).unwrap() * 1_000_000,
+            );
+            stand(&t, id(1_000 + k), at)
+        })
+        .collect();
+    let to = Vec3::new(near.x + 12_000_000, near.y, near.z - 12_000_000);
+    let to = stand(&t, id(11), to).pose.position;
+    let map = Arc::new(t.versions.clone());
+    let mut planner = Planner::new(t);
+    let mut w = wants(&bodies, to, true, &map);
+    w.lines.clear();
+    w.forms.clear();
+    let (mut granted, mut overflow, mut passes) = (BTreeMap::new(), 0, 0);
+    while !w.places.is_empty() && passes < 400 {
+        passes += 1;
+        let p = planner.answer(&w);
+        for (who, (_, placed)) in &p.places {
+            let Ok((g, _, _)) = placed else {
+                panic!("{who:?} refused {:?}", placed.as_ref().err());
+            };
+            overflow += usize::from(g.overflow);
+            granted.insert(*who, passes);
+        }
+        // The clock asks again only the walks still waiting; every mark keeps its ask (a grant is held).
+        w.places.retain(|(b, _, _)| !granted.contains_key(&b.id));
+    }
+    assert_eq!(granted.len(), bodies.len(), "every Soul answered");
+    assert!(overflow >= 100, "{overflow} Souls needed overflow points");
+    assert!(
+        passes >= 100 / crate::spots::OVERFLOW_EACH,
+        "spread over {passes} passes"
+    );
+    println!(
+        "S13d (2b): {CROWD} Souls at one target, {overflow} on overflow points: all granted, none refused, in {passes} \
+         passes"
+    );
+}
+
+/// (3) While the planner is current, a batch on another map (one from before a change) is left for the clock to
+/// drop. Once an install of a committed map fails, the planner is behind for good: every question on a map it does
+/// not hold is refused `planner.map-stale` at once, stamped with the batch's map; a batch on its own map is still
+/// answered.
+#[test]
+fn once_an_install_fails_questions_on_the_clocks_map_are_refused_map_stale() {
     let t = town();
     let a = stand(&t, id(10), Vec3::new(0, 0, 0));
-    let to = stand(
-        &t,
-        id(11),
-        Vec3::new(a.pose.position.x + 3_000_000, 0, a.pose.position.z),
-    )
-    .pose
-    .position;
+    let to = goal(&t, &a);
     let current = Arc::new(t.versions.clone());
     let mut other = t.versions.clone();
     other.bump([&t.ground]);
     let other = Arc::new(other);
-    assert_ne!(*other, *current);
+    let part = Part::read(
+        &encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(t.doors.header.hash().to_bytes())),
+            (2, Value::Array(Vec::new())),
+        ])))
+        .unwrap(),
+    )
+    .unwrap();
+    let rebuilt = Town::rebuild(
+        t.tree.frozen(),
+        &t.doors.header,
+        t.ground,
+        &t.versions,
+        &t.basis(),
+        &part,
+    )
+    .unwrap();
     let mut planner = Planner::new(t);
     let w = wants(&[a], to, true, &other);
-    for _ in 1..UNANSWERED {
+    for _ in 0..40 {
         let p = planner.answer(&w);
         assert!(p.places.is_empty() && p.lines.is_empty() && p.forms.is_empty());
     }
+    // A committed map made from one the planner does not hold: not installed, and the planner is behind.
+    assert_eq!(planner.install(&other, rebuilt, &part), Err(MAP_STALE));
     let p = planner.answer(&w);
     all_answered(&w, &p, a.id);
     assert_eq!(p.places[&a.id].1.as_ref().err(), Some(&MAP_STALE));
     assert_eq!(p.lines[&a.id].1.as_ref().unwrap_err().name, MAP_STALE);
     assert_eq!(walk_refusal(&p, a.id), Some(MAP_STALE));
-    // On the planner's own map: answered, and the count starts again.
     let ok = wants(&[a], to, true, &current);
     let p = planner.answer(&ok);
     all_answered(&ok, &p, a.id);
     assert_eq!(walk_refusal(&p, a.id), None);
-    assert!(
-        planner.answer(&w).forms.is_empty(),
-        "a new run of stale batches waits again"
-    );
-    println!("S13d (3): a stale map: refused {MAP_STALE} at batch {UNANSWERED}");
+    println!("S13d (3): after a failed install: refused {MAP_STALE} at once");
 }
 
 /// (4) One body's panic refuses only its own questions `planner.failed`; the other body's in the same batch are the

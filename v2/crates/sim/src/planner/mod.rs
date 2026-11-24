@@ -21,12 +21,17 @@
 //!   refused [`FAILED`], and the batch's other questions are answered as ever. A panic outside them (the spot tables'
 //!   writing) refuses every walk, line and form question in the batch [`FAILED`]. No act is left waiting, and the
 //!   planner goes on.
-//! - **One answer each.** Every question a batch asks gets exactly one answer (S13d). A walk whose place the spot
-//!   tables have neither granted nor refused is asked again at most [`UNANSWERED`] times, then refused [`NO_SPOT`]. A
-//!   batch on a map the planner does not hold is left unanswered (the install it waits for comes first) at most
-//!   [`UNANSWERED`] batches in a row, then each of its questions is refused [`MAP_STALE`]. A form's walk the planner
-//!   cannot plan for the body's class is refused by that name (`body-class-unprepared`), and a refused form walk
-//!   carries its refusal, so the form ends with the planner's own name, not `souls:no-way`.
+//! - **One answer each.** Every question a batch asks gets exactly one answer, or waits only where the world holds
+//!   it back on purpose (S13d). Nothing is counted: what is refused follows from the planner's own state, so a replay
+//!   refuses the same questions at the same ticks.
+//!   - A walk's place the spot tables did not answer waits while they hold it back on purpose: a Soul part way up a
+//!     stair (#4171), a crowd's overflow spread over passes (A2-5), a body the world holds. A walk for a body whose
+//!     class has no tables is never answered, so it is refused [`UNPREPARED`] in the batch that asks.
+//!   - A batch on a map the planner does not hold is left unanswered while the planner is current: it is a batch from
+//!     before a change, whose answers the clock drops. Once an install of a committed map has failed, the planner
+//!     stays behind for good, so each question on a map it does not hold is refused [`MAP_STALE`].
+//!   - A form's walk the planner cannot plan for the body's class is refused [`UNPREPARED`]. A refused form walk
+//!     carries its refusal, so the form ends with the planner's own name, not `souls:no-way`.
 //! - **Waits.** [`Thread::take`] waits for the answers to everything sent. In lockstep as long as it takes, so what a
 //!   tick reads never depends on the threads' timing and a run fed the same inputs at the same ticks repeats (K12's
 //!   replay). A free-running clock never stops for the planner: it waits at most a bound for each batch, and a batch
@@ -41,7 +46,6 @@ use crate::walk::town::{Rebuilt, Town};
 use replica::effects::{Part, Refusal};
 use replica::ids::Id;
 use replica::pose::{Support, Vec3};
-use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -52,14 +56,10 @@ use std::time::Duration;
 pub const GROUND_CHANGED: &str = "walk.ground-changed";
 /// A walk, line or form question's refusal when its answer panicked (outside any one question: the whole batch's).
 pub const FAILED: &str = "planner.failed";
-/// A walk's refusal when the spot tables gave its place no answer in [`UNANSWERED`] asks.
-pub const NO_SPOT: &str = "planner.no-spot";
-/// Each question's refusal once [`UNANSWERED`] batches in a row came on a map the planner does not hold.
+/// Each question's refusal on a map the planner does not hold, once an install has left it behind.
 pub const MAP_STALE: &str = "planner.map-stale";
-/// How many times a question is left unanswered before it is refused by name: a re-ask is bounded (S13d).
-pub const UNANSWERED: u32 = 16;
-/// A walk left waiting for its place is forgotten when it is not asked again in this many batches.
-const FORGET: u64 = 64;
+/// A walk's refusal when the body's class has no prepared geometry: no table or route can answer it.
+pub const UNPREPARED: &str = "body-class-unprepared";
 
 /// The straight distance, µm, from `a` to `b`: a reach check (B2), the planner's.
 pub fn reach(a: Vec3, b: Vec3) -> i64 {
@@ -187,13 +187,8 @@ impl GroundTrace {
 /// The planner over its own town.
 pub struct Planner {
     pub town: Town,
-    /// Batches answered.
-    batch: u64,
-    /// Each walk (body, order) whose place the spot tables have not answered yet: how many times it was left
-    /// unanswered, and the batch it was last asked in.
-    waits: BTreeMap<(Id, Id), (u32, u64)>,
-    /// Batches in a row on a map the planner does not hold.
-    stale: u32,
+    /// Whether an install of a committed map failed: the planner's map then stays behind the clock's for good.
+    behind: bool,
     /// Questions whose answers panicked, caught there (each refused [`FAILED`]).
     pub panics: u64,
     /// A test's forced panic in this body's answers.
@@ -205,9 +200,7 @@ impl Planner {
     pub fn new(town: Town) -> Planner {
         Planner {
             town,
-            batch: 0,
-            waits: BTreeMap::new(),
-            stale: 0,
+            behind: false,
             panics: 0,
             #[cfg(test)]
             fault: None,
@@ -238,6 +231,26 @@ impl Planner {
                 failed()
             }
         }
+    }
+
+    /// Installs a committed map made from `before`. One that fails (the planner's map is not `before`, the install
+    /// refused or panicked) leaves the planner behind the clock for good: from then each question on a map it does
+    /// not hold is refused [`MAP_STALE`] (S13d).
+    pub fn install(
+        &mut self,
+        before: &crate::ground::Versions,
+        rebuilt: Rebuilt,
+        part: &Part,
+    ) -> Result<(), &'static str> {
+        let installed = catch_unwind(AssertUnwindSafe(|| {
+            if *before != self.town.versions {
+                return Err(MAP_STALE);
+            }
+            self.town.install(rebuilt, part).map_err(|r| r.name)
+        }))
+        .unwrap_or(Err(FAILED));
+        self.behind |= installed.is_err();
+        installed
     }
 
     /// Answers one tick's wants: the spot tables written from its marks, then each waiting walk's place and legs,
@@ -273,18 +286,16 @@ impl Planner {
     fn answer_traced(&mut self, w: &Wants, trace: &mut GroundTrace) -> Planned {
         let mut out = Planned::default();
         trace.begin(w);
-        self.batch += 1;
         if let Some(map) = &w.form_map {
             if **map != self.town.versions {
-                // The install of the batch's map comes before it (FIFO); a planner that stays behind refuses by name
-                // rather than leave every question to be asked again for ever (S13d).
-                self.stale += 1;
-                if self.stale < UNANSWERED {
-                    return out;
+                // The install of a committed map comes before the batches on it (FIFO): while the planner is current,
+                // a batch on another map is one from before a change, whose answers the clock drops. Behind for good
+                // (an install failed), each question is refused by name rather than asked again for ever (S13d).
+                if self.behind {
+                    return refused(w, MAP_STALE, "the planner's map stays behind the batch's");
                 }
-                return refused(w, MAP_STALE, "the planner's map stays behind the batch's");
+                return out;
             }
-            self.stale = 0;
             out.map = Some(Arc::clone(map));
         }
         self.town.body_classes.clone_from(&w.classes);
@@ -299,9 +310,6 @@ impl Planner {
             }
             out.revoked = self.town.revoked();
         }
-        let batch = self.batch;
-        self.waits
-            .retain(|_, (_, last)| batch.saturating_sub(*last) < FORGET);
         for (body, target, order) in &w.places {
             let placed = self.isolated(
                 |me| me.place(body, target, *order, trace, &mut out.searched),
@@ -350,8 +358,8 @@ impl Planner {
         out
     }
 
-    /// A waiting walk's place and legs, or a refusal's name; `None` while the spot tables have not answered its place,
-    /// asked again at most [`UNANSWERED`] times before it is refused [`NO_SPOT`] (S13d).
+    /// A waiting walk's place and legs, or a refusal's name; `None` while the spot tables hold its place back on
+    /// purpose (S13d).
     fn place(
         &mut self,
         body: &crate::mover::Body,
@@ -387,16 +395,15 @@ impl Planner {
             }
             None => {
                 trace.line("lookup-none", key);
-                let (n, last) = self.waits.entry((body.id, order)).or_insert((0, 0));
-                *n += 1;
-                *last = self.batch;
-                if *n < UNANSWERED {
+                // The tables hold a place back on purpose (a Soul mid-stair, #4171; a crowd's overflow spread over
+                // passes, A2-5; a body the world holds asks none): the walk waits. A class with no tables is never
+                // answered, and its ask fails every Soul's pass (`Town::spots`): refused now, by name.
+                if self.town.surfaces_for(self.town.size_of(body.id)).is_some() {
                     return None;
                 }
-                Err(NO_SPOT)
+                Err(UNPREPARED)
             }
         };
-        self.waits.remove(&(body.id, order));
         Some(r)
     }
 
@@ -565,14 +572,8 @@ impl Thread {
                             rebuilt,
                             part,
                         } => {
-                            let installed = catch_unwind(AssertUnwindSafe(|| {
-                                if *before != planner.town.versions {
-                                    return Err("planner.map-stale");
-                                }
-                                planner.town.install(*rebuilt, &part).map_err(|r| r.name)
-                            }));
-                            if !matches!(installed, Ok(Ok(()))) {
-                                eprintln!("planner: committed map not installed: {installed:?}");
+                            if let Err(name) = planner.install(&before, *rebuilt, &part) {
+                                eprintln!("planner: committed map not installed: {name}");
                             }
                             continue;
                         }
