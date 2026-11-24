@@ -2198,15 +2198,15 @@ fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
         let slots = b.slots.as_ref().expect("slots");
         let support = b.c.body(body).expect("a body").pose.support;
         println!(
-            "E11b {when}: left at {} µs; seat held {:?}, holder {:?}, support {support:?}",
+            "E11b {when}: left at {} µs; slot held {:?}, holder {:?}, support {support:?}",
             e.at,
             slots.held_by(body),
             slots.holder_in(chair, slot)
         );
         assert!(b.moves.is_empty(), "{when}: the sit's move ended");
         if when == "before-slot" {
-            assert_eq!(slots.held_by(body), None, "{when}: the seat given back");
-            assert_eq!(slots.holder_in(chair, slot), None, "{when}: the seat free");
+            assert_eq!(slots.held_by(body), None, "{when}: the slot given back");
+            assert_eq!(slots.holder_in(chair, slot), None, "{when}: the slot free");
             assert_ne!(support, replica::pose::Support::Slot, "{when}: standing");
             b.clean();
             continue;
@@ -2222,8 +2222,8 @@ fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
         };
         assert_eq!(e.how.as_str(), "done", "{when}: the rise completes");
         let slots = b.slots.as_ref().expect("slots");
-        assert_eq!(slots.held_by(body), None, "{when}: out of the seat");
-        assert_eq!(slots.holder_in(chair, slot), None, "{when}: the seat free");
+        assert_eq!(slots.held_by(body), None, "{when}: out of the slot");
+        assert_eq!(slots.holder_in(chair, slot), None, "{when}: the slot free");
         assert_ne!(
             b.c.body(body).expect("a body").pose.support,
             replica::pose::Support::Slot
