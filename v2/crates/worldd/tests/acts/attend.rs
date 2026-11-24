@@ -213,6 +213,7 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
                 point: Vec3::new(at.x + dx, 465_000, at.z + 20_000),
                 facing: Quat::IDENTITY,
                 floor: ground,
+                more: Vec::new(),
             })?;
         }
     }
