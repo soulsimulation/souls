@@ -1059,3 +1059,148 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     );
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
+
+/// E5's kinds: linen (dirt 1, soap 2), a board (soap 1, dirt 2), a tub (soap 2, as linen numbers it) and a funnel
+/// (no soap), each with a form that transfers soap.
+const E5_KINDS: [&str; 4] = [
+    r#"{ "format": "souls-entry/1", "kind": "e5:linen", "owner": "thing",
+      "state": {
+        "dirt": { "n": 1, "type": "int", "unit": "count", "default": 5, "min": 0, "max": 9, "audience": { "rule": "everyone" } },
+        "soap": { "n": 2, "type": "int", "unit": "g", "default": 30, "min": 0, "max": 50, "audience": { "rule": "everyone" } }
+      },
+      "forms": { "wash": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+        "effects": [{ "change": "transfer", "field": "soap", "from": "this", "into": { "arg": "other" }, "amount": 10, "event": "washed" }] } } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:board", "owner": "thing",
+      "state": {
+        "soap": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } },
+        "dirt": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 9, "audience": { "rule": "everyone" } }
+      } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:tub", "owner": "thing",
+      "state": {
+        "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } },
+        "soap": { "n": 2, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } }
+      } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:funnel", "owner": "thing",
+      "state": {
+        "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } }
+      },
+      "forms": { "pour_soap": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+        "effects": [{ "change": "transfer", "field": "soap", "from": { "arg": "from" }, "into": { "arg": "into" }, "amount": 10, "event": "poured" }] } } }"#,
+];
+
+/// A set a transfer writes: the node, its field's number, the value and the signed `by`.
+type E5Set = (Id, u64, Value, Option<i64>);
+
+/// The things of E5's kinds, `e5:linen` 100, `e5:board` 101, `e5:tub` 102 and `e5:funnel` 103, on a tree, and what
+/// form `form` of kind `at` (by its index in [`E5_KINDS`]) done at its thing with thing arguments `args` writes.
+fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>, &'static str> {
+    let numbered = |e: &str| {
+        let mut v = parse(e).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let texts: Vec<String> = E5_KINDS.iter().map(|e| numbered(e)).collect();
+    let mut kinds = Kinds::default();
+    let named: Vec<(&str, &str)> = ["linen", "board", "tub", "funnel"]
+        .into_iter()
+        .zip(texts.iter().map(String::as_str))
+        .collect();
+    kinds.load(&named);
+    assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
+    let limits = super::amounts::limits(&kinds);
+    let kinds_diag = "{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}\n\
+                      {1: \"e5:linen\", 2: \"thing\"}\n{1: \"e5:board\", 2: \"thing\"}\n\
+                      {1: \"e5:tub\", 2: \"thing\"}\n{1: \"e5:funnel\", 2: \"thing\"}";
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:board\", 3: 1}, {1: 102, 2: \"e5:tub\", 3: 1}, \
+                 {1: 103, 2: \"e5:funnel\", 3: 1}], 4: []}";
+    let (tree, _) =
+        Tree::load(&parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"))
+            .expect("loads");
+    let args: BTreeMap<String, Id> = args
+        .iter()
+        .map(|(k, n)| ((*k).to_owned(), id(*n)))
+        .collect();
+    let effects =
+        bind_effects_with(&parse(E5_KINDS[at]).expect("JSON"), form, &args).expect("bound");
+    let reserved: Vec<Id> = Vec::new();
+    let made = super::amounts::Cx {
+        view: View {
+            tree: &tree,
+            out: &[],
+        },
+        limits: &limits,
+        header: None,
+        body: id(2),
+        soul: id(2),
+        hands: &[],
+        node: id(100 + at as u64),
+        reserved: &reserved,
+        now: 0,
+    }
+    .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
+    .map_err(|r| r.name)?;
+    Ok(made
+        .iter()
+        .flat_map(|(_, _, body)| match body {
+            Body::Changes(cs) => cs.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|c| match c.change {
+            Change::Set {
+                node,
+                field,
+                to,
+                by,
+            } => Some((node, field, to, by)),
+            _ => None,
+        })
+        .collect())
+}
+
+/// E5: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's field 1)
+/// is refused `transfer-fields-differ`, so the run ends here rather than its part being refused by the tree's balance,
+/// which sums by number. Into a kind that numbers soap as linen does (the tub), it moves the amount.
+#[test]
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_is_refused_by_name() {
+    assert_eq!(
+        e5_transfer(0, "wash", &[("other", 101)]),
+        Err("transfer-fields-differ")
+    );
+    assert_eq!(
+        e5_transfer(0, "wash", &[("other", 102)]),
+        Ok(vec![
+            (id(100), 2, Value::Uint(20), Some(-10)),
+            (id(102), 2, Value::Uint(10), Some(10))
+        ])
+    );
+}
+
+/// E5: each end finds the field by name on its own kind; an end whose kind has no field of that name (the funnel has
+/// no soap) is refused `field-unknown`, from either side.
+#[test]
+fn e5_an_end_whose_kind_lacks_the_field_is_refused_field_unknown() {
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 103), ("into", 102)]),
+        Err("field-unknown")
+    );
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 102), ("into", 103)]),
+        Err("field-unknown")
+    );
+}
+
+/// E5: a transfer whose field the acting kind does not declare (the funnel pours soap it has none of) binds, and moves
+/// the amount between its two thing arguments by their own kinds' field.
+#[test]
+fn e5_a_transfer_of_a_field_the_acting_kind_does_not_declare_moves_between_its_arguments() {
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 100), ("into", 102)]),
+        Ok(vec![
+            (id(100), 2, Value::Uint(20), Some(-10)),
+            (id(102), 2, Value::Uint(10), Some(10))
+        ])
+    );
+}
