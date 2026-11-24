@@ -336,6 +336,8 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   assert.match(html, /<title>Fresh Fields · Souls<\/title>/); assert.match(html, /<link rel="canonical" href="http:\/\/127\.0\.0\.1:\d+\/w\/fresh\/">/);
   assert.deepEqual([c.worldKey, c.worldPath, c.worldId, c.worldName, c.worldEngine, c.authProvider, c.devAuth], ['fresh', '/w/fresh', 'v2:fresh', 'Fresh Fields', true, 'dev', true]);
   assert.deepEqual([c.v2Stream, c.v2History, c.v2Bodies, c.v2Gateway, c.v2Directory], ['/s/fresh/', '/s/h-fresh/', '/w/fresh/v2/bodies/', '/w/fresh/v2/ws', '/']);
+  const { soulClient, ...routed } = await (await get('/w/fresh/v1/config', { accept: 'application/json' })).json();
+  assert.equal(soulClient?.version, '3.0.0'); assert.deepEqual(routed, c, 'its /v1/config is the page\'s config, beside its client');
   assert.equal((await get('/w/fresh/eden.mjs')).status, 200, 'its client is the binding\'s');
   assert.equal(await (await get('/w/fresh/v2/bodies/bodies.json')).text(), '{"format":"souls/bodies/1","bodies":[]}', 'its bodies are the binding\'s');
   const act = await fetch(`${base}/w/fresh/v1/edge/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -387,6 +389,12 @@ test('a routed world whose views are published gets its page and reads without i
   assert.equal(eden.headers.get('x-souls-engine'), 'new', 'the launcher\'s page of a moved world');
   const config = JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await eden.text())?.[1] ?? 'null');
   assert.deepEqual([config?.worldKey, config?.worldId, config?.worldPath, config?.v2Stream, config?.v2Gateway], ['eden', 'eden-original-1', '/w/eden', '/s/eden/', '/w/eden/v2/ws']);
+  // its /v1/config is that page config (every field an old world's gives) beside the served client's, without the old process
+  const routed = await view('/v1/config');
+  assert.equal(routed.status, 200); const { soulClient, ...pageConfig } = await routed.json();
+  assert.equal(soulClient?.version, '3.0.0'); assert.deepEqual(pageConfig, config, 'the route answers what the page inlines');
+  assert.deepEqual([config.accountAuthRequired, config.inviteRequired, config.accountApproval, config.soulProfile, config.authReady, config.worldEngine, config.worldName], [false, false, null, null, true, true, 'eden']);
+  for (const k of ['authProvider', 'publicUrl', 'worldURL', 'instructionsURL', 'devAuth', 'build']) assert.ok(k in config, k);
   const snap = await view('/v1/world/snapshot?defs=ref&cols=1&v=k1');
   assert.equal(snap.status, 200); assert.equal(snap.headers.get('x-souls-static'), 'published'); assert.equal(snap.headers.get('x-defs-ref'), null, 'the plain snapshot, for the wire form');
   assert.equal(await snap.text(), published);
