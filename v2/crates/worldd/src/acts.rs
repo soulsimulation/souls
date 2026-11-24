@@ -2246,10 +2246,10 @@ impl Acts {
                     }
                     if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
                         let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
-                        if slot
-                            .and_then(|s| b.slots.holder_in(*node, s))
-                            .is_some_and(|h| h != body)
-                        {
+                        // Taken when every place of it is held, by others (a tent's two sleepers, E16).
+                        if slot.is_some_and(|s| {
+                            b.slots.full(*node, s) && !b.slots.holders_in(*node, s).contains(&body)
+                        }) {
                             taken = Some(n.clone());
                         }
                         continue;

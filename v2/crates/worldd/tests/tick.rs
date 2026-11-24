@@ -178,6 +178,7 @@ fn bodies_ticked(
         point: Vec3::new(-36_000_000, 450_000, 30_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }

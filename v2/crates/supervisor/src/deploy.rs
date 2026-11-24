@@ -742,6 +742,9 @@ pub struct Rehearsal {
     pub served_len: usize,
     pub served_sha: String,
     pub served_kept: bool,
+    /// An earlier rehearsal of this build left its scratch probe receipt and its copy is no longer served: the receipt
+    /// was dropped with the copy (`rehearsal.probe-dropped`).
+    pub dropped_probe: bool,
 }
 
 struct Killed(Child);
@@ -797,9 +800,19 @@ pub fn rehearse(
     }
     let total: usize = fed.iter().map(Vec::len).sum();
     let receipt = scratch.join("operator.probe");
+    let mut dropped_probe = false;
     if matches!(probe, Probe::Operator(_)) && receipt.exists() {
+        // Its lock first: a rehearsal of this build still running owns it (`canary.probe-busy`).
         let mut previous = Probe::operator(&receipt)?;
-        cleanup_operator(&socket_path(scratch), c, &mut previous, &mut || None)?;
+        // A scratch probe's body lives only in the scratch copy, emptied below. A copy still served (an interrupted
+        // deploy's build, left running) retires it as any watch does; one no longer served never can, and waiting on
+        // its socket refused every later rehearsal of this build (`canary.probe-pending`). Its receipt goes with the
+        // copy, by name in the deploy's record.
+        if UnixStream::connect(socket_path(scratch)).is_ok() {
+            cleanup_operator(&socket_path(scratch), c, &mut previous, &mut || None)?;
+        } else {
+            dropped_probe = true;
+        }
     }
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
@@ -905,6 +918,7 @@ pub fn rehearse(
         served_len,
         served_sha,
         served_kept,
+        dropped_probe,
     })
 }
 
@@ -1088,6 +1102,12 @@ impl Deploy<'_> {
                 return (Ended::NotDeployed { why }, tl, None);
             }
         };
+        if r.dropped_probe {
+            note(
+                "rehearsal.probe-dropped: a probe receipt of an earlier rehearsal no longer served"
+                    .into(),
+            );
+        }
         note(format!(
             "rehearsed on a scratch copy: {} records copied, {} recorded intents fed, {} named ends",
             r.copied, r.fed, r.ended
