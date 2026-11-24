@@ -748,6 +748,54 @@ jobs:
           echo "::error::Eden's page at $SIM_ORIGIN/w/eden/ did not answer 200 with build ${want:-a build} (last: HTTP $code, ${build:-no build})"
           exit 1
 
+  # Once both have moved: every main header control on every moved world's page, clicked in headless Chromium (Live,
+  # Back 1 min, Back again, From the start, Link to this moment, Broadcast, sound, Explore, places, follow, New Soul,
+  # Sign in), failing on any console error or 4xx/5xx from the page's own origin, plus the site probes Sign in needs.
+  # Read-only: it never submits a form or signs in. Required: publish needs it, so a failure publishes nothing and the
+  # summary names the rollback. eyes_only runs it alone against the live site. docs/testing.md#controls-gate
+  controls:
+    needs: [preflight, ship, v2-move]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (needs.ship.result == 'success' && (needs.v2-move.result == 'success' || (!inputs.v2 && needs.v2-move.result == 'skipped')))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: '${{ needs.preflight.outputs.sha }}', persist-credentials: false }
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: Playwright's Chromium
+        run: |
+          pnpm install --frozen-lockfile --filter mars-campus-viewer
+          pnpm --filter mars-campus-viewer exec playwright install --with-deps chromium 2>&1 | grep -v "%" | tail -4
+      - name: Every header control on every moved world
+        env:
+          SHA: ${{ needs.preflight.outputs.sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          EYES_ONLY: ${{ inputs.eyes_only }}
+        run: |
+          set +e
+          node tools/test-harness/e2e-controls/controls.mjs --origin "$SIM_ORIGIN" --out "$RUNNER_TEMP/controls"
+          rc=$?
+          [ -f "$RUNNER_TEMP/controls/summary.json" ] && { echo '```json'; cat "$RUNNER_TEMP/controls/summary.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$rc" = 0 ] && exit 0
+          if [ "$DRY_RUN" = false ] && [ "$EYES_ONLY" != true ]; then
+            { echo "The release IS live and its header controls fail (above): nothing is published. Decide; to roll back, the"
+              echo "ship job's summary names rollback.yml's exact line (code only, no ssh), and rollback-v2.yml takes the engine back (v2/docs/release.md)."; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::we-${SHA:0:12} is live and its header controls fail; nothing is published. See the summary for the rollback."
+          else
+            echo "::error::the live site's header controls fail (nothing was moved by this run)"
+          fi
+          exit 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: controls-${{ needs.preflight.outputs.label }}
+          path: ${{ runner.temp }}/controls
+          if-no-files-found: ignore
+
   # feed_only: the feed item of a release already live and tagged, by itself (A3 of the 0.127 follow-up). The tag's tree
   # with this workflow's release-client.mjs, which compares with the release before the tag. Idempotent: the item's link
   # (<origin>/changelog#v<version>) is its id, so a second run finds it and posts nothing.
@@ -796,10 +844,10 @@ jobs:
         run: rm -rf ~/.ssh/deploy_key
 
   publish:
-    needs: [preflight, ship, v2-move, eden-check]
+    needs: [preflight, ship, v2-move, eden-check, controls]
     # !cancelled(): with gate=report the receipts job (ship's need) is skipped, and a bare condition would skip publish with it.
     # Engine v2 must have moved too (unless v2=false skipped it) and Eden's page must answer (eden-check).
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.ship.result == 'success' && needs.eden-check.result == 'success' && !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.ship.result == 'success' && needs.eden-check.result == 'success' && needs.controls.result == 'success' && !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
