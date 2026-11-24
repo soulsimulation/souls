@@ -741,8 +741,8 @@ impl Slots {
                         let _ = c.set(body, d, Part::Stance(Stance::Stand));
                         self.release(key);
                     }
-                    Err(_) => {
-                        moves.cancel(c, due, instance, now, lit("stand-point-off-floor"));
+                    Err(r) => {
+                        moves.cancel(c, due, instance, now, lit(r.name));
                         self.sit_still(c, key);
                     }
                 }

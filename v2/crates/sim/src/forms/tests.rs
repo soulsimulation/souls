@@ -1745,6 +1745,97 @@ fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
     }
 }
 
+/// E11c: a rise whose stand point is off the floor (here the floor is cut back to stop short of the seat's exit) is
+/// refused at its contact, and its run ends there by the refusal's name, not at its deadline waiting on a move the
+/// places cancelled. The body stays seated, and once the floor is back under the stand point the same rise completes.
+#[test]
+fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "seated");
+    b.forms.ended.clear();
+    // The floor now ends 2 m behind the seat: its stand point (in front) and every point out along its exit are off it.
+    let whole = b.surfaces.remove(&fixture(1)).expect("the floor");
+    let corners = vec![
+        [-30_000, 0, -30_000],
+        [30_000, 0, -30_000],
+        [30_000, 0, -2_000],
+        [-30_000, 0, -2_000],
+    ];
+    let cut = Surface::new(
+        fixture(1),
+        vec![Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
+        }],
+    );
+    assert!(stand.z > -2_000_000, "the stand point is off the cut floor");
+    b.surfaces.insert(fixture(1), cut);
+    let asked = b.now;
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("the rise starts");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    println!(
+        "E11c: the rise ended {} after {} µs",
+        e.how.as_str(),
+        e.at - asked
+    );
+    assert_eq!(e.how.as_str(), "off-surface", "ends by the refusal's name");
+    assert!(
+        e.at - asked < Limits::default().step_move / 2,
+        "at its contact, not its deadline: {} µs",
+        e.at - asked
+    );
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.held_by(body), Some(chair), "seated still");
+    assert_eq!(slots.holder_in(chair, slot), Some(body));
+    assert_eq!(
+        b.c.body(body).expect("a body").pose.support,
+        replica::pose::Support::Slot
+    );
+    assert!(b.moves.is_empty(), "the rise's move ended");
+    b.forms.ended.clear();
+    b.surfaces.insert(fixture(1), whole);
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise],
+        intent(body, 2),
+        Limits::default(),
+    )
+    .expect("the rise starts again");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "the floor back: the rise completes");
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    b.clean();
+}
+
 /// #4187 review: a take that waited on its body's seat step, behind a long walk (20 m, well past an act's 10 s), is
 /// listed as started late when its run starts, so `worldd` gives it its run's own deadline (its start plus its
 /// steps' span) and its progress answer then; it runs to its end.

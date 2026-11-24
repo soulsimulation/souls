@@ -1901,11 +1901,14 @@ impl Forms {
                 );
                 s.slots
                     .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
-                    .map(|(f, _)| f)
+                    .map(|(f, h)| (f, h.and_then(Result::err)))
             }
-            _ => w.moves.fire(w.controller, w.due, w.mint, w.reach, t),
+            _ => w
+                .moves
+                .fire(w.controller, w.due, w.mint, w.reach, t)
+                .map(|f| (f, None)),
         };
-        if let Some(f) = fired {
+        if let Some((f, refused)) = fired {
             match f {
                 Fired::Done(rec) | Fired::Cancelled(rec) => {
                     if let Some(&run) = self.by_body.get(&rec.body)
@@ -1919,15 +1922,21 @@ impl Forms {
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
-                // Phase 1 begins at the contact instant (B2).
+                // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no
+                // floor to stand on) cancelled the move: its run ends now by the refusal's name (E11c), not at its
+                // deadline waiting on a move that is gone.
                 Fired::Phase { instance, phase: 1 } => {
                     if let Some(&run) = self.by_body.get(&t.node)
-                        && self
-                            .runs
-                            .get(&run)
-                            .is_some_and(|fr| fr.mv == Some(instance))
+                        && let Some(fr) = self.runs.get_mut(&run)
+                        && fr.mv == Some(instance)
                     {
-                        self.wake(w, run, Woke::Contact, t.due);
+                        match refused {
+                            Some(r) => {
+                                fr.mv = None;
+                                self.wake(w, run, Woke::Moved(name(r.name)), t.due);
+                            }
+                            None => self.wake(w, run, Woke::Contact, t.due),
+                        }
                     }
                 }
                 Fired::Phase { .. } => {}
