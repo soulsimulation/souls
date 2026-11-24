@@ -485,8 +485,11 @@ impl Stage {
                 Change::Set {
                     node, field, to, ..
                 } => self.read_set(*node, *field, to),
-                // A thing a form made is kept by a name of its own, so the case's state can name it.
-                Change::Create { node, kind, .. } if plain(kind.as_str()) != BODY => {
+                // A thing a form made, and the tree took, is kept by a name of its own, so the case's state can name
+                // it and its fields are read back from the tree. A create the tree refused is only in the log.
+                Change::Create { node, kind, .. }
+                    if plain(kind.as_str()) != BODY && self.tree.handle(*node).is_some() =>
+                {
                     let kind = plain(kind.as_str()).to_owned();
                     let fields = self.defaults(&kind);
                     self.placed += 1;

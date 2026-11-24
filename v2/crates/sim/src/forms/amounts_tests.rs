@@ -828,6 +828,51 @@ fn a3_a_made_thing_appears_where_its_form_names_and_a_place_not_free_is_refused(
     assert_eq!((how.as_str(), made.len()), ("slot-occupied", 0));
 }
 
+/// E6: a form's `create` that names its kind by the plain name, as content writes it, commits under the name the
+/// zone's header pins (`<kind>@<hash>`); the tree takes it (it refuses a plain name, `name-not-pinned`).
+#[test]
+fn e6_a_create_by_the_plain_name_commits_under_the_pinned_name() {
+    let mut b = Bench::new(1, 1, &[0]);
+    let full = b.full.clone();
+    let plain = replica::world_model::plain(&full).to_owned();
+    assert_ne!(plain, full, "the header pins the kind by hash");
+    let entry = parse(&ENTRY.replace("KIND", &plain)).expect("JSON");
+    let (body, thing) = (id(2), id(100));
+    assert!(matches!(
+        b.ask(&entry, body, thing, "make_held", None, intent(body, 1)),
+        Ok(Asked::Started(_))
+    ));
+    let mut made = Vec::new();
+    while !b.p.forms.is_empty() {
+        b.tick();
+        made.extend(
+            b.flush()
+                .0
+                .iter()
+                .flat_map(Effect::changes)
+                .filter_map(|c| match &c.change {
+                    Change::Create { node, kind, .. } => Some((*node, kind.clone())),
+                    _ => None,
+                }),
+        );
+    }
+    let e = b.p.forms.ended.pop().expect("ended");
+    let [(node, ref kind)] = made[..] else {
+        panic!("{made:?}")
+    };
+    println!(
+        "create of {plain}: {}; made as {}",
+        e.how.as_str(),
+        kind.as_str()
+    );
+    assert_eq!((e.how.as_str(), kind.as_str()), ("done", full.as_str()));
+    let n = b
+        .tree
+        .node(b.tree.handle(node).expect("committed to the tree"))
+        .expect("a node");
+    assert_eq!((n.kind().as_str(), n.parent()), (full.as_str(), Some(body)));
+}
+
 /// Starts `form` of `entry` by `body` at `node` with thing argument `other` and value arguments `vals` (C24).
 #[allow(clippy::too_many_arguments)]
 fn start(
