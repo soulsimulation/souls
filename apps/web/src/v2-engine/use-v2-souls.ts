@@ -21,6 +21,10 @@ import { historyBase, setV2History, V2History } from './history.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
+// The inline config as the page arrived with it: the app takes (deletes) window.__simConfig at its first config read
+// (inline-config.ts), before this hook's effect reads v2Replica, v2History and v2Bodies, so it is kept at load.
+const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown } }).__simConfig;
+
 export function v2Stream(): string | null {
   const v = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Stream?: unknown } }).__simConfig?.v2Stream;
   return typeof v === 'string' && STREAM.test(v) && !v.split('/').some((s) => s === '.' || s === '..') ? v : null;
@@ -75,12 +79,15 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         for (const e of m.entities.values()) if (e.in?.parent === 'world' && e.p && Math.hypot(e.p[0] - at[0], e.p[2] - at[2]) < 0.05) return e.id;
         return undefined;
       };
+      // The replica by version where the launcher names one (`v2Replica`, cutover.mjs: its files are immutable), else the plain path
+      const named = PAGE_CONFIG?.v2Replica;
+      const replica = new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
-      const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
-      if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));
+      const past = historyBase(stream, PAGE_CONFIG);
+      if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
-      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))))));
+      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
@@ -88,7 +95,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
       // body is then drawn in the look the v2 world gives it (take-bodies.ts); without it, body kinds stay default people.
       const { bodiesUrl, catalogueOf } = await import('./take-bodies.ts');
-      const cfg = (window as unknown as { __simConfig?: { v2Bodies?: unknown } }).__simConfig?.v2Bodies;
+      const cfg = PAGE_CONFIG?.v2Bodies;
       const url = bodiesUrl(new URLSearchParams(location.search).get('bodies') ?? cfg);
       const rows = url ? catalogueOf(await fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null)) : null;
       if (rows && !stopped) bridge.looks(rows);
@@ -132,7 +139,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
-      st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
+      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
     return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); };

@@ -1632,6 +1632,29 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
 fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
     use skills::form_runner::Step;
     let (mut b, body, chair, slot, stand) = seat_bench();
+    // The body in a tree with a posture field (as `a_seat_taken_or_left_writes_the_bodys_posture` sets it up), so the
+    // seat's sit and the back-out's rise write it.
+    let kinds = parse_kinds(KINDS).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| replica::world_model::plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let root = b.mint.mint().expect("id");
+    let draft = replica::world_model::Draft {
+        kinds: kinds.clone(),
+        souls: Default::default(),
+        audiences: BTreeMap::new(),
+        nodes: vec![
+            tree_node(root, full("souls:place"), None),
+            tree_node(body, full("souls:body"), Some(root)),
+        ],
+        links: Vec::new(),
+    };
+    b.tree = Tree::load(&draft).expect("loads").0;
+    b.forms.postures.insert(full("souls:body"), 28);
     // The lecture: a thing of its own, apart from the chair whose seat its form takes.
     let hall = b.mint.mint().expect("id");
     b.snap.things.insert(hall, (Vec3::ZERO, BTreeMap::new()));
@@ -1688,6 +1711,34 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
     assert!(
         b.moves.is_empty() && b.due.is_empty(),
         "nothing of the run left"
+    );
+    let postures: Vec<Value> = b
+        .forms
+        .out
+        .drain(..)
+        .filter_map(|e| match e.body {
+            Body::Changes(cs) => Some(cs),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|c| match c.change {
+            Change::Set {
+                node,
+                field: 28,
+                to,
+                ..
+            } if node == body => Some(to),
+            _ => None,
+        })
+        .collect();
+    println!("E14 leave mid-sit: posture written {postures:?}");
+    assert_eq!(
+        postures,
+        [
+            Value::Text(super::name("sit")),
+            Value::Text(super::name("stand"))
+        ],
+        "the body's posture reads standing once it stands"
     );
     b.clean();
     // Leave mid-walk: the walk to the seat ends with the run, and no seat is taken.
@@ -1778,6 +1829,126 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
     );
     assert_eq!((how.as_str(), seated(&b, body)), ("done", None));
     b.clean();
+}
+
+/// A node of the test's tree, everyone's, with `fields`.
+fn tree_node(id: Id, kind: String, parent: Option<Id>) -> replica::world_model::Node {
+    replica::world_model::Node {
+        id,
+        kind,
+        parent,
+        slot: None,
+        audience: replica::world_model::Audience::Everyone,
+        fields: BTreeMap::new(),
+    }
+}
+
+/// 0.135 E14 review: a slot argument on another thing is checked before the act starts, as the form's own thing is: a
+/// private chair is refused `object.private` (as a bare sit on it is), another Soul's body `slot-of-a-body`, a slot the
+/// thing neither declares nor holds as a seat `slot-unknown`, and a slot argument the form does not take as a slot
+/// `arg-type`. A public chair's seat starts.
+#[test]
+fn e14_a_slot_of_another_thing_is_refused_when_private_a_body_or_undeclared() {
+    use replica::world_model::{Draft, plain};
+    use skills::form_runner::Arg;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let kinds = parse_kinds(KINDS).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let (root, hall, other) = (
+        b.mint.mint().expect("id"),
+        b.mint.mint().expect("id"),
+        b.mint.mint().expect("id"),
+    );
+    let mut private = tree_node(chair, full("souls:sofa"), Some(root));
+    private
+        .fields
+        .insert(replica::who_may::F_ACCESS, Value::Uint(2));
+    let draft = |chair_node| Draft {
+        kinds: kinds.clone(),
+        souls: Default::default(),
+        audiences: BTreeMap::new(),
+        nodes: vec![
+            tree_node(root, full("souls:place"), None),
+            tree_node(body, full("souls:body"), Some(root)),
+            tree_node(hall, full("souls:crate"), Some(root)),
+            chair_node,
+        ],
+        links: Vec::new(),
+    };
+    let placed = b.surfaces[&fixture(1)]
+        .place(
+            other,
+            Frame {
+                node: fixture(1),
+                slot: None,
+            },
+            Vec3::new(1_000_000, 0, 0),
+            Quat::IDENTITY,
+        )
+        .expect("placed");
+    b.c.add(family(), placed).expect("added");
+    let entry = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:lecture", "owner": "thing",
+          "forms": {
+            "attend": { "who": "anyone", "takes": { "seat": { "type": "slot" } },
+              "steps": [{ "step": "sit", "slot": { "arg": "seat" } }] },
+            "point_at": { "who": "anyone", "takes": { "seat": { "type": "thing" } },
+              "steps": [{ "step": "wait", "us": 50000 }] } } }"#,
+    )
+    .expect("JSON");
+    let mut n = 0;
+    let mut ask = |b: &mut Bench, form: &str, arg: Arg| {
+        n += 1;
+        b.look();
+        let now = b.now;
+        let args = BTreeMap::from([("seat".to_owned(), arg)]);
+        let (mut w, forms) = b.world();
+        forms
+            .commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                hall,
+                &entry,
+                form,
+                &args,
+                intent(body, n),
+                Limits::default(),
+                now,
+            )
+            .map(|_| ())
+            .map_err(|r| r.name)
+    };
+    b.tree = Tree::load(&draft(private)).expect("loads").0;
+    let private = ask(&mut b, "attend", Arg::Slot(chair, slot));
+    let a_body = ask(&mut b, "attend", Arg::Slot(other, 1));
+    b.tree = Tree::load(&draft(tree_node(chair, full("souls:sofa"), Some(root))))
+        .expect("loads")
+        .0;
+    let undeclared = ask(&mut b, "attend", Arg::Slot(chair, slot + 7));
+    let not_a_slot = ask(&mut b, "point_at", Arg::Slot(chair, slot));
+    let public = ask(&mut b, "attend", Arg::Slot(chair, slot));
+    println!(
+        "E14 another thing's slot: private {private:?}, a body {a_body:?}, undeclared {undeclared:?}, \
+         not taken as a slot {not_a_slot:?}, public {public:?}"
+    );
+    assert_eq!(private, Err("object.private"));
+    assert_eq!(a_body, Err("slot-of-a-body"));
+    assert_eq!(undeclared, Err("slot-unknown"));
+    assert_eq!(not_a_slot, Err("arg-type"));
+    assert_eq!(public, Ok(()));
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "the public seat is taken");
 }
 
 /// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand

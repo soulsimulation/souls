@@ -1740,6 +1740,9 @@ pub struct Runner {
     /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
     /// body out again by a rise, then ends `left`.
     backing: bool,
+    /// That rise is under way: the run ends `left` when it ends, not at its contact, so the world writes the body
+    /// standing (the rise's `done`) before the run is over.
+    rising_out: bool,
 }
 
 impl Runner {
@@ -1775,6 +1778,7 @@ impl Runner {
             leaving: false,
             again: false,
             backing: false,
+            rising_out: false,
         }
     }
 
@@ -1985,6 +1989,7 @@ impl Runner {
                     self.timer = None;
                     self.end(host, name("left"))
                 }
+                Woke::Contact if self.rising_out => Next::Sleep,
                 Woke::Contact if other_seat && !self.effected => {
                     self.backing = true;
                     Next::Sleep
@@ -1998,6 +2003,7 @@ impl Runner {
                         Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                     // The step in progress is the rise now, so the world writes the body standing when it ends.
                     self.steps[self.at] = Step::Rise;
+                    self.rising_out = true;
                     Next::Rise
                 }
                 Woke::Contact | Woke::Moved(_) => self.end(host, name("left")),

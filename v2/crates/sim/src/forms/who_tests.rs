@@ -95,20 +95,52 @@ fn strs(v: Option<&Value>) -> Vec<String> {
 }
 
 /// Loads a case's `state` as a T2 tree: a public root place; each node with hands a body of the fixtures' family,
-/// under the root, linked to its Soul by `souls:body-of`; each other node a thing of its kind, in the hand that
-/// holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` (`souls:owns` for its `owner`)
+/// under the root (or seated in the thing slot that lists it), linked to its Soul by `souls:body-of`; each other node
+/// a thing of its kind, in the hand that holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` (`souls:owns` for its `owner`)
 /// from its end to the thing, public when the kind's link is, else in an audience whose members are its ends, each
 /// body counted as its Soul.
 fn build(kinds: &Value, state: &Value) -> Built {
-    let nodes = state.get("nodes").and_then(Value::obj).unwrap_or(&[]);
+    // A node that is not an object (a null left in the input) is not in the world.
+    let kept: Vec<(String, Value)> = state
+        .get("nodes")
+        .and_then(Value::obj)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|(_, n)| n.obj().is_some())
+        .cloned()
+        .collect();
+    let nodes = kept.as_slice();
     let thing_kinds: BTreeSet<&str> = nodes
         .iter()
         .filter(|(_, n)| n.get("hands").is_none())
         .filter_map(|(_, n)| n.get("kind")?.str())
         .collect();
+    // A thing kind's slots, numbered from 1 in its entry's order (`import_eden::body_slots_of`), each admitting what
+    // its entry's slot admits: a body listed in one sits there, the thing's child in that slot (E10b).
+    let slots_of = |k: &str| -> Vec<(String, String)> {
+        kinds
+            .get(k)
+            .and_then(|e| e.get("slots"))
+            .and_then(Value::obj)
+            .unwrap_or(&[])
+            .iter()
+            .map(|(s, d)| {
+                let admits = d.get("admits").and_then(Value::str).unwrap_or("thing");
+                (s.clone(), admits.to_owned())
+            })
+            .collect()
+    };
     let mut text = KINDS.to_owned();
     for k in &thing_kinds {
-        text.push_str(&format!("\n{{1: \"{k}\", 2: \"thing\"}}"));
+        let admits: Vec<String> = (1..)
+            .zip(slots_of(k))
+            .map(|(n, (_, a))| format!("{n}: [\"{a}\"]"))
+            .collect();
+        let slots = match admits.is_empty() {
+            true => String::new(),
+            false => format!(", 6: {{{}}}", admits.join(", ")),
+        };
+        text.push_str(&format!("\n{{1: \"{k}\", 2: \"thing\"{slots}}}"));
     }
     let kind_defs = parse_kinds(&text).expect("kinds");
     let full = |p: &str| -> String {
@@ -182,10 +214,22 @@ fn build(kinds: &Value, state: &Value) -> Built {
             });
         }
     }
+    let mut seated: BTreeMap<String, (Id, u64)> = BTreeMap::new();
+    for (k, n) in nodes {
+        let Some(kind) = n.get("kind").and_then(Value::str) else {
+            continue;
+        };
+        for (slot, (name, _)) in (1..).zip(slots_of(kind)) {
+            for b in strs(n.get("slots").and_then(|x| x.get(&name))) {
+                seated.insert(b, (ids[k], slot));
+            }
+        }
+    }
     for (k, n) in nodes {
         let body = n.get("hands").is_some();
-        let (parent, slot) = match holder.get(k) {
-            Some((b, s)) if !body => (*b, Some(*s)),
+        let (parent, slot) = match (holder.get(k), seated.get(k)) {
+            (Some((b, s)), _) if !body => (*b, Some(*s)),
+            (_, Some((t, s))) if body => (*t, Some(*s)),
             _ => (root, None),
         };
         let kind = match body {
@@ -740,4 +784,83 @@ fn e10_a_seated_rider_steers_and_a_passenger_or_a_bystander_is_refused() {
         assert_eq!(r.name, "not-permitted", "{who}: {}", r.detail);
         assert_eq!(r.detail, "who may: whoever holds it", "{who}");
     }
+}
+
+/// E10b: a vehicle in one body's hand while another body sits in its drive slot has one holder, the carrier. The body
+/// in the drive slot is refused `not-permitted`, as a passenger is, so two bodies never both hold it; the carrier keeps
+/// its `who: holder` forms (it can always put the vehicle down), and the rider is still seated and may get off. With
+/// the vehicle set down (loose in the place), the same rider holds it again.
+#[test]
+fn e10b_a_carried_vehicle_is_the_carriers_alone_not_its_riders() {
+    let name = "f6:v";
+    let entry = parse(&format!(
+        r#"{{"format":"souls-entry/1","kind":"{name}","owner":"thing",
+        "slots":{{"saddle":{{"admits":"body","posture":"sit","most":1}}}},
+        "vehicle":{{"drive":"saddle","steer":"steer","speed_mm_s":5000,"ground":"level"}},
+        "forms":{{"steer":{{"who":"holder"}}}}}}"#
+    ))
+    .expect("JSON");
+    let text = format!("{KINDS}\n{{1: \"{name}\", 2: \"thing\", 6: {{1: [\"body\"]}}}}");
+    let kinds = parse_kinds(&text).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let id = |n| Id::new(FIXTURE_SCOPE_A, n).expect("an id");
+    let (root, vehicle, carrier, rider) = (id(1), id(2), id(3), id(4));
+    let node = |id, kind: &str, parent, slot| Node {
+        id,
+        kind: full(kind),
+        parent,
+        slot,
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let steer = |carried: bool| {
+        let (parent, slot) = if carried {
+            (carrier, Some(2))
+        } else {
+            (root, None)
+        };
+        let draft = Draft {
+            kinds: kinds.clone(),
+            nodes: vec![
+                node(root, "souls:place", None, None),
+                node(carrier, "souls:body", Some(root), None),
+                node(vehicle, name, Some(parent), slot),
+                node(rider, "souls:body", Some(vehicle), Some(1)),
+            ],
+            ..Draft::default()
+        };
+        let (tree, rules) = Tree::load(&draft).unwrap_or_else(|e| panic!("loads: {e}"));
+        let may_steer = |body| {
+            may(
+                &tree,
+                &rules.audiences,
+                &|_| None,
+                body,
+                vehicle,
+                &entry,
+                "steer",
+            )
+        };
+        (may_steer(carrier), may_steer(rider))
+    };
+    let (by_carrier, by_rider) = steer(true);
+    assert!(by_carrier.is_ok(), "the carrier holds it: {by_carrier:?}");
+    let r = by_rider.expect_err("the body in the drive slot of a carried vehicle");
+    assert_eq!(r.name, "not-permitted", "{}", r.detail);
+    assert_eq!(r.detail, "who may: whoever holds it");
+    let (by_carrier, by_rider) = steer(false);
+    assert!(
+        by_rider.is_ok(),
+        "set down, the rider holds it: {by_rider:?}"
+    );
+    assert_eq!(
+        by_carrier.expect_err("a body beside it").name,
+        "not-permitted"
+    );
 }
