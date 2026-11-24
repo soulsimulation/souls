@@ -42,18 +42,22 @@ export async function board(names, words, limitS = 600) {
 }
 
 /** Open the page the recorder opened (`url`: its address, with the take's `?hour=`) as a ?shot=1 page (the camera holds
- *  exactly where shotCamera puts it) and wait for its scene. Installs `window.__rideKey(ride)`: the key the take's frame
- *  has a ride under. The frame keys a thing by the page's own id for it (an `e_…` hash on a launcher-made world), and its
- *  entries carry no name, so a ride is found by that id, else by the entity layer's thing of that name, else by the layer's
- *  thing whose def names `ride.def` (`balloon`) among those the frame carries. */
+ *  exactly where shotCamera puts it) and wait for its scene. */
 export async function shotPage(page, url) {
   const u = new URL(url);
   u.searchParams.set('dev', '1'); u.searchParams.set('shot', '1');
   await page.goto(u.href);
   await page.locator('canvas').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForFunction(() => window.__soulsEntity?.shotCamera && window.__soulsEntity.transportFrame?.()?.entities, null, { timeout: 90_000 });
+}
+
+/** Installs `window.__rideKey(ride)` on the page: the key the take's frame has a ride under. The frame keys a thing by the
+ *  page's own id for it (an `e_…` hash on a launcher-made world), and its entries carry no name, so a ride is found by that
+ *  id, else by the entity layer's thing of that name, else by the layer's thing whose def names `ride.def` (`balloon`)
+ *  among those the frame carries. */
+async function rideKey(page) {
   await page.evaluate(() => {
-    window.__rideKey = ({ name, def }) => {
+    window.__rideKey ??= ({ name, def }) => {
       const E = window.__soulsEntity, all = E.transportFrame()?.entities ?? {};
       if (all[name]) return name;
       const layer = E.layer?.model?.entities;
@@ -69,7 +73,7 @@ export async function shotPage(page, url) {
 export async function hold(page, ride, ms) {
   for (const until = Date.now() + ms; Date.now() < until;) {
     const c = await carrierPose(page, ride, 0);
-    console.error(`kit: ${ride.name} on the page at ${c ? `${c.p.map((v) => v.toFixed(1)).join(', ')} (${c.key})` : 'none'}`);
+    console.error(`kit: ${ride.name} on the page at ${c ? `${c.p.map((v) => v.toFixed(1)).join(', ')} (${c.key}, tick ${c.tick})` : 'none'}`);
     await page.waitForTimeout(Math.min(5000, Math.max(0, until - Date.now())));
   }
 }
@@ -83,6 +87,7 @@ export async function fixed(page, eye, at) {
  *  `dist` metres out at `from` radians from its +x, turning `rate` rad/s, the eye `eyeUp` and the look `atUp` over its
  *  floor. Runs in the page until the next fixed/orbit call replaces it. */
 export async function orbit(page, ride, { dist, from = 0, rate = 0, eyeUp = 1.5, atUp = 1 }) {
+  await rideKey(page);
   await page.evaluate(({ ride, dist, from, rate, eyeUp, atUp }) => {
     const E = window.__soulsEntity, t0 = performance.now(), run = (window.__rideCam = (window.__rideCam ?? 0) + 1);
     const step = () => {
@@ -98,15 +103,17 @@ export async function orbit(page, ride, { dist, from = 0, rate = 0, eyeUp = 1.5,
   }, { ride, dist, from, rate, eyeUp, atUp });
 }
 
-/** Wait up to `ms` until the page carries the ride (`{name, def}`); → its pose in the depicted frame ({p, yaw, key}), or
- *  null. */
+/** Wait up to `ms` until the page carries the ride (`{name, def}`); → its pose in the depicted frame ({p, yaw, key, tick}),
+ *  or null. */
 export async function carrierPose(page, ride, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const c = await page.evaluate((ride) => {
-      const key = window.__rideKey(ride), e = key ? window.__soulsEntity.transportFrame()?.entities?.[key] : null;
-      return e?.p ? { p: [...e.p], yaw: e.yaw ?? 0, key } : null;
-    }, ride);
+      if (!window.__soulsEntity?.transportFrame) return null;
+      const f = window.__soulsEntity.transportFrame(), key = window.__rideKey?.(ride), e = key ? f?.entities?.[key] : null;
+      return e?.p ? { p: [...e.p], yaw: e.yaw ?? 0, key, tick: f.tick } : null;
+    }, ride).catch(() => null);
+    if (!c) await rideKey(page).catch(() => {});
     if (c || Date.now() > until) return c;
     await page.waitForTimeout(250);
   }
