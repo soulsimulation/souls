@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // The controls gate: every main control in a world page's header, clicked in real headless Chromium, on every moved world.
+// Time (Gene, 24 Nov): the header's one time control is the pill; every time control is pressed inside the panel it opens.
 // A release once shipped with Sign in and "Back 1 min" broken on /w/eden/ and no gate noticed; this is the gate that would
 // have. It only clicks: it never submits a form, never signs in and never changes a world, so it is safe against production.
 //
@@ -96,7 +97,7 @@ async function walkWorld(browser, origin, slug, dir) {
   ctx.on('page', watch);
   const page = await ctx.newPage();
   const steps = [];
-  const view = (p = page) => p.evaluate(() => { const d = document.querySelector('.viewer-history')?.dataset ?? {}; return { pres: d.viewerPresentation ?? null, tick: d.viewerTick ? Number(d.viewerTick) : null, camera: document.querySelector('[data-camera]')?.dataset.camera ?? null }; }).catch(() => ({}));
+  const view = (p = page) => p.evaluate(() => { const d = document.querySelector('.viewer-history')?.dataset ?? {}; return { pres: d.viewerPresentation ?? null, tick: d.viewerTick ? Number(d.viewerTick) : null, camera: document.querySelector('[data-camera]')?.dataset.camera ?? null, pill: document.querySelector('.time-pill')?.textContent?.trim() ?? null, clock: document.querySelector('.time-panel-clock')?.textContent?.trim() ?? null }; }).catch(() => ({}));
   const notLoaded = (p = page) => p.evaluate(() => [...document.querySelectorAll('.warn, [role=status], .explore-note')].map((e) => e.textContent?.trim() ?? '').find((t) => /could not be loaded|temporarily unavailable/i.test(t)) ?? null).catch(() => null);
   const until = async (fn, ms, every = 250) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(every); } return null; };
   const step = async (name, fn) => {
@@ -128,24 +129,31 @@ async function walkWorld(browser, origin, slug, dir) {
     throw last;
   };
   const escape = async () => { await page.keyboard.press('Escape'); await sleep(300); };
-  // #4627: Back 1 min, Link to this moment and From the start live in the time panel the clock button opens. A world
-  // with no clock (or a page before #4627) keeps them in the header: the same names there.
-  const moment = async (name) => {
-    const clock = page.locator('.world-time-button').first(), panel = page.locator('.time-preview-moments');
-    if (await clock.count()) {
-      if (!await panel.isVisible().catch(() => false)) await press(clock);
-      if (await until(() => panel.isVisible().catch(() => false), 5000)) return panel.getByRole('button', { name, exact: true });
-    }
-    return page.getByRole('button', { name, exact: true });
+  // The time panel: the pill opens it; every time control is a button inside it (none is in the header).
+  const panel = page.locator('.time-panel');
+  const openPanel = async () => {
+    if (await panel.isVisible().catch(() => false)) return;
+    await press(page.locator('.time-pill').first());
+    if (!await until(() => panel.isVisible().catch(() => false), 5000)) fail('the time pill opened no panel');
   };
+  const moment = async (name) => { await openPanel(); return panel.getByRole('button', { name, exact: true }); };
+  // nothing time-related in the header but the pill
+  const headerTime = () => page.evaluate(() => [...document.querySelectorAll('.hud-status button, .hud-status input, .viewer-status button, .viewer-status input')]
+    .filter((e) => !e.classList.contains('time-pill')).map((e) => e.getAttribute('aria-label') || e.textContent?.trim() || e.tagName)).catch(() => []);
   const back = async (label) => {
     const before = await view();
     if (before.tick == null) fail('no moment shown before the click');
+    const url = page.url();
     await press(await moment('Back 1 min'));
-    const landed = await until(async () => { const v = await view(); const bad = await notLoaded(); if (bad) return { bad }; return v.pres === 'history' && v.tick < before.tick ? v : null; }, 25000);
+    const landed = await until(async () => { const v = await view(); const bad = await notLoaded(); if (bad) return { bad }; return v.pres === 'history' && v.tick < before.tick && !/Loading/.test(v.pill ?? '') ? v : null; }, 25000);
     if (!landed) fail(`${label}: never landed on an earlier moment (presentation ${(await view()).pres})`);
     if (landed.bad) fail(`${label}: "${landed.bad}"`);
-    return `tick ${before.tick} -> ${landed.tick}`;
+    if (page.url() !== url) fail(`${label}: the page navigated (${url} -> ${page.url()})`);
+    // 1 min = 60 s of world time; playback runs on between the two reads, so it lands a little under a minute back
+    const back = (before.tick - landed.tick) * 0.05;
+    if (back < 50 || back > 70) fail(`${label}: moved ${back.toFixed(1)} s, not about 60`);
+    if (!/^Recorded · /.test(landed.pill ?? '')) fail(`${label}: the pill reads "${landed.pill}"`);
+    return `tick ${before.tick} -> ${landed.tick} (${back.toFixed(1)} s); clock ${landed.clock}; pill "${landed.pill}"`;
   };
 
   await step('load', async () => {
@@ -155,9 +163,32 @@ async function walkWorld(browser, origin, slug, dir) {
     return `presentation ${(await view()).pres}`;
   });
   await step('Live', async () => {
-    await press(page.locator('.live-pill').first());
-    await page.locator('input[aria-label="Preview hour"]').waitFor({ state: 'visible', timeout: 5000 });
+    const extra = await headerTime();
+    if (extra.some((t) => /back|link|start|live|pause|play|preview|×|range|moment/i.test(t))) fail(`time controls in the header: ${extra.join(', ')}`);
+    const pill = (await view()).pill;
+    if (pill !== 'Live') fail(`the pill reads "${pill}", not "Live"`);
+    await openPanel();
+    const shown = await panel.locator('button').allTextContents();
+    if (await panel.locator('input[aria-label="Preview hour"]').count()) fail('the panel still has the time-of-day preview');
     await escape();
+    if (await panel.isVisible().catch(() => false)) fail('Escape left the panel open');
+    return `pill "${pill}"; panel: ${shown.join(', ')}`;
+  });
+  await step('Pause', async () => {
+    await press(await moment('Pause'));
+    const v = await until(async () => { const x = await view(); return x.pres === 'history' && /^Recorded · /.test(x.pill ?? '') ? x : null; }, 25000);
+    if (!v) fail(`Pause did not hold the moment (presentation ${(await view()).pres})`);
+    await sleep(2500);
+    const after = await view();
+    if (after.tick !== v.tick) fail(`the clock moved while paused (tick ${v.tick} -> ${after.tick})`);
+    return `held at ${after.clock}; pill "${after.pill}"`;
+  });
+  await step('Play', async () => {
+    const before = await view();
+    await press(await moment('Play'));
+    const v = await until(async () => { const x = await view(); return x.tick > before.tick ? x : null; }, 10000);
+    if (!v) fail('Play did not move the clock');
+    return `${before.clock} -> ${v.clock}`;
   });
   await step('Back 1 min', () => back('Back 1 min'));
   await step('Back again', () => back('Back again'));
@@ -174,22 +205,28 @@ async function walkWorld(browser, origin, slug, dir) {
     await press(b);
     const link = await until(() => page.evaluate(() => document.querySelector('[data-moment-link]')?.getAttribute('data-moment-link') || null), 5000);
     if (!link) fail('no link was made');
+    const said = await page.evaluate(() => document.querySelector('[data-moment-link]')?.textContent?.trim() ?? null);
+    if (said !== 'Copied') fail(`the button says "${said}", not "Copied"`);
+    const want = Math.floor(Number(new URLSearchParams(new URL(link).hash.slice(1)).get('t')) / 50000);
     const tab = await ctx.newPage();
     try {
       await tab.goto(link, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      const v = await until(async () => { const bad = await notLoaded(tab); if (bad) return { bad }; const x = await view(tab); return x.tick != null && x.pres === 'history' ? x : null; }, 45000);
+      const v = await until(async () => { const bad = await notLoaded(tab); if (bad) return { bad }; const x = await view(tab); return x.tick != null && x.pres === 'history' && !/Loading/.test(x.pill ?? '') ? x : null; }, 45000);
       if (!v) fail(`the link's tab never showed the moment (presentation ${(await view(tab)).pres})`);
       if (v.bad) fail(`the link's tab: "${v.bad}"`);
+      // it plays on from the moment: within a few seconds after it, never before
+      const off = (v.tick - want) * 0.05;
+      if (off < -1 || off > 15) fail(`the link's tab shows ${off.toFixed(1)} s from the linked moment`);
       await tab.screenshot({ path: join(dir, 'moment-link-tab.png') }).catch(() => {});
-      return `new tab at tick ${v.tick}`;
+      return `new tab at tick ${v.tick} (${off.toFixed(1)} s after the link's ${want}); pill "${v.pill}"`;
     } finally { await tab.close().catch(() => {}); }
   });
   await step('Return to live', async () => {
-    const r = page.getByRole('button', { name: 'Return to live', exact: true });
-    if (await r.count()) await press(r);
-    else if ((await view()).pres === 'history') await press(await moment('Back to live'));   // #4627: in the time panel
-    if (!await until(async () => (await view()).pres === 'live', 20000)) fail('never back to live');
+    await press(await moment('Return to live'));
+    const v = await until(async () => { const x = await view(); return x.pres === 'live' && x.pill === 'Live' ? x : null; }, 20000);
+    if (!v) fail(`never back to live (pill "${(await view()).pill}")`);
     await escape();
+    return `pill "${v.pill}"`;
   });
   await step('Broadcast menu', async () => {
     await press(page.locator('button[aria-label="Camera modes and help"]').first());
