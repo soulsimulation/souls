@@ -123,6 +123,66 @@ pub fn register(
     (out, things.len(), all, left, moved)
 }
 
+/// The runs of the registered seats `places` that move with their cabins (N14, `sim::courses::rides::seat_runs`): each
+/// ride's seats, from its entry in `kinds` (the one the thing names), carried onto the floor its seats are on, over that
+/// floor's height (its surface for the standard body), on the ride's own clock from world time 0. Each is the thing's id and its seat's run; a thing whose
+/// entry has no ride of two stops has none.
+pub fn runs(
+    town: &Town,
+    kinds: &[(String, Json)],
+    places: &[PlaceAt],
+) -> Vec<(Id, sim::courses::rides::SeatRun)> {
+    use replica::pose::Frame;
+    let mut by_thing: std::collections::BTreeMap<Id, std::collections::BTreeMap<u64, PlaceAt>> =
+        Default::default();
+    for p in places {
+        by_thing
+            .entry(p.thing)
+            .or_default()
+            .insert(p.place.slot, p.clone());
+    }
+    let mut out = Vec::new();
+    for (thing, seats) in by_thing {
+        let Some(node) = town.tree.handle(thing).and_then(|h| town.tree.node(h)) else {
+            continue;
+        };
+        let name = import_eden::entry_name(node.kind().as_str(), node.fields());
+        let Some((_, entry)) = kinds.iter().find(|(k, _)| k == name) else {
+            continue;
+        };
+        if entry.get("ride").is_none() {
+            continue;
+        }
+        let Some(floor) = seats.values().next().map(|p| p.floor) else {
+            continue;
+        };
+        let surface = town.surfaces.get(&floor);
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let ground = |x: i64, z: i64| {
+            let b = surface?
+                .place(floor, frame, Vec3::new(x, 0, z), Quat::IDENTITY)
+                .ok()?;
+            Some(b.pose.position.y)
+        };
+        let Some(x) = town
+            .tree
+            .handle(thing)
+            .zip(town.tree.handle(floor))
+            .and_then(|(h, f)| sim::ground::scene::xform_to(&town.tree, h, f).ok())
+        else {
+            continue;
+        };
+        let to_floor = |p: Vec3| x.point(p).ok();
+        for r in sim::courses::rides::seat_runs(entry, &seats, &to_floor, &ground, 0) {
+            out.push((thing, r));
+        }
+    }
+    out
+}
+
 /// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
 /// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
 /// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.

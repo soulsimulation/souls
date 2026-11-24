@@ -1793,6 +1793,7 @@ fn bodies(
     ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
+    runs: Vec<(Id, sim::courses::rides::SeatRun)>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
 ) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
@@ -1863,6 +1864,12 @@ fn bodies(
     for (thing, course) in moving {
         let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
         b.slots.moving(thing, &course, home)?;
+    }
+    // The seats that move with their cabins (N14): boarded and left only where they stand at a stop.
+    for (thing, r) in runs {
+        if let Err(e) = b.slots.run(thing, r.slot, &r.course, r.stops) {
+            eprintln!("worldd: a ride's seat run did not load: {}", refusal(e));
+        }
     }
 
     for (a, build) in at {
@@ -2887,7 +2894,19 @@ fn serve(args: &[String]) -> R<()> {
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
+    let runs = worldd::places::runs(&town, &kinds, &places);
     stamp("places to sit placed");
+    for (thing, r) in &runs {
+        // As a balloon's loop is printed (`with_rides`): where a client's own timetable can be checked.
+        println!(
+            "ride seat: {} slot {}, lap {} us from {} us, {} stops to get on and off at",
+            replica::world_model::show(*thing),
+            r.slot,
+            r.course.load().map_or(0, |t| t.period),
+            r.course.t0,
+            r.stops.len()
+        );
+    }
     let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
@@ -3048,7 +3067,15 @@ fn serve(args: &[String]) -> R<()> {
     });
     cfg.wear = Some(answers::Wearing { catalogue, born });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-        let b = bodies(town, planner, ground, placed, places.clone(), builds);
+        let b = bodies(
+            town,
+            planner,
+            ground,
+            placed,
+            places.clone(),
+            runs.clone(),
+            builds,
+        );
         stamp("places to sit registered");
         b
     }));
@@ -5151,6 +5178,7 @@ mod s10c_lockstep {
             let (mut town, planner) =
                 recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
             let (places, ..) = worldd::places::register(&mut town, &kinds);
+            let runs = worldd::places::runs(&town, &kinds, &places);
             let rules = Rules {
                 kinds: Json::Obj(kinds),
                 moves: Json::Obj(Vec::new()),
@@ -5171,7 +5199,7 @@ mod s10c_lockstep {
                 per_tick: 8,
             });
             cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-                bodies(town, planner, ground, placed, places, builds)
+                bodies(town, planner, ground, placed, places, runs, builds)
             }));
             let world = answers::start(initial.frozen(), rules, store.clone(), cfg).unwrap();
             Lock {

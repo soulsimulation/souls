@@ -55,6 +55,7 @@ const MOVED = 'souls:form-move', RUN_ENDED = 'souls:form-ended';
 const NAME = 30;
 const DESCRIPTION = 31;
 const COURSE = 80; // a moving node's course (#3603)
+const SEATS = 88; // N14: the courses of a ride's seats that move with their cabins, by slot
 
 function nodeRec(v: Map<number, unknown>): NodeRec {
   const pose = v.get(7) as Map<number, unknown> | undefined;
@@ -99,6 +100,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
+  const seats = f.get(SEATS);
+  if (seats instanceof Map) rec.seats = Object.fromEntries([...seats].map(([k, c]) => [num(k), encode(c)]));
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   if (f.get(33) instanceof Uint8Array) (rec as NodeRec & { look?: string }).look = new TextDecoder().decode(f.get(33) as Uint8Array); // V3: a Soul's own look's params (G2)
   const placeName = f.get(PLACE_NAME);

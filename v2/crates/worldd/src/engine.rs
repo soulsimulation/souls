@@ -142,6 +142,8 @@ pub struct Engine {
     out: Vec<Effect>,
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
+    /// Whether the rides' seat courses (N14) were written to their things at this start.
+    seat_courses: bool,
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
     /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
@@ -379,6 +381,7 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
+            seat_courses: false,
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
@@ -1075,6 +1078,10 @@ impl Engine {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
+        }
+        if !self.seat_courses {
+            self.seat_courses = true;
+            self.out.extend(seat_courses(live, slots, now));
         }
         let mut tree = None;
         while let Some(t) = self.due.fire(now) {
@@ -2550,4 +2557,46 @@ mod kind_tests {
             );
         }
     }
+}
+
+/// The courses of the rides' seats that move with their cabins (N14), written once at a start onto each ride whose
+/// [`replica::schedule::F_SEAT_COURSES`] is not what its seats run now (`slots`, from its entry): one entry of the
+/// world's a ride, so every copy and the page read where each seat and its rider are. A restart with the same entries
+/// writes nothing.
+fn seat_courses(live: &Tree, slots: &Slots, now: Micros) -> Vec<Effect> {
+    let mut by: BTreeMap<Id, BTreeMap<u64, Value>> = BTreeMap::new();
+    for (thing, slot, c) in slots.seat_courses() {
+        by.entry(thing).or_default().insert(slot, c.to_value());
+    }
+    let mut out = Vec::new();
+    for (thing, courses) in by {
+        let to = Value::Map(courses);
+        let held = live
+            .handle(thing)
+            .and_then(|h| live.node(h))
+            .and_then(|n| n.fields().get(&replica::schedule::F_SEAT_COURSES).cloned());
+        if held.as_ref() == Some(&to) {
+            continue;
+        }
+        let e = crate::carrier::entry(
+            live,
+            thing,
+            vec![crate::carrier::set(
+                thing,
+                replica::schedule::F_SEAT_COURSES,
+                to,
+            )],
+            now,
+            Cause::World,
+            Actor::World,
+        );
+        match e {
+            Ok(e) => out.push(e),
+            Err(r) => eprintln!(
+                "worldd: {}'s seat courses are not written: {r}",
+                show(thing)
+            ),
+        }
+    }
+    out
 }

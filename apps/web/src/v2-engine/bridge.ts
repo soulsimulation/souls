@@ -6,7 +6,7 @@ import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type Rec
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
-import { keepPlaces, placeAt, type CourseAt, type CoursePlaces } from './course-samples.ts';
+import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
 import { reloadForFormat } from './stream-format.ts';
@@ -21,7 +21,9 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   /** V3: the Soul's own look's params (field 33, G2's `life:look`), JSON. */
   look?: string;
   /** A moving node's course (field 80, #3603), its canonical bytes, for the replica's `courseAt`. */
-  course?: Uint8Array };
+  course?: Uint8Array;
+  /** N14: the courses of a ride's seats that move with their cabins (field 88), by slot, for `courseAt`. */
+  seats?: Record<number, Uint8Array> };
 export type { CourseAt };
 type SampleRec = [string, string, number | null, number, number, number, number];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
@@ -32,6 +34,9 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
   courses?: CoursePlaces };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number };
+
+/** N14: the def of a cabin a seat that moves with its cabin is drawn in (WorldRideCars, by LiveWorld). */
+export const CABIN = 'ride-cabin';
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
 export type V2View = {
@@ -204,7 +209,7 @@ export class V2Bridge {
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
     const p = m.p;
     this.liveFrom ??= p.from;
-    for (const id of p.removed) this.places.delete(id);
+    for (const id of p.removed) for (const k of [...this.places.keys()]) if (k === id || k.startsWith(`${id}#`)) this.places.delete(k);
     keepPlaces(this.places, p.courses);
     // K2: a record that changes a body's frame or slot (a sit, a stand, a step inside) lands after the part's own motion
     // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
@@ -240,7 +245,7 @@ export class V2Bridge {
     // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
     // bundle's state lists a seated body before its bench: it was drawn nowhere for the whole bundle)
     for (const n of nodes) this.nodes.set(n.id, n);
-    if (this.onCourse && nodes.some((n) => n.course)) { const f = this.onCourse; this.onCourse = null; f(); }
+    if (this.onCourse && nodes.some((n) => n.course || n.seats)) { const f = this.onCourse; this.onCourse = null; f(); }
     for (const n of nodes) {
       if (n.parent === null) this.view.world = n.id;
       if (!isBody(n)) {
@@ -290,7 +295,7 @@ export class V2Bridge {
     if (id === null) return { p: [0, 0, 0], q: [1, 0, 0, 0] };
     const n = this.nodes.get(id);
     if (!n || depth > 32) return null;
-    const up = this.inSlot(this.world(n.parent, depth + 1, t), n.parent, n.slot);
+    const up = this.inSlot(this.world(n.parent, depth + 1, t), n.parent, n.slot, t);
     if (!up) return null;
     const q: Mat['q'] = [n.rot[0] / Q, n.rot[1] / Q, n.rot[2] / Q, n.rot[3] / Q], r = rotate(up.q, (t !== undefined && this.coursePos(n, t)) || n.pos);
     return { p: [up.p[0] + r[0], up.p[1] + r[1], up.p[2] + r[2]], q: mul(up.q, q) };
@@ -306,8 +311,22 @@ export class V2Bridge {
     try { const v = read(n.course, BigInt(Math.floor(t))); return [Number(v[0]), Number(v[1]), Number(v[2])]; } catch { return null; }
   }
 
-  /** Whether node `id` or a frame above it is on a course (it moves with no sample of its own). */
-  private onCourseFrame(id: string | null): boolean {
+  /** N14: where slot `slot` of node `id`, a ride's seat that moves with its cabin, is at world time `t` (µm, the node's
+   *  frame): from its posted places, else its course read directly; null with no course or no reader yet. */
+  private seatPos(id: string, slot: number, t: number): [number, number, number] | null {
+    const course = this.nodes.get(id)?.seats?.[slot];
+    if (!course) return null;
+    const posted = placeAt(this.places.get(seatKey(id, slot)), t);
+    if (posted) return posted;
+    const read = this.courseAt;
+    if (!read) return null;
+    try { const v = read(course, BigInt(Math.floor(t))); return [Number(v[0]), Number(v[1]), Number(v[2])]; } catch { return null; }
+  }
+
+  /** Whether node `id` or a frame above it is on a course (it moves with no sample of its own); with `slot`, also
+   *  whether that slot of `id` is a seat that moves with its cabin (N14). */
+  private onCourseFrame(id: string | null, slot: number | null = null): boolean {
+    if (id !== null && slot !== null && this.nodes.get(id)?.seats?.[slot]) return true;
     for (let n = id ? this.nodes.get(id) : undefined, d = 0; n && d < 32; n = n.parent ? this.nodes.get(n.parent) : undefined, d++) if (n.course) return true;
     return false;
   }
@@ -329,16 +348,30 @@ export class V2Bridge {
       out.push({ entity: entity ?? n.origin ?? entityOf(id), label: n.name ?? plain.replace(/_/g, ' '), def: plain, carrier: true,
         at: (t) => { const w = this.world(id, 0, t); return w ? { p: [w.p[0] / 1000, w.p[1] / 1000, w.p[2] / 1000], yaw: -2 * Math.atan2(w.q[2], w.q[0]) } : null; } });
     }
+    // N14: each seat of a ride that moves with its cabin, a cabin the page draws where the seat's course has it (its
+    // rider sits in it, `sample`); keyed by the ride's entity id and the slot.
+    for (const n of this.nodes.values()) {
+      if (!n.seats || isBody(n)) continue;
+      const id = n.id, plain = n.kind.split('@')[0].split(':').pop()!;
+      for (const slot of Object.keys(n.seats).map(Number)) {
+        // its floor under the seat, where its rider's feet are (`sample`)
+        const under = seatOf(n.kind, n.slots?.find((x) => x[0] === slot)).height;
+        out.push({ entity: `${n.origin ?? entityOf(id)}#cabin-${slot}`, label: `${n.name ?? plain.replace(/_/g, ' ')} cabin`, def: CABIN, carrier: true,
+          at: (t) => { const w = this.inSlot(this.world(id, 0, t), id, slot, t); return w ? { p: [w.p[0] / 1000, w.p[1] / 1000 - under, w.p[2] / 1000], yaw: -2 * Math.atan2(w.q[2], w.q[0]) } : null; } });
+      }
+    }
     return out;
   }
 
   /** A frame moved to one of its node's slots: the slot's point only, as the v2 page adds it (its yaw does not turn
    *  what is in it). */
-  private inSlot(f: Mat | null, id: string | null, slot: number | null): Mat | null {
+  private inSlot(f: Mat | null, id: string | null, slot: number | null, t?: number): Mat | null {
     if (!f || slot === null || id === null) return f;
+    // N14: a seat that moves with its cabin is where its course has it at `t`
+    const run = t !== undefined ? this.seatPos(id, slot, t) : null;
     const s = this.nodes.get(id)?.slots?.find((x) => x[0] === slot);
-    if (!s) return f;
-    const r = rotate(f.q, [s[1] * 1000, s[2] * 1000, s[3] * 1000]);
+    if (!s && !run) return f;
+    const r = rotate(f.q, run ?? [s![1] * 1000, s![2] * 1000, s![3] * 1000]);
     return { p: [f.p[0] + r[0], f.p[1] + r[1], f.p[2] + r[2]], q: f.q };
   }
 
@@ -346,14 +379,14 @@ export class V2Bridge {
    *  place is not drawn. */
   private sample(id: string, frame: string, slot: number | null, at: number, pos: [number, number, number]): void {
     // K4: in a frame on a course (a balloon's rider) the body is where the course has its frame at each time
-    const moving = this.onCourseFrame(frame);
+    const moving = this.onCourseFrame(frame, slot);
     const placeAt = (t?: number): [number, number, number] | null => {
-      const f = this.inSlot(this.world(frame, 0, t), frame, slot);
+      const f = this.inSlot(this.world(frame, 0, t), frame, slot, t);
       if (!f) return null;
       const r = rotate(f.q, pos);
       return [(f.p[0] + r[0]) / 1000, (f.p[1] + r[1]) / 1000, (f.p[2] + r[2]) / 1000];
     };
-    const f = this.inSlot(this.world(frame, 0, moving ? at : undefined), frame, slot);
+    const f = this.inSlot(this.world(frame, 0, moving ? at : undefined), frame, slot, moving ? at : undefined);
     if (!f) {
       this.view.unplaced++;
       const why = `${frame}${slot !== null ? `/${slot}` : ''}${this.nodes.has(frame) ? ' (a frame above it is not public)' : ' (not in the public copy)'}`;

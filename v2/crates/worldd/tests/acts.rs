@@ -76,6 +76,7 @@ const CIRCLE: &str = "test:circle";
 const OPEN_GROUND: &str = "eden:ground";
 const WALLS: &str = "test:walls";
 const BAR: &str = "test:bar";
+const LIFT: &str = "test:lift";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
@@ -93,6 +94,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         OPEN_GROUND,
         WALLS,
         BAR,
+        LIFT,
     ]
     .iter()
     .enumerate()
@@ -261,6 +263,13 @@ fn tree_rules() -> TreeRules {
             ),
             (fullname(WALLS), k("thing", &[], &[], None)),
             (
+                fullname(LIFT),
+                Kind {
+                    slots: BTreeMap::from([(1, BTreeSet::from(["family".to_owned()]))]),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
+            (
                 fullname(BAR),
                 Kind {
                     slots: BTreeMap::from([
@@ -384,6 +393,7 @@ fn entries() -> Json {
         (CAN.into(), can),
         (PLANK.into(), plank),
         (CIRCLE.into(), circle_entry()),
+        (LIFT.into(), lift_entry()),
         (BAR.into(), bar_entry()),
     ])
 }
@@ -435,6 +445,7 @@ fn world() -> Replica {
         create(near_can(), CAN, g, south(1_500_000)),
         create(circle(), CIRCLE, g, circle_at()),
         create(bar(), BAR, g, bar_at()),
+        create(lift(), LIFT, g, lift_at()),
     ];
     world_of(zone_place(), changes)
 }
@@ -491,6 +502,9 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     for p in bar_places(ground) {
         b.add_place(p)?;
     }
+    let (cabin, r) = lift_place(ground);
+    b.add_place(cabin)?;
+    b.slots.run(lift(), r.slot, &r.course, r.stops)?;
     Ok(b)
 }
 
@@ -2417,4 +2431,133 @@ fn r2_two_carriers_lift_one_carry_in_one_tick_and_nothing_is_kept() {
         );
     }
     assert_eq!(both.kept, (0, 0), "nothing kept for the lifts");
+}
+
+/// N14: a lift whose one cabin runs across and back between its low stop (where it is declared, its stand point 800 mm
+/// south) and its high stop 4 m north, east of the walkers. It is boarded by its form and left by a rise.
+fn lift() -> Id {
+    id(12)
+}
+fn lift_at() -> Vec3 {
+    Vec3::new(-36_000_000, 0, 30_000_000)
+}
+fn lift_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:lift", "owner": "thing",
+      "points": { "low": { "role": "stand", "at_mm": [0, 0, -800], "yaw_mdeg": 0 },
+        "high": { "role": "stand", "at_mm": [0, 0, 3200], "yaw_mdeg": 0 } },
+      "slots": { "cabin": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "low" } },
+      "geometry": { "bounds_mm": [2000, 3000, 6000] },
+      "forms": {
+        "board": { "who": "anyone", "starts": "act",
+          "takes": { "seat": { "type": "slot",
+            "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+          "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+          "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" }] },
+        "get_off": { "who": "anyone", "starts": "act", "steps": [{ "step": "rise" }] } },
+      "ride": { "seats": ["cabin"], "stops": ["low", "high"], "returns": true, "start": "board",
+        "speed_mm_s": 1000, "ground": "level" } }"#,
+    )
+    .unwrap()
+}
+/// How long the lift's cabin still waits at its low stop when the world starts, µs.
+const LIFT_LEFT: i64 = 10_000_000;
+/// The lift's cabin seat as a served world registers it, and its run (`sim::courses::rides::seat_runs`, as
+/// `worldd::places::runs` gives it) on the open ground, its clock set so the cabin leaves its low stop
+/// [`LIFT_LEFT`] after the world starts (world time is real time).
+fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun) {
+    let place = sim::slots::PlaceAt {
+        thing: lift(),
+        place: replica::moves::Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, -800_000],
+        },
+        point: Vec3::new(lift_at().x, 450_000, lift_at().z),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: Vec::new(),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    let t0 = now - (sim::courses::rides::SEAT_STOP - LIFT_LEFT);
+    let seats = BTreeMap::from([(1, place.clone())]);
+    let at = lift_at();
+    let mut runs = sim::courses::rides::seat_runs(
+        &lift_entry(),
+        &seats,
+        &|p: Vec3| p.plus(at).ok(),
+        &|_, _| Some(0),
+        t0,
+    );
+    assert_eq!(runs.len(), 1, "the cabin runs");
+    (place, runs.remove(0))
+}
+
+/// N14: a Soul boards a cabin at its stop through the gateway, is carried in its seat while the cabin is between stops
+/// (a rise is refused `boarding-frame-away` and it stays in the slot), and gets off at the far stop, on its feet at
+/// that stop's stand point, 4 m from where it got on: never set down mid-way, never left aloft.
+#[test]
+fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
+    let started = std::time::Instant::now();
+    let (run, mut a, _) = serve("n14");
+    let boarded = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board: {boarded:?} after {:?}", started.elapsed());
+    boarded.expect("boarded at its stop");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)));
+    // The world wrote the cabin's course onto the lift at its start, for every copy and the page to read.
+    let t = r.tree();
+    let written = t
+        .node(t.handle(lift()).unwrap())
+        .unwrap()
+        .fields()
+        .get(&replica::schedule::F_SEAT_COURSES)
+        .cloned();
+    let Some(Value::Map(courses)) = written else {
+        panic!("no seat courses on the lift: {written:?}")
+    };
+    let course = replica::schedule::course::Course::read(&courses[&1]).expect("a course");
+    assert_eq!(course.stations.len(), 2);
+    assert_eq!(course.stations[1].at.z - course.stations[0].at.z, 4_000_000);
+    // On its way to the far stop (it leaves 10 s in and takes 4 s): carried, not set down.
+    std::thread::sleep(Duration::from_millis(12_000).saturating_sub(started.elapsed()));
+    let away = a.act("test:get_off", Some(lift()), BTreeMap::new());
+    println!(
+        "N14 get off on the way: {away:?} after {:?}",
+        started.elapsed()
+    );
+    assert_eq!(away, Err("boarding-frame-away".to_owned()));
+    assert_eq!(
+        parent(&run.replay(), w1()),
+        (Some(lift()), Some(1)),
+        "still in its seat"
+    );
+    // At the far stop it gets off there.
+    std::thread::sleep(Duration::from_millis(16_000).saturating_sub(started.elapsed()));
+    let off = a.act("test:get_off", Some(lift()), BTreeMap::new());
+    println!(
+        "N14 get off at the far stop: {off:?} after {:?}",
+        started.elapsed()
+    );
+    off.expect("gets off at the far stop");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(ground()), None), "on the ground");
+    let t = r.tree();
+    let p = t
+        .node(t.handle(w1()).unwrap())
+        .unwrap()
+        .place()
+        .unwrap()
+        .position;
+    let high = Vec3::new(lift_at().x, 0, lift_at().z + 3_200_000);
+    println!("N14 stands at {p:?}, the far stand point {high:?}");
+    assert!(
+        (p.x - high.x).abs() <= 300_000 && (p.z - high.z).abs() <= 300_000,
+        "at the far stop's stand point"
+    );
+    run.stop();
 }

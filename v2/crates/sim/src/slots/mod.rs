@@ -32,6 +32,14 @@
 //! - **Rising onto a taken spot.** The stand point may be taken: [`clear_spot`] finds the nearest clear point, and the
 //!   body walks there by the mover. It never appears there.
 //!
+//! - **A seat that moves with its cabin** (N14, [`Slots::run`]): a cable car's cabin, a big wheel's gondola. Its run is
+//!   a course of the slot in its thing's frame (`crate::courses::rides::seat_runs`), read from the formula, never stepped;
+//!   a seated body moves with it because its frame is the slot. It is taken only while it stands at its own stop (the
+//!   one whose stand point a form walks its rider to), with [`crate::links::boarding::CROSSING`] of the stop left, its
+//!   height there measured over the floor under that stop's stand point; a rise is started at any stop where riders get
+//!   on and off, and stands the body at that stop's stand point. Anywhere else both are refused `boarding-frame-away` and the rider stays in its seat, carried on to the
+//!   next stop; a body whose legs another claim took is never set down from a seat that is away from a stop.
+//!
 //! Not here: choosing among things (I5), queueing for one (B7), sitting where there is no seat (E3), sleep, a seat
 //! edited away under its sitter (G2), writing the hold into the tree (the writer's).
 //!
@@ -246,6 +254,18 @@ pub struct Slots {
     /// The things that move on a course (a punt, #3603): their loaded tracks and their homes. A seat on one is taken
     /// only while it stands at its home with time to cross left, and left only there.
     moving: BTreeMap<Id, (crate::courses::Table, Vec3)>,
+    /// The seats that move with their cabin (N14): each one's loaded run, and the seat as it stands at each station
+    /// where riders get on and off.
+    runs: BTreeMap<
+        Key,
+        (
+            crate::courses::Course,
+            crate::courses::Table,
+            BTreeMap<usize, PlaceAt>,
+        ),
+    >,
+    /// The stop each rise from a moving seat was started at: where it stands the body.
+    rising: BTreeMap<Spot, PlaceAt>,
 }
 
 impl Slots {
@@ -270,6 +290,55 @@ impl Slots {
     pub fn moving(&mut self, thing: Id, course: &crate::courses::Course, home: Vec3) -> R<()> {
         self.moving.insert(thing, (course.load()?, home));
         Ok(())
+    }
+
+    /// The seat of `thing` in `slot` moves with its cabin on `course` (N14, the thing's frame), standing where riders get on
+    /// and off as `stops` says (each a station of the course and the seat there, in the floor's frame). Called again when
+    /// its thing is registered again. A course that does not load is refused by its own name.
+    pub fn run(
+        &mut self,
+        thing: Id,
+        slot: u64,
+        course: &crate::courses::Course,
+        stops: Vec<(usize, PlaceAt)>,
+    ) -> R<()> {
+        let table = course.load()?;
+        self.runs.insert(
+            (thing, slot),
+            (course.clone(), table, stops.into_iter().collect()),
+        );
+        Ok(())
+    }
+
+    /// Every seat that moves with its cabin (N14), by thing and slot, with its course in the thing's frame.
+    pub fn seat_courses(&self) -> impl Iterator<Item = (Id, u64, &crate::courses::Course)> {
+        self.runs.iter().map(|(k, (c, ..))| (k.0, k.1, c))
+    }
+
+    /// Whether the seat of `thing` in `slot` moves with its cabin (N14).
+    pub fn runs(&self, thing: Id, slot: u64) -> bool {
+        self.runs.contains_key(&(thing, slot))
+    }
+
+    /// The seat `key` as it stands now: `None` when it does not move (its place is its registered one); the seat at
+    /// the stop it stands at with `left` of the stop to spare; else `boarding-frame-away`.
+    fn stop_now(&self, key: Key, now: Micros, left: Micros) -> R<Option<&PlaceAt>> {
+        let Some((_, t, stops)) = self.runs.get(&key) else {
+            return Ok(None);
+        };
+        match t.stopped(now) {
+            Ok(Some(s)) if s.left >= left => match stops.get(&s.station) {
+                Some(p) => Ok(Some(p)),
+                None => refuse(
+                    "boarding-frame-away",
+                    format!("{} slot {}: its seat stands aloft", show(key.0), key.1),
+                ),
+            },
+            _ => refuse(
+                "boarding-frame-away",
+                format!("{} slot {}: its seat is between stops", show(key.0), key.1),
+            ),
+        }
     }
 
     /// `boarding-frame-away` unless the moving `thing` stands at its home at `now` with `left` of its stop to spare.
@@ -325,6 +394,7 @@ impl Slots {
             }
         }
         self.places.retain(|(id, _), _| *id != thing);
+        self.runs.retain(|(id, _), _| *id != thing);
         self.places.extend(next);
         Ok(())
     }
@@ -438,6 +508,7 @@ impl Slots {
     /// Releases the seat `body` holds (a retirement, K10 #2673): the seat's thing, and the sit or rise under way.
     pub fn release_body(&mut self, body: Id) -> Option<(Id, Option<Instance>)> {
         let key = self.by_body.remove(&body)?;
+        self.rising.remove(&key);
         let under_way = match self.held.remove(&key)?.state {
             State::Lowering { instance, .. } | State::Rising(instance) => Some(instance),
             State::Seated(_) => None,
@@ -529,6 +600,21 @@ impl Slots {
                 format!("{} holds {}", show(r.body), show(t.0)),
             );
         }
+        // A seat that moves with its cabin is boarded where it stands at its own stop, where the body was walked to, and
+        // measured there (N14); at another stop it is left only.
+        let at = match self.stop_now(key, now, crate::links::boarding::CROSSING)? {
+            Some(p) if p.stand().ok() != at.stand().ok() => {
+                return refuse(
+                    "boarding-frame-away",
+                    format!(
+                        "{} slot {slot}: its cabin stands at another stop",
+                        show(r.thing)
+                    ),
+                );
+            }
+            Some(p) => p,
+            None => at,
+        };
         let reach = self.reach_of(r.body);
         if at.place.height > reach {
             return refuse(
@@ -687,6 +773,10 @@ impl Slots {
             return not_seated();
         };
         self.at_home(key.0, now, 0)?;
+        // From a seat that moves with its cabin, only at a stop, with time to stand up before it leaves (N14).
+        let stop = self
+            .stop_now(seat_of(key), now, crate::links::boarding::CROSSING)?
+            .cloned();
         if let Some(d) = driver {
             c.release(body, d)?;
         }
@@ -696,6 +786,9 @@ impl Slots {
                     c.set(body, d, Part::Stance(hold.stance))?;
                 }
                 self.set(key, State::Rising(n));
+                if let Some(p) = stop {
+                    self.rising.insert(key, p);
+                }
                 Ok(n)
             }
             Err(r) => {
@@ -712,6 +805,7 @@ impl Slots {
     }
 
     fn release(&mut self, key: Spot) {
+        self.rising.remove(&key);
         if let Some(h) = self.held.remove(&key) {
             self.by_body.remove(&h.body);
             self.changed.push(key.0);
@@ -745,6 +839,9 @@ impl Slots {
         if h.state != State::Seated(None) {
             return None;
         }
+        // A seat away from a stop carries its rider on (N14); at a stop the body is set down at that stop's stand point.
+        let stop = self.stop_now(seat_of(key), now, 0).ok()?.cloned();
+        let at = stop.as_ref().unwrap_or(at);
         let claims = c.claims(h.body)?;
         let leg = claims
             .family()
@@ -782,7 +879,10 @@ impl Slots {
         };
         let (hold, at) = (
             self.held.get(&key).copied()?,
-            self.places.get(&seat_of(key))?.clone(),
+            match self.rising.get(&key) {
+                Some(p) => p.clone(),
+                None => self.places.get(&seat_of(key))?.clone(),
+            },
         );
         let instance = match hold.state {
             State::Lowering { instance, .. } | State::Rising(instance) => instance,
