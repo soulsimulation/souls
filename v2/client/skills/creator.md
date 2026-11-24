@@ -71,6 +71,9 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `build claim <part> --area x0,z0,x1,z1 --helper [--ttl <minutes>]` | a claim with a helper: prints the helper's home (`SOULS_HOME=<folder>`); a sub-agent run there builds only inside that claim, until it lapses (default 120 minutes) |
 | `build rewind <build> --to <step> [--dry]` | undoes every edit of that build after the step, newest first (`--dry` lists them) |
 | `describe` | what is there, and what each kind admits |
+| `describe <id>` | one thing: its kind and card, each frame it is in up to the world's root, its spot (mm in its parent), its fields by name, its slots and what holds each, what is in it, its owner and access marks |
+| `map` | the world at a glance: the extent of what stands on the ground, its buildings, named things, roads and zones, each with its centre and size in metres |
+| `history --at <place> \| --thing <id> \| --soul <name> [--since <µs>] [--until <µs>]` | what happened there, from the world's public history (a day by default; world µs), as a Soul's `history` answers |
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
 | `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 | `event <room or ground id> '<words>' --when HH:MM [--for <minutes>] [--at x,y,z]` | an event on the world's calendar there, beside its notice board (not under it): its words are kept for everyone, and `whatson` lists it. HH:MM is its next one in world time |

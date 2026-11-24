@@ -26,7 +26,7 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 
 | eden-god | souls-god | Status |
 |---|---|---|
-| `describe <ref>`, `map`, `history`, `resolve` | `describe` gives every node (id, kind, parent, text) from the daemon's copy | partial: no per-ref read; `history` gap: #3694 |
+| `describe <ref>`, `map`, `history`, `resolve` | `describe` gives every node from the daemon's copy; `describe <id>` one thing (R8b); `map` the world at a glance (R8d); `history --at\|--thing\|--soul` the public history (R8c) | partial: no `resolve` |
 | `mirror`, `snapshot`, `query`, `follow`, `stream` | the daemon keeps a live copy; `describe` reads it | retired: the copy is local |
 | `defs <words>`, `catalog`, `find`, `recommend`, `taxonomy` | `describe` kinds only | gap: #3696 |
 | `where`, `reach`, `clear`, `free`, `verify-use` | `check` runs any edit on the copy and names the refusal | partial: no free-space or reach read; no task |
