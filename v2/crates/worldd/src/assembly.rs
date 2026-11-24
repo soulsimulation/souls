@@ -45,7 +45,7 @@ use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
 use sim::activity::Activities;
-use sim::activity::carry::{HEIGHT, yaw_toward};
+use sim::activity::carry::yaw_toward;
 use sim::activity::seating::{Seating, Target};
 use sim::ground::scene::{slot_points, xform_to};
 use sim::structure::Structure;
@@ -261,9 +261,10 @@ impl Assembly {
         });
     }
 
-    /// `part:take` (`unseat` false) or `part:unseat` (true) by crew `activity`, whose carriers stand at `front` and
-    /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
-    /// [`Assembly::ready`]. Returns the crew's node's pose, where its carry starts.
+    /// `part:take` (`unseat` false) or `part:unseat` (true) by crew `activity`, whose carriers' feet are at `front`
+    /// and `back` on `ground` (µm in its frame) and who hold it `grip` µm above them (their bodies' grips): the part
+    /// into the crew's slot, written on `tree` and waiting in [`Assembly::ready`]. Returns the crew's node's pose,
+    /// where its carry starts.
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -278,6 +279,7 @@ impl Assembly {
         ground: Id,
         unseat: bool,
         reach: i64,
+        grip: i64,
     ) -> R<(Vec3, Quat)> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
@@ -364,7 +366,7 @@ impl Assembly {
         let inside = conj(turn)?
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
-        let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
+        let frame = Vec3::new(middle.x, middle.y + grip, middle.z);
         self.aim(tree, activity, ground)?;
         self.seating
             .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;

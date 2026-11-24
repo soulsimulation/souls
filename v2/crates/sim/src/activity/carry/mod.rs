@@ -73,6 +73,13 @@
 //!   on the carry ([`Carry::way`]) and said to its audience at the lift (`souls:carry-way`, worldd's engine): its
 //!   carriers walk it pose by pose, each tick checked as above.
 //!
+//! - **Held where its carriers' bodies hold (0.135 Super).** Every height here is above the carriers' feet, the point
+//!   of their surface under them (a floater's position is its hover above it). The load's middle is held at its
+//!   [`Load::grip`], the mean of its two ends' grips ([`Load::held_by`]): each body's build states its grip
+//!   (`replica::kinds::sizes::Build::grip_mm`), a walker's hands at [`HEIGHT`] unless its entry says otherwise, a
+//!   floater, which has no hands, under its body. The sweeps, the steps' checks and every set-down read that height,
+//!   so a load carried by floaters, or by a walker and a floater, is checked where it is and set down on the floor.
+//!
 //! Not here, proposed as tasks: carriers that swing about their grips (a corner between 1.2 m corridors); stairs;
 //! turning with three carriers or more; a sweep that counts the sides' bodies; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
@@ -115,8 +122,8 @@ pub const HALF_WIDTH: i64 = 150_000;
 pub const REACH: i64 = 350_000;
 /// Between the two carriers' centres, µm.
 pub const SPAN: i64 = 2 * (HALF_LENGTH + REACH);
-/// The board's height above its carriers' feet while carried, µm.
-pub const HEIGHT: i64 = 900_000;
+/// A load's height above its carriers' feet while carried by walkers, µm: their hands (`replica::kinds::sizes::GRIP_MM`).
+pub const HEIGHT: i64 = replica::kinds::sizes::GRIP_MM * 1000;
 /// The sweep's step along the route, µm.
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
@@ -153,6 +160,9 @@ pub struct Load {
     pub long: Vec3,
     /// Half its bounds in its own frame, µm (0.135 C7: what it takes up as it is held, whichever way it is turned).
     pub half: Vec3,
+    /// How high its middle is held above its carriers' feet, µm: the mean of its two ends' grips, as their bodies'
+    /// entries state them ([`Load::held_by`]); [`HEIGHT`], a walker's hands, until its carry is held.
+    pub grip: i64,
 }
 
 impl Load {
@@ -169,6 +179,7 @@ impl Load {
             rest: 0,
             long: Vec3::new(HALF_LENGTH, 0, 0),
             half: Vec3::new(HALF_LENGTH, 0, HALF_WIDTH),
+            grip: HEIGHT,
         }
     }
 
@@ -295,6 +306,7 @@ impl Load {
                 _ => Vec3::new(0, 0, d * 500),
             },
             half: Vec3::new(w * 500, h * 500, d * 500),
+            grip: HEIGHT,
         })
     }
 
@@ -314,8 +326,17 @@ impl Load {
         Ok(e)
     }
 
+    /// The load held by carriers whose grips (their builds' `grip`, µm above their feet) are `front` and `back`:
+    /// its middle at their mean, so a crew of a walker and a floater holds it level between them.
+    pub fn held_by(self, front: i64, back: i64) -> Load {
+        Load {
+            grip: (front + back) / 2,
+            ..self
+        }
+    }
+
     /// Its outline as it is held, as a load to draw on the plan ([`outline`]), and the heights it spans, µm above its
-    /// carriers' feet: its middle at [`HEIGHT`] (0.135 C7).
+    /// carriers' feet: its middle at its [`Load::grip`] (0.135 C7).
     pub fn as_held(&self) -> R<(Load, [i64; 2])> {
         let e = self.held_half()?;
         let plan = Load {
@@ -323,7 +344,7 @@ impl Load {
             half_width: e.z,
             ..*self
         };
-        Ok((plan, [HEIGHT - e.y, HEIGHT + e.y]))
+        Ok((plan, [self.grip - e.y, self.grip + e.y]))
     }
 
     /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
@@ -1096,7 +1117,7 @@ impl Carry {
         let Some((mut c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
             return refuse("carry-set-down-nowhere", "no sample of the carry");
         };
-        c.y -= HEIGHT;
+        c.y -= self.load.grip;
         self.put(tree, at, node, c, q, transfer)
     }
 
@@ -1105,11 +1126,12 @@ impl Carry {
         self.log.write(tree, at, entries)
     }
 
-    /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame).
-    fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
+    /// The frame's pose for carriers whose feet are at `front` and `back` (µm, the open ground's frame): between
+    /// them, its load's grip above their feet.
+    fn pose(&self, front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
         let c = Vec3::new(
             (front.x + back.x) / 2,
-            (front.y + back.y) / 2 + HEIGHT,
+            (front.y + back.y) / 2 + self.load.grip,
             (front.z + back.z) / 2,
         );
         Ok((c, yaw_toward([front.x - back.x, front.z - back.z])?))
@@ -1125,7 +1147,7 @@ impl Carry {
         back: Vec3,
         transfer: Id,
     ) -> R<()> {
-        let (c, q) = Carry::pose(front, back)?;
+        let (c, q) = self.pose(front, back)?;
         let (position, orientation) = self.load.held()?;
         let leave = TransferRec::Leave {
             transfer,
@@ -1201,7 +1223,7 @@ impl Carry {
             self.raise = rest_top(fixed, &self.load, from, &[])?;
             return Err(r);
         }
-        let (c, q) = Carry::pose(front, back)?;
+        let (c, q) = self.pose(front, back)?;
         let e = (
             self.activity,
             self.audience,
@@ -1226,8 +1248,8 @@ impl Carry {
         back: Vec3,
         transfer: Id,
     ) -> R<()> {
-        let (mut c, q) = Carry::pose(front, back)?;
-        c.y -= HEIGHT;
+        let (mut c, q) = self.pose(front, back)?;
+        c.y -= self.load.grip;
         self.put(tree, at, node, c, q, transfer)
     }
 

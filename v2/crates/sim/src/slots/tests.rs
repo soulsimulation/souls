@@ -781,6 +781,7 @@ fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
         size: replica::kinds::sizes::Size::Small,
         height_mm: 1_000,
         hover_mm: 0,
+        grip_mm: replica::kinds::sizes::GRIP_MM,
     };
     let reach = standing_reach(small);
     for (height, admitted) in [(reach, true), (reach + 1, false), (1_600_000, false)] {
