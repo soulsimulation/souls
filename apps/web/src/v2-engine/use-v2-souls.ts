@@ -75,12 +75,15 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         for (const e of m.entities.values()) if (e.in?.parent === 'world' && e.p && Math.hypot(e.p[0] - at[0], e.p[2] - at[2]) < 0.05) return e.id;
         return undefined;
       };
+      // The replica by version where the launcher names one (`v2Replica`, cutover.mjs: its files are immutable), else the plain path
+      const named = (window as unknown as { __simConfig?: { v2Replica?: unknown } }).__simConfig?.v2Replica;
+      const replica = new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
-      if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));
+      if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
-      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))))));
+      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
