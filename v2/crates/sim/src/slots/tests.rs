@@ -373,6 +373,10 @@ fn rising_hands_the_body_back_at_the_stand_point() {
         None,
         "released when the holder left"
     );
+    assert!(
+        !w.c.carried(b) && w.slots.climbs().is_empty(),
+        "a normal rise is a step, no climb out (E11d)"
+    );
     w.run(i64::MAX);
     assert!(w.c.claims(b).expect("a body").running().is_empty());
 }
@@ -809,4 +813,262 @@ fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
         assert_eq!(e.name, "place-out-of-reach", "a cabin {height} µm up");
         assert!(w.slots.is_empty());
     }
+}
+
+/// A floor of one piece from (x0, z0) to (x1, z1), mm: what is left of the chair's floor once it has changed under a
+/// seated body (a boat moored the other way round, the floor cut back under a seat).
+fn floor_only(x0: i32, z0: i32, x1: i32, z1: i32) -> Surface {
+    let corners = vec![[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]];
+    Surface::new(
+        fixture(1),
+        vec![Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
+        }],
+    )
+}
+
+type Handed = Option<Result<replica::pose::HandOff, replica::effects::Refusal>>;
+
+/// Fires every timer due before `until` with reach not in question ([`Near`]): the last hand-off the places made.
+fn run_near(w: &mut World, until: i64) -> Handed {
+    let mut handed = None;
+    while let Some(t) = w.due.fire(until) {
+        let (_, h) = w
+            .slots
+            .fire(
+                &mut w.c,
+                &mut w.due,
+                &mut w.mint,
+                &mut w.moves,
+                &Near,
+                &w.floors,
+                &t,
+            )
+            .expect("a move's timer");
+        handed = h.or(handed);
+    }
+    handed
+}
+
+/// Starts `b` rising at `now` and runs it to the rise's contact: the contact and the hand-off made there.
+fn rise_to_contact(w: &mut World, b: Id, now: i64) -> (i64, Handed) {
+    let n = w
+        .slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            b,
+            &mv("souls:rise"),
+            now,
+        )
+        .expect("rising");
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    (contact, run_near(w, contact + 1))
+}
+
+/// E11d: body 0 seated in the chair (slot at the origin, stand point 300 mm in front, +z), then the floor becomes
+/// `floor`, and the body rises to the rise's contact.
+fn seated_then_rise(floor: Surface) -> (World, Id, i64, Handed) {
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    w.sit(&[0], &mv("souls:sit"))[0].1.clone().expect("started");
+    w.run(i64::MAX);
+    assert_eq!(w.c.body(b).unwrap().pose.support, Support::Slot);
+    w.floors.insert(fixture(1), floor);
+    let (contact, handed) = rise_to_contact(&mut w, b, 2_000_000);
+    (w, b, contact, handed)
+}
+
+/// Steps `w` 50 ms at a time from `from` until `b` is no longer carried (at most 10 s), firing timers as they fall
+/// due: each tick's position.
+fn step_until_landed(w: &mut World, b: Id, from: i64) -> Vec<Vec3> {
+    let mut at = from;
+    let mut path = vec![w.c.body(b).unwrap().pose.position];
+    while w.c.carried(b) {
+        at += 50_000;
+        assert!(at < from + 10_000_000, "landed within 10 s");
+        run_near(w, at);
+        assert!(w.c.step(&w.floors, 50_000, at).refused.is_empty());
+        path.push(w.c.body(b).unwrap().pose.position);
+    }
+    run_near(w, i64::MAX);
+    path
+}
+
+/// E11d: a seat whose stand point faces the water, the bank on its other side (the floor from 1 m behind the seat):
+/// the stand point and every point out along its exit are off the floor, so the body climbs out to the nearest floor
+/// by a straight line that leaves only the seat's own hole, carried at walking speed (never further in a tick than
+/// that), and stands on the bank, its seat free, and walks on. Named once (`climb-out`); the same both runs.
+#[test]
+fn e11d_a_seat_facing_the_water_climbs_out_onto_the_bank_behind_it() {
+    let mut paths = Vec::new();
+    for _ in 0..2 {
+        let (mut w, b, contact, handed) =
+            seated_then_rise(floor_only(-5_000, -5_000, 5_000, -1_000));
+        let h = handed
+            .expect("a hand-off at contact")
+            .expect("the stand is not refused");
+        assert_eq!(
+            (h.pose.position.x, h.pose.position.z),
+            (0, 0),
+            "handed onto the floor's frame at the seat's own point, never at the bank"
+        );
+        assert!(w.c.carried(b), "carried by the world from the seat");
+        assert_eq!(w.slots.holder(w.chair), None, "the seat is free");
+        let climbs = w.slots.climbs();
+        let [cl] = climbs.as_slice() else {
+            panic!("one climb out: {climbs:?}")
+        };
+        assert_eq!(super::CLIMB_OUT, "climb-out");
+        assert_eq!((cl.body, cl.thing, cl.at), (b, w.chair, contact));
+        assert_eq!((cl.to.x, cl.to.z), (0, -1_000_000), "the nearest floor");
+        let path = step_until_landed(&mut w, b, contact);
+        assert!(path.len() > 10, "a climb over time, not a jump: {path:?}");
+        let most = crate::gaits::WALK.speed * 50_000 / 1_000_000 + 1;
+        for s in path.windows(2) {
+            let (dx, dz) = (s[1].x - s[0].x, s[1].z - s[0].z);
+            let d = (i128::from(dx) * i128::from(dx) + i128::from(dz) * i128::from(dz)).isqrt();
+            assert!(
+                d <= i128::from(most),
+                "no tick further than walking speed: {d} µm"
+            );
+            assert_eq!(s[1].x, 0, "a straight line");
+        }
+        let p = w.c.body(b).unwrap().pose;
+        assert!(
+            matches!(p.support, Support::Surface { .. }),
+            "on the bank: {p:?}"
+        );
+        assert_eq!((p.position.x, p.position.z), (0, -1_000_000));
+        assert_eq!(w.c.input(b).unwrap().stance, Stance::Stand);
+        assert!(w.slots.climbs().is_empty(), "named once");
+        assert!(
+            w.due.is_empty() && w.moves.is_empty(),
+            "nothing left running"
+        );
+        // It walks on, up the bank.
+        let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+        let v = Vec3::new(0, 0, -1_000_000);
+        w.c.set(b, d, Part::Velocity(v, replica::pose::Mode::Surface))
+            .expect("steered by the walk");
+        assert!(w.c.step(&w.floors, 50_000, 20_000_000).refused.is_empty());
+        let q = w.c.body(b).unwrap().pose.position;
+        assert_eq!(q.z, -1_050_000, "walked one tick at 1 m/s");
+        paths.push(path);
+    }
+    assert_eq!(paths[0], paths[1], "the same for the same inputs");
+}
+
+/// E11d: a seat whose floor is now far from it (as if its thing were moved by its creator to where no floor is
+/// within 3 m): the rise ends `off-surface` at contact, by name, and the body is not stuck. It stays seated, its seat
+/// held, a seated driver on its legs (it does seated things), it leaves the world as a seated body does
+/// (`release_body`), and with floor near again it rises as normal.
+#[test]
+fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
+    let (mut w, b, _, handed) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000));
+    let e = handed
+        .expect("a hand-off at contact")
+        .expect_err("no floor within the bound");
+    assert_eq!(e.name, "off-surface", "{e}");
+    assert!(e.detail.contains("within 3000000 µm"), "{e}");
+    run_near(&mut w, i64::MAX);
+    assert_eq!(
+        w.c.body(b).unwrap().pose.support,
+        Support::Slot,
+        "seated still"
+    );
+    assert_eq!(w.slots.holder(w.chair), Some(b), "its seat held");
+    assert!(
+        !w.c.carried(b) && w.slots.climbs().is_empty(),
+        "no climb, nothing moved"
+    );
+    let running = w.c.claims(b).unwrap().running().clone();
+    assert!(
+        running.values().all(|i| i.shape == seated_shape()),
+        "held seated"
+    );
+    assert!(
+        w.due.is_empty() && w.moves.is_empty(),
+        "nothing left running"
+    );
+    // Floor near again: it rises at the stand point, as any rise.
+    w.floors
+        .insert(fixture(1), floor_only(-5_000, -5_000, 5_000, 5_000));
+    let (_, handed) = rise_to_contact(&mut w, b, 9_000_000);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let p = w.c.body(b).unwrap().pose;
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (0, 300_000),
+        "at the stand point"
+    );
+    // And a body left seated so leaves the world as a seated body does.
+    let (mut w, b, _, _) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000));
+    run_near(&mut w, i64::MAX);
+    assert_eq!(w.slots.release_body(b), Some((w.chair, None)));
+    assert_eq!(w.slots.holder(w.chair), None);
+}
+
+/// E11d: a thing's other stand points come before the nearest floor. A thing with two seats 2 m apart, the floor only
+/// round the second's stand point: the body in the first climbs out to that stand point, not to the floor's nearer
+/// corner.
+#[test]
+fn e11d_the_things_other_stand_point_comes_first() {
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    let at = w.slots.place(w.chair).unwrap().clone();
+    w.slots
+        .add(PlaceAt {
+            point: Vec3::new(2_000_000, at.point.y, 0),
+            place: Place {
+                slot: 2,
+                ..at.place.clone()
+            },
+            ..at.clone()
+        })
+        .unwrap();
+    let req = Request {
+        body: b,
+        thing: w.chair,
+        slot: Some(1),
+        mv: &mv("souls:sit"),
+        stance: Stance::Sit,
+    };
+    let r = w.slots.commit(
+        &mut w.c,
+        &mut w.due,
+        &mut w.mint,
+        &mut w.moves,
+        &Near,
+        &w.floors,
+        &[req],
+        0,
+    );
+    r[0].1.as_ref().expect("started");
+    run_near(&mut w, i64::MAX);
+    assert_eq!(w.slots.held_place(b).unwrap().place.slot, 1);
+    // The floor: x 1.5 m to 2.5 m, z 0 to 1 m. Its nearest point to the seat is (1.5 m, 0); the other seat's stand
+    // point (2 m, 0.3 m) comes first.
+    w.floors
+        .insert(fixture(1), floor_only(1_500, 0, 2_500, 1_000));
+    let (contact, handed) = rise_to_contact(&mut w, b, 2_000_000);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let climbs = w.slots.climbs();
+    let [cl] = climbs.as_slice() else {
+        panic!("{climbs:?}")
+    };
+    assert_eq!(
+        (cl.to.x, cl.to.z),
+        (2_000_000, 300_000),
+        "the other seat's stand point"
+    );
+    step_until_landed(&mut w, b, contact + 1);
+    let p = w.c.body(b).unwrap().pose.position;
+    assert_eq!((p.x, p.z), (2_000_000, 300_000));
 }

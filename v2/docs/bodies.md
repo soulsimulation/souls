@@ -157,6 +157,16 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
   then handed back onto the floor at the stand point, under the new claim's driver, and the seat is released. Left in
   the slot, it would be stuck, because a tick never steps a body in a slot.
+- **Climbing out** (E11d). A rise whose stand point, and the short search out from it (the body's own radius), are
+  all off the floor (a boat moored with its stand point's side away from the bank, the floor changed under a seat)
+  climbs out instead (`slots::climb_point`): to the thing's other stand points first, then the nearest floor within
+  3 m of the seat (`CLIMB_BOUND`), by a straight line that, once on the floor, stays on it, so it leaves only the
+  seat's own hole and never crosses a wall's or a box's cut. At the rise's contact the body is handed onto the floor's
+  frame at the seat's point, and the world carries it along that line at walking speed, as N10's walk-out does. It
+  never appears there. The climb is named `climb-out` (`slots::ClimbOut`), and the rise's run goes on once the body
+  stands on the floor. With no such floor the rise ends `off-surface` at contact. The body is not stuck: it stays
+  seated with its seat held, does what a seated body does, leaves the world as one does, and rises once there is floor
+  near again.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 

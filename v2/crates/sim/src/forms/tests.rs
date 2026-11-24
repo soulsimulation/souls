@@ -1765,13 +1765,14 @@ fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
     };
     assert_eq!(e.how.as_str(), "done", "seated");
     b.forms.ended.clear();
-    // The floor now ends 2 m behind the seat: its stand point (in front) and every point out along its exit are off it.
+    // The floor now ends 10 m behind the seat: its stand point (in front), every point out along its exit and any
+    // floor a body could climb out to (E11d, 3 m) are off it.
     let whole = b.surfaces.remove(&fixture(1)).expect("the floor");
     let corners = vec![
         [-30_000, 0, -30_000],
         [30_000, 0, -30_000],
-        [30_000, 0, -2_000],
-        [-30_000, 0, -2_000],
+        [30_000, 0, -10_000],
+        [-30_000, 0, -10_000],
     ];
     let cut = Surface::new(
         fixture(1),
@@ -1782,7 +1783,7 @@ fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
             ground: crate::gaits::Ground::Dry,
         }],
     );
-    assert!(stand.z > -2_000_000, "the stand point is off the cut floor");
+    assert!(stand.z > -7_000_000, "the stand point is off the cut floor");
     b.surfaces.insert(fixture(1), cut);
     let asked = b.now;
     b.steps(
@@ -1993,4 +1994,63 @@ fn a_seat_taken_or_left_writes_the_bodys_posture() {
             "{case}: out of the slot"
         );
     }
+}
+
+/// E11d through a form run: the floor now ends 2 m behind the seat, so the stand point and the short search beside it
+/// are off it but floor lies within the climb-out bound. The rise ends `done`, the body climbs out (named once) and
+/// stands on that floor, its seat free, and nothing is left over.
+#[test]
+fn e11d_a_rise_with_floor_behind_the_seat_climbs_out_and_ends_done() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    b.forms.ended.clear();
+    let corners = vec![
+        [-30_000, 0, -30_000],
+        [30_000, 0, -30_000],
+        [30_000, 0, -2_000],
+        [-30_000, 0, -2_000],
+    ];
+    b.surfaces.insert(
+        fixture(1),
+        Surface::new(
+            fixture(1),
+            vec![Piece {
+                outline: vec![corners.clone()],
+                vertices: corners,
+                triangles: vec![[0, 2, 1], [0, 3, 2]],
+                ground: crate::gaits::Ground::Dry,
+            }],
+        ),
+    );
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("the rise starts");
+    b.run(30_000_000);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "done", "risen");
+    let slots = b.slots.as_mut().expect("slots");
+    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    assert_eq!(slots.climbs().len(), 1, "one climb out");
+    let p = b.c.body(body).expect("a body").pose;
+    assert!(
+        matches!(p.support, replica::pose::Support::Surface { .. }) && p.position.z <= -2_000_000,
+        "on the floor behind the seat: {p:?}"
+    );
+    assert!(!b.c.carried(body), "landed");
+    b.clean();
 }
