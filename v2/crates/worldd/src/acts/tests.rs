@@ -1216,3 +1216,126 @@ fn an_aimed_move_names_a_visible_thing_and_never_a_hidden_one() {
         "a move at the body itself names nothing else"
     );
 }
+
+fn content_entry(path: &str) -> Json {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds")
+        .join(format!("{path}.json"));
+    replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// 0.135 E13: a body in a slot of a thing reaches from its seat to the thing's named point, wherever the thing is
+/// placed and however it is turned. Content's motorboat and narrowboat, placed far from the origin: the helm reaches
+/// the key and the other seats do not, the stern reaches the hatch and the berth and the galley do not, and the
+/// answers are the same at two places. Before, a seated body was measured from its seat's frame at zero, which gave
+/// the thing's distance from the origin for every seat and every point.
+#[test]
+fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let tree = &imported.tree;
+    let node = |id: Id| tree.node(tree.handle(id).unwrap()).unwrap();
+    // Three things away from the origin, each read as a vehicle: the building (60 m west, turned 33°) and the ring
+    // (75 m east) as motorboats, a room upstairs in the building as a narrowboat.
+    let (west, east, room) = (
+        imported.nodes["building"],
+        imported.nodes["ring"],
+        imported.nodes["building/r1a"],
+    );
+    for id in [west, east, room] {
+        let at = world_at(tree, id).expect("placed");
+        assert!(
+            at.x.abs().max(at.z.abs()) > 50_000_000,
+            "far from the origin: {at:?}"
+        );
+    }
+    let (motorboat, narrowboat) = (
+        content_entry("vehicles/motorboat"),
+        content_entry("vehicles/narrowboat"),
+    );
+    let kinds = Json::Obj(vec![
+        (plain(node(west).kind()).to_owned(), motorboat.clone()),
+        (plain(node(east).kind()).to_owned(), motorboat.clone()),
+        (plain(node(room).kind()).to_owned(), narrowboat.clone()),
+    ]);
+    let slot_of = |entry: &Json, slot: &str| {
+        let slots = entry.get("slots").unwrap().obj().unwrap();
+        1 + slots.iter().position(|(k, _)| k == slot).unwrap() as u64
+    };
+    let mut bodies = BTreeMap::new();
+    let mut riders = Vec::new();
+    let mut ride = |thing: Id, entry: &Json, slot: &'static str, point: &'static str| {
+        let id = Id::new(Scope([0xcb; 16]), riders.len() as u64 + 1).unwrap();
+        let pose = replica::pose::Pose {
+            frame: Frame {
+                node: thing,
+                slot: Some(slot_of(entry, slot)),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: replica::pose::Support::Slot,
+        };
+        let body = Moved {
+            id,
+            pose,
+            linear: Vec3::ZERO,
+            piece: 0,
+            tri: 0,
+        };
+        bodies.insert(id, body);
+        riders.push((id, thing, slot, point));
+    };
+    for thing in [west, east] {
+        for slot in ["helm", "front", "back_left", "back_right"] {
+            ride(thing, &motorboat, slot, "key");
+        }
+    }
+    for slot in ["stern", "berth", "galley"] {
+        ride(room, &narrowboat, slot, "hatch");
+    }
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: Arc::new(bodies.clone()),
+        carrying: Arc::new(BTreeSet::new()),
+        tree,
+        split: None,
+        builds: Arc::new(bodies.keys().map(|b| (*b, Build::STANDARD)).collect()),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
+    let reach = 600_000;
+    let mut by_seat = BTreeMap::new();
+    for (body, thing, slot, point) in riders {
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(point).unwrap(),
+            )
+            .expect("measured");
+        println!("E13: seated in {slot}, {d} µm from {point}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "stern"),
+            "{slot} to {point}: {d} µm"
+        );
+        // The same seat of the same kind gives the same answer wherever the thing is.
+        if let Some(was) = by_seat.insert(slot, d) {
+            assert_eq!(was, d, "{slot}: the same from another place");
+        }
+    }
+}

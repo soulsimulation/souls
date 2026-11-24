@@ -929,6 +929,10 @@ impl Town {
             .index
             .recut(before, after, ids, basis.size.radius_mm(), &cut)?;
         let mut cut_open = (**open).clone();
+        // The ground's doors (S13): a building placed or removed may bring or take one.
+        cut_open.doors =
+            ground_doors(after, basis.index.ground()).map_err(|_| "the ground's doors")?;
+        let gates_moved = r.gates_moved || cut_open.doors != open.doors;
         let mut squares = Vec::new();
         // The links whose meets on a square cut again changed: their buildings are read again on the new meets.
         let mut moved = BTreeSet::new();
@@ -985,13 +989,20 @@ impl Town {
                 .ok_or("a building that cannot be read alone")?
         };
         // A link whose meets changed that no building holds, before the change or as read now, is the open ground's
-        // own: a gate. The gates are read as a whole build reads them, without the links the buildings hold now.
+        // own: a gate. The gates are read again, as a whole build reads them (without the links the buildings hold
+        // now), when one is; when a building read again holds other links than before (a link may pass between it
+        // and the gates); and when the ground's doorways or doors changed (S13).
         let held = |l: &Id| {
             buildings
                 .iter()
                 .any(|(b, _)| b.links.iter().any(|k| k.id == *l))
         };
-        if unowned.iter().any(|l| !held(l)) {
+        let none = BTreeSet::new();
+        let changed_links = buildings.iter().any(|(b, _)| {
+            let now: BTreeSet<Id> = b.links.iter().map(|l| l.id).collect();
+            now != *basis.known.get(&b.thing).unwrap_or(&none)
+        });
+        if gates_moved || changed_links || unowned.iter().any(|l| !held(l)) {
             let mut known = (*basis.known).clone();
             for (b, _) in &buildings {
                 known.insert(b.thing, b.links.iter().map(|l| l.id).collect());

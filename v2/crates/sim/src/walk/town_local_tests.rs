@@ -334,6 +334,107 @@ fn path(t: &Town) -> Option<Part> {
     ))
 }
 
+/// An edit of the Eden timing test, made on the town as it stands, at the clear row.
+type Edit = fn(&Town, (i64, i64)) -> Option<Part>;
+
+/// The buildings on the open ground with a doorway onto it (a front door: the ground's own doorway, placed by the
+/// building), with that many doorways, in id order.
+fn with_front_doors(t: &Town) -> Vec<(Id, usize)> {
+    let tree = &t.tree;
+    let gh = tree.handle(t.ground).unwrap();
+    let mut out = Vec::new();
+    for &c in tree.children(gh).unwrap() {
+        let thing = tree.node(c).unwrap().id();
+        let mut doors = 0;
+        let mut stack = vec![c];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+            doors += tree
+                .links_of(h)
+                .unwrap_or(&[])
+                .iter()
+                .filter(|e| tree.ty(e).as_str() == crate::ground::scene::DOORWAY)
+                .filter(|e| e.other == t.ground)
+                .count();
+        }
+        if doors > 0 {
+            out.push((thing, doors));
+        }
+    }
+    out
+}
+
+/// Building `b` moved `dx` m along x from where it stands.
+fn nudged(t: &Town, b: Id, dx: i64) -> Part {
+    let n = t.tree.node(t.tree.handle(b).unwrap()).unwrap();
+    let place = n.place().unwrap();
+    let mut at = place.position;
+    at.x += dx * M / 2;
+    part_on(
+        t,
+        b,
+        vec![Change::Reparent {
+            node: b,
+            from: Frame {
+                node: t.ground,
+                slot: n.slot(),
+            },
+            pose: Pose {
+                frame: Frame {
+                    node: t.ground,
+                    slot: n.slot(),
+                },
+                position: at,
+                orientation: place.orientation,
+                support: place.support,
+            },
+        }],
+    )
+}
+
+/// Building `b` placed again as it stands now, after it is removed: every node of it created (parents first) and
+/// every link with an end in it made again, in one effect on the open ground.
+fn placed_again(t: &Town, b: Id) -> Vec<Change> {
+    let tree = &t.tree;
+    let mut changes = Vec::new();
+    let mut links = BTreeSet::new();
+    let mut stack = vec![tree.handle(b).unwrap()];
+    while let Some(h) = stack.pop() {
+        let n = tree.node(h).unwrap();
+        let place = n.place().unwrap();
+        changes.push(Change::Create {
+            node: n.id(),
+            kind: n.kind().clone(),
+            pose: Pose {
+                frame: Frame {
+                    node: n.parent().unwrap(),
+                    slot: n.slot(),
+                },
+                position: place.position,
+                orientation: place.orientation,
+                support: place.support,
+            },
+            audience: n.audience(),
+            fields: n.fields().clone(),
+        });
+        links.extend(tree.links_of(h).unwrap_or(&[]).iter().map(|e| e.link));
+        let mut kids = tree.children(h).unwrap_or(&[]).to_vec();
+        kids.reverse();
+        stack.extend(kids);
+    }
+    for link in links {
+        let (ty, ends, owner, audience) = tree.link(link).unwrap();
+        changes.push(Change::Link {
+            link,
+            ty: ty.clone(),
+            ends,
+            owner,
+            audience,
+        });
+    }
+    changes
+}
+
 /// `p` rebuilt on `t`'s ground off the clock, timed (the tree copy is the caller's, as K8's spares are).
 fn rebuilt(t: &Town, p: &Part) -> (Rebuilt, f64) {
     let (mut base, header, versions, basis) = (
@@ -592,6 +693,59 @@ fn a_building_edit_rebuilds_only_its_squares_and_building_and_equals_the_whole()
 }
 
 #[test]
+fn a_building_with_front_doors_moved_removed_and_placed_equals_the_whole() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let mut t = town_of(&w.text);
+    let doors = with_front_doors(&t);
+    assert!(
+        !doors.is_empty(),
+        "the test world has buildings with front doors"
+    );
+    // Each moved half a metre: its doorways onto the ground move with it.
+    let mut local = 0;
+    for &(b, _) in &doors {
+        let p = nudged(&t, b, 1);
+        let (whole, _, _) = apply(&mut t, &p);
+        local += usize::from(!whole);
+        let mut w = whole_of(&t);
+        let d = differences(&mut t, &mut w, 300);
+        assert!(
+            d.is_empty(),
+            "after {b:?} moved, the town equals the whole: {d:?}"
+        );
+    }
+    println!(
+        "{} buildings with front doors moved: {local} rebuilt locally",
+        doors.len()
+    );
+    assert!(
+        local > 0,
+        "a building with front doors moved is rebuilt locally"
+    );
+    // The one with the most removed, then placed again as it was.
+    let (b, _) = *doors.iter().max_by_key(|(_, n)| *n).unwrap();
+    let again = placed_again(&t, b);
+    let p = part_on(&t, b, vec![Change::Remove { node: b }]);
+    let (whole, why, _) = apply(&mut t, &p);
+    println!("removed: whole {whole}, why {why:?}");
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(
+        d.is_empty(),
+        "after {b:?} was removed, the town equals the whole: {d:?}"
+    );
+    let p = part(&t, again);
+    let (whole, why, _) = apply(&mut t, &p);
+    println!("placed with its front doors: whole {whole}, why {why:?}");
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(
+        d.is_empty(),
+        "after {b:?} was placed again, the town equals the whole: {d:?}"
+    );
+}
+
+#[test]
 #[ignore = "needs the exported Eden facts file"]
 fn eden_building_path_and_wall_rebuild_times() {
     let path_of = concat!(
@@ -611,7 +765,7 @@ fn eden_building_path_and_wall_rebuild_times() {
             t0.elapsed().as_secs_f64() * 1000.0
         );
         let at = clear_row(&t);
-        let edits: [(&str, fn(&Town, (i64, i64)) -> Option<Part>); 5] = [
+        let edits: [(&str, Edit); 5] = [
             ("a building edit", |t, at| Some(building(t, at))),
             ("a small path edit", |t, _| path(t)),
             ("a single wall", |t, at| Some(wall(t, at))),
