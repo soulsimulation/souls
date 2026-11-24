@@ -35,6 +35,8 @@ export type NodeRec = {
   def?: string;
   /** Its def's params (import-eden's field 19, W3), when it has any. */
   params?: Record<string, unknown>;
+  /** The open ground's: the defs the world defines itself (import-eden's field 102), `[ref, stored def's JSON text]`. */
+  defBodies?: [string, string][];
   /** R4 (0.134): a creator's tint (replica `tint::F_TINT`, field 145): `[part, rgb]` rows, `tint:whole` for the whole
    *  thing and `part:<name>` for a part; empty once undone. Absent when the thing was never recoloured. */
   tint?: [string, number][];

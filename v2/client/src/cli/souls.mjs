@@ -38,7 +38,8 @@
 //   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
-//                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
+//                                             one's move is aimed at the other (0.134 T1); holding hands, the first to walk leads the other
+//                                             beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or act lets go (T2)
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
 //   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
@@ -127,7 +128,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
-import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
+import { ADDS, findHome, namedHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
@@ -606,11 +607,14 @@ if (isMain(import.meta.url)) {
     }
     process.stdout.write(JSON.stringify(v) + '\n');
   };
+  // 0.133 Q2: `--home <path>` names the home; a command that adds to a home never takes a parent folder's
+  let homeNamed = null;
+  try { const h = namedHome(process.argv.slice(2)); homeNamed = h.named; process.argv = [...process.argv.slice(0, 2), ...h.argv]; } catch (e) { out({ ok: false, code: e.code, detail: e.message }); process.exit(1); }
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   // #3706: today's `help safety`, as text: the page a world serves at /safety.md, from the same file.
   if (process.argv[2] === 'help' && process.argv[3] === 'safety') { process.stdout.write(safetyText()); process.exit(0); }
   try {
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: ADDS.has(process.argv[2]), named: homeNamed });
     newsHome = home;
     if (process.argv[2] !== 'news') fetchNewsLater(home);
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words

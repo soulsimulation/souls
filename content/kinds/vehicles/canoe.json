@@ -3,7 +3,7 @@
   "kind": "eden:canoe",
   "owner": "thing",
   "state": {},
-  "points": {"bank":{"role":"stand","at_mm":[-1200,0,0],"yaw_mdeg":90000}},
+  "points": {"bank":{"role":"stand","at_mm":[-1200,0,0],"yaw_mdeg":90000},"paddle":{"role":"contact","at_mm":[0,450,-600]}},
   "slots": {
     "back": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,-900],"stand":"bank","board_mm":4000},
     "front": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,900],"stand":"bank","board_mm":4000}
@@ -34,7 +34,7 @@
         "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [],
-      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "steps": [{"step":"move","move":"steer","at":"paddle","toward":{"arg":"toward"}}],
       "effects": []
     }
   },

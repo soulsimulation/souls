@@ -1524,6 +1524,19 @@ impl Forms {
         }
     }
 
+    /// [`other_slots`] for a caller that binds the arguments itself and starts with [`Forms::start`] (worldd's acts,
+    /// E14b): each slot argument on another thing is refused by name as [`Forms::commit`] refuses it.
+    pub fn other_slots<G: Geometry, R: Reach>(
+        &self,
+        w: &World<'_, G, R>,
+        body: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        args: &form_runner::Args,
+    ) -> Result<(), Refusal> {
+        other_slots(w, &self.slots_of, body, entry, form, args)
+    }
+
     /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
     /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
@@ -1901,11 +1914,15 @@ impl Forms {
             // Out of a seat by B3's rise (its end wakes the run, [`Forms::fire`]); up from a ground posture, or a body
             // standing, at once (C25).
             Next::Rise => {
-                if let Some(d) = self.settled.remove(&body) {
+                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
+                // A body in a seat rises from it (0.135 E21): a ground posture it settled into before was ended by the
+                // walk to the seat, which claimed its legs, so the record of it is dropped, not released.
+                if let Some(d) = self.settled.remove(&body)
+                    && seated.is_none()
+                {
                     let _ = w.controller.release(body, d);
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 }
-                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
                 let Some(_) = seated else {
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 };
@@ -2234,11 +2251,14 @@ impl Forms {
                 );
                 s.slots
                     .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
-                    .map(|(f, _)| f)
+                    .map(|(f, h)| (f, h.and_then(Result::err)))
             }
-            _ => w.moves.fire(w.controller, w.due, w.mint, w.reach, t),
+            _ => w
+                .moves
+                .fire(w.controller, w.due, w.mint, w.reach, t)
+                .map(|f| (f, None)),
         };
-        if let Some(f) = fired {
+        if let Some((f, refused)) = fired {
             match f {
                 Fired::Done(rec) | Fired::Cancelled(rec) => {
                     if let Some(&run) = self.by_body.get(&rec.body)
@@ -2252,15 +2272,21 @@ impl Forms {
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
-                // Phase 1 begins at the contact instant (B2).
+                // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no
+                // floor to stand on, a sit the slot would not take) cancelled the move: its run ends now by the
+                // refusal's name (E11c), not at its deadline waiting on a move that is gone.
                 Fired::Phase { instance, phase: 1 } => {
                     if let Some(&run) = self.by_body.get(&t.node)
-                        && self
-                            .runs
-                            .get(&run)
-                            .is_some_and(|fr| fr.mv == Some(instance))
+                        && let Some(fr) = self.runs.get_mut(&run)
+                        && fr.mv == Some(instance)
                     {
-                        self.wake(w, run, Woke::Contact, t.due);
+                        match refused {
+                            Some(r) => {
+                                fr.mv = None;
+                                self.wake(w, run, Woke::Moved(name(r.name)), t.due);
+                            }
+                            None => self.wake(w, run, Woke::Contact, t.due),
+                        }
                     }
                 }
                 Fired::Phase { .. } => {}

@@ -5,7 +5,8 @@
   "state": {"open":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "towpath": {"role":"stand","at_mm":[-1900,0,-5800],"yaw_mdeg":90000},
-    "hatch": {"role":"contact","at_mm":[0,1100,-5800]}
+    "hatch": {"role":"contact","at_mm":[0,1100,-5800]},
+    "tiller": {"role":"contact","at_mm":[500,1000,-6700]}
   },
   "slots": {
     "stern": {"admits":"body","posture":"sit","most":1,"at_mm":[500,800,-6200],"stand":"towpath"},
@@ -42,7 +43,7 @@
         "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [],
-      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "steps": [{"step":"move","move":"steer","at":"tiller","toward":{"arg":"toward"}}],
       "effects": []
     },
     "lie_down": {

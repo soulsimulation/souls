@@ -7,6 +7,7 @@ import init, { historyAt } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
+import { DAY_US, dayIndexKey, headerKey, today } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
@@ -21,7 +22,6 @@ export type Seeked = { seq: number; at: number; start: number; length: number; n
   courses?: CoursePlaces };
 export type HistoryMsg = { t: 'seeked'; s: Seeked } | { t: 'error'; seq: number; message: string };
 
-const DAY_US = 86_400_000_000;
 const post = (m: HistoryMsg) => (self as unknown as Worker).postMessage(m);
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -69,7 +69,7 @@ const ready = init();
 
 /** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. */
 function dayIndex(base: URL, day: number): Promise<Index | null> {
-  if (!days.has(day)) days.set(day, get(new URL(`bundles/${String(day).padStart(8, '0')}/index`, base)).then((b) => {
+  if (!days.has(day)) days.set(day, get(new URL(dayIndexKey(day), base)).then((b) => {
     if (!b) return null;
     const m = decode(b, { useMaps: true }) as Map<number, unknown>;
     return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
@@ -78,9 +78,11 @@ function dayIndex(base: URL, day: number): Promise<Index | null> {
 }
 
 async function seek(base: URL, seq: number, at: number) {
-  header ??= get(new URL('header', base)).then((b) => b ?? Promise.reject(new Error('no header')));
-  // V4's walk: the last bundle that starts at or before the moment, back through earlier days to a year.
-  for (let day = Math.floor(at / DAY_US); day > Math.floor(at / DAY_US) - 366; day--) {
+  header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
+  // V4's walk: the last bundle that starts at or before the moment, back through earlier days to a year. A day after
+  // today has no index yet (the origin answers 404), so neither the walk nor the next bundle's lookup asks for one.
+  const now = today();
+  for (let day = Math.min(Math.floor(at / DAY_US), now); day > Math.floor(at / DAY_US) - 366; day--) {
     const ix = await dayIndex(base, day);
     let i = ix ? ix.length - 1 : -1;
     while (i >= 0 && ix![i][0] > at) i--;
@@ -95,7 +97,7 @@ async function seek(base: URL, seq: number, at: number) {
       const p = (s.get(5) as unknown[]).map(num);
       return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
     });
-    const later = ix[i + 1]?.[0] ?? (await dayIndex(base, day + 1))?.[0]?.[0] ?? null;
+    const later = ix[i + 1]?.[0] ?? (day < now ? (await dayIndex(base, day + 1))?.[0]?.[0] : null) ?? null;
     const start = num(out.get(4)), length = num(out.get(5));
     const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
     post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });

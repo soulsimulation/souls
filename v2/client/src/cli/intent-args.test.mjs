@@ -34,6 +34,14 @@ test('named-args: numbered part, slot and private text/reference wrappers keep t
   assert.throws(()=>parameters(undefined,'{"1":{"unknown":"map"}}'),/param-unsupported/);
 });
 
+test('named-args: a slot of another thing goes as [id, slot number] (0.135 E14b)',()=>{
+  const [[key,value]]=parameters(undefined,JSON.stringify({'1':[['seat',{node:other,slot:2}]]})).get(1);
+  assert.equal(Buffer.from(key).toString(),'seat');
+  assert.deepEqual(value,[[new Uint8Array(Buffer.alloc(16,9)),3],2]);
+  for(const slot of [0,'left',-1])assert.throws(()=>parameters(undefined,JSON.stringify({'1':[['seat',{node:other,slot}]]})),/param-unsupported/);
+  assert.throws(()=>parameters(undefined,JSON.stringify({'1':[['seat',{node:'not-an-id',slot:1}]]})),/target-not-an-id/);
+});
+
 test('named-args: exact signed T0 integers survive nested coordinate arrays and both 64-bit boundaries',()=>{
   const p=parameters(undefined,'{"1":[-20000000,0,21000000],"2":[-1,[-18446744073709551616,18446744073709551615]]}');
   assert.deepEqual(p.get(1),[-20000000,0,21000000]);

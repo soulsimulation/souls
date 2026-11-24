@@ -156,6 +156,8 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
+    /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
+    fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
 }
 
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
@@ -350,6 +352,7 @@ impl Engine {
             loads: BTreeMap::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
+            fixed: BTreeMap::new(),
         }
     }
 
@@ -803,7 +806,7 @@ impl Engine {
                         None => None,
                     };
                     let xz = |v: Vec3| [v.x, v.z];
-                    load.check(
+                    let way = load.check(
                         crew,
                         xz(f),
                         xz(k),
@@ -833,6 +836,15 @@ impl Engine {
                         .iter()
                         .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
                         .collect();
+                    // 0.135 R2: a way that turns the load is kept on the carry and said to its carriers after the lift.
+                    if let Some(way) = way {
+                        self.take(&mut carry, Some((a.id, a.soul)));
+                        self.activities.next = tree.next();
+                        let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
+                        self.activities
+                            .carry_way(&mut tree, activity, board, &way, by)?;
+                        carry.way = way;
+                    }
                     self.carries.insert(activity, carry);
                 } else {
                     let mut carry = self
@@ -949,8 +961,16 @@ impl Engine {
     }
 
     /// The engine's part of a tick at `now`: its due timers (a leave let go, an offer or a pair lapsed), then one
-    /// sample of each carry between its carriers.
-    pub fn tick(&mut self, live: &Tree, c: &mut Controller, slots: &mut Slots, now: Micros) {
+    /// sample of each carry between its carriers, checked against the fixed geometry of its ground as the walkers'
+    /// ground `versions` have it (0.135 C7).
+    pub fn tick(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        slots: &mut Slots,
+        versions: &sim::ground::Versions,
+        now: Micros,
+    ) {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
@@ -1123,11 +1143,65 @@ impl Engine {
                     }
                 }
             }
+            // 0.135 C7: every step is checked against its ground's fixed geometry, read again only when the walkers'
+            // ground has changed since (`versions`, G3's); a step into it stops the carry, its load set down where its
+            // last sample had it.
+            let mut blocked = Vec::new();
             for (activity, f, k) in step {
-                if let Some(carry) = self.carries.get_mut(&activity)
-                    && let Err(r) = carry.step(tr, now, f, k)
-                {
-                    eprintln!("worldd: a carry's sample was not written: {r}");
+                let Some(carry) = self.carries.get_mut(&activity) else {
+                    continue;
+                };
+                let fresh = self
+                    .fixed
+                    .get(&carry.ground)
+                    .is_some_and(|(v, _)| v == versions);
+                if !fresh {
+                    match Fixed::of(tr, carry.ground) {
+                        Ok(g) => {
+                            self.fixed.insert(carry.ground, (versions.clone(), g));
+                        }
+                        Err(e) => {
+                            self.fixed.remove(&carry.ground);
+                            eprintln!("worldd: the carry {} stopped: {e}", show(activity));
+                            blocked.push(activity);
+                            continue;
+                        }
+                    }
+                }
+                let done = match self.fixed.get(&carry.ground) {
+                    Some((_, g)) => carry.step(tr, now, f, k, g),
+                    None => Err(refusal("carry-geometry", show(carry.ground))),
+                };
+                match done {
+                    Ok(()) => {}
+                    Err(r) if r.name == "carry-load-blocked" || r.name == "carry-geometry" => {
+                        eprintln!("worldd: the carry {} stopped: {r}", show(activity));
+                        blocked.push(activity);
+                    }
+                    Err(r) => eprintln!("worldd: a carry's sample was not written: {r}"),
+                }
+            }
+            for a in blocked {
+                let Some(mut carry) = self.carries.remove(&a) else {
+                    continue;
+                };
+                match break_off(
+                    &mut carry,
+                    &mut self.activities,
+                    &mut self.mint,
+                    tr,
+                    now,
+                    None,
+                    "souls:carry-blocked",
+                    None,
+                ) {
+                    // A crew's part set down is no longer its own (0.135 A2).
+                    Ok(()) => {
+                        if let Some(s) = self.asm.as_mut() {
+                            s.ended(a);
+                        }
+                    }
+                    Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
                 }
             }
         }
@@ -2218,7 +2292,7 @@ impl Engine {
     /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
     /// [`Engine::out`].
     pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
-        let Some((_, _, follower, _)) = self
+        let Some((_, _, follower, _, _)) = self
             .activities
             .following()
             .into_iter()
@@ -2257,7 +2331,20 @@ impl Engine {
 
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
-    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+    /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
+    /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    pub fn walked(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        body: Id,
+        intent: Id,
+        now: Micros,
+        walk: bool,
+    ) {
+        if walk && self.activities.lead(&self.moves, body) {
+            return;
+        }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
@@ -2318,8 +2405,9 @@ impl Engine {
         self.collect(None);
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and the width
+    /// of a place beside the leader (R1, hand in hand).
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
     }
 

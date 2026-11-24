@@ -763,7 +763,8 @@ impl Slots {
     /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
     /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
     /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
-    /// did and the hand-off made, or why it could not be (the rise is then cancelled and the body stays seated).
+    /// did and the hand-off made, or why it could not be (the move is then cancelled by that name: a rise's body stays
+    /// seated, a sit's seat is released).
     #[allow(clippy::too_many_arguments)]
     pub fn fire(
         &mut self,
@@ -803,14 +804,20 @@ impl Slots {
                 let h = c
                     .slot_in_at(body, d, frame, at.spot(key.2), now)
                     .and_then(|h| c.set(body, d, Part::Stance(hold.stance)).map(|()| h));
-                if h.is_ok() {
-                    self.set(
+                match &h {
+                    Ok(_) => self.set(
                         key,
                         State::Lowering {
                             instance,
                             in_slot: true,
                         },
-                    );
+                    ),
+                    // Refused into the slot (E11c review): the sit ends by that name and the seat is given back, so
+                    // no seat is held by a body that never got into it.
+                    Err(r) => {
+                        moves.cancel(c, due, instance, now, lit(r.name));
+                        self.release(key);
+                    }
                 }
                 Some(h)
             }
@@ -822,8 +829,8 @@ impl Slots {
                         let _ = c.set(body, d, Part::Stance(Stance::Stand));
                         self.release(key);
                     }
-                    Err(_) => {
-                        moves.cancel(c, due, instance, now, lit("stand-point-off-floor"));
+                    Err(r) => {
+                        moves.cancel(c, due, instance, now, lit(r.name));
                         self.sit_still(c, key);
                     }
                 }

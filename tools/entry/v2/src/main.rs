@@ -21,8 +21,12 @@
 //! is stood back up on the ground at its seat's stand point when the case is cleared, and a restart seats it again as
 //! a served world's restart does (`Slots::restore`).
 //!
-//! Not here: a geometry beyond open ground (every point is reached in a straight line and every thing is within
-//! reach of a move, as in F3's stop table; no seat's stand point is blocked, so none is moved), and the gateway (F7). The moves
+//! Reach (0.135 E19): a move's reach is measured as the served world measures it, by the same code (`sim::reach`):
+//! from the body's edge to the thing's point or nearest surface on the ground, or from its seat when it is in a slot of
+//! the thing it acts on, so a row the world refuses `out-of-reach` is refused here.
+//!
+//! Not here: a geometry beyond open ground (every point is reached in a straight line; no seat's stand point is
+//! blocked, so none is moved), and the gateway (F7). The moves
 //! are content's, every `content/moves` entry loaded at world start by hash (F13, #3383). No kind, form or move is
 //! named.
 
@@ -46,7 +50,7 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3, fixture};
 use replica::rules::decide_parts;
 use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
-use replica::tree::{Rules, Tree};
+use replica::tree::{Place, Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
 use sim::activity::{Activities, Ask as Asking};
 use sim::controller::Controller;
@@ -97,14 +101,65 @@ fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
 }
 
-/// Bodies where the controller has them, things where they were placed (for reach); every thing is within reach.
+/// Bodies where the controller has them; and what reach reads, as the served world reads it (0.135 E19): each body's
+/// pose, each node's parent and place in the tree, each node's entry name, and the entries.
 #[derive(Default)]
 struct Snap {
     nodes: BTreeMap<Id, Vec3>,
-    things: BTreeMap<Id, Vec3>,
+    poses: BTreeMap<Id, Pose>,
+    up: BTreeMap<Id, (Option<Id>, Option<Place>)>,
+    entry_of: BTreeMap<Id, String>,
+    /// The thing argument each body's run moves at or toward (`sim::reach::AT_ARG`).
+    toward: BTreeMap<Id, Id>,
+    kinds: Option<J>,
     /// Each body's walks before a sit into a seat of another thing (E14), by step: the seat's stand point on the
     /// ground, where a served world aims that walk (`worldd`'s `sit_walks`, from `Forms::seat_walks`).
     sit_walks: BTreeMap<Id, BTreeMap<usize, Vec3>>,
+}
+
+impl Snap {
+    fn entry(&self, node: Id) -> Option<&J> {
+        self.kinds.as_ref()?.get(self.entry_of.get(&node)?)
+    }
+
+    /// A node's place in the tree, its parents' positions added (their turns are not), as `worldd`'s `Sight::place`.
+    fn place(&self, node: Id) -> Option<Vec3> {
+        let (mut at, mut id) = (Vec3::ZERO, node);
+        for _ in 0..64 {
+            let (parent, place) = *self.up.get(&id)?;
+            if let Some(p) = place {
+                at = Vec3::new(
+                    at.x + p.position.x,
+                    at.y + p.position.y,
+                    at.z + p.position.z,
+                );
+            }
+            match parent {
+                Some(p) => id = p,
+                None => return Some(at),
+            }
+        }
+        None
+    }
+
+    /// Point `at` of node `node`'s frame carried up the tree onto the ground, as the served world's view carries it
+    /// onto a floor (`View::on_floor`); the open ground is this world's one floor.
+    fn on_ground(&self, node: Id, at: Vec3) -> Option<Vec3> {
+        let (mut on, mut at) = (node, at);
+        for _ in 0..64 {
+            if on == ground_id() {
+                return Some(at);
+            }
+            let (parent, place) = *self.up.get(&on)?;
+            let place = place?;
+            at = place
+                .position
+                .plus(place.orientation.rotate(at).ok()?)
+                .ok()?;
+            on = parent?;
+        }
+        None
+    }
 }
 
 impl Geometry for Snap {
@@ -115,19 +170,45 @@ impl Geometry for Snap {
             Ask::Distance { .. } => None,
         }
     }
-    /// A body where the controller has it. A thing is the tree's to answer (where it is, who holds it).
-    fn plan_walk(&self, body: Id, step: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+    /// A walk to point `at` of node `node`'s frame goes to that point carried onto the ground (0.135 E21), as a served
+    /// world plans it in that frame: a campfire in its site's slot, a line in its guestbook.
+    fn legs(&self, _: Id, node: Id, at: Vec3, _: i64) -> Option<Vec<sim::walk::Leg>> {
+        let to = self.on_ground(node, at)?;
+        Some(vec![sim::walk::Leg { to, link: None }])
+    }
+    fn plan_walk(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+    ) -> replica::host::WalkPlan {
         match self.sit_walks.get(&body).and_then(|w| w.get(&step)) {
             Some(&stand) => replica::host::WalkPlan::Legs(vec![(stand, None)]),
-            None => replica::host::WalkPlan::Unplanned,
+            None => self.legs(body, node, at, reach).map_or(
+                replica::host::WalkPlan::Unplanned,
+                |legs| {
+                    replica::host::WalkPlan::Legs(
+                        legs.into_iter().map(|l| (l.to, l.link)).collect(),
+                    )
+                },
+            ),
         }
     }
+    /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
+    /// it is in, as the served world reads it (`sim::reach::body_at`, 0.135 E21). A thing is the tree's to answer
+    /// (where it is, who holds it).
     fn read(&self, node: Id) -> Option<Seen> {
-        let position = *self.nodes.get(&node)?;
+        let seat = self.poses.get(&node).filter(|p| p.support == Support::Slot);
+        let (parent, position) = match seat {
+            Some(p) => sim::reach::body_at(p, self.entry(p.frame.node), |n, q| Some((n, q)))?,
+            None => (ground_id(), *self.nodes.get(&node)?),
+        };
         Some(Seen {
             id: node,
             kind: name("entry:node"),
-            parent: Some(ground_id()),
+            parent: Some(parent),
             position,
             fields: BTreeMap::new(),
         })
@@ -135,8 +216,70 @@ impl Geometry for Snap {
 }
 
 impl Reach for Snap {
-    fn distance(&self, _: Id, _: &Effector, _: Option<&Name>, t: Id, _: &Name) -> Option<i64> {
-        self.things.contains_key(&t).then_some(0)
+    /// As the served world measures it (`worldd`'s `Sight`), by the same code (`sim::reach`, 0.135 E19): a thing in the
+    /// body's own hand is within reach; a body in a slot of the thing it acts on reaches from its seat
+    /// (`sim::reach::in_slot`); else, each body where it is (`sim::reach::body_at`), from the body's edge to the thing's
+    /// point or its nearest surface, carried onto the ground (`sim::reach::to_thing`), else to its place in the tree,
+    /// across x and z and in height. Every body is of the standard build, as the places table takes it here.
+    fn distance(
+        &self,
+        body: Id,
+        _: &Effector,
+        _: Option<&Name>,
+        target: Id,
+        point: &Name,
+    ) -> Option<i64> {
+        let me = self.poses.get(&body)?;
+        // C23: a move at the body itself, or at the thing argument its run named (`sim::reach::targets`).
+        let target = match point.as_str() {
+            sim::reach::AT_SELF => return Some(0),
+            sim::reach::AT_ARG => *self.toward.get(&body)?,
+            _ => target,
+        };
+        let build = sim::slots::STANDARD_BUILD;
+        if self.up.get(&target).and_then(|u| u.0) == Some(body) {
+            return Some(0);
+        }
+        if me.support == Support::Slot && me.frame.node == target {
+            return sim::reach::in_slot(self.entry(target)?, build, me.frame.slot?, point.as_str());
+        }
+        // Each body where it is (0.135 E21): a seated, lying or riding one at its slot of what it is in, on the ground.
+        let at = |p: &Pose| {
+            let carry = |n: Id, q: Vec3| Some((ground_id(), self.on_ground(n, q)?));
+            sim::reach::body_at(p, self.entry(p.frame.node), carry)
+        };
+        let (floor, a) = at(me)?;
+        let on = |p: Vec3| {
+            (floor == ground_id())
+                .then(|| self.on_ground(target, p))
+                .flatten()
+        };
+        if let Some(d) = self
+            .entry(target)
+            .and_then(|e| sim::reach::to_thing(e, build, a, point.as_str(), on))
+        {
+            return Some(d);
+        }
+        let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
+        let (b, top) = match self.poses.get(&target) {
+            Some(t) => {
+                let (on, b) = at(t)?;
+                (b, height(on, b.y))
+            }
+            None => {
+                let b = self.place(target)?;
+                (b, Some(b.y))
+            }
+        };
+        let reach = sim::slots::standing_reach(build);
+        let v = match (height(floor, a.y), top) {
+            (Some(feet), Some(y)) => sim::reach::off_height(feet, reach, y, y),
+            _ => 0,
+        };
+        Some(sim::reach::with_height(
+            sim::reach::flat([a.x, a.z], [b.x, b.z]),
+            v,
+        ))
     }
 }
 
@@ -457,7 +600,40 @@ impl Stage {
         self.snap.nodes = self.c.bodies().map(|b| (b.id, b.pose.position)).collect();
     }
 
+    /// What reach reads, as it stands at the call (0.135 E19): the bodies' poses and the tree's nodes, so a thing just
+    /// placed is measured.
+    fn see(&mut self) {
+        self.snap.poses = self.c.bodies().map(|b| (b.id, b.pose)).collect();
+        self.snap.up.clear();
+        self.snap.entry_of.clear();
+        let mut todo = vec![self.tree.root()];
+        while let Some(h) = todo.pop() {
+            let Some(n) = self.tree.node(h) else {
+                continue;
+            };
+            self.snap.up.insert(n.id(), (n.parent(), n.place()));
+            // A body the controller does not move now (one carried by what it rides) is where the tree has it.
+            if self.souls_of.contains_key(&n.id())
+                && let (Some(node), Some(p)) = (n.parent(), n.place())
+            {
+                self.snap.poses.entry(n.id()).or_insert(Pose {
+                    frame: Frame {
+                        node,
+                        slot: n.slot(),
+                    },
+                    position: p.position,
+                    orientation: p.orientation,
+                    support: p.support,
+                });
+            }
+            let e = import_eden::entry_name(n.kind().as_str(), n.fields());
+            self.snap.entry_of.insert(n.id(), e.to_owned());
+            todo.extend(self.tree.children(h).unwrap_or(&[]));
+        }
+    }
+
     fn world(&mut self) -> (World<'_, Snap, Snap>, &mut Forms) {
+        self.see();
         (
             World {
                 tree: &self.tree,
@@ -920,12 +1096,26 @@ impl Stage {
         let fields = self.defaults(kind);
         let b = self.body_at();
         // Beside the body, toward the middle of the ground on its farther axis, so a long run of cases never walks
-        // off it.
-        let toward = |v: i64| if v > 0 { -AWAY } else { AWAY };
+        // off it. A thing longer than that (a 14 m narrowboat) is set past its own half length, so the whole of it,
+        // and every point a body stands at on it, lies toward the middle: centred 3 m away, each seat case's rise put
+        // the body at a stand point 2.8 m farther out, until one lay off the ground (0.135 E11c).
+        let half = |axis: usize| {
+            self.entry(kind)
+                .and_then(|e| e.get("geometry"))
+                .and_then(|g| g.get("bounds_mm"))
+                .and_then(J::arr)
+                .and_then(|a| match a.get(axis) {
+                    Some(J::Int(mm)) => i64::try_from(*mm / 2).ok(),
+                    _ => None,
+                })
+                .map_or(0, |mm| mm.saturating_mul(1000))
+        };
+        let away = |axis: usize| AWAY.max(half(axis).saturating_add(500_000));
+        let toward = |v: i64, axis: usize| if v > 0 { -away(axis) } else { away(axis) };
         let at = if b.x.abs() >= b.z.abs() {
-            Vec3::new(b.x + toward(b.x), 0, b.z)
+            Vec3::new(b.x + toward(b.x, 0), 0, b.z)
         } else {
-            Vec3::new(b.x, 0, b.z + toward(b.z))
+            Vec3::new(b.x, 0, b.z + toward(b.z, 2))
         };
         let Ok(id) = self.mint.mint() else {
             return err("no id");
@@ -952,7 +1142,6 @@ impl Stage {
         }
         self.placed += 1;
         let key = format!("x{}", self.placed);
-        self.snap.things.insert(id, at);
         self.seat(id);
         // The create was read as a form's make: it is the gate's thing, by the gate's key.
         self.things.retain(|_, t| t.id != id);
@@ -1208,7 +1397,6 @@ impl Stage {
                 r.name, r.detail
             ));
         }
-        self.snap.things.remove(&t.id);
         self.arranged.remove(&t.id);
         // What was in it went with it (T2 rule 3).
         let tree = &self.tree;
@@ -1270,7 +1458,6 @@ impl Stage {
         }
         self.things.retain(|_, t| !gone.contains(&t.id));
         for id in gone {
-            self.snap.things.remove(&id);
             self.arranged.remove(&id);
         }
         self.look();
@@ -1947,12 +2134,20 @@ impl Stage {
                     .iter()
                     .filter_map(|(lt, _)| {
                         let ty = replica::audience::link_type(&t.kind, lt);
+                        // An end that is a body's Soul is named by its body, as the case names it (0.135 E21), so a
+                        // rule's `most_per` on the actor counts a link a form made (a signed line, a vote).
+                        let by_body = |id: Id| {
+                            self.souls_of
+                                .iter()
+                                .find(|(_, s)| **s == id)
+                                .map_or(id, |(b, _)| *b)
+                        };
                         let ends: Vec<J> = self
                             .tree
                             .links_at(t.id)
                             .iter()
                             .filter(|e| self.tree.ty(e).as_str() == ty)
-                            .map(|e| J::Str(call(e.other)))
+                            .map(|e| J::Str(call(by_body(e.other))))
                             .collect();
                         (!ends.is_empty()).then(|| (lt.clone(), J::Arr(ends)))
                     })
@@ -2079,6 +2274,9 @@ impl Stage {
         for t in things {
             self.seat(t);
         }
+        if let Some(no) = self.reseat(node, &kind, &form, case, &names) {
+            return no;
+        }
         // The world's check at commit: R2's rules on the case's state as it stands, the world seeing all (I3).
         let state = self.state_of(case, ids, &names);
         let asker = obj(vec![("sees", J::s("all"))]);
@@ -2146,6 +2344,24 @@ impl Stage {
             .and_then(J::str)
             .unwrap_or("b1");
         let body = names.to_id.get(actor).copied().unwrap_or(self.body);
+        // Each move's target from the form's arguments, as the served world binds it (C23, `sim::reach::targets`).
+        let (entry, thing) = match sim::reach::targets(&entry, &form, &args) {
+            Ok(t) => t,
+            Err(r) => {
+                return obj(vec![
+                    ("verdict", J::s("no")),
+                    ("reason", J::s(r.name)),
+                    ("code", J::s(r.name)),
+                    ("detail", J::Str(r.detail)),
+                    ("receipt", J::s("refused")),
+                    ("by", J::s("runner")),
+                ]);
+            }
+        };
+        match thing {
+            Some(t) => self.snap.toward.insert(body, t),
+            None => self.snap.toward.remove(&body),
+        };
         let intent = Intent {
             id,
             expiry: i64::MAX,
@@ -2596,6 +2812,112 @@ impl Stage {
         self.wait(&rid)
     }
 
+    /// A Soul a leave left seated and that then rose (E11) no longer holds the vehicle (E10): before a holder's form
+    /// on it is done again, it sits back in the vehicle's drive seat by the vehicle's own form that sits there (its
+    /// `ride`), run until it ends, never by writing the seat (0.135 E18). Only when the case seats the actor there
+    /// and it holds no seat now. `None` when there was nothing to do or it sat; else the sit's refusal, by name.
+    fn reseat(&mut self, node: Id, kind: &str, form: &str, case: &J, names: &Names) -> Option<J> {
+        let entry = self.entry(kind)?.clone();
+        let who = entry.get("forms")?.get(form)?.get("who").and_then(J::str);
+        let drive = entry.get("vehicle")?.get("drive")?.str()?.to_owned();
+        let actor = case.get("state")?.get("actor")?.str()?;
+        let this = case.get("act")?.get("this")?.str()?;
+        let seat = case
+            .get("state")?
+            .get("nodes")?
+            .get(this)?
+            .get("slots")?
+            .get(&drive);
+        let body = names.to_id.get(actor).copied()?;
+        let in_case = strs(seat).iter().any(|b| b == actor) || seat.and_then(J::str) == Some(actor);
+        if who != Some("holder") || !in_case || self.slots.held_by(body).is_some() {
+            return None;
+        }
+        let refused = |name: &str, detail: String| {
+            obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::Str(format!("reseat.{name}"))),
+                ("code", J::Str(format!("reseat.{name}"))),
+                ("detail", J::Str(detail)),
+                ("receipt", J::s("refused")),
+                ("by", J::s("runner")),
+            ])
+        };
+        let sits = |f: &J| {
+            f.get("starts").and_then(J::str) == Some("act")
+                && f.get("steps")
+                    .and_then(J::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|s| {
+                        s.get("step").and_then(J::str) == Some("sit")
+                            && s.get("slot").and_then(J::str) == Some(drive.as_str())
+                    })
+        };
+        let forms = entry.get("forms").and_then(J::obj).unwrap_or(&[]);
+        let Some(sit) = forms.iter().find(|(_, f)| sits(f)).map(|(k, _)| k.clone()) else {
+            return Some(refused(
+                "no-sit",
+                format!("no form of {kind} sits in its drive seat {drive}"),
+            ));
+        };
+        let n = self.runs.len() as u64 + 1;
+        let id = Id::new(Scope([0xe3; 16]), (3 << 40) + n)?;
+        let mut digest = [0u8; 32];
+        digest[..8].copy_from_slice(&n.to_le_bytes());
+        digest[16] = 0xe2;
+        let intent = Intent {
+            id,
+            expiry: i64::MAX,
+            actor: Actor::Soul(self.souls_of.get(&body).copied().unwrap_or(self.soul)),
+            digest,
+        };
+        let (now, from) = (self.now, self.log.len());
+        let asked = {
+            let (mut w, forms) = self.world();
+            forms.commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                node,
+                &entry,
+                &sit,
+                &Args::default(),
+                intent,
+                Limits::default(),
+                now,
+            )
+        };
+        self.flush();
+        if let Err(r) = asked {
+            return Some(refused(r.name, format!("{sit} into {drive}: {}", r.detail)));
+        }
+        let rid = format!("r{n}");
+        let last = self.forms.at(body);
+        self.runs.insert(
+            rid.clone(),
+            Run {
+                intent: id,
+                last,
+                from,
+                body,
+            },
+        );
+        let w = self.wait(&rid);
+        if w.get("verdict").and_then(J::str) == Some("yes")
+            && self.slots.held_by(body) == Some(node)
+        {
+            return None;
+        }
+        let why = w
+            .get("code")
+            .and_then(J::str)
+            .unwrap_or("not-seated")
+            .to_owned();
+        Some(refused(&why, format!("{sit} into {drive} ended {why}")))
+    }
+
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
     /// The tree is the store's, and stays.
     fn restart(&mut self) -> J {
@@ -2787,6 +3109,7 @@ impl Stage {
         match s("op").as_str() {
             "define" => {
                 self.kinds = q.get("kinds").cloned().unwrap_or(none);
+                self.snap.kinds = Some(self.kinds.clone());
                 // The import check (F14): a kind whose form names a point it does not declare is refused here.
                 self.refused = self
                     .kinds

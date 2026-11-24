@@ -26,8 +26,24 @@ import { newEngineModules, placeIn } from './director.mjs';
 import { exportFacts } from './world.mjs';
 import { liveSeat, intentsOf, useSeatLogin } from './live.mjs';
 
-/** The battery's place id for a place name of the new engine (import-eden: today's place id is `g-` and its name). */
-export const placeIds = (path) => path.map((n) => `g-${n}`);
+/** The battery's place id for a place name of the new engine (import-eden: today's place id is `g-` and its name; a
+ *  pond's shore is its `shore-bank`). */
+export const PLACE_ALIASES = { 'pond shore': 'pond.shore-bank' };
+export const placeIds = (path) => path.map((n) => `g-${PLACE_ALIASES[n] ?? n}`);
+
+/** How near a walk's end must be to its target to count as at it, metres (0.133 Q2): a bank is within this of its pond. */
+export const AT_PLACE_M = 1.5;
+/** 0.133 Q2: the places on open ground (no frame of their own, so not in the body's place path) that the seat's last done
+ *  walk ended at, by its own receipt's `away_m`, as battery ids: the walk's first target, named from what the seat's own
+ *  `find` and `look` answers called it (else `nameOf`). */
+export function walkedTo(commands, sinceMs, nameOf = () => null) {
+  const done = commands.filter((c) => c.at >= sinceMs && c.words?.[0] === 'act' && c.answer?.phase === 'done' && c.answer?.away_m != null);
+  const last = done.at(-1);
+  if (!last || last.answer.away_m > AT_PLACE_M) return [];
+  const id = String(last.answer.receipt?.target ?? '').split(' ')[0];
+  const named = commands.flatMap((c) => c.answer?.found ?? []).find((r) => r.id === id)?.name ?? nameOf(id);
+  return named ? placeIds([named]) : [];
+}
 
 /** The seat's acts as receipts (`{capability: "<verb>:<target>", phase}`), from its command log, after `sinceMs`. */
 export function receiptsOf(commands, sinceMs, kindOf = () => null) {
@@ -119,7 +135,8 @@ export async function episodeV2({ dir, genesis, item, seatCfg, sampleMs = 500, h
       const tr = await truth.soul(soulId), view = await mods.owner.cardView({ soulId, identity: 'wren' });
       const m = (view.messages ?? []).find((x) => x.id === sent.messageId) ?? null;
       card = m ? { messageId: m.id, state: m.state, outcome: ['done', 'failed'].includes(m.state) ? m.state : null } : null;
-      const obs = { placeIds: placeIds(tr.placePath ?? []), place: tr.placePath?.[0] ? `g-${tr.placePath[0]}` : null, posture: tr.posture ?? null, receipts: [] };
+      const at = [...placeIds(tr.placePath ?? []), ...(tr.placePath?.length ? [] : walkedTo(readLines(seat.commands()), sentLocal, (id) => truth.node(id)?.placeName ?? null))];
+      const obs = { placeIds: at, place: at[0] ?? null, posture: tr.posture ?? null, receipts: [] };
       const t = Date.now() - sentLocal;
       if (firstMotionMs == null && (tr.placePath?.[0] ?? null) !== before.place) firstMotionMs = t;
       const newReceipts = receiptsOf(readLines(seat.commands()), sentLocal);

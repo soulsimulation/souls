@@ -81,3 +81,15 @@ test('the reader\'s worker posts a course\'s places with each part, and the page
     assert.deepEqual(f.entities[E].p.map((x) => +x.toFixed(3)), [10.3, s + 0.1, 2 * s], `its rider at ${s} s`);
   }
 });
+
+test('a rowing punt on its course is a `rowing-punt` fixture in the takes, which the take\'s fixture views draw as a punt', () => {
+  const punt = { ...balloon, id: 'w.8', kind: 'core:rowing_punt@1220ab', origin: 'e_punt0' };
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.courseAt = courseAt;
+  b.receive({ t: 'snapshot', s: { nodes: [world, punt], removed: [] } });
+  for (let n = 0; n < 6; n++) b.receive(part(n));
+  const rec = (b.view.takes.chunks[0].take as { finalState: { entities: Record<string, { kind: string; def: string; carrier?: unknown }> } }).finalState.entities.e_punt0;
+  assert.equal(rec.kind, 'fixture');
+  assert.equal(rec.def, 'rowing-punt', 'today\'s def name (mars engine-view fixtures.ts draws it)');
+  assert.ok(rec.carrier, 'still a ride');
+});
