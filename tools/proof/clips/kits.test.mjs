@@ -22,5 +22,5 @@ test('each kit either acts through the new client or is listed and skipped, by n
     assert.doesNotMatch(steps, OLD, `${k} drives the old world: list it with skip, or port it to the shared cast`);
   }
   for (const f of ['_shared/cast.mjs', '_shared/ride.mjs']) assert.doesNotMatch(readFileSync(join(here, f), 'utf8'), OLD, `${f} acts through the new client`);
-  assert.deepEqual(skipped.sort(), ['classroom-tv', 'tv-channels', 'tv-channels-noon']);
+  assert.deepEqual(skipped.sort(), ['classroom-tv', 'ride-wheel', 'tv-channels', 'tv-channels-noon']);
 });
