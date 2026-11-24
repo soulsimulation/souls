@@ -342,7 +342,9 @@ fn rides(
         return false;
     }
     for holder in sorted(nodes) {
-        let hands = nodes.and_then(|n| n.get(holder)).and_then(|n| n.get("hands"));
+        let hands = nodes
+            .and_then(|n| n.get(holder))
+            .and_then(|n| n.get("hands"));
         if hands.is_some_and(|h| h.obj().is_none()) {
             continue;
         }

@@ -95,8 +95,8 @@ fn strs(v: Option<&Value>) -> Vec<String> {
 }
 
 /// Loads a case's `state` as a T2 tree: a public root place; each node with hands a body of the fixtures' family,
-/// under the root, linked to its Soul by `souls:body-of`; each other node a thing of its kind, in the hand that
-/// holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` (`souls:owns` for its `owner`)
+/// under the root (or seated in the thing slot that lists it), linked to its Soul by `souls:body-of`; each other node
+/// a thing of its kind, in the hand that holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` (`souls:owns` for its `owner`)
 /// from its end to the thing, public when the kind's link is, else in an audience whose members are its ends, each
 /// body counted as its Soul.
 fn build(kinds: &Value, state: &Value) -> Built {
@@ -106,9 +106,32 @@ fn build(kinds: &Value, state: &Value) -> Built {
         .filter(|(_, n)| n.get("hands").is_none())
         .filter_map(|(_, n)| n.get("kind")?.str())
         .collect();
+    // A thing kind's slots, numbered from 1 in its entry's order (`import_eden::body_slots_of`), each admitting what
+    // its entry's slot admits: a body listed in one sits there, the thing's child in that slot (E10b).
+    let slots_of = |k: &str| -> Vec<(String, String)> {
+        kinds
+            .get(k)
+            .and_then(|e| e.get("slots"))
+            .and_then(Value::obj)
+            .unwrap_or(&[])
+            .iter()
+            .map(|(s, d)| {
+                let admits = d.get("admits").and_then(Value::str).unwrap_or("thing");
+                (s.clone(), admits.to_owned())
+            })
+            .collect()
+    };
     let mut text = KINDS.to_owned();
     for k in &thing_kinds {
-        text.push_str(&format!("\n{{1: \"{k}\", 2: \"thing\"}}"));
+        let admits: Vec<String> = (1..)
+            .zip(slots_of(k))
+            .map(|(n, (_, a))| format!("{n}: [\"{a}\"]"))
+            .collect();
+        let slots = match admits.is_empty() {
+            true => String::new(),
+            false => format!(", 6: {{{}}}", admits.join(", ")),
+        };
+        text.push_str(&format!("\n{{1: \"{k}\", 2: \"thing\"{slots}}}"));
     }
     let kind_defs = parse_kinds(&text).expect("kinds");
     let full = |p: &str| -> String {
@@ -182,10 +205,22 @@ fn build(kinds: &Value, state: &Value) -> Built {
             });
         }
     }
+    let mut seated: BTreeMap<String, (Id, u64)> = BTreeMap::new();
+    for (k, n) in nodes {
+        let Some(kind) = n.get("kind").and_then(Value::str) else {
+            continue;
+        };
+        for (slot, (name, _)) in (1..).zip(slots_of(kind)) {
+            for b in strs(n.get("slots").and_then(|x| x.get(&name))) {
+                seated.insert(b, (ids[k], slot));
+            }
+        }
+    }
     for (k, n) in nodes {
         let body = n.get("hands").is_some();
-        let (parent, slot) = match holder.get(k) {
-            Some((b, s)) if !body => (*b, Some(*s)),
+        let (parent, slot) = match (holder.get(k), seated.get(k)) {
+            (Some((b, s)), _) if !body => (*b, Some(*s)),
+            (_, Some((t, s))) if body => (*t, Some(*s)),
             _ => (root, None),
         };
         let kind = match body {
@@ -811,7 +846,10 @@ fn e10b_a_carried_vehicle_is_the_carriers_alone_not_its_riders() {
     assert_eq!(r.name, "not-permitted", "{}", r.detail);
     assert_eq!(r.detail, "who may: whoever holds it");
     let (by_carrier, by_rider) = steer(false);
-    assert!(by_rider.is_ok(), "set down, the rider holds it: {by_rider:?}");
+    assert!(
+        by_rider.is_ok(),
+        "set down, the rider holds it: {by_rider:?}"
+    );
     assert_eq!(
         by_carrier.expect_err("a body beside it").name,
         "not-permitted"
