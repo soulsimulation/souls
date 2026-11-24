@@ -16,7 +16,9 @@
 //! the spool: its ETag and bytes, from the store as the writer found it at open, or from its own last put), and a
 //! head it tried whose answer was lost (`head.tried`) counts as its own. A head in the store that is neither is
 //! another writer's: the backup is **fenced**, for good. It never adopts that head nor puts over it, and says so in
-//! `health.json`; the stream and its viewers go on from the local disk.
+//! `health.json`; the stream and its viewers go on from the local disk. A confirmed head is kept with the store's
+//! identity: a spool with none, or one of another store, learns the store's head again (and puts over it), and a
+//! store with no head gets this writer's; neither is fenced.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -57,6 +59,7 @@ pub enum State {
 /// The writer's side of the backup: where the spool is, and how it tells the thread there is more.
 pub struct Spool {
     pub(super) dir: PathBuf,
+    store: String,
     wake: Option<SyncSender<()>>,
     prunes: Prunes,
     progress: Arc<Progress>,
@@ -114,9 +117,12 @@ fn tried_key(head_key: &str) -> String {
 }
 
 impl Spool {
-    pub(super) fn new(dir: PathBuf) -> Spool {
+    /// The spool in `dir`, backed up to the store whose identity is `store` (a digest of its address: a store moved to
+    /// another bucket is another store, whose head the backup learns again).
+    pub(super) fn new(dir: PathBuf, store: String) -> Spool {
         Spool {
             dir,
+            store,
             wake: None,
             prunes: Arc::default(),
             progress: Arc::default(),
@@ -152,7 +158,7 @@ impl Spool {
 
     /// The store's head under `head_key` as the writer found it there (`etag`, `bytes`): what its backup puts over.
     pub(super) fn confirm(&self, head_key: &str, bytes: &[u8], etag: &str) -> super::R<()> {
-        confirm(&self.dir, head_key, bytes, etag)
+        confirm(&self.dir, &self.store, head_key, bytes, etag)
     }
 
     pub(super) fn read(&self, key: &str) -> Option<Vec<u8>> {
@@ -184,10 +190,10 @@ impl Spool {
     }
 }
 
-/// `head.confirmed`: the ETag, a newline, the head's bytes; and no head tried since.
-fn confirm(dir: &Path, head_key: &str, bytes: &[u8], etag: &str) -> super::R<()> {
-    let mut b = etag.as_bytes().to_vec();
-    b.push(b'\n');
+/// `head.confirmed`: the store's identity, a newline, the ETag, a newline, the head's bytes (an empty ETag and no
+/// bytes: the store had no head); and no head tried since.
+fn confirm(dir: &Path, store: &str, head_key: &str, bytes: &[u8], etag: &str) -> super::R<()> {
+    let mut b = format!("{store}\n{etag}\n").into_bytes();
     b.extend_from_slice(bytes);
     let path = dir.join(confirmed_key(head_key));
     if let Some(p) = path.parent() {
@@ -211,15 +217,20 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     let (wake, woken) = std::sync::mpsc::sync_channel(1);
     spool.wake = Some(wake);
     let head_key = format!("{prefix}head");
+    // Known only when it is this store's: a spool with none, or one of another store, learns the store's head again.
     let confirmed = std::fs::read(spool.dir.join(confirmed_key(&head_key)))
         .ok()
         .and_then(|b| {
-            let at = b.iter().position(|c| *c == b'\n')?;
-            Some((
-                b[at + 1..].to_vec(),
-                String::from_utf8(b[..at].to_vec()).ok()?,
-            ))
+            let mut fields = b.splitn(3, |c| *c == b'\n');
+            let (store, etag, bytes) = (fields.next()?, fields.next()?, fields.next()?);
+            if store != spool.store.as_bytes() {
+                return None;
+            }
+            let etag = String::from_utf8(etag.to_vec()).ok()?;
+            Some((!etag.is_empty()).then(|| (bytes.to_vec(), etag)))
         });
+    let known = confirmed.is_some();
+    let confirmed = confirmed.flatten();
     let tried = std::fs::read(spool.dir.join(tried_key(&head_key)))
         .map(|b| unframe(&b))
         .unwrap_or_default();
@@ -228,9 +239,11 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
         dir: spool.dir.clone(),
         prefix,
         head_key,
+        identity: spool.store.clone(),
         prunes: Arc::clone(&spool.prunes),
         progress: Arc::clone(&spool.progress),
         confirmed,
+        known,
         tried,
         deletes: std::collections::VecDeque::new(),
         deleting: true,
@@ -282,10 +295,14 @@ struct Worker<S> {
     dir: PathBuf,
     prefix: String,
     head_key: String,
+    /// The store's identity, kept with the confirmed head.
+    identity: String,
     prunes: Prunes,
     progress: Arc<Progress>,
     /// The head this writer last knew the store to hold, and its ETag; none: the store had no head.
     confirmed: Option<(Vec<u8>, String)>,
+    /// Whether `confirmed` is known (this store's, from the spool or this run); else learned at the first put.
+    known: bool,
     /// Heads put since, whose answers were lost: if the store holds one, it is this writer's.
     tried: Vec<Vec<u8>>,
     deletes: std::collections::VecDeque<String>,
@@ -402,6 +419,12 @@ impl<S: ObjectStore> Worker<S> {
 
     /// Puts `head` over the confirmed one; whether the store holds it now.
     fn put_head(&mut self, head: Vec<u8>) -> Result<bool, Short> {
+        if !self.known {
+            self.reseed()?;
+            if self.confirmed.as_ref().is_some_and(|c| c.0 == head) {
+                return Ok(true);
+            }
+        }
         if !self.tried.contains(&head) {
             self.tried.push(head.clone());
             let path = self.dir.join(tried_key(&self.head_key));
@@ -433,22 +456,46 @@ impl<S: ObjectStore> Worker<S> {
                 self.confirm(o.bytes, o.etag)?;
                 Err(lost.into())
             }
-            None if self.confirmed.is_none() => Err(lost.into()),
+            // No head there (a store emptied or moved): learned again, and created next pass.
+            None => {
+                if self.confirmed.is_some() {
+                    eprintln!(
+                        "worldd: the public stream's backup finds no head in the store; it writes its own"
+                    );
+                    self.confirm_absent()?;
+                }
+                Err(lost.into())
+            }
             Some(_) => Err(Short::Fenced(format!(
                 "stream-backup-fenced: the store's head {} is another writer's",
-                self.head_key
-            ))),
-            None => Err(Short::Fenced(format!(
-                "stream-backup-fenced: the store's head {} is gone",
                 self.head_key
             ))),
         }
     }
 
+    /// The store's head learned again, as the store holds it now: a spool with no confirmed head (or one of another
+    /// store) puts over what is there rather than fencing on it.
+    fn reseed(&mut self) -> super::R<()> {
+        match self.store.get(&self.head_key)? {
+            Some(o) => self.confirm(o.bytes, o.etag)?,
+            None => self.confirm_absent()?,
+        }
+        eprintln!("worldd: the public stream's backup learned the store's head again");
+        self.known = true;
+        Ok(())
+    }
+
     fn confirm(&mut self, head: Vec<u8>, etag: String) -> super::R<()> {
-        confirm(&self.dir, &self.head_key, &head, &etag)?;
+        confirm(&self.dir, &self.identity, &self.head_key, &head, &etag)?;
         self.tried.clear();
         self.confirmed = Some((head, etag));
+        Ok(())
+    }
+
+    fn confirm_absent(&mut self) -> super::R<()> {
+        confirm(&self.dir, &self.identity, &self.head_key, &[], "")?;
+        self.tried.clear();
+        self.confirmed = None;
         Ok(())
     }
 

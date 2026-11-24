@@ -1196,6 +1196,8 @@ pub struct PublicWriter<S> {
     /// R15: the recovery chain written here first and backed up to the store behind the stream ([`backup`]); none:
     /// written to the store before each part is published, as before.
     spool: Option<backup::Spool>,
+    /// R15: the next rollover is a fresh generation's, after a recovery from the store alone.
+    fresh: bool,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1542,7 +1544,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         start: PublicStart<'_>,
         store: S,
         closed: Closed,
-        spool: Option<PathBuf>,
+        spool: Option<(PathBuf, String)>,
     ) -> R<Self> {
         let PublicStart {
             root,
@@ -1629,7 +1631,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             closed_kinds: closed,
             inside,
             hides: true,
-            spool: spool.map(backup::Spool::new),
+            spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
+            fresh: false,
         };
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
@@ -1659,6 +1662,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             w.etag = Some(head.etag);
             w.head = Some(hash);
         } else {
+            if let Some(spool) = &w.spool {
+                // A new chain: the store had no head, and its backup's first head is created, not put over one.
+                spool.confirm(&head_key, &[], "")?;
+            }
             if record != 0 && checkpoint.is_none() {
                 return Err(fault(
                     "stream-recovery-checkpoint",
@@ -1851,6 +1858,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             && w.chunks.is_empty()
             && !w.force_remainder
             && w.migration_cut.is_none();
+        w.fresh = fresh;
         if w.rollover_due() || fresh {
             w.rollover()?;
         }
@@ -2134,6 +2142,20 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             (self.generation_baseline()?, self.player.state().clone())
         };
+        // R15: a fresh generation (a writer recovered from the store alone) never takes the id of the generation it
+        // leaves, or the one before: a lost tail of parts may have been published under it.
+        let id = replica::ids::sha256(&baseline).to_vec();
+        if self.fresh
+            && (id == replica::ids::sha256(&self.baseline).to_vec()
+                || self.handoff.as_ref().is_some_and(|h| h.0 == id))
+        {
+            return Err(fault(
+                "stream-generation-reused",
+                "a new generation from the store alone would take the id of the one it leaves; copy the spool or \
+                 let the old machine's backup catch up",
+            ));
+        }
+        self.fresh = false;
         // A new generation's baseline text holds every public name, as the first baseline's does (#3574).
         let words = self.words(&state, &state)?;
         let text = self.put(&words)?;

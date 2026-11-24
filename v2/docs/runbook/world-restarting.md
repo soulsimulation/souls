@@ -38,13 +38,24 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
   log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
   so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
-  (SIGTERM) and a sleep give the backup up to 8 s and 10 s to catch up first.
+  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
 - **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
   that recovers from the store alone (no `stream-backup/`) starts a new generation, so it never cuts a part again at
   an address viewers may hold. If the store was behind, the parts it lacked are a gap in the stream's history.
 - **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
   this world still running beside a newer one (on this machine or another). The fenced one never writes over it
-  and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running.
+  and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running. If the
+  fenced one is the one that should run (the other is gone for good), unfence it: stop it, remove its confirmed and
+  tried heads, and start it; its backup learns the store's head again and writes over it.
+
+  ```sh
+  sudo systemctl stop worldd@<world>
+  sudo find /var/lib/souls/worlds/worlds/<world>/stream-backup \( -name head.confirmed -o -name head.tried \) -delete
+  sudo systemctl start worldd@<world>
+  ```
+
+  A spool with no confirmed head, or one written for another store (the stream's store moved to another bucket), is
+  learned again the same way by itself; a store whose head is gone gets this writer's.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
