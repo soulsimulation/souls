@@ -60,6 +60,28 @@ pub trait Standing {
     }
 }
 
+/// The places of `.0`, then, once every one of those is tried, those of `.1` for the same entry: births by an entry on
+/// the open ground take the floor that holds it ([`crate::walk::town::Town::entry_floor`]) only when the ground round
+/// it holds no free place.
+pub struct Then<'a, A, B>(pub &'a A, pub Option<&'a B>);
+
+impl<A: Standing, B: Standing> Standing for Then<'_, A, B> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let n = self.0.tries() + self.0.beyond();
+        if i < n {
+            self.0.spot(entry, i)
+        } else {
+            self.1?.spot(entry, i - n)
+        }
+    }
+    fn tries(&self) -> u64 {
+        self.0.tries()
+    }
+    fn beyond(&self) -> u64 {
+        self.0.beyond() + self.1.map_or(0, |b| b.tries() + b.beyond())
+    }
+}
+
 /// Why a birth waits when every place by its entry, and every further one, is held.
 pub const NO_FREE_PLACE: &str = "birth-no-free-place";
 /// Why a birth waits when the ground holds none of the places by its entry or further, and none was held by a body.

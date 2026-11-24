@@ -4167,3 +4167,66 @@ fn c25_doors_from_either_side() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// verdelis-eden (24 Nov, review of #4574): a world entered under a roof wider than the birth ring (a 40 m hall over
+/// the entry at (0, 0), a doorway in its south wall) births its Souls on the hall's floor. Seeded
+/// and served by `worldd` from a facts file of its own: no Eden facts needed.
+#[test]
+fn a_join_under_a_wide_roof_is_born_on_its_floor() {
+    let facts = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-hall@1", "hash": "aa", "name": "core:hall", "form": "point"}],
+  "things": [
+    {"id": "e_hall", "def": "core-hall@1", "ref": "core-hall@1", "parent": null, "pose": [0, 0, 0, 0],
+     "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "wide-hall",
+     "floors": [{"level": 0, "y": 0, "polygon": [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]]}],
+     "rooms": [{"id": "hall", "name": "Hall", "floor": 0, "pose": [0, 0, 0, 0], "height": 4000,
+                "polygon": [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]]}],
+     "openings": [{"id": "door", "kind": "door", "at": [0, 20050], "yaw": 0, "width": 1000, "height": 2100, "sill": 0,
+                   "level": 0, "from": "hall", "fromWall": true, "state": "always", "inRoom": [0, 0, 20050, 0]}],
+     "solids": [[-10250, 20050, 9750, 50, 0, 0, 4000, 5, 0], [10250, 20050, 9750, 50, 0, 0, 4000, 5, 0],
+                [0, -20050, 20100, 50, 0, 0, 4000, 5, 0], [20050, 0, 50, 20100, 0, 0, 4000, 5, 0],
+                [-20050, 0, 50, 20100, 0, 0, 4000, 5, 0]]}
+  ],
+  "doors": [],
+  "places": [],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+  "bake": {"things": 1, "doors": 0, "rooms": 1, "floors": 1, "floor surfaces": 1, "solids": 5, "slots": 0, "windows": 0, "doorways": 1},
+  "byRef": {"core-hall@1": 1}
+}"#;
+    let path = std::env::temp_dir().join(format!("wide-hall-{}.facts.json", std::process::id()));
+    std::fs::write(&path, facts).unwrap();
+    let im = import_eden::load(facts).expect("the hall loads");
+    let floor = im.nodes["e_hall/floor-0"];
+    let (_served, _soul, dir) = serve(
+        path.to_str().unwrap(),
+        "0,0",
+        "wide-hall",
+        im.nodes["world"].scope(),
+    );
+    let born = track(&dir);
+    println!("born: {:?}", born.last());
+    let &(_, node, x, z) = born.last().expect("the body's row");
+    assert_eq!(
+        node, floor,
+        "on the hall's floor, not the open ground cut out under it"
+    );
+    assert!(x.abs() < 17.0 && z.abs() < 17.0, "by the entry: ({x}, {z})");
+    // A second Soul, born beside the first: the floor's ring, a free place.
+    let mut other = Client(
+        UnixStream::connect(dir.join("gateway.sock")).unwrap(),
+        Id::new(Scope([0xc1; 16]), 2).unwrap(),
+        0,
+        im.nodes["world"].scope(),
+    );
+    other
+        .0
+        .set_read_timeout(Some(Duration::from_secs(90)))
+        .unwrap();
+    other.act(JOIN, None, BTreeMap::new()).expect("born too");
+    let rows = track(&dir);
+    let nodes: std::collections::BTreeSet<Id> = rows.iter().map(|r| r.1).collect();
+    assert_eq!(nodes, [floor].into(), "both on the floor");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+}

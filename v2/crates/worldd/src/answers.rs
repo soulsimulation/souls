@@ -800,7 +800,8 @@ struct Lives {
     life: Life,
     ring: Ring,
     entry: Id,
-    /// The entry as configured ([`Join::entry`]): the ring is put by it at each tick's births ([`sim::walk::town::Town::entry_at`]).
+    /// The entry as configured ([`Join::entry`]): when the ring round it on the open ground holds no free place, births
+    /// try the floor that holds it ([`sim::walk::town::Town::entry_floor`]).
     at: (Id, Vec3),
     family: Family,
     kind: Name,
@@ -3308,11 +3309,19 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        // The entry on the floor that holds it when the open ground does not (a world entered under a roof).
-        if l.at.0 == b.town.ground {
-            l.ring.entries.insert(l.entry, b.town.entry_at(l.at.1));
-        }
-        let mut born = b.births_built(&mut l.life, now, &l.ring, &l.family, &|soul| {
+        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
+        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
+        let floor = (l.at.0 == b.town.ground)
+            .then(|| b.town.entry_floor(l.at.1))
+            .flatten()
+            .map(|e| Ring {
+                entries: BTreeMap::from([(l.entry, e)]),
+                radius: l.ring.radius,
+                gap: l.ring.gap,
+                rings: l.ring.rings,
+            });
+        let standing = sim::life::Then(&l.ring, floor.as_ref());
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
             self.birth_builds
                 .get(&soul)
                 .copied()

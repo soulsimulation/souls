@@ -1601,32 +1601,30 @@ impl Town {
         Ok((map, surfaces, buildings, basis, square_pieces))
     }
 
-    /// Where a world's entry at `at` (µm, the open ground's frame) is for a birth: the open ground when it holds the
-    /// point for today's walking body; else the lowest floor of a building on the open ground that holds it, with the
-    /// point in that floor's frame (verdelis-eden's dome garden covers its entry at (0, 0), and the open ground is cut
-    /// out under a building's floor); else the open ground, unchanged.
-    pub fn entry_at(&self, at: Vec3) -> (Id, Vec3) {
+    /// The ground-level floor (level 0) of a building on the open ground that holds the entry point `at` (µm, the
+    /// open ground's frame) for today's walking body and has an open way to the open ground (an unblocked link with an
+    /// end on each), with the point in that floor's frame: where births go when the open ground round an entry holds
+    /// no place (verdelis-eden's dome garden covers its entry at (0, 0), and the open ground is cut out under it). A
+    /// floor above the ground and a sealed one are never taken. `None` when no such floor holds it.
+    pub fn entry_floor(&self, at: Vec3) -> Option<(Id, Vec3)> {
         let holds = |node: Id, p: Vec3| {
             self.surfaces.get(&node).is_some_and(|s| {
                 s.place(node, Frame { node, slot: None }, p, Quat::IDENTITY)
                     .is_ok()
             })
         };
-        if holds(self.ground, at) {
-            return (self.ground, at);
-        }
-        let mut best: Option<(i64, Id, Vec3)> = None;
-        for b in &self.buildings {
-            let Ok(p) = crate::links::back(&b.place, at) else {
-                continue;
-            };
-            for (&node, &(level, _)) in &b.floors {
-                if best.is_none_or(|(l, ..)| level < l) && holds(node, p) {
-                    best = Some((level, node, p));
-                }
-            }
-        }
-        best.map_or((self.ground, at), |(_, node, p)| (node, p))
+        let ground = self.ground;
+        self.buildings.iter().find_map(|b| {
+            let p = crate::links::back(&b.place, at).ok()?;
+            b.floors.iter().find_map(|(&node, &(level, _))| {
+                let out = b.links.iter().any(|l| {
+                    l.blocked.is_none()
+                        && matches!(&l.ends, [Some(x), Some(y)]
+                            if (x.floor == node && y.floor == ground) || (y.floor == node && x.floor == ground))
+                });
+                (level == 0 && out && holds(node, p)).then_some((node, p))
+            })
+        })
     }
 
     /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity

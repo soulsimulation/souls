@@ -56,7 +56,8 @@ export function entryMap(mapPath: string): (ref: string) => string | undefined {
 function footprintBaked(dir: string, sha: string): AssetInfo['baked'] | undefined {
   const f = join(dir, `${sha}.meta.json`);
   if (!existsSync(f)) return undefined;
-  return (JSON.parse(readFileSync(f, 'utf8')) as { baked?: AssetInfo['baked'] }).baked;
+  try { return (JSON.parse(readFileSync(f, 'utf8')) as { baked?: AssetInfo['baked'] }).baked; }
+  catch (e) { throw new Error(`footprint-unreadable: ${sha}: ${(e as Error).message}`); }
 }
 
 /** The model, the facts file's head, and what each thing adds to its record (its uploads, its entry or why none).
