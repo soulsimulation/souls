@@ -100,7 +100,16 @@ fn strs(v: Option<&Value>) -> Vec<String> {
 /// from its end to the thing, public when the kind's link is, else in an audience whose members are its ends, each
 /// body counted as its Soul.
 fn build(kinds: &Value, state: &Value) -> Built {
-    let nodes = state.get("nodes").and_then(Value::obj).unwrap_or(&[]);
+    // A node that is not an object (a null left in the input) is not in the world.
+    let kept: Vec<(String, Value)> = state
+        .get("nodes")
+        .and_then(Value::obj)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|(_, n)| n.obj().is_some())
+        .cloned()
+        .collect();
+    let nodes = kept.as_slice();
     let thing_kinds: BTreeSet<&str> = nodes
         .iter()
         .filter(|(_, n)| n.get("hands").is_none())

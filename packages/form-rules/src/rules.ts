@@ -896,8 +896,9 @@ export function whoMay(input: Input): WhoVerdict {
     read.push([`${act.this}/slot/${drive}/occupants`, riders]);
     if (!riders.includes(state.actor)) return refuse({});
     for (const holder of sorted(nodes)) {
-      const hands = nodes[holder].hands;
-      const hand = hands && typeof hands === 'object' ? sorted(hands).find((k) => hands[k] === act.this) : undefined;
+      // Only a plain object of hands holds anything: a missing node or a list of hands is no hand (as `who_may.rs`).
+      const hands = nodes[holder]?.hands;
+      const hand = hands && typeof hands === 'object' && !Array.isArray(hands) ? sorted(hands).find((k) => hands[k] === act.this) : undefined;
       if (hand === undefined) continue;
       read.push([`${holder}/hand/${hand}`, act.this]);
       return refuse({});
