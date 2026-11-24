@@ -712,16 +712,26 @@ fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
     with_entry_kinds(&rides, entries)
 }
 
-/// This build's hash: the launcher's (`WORLDD_BUILD`), else the same one of this program's own bytes (S12), so
-/// `worldd seed` keeps [`courses`] under the key the launched world reads; else the crate's version.
+/// This build's id: the launcher's hash (`WORLDD_BUILD`), else the crate's version with this program's length and
+/// modification time (S12), read from its metadata only, so `worldd seed` keeps [`courses`] under the key the
+/// launched world reads and every start of the same binary agrees. Hashing the binary's bytes instead cost about 10 s
+/// per start for a debug build.
 fn build_id() -> String {
     static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     ID.get_or_init(|| {
         std::env::var("WORLDD_BUILD").unwrap_or_else(|_| {
+            let version = env!("CARGO_PKG_VERSION");
             std::env::current_exe()
-                .and_then(std::fs::read)
-                .map(|b| to_hex(&supervisor::build_hash(&b)))
-                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned())
+                .and_then(std::fs::metadata)
+                .map(|m| {
+                    let at = m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |d| d.as_nanos());
+                    format!("{version}-{}-{at}", m.len())
+                })
+                .unwrap_or_else(|_| version.to_owned())
         })
     })
     .clone()
