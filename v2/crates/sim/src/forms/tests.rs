@@ -2545,7 +2545,7 @@ fn two_seat_bench() -> (Bench, Id, [u64; 2], Id, Id) {
         .slots
         .as_ref()
         .and_then(|s| s.place_in(bench, slot))
-        .expect("the first seat")
+        .expect("the first place")
         .clone();
     let mut second = first.clone();
     second.place.slot = slot + 1;
@@ -2685,7 +2685,7 @@ fn i4575_two_souls_racing_for_one_seat_one_wins_the_other_is_refused_place_taken
         .iter()
         .map(|e| e.how.as_str().to_owned())
         .collect();
-    println!("#4575 race: Bea's sit ended before the seat:{ended:?}");
+    println!("#4575 race: Bea's sit ended before the place:{ended:?}");
     assert_ne!(ended, vec!["done".to_owned()]);
     assert_eq!(b.forms.seat_holders(bench, left), Vec::<Id>::new());
     assert_eq!(
@@ -2760,18 +2760,30 @@ fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
     let entry =
         |f: &str| parse(&std::fs::read_to_string(root.join(f)).expect("read")).expect("JSON");
     let node = fixture(7);
-    for (file, form, seat, whole) in [
+    for (file, form, place, whole) in [
         ("seating/bench.json", "sit", "left", false),
         ("vehicles/locomotive.json", "board", "fireman", false),
         ("vehicles/locomotive.json", "drive", "driver", true),
     ] {
         let e = entry(file);
-        let args = Args::from([("seat".to_owned(), Arg::Name(seat.to_owned()))]);
+        // The form's one slot argument, by the name its entry gives it.
+        let arg = e
+            .get("forms")
+            .and_then(|f| f.get(form))
+            .and_then(|f| f.get("takes"))
+            .and_then(json::Value::obj)
+            .and_then(|t| {
+                t.iter()
+                    .find(|(_, t)| t.get("type").and_then(json::Value::str) == Some("slot"))
+            })
+            .map(|(k, _)| k.clone())
+            .expect("a slot argument");
+        let args = Args::from([(arg, Arg::Name(place.to_owned()))]);
         let steps = bind_with(&e, form, &args).expect("binds");
         let effects = bind_effects_args(&e, form, &args).expect("binds");
-        let seats = super::seats_taken(node, &steps, &effects, false);
-        println!("#4575 {file} {form}: seats reserved {seats:?} (empty: the whole thing)");
-        assert_eq!(seats.is_empty(), whole, "{file} {form}: {effects:?}");
+        let taken = super::slots_taken(node, &steps, &effects, false);
+        println!("#4575 {file} {form}: slots reserved {taken:?} (empty: the whole thing)");
+        assert_eq!(taken.is_empty(), whole, "{file} {form}: {effects:?}");
     }
 }
 
@@ -2873,7 +2885,7 @@ fn i4575_e14_a_lecture_removed_mid_attend_ends_it_and_frees_the_seat() {
     assert_eq!(
         b.slots.as_ref().expect("slots").holder_in(bench, left),
         None,
-        "the seat given back"
+        "the place given back"
     );
     b.clean();
 }
