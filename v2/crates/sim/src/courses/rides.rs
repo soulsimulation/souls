@@ -136,6 +136,9 @@ pub struct SeatRun {
     pub slot: u64,
     pub course: Course,
     pub stops: Vec<(usize, PlaceAt)>,
+    /// The stations where it is boarded, its own stop: across and back the one its stand point names, round a ring
+    /// every station within reach. Their places stand the rider at the registered place's stand point.
+    pub own: std::collections::BTreeSet<usize>,
     /// What a trip's end sets back ([`trip_ends`]): the same for every seat of a ride.
     pub ends: Vec<(u64, replica::encode::Value)>,
 }
@@ -197,14 +200,15 @@ fn mid(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
 }
 
-/// Where a thing's seats run (see the module doc), from its entry `entry`, starting at world time `t0`. `seats`: each of
-/// its body slots as registered where the thing stands, by slot number (the entry's order, from 1), `to_floor`
+/// Where a thing's riders' slots run (see the module doc), from its entry `entry`, starting at world time `t0`.
+/// `registered`: each of its body slots as registered where the thing stands, by slot number (the entry's order, from
+/// 1), `to_floor`
 /// carries a point of the thing's frame into the floor's (µm), and `ground(x, z)` is the floor's height there (floor
 /// frame, µm; `None`: the point's own height). A seat the ride does not list, or whose run does not load, has none; a
 /// thing whose entry has no ride of two stops has none.
 pub fn seat_runs(
     entry: &Json,
-    seats: &BTreeMap<u64, PlaceAt>,
+    registered: &BTreeMap<u64, PlaceAt>,
     to_floor: &dyn Fn(Vec3) -> Option<Vec3>,
     ground: &dyn Fn(i64, i64) -> Option<i64>,
     t0: Micros,
@@ -218,18 +222,26 @@ pub fn seat_runs(
     let Some(r) = entry.get("ride") else {
         return Vec::new();
     };
-    let names = |k: &str| -> Vec<String> {
-        r.get(k)
-            .and_then(Json::arr)
+    let names = |v: &Json| -> Vec<String> {
+        v.arr()
             .unwrap_or(&[])
             .iter()
             .filter_map(Json::str)
             .map(str::to_owned)
             .collect()
     };
-    let (listed, stop_names) = (names("seats"), names("stops"));
     let points = entry.get("points");
     let slots = entry.get("slots");
+    let stop_names = r.get("stops").map(names).unwrap_or_default();
+    // The slots it carries riders in: the section's list, beside `stops`, that names the entry's own slots.
+    let listed: Vec<String> = r
+        .obj()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|(k, _)| k != "stops")
+        .map(|(_, v)| names(v))
+        .find(|l| !l.is_empty() && l.iter().all(|n| slots.and_then(|s| s.get(n)).is_some()))
+        .unwrap_or_default();
     let number = |name: &str| {
         (1u64..)
             .zip(slots?.obj()?)
@@ -262,7 +274,7 @@ pub fn seat_runs(
     let ends = trip_ends(entry);
     let mut out = Vec::new();
     for (k, (name, point, own)) in declared.iter().enumerate() {
-        let Some(base) = number(name).and_then(|n| seats.get(&n)) else {
+        let Some(base) = number(name).and_then(|n| registered.get(&n)) else {
             continue;
         };
         // The stations (thing frame) and, for each, the stand point it is left at.
@@ -324,6 +336,13 @@ pub fn seat_runs(
             continue;
         };
         course.within = table.period;
+        // Its own stations: across and back the first (its own stop, the trip starts there); round a ring every one.
+        let own_station = |i: usize| !ride.returns || i == 0;
+        // The registered place's stand point (moved clear of a wall or a doorway at registration, as the case may be),
+        // in the floor's frame, where a form walks the rider and where it is set down at its own stop.
+        let registered_stand = base.stand().ok();
+        let [w, x, y, z] = base.facing.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z).ok();
         let at_stops = stations
             .iter()
             .enumerate()
@@ -333,6 +352,13 @@ pub fn seat_runs(
                 if !(0..=STANDARD_REACH).contains(&height) {
                     return None;
                 }
+                let offset = match (own_station(i), registered_stand, back) {
+                    (true, Some(s), Some(q)) => {
+                        let d = q.rotate(Vec3::new(s.x - p.x, 0, s.z - p.z)).ok()?;
+                        [d.x, d.z]
+                    }
+                    _ => [stand.x - at.x, stand.z - at.z],
+                };
                 Some((
                     i,
                     PlaceAt {
@@ -340,7 +366,7 @@ pub fn seat_runs(
                         place: Place {
                             slot: base.place.slot,
                             height,
-                            stand: [stand.x - at.x, stand.z - at.z],
+                            stand: offset,
                         },
                         point: p,
                         facing: base.facing,
@@ -350,10 +376,16 @@ pub fn seat_runs(
                 ))
             })
             .collect::<Vec<_>>();
+        let own = at_stops
+            .iter()
+            .map(|(i, _)| *i)
+            .filter(|i| own_station(*i))
+            .collect();
         out.push(SeatRun {
             slot: base.place.slot,
             course,
             stops: at_stops,
+            own,
             ends: ends.clone(),
         });
     }
@@ -433,7 +465,7 @@ mod tests {
 
     /// The seats of `entry` as a thing placed at the floor's origin, unturned, registers them: by slot number, each at
     /// its declared point, its stand point's offset from it.
-    fn seats_of(entry: &Json) -> BTreeMap<u64, PlaceAt> {
+    fn places_of(entry: &Json) -> BTreeMap<u64, PlaceAt> {
         let mm = |v: &Json| {
             let a = v.arr().unwrap();
             let n = |k: usize| match a[k] {
@@ -480,12 +512,12 @@ mod tests {
     #[test]
     fn n14_a_cable_cars_cabins_run_across_and_back_at_standing_height_at_each_station() {
         let e = entry("cable_car.json");
-        let seats = seats_of(&e);
-        let flat = seat_runs(&e, &seats, &|p| Some(p), &|_, _| Some(0), 0);
+        let registered = places_of(&e);
+        let flat = seat_runs(&e, &registered, &|p| Some(p), &|_, _| Some(0), 0);
         assert_eq!(flat.len(), 2, "both cabins");
         for r in &flat {
             assert_eq!(r.course.shape, Shape::ThereAndBack);
-            let own = &seats[&r.slot];
+            let own = &registered[&r.slot];
             // It waits first where it is declared, at the valley station.
             assert_eq!(r.course.stations[0].at, own.point);
             let t = r.course.load().unwrap();
@@ -508,11 +540,11 @@ mod tests {
         }
         // On a mountain the far stop rises with the ground under the mountain station, and stays at standing height.
         let hill = |_: i64, z: i64| Some(if z < 0 { 43_900_000 } else { 0 });
-        let up = seat_runs(&e, &seats, &|p| Some(p), &hill, 0);
+        let up = seat_runs(&e, &registered, &|p| Some(p), &hill, 0);
         assert_eq!(up[0].course.stations[1].at.y, 450_000 + 43_900_000);
         assert_eq!(up[0].stops[1].1.place.height, 450_000);
         // The same entry and ground give the same runs.
-        let again = seat_runs(&e, &seats, &|p| Some(p), &hill, 0);
+        let again = seat_runs(&e, &registered, &|p| Some(p), &hill, 0);
         assert_eq!(
             up.iter().map(|r| &r.course).collect::<Vec<_>>(),
             again.iter().map(|r| &r.course).collect::<Vec<_>>()
@@ -522,8 +554,8 @@ mod tests {
     #[test]
     fn n14_a_big_wheels_gondolas_turn_round_and_two_wait_at_the_platform_together() {
         let e = entry("big_wheel.json");
-        let seats = seats_of(&e);
-        let runs = seat_runs(&e, &seats, &|p| Some(p), &|_, _| Some(0), 0);
+        let registered = places_of(&e);
+        let runs = seat_runs(&e, &registered, &|p| Some(p), &|_, _| Some(0), 0);
         assert_eq!(runs.len(), 16);
         let at_platform = |r: &SeatRun, t: Micros| {
             let s = r.course.load().unwrap().stopped(t).unwrap();
@@ -569,8 +601,51 @@ mod tests {
         );
         // The carousel's horses go round too, and every station is one to get on and off at.
         let c = entry("carousel.json");
-        let horses = seat_runs(&c, &seats_of(&c), &|p| Some(p), &|_, _| Some(0), 0);
+        let horses = seat_runs(&c, &places_of(&c), &|p| Some(p), &|_, _| Some(0), 0);
         assert_eq!(horses.len(), 6);
         assert!(horses.iter().all(|r| r.stops.len() == 6));
+    }
+
+    /// N14 review: a slot is boarded at its own stations, marked by index, and stands its rider at the registered
+    /// place's stand point there, as registration placed it (moved clear of a wall, or on a turned ride), never by
+    /// matching recomputed points.
+    #[test]
+    fn n14_own_stations_are_marked_and_stand_the_rider_where_the_place_was_registered() {
+        let near = |a: Vec3, b: Vec3| (a.x - b.x).abs() <= 1 && (a.z - b.z).abs() <= 1;
+        // The cable car, its red cabin's stand point moved 500 mm at registration: its own stop is station 0, and the
+        // rider is set down at the moved point there; at the mountain at the mountain station's.
+        let e = entry("cable_car.json");
+        let mut registered = places_of(&e);
+        registered.get_mut(&1).unwrap().place.stand[0] += 500_000;
+        let moved = registered[&1].stand().unwrap();
+        let runs = seat_runs(&e, &registered, &|p| Some(p), &|_, _| Some(0), 0);
+        let red = runs.iter().find(|r| r.slot == 1).unwrap();
+        assert_eq!(red.own, std::collections::BTreeSet::from([0]));
+        assert!(near(red.stops[0].1.stand().unwrap(), moved));
+        assert!(near(
+            red.stops[1].1.stand().unwrap(),
+            Vec3::new(5_000_000, 0, -59_500_000)
+        ));
+        // The big wheel turned 37° where it stands: every station within reach is its own, and each stands the rider at
+        // the registered stand point to the micrometre's rounding.
+        let e = entry("big_wheel.json");
+        let q = replica::pose::Quat::from_yaw_mdeg(37_000).unwrap();
+        let registered: BTreeMap<u64, PlaceAt> = places_of(&e)
+            .into_iter()
+            .map(|(n, mut p)| {
+                p.point = q.rotate(p.point).unwrap();
+                p.facing = q;
+                (n, p)
+            })
+            .collect();
+        let runs = seat_runs(&e, &registered, &|p| q.rotate(p).ok(), &|_, _| Some(0), 0);
+        for r in &runs {
+            assert_eq!(r.own.len(), 2, "slot {}", r.slot);
+            let own = registered[&r.slot].stand().unwrap();
+            for (i, p) in &r.stops {
+                assert!(r.own.contains(i));
+                assert!(near(p.stand().unwrap(), own), "slot {} station {i}", r.slot);
+            }
+        }
     }
 }

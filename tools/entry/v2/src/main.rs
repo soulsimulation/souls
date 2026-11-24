@@ -1225,7 +1225,7 @@ impl Stage {
         };
         if self.slots.replace(id, places).is_ok() {
             for r in runs {
-                if let Err(e) = self.slots.run(id, r.slot, &r.course, r.stops) {
+                if let Err(e) = self.slots.run(id, r.slot, &r.course, r.stops, &r.own) {
                     eprintln!("a ride's seat run did not load: {}: {}", e.name, e.detail);
                 }
             }

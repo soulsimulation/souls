@@ -505,7 +505,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     let (cabin, r) = lift_place(ground);
     b.add_place(cabin)?;
     b.slots.trip_ends(lift(), r.ends.clone());
-    b.slots.run(lift(), r.slot, &r.course, r.stops)?;
+    b.slots.run(lift(), r.slot, &r.course, r.stops, &r.own)?;
     Ok(b)
 }
 

@@ -142,7 +142,7 @@ pub fn runs(
             .insert(p.place.slot, p.clone());
     }
     let mut out = Vec::new();
-    for (thing, seats) in by_thing {
+    for (thing, registered) in by_thing {
         let Some(node) = town.tree.handle(thing).and_then(|h| town.tree.node(h)) else {
             continue;
         };
@@ -153,7 +153,7 @@ pub fn runs(
         if entry.get("ride").is_none() {
             continue;
         }
-        let Some(floor) = seats.values().next().map(|p| p.floor) else {
+        let Some(floor) = registered.values().next().map(|p| p.floor) else {
             continue;
         };
         let surface = town.surfaces.get(&floor);
@@ -176,7 +176,7 @@ pub fn runs(
             continue;
         };
         let to_floor = |p: Vec3| x.point(p).ok();
-        for r in sim::courses::rides::seat_runs(entry, &seats, &to_floor, &ground, 0) {
+        for r in sim::courses::rides::seat_runs(entry, &registered, &to_floor, &ground, 0) {
             out.push((thing, r));
         }
     }

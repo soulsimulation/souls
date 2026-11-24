@@ -990,7 +990,13 @@ fn cabin(w: &mut World) -> crate::courses::Table {
         ..at.clone()
     };
     w.slots
-        .run(w.chair, at.place.slot, &course, vec![(0, at), (1, there)])
+        .run(
+            w.chair,
+            at.place.slot,
+            &course,
+            vec![(0, at), (1, there)],
+            &std::collections::BTreeSet::from([0]),
+        )
         .expect("a run");
     course.load().expect("loads")
 }
@@ -1125,7 +1131,7 @@ fn n14_a_rider_whose_legs_another_claim_takes_is_never_set_down_between_stops() 
             Name::new("test:left").expect("a name"),
         )
     };
-    assert_eq!(held, Some(true), "still holds its seat");
+    assert_eq!(held, Some(true), "still holds its place");
     assert_eq!(w.c.body(b).expect("a body").pose.support, Support::Slot);
     assert_eq!(w.slots.held_by(b), Some(w.chair));
     // Its walk ends; at the next stop it rises there.
@@ -1157,4 +1163,102 @@ fn n14_a_trip_ends_at_the_next_stop_and_a_board_waits_for_the_cabin() {
         assert!(r.detail.contains("26000000"), "{r}");
     }
     assert!(w.slots.boardable_seat(w.chair, 26_000_000).is_ok());
+}
+
+/// N14 review: a big wheel's gondolas share one stand point, so the free-slot choice was always gondola 1, aloft 14
+/// steps of 16. A request naming no slot takes a gondola that waits at the platform now, whichever it is.
+#[test]
+fn n14_a_big_wheel_is_boarded_at_whichever_gondola_waits_at_the_platform() {
+    use replica::rules::json::{Value as Json, parse};
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/rides");
+    let entry = parse(&std::fs::read_to_string(dir.join("big_wheel.json")).unwrap()).unwrap();
+    let mut w = world(chair());
+    let wheel = w.mint.mint().expect("id");
+    let floor = fixture(1);
+    let mm = |v: &Json| {
+        let a = v.arr().unwrap();
+        let n = |k: usize| match a[k] {
+            Json::Int(n) => i64::try_from(n).unwrap() * 1000,
+            _ => panic!("a whole mm"),
+        };
+        Vec3::new(n(0), n(1), n(2))
+    };
+    let mut registered = BTreeMap::new();
+    for (n, (_, s)) in (1u64..).zip(entry.get("slots").unwrap().obj().unwrap()) {
+        let at = mm(s.get("at_mm").unwrap());
+        let stand_name = s.get("stand").unwrap().str().unwrap();
+        let st = mm(entry
+            .get("points")
+            .unwrap()
+            .get(stand_name)
+            .unwrap()
+            .get("at_mm")
+            .unwrap());
+        let p = PlaceAt {
+            thing: wheel,
+            place: Place {
+                slot: n,
+                height: at.y,
+                stand: [st.x - at.x, st.z - at.z],
+            },
+            point: at,
+            facing: Quat::IDENTITY,
+            floor,
+            more: Vec::new(),
+        };
+        w.slots.add(p.clone()).expect("a place");
+        registered.insert(n, p);
+    }
+    let runs =
+        crate::courses::rides::seat_runs(&entry, &registered, &|p| Some(p), &|_, _| Some(0), 0);
+    assert_eq!(runs.len(), 16);
+    for r in &runs {
+        w.slots
+            .run(wheel, r.slot, &r.course, r.stops.clone(), &r.own)
+            .expect("a run");
+    }
+    // A step at which gondola 1 is up the wheel: its fifth stop.
+    let table = runs[0].course.load().unwrap();
+    let t = table
+        .legs
+        .iter()
+        .filter(|l| l.stop.is_some())
+        .nth(4)
+        .unwrap()
+        .start
+        + 1;
+    assert!(!w.slots.at_own_stop(wheel, 1, t), "gondola 1 is aloft");
+    let waiting: Vec<u64> = (1..=16)
+        .filter(|s| w.slots.at_own_stop(wheel, *s, t))
+        .collect();
+    assert_eq!(
+        waiting.len(),
+        2,
+        "two gondolas wait at the platform: {waiting:?}"
+    );
+    assert!(w.slots.boardable_seat(wheel, t).is_ok());
+    // A sit naming no gondola takes one of those two.
+    let body = w.bodies[0];
+    let sit = mv("souls:sit");
+    let req = [Request {
+        body,
+        thing: wheel,
+        slot: None,
+        mv: &sit,
+        stance: Stance::Sit,
+    }];
+    let w = &mut w;
+    let out = w.slots.commit(
+        &mut w.c,
+        &mut w.due,
+        &mut w.mint,
+        &mut w.moves,
+        &Near,
+        &w.floors,
+        &req,
+        t,
+    );
+    assert!(out[0].1.is_ok(), "{:?}", out[0].1);
+    let (_, slot, _) = w.slots.spot_of(body).expect("held");
+    assert!(waiting.contains(&slot), "took gondola {slot}");
 }

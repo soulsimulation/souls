@@ -143,7 +143,7 @@ pub struct Engine {
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
     /// Whether the rides' seat courses (N14) were written to their things at this start.
-    seat_courses: bool,
+
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
     /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
@@ -419,7 +419,7 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
-            seat_courses: false,
+
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
@@ -1118,9 +1118,10 @@ impl Engine {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
         }
-        if !self.seat_courses {
-            self.seat_courses = true;
-            self.out.extend(seat_courses(live, slots, now));
+        // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
+        let changed = slots.runs_changed();
+        if !changed.is_empty() {
+            self.out.extend(slot_courses(live, slots, &changed, now));
         }
         // N14: a ride's trip ends when its seats next come to a stop: what its start form set goes back (a cable car's
         // `under_way`), so a ride set off once is boarded again.
@@ -2590,14 +2591,17 @@ fn trip_end(live: &Tree, thing: Id, ends: &[(u64, Value)], now: Micros) -> Optio
     }
 }
 
-/// The courses of the rides' seats that move with their cabins (N14), written once at a start onto each ride whose
-/// [`replica::schedule::F_SEAT_COURSES`] is not what its seats run now (`slots`, from its entry): one entry of the
-/// world's a ride, so every copy and the page read where each seat and its rider are. A restart with the same entries
-/// writes nothing.
-fn seat_courses(live: &Tree, slots: &Slots, now: Micros) -> Vec<Effect> {
-    let mut by: BTreeMap<Id, BTreeMap<u64, Value>> = BTreeMap::new();
-    for (thing, slot, c) in slots.seat_courses() {
-        by.entry(thing).or_default().insert(slot, c.to_value());
+/// The courses of the slots that move with their cabins (N14) of the rides `changed`, written onto each whose
+/// [`replica::schedule::F_SEAT_COURSES`] is not what its slots run now (`slots`, from its entry), or cleared on one whose
+/// slots no longer run (a ride a god edit moved where they do not): one entry of the world's a ride, so every copy and
+/// the page read where each slot and its rider are. A restart with the same entries writes nothing.
+fn slot_courses(live: &Tree, slots: &Slots, changed: &BTreeSet<Id>, now: Micros) -> Vec<Effect> {
+    let mut by: BTreeMap<Id, BTreeMap<u64, Value>> =
+        changed.iter().map(|t| (*t, BTreeMap::new())).collect();
+    for (thing, slot, c) in slots.slot_courses() {
+        if let Some(m) = by.get_mut(&thing) {
+            m.insert(slot, c.to_value());
+        }
     }
     let mut out = Vec::new();
     for (thing, courses) in by {
@@ -2605,8 +2609,11 @@ fn seat_courses(live: &Tree, slots: &Slots, now: Micros) -> Vec<Effect> {
         let held = live
             .handle(thing)
             .and_then(|h| live.node(h))
-            .and_then(|n| n.fields().get(&replica::schedule::F_SEAT_COURSES).cloned());
-        if held.as_ref() == Some(&to) {
+            .map(|n| n.fields().get(&replica::schedule::F_SEAT_COURSES).cloned());
+        let Some(held) = held else {
+            continue;
+        };
+        if held.as_ref() == Some(&to) || (held.is_none() && to == Value::Map(BTreeMap::new())) {
             continue;
         }
         let e = crate::carrier::entry(
@@ -2624,7 +2631,7 @@ fn seat_courses(live: &Tree, slots: &Slots, now: Micros) -> Vec<Effect> {
         match e {
             Ok(e) => out.push(e),
             Err(r) => eprintln!(
-                "worldd: {}'s seat courses are not written: {r}",
+                "worldd: {}'s slot courses are not written: {r}",
                 show(thing)
             ),
         }

@@ -1868,8 +1868,8 @@ fn bodies(
     // The seats that move with their cabins (N14): boarded and left only where they stand at a stop.
     for (thing, r) in runs {
         b.slots.trip_ends(thing, r.ends.clone());
-        if let Err(e) = b.slots.run(thing, r.slot, &r.course, r.stops) {
-            eprintln!("worldd: a ride's seat run did not load: {}", refusal(e));
+        if let Err(e) = b.slots.run(thing, r.slot, &r.course, r.stops, &r.own) {
+            eprintln!("worldd: a ride's slot run did not load: {}", refusal(e));
         }
     }
 
@@ -2900,7 +2900,7 @@ fn serve(args: &[String]) -> R<()> {
     for (thing, r) in &runs {
         // As a balloon's loop is printed (`with_rides`): where a client's own timetable can be checked.
         println!(
-            "ride seat: {} slot {}, lap {} us from {} us, {} stops to get on and off at",
+            "ride slot: {} slot {}, lap {} us from {} us, {} stops to get on and off at",
             replica::world_model::show(*thing),
             r.slot,
             r.course.load().map_or(0, |t| t.period),
