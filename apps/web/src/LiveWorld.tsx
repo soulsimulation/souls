@@ -121,7 +121,7 @@ import {WorldEdgeItems} from './WorldEdgeItems.ts';
 import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type CameraMove } from './WorldNavigation.ts';
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
 import { composeVisibleViewport, viewportNote, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
-import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
+import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, seatedPlate, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import { cardLook, fadeCard } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
 import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
@@ -169,7 +169,7 @@ const HOUR_SECONDS = 3600;
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
 type Shown = { tick: number; datetime: string | null; take: Take | null; entities: Record<string, SampledEntity> };
-type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
+type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string; up?: boolean;
   /** #2195: the card's eased opacity, whether it is emphasised, and its last sightline check (performance.now ms). */
   shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
 
@@ -1021,7 +1021,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
-        l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
+        // 24 Nov: a seated body's plate sits over its head (seatedPlate): under it, side by side on a bench, it lay on the
+        // next Soul's legs and its own floated a metre below its body
+        const sat = seatedPlate(at.entities[soul.entityId]?.activity, at.entities[soul.entityId]?.state?.seatHeight);
+        if (sat !== null) { l.up = true; l.obj.center.set(0.5, 1); l.obj.position.set(pos[0], pos[1] + sat, pos[2]); }
+        else { l.up = false; l.obj.center.set(0.5, 0); l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]); }
         l.obj.visible = true;
         if (cards) {
           const activity = at.entities[soul.entityId]?.activity;
@@ -1206,7 +1210,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       for (const [id,l] of labels) {
         if (!l.obj.visible || l.obj.element.style.display === 'none' || l.shown < 0.04) continue;   // #2195: a faded-out card takes no room
         const b=l.obj.element.getBoundingClientRect();
-        boxes.push({id,x:b.left-hostBox.left-l.offset.dx,y:b.top-hostBox.top-l.offset.dy,width:b.width,height:b.height,selected:id===soulId,previous:l.offset});
+        boxes.push({id,x:b.left-hostBox.left-l.offset.dx,y:b.top-hostBox.top-l.offset.dy,width:b.width,height:b.height,selected:id===soulId,previous:l.offset,...(l.up?{up:true}:{})});
       }
       const placements=placeWorldLabels(boxes,area);
       for(const [id,l] of labels) {

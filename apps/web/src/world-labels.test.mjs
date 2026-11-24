@@ -1,5 +1,6 @@
 // C2 (Gene 2026-10-26): name plates hang under the body, just outside the selection ring; no leader line; the packing
-// solver only moves a plate sideways or down, never up over its body, at most 180 px.
+// solver only moves a plate sideways or down, never up over its body, at most 180 px. A seated body's plate sits over
+// its head (24 Nov) and moves only sideways or up.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp} from 'node:fs/promises';
@@ -9,7 +10,7 @@ import {createRequire} from 'node:module';
 import {build} from 'esbuild';
 const here=new URL('.',import.meta.url).pathname,outfile=join(await mkdtemp(join(tmpdir(),'souls-world-labels-')),'labels.cjs');
 await build({entryPoints:[join(here,'WorldLabels.ts')],outfile,bundle:true,format:'cjs',platform:'node',logLevel:'silent'});
-const {placeWorldLabels,plateAnchor,nameTag,DOING_DISPLAY,DOING_LINES}=createRequire(import.meta.url)(outfile);
+const {placeWorldLabels,plateAnchor,seatedPlate,nameTag,DOING_DISPLAY,DOING_LINES}=createRequire(import.meta.url)(outfile);
 const area={left:0,top:0,width:390,height:700,aspect:390/700};
 const box=(id,x,y,o={})=>({id,x,y,width:80,height:18,selected:false,...o});
 const overlap=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
@@ -48,6 +49,25 @@ test('solver: a plate whose anchor (its top centre) is off screen stays hidden; 
  assert.equal(placeWorldLabels([box('a',100,690)],area).has('a'),false);
  assert.deepEqual(placeWorldLabels([box('a',-30,300)],area).get('a'),{dx:30,dy:0},'sideways onto the screen is fine');
 });
+test('seatedPlate: a seated body\'s plate over its head, from the seat\'s height; any other body\'s under it (24 Nov)',()=>{
+ assert.equal(seatedPlate('sit',0.45),1.55);
+ assert.ok(Math.abs(seatedPlate('sit',0.6)-1.7)<1e-9,'a higher seat, a higher plate');
+ assert.equal(seatedPlate('sit',undefined),1.55,'no recorded seat height: a bench\'s');
+ for(const bad of [0,-1,3,NaN,'0.5'])assert.equal(seatedPlate('sit',bad),1.55);
+ for(const a of ['idle','walk','lie','sleep',undefined])assert.equal(seatedPlate(a,0.45),null,`${a}: under the body`);
+});
+test('solver: two Souls seated side by side each keep their plate over their own head; a crowded one goes up or aside, never down onto its body',()=>{
+ // a plate over a head: x,y is its top left, its anchor its bottom centre (y + height)
+ const up=(id,x,bottom,o={})=>box(id,x,bottom-18,{up:true,...o});
+ assert.deepEqual(placeWorldLabels([up('a',100,300)],area).get('a'),{dx:0,dy:0},'a free plate stays over its head');
+ const apart=placeWorldLabels([up('a',60,300,{selected:true}),up('b',150,310)],area);
+ assert.deepEqual([apart.get('a'),apart.get('b')],[{dx:0,dy:0},{dx:0,dy:0}],'heads apart: each plate over its own');
+ const r=placeWorldLabels([up('a',100,300,{selected:true}),up('b',104,304)],area),b=r.get('b');
+ assert.ok(b&&b.dy<=0,JSON.stringify(b));
+ assert.ok(!overlap({x:100,y:282,width:80,height:18},{x:104+b.dx,y:286+b.dy,width:80,height:18}));
+ assert.deepEqual(placeWorldLabels([up('a',100,300,{previous:{dx:0,dy:24}})],area).get('a'),{dx:0,dy:0},'a stale downward placement is dropped');
+ assert.equal(placeWorldLabels([up('a',100,720)],area).has('a'),false,'its anchor (its bottom) off screen: hidden');
+});
 test('plateAnchor: the ground point moved toward the eye by the ring radius, height unchanged',()=>{
  const p=plateAnchor([10,2,5],{x:10,z:25},{x:0,z:1},0.64);
  assert.deepEqual(p.map(v=>+v.toFixed(6)),[10,2,5.64]);
@@ -66,7 +86,7 @@ test('name tag has no leader line: name, doing, card, channel chip only',()=>{
 });
 test('LiveWorld hangs the plate below its anchor and reads the radius from the drawn ring',async()=>{
  const src=await readFile(join(here,'LiveWorld.tsx'),'utf8');
- assert.match(src,/obj\.center\.set\(0\.5, 0\)/);assert.match(src,/ring\.geometry\.parameters\.outerRadius/);
+ assert.match(src,/obj\.center\.set\(0\.5, 0\)/);assert.match(src,/seatedPlate\(at\.entities\[soul\.entityId\]\?\.activity/);assert.match(src,/l\.obj\.center\.set\(0\.5, 1\)/);assert.match(src,/ring\.geometry\.parameters\.outerRadius/);
  assert.doesNotMatch(src,/leader/);assert.match(src,/plateAnchor\(pos, eye, down, ringR\)/);
 });
 test('#1645: the doing line wraps within a max width and stops at two lines with an ellipsis',()=>{
