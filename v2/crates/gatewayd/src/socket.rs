@@ -88,6 +88,7 @@ pub fn router(gw: Arc<Gateway>) -> Router {
         .route(crate::creator::PATH, post(crate::creator::exchange))
         .route(crate::creator::HELPER_PATH, post(crate::creator::helper))
         .route(crate::entries::PATH, get(crate::entries::serve))
+        .route(crate::entries::KINDS_PATH, get(crate::entries::serve_kinds))
         .route(
             crate::bulk::PATH,
             post(crate::bulk::submit).layer(crate::bulk::limit()),

@@ -11,7 +11,8 @@
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
-# What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
+# What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd and
+# its uploads checker assets-check,
 # directoryd, register-world, deploy, gateway-upgrade, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory, souls-origin, souls-agents and souls-alarms (with its drop-in).
@@ -30,7 +31,7 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-world publish-template)
+PROGRAMS=(supervisor worldd gatewayd assets-check directoryd register-world deploy gateway-upgrade import-world publish-template)
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }

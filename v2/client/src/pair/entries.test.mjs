@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
-import { entriesOf, refreshEntries } from './pair.mjs';
+import { entriesOf, refreshEntries, refreshKindsText } from './pair.mjs';
 import { kindsIn } from '../check/state.mjs';
 
 test('the entries address is the socket address\'s, over http(s)', () => {
@@ -45,6 +45,37 @@ test('entries are written where the checks read them, revalidated by tag, and re
     await assert.rejects(refreshEntries({ home, world: 'eden', gateway, token: 'other' }), { code: 'token.refused' });
     assert.ok(readdirSync(join(home, 'kinds')).every((f) => !f.endsWith('.tmp')));
     assert.equal(JSON.parse(readFileSync(join(home, 'kinds', '.entries-eden.json'), 'utf8')).files.length, 2);
+  } finally {
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('#1960: a creator keeps the world\'s kinds text where its checks read it, revalidated by tag', async () => {
+  let text = '{1: "eden:bench", 2: "thing"}\n';
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url, tag: req.headers['if-none-match'] ?? null });
+    if (req.url !== '/v2/kinds' || req.headers.authorization !== 'Bearer t0k') { res.writeHead(401).end('{"refused":"token.refused"}'); return; }
+    const tag = `"${createHash('sha256').update(text).digest('hex')}"`;
+    if (req.headers['if-none-match'] === tag) { res.writeHead(304, { etag: tag }).end(); return; }
+    res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip', etag: tag }).end(gzipSync(text));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const home = mkdtempSync(join(tmpdir(), 'kinds-')), gateway = `ws://127.0.0.1:${server.address().port}/v2/ws`;
+  try {
+    assert.deepEqual(await refreshKindsText({ home, world: 'eden', gateway, token: 't0k' }), { changed: true });
+    assert.equal(readFileSync(join(home, 'kinds', 'eden.kinds'), 'utf8'), text);
+    assert.deepEqual(await refreshKindsText({ home, world: 'eden', gateway, token: 't0k' }), { changed: false });
+    assert.ok(seen[1].tag, 'the second fetch sent the kept tag');
+    text += '# souls-boot-body eden:bench\n';
+    assert.deepEqual(await refreshKindsText({ home, world: 'eden', gateway, token: 't0k' }), { changed: true });
+    assert.equal(readFileSync(join(home, 'kinds', 'eden.kinds'), 'utf8'), text, 'a restarted world\'s new text replaces it');
+    unlinkSync(join(home, 'kinds', 'eden.kinds'));
+    assert.deepEqual(await refreshKindsText({ home, world: 'eden', gateway, token: 't0k' }), { changed: true }, 'a file gone is fetched again');
+    await assert.rejects(refreshKindsText({ home, world: 'eden', gateway, token: 'other' }), { code: 'token.refused' });
+    await assert.rejects(refreshKindsText({ home, world: '../x', gateway, token: 't0k' }), { code: 'kinds-world' });
+    assert.deepEqual(Object.keys(kindsIn(join(home, 'kinds'))), [], 'the text is not read as an entry');
   } finally {
     server.close();
     rmSync(home, { recursive: true, force: true });
