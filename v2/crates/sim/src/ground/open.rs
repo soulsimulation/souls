@@ -6,7 +6,7 @@
 //!   own doorways. [`Scene::of`] is the same parts in the children's order, so a scene put together from some of them
 //!   lists its boxes in the order the whole one does, and each square is cut from the same boxes in the same order.
 //! - **What a change cuts again** ([`Index::recut`]): the children holding the nodes a part changes, read again from
-//!   the tree it leaves, and the squares that meet their old or new bounds, grown by [`AFFECT`] and by the reach of
+//!   the tree it leaves, and the squares that meet their old or new bounds, grown by [`affect`] and by the reach of
 //!   any doorway near them (a box beside a doorway sets how deep it is). Those squares are cut from a scene of the
 //!   parts that meet them, grown by [`SELECT`] and twice the widest doorway, on the terrain under it alone.
 //! - **What it gives back**: each square's dry pieces and its doorways' meets. A square's water pieces are cut from
@@ -26,9 +26,20 @@ use replica::world_model::show;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-/// How far past a changed child's bounds its squares are cut again, µm: more than a body's radius with its margin,
-/// which a box is grown by.
+/// How far past a changed child's bounds its squares are cut again, µm, at least: more than a standard body's radius
+/// with its margin, which a box is grown by. A larger body's cut reaches further ([`affect`]).
 pub const AFFECT: i64 = 1_000_000;
+/// What [`AFFECT`] keeps past a standard body's clearance (280 mm radius, its margin and 1 mm), µm: kept past every
+/// class's.
+const AFFECT_SLACK: i64 =
+    AFFECT - (replica::kinds::sizes::Size::Standard.radius_mm() + super::MARGIN + 1) * 1000;
+
+/// How far past a changed child's bounds its squares are cut again for a body of `radius` mm (S13b): [`AFFECT`], or
+/// the body's clearance (the radius, its margin and 1 mm, which a box is grown by) with the same slack when that
+/// reaches further, as a giant's does.
+pub fn affect(radius: i64) -> i64 {
+    AFFECT.max((radius + super::MARGIN + 1) * 1000 + AFFECT_SLACK)
+}
 /// How far past the squares cut again their scene reaches, besides twice the widest doorway, µm: a doorway's depth is
 /// set by the boxes either side of it, and its passage reaches past the wall.
 pub const SELECT: i64 = 4_000_000;
@@ -63,6 +74,9 @@ pub type Square = ((i32, i32), Vec<Piece>, Vec<Meet>, Vec<Vec<bool>>);
 pub struct Recut {
     pub squares: Vec<Square>,
     pub index: Index,
+    /// Whether the open ground's own doorways (its gates, placed by the buildings whose rooms they lead into) changed:
+    /// a building with a doorway onto the ground placed, moved or removed (S13).
+    pub gates_moved: bool,
 }
 
 impl Index {
@@ -322,21 +336,44 @@ impl Index {
                 parts.insert(k, p);
             }
         }
+        // The ground's doorways are placed by the buildings they lead into (`Scene::ground_doorways`): read again, and
+        // where one changed, the squares about it before and after are cut again with the change (S13).
+        let gates = Scene::ground_doorways(after, gh).map_err(|_| "the ground's doorways")?;
+        let gates_moved = gates != *self.gates;
+        let gates = if gates_moved {
+            for d in self.gates.iter().filter(|d| !gates.contains(d)) {
+                changed_bb = Some(join(changed_bb, door_bb(d)));
+            }
+            for d in gates.iter().filter(|d| !self.gates.contains(d)) {
+                changed_bb = Some(join(changed_bb, door_bb(d)));
+            }
+            Arc::new(gates)
+        } else {
+            self.gates.clone()
+        };
+        let widest = parts
+            .values()
+            .flat_map(|p| &p.scene.doorways)
+            .chain(gates.iter())
+            .map(|d| d.width / 2)
+            .max()
+            .unwrap_or(0);
         let index = Index {
             ground: self.ground,
             parts: Arc::new(parts),
-            gates: self.gates.clone(),
+            gates,
             terrain: self.terrain.clone(),
-            widest: self.widest,
+            widest,
         };
         let Some(changed_bb) = changed_bb else {
             return Ok(Recut {
                 squares: Vec::new(),
                 index,
+                gates_moved,
             });
         };
         // The change, grown, and every doorway near it (a box beside one sets its depth).
-        let mut affect = grow(changed_bb, AFFECT);
+        let mut affect = grow(changed_bb, affect(radius));
         let doors = index.doorways(gh, after);
         for d in &doors {
             let b = door_bb(d);
@@ -394,6 +431,7 @@ impl Index {
         Ok(Recut {
             squares: out,
             index,
+            gates_moved,
         })
     }
 

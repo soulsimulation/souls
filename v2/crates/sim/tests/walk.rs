@@ -1183,3 +1183,82 @@ fn a1_a2_a5_four_hundred_walkers_cross_the_square() {
         );
     }
 }
+
+/// 0.135 E20: a walk is done within `AT_GOAL` of its goal, short of it on the side it came from; a form's walk right
+/// before a move (`arrive` set to `AT_SPOT`) ends on its goal, the stand point the move is reached from. A body standing
+/// just past or beside the stand point holds it off the point: within `AT_GOAL`, held `HOLD` ticks, it ends short there
+/// (`F_SHORT`), long before a form's walk deadline (60 s), as near as the bystander lets it.
+#[test]
+fn e20_a_walk_before_a_move_ends_on_its_stand_point() {
+    use skills::route::{AT_GOAL, AT_SPOT};
+    let goal = Vec3::new(3_000_000, 0, 0);
+    // Where the walk ends, µm from the goal, and on which tick; a body at rest at `by`, if any.
+    let end = |arrive: i64, by: Option<Vec3>| {
+        let mut w = Plane {
+            half: 20_000_000,
+            now: 0,
+            bodies: BTreeMap::from([(id(1), (Vec3::ZERO, Vec3::ZERO))]),
+        };
+        if let Some(b) = by {
+            w.bodies.insert(id(2), (b, Vec3::ZERO));
+        }
+        let mut skill = common::route(
+            &[Leg {
+                to: goal,
+                link: None,
+            }],
+            SPEED,
+            TICK,
+        );
+        skill.arrive = arrive;
+        for tick in 0..1_400 {
+            let mut h = OnPlane {
+                plane: &w,
+                me: id(1),
+                input: None,
+            };
+            if skill.step(&mut h) == Progress::Done {
+                return (dist(w.bodies[&id(1)].0, goal), tick);
+            }
+            let v = h.input.map_or(Vec3::ZERO, |i| i.velocity);
+            let (p, _) = w.bodies[&id(1)];
+            let at = Vec3::new(
+                p.x + v.x * TICK / 1_000_000,
+                0,
+                p.z + v.z * TICK / 1_000_000,
+            );
+            w.bodies.insert(id(1), (at, v));
+            w.now += TICK;
+        }
+        panic!("the walk never ended (arrive {arrive}, a body at {by:?})");
+    };
+    let ((any, _), (before_a_move, _)) = (end(AT_GOAL, None), end(AT_SPOT, None));
+    println!(
+        "E20: done {} mm short; before a move {} mm",
+        any / 1000,
+        before_a_move / 1000
+    );
+    assert!(
+        any > AT_SPOT && any <= AT_GOAL,
+        "a walk is done short of its goal: {any}"
+    );
+    assert!(
+        before_a_move <= AT_SPOT,
+        "a walk before a move ends on it: {before_a_move}"
+    );
+    // The reviewer's bystanders (#4566): just past the stand point and beside it.
+    for by in [Vec3::new(3_250_000, 0, 0), Vec3::new(3_000_000, 0, 200_000)] {
+        let (off, tick) = end(AT_SPOT, Some(by));
+        println!(
+            "E20: a body at ({}, {}) mm: done {} mm off at tick {tick}",
+            by.x / 1000,
+            by.z / 1000,
+            off / 1000
+        );
+        assert!(off <= AT_GOAL, "ends within AT_GOAL of the point: {off}");
+        assert!(
+            tick < 200,
+            "ends in seconds, not at the deadline: tick {tick}"
+        );
+    }
+}

@@ -38,7 +38,8 @@
 //   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
-//                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
+//                                             one's move is aimed at the other (0.134 T1); holding hands, the first to walk leads the other
+//                                             beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or act lets go (T2)
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
 //   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
@@ -459,6 +460,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
+          // 0.133: a walk's end, how far from its target it stood, metres
+          ...(r?.receipt?.away_m != null ? { away_m: r.receipt.away_m } : {}),
           // R1b: refused, one offer of the same thing that would work instead.
           ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
           // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).

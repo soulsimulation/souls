@@ -166,8 +166,12 @@ export function listed({ entries, bad }, marks = {}, now) {
   return {
     entries: entries.map((e) => {
       const m = marks[e.key];
-      const status = m ? (m.missed ? 'missed' : 'sent') : e.until !== null && now > e.until ? 'ended' : 'waiting';
-      return { ...shown(e), status, ...(m?.sequence ? { sequence: m.sequence } : {}), ...(m?.at ? { firedAt: new Date(m.at).toISOString() } : {}) };
+      // An act that never went says why: `failed` by its error's name (E14b), `stopped` by the local check's reasons.
+      const status = m ? (m.missed ? 'missed' : m.failed ? 'failed' : m.stopped ? 'stopped' : 'sent') : e.until !== null && now > e.until ? 'ended' : 'waiting';
+      return {
+        ...shown(e), status, ...(m?.sequence ? { sequence: m.sequence } : {}), ...(m?.failed ? { failed: m.failed } : {}),
+        ...(m?.stopped ? { stopped: m.stopped } : {}), ...(m?.at ? { firedAt: new Date(m.at).toISOString() } : {}),
+      };
     }),
     ...(bad.length ? { bad } : {}),
   };

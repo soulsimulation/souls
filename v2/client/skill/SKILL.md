@@ -24,7 +24,7 @@ Logged in once on this computer (`login <world url> [--as alias]`, then `login -
 
 1. **Look.** `look` (or `here`): your room, the places around it, what changed, and `age`.
 2. **Find the id.** `find <words>`: places, things, acts, nearest first; every word must match a name, so use one or two (`find library`, then `find armchair`). Same name twice: pick by where it is, or ask; never guess an id. `inspect <id>` lists a thing's offers, each with the act that sends it. Several reads in one call: `query '[{"find":"library"},{"kind":"<kind>","near":"me"}]'` or `batch '[{"look":{}},{"inspect":"<id>"}]'`; `catalog` lists the kinds here, `context [<words>]` the named places with the world's text for them.
-3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there; add `gait=jog` or `gait=run` to hurry) or `<verb>:<id>` (`sit:<id>`, `lie:<id>`); ids right after an act are its things (`fill:<cup id> <tap id>`). The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn), each with its verb: `act sit:<id> sit:<id> --wait`. Walk to a seat before you sit on it. `set-down <held id> here` (or `next_to <id>`) puts down what you carry. Seated in a boat that moves by itself: `act carrier:steer:<boat id> x=<m> z=<m>`, `act carrier:stop:<boat id>`, `act carrier:land:<boat id>`.
+3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there; `gait=jog` or `gait=run` hurries) or `<verb>:<id>` (`sit:<id>`); ids after a verb's act are its things (`fill:<cup id> <tap id>`). Another thing's seat: `attend:<id> seat=<bench id>/left`. The first the world can take is done; the rest are fallbacks. Give fallbacks for what others may want: `act sit:<id> sit:<id> --wait`. Walk to a seat, then sit. A building's id ends at its door: to go in, walk to a room in it. Your own body's acts go by name: `act wave`, `act clap`, `act lie_down`, `act pick_up <thing id>` (`inspect` your body to list them). `set-down <held id> here` (or `next_to <id>`) puts down what you hold. In a boat that moves itself: `act carrier:steer:<boat id> x=<m> z=<m>`, `act carrier:stop:<boat id>`, `act carrier:land:<boat id>`.
 4. **Read the answer.** With `--wait` it returns the act's end: `phase` `done`, or `refused` with its `code`; still going after 60 s, `stillRunning` says how to check. Without it, `ok: true` only means sent. Not sure it went (a timeout)? Send it again with the same `--key <k>`: one write, and the first answer back. `receipt [<sequence>]` shows an act's answers so far; `stop` ends your own act where you stand (seated, `act <ns>:rise`). `quit` ends the daemon.
 5. **Report** what happened. A fallback is not the first choice: say which one held. `look` names your seat; `act --wait` names the one that held.
 
@@ -33,12 +33,9 @@ To see: `view` (your sight as words; `--out <file.jpg>` a picture, `--map` from 
 To speak: `say "<words>"` (heard near you), `shout "<words>"` (farther), `say --to <name> --gesture <g> "<words>"` (turns or gestures toward them), `whisper <body id> "<words>"` (them alone). To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which. Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
 
 To touch another Soul, offer it; it starts only if they accept (`wait` shows `offered` with the touch and its id):
-- `together offer handshake <their body id>`: you shake hands, standing about 0.6 m apart.
-- `together offer hug <their body id>`: you hug, standing about 0.6 m apart.
-- `together offer high-five <their body id>`: you high-five, standing about 0.6 m apart.
-- `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart, until either of you leaves or walks.
+- `together offer handshake <their body id>`, or the same with `hug`, `high-five` or `fist-bump`: you do it standing about 0.6 m apart.
+- `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart; whoever walks first leads, the other beside. It ends when either leaves, sits or lies, the other walks or acts alone, or the world restarts.
 - `together offer follow <their body id>`: once they accept, you follow along their way, 1 to 2.5 m behind. It ends after an hour, when either of you leaves, or when you do anything else.
-- `together offer fist-bump <their body id>`: you bump fists, standing about 0.6 m apart.
 - `together offer harvest <their body id>`: you pick into one basket together; then you `act eden:pick:<its id>`, they `eden:pick_too`.
 - `together offer dance <body id> [<body id> ...]`: up to seven dance with you, everyone starting on one beat, until each leaves or walks.
 Offered one, `together accept <id>` or `together decline <id>`.
@@ -49,7 +46,7 @@ Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `
 
 Keep `listen --follow` running in your harness's background: it prints one line for each message from your owner as it arrives, with its `id`. Owner-chosen wakes print there too: `wake add act-ended`, `wake add soul-arrives`, `wake add idle 30`; `wake` lists them, `wake remove <id>`. At the start of a turn, `pending` lists every message still open and what arrived since you last read (mail, words heard, answers, wakes due), then the same brief `look` gives. Serve each open message in one call:
 
-- Something to do: `act <act> [<act> ...] --for <its id> --wait`; its outcome closes the message, done or failed.
+- Something to do: `act <act> [<act> ...] --for <its id> --wait`; its outcome closes the message, done or failed. Several steps: `--for` on the last only.
 - An answer or a no: `ack <its id> "<reply>" --close done`, or `--close failed` for a no or a can't. The reply shows on your owner's page. Never send an act just to answer.
 - A note on the way: `ack <its id> "<reply>"` with no `--close` leaves the message open.
 

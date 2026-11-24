@@ -25,8 +25,9 @@
 //! - **A load from its own entry (0.135 C2).** A load whose kind has an entry is carried as the entry states it
 //!   ([`Load::of`]): its longest side is carried lengthways, its width on the plan is the larger of its other two
 //!   sides, its two outermost grips along its length are where its carriers hold it, each carrier standing [`REACH`]
-//!   beyond its grip, and its `hold_crew` is how many must carry it. Before the lift ([`Load::check`]) a crew smaller
-//!   than that is refused `carry-crew-too-small`, a carrier more than [`GRIP_REACH`] from its grip
+//!   beyond its grip, and its `carry_crew` (else its `hold_crew`, 0.135 C6) is how many must carry it. Before the
+//!   lift ([`Load::check`]) a crew smaller than that is refused `carry-crew-too-small`, a carrier more than
+//!   [`GRIP_REACH`] from its grip
 //!   `carry-grip-out-of-reach`, and, when the lift names where the front goes, a load whose outline would meet fixed
 //!   geometry on the straight way there ([`sweep_load`]) and on every way that turns it (0.135 R2, below)
 //!   `carry-load-blocked`; nothing is written. A load whose kind
@@ -93,7 +94,7 @@ use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
-use crate::ground::scene::{FLOOR, Scene, Terrain, Xz, xform_to};
+use crate::ground::scene::{FLOOR, GROUND, Scene, Terrain, Xz, xform_to};
 use crate::ground::{BODY_HIGH, BODY_LOW};
 use crate::slots::hands::{Entry, Log};
 
@@ -138,7 +139,8 @@ pub struct Load {
     /// The grips between those, from the back toward the front (0.135 C5): each a side carrier's, beside it. A crew
     /// of six has four sides, so a load with more keeps its first four.
     pub inner: [Option<i64>; INNER],
-    /// How many must carry it (`state.hold_crew`'s default; two when it says none).
+    /// How many must carry it (`state.carry_crew`'s default, else `state.hold_crew`'s, 0.135 C6; two when it says
+    /// neither).
     pub crew: u64,
     /// The turn from its own frame to the carry's (0.135 C4): its longest side along the carry's +x, from the back
     /// carrier to the front; a load whose length lies flat keeps its up, one whose length stands is laid flat.
@@ -209,7 +211,7 @@ impl Load {
     }
 
     /// A load from its kind's entry (`souls-entry/1`): `geometry.bounds_mm`, the `grip` points and
-    /// `state.hold_crew`. An entry with no bounds, or fewer than two grips apart along its length, is not a load.
+    /// `state.carry_crew` (else `state.hold_crew`). An entry with no bounds, or fewer than two grips apart along its length, is not a load.
     pub fn of(entry: &Json) -> Result<Load, String> {
         let bounds: Vec<i64> = entry
             .get("geometry")
@@ -260,12 +262,15 @@ impl Load {
         for (k, g) in between.iter().take(INNER).enumerate() {
             inner[k] = Some(*g);
         }
-        let crew = match entry
-            .get("state")
-            .and_then(|s| s.get("hold_crew"))
-            .and_then(|c| c.get("default"))
-        {
-            Some(Json::Int(n)) => u64::try_from(*n).map_err(|_| "hold_crew is a count")?,
+        // 0.135 C6: how many carry it is its own field, so a part one holds standing can take four to carry.
+        let count = |field| {
+            entry
+                .get("state")
+                .and_then(|s| s.get(field))
+                .and_then(|c| c.get("default"))
+        };
+        let crew = match count("carry_crew").or_else(|| count("hold_crew")) {
+            Some(Json::Int(n)) => u64::try_from(*n).map_err(|_| "a crew is a count")?,
             _ => 2,
         };
         // Its longest side onto the carry's +x (0.135 C4): x stays; z by a quarter turn about y; y laid flat, by the
@@ -595,6 +600,12 @@ impl Fixed {
     /// The fixed geometry of the open ground `ground` and the lowest floor of each building standing on it.
     pub fn of(tree: &Tree, ground: Id) -> Result<Fixed, String> {
         let gh = tree.handle(ground).ok_or("no such ground")?;
+        // A node that is neither an open ground nor a floor has no ground of its own, so nothing on it is cut out of
+        // a walk: it has no fixed geometry (0.135 C7: a carry over it is not stopped for want of a scene).
+        let kind = plain(tree.node(gh).ok_or("no such ground")?.kind().as_str()).to_owned();
+        if kind != GROUND && kind != FLOOR {
+            return Ok(Fixed::new(Vec::new()));
+        }
         // On the open ground a box is read against the ground's height under it (its terrain's, raised or sloped).
         let scene = Scene::of(tree, ground)?;
         let t = scene.terrain.as_ref();

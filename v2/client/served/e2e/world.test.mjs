@@ -315,12 +315,28 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   for (const me of [meA, meB]) assert.ok(v1.nodes.has(pageKey(me)), `(a) the public stream carries ${me}'s body: ${v1.bodies().map((n) => n.id)}`);
   stage('viewer has both bodies');
 
+  // Q1: an owner names their Soul on its page; another Soul's copy then finds its body by that name (the body's name
+  // field, 30, which the world's describe sets), as an agent asked to "go over to Alder" first does
+  const post = (path, body) => fetch(new URL(path, directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: 'alder' }) });
+  const key = ((await (await post('/v1/account/souls', {})).json()).souls ?? [])[0]?.soul;
+  assert.equal((await post('/v1/account/souls/profile', { soul: key, name: 'Alder Quill' })).status, 200, "A's owner names A");
+  await waitFor("A's body by its name in B's copy", async () => ((await B.cli('find', 'alder', 'quill')).found ?? []).find((r) => r.id === meA), 20_000);
+  // 24 Nov staged scene: `say --to "<name>"` addresses that Soul by its owner's name, any case, as `find` reads it
+  // (the 0.132.3 client named other bodies "body <n>" and refused `say-to-unknown`)
+  const toName = await B.cli('say', '--to', 'ALDER quill', 'morning, Alder');
+  assert.equal(toName.ok, true, `B's say --to A by A's name: ${JSON.stringify(toName)}`);
+  assert.deepEqual([toName.to?.id, toName.to?.name], [meA, 'Alder Quill'], `addressed to A's body by its name: ${JSON.stringify(toName.to)}`);
+  assert.ok(accepted(await answered(B, toName.sequence)), "B's words to A are accepted");
+
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
   assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', `(b) \`can wave:<me>\` answers yes from the copy (#3772, fixed by #4075): ${JSON.stringify(can)}`);
   // (b) inspect on my own body lists the family's gestures as its offers (E21, #2791), as `can` reads them.
   const offered = ((await A.cli('inspect', meA)).offers ?? []).map((o) => o.name);
   for (const g of ['wave', 'clap', 'point']) assert.ok(offered.includes(g), `(b) \`inspect <me>\` offers ${g}: ${offered.join(', ')}`);
+  // Q1: the body's own act by its name alone, as an agent first writes it (`act clap`), is that act on A's body
+  const bare = await A.cli('can', 'clap');
+  assert.equal(bare.can, 'yes', `(b) \`can clap\` is the clap of A's own body: ${JSON.stringify(bare)}`);
 
   // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
   // takes a private turn.
@@ -412,9 +428,14 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
   assert.ok(bench, 'the bench is found by its words');
   const fromPart = v1.parts.length;
-  const walk = await act(A, bench.id);
+  // Q1: a ranked list of bare ids is a walk to the first, the rest its fallbacks (the chair), never the walk's arguments
+  const chair = (await A.cli('find', 'chair')).found.find((r) => r.kind?.startsWith('eden:chair'));
+  const walk = await act(A, bench.id, chair.id);
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
   await ended(A, walk, "A's walk to the bench");
+  // 0.133 Q1: its receipt says how far from the bench it ended, from that walk's own end entry (found by sequence)
+  const walked = await A.cli('receipt', String(walk.sent.sequence));
+  assert.ok(typeof walked.receipt?.away_m === 'number' && walked.receipt.away_m < 2, `A's walk says how far from the bench it ended: ${JSON.stringify(walked.receipt)}`);
   // A family gesture on A's own body, to its receipt (0.132 B1-3): a point toward the bench, from its stand point (the
   // point move reaches 600 mm, so it is made before the sit).
   async function gesture(...words) {
@@ -422,13 +443,14 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     assert.ok(accepted(g.answer), `(a) ${words[0]}: ${JSON.stringify(g.answer)}`);
     if (g.answer.answer === 3) assert.equal((await answered(A, g.sent.sequence, 30_000, true)).answer, 1, `(a) ${words[0]} ends with its receipt`);
   }
-  await gesture(`point:${meA}`, `toward=${bench.id}`);
+  // Q1: `point:<bench>`: the bench offers no point, A's body does: A points toward the bench
+  await gesture(`point:${bench.id}`);
   const sit = await act(A, `sit:${bench.id}`);
   assert.ok(accepted(sit.answer), `A's sit on the bench: ${JSON.stringify(sit.answer)}`);
   // A body runs one form at a time and the world queues nothing (v2/docs/intents.md rules 7, 8): a sit answered in
   // progress (3) is followed by its receipt, and only then is the body free for the wave.
   if (sit.answer.answer === 3) assert.equal((await answered(A, sit.sent.sequence, 30_000, true)).answer, 1, "A's sit ends with its receipt");
-  const wave = await act(A, `wave:${meA}`);
+  const wave = await act(A, 'wave'); // Q1: by its name alone
   const words = 'the bread is still warm on the square';
   const secret = 'the key is under the third stone';
   const say = await A.cli('say', words);

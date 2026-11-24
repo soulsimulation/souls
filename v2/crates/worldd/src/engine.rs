@@ -359,7 +359,11 @@ impl Engine {
 
     /// The earliest due time of the activities and the boats on their loops (O2: when a sleeping world must be up).
     pub fn next_due(&self) -> Option<Micros> {
-        self.due.next_due()
+        // B10: an unstarted activity's expiry is due too, so a sleeping world wakes to end it.
+        match (self.due.next_due(), self.activities.next_expiry()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// The systems for a zone under `header`, checked by `rules`, with activities of `kinds`, minting ids of `scope`.
@@ -801,11 +805,9 @@ impl Engine {
                     [f, b, ..] => (f.body, b.body),
                     _ => return Err(refusal("carry-needs-two", show(activity))),
                 };
-                // 0.135 C5: the members after the first two carry beside the load, in join order.
-                let sides = members[2..]
-                    .iter()
-                    .map(|m| stands(c, m.body).map(|(_, at)| (m.body, at)))
-                    .collect::<R<Vec<_>>>()?;
+                // 0.135 C5: the members after the first two carry beside the load, in join order. Only a lift reads
+                // where they stand: a set-down never waits on a side whose body is gone.
+                let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
                     return Err(refusal("activity-not-started", show(activity)));
                 }
@@ -818,6 +820,10 @@ impl Engine {
                     if self.carries.contains_key(&activity) {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
+                    let sides = side_bodies
+                        .iter()
+                        .map(|b| stands(c, *b).map(|(_, at)| (*b, at)))
+                        .collect::<R<Vec<_>>>()?;
                     let board = param_id(&a.params, 1, "lift-needs-a-thing")?;
                     // 0.135 C2: a load whose kind has an entry is checked as it states, before anything is written.
                     let node = tree
@@ -976,6 +982,14 @@ impl Engine {
         now: Micros,
         by: (Id, Id),
     ) -> R<()> {
+        // One who is not a member of the carry leaves nothing it holds.
+        if !self
+            .activities
+            .members(activity)
+            .is_some_and(|m| m.iter().any(|m| m.body == body))
+        {
+            return Ok(());
+        }
         let Some(mut carry) = self.carries.remove(&activity) else {
             return Ok(());
         };
@@ -1075,6 +1089,21 @@ impl Engine {
         }
         if let Some(tr) = tree.as_mut() {
             self.begin_moves(tr, c, now);
+        }
+        // B10: a creator's edit that removed a thing took the activity bound to it: its members are let go at once.
+        if self.activities.stranded(live) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for a in self.activities.release_gone(tr, c, now) {
+                self.carries.remove(&a);
+            }
+        }
+        // B10: an unstarted activity past its expiry that no offer or pair waits on (a proposal, or an offer a restart
+        // did not keep) ends, with its role links.
+        if self.activities.expiring(now) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            self.activities.expire(tr, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
         // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
@@ -2353,7 +2382,7 @@ impl Engine {
     /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
     /// [`Engine::out`].
     pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
-        let Some((_, _, follower, _)) = self
+        let Some((_, _, follower, _, _)) = self
             .activities
             .following()
             .into_iter()
@@ -2392,7 +2421,20 @@ impl Engine {
 
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
-    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+    /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
+    /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    pub fn walked(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        body: Id,
+        intent: Id,
+        now: Micros,
+        walk: bool,
+    ) {
+        if walk && self.activities.lead(&self.moves, body) {
+            return;
+        }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
@@ -2453,8 +2495,9 @@ impl Engine {
         self.collect(None);
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and the width
+    /// of a place beside the leader (R1, hand in hand).
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
     }
 

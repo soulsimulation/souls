@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
+import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -84,6 +85,18 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     assert.deepEqual([eden.v2Gateway, eden.v2Directory], ['/w/eden/v2/ws', '/'], 'routed (B3-2b): where the owner\'s box finds the gateway and the directory');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
+  // cdn-walk (24 Nov): the routed page loads the replica by version, so both files are immutable; the plain addresses
+  // the Soul client's upgrade reads, and any other version, are kept nowhere (no-store), and the cdn-walk rule passes
+  const { v2Replica } = await pageConfig('/w/eden/');
+  const version = createHash('sha256').update('test module').update('test wasm').digest('hex').slice(0, 16);
+  assert.equal(v2Replica, `/w/eden/v2/replica/${version}/replica.js`, 'routed: the replica by its version');
+  for (const [path, body, cc] of [[v2Replica, 'test module', 'public, max-age=31536000, immutable'], [v2Replica.replace('replica.js', 'replica_bg.wasm'), 'test wasm', 'public, max-age=31536000, immutable'],
+    ['/w/eden/v2/replica/0000000000000000/replica_bg.wasm', 'test wasm', 'no-store'], [`${v2Replica}?x=1`, 'test module', 'no-store'], ['/w/eden/replica_bg.wasm', 'test wasm', 'no-store'], ['/w/eden/replica.js', 'test module', 'no-store']]) {
+    const r = await fetch(base + path);
+    assert.deepEqual([r.status, r.headers.get('cache-control'), await r.text()], [200, cc, body], path);
+    if (cc !== 'no-store') assert.equal(originCacheProblem({ path, status: 200, headers: Object.fromEntries(r.headers) }), null, path);
+  }
+  assert.equal(originCacheClass(v2Replica.replace('replica.js', 'replica_bg.wasm')), 'stable', 'cdn-walk judges the versioned wasm');
   // #4177: the page's arrival published the old world's static views beside the stream; the page's reads get those files
   for (let i = 0; i < 50 && !existsSync(join(staticDir, 'manifest.json')); i++) await new Promise(r => setTimeout(r, 20));
   const manifest = JSON.parse(readFileSync(join(staticDir, 'manifest.json')));
@@ -92,7 +105,9 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   for (const path of ['/w/eden/v1/world/snapshot', '/w/eden-2026/v1/world/snapshot']) {
     const r = await fetch(base + path); assert.equal(r.headers.get('x-souls-static'), 'published', path); assert.equal(await r.text(), published, path);
   }
-  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot?defs=ref&cols=1')).headers.get('x-souls-static'), null, 'a wire form (other body and headers) passes through to the old world');
+  const wire = await fetch(base + '/w/eden/v1/world/snapshot?defs=ref&cols=1');   // 24 Nov: the page's first read
+  assert.equal(wire.headers.get('x-souls-static'), 'published', 'the wire form gets the plain published snapshot (no x-defs-ref: plain to the page)'); assert.equal(await wire.text(), published);
+  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot?other=1')).headers.get('x-souls-static'), null, 'any other query passes through to the old world');
   assert.equal((await fetch(base + '/w/eden/v1/scene')).headers.get('x-souls-static'), null, 'a view not published: the old world answers');
   assert.equal(JSON.parse(readFileSync(join(staticDir, 'config.json'))).worldKey, 'eden', 'the old config published beside the stream');
   const before = readFileSync(hits, 'utf8');
@@ -179,6 +194,36 @@ test('#4177: a rollback removes the published views, and a re-route whose snapsh
   await assert.rejects(fence.publish(w, (path) => (path === '/v1/world/snapshot' ? { status: 503, body: Buffer.from('{}') } : old(path))), /cutover.static-snapshot-unavailable/);
   assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
   assert.equal(served(), null, 'the snapshot falls through to the live old view');
+});
+test('24 Nov: a static folder the launcher cannot write holds the views in memory; the page reads them the same, and a rollback drops them', async t => {
+  const dir = mkdtempSync(new URL('static-ro-', scratch)), routesFile = join(dir, 'routes.json'), staticDir = join(dir, 'static');
+  mkdirSync(staticDir); chmodSync(staticDir, 0o555);
+  t.after(() => { chmodSync(staticDir, 0o755); rmSync(dir, { recursive: true, force: true }); });
+  // read-only as the unit's sandbox makes it (EROFS there; EACCES here). Root writes past a mode: then a file stands in its place
+  let ro = staticDir;
+  try { writeFileSync(join(staticDir, 'probe'), ''); rmSync(join(staticDir, 'probe')); writeFileSync(join(dir, 'file'), ''); ro = join(dir, 'file', 'static'); } catch { /* read-only, as wanted */ }
+  const routed = (canonical) => writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical } } }));
+  const fence = cutoverFence({ binding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir: join(dir, 'client'), staticDir: ro } }), w = { slug: 'eden', worldId: 'eden-1' };
+  let reads = 0;
+  const hash = 'c'.repeat(64);   // the scene's capture: a freshly loaded old world answers it 404 (W4 prep), so it must be served
+  const old = (path) => { reads++; return { status: path === '/v1/scene' || path === '/v1/world/snapshot' ? 200 : 404, body: Buffer.from(JSON.stringify({ path, at: 'held', ...(path === '/v1/scene' ? { renderSceneRef: { hash } } : {}) })) }; };
+  const ask = (path) => { let out = null; const res = { writeHead: (status, headers) => ({ end: (b) => { out = { status, headers, body: String(b) }; } }) };
+    return fence.handle({ method: 'GET' }, res, w, new URL(`http://x/w/eden${path}`)) ? out : null; };
+  routed(true);
+  const m = await fence.publish(w, old);
+  assert.deepEqual(Object.keys(m.files), ['scene.json', 'snapshot.json']);
+  assert.match(m.unwritable, /^.+: E[A-Z]+$/, 'the flight that held them names the folder and why, for the launcher\'s one log line');
+  const got = ask('/v1/world/snapshot');
+  assert.equal(got.status, 200); assert.equal(got.headers['x-souls-static'], 'published'); assert.match(got.body, /"at":"held"/, 'the page reads the held snapshot');
+  assert.equal(ask('/v1/edge/items'), null, 'a view the old world did not answer: it answers live, as before');
+  const capture = ask(`/v1/scenes/${hash}?world=eden-1`);
+  assert.equal(capture.status, 200, 'the page\'s scenery from the held scene'); assert.equal(JSON.parse(capture.body).worldId, 'eden-1');
+  const n = reads, again = await fence.publish(w, old);
+  assert.equal(reads, n, 'once per routing: a later page arrival reads nothing again'); assert.equal(again.unwritable, undefined, 'and logs nothing again');
+  routed(false);
+  assert.equal(fence.v2Stream(w), null);
+  routed(true);
+  assert.equal(ask('/v1/world/snapshot'), null, 'rolled back: the held views are gone; a re-route publishes afresh');
 });
 test('W4 prep: a routed page\'s scenery is answered from the published scene, which the page verifies; any other hash passes through', async t => {
   const { captureRenderScene } = await import('../../packages/engine-contract/src/scene-capture.ts');
@@ -315,4 +360,57 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   table.worlds.fresh.canonical = false; writeFileSync(routes, JSON.stringify(table));
   assert.equal((await get('/w/fresh/')).status, 404);
   assert.equal((await (await get('/__sim/worlds.json', { accept: 'application/json' })).json()).worlds.some(w => w.slug === 'fresh'), false);
+});
+
+test('a routed world whose old process is unloaded and whose views are published gets its page and reads without it; with none published it wakes it once', async t => {
+  // live, 24 Nov: with --unload-still the bare web page went out (no inline config); the page then read /v1/config, which
+  // a routed world answers with the new client's fields only, and said "There is no world at this address". #4561 then
+  // loaded the old world for its page (about 3 s); the page now is the launcher's own, and its views never wake it
+  const dir = mkdtempSync(new URL('unloaded-routed-', scratch)), data = join(dir, 'data'), clientDir = join(dir, 'served'), routesFile = join(dir, 'routes.json'), webDir = join(dir, 'web');
+  mkdirSync(data); mkdirSync(clientDir); mkdirSync(join(webDir, 'assets'), { recursive: true });
+  writeFileSync(join(webDir, 'index.html'), '<!doctype html><html><head><title>Souls</title><link rel="canonical" href="https://x/"></head><body></body></html>');
+  writeFileSync(join(webDir, 'assets', 'app.js'), 'console.log(1)');
+  const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(clientDir, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
+  const client = described('eden.mjs', 'served fixture bytes'), skill = described('skill.md', 'test skill');
+  const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
+  writeFileSync(join(clientDir, 'soul-client.json'), JSON.stringify({ ...client, contract: 'souls-v2/1', version: '3.0.0', skill, files }));
+  const worlds = [{ slug: 'eden', worldId: 'eden-original-1' }, { slug: 'other' }].map(w => ({ ...w, name: w.slug, template: 'empty', createdAt: 1, owner: 'synthetic-owner' }));
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: ['/worlds'], worlds }));
+  writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical: true } } }));
+  const P = await testPort(3), base = `http://127.0.0.1:${P}`;
+  const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
+  const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, webDir, eager: 0, base: '/', log: () => {}, unloadStill: true, keepAlive: false, prewarm: false, stillEveryMs: 1e9, stillAlarmMs: 1e9,
+    cutoverBinding: { oldWorldId: 'eden-original-1', canonicalSlug: 'eden', routesFile, clientDir, staticDir: join(dir, 'origin/s/eden/static') },
+    command: (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }) });
+  t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
+  const page = (slug) => fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } });
+  const view = (path, headers = {}) => fetch(`${base}/w/eden${path}`, { headers });
+  assert.equal((await fetch(`${base}/w/eden/assets/app.js`)).status, 200, 'the build\'s files still come from here');
+  assert.equal(launcher.pool.status('eden').status, 'stopped', 'and load nothing');
+  // views published before (as a page of the running old world publishes them; kept on disk across restarts)
+  const staticDir = join(dir, 'origin/s/eden/static'); mkdirSync(staticDir, { recursive: true });
+  writeFileSync(join(staticDir, 'snapshot.json'), '{"contract":"world/1","entities":[]}');
+  writeFileSync(join(staticDir, 'manifest.json'), JSON.stringify({ schema: 'souls/old-static/1', world: 'eden', oldWorldId: 'eden-original-1', stream: '/s/eden/', files: { 'snapshot.json': {} } }));
+  const eden = await page('eden');
+  assert.equal(eden.status, 200); assert.notEqual(eden.headers.get('x-sim-cache'), 'unloaded', 'not the bare web page');
+  assert.equal(eden.headers.get('x-souls-engine'), 'new', 'the launcher\'s page of a moved world');
+  const config = JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await eden.text())?.[1] ?? 'null');
+  assert.deepEqual([config?.worldKey, config?.worldId, config?.worldPath, config?.v2Stream, config?.v2Gateway], ['eden', 'eden-original-1', '/w/eden', '/s/eden/', '/w/eden/v2/ws']);
+  const snap = await view('/v1/world/snapshot?defs=ref&cols=1&v=k1');
+  assert.equal(snap.status, 200); assert.equal(snap.headers.get('x-souls-static'), 'published'); assert.equal(snap.headers.get('x-defs-ref'), null, 'the plain snapshot, for the wire form');
+  assert.equal(await snap.text(), '{"contract":"world/1","entities":[]}');
+  // a view the old world did not publish, and the page's other old reads: answered here, not by waking it
+  for (const path of ['/v1/scene', '/v1/kernel', '/v1/world/visitors', '/v1/world/seq']) { const r = await view(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path); }
+  assert.equal((await view('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200, 'its sign-in, as a world\'s with no old twin');
+  assert.equal(launcher.pool.status('eden').status, 'stopped', 'the page and its reads loaded nothing');
+  // none published for its stream (a fresh move, or views held in memory before a restart): the page wakes the old world
+  // once, as #4561 did (drawn from its stream alone, an old world's buildings can lose their finish), and publishes them
+  rmSync(join(staticDir, 'manifest.json'));
+  const fresh = await page('eden');
+  assert.equal(fresh.status, 200); assert.equal(fresh.headers.get('x-souls-engine'), null, 'the old world\'s page');
+  assert.equal(JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await fresh.text())?.[1] ?? 'null')?.v2Stream, '/s/eden/');
+  assert.equal(launcher.pool.status('eden').status, 'running', 'it loaded its old world');
+  // a world not routed keeps the unloaded page (#2304 A3)
+  const other = await page('other');
+  assert.equal(other.headers.get('x-sim-cache'), 'unloaded'); assert.equal(launcher.pool.status('other').status, 'stopped');
 });

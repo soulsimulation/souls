@@ -336,6 +336,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         point: Vec3::new(s.x, 450_000, s.z - 300_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -439,12 +440,22 @@ fn serve_on(
     store: Mem,
     text: Option<std::sync::Arc<sim::text::Store>>,
 ) -> (Run, Client, Client) {
+    serve_at(tag, store, text, entry())
+}
+
+/// [`serve_on`] with its births by the entry at `at` (µm, the open ground's frame).
+fn serve_at(
+    tag: &str,
+    store: Mem,
+    text: Option<std::sync::Arc<sim::text::Store>>,
+    at: Vec3,
+) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.text = text;
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((tree_rules(), vec![pair_kind()]));
     cfg.join = Some(Join {
-        entry: (ground(), entry()),
+        entry: (ground(), at),
         family: humanoid(),
         kind: name(&fullname(BODY)),
         per_tick: 8,
@@ -611,6 +622,31 @@ fn a1_a_first_intent_births_the_body_named_by_its_join_and_it_takes_and_puts() {
     let t = r.tree();
     let n = t.node(t.handle(bo_body).unwrap()).unwrap();
     assert!(n.fields().get(&NAME).is_none(), "unnamed");
+    run.stop();
+}
+
+#[test]
+fn a5_a_join_no_place_can_hold_is_refused_by_name_and_a_second_is_too() {
+    // An entry far past N2's test world, where no ground is cut: every spot of the search is off the surface.
+    let (run, mut a, mut b) = serve_at(
+        "a5",
+        Mem::with(Vec::new()),
+        None,
+        Vec3::new(-900_000_000, 0, 30_000_000),
+    );
+    let joined = a.act(JOIN, None, p(&[(1, words("Ada"))]));
+    println!("A5 join off the ground: {joined:?}");
+    assert_eq!(joined, Err("birth-off-surface".to_owned()));
+    assert!(run.body_of(ada()).is_none(), "no body");
+    // The birth was withdrawn, not left waiting: a join sent again is asked and answered again, as is another Soul's.
+    assert_eq!(
+        a.act(JOIN, None, p(&[(1, words("Ada"))])),
+        Err("birth-off-surface".to_owned())
+    );
+    assert_eq!(
+        b.act("activity:propose", Some(ground()), BTreeMap::new()),
+        Err("birth-off-surface".to_owned())
+    );
     run.stop();
 }
 
@@ -1124,9 +1160,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// writes its rungs as the world's entries (953 records, 3,150 motion samples); with N1's commit taken out the run
 /// writes the previous pin (dcf33b73...), so the ladder is the whole difference. Re-pinned by A2-2: a walker finds a
 /// way round bodies standing in its way (905 records, 2,342 motion samples); with main's walk skill put back the run
-/// writes the previous pin (06e9e816...), so the walk skill is the whole difference.
+/// writes the previous pin (06e9e816...), so the walk skill is the whole difference. Re-pinned by 0.133 Q1: a done walk's
+/// `souls:move-ended` carries field 7, how far from its target it ended, mm (same 905 records, 2,342 motion samples);
+/// with only field 7 left out the run writes the previous pin (26cdac83...), so field 7 is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "26cdac832ea50b51a929389b954dd7f428cf84c92f3e819c9dedc4ae3481431b";
+    "85d9b1984b7ec6ce8efd775b76246aa1327852ac036d39c6b2841895cc660f85";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

@@ -9,6 +9,7 @@ import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './tak
 import { keepPlaces, placeAt, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
+import { reloadForFormat } from './stream-format.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -30,7 +31,7 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
-type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
+type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number };
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
 export type V2View = {
@@ -44,6 +45,8 @@ export type V2View = {
   /** World time (µs) the parts reach. */
   newestTo: number | null;
   error: string | null;
+  /** #4535: the stream's format this bundle cannot read, while the page shows its notice and reloads (stream-format.ts). */
+  reloading?: number;
   parts: number;
   /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
@@ -176,8 +179,14 @@ export class V2Bridge {
 
   stop(): void { this.worker?.terminate(); this.worker = null; }
 
+  /** #4535: reload the page for a stream format its bundle cannot read (stream-format.ts); a test replaces it. */
+  reloadFor: (format: number) => boolean = (format) => reloadForFormat(format);
+
   receive(m: Msg): void {
     if (m.t === 'error') { this.view.error = m.message; return; }
+    // #4535: the worker posts this at each try at a baseline it cannot read; a reload refused (one a minute ago for the
+    // same format) is tried again at a later one
+    if (m.t === 'format') { if (this.view.reloading === undefined && this.reloadFor(m.format)) this.view.reloading = m.format; return; }
     // B2-3: a still world writes no part; its pointer says it is quiet up to a time (worldd view_out `idle`, every half
     // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
