@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { placedOf } from './world-state.ts';
 import { CarriedParts, bundledEntries, headingAt, sampleAt, type PartNode } from './take-parts.ts';
+import { kindDef } from './creator-kinds.ts';
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000;
 const node = (id: string, kind: string, parent: string | null, pos: [number, number, number], extra: object = {}): PartNode =>
@@ -77,4 +78,49 @@ test('samples between two times are interpolated; the heading is the way of the 
   assert.equal(headingAt(s, 10), null, '1 mm is not a direction');
   s.push({ at: 20, frame: 'g', slot: null, p: [0, 0, 100_000] });
   assert.ok(Math.abs(headingAt(s, 20)! + Math.PI / 2) < 0.02, 'south (+z) is a quarter turn the other way');
+});
+
+test('W4: a bay placed live (no origin) is defined as its frame, the edges of its bounds, not one box; a stand stays a box', () => {
+  const { kinds, applied } = fake();
+  const parts = new CarriedParts(kinds, bundledEntries({
+    u: { format: 'souls-entry/1', kind: 'mars:rack_upright', points: { foot: [0, 0, 0] }, geometry: { bounds_mm: [1219, 2438, 76] } },
+    b: { format: 'souls-entry/1', kind: 'mars:rack_bay', slots: { upright_a: { kinds: ['mars:rack_upright'], at_mm: [0, 0, -1448] } }, geometry: { bounds_mm: [1219, 2438, 2972] } },
+    s: { format: 'souls-entry/1', kind: 'mars:frame_stand', slots: { frame_1: { kinds: ['mars:rack_upright'], at_mm: [0, 100, -150] } }, geometry: { bounds_mm: [1419, 300, 600] } },
+  }));
+  const bay = node('bay', 'mars:rack_bay@1220bf', 'g.1', [65_000_000, 0, -24_000_000], { slots: [[1, 0, 0, -1448, 0, 1]] });
+  const stand = node('st', 'mars:frame_stand@1220aa', 'g.1', [60_000_000, 0, -24_000_000]);
+  parts.receive({ t: 'snapshot', s: { nodes: [place, ground, bay, stand], removed: [] } });
+  const defined = new Map(applied.flat().map((n) => [n.defines, JSON.parse(new TextDecoder().decode(n.entry))]));
+  const frame = defined.get('mars:rack_bay@1220bf').geometry.parts as { at: number[]; size: number[] }[];
+  assert.equal(frame.length, 12, 'twelve edges');
+  assert.ok(frame.every((p) => p.size.filter((v) => v === 30).length >= 2), 'each edge a 30 mm bar');
+  assert.deepEqual(frame.slice(0, 4).map((p) => p.at), [[-594.5, 1219, -1471], [594.5, 1219, -1471], [-594.5, 1219, 1471], [594.5, 1219, 1471]], 'its four posts at its corners');
+  assert.equal(defined.get('mars:frame_stand@1220aa').geometry.parts, undefined, 'a stand its uprights stand above draws as its box');
+  // and the old page's def from it: twelve shapes, not the one bounds box
+  const def = kindDef('mars:rack_bay@1220bf', new TextEncoder().encode(JSON.stringify(defined.get('mars:rack_bay@1220bf'))))!.def;
+  assert.equal((def.make as unknown as { args: { shapes: unknown[] } }).args.shapes.length, 12);
+});
+
+test('W4: a bay placed live (its record has no slot points) is handed on with its kind\'s, so its parts stand in their slots', () => {
+  const { kinds } = fake();
+  const parts = new CarriedParts(kinds, bundledEntries({
+    u: { format: 'souls-entry/1', kind: 'mars:rack_upright', points: { foot: [0, 0, 0] }, geometry: { bounds_mm: [1219, 2438, 76] } },
+    m: { format: 'souls-entry/1', kind: 'mars:rack_beam', points: { end_l: {} }, geometry: { bounds_mm: [51, 102, 2743] } },
+    b: { format: 'souls-entry/1', kind: 'mars:rack_bay', geometry: { bounds_mm: [1219, 2438, 2972] },
+      slots: { upright_a: { kinds: ['mars:rack_upright'], at_mm: [0, 0, -1448] }, upright_b: { kinds: ['mars:rack_upright'], at_mm: [0, 0, 1448] }, beam_high_l: { kinds: ['mars:rack_beam'], at_mm: [-572, 863, 0] } } },
+  }));
+  // as souls-god places them: the bay at (6, 0, 6) m, each part at its slot's origin
+  const bay = node('bay', 'mars:rack_bay@1220bf', 'g.1', [6_000_000, 0, 6_000_000]);
+  const ua = node('ua', 'mars:rack_upright@1220eb', 'bay', [0, 0, 0], { slot: 1 }), ub = node('ub', 'mars:rack_upright@1220eb', 'bay', [0, 0, 0], { slot: 2 });
+  const hl = node('hl', 'mars:rack_beam@1220cc', 'bay', [0, 0, 0], { slot: 3 });
+  parts.receive({ t: 'snapshot', s: { nodes: [place, ground, bay, ua, ub, hl], removed: [] } });
+  const handed = parts.frames(0);
+  assert.deepEqual(handed.map((n) => [n.id, n.slots]), [['bay', [[1, 0, 0, -1448], [2, 0, 0, 1448], [3, -572, 863, 0]]]]);
+  const m = new Map([place, ground, bay, ua, ub, hl].map((n) => [n.id, n]));
+  for (const n of handed) m.set(n.id, n);
+  const at = (id: string) => placedOf(m as never, id)!.p.map((v) => +v.toFixed(3));
+  assert.deepEqual([at('ua'), at('ub'), at('hl')], [[6, 0, 4.552], [6, 0, 7.448], [5.428, 0.863, 6]], 'each in its slot, not all at the bay\'s origin');
+  // a bay whose record has its slot points (an import) is left as it is
+  parts.receive({ t: 'part', p: { nodes: [{ ...bay, slots: [[1, 0, 0, -1448, 0, 1]] }], removed: [], samples: [] } });
+  assert.deepEqual(parts.frames(0), []);
 });
