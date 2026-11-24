@@ -283,4 +283,74 @@ fn an_activity_tells_its_members_who_joins_starts_leaves_and_when_it_ends() {
         said("souls:activity-started", BTreeMap::new()),
     );
     step(&mut hub, after, [5, 5, 0], "no members left: to no one");
+
+    // A two-member offer already taken: a third who takes it joins a new pair, the event naming the offer in field 1.
+    let (offer, pair, thing) = (id(20), id(21), id(22));
+    let to = |l: u64, b: Id, a: Id| Change::Link {
+        link: id(l),
+        ty: name(MEMBER),
+        ends: [b, a],
+        owner: End::Second,
+        audience: Audience::Everyone,
+    };
+    let taken = effect(
+        11,
+        offer,
+        vec![to(30, asker, offer), to(31, asked, offer)],
+        None,
+    );
+    step(&mut hub, taken, [5, 5, 0], "an offer taken: nothing told");
+    let joined = BTreeMap::from([(1, offer.to_value())]);
+    let second = effect(
+        12,
+        floor,
+        vec![to(32, asker, pair), to(33, third, pair)],
+        said("souls:activity-joined", joined),
+    );
+    step(
+        &mut hub,
+        second,
+        [6, 5, 1],
+        "a second taker's pair: to its members, not to the first taker",
+    );
+    // A creator removes the thing the pair is under (the removal names the thing alone); each member is told at its
+    // body, once.
+    let gone = effect(13, thing, vec![Change::Remove { node: thing }], None);
+    step(
+        &mut hub,
+        gone,
+        [6, 5, 1],
+        "the thing's removal: nothing told",
+    );
+    let end = |seq: u64, body: Id| {
+        let f = BTreeMap::from([
+            (1, pair.to_value()),
+            (2, Value::Text(name("souls:thing-gone"))),
+        ]);
+        effect(seq, body, Vec::new(), said("souls:activity-ended", f))
+    };
+    step(
+        &mut hub,
+        end(14, asker),
+        [7, 5, 1],
+        "an end at a body: to it alone",
+    );
+    step(
+        &mut hub,
+        end(15, third),
+        [7, 5, 2],
+        "an end at a body: to it alone",
+    );
+    let late = effect(
+        16,
+        pair,
+        Vec::new(),
+        said("souls:activity-started", BTreeMap::new()),
+    );
+    step(
+        &mut hub,
+        late,
+        [7, 5, 2],
+        "its memberships let go: to no one",
+    );
 }
