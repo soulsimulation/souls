@@ -51,7 +51,7 @@
         "change": "set",
         "node": "s1",
         "field": "open",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],
@@ -92,7 +92,7 @@
         "change": "set",
         "node": "s1",
         "field": "open",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],

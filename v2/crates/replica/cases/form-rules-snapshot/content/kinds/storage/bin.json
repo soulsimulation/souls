@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "open": {
-      "n": 1,
+      "n": 28,
       "type": "bool",
       "default": false,
       "audience": {
@@ -32,19 +32,29 @@
     }
   },
   "slots": {
-    "inside": {
+    "in_1": {
       "admits": "thing",
-      "most": 10,
-      "at_mm": [
-        0,
-        100,
-        0
-      ],
-      "fits_mm": [
-        400,
-        600,
-        400
-      ]
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
+      "most": 1,
+      "at_mm": [-70, 550, 60],
+      "fits_mm": [140, 120, 140]
+    },
+    "in_2": {
+      "admits": "thing",
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
+      "most": 1,
+      "at_mm": [70, 550, 60],
+      "fits_mm": [140, 120, 140]
+    },
+    "in_3": {
+      "admits": "thing",
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
+      "most": 1,
+      "at_mm": [0, 550, -80],
+      "fits_mm": [140, 120, 140]
     }
   },
   "geometry": {
@@ -115,6 +125,22 @@
           "event": "shut"
         }
       ]
+    },
+    "put_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing" }, "place": { "type": "slot" } },
+      "needs": [{ "need": "held_by_actor", "thing": { "arg": "thing" } }, { "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "put", "slot": { "arg": "place" } }],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": { "arg": "place" }, "event": "binned" }]
+    },
+    "take_out": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing" } },
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "take" }],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "actor_hand", "event": "taken_out" }]
     }
   },
   "motion": {
@@ -141,7 +167,7 @@
     "shape": {"round":15,"shapes":[{"kind":"cyl","at":[0,390,0],"r":210,"h":780,"segments":10,"r2":240,"tint":"body"},{"kind":"cyl","at":[0,800,0],"r":270,"h":50,"segments":10,"tint":"lid","role":"lid","pivot":[0,800,-270]},{"kind":"sphere","at":[0,840,0],"r":90,"segments":6,"tint":"lid","scale":[1000,600,1000],"role":"lid","pivot":[0,800,-270]},{"kind":"cyl","at":[0,600,0],"r":245,"h":40,"segments":10,"tint":"band"}],"palette":{"body":"#3d5a45","lid":"#2b3a30","band":"#c9b26b"},"tags":["prop","street","bin","litter"]}
   },
   "text": {
-    "card": "A litter bin with a lid: open it to put rubbish in, carry it in both hands.",
+    "card": "A litter bin: put rubbish in it by hand; its lid opens and closes.",
     "storage": "storage",
     "rubbish": "rubbish",
     "dustbin": "dustbin"

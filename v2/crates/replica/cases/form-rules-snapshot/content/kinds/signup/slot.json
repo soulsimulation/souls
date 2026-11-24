@@ -3,7 +3,7 @@
   "kind": "eden:signup_slot",
   "owner": "thing",
   "state": {
-    "starts_in": { "n": 1, "type": "duration", "default": 0, "audience": { "rule": "everyone" } }
+    "starts_in": { "n": 28, "type": "duration", "default": 0, "audience": { "rule": "everyone" } }
   },
   "links": {
     "signed": { "n": 1, "from": "soul", "most": 1, "most_per": 3, "audience": { "rule": "everyone" } }

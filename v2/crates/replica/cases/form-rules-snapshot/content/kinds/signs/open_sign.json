@@ -3,7 +3,7 @@
   "kind": "eden:open_sign",
   "owner": "thing",
   "state": {
-    "open": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+    "open": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
   },
   "points": {
     "knob": { "role": "contact", "at_mm": [40, 1100, 0] },

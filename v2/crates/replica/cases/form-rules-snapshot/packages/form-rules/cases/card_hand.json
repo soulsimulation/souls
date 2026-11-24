@@ -55,7 +55,7 @@
         }
       },
       "asker": {"sees": ["public", "linked:player"]},
-      "expect": {"verdict": "yes", "read": [["t1/field/1", 52], ["h1/field/1", 4], ["t1/field/1", 52], ["h1/field/1", 4]]}
+      "expect": {"verdict": "yes", "read": [["t1/field/28", 52], ["h1/field/28", 4], ["t1/field/28", 52], ["h1/field/28", 4]]}
     },
     {
       "name": "draw_from_an_empty_pack",
@@ -77,7 +77,7 @@
         "need": 1,
         "detail": {"node": "t1", "field": "cards", "has": 0, "amount": 1},
         "fix": null,
-        "read": [["t1/field/1", 0], ["h1/field/1", 4], ["t1/field/1", 0], ["h1/field/1", 4]]
+        "read": [["t1/field/28", 0], ["h1/field/28", 4], ["t1/field/28", 0], ["h1/field/28", 4]]
       }
     },
     {
@@ -100,7 +100,7 @@
         "need": 0,
         "detail": {"node": "h1", "field": "cards", "room": 0, "amount": 1},
         "fix": null,
-        "read": [["t1/field/1", 1], ["h1/field/1", 52]]
+        "read": [["t1/field/28", 1], ["h1/field/28", 52]]
       }
     },
     {
@@ -133,7 +133,7 @@
         }
       },
       "asker": {"sees": ["public", "linked:player"]},
-      "expect": {"verdict": "yes", "read": [["h1/field/1", 4], ["t1/field/1", 40], ["h1/field/1", 4], ["t1/field/1", 40]]}
+      "expect": {"verdict": "yes", "read": [["h1/field/28", 4], ["t1/field/28", 40], ["h1/field/28", 4], ["t1/field/28", 40]]}
     },
     {
       "name": "play_from_an_empty_hand",
@@ -155,7 +155,7 @@
         "need": 1,
         "detail": {"node": "h1", "field": "cards", "has": 0, "amount": 1},
         "fix": null,
-        "read": [["h1/field/1", 0], ["t1/field/1", 40], ["h1/field/1", 0], ["t1/field/1", 40]]
+        "read": [["h1/field/28", 0], ["t1/field/28", 40], ["h1/field/28", 0], ["t1/field/28", 40]]
       }
     },
     {
@@ -178,7 +178,7 @@
         "need": 0,
         "detail": {"node": "t1", "field": "cards", "room": 0, "amount": 1},
         "fix": null,
-        "read": [["h1/field/1", 1], ["t1/field/1", 52]]
+        "read": [["h1/field/28", 1], ["t1/field/28", 52]]
       }
     },
     {

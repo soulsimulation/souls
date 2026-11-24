@@ -3,7 +3,7 @@
   "kind": "eden:filter_carafe",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-90, 150, 0] },

@@ -1,0 +1,92 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:checkers_table",
+  "owner": "thing",
+  "state": {
+    "phase": { "n": 28, "type": "enum", "values": ["waiting", "playing"], "default": "waiting", "audience": { "rule": "everyone" } },
+    "turn": { "n": 29, "type": "enum", "values": ["dark", "light"], "default": "dark", "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "dark": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } },
+    "light": { "n": 2, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "dark_stand": { "role": "stand", "at_mm": [0, 0, -550] },
+    "light_stand": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 },
+    "board": { "role": "contact", "at_mm": [0, 760, 0] }
+  },
+  "geometry": { "bounds_mm": [700, 760, 700] },
+  "forms": {
+    "play_dark": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "dark" }],
+      "steps": [{ "step": "walk_to", "point": "dark_stand" }],
+      "effects": [{ "change": "link", "link": "dark", "from": "actor", "event": "took_dark" }]
+    },
+    "play_light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "light" }],
+      "steps": [{ "step": "walk_to", "point": "light_stand" }],
+      "effects": [{ "change": "link", "link": "light", "from": "actor", "event": "took_light" }]
+    },
+    "begin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "phase", "is": "waiting", "says": "already_playing" },
+        { "need": "linked", "link": "dark" },
+        { "need": "linked", "link": "light" }
+      ],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "phase", "to": "playing", "event": "game_began" },
+        { "change": "set", "field": "turn", "to": "dark", "event": "dark_to_move" }
+      ]
+    },
+    "move_dark": {
+      "who": { "link": "dark" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "phase", "is": "playing", "says": "not_playing" },
+        { "need": "state", "field": "turn", "is": "dark", "says": "not_your_turn" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "board" }],
+      "effects": [{ "change": "set", "field": "turn", "to": "light", "event": "dark_moved" }]
+    },
+    "move_light": {
+      "who": { "link": "light" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "phase", "is": "playing", "says": "not_playing" },
+        { "need": "state", "field": "turn", "is": "light", "says": "not_your_turn" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "board" }],
+      "effects": [{ "change": "set", "field": "turn", "to": "dark", "event": "light_moved" }]
+    },
+    "pack_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "phase", "is": "playing", "says": "not_playing" }],
+      "steps": [{ "step": "move", "move": "slide", "at": "board" }],
+      "effects": [
+        { "change": "unlink", "link": "dark", "from": "all", "event": "dark_left" },
+        { "change": "unlink", "link": "light", "from": "all", "event": "light_left" },
+        { "change": "set", "field": "phase", "to": "waiting", "event": "game_over" }
+      ]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A checkers board for two: take dark or light, begin, move in turn, pack up.",
+    "already_playing": "A game is already being played.",
+    "not_playing": "No game is being played: begin one first.",
+    "not_your_turn": "It is the other side's turn.",
+    "games": "games",
+    "checkers": "checkers",
+    "draughts": "draughts"
+  },
+  "card": { "text": "card", "category": "games", "synonyms": ["checkers", "draughts"] }
+}

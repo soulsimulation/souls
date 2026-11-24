@@ -3,8 +3,8 @@
   "kind": "eden:mural_panel",
   "owner": "thing",
   "state": {
-    "picture": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } },
-    "title": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "picture": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "title": { "n": 29, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
     "painter": { "n": 1, "from": "soul", "most": 100, "audience": { "rule": "everyone" } }
