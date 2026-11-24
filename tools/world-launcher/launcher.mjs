@@ -765,6 +765,21 @@ export async function openLauncher(cfg = {}) {
     res.writeHead(200, w.routeOnly ? { ...head, ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
     return true;
   }
+  /** 24 Nov: the page's polled old reads of a moved world whose old process sleeps (oldCold), in the shapes the old
+   *  process gives (apps/server http.ts, god/routes.ts, god/context-views.ts), so none is a 404 (live: Mars's page
+   *  logged one every poll, and its Explore said "Locations are temporarily unavailable"): visitors as a world without
+   *  travel (`available: false`: the page stops asking, SoulTravel.tsx); seq from the published snapshot (the page then
+   *  never resyncs for nothing, WorldEntityLayer.ts); context as a listing with no places (WorldContextViews.ts). */
+  function coldRead(res, w, rest, url) {
+    if (rest === '/v1/world/visitors') { json(res, 200, { contract: 'travel/1', world: worldIdOf(w), available: false, open: false, visitors: [], recent: [] }); return true; }
+    const seq = rest === '/v1/world/seq' || rest === '/v1/world/context' ? cutover?.publishedSeq(w) : null;
+    if (!seq) return false;
+    if (rest === '/v1/world/seq') { json(res, 200, seq); return true; }
+    const q = url.searchParams.get('q'), ref = url.searchParams.get('ref');
+    json(res, 200, { contract: 'world-context/1', revision: seq.seq, listingRevision: createHash('sha256').update(JSON.stringify([worldIdOf(w), seq.seq, q, ref])).digest('hex'),
+      source: 'authored-meaning', scope: ref ? 'exact' : q ? 'search-all' : 'semantic', targets: [], total: 0, nextCursor: null });
+    return true;
+  }
   /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
    *  (`me.userId`, `me.short`), so the page shows the visitor signed in. Their Souls there are the new engine's (the
    *  directory's My Souls), not listed here. Clerk: verified as the launcher's owner routes verify; locally, the dev
@@ -1329,6 +1344,7 @@ export async function openLauncher(cfg = {}) {
       if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
       if ((req.method === 'GET' || req.method === 'HEAD') && /^\/(?:v1|mcp)(?:\/|$)/.test(edgeRest)) {
         if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
+        if (coldRead(res, w, edgeRest, url)) return;
         json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; its old process is not awake, and this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
       }
     }
