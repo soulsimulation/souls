@@ -372,9 +372,11 @@ async function disturbCase(t, row, kinds, placed) {
   // rises. It rises first, so the form is done again on the thing as it stands; a world that cannot make it rise from
   // here refuses the redo `slot_taken`, its own seat held.
   const seated = row.how === 'leave' && body1.seat === id;
+  let rose;
   if (seated && t.rise) {
     const up = await t.rise();
-    if (up.verdict !== 'yes') off.push(`the Soul, left seated, could not rise (${up.code ?? up.reason ?? up.verdict})`);
+    rose = up.verdict === 'yes' && (await t.body()).seat == null;
+    if (!rose) off.push(`the Soul, left seated, could not rise (${up.code ?? up.reason ?? up.verdict})`);
   }
   let again;
   if (row.how === 'remove') {
@@ -394,7 +396,7 @@ async function disturbCase(t, row, kinds, placed) {
     }
   }
   for (const r of [stopRefused, refusedBy(again).run]) if (r) off.push(r);
-  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
+  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(seated ? {left_seated: true, ...(t.rise ? {rose} : {})} : {}), ...(again ? {again: brief(again)} : {})};
 }
 
 /** A change other than a set as one line to compare, by the case's names: what it did, to what, and where to (a made
