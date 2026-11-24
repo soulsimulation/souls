@@ -166,6 +166,8 @@ pub struct Engine {
     waiting: BTreeMap<Id, Act>,
     /// Each way back and not yet read by its lift run again, by intent: what was asked, and the way or its refusal.
     found: BTreeMap<Id, (WayAsk, Way)>,
+    /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
+    entries: Json,
 }
 
 /// A lift's way, found: none for a straight way, else the poses of one that turns the load, or its refusal.
@@ -238,18 +240,52 @@ fn break_off(
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
-/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing.
+/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing. A seated,
+/// lying or riding body is where its seat is ([`feet_of`]), as the served world's reach reads it, not at its slot
+/// frame's zero.
 struct Feet(BTreeMap<Id, (Id, [i64; 2])>);
 
 impl Feet {
-    fn of(c: &Controller, bodies: impl IntoIterator<Item = Id>) -> Feet {
+    fn of(
+        c: &Controller,
+        tree: &Tree,
+        entries: &Json,
+        bodies: impl IntoIterator<Item = Id>,
+    ) -> Feet {
         Feet(
             bodies
                 .into_iter()
-                .filter_map(|b| c.body(b).map(|m| (b, sim::index::place_of(m))))
+                .filter_map(|b| c.body(b).map(|m| (b, feet_of(tree, entries, &m.pose))))
                 .collect(),
         )
     }
+}
+
+/// Where a body with pose `pose` stands (0.135 E21, [`sim::reach::body_at`]): a seated, lying or riding one at its
+/// slot's point of the thing it is in, carried from that thing's frame onto the node it is placed on; any other, or
+/// one whose thing's entry or place is not found, where its pose has it.
+fn feet_of(tree: &Tree, entries: &Json, pose: &replica::pose::Pose) -> (Id, [i64; 2]) {
+    let thing = tree.handle(pose.frame.node).and_then(|h| tree.node(h));
+    let within = thing
+        .as_ref()
+        .and_then(|n| crate::acts::entry_in(entries, tree, n));
+    let on = |_: Id, p: Vec3| {
+        let n = thing.as_ref()?;
+        let place = n.place()?;
+        let up = place
+            .position
+            .plus(place.orientation.rotate(p).ok()?)
+            .ok()?;
+        Some((n.parent()?, up))
+    };
+    let (floor, at) = sim::reach::body_at(pose, within.as_deref(), on).unwrap_or_else(|| {
+        let node = match pose.support {
+            replica::pose::Support::Surface { surface, .. } => surface,
+            _ => pose.frame.node,
+        };
+        (node, pose.position)
+    });
+    (floor, [at.x, at.z])
 }
 
 impl Reach for Feet {
@@ -347,8 +383,10 @@ fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
 
 impl Engine {
     /// The engine carrying each load whose kind `entries` states as its entry says (0.135 C2): `entries` is the
-    /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out.
+    /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out. The
+    /// entries are kept, so a touch reaches a seated body at its seat (0.135 E21, [`feet_of`]).
     pub fn with_loads(mut self, entries: &Json) -> Engine {
+        self.entries = entries.clone();
         for (_, e) in entries.obj().unwrap_or(&[]) {
             if let (Some(kind), Ok(load)) = (e.get("kind").and_then(Json::str), Load::of(e)) {
                 self.loads.insert(kind.to_owned(), load);
@@ -399,6 +437,7 @@ impl Engine {
             asked: Vec::new(),
             waiting: BTreeMap::new(),
             found: BTreeMap::new(),
+            entries: Json::Null,
         }
     }
 
@@ -449,7 +488,7 @@ impl Engine {
         if bodies.is_empty() {
             return;
         }
-        let feet = Feet::of(c, bodies);
+        let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(
             tree,
             c,
@@ -611,7 +650,7 @@ impl Engine {
                 // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
-                    let feet = Feet::of(c, [asker, a.body]);
+                    let feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
                             continue;
@@ -1086,7 +1125,7 @@ impl Engine {
                 .instance_of(&t)
                 .and_then(|n| self.moves.record(n));
             if let Some((body, target)) = aimed.map(|r| (r.body, r.target)) {
-                let feet = Feet::of(c, [body, target]);
+                let feet = Feet::of(c, tr, &self.entries, [body, target]);
                 let _ = self.moves.fire(c, &mut self.due, &mut self.mint, &feet, &t);
                 continue;
             }
@@ -2549,5 +2588,80 @@ mod kind_tests {
                 "bad"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod feet_tests {
+    use super::*;
+    use replica::pose::{Frame, Pose, Quat, Support};
+
+    /// 0.135 E21 follow-up: a touch's reach to a seated Soul (an accept, a role's move) is from its seat. The testworld
+    /// building (60 m west, turned 33°) read as a bench whose end seat is 9.5 m from its origin: a Soul standing 0.4 m
+    /// from that seat is 0.4 m from the seated one, both ways, inside a handshake's reach; before, it was measured from
+    /// the bench's origin, 9.5 m off.
+    #[test]
+    fn a_touch_reaches_a_seated_body_at_its_seat() {
+        let generated = testworld::generate(1, 0).expect("the synthetic world");
+        let imported = import_eden::load(&generated.text).expect("the imported world");
+        let (ground, bench) = (imported.nodes["ground"], imported.nodes["building"]);
+        let tree = &imported.tree;
+        let node = tree.node(tree.handle(bench).unwrap()).unwrap();
+        let end_x = testworld::BUILDING_LENGTH / 2 + 1_500;
+        let entry = replica::rules::json::parse(&format!(
+            r#"{{"slots":{{"middle":{{"admits":"body","at_mm":[0,450,0]}},"end":{{"admits":"body","at_mm":[{end_x},450,0]}}}}}}"#
+        ))
+        .unwrap();
+        let entries = Json::Obj(vec![(plain(node.kind().as_str()).to_owned(), entry)]);
+        let place = node.place().unwrap();
+        let out = |x: i64, z: i64| {
+            let d = place
+                .orientation
+                .rotate(Vec3::new(x * 1000, 0, z * 1000))
+                .unwrap();
+            place.position.plus(d).unwrap()
+        };
+        let seated = Pose {
+            frame: Frame {
+                node: bench,
+                slot: Some(2),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        };
+        let standing = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: out(end_x, 400),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        };
+        let id = |n: u64| Id::new(Scope([0xce; 16]), n).unwrap();
+        let feet = Feet(BTreeMap::from([
+            (id(1), feet_of(tree, &entries, &seated)),
+            (id(2), feet_of(tree, &entries, &standing)),
+        ]));
+        let d = |a, b| {
+            feet.distance(
+                id(a),
+                &Effector::Held,
+                None,
+                id(b),
+                &Name::new("p").unwrap(),
+            )
+            .expect("one floor")
+        };
+        let (to, from) = (d(2, 1), d(1, 2));
+        println!("a touch from 0.4 m off the bench's end seat: {to} µm, {from} µm back");
+        assert!((to - 400_000).abs() <= 10_000, "to the seated Soul: {to}");
+        assert_eq!(to, from);
+        // With no entry for the bench its seat is not found: the old measure, from the bench's origin, 9.5 m off.
+        assert_eq!(feet_of(tree, &Json::Null, &seated), (bench, [0, 0]));
     }
 }
