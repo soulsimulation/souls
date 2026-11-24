@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { openSoulMemory as shippingMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
+import { openSoulMemory as shippingMemory } from '../soul/memory.mjs';
 import { frozenWorld } from '../../test/compat/frozen-world.mjs';
 import { knownThrough, readAliases, soulDirOf } from '../memory/memory.mjs';
 import { endpointsOf, formerSouls, rollbackHome, upgradeHome } from './upgrade.mjs';
