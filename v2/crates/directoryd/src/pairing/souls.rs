@@ -157,7 +157,7 @@ impl Pairing {
         if !is_world(world) {
             return Err("world");
         }
-        self.authority(Some(world))?;
+        self.placed(world)?;
         store(self.db.lock().expect("the store").execute(
             "INSERT OR REPLACE INTO pair_request_worlds_v1(code, world) VALUES (?1, ?2)",
             params![code, world],
