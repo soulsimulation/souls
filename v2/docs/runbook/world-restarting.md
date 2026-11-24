@@ -20,6 +20,14 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A degraded public stream** (R12). When the public stream cannot recover from the store (refused or out of reach
+  after its patient tries), the world does not exit: it serves its Souls with no viewers (no `views/world.json`) and
+  tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public
+  stream is degraded, no viewers: <fault>; try <n> refused, the next in <ms> ms` at each try, and `health.json` has
+  `"stream":{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` (`serving` once it recovers). Fix the store or
+  the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait in
+  memory until the stream catches up. A stream that ends after serving says `"state":"stopped"` with its fault; a
+  restart starts it again.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
