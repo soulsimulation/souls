@@ -10,7 +10,7 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 | `routes.mjs` | run by `souls-routes.timer` | the active map from the directory and trusted placement metadata: `/var/lib/souls-routes/slugs/<slug>` and `sitemap.xml` |
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |
-| `soul-game-moved.caddy` | `/etc/caddy/sites/soul-game.caddy` | `soul.game` while only some worlds have moved: the live file plus the moved worlds' new-engine paths (below) |
+| `soul-game-moved.caddy` | `/etc/caddy/sites/soul-game.caddy` | `soul.game` while only some worlds have moved: the live file plus each moved world's paths to its own gatewayd (below) |
 | `moved-install.sh` | not installed | installs `soul-game-moved.caddy` over the live file, or undoes it |
 | `moved-standin.mjs` | not installed | proves `soul-game-moved.caddy` and `moved-install.sh` on this machine |
 
@@ -37,26 +37,33 @@ the gateway and pairing), then once with the two systems' worlds swapped, which 
 
 ## While only some worlds have moved (24 Nov 2026)
 
-Production's front door is still the live 0.131 F0 file (`/s/*` to the viewers' origin, everything else to today's
-launcher), so a Soul cannot pair with a world that has moved: `node eden.mjs pair https://soul.game/w/eden/` fails
-`pair-world-routing`. [`soul-game-moved.caddy`](soul-game-moved.caddy) is that live file plus, for the moved worlds only,
-the bootstrap (to 7320) and the agent paths (`v2/ws`, `creator-token`, `entries`, uploads, to the agents' relay on
-7330), and, for everyone, the site-level pairing paths (`/pair`, `/v1/pair/*`, `/v1/agent/account[/*]`, to the
-directory and the release's card); today's client pairs at `/w/<slug>/v1/agent/pair`, which stays with the launcher.
-The moved worlds are one alternation in its `@moved` line, `(eden)`; W4 extends it and installs again.
+Production's front door was the live 0.131 F0 file (`/s/*` to the viewers' origin, everything else to today's
+launcher), so a Soul could not pair with a world that had moved: `node eden.mjs pair https://soul.game/w/eden/` failed
+`pair-world-routing`. [`soul-game-moved.caddy`](soul-game-moved.caddy) is that live file plus, for each moved world, the
+bootstrap (to 7320) and the agent paths (`v2/ws`, `creator-token`, `entries`, uploads) straight to **that world's own
+gatewayd** with `/w/<slug>` stripped, and, for everyone, the site-level pairing paths (`/pair`, `/v1/pair/*`,
+`/v1/agent/account[/*]`, to the directory and the release's card); today's client pairs at `/w/<slug>/v1/agent/pair`,
+which stays with the launcher. The agents' relay (`souls-agents`) is not used: production runs none, and 7330 is
+Eden's gatewayd.
+
+The moved worlds are the `import moved-world <slug> <port>` lines in its site block, one per world, `<port>` being the
+port of that world's `gateway` in `/var/lib/souls/routes/worlds.json`. To move another world, add its line
+(`bash moved-install.sh lines` prints the line for every canonical world in that file) and install again.
 
 The release owner, on the production host, from a copy of this folder (a checkout, or the live release once it
 carries it):
 
 ```bash
 sudo bash moved-install.sh install   # back up, write, caddy validate, reload, check from loopback; undoes itself on a failure
-sudo bash moved-install.sh undo      # the saved /etc/caddy/soul-game.caddy.before-moved back, validated, reloaded
+sudo bash moved-install.sh undo      # the original /etc/caddy/soul-game.caddy.before-moved back, validated, reloaded
 ```
 
-It reads the launcher's port and `trusted_proxies` from the live file, and stops with nothing changed unless the
-directory answers its pairing card, each moved world's bootstrap comes from the viewers' origin (Eden `canonical: true`
-in the routes file), the agents' relay answers and the release's `pair.html` is there. The undo in one line, without the
-script: `sudo cp -a /etc/caddy/soul-game.caddy.before-moved /etc/caddy/sites/soul-game.caddy && sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+It reads the launcher's port and `trusted_proxies` from the original file, and stops with nothing changed unless the
+directory answers its pairing card, and for each line worlds.json names that port as the world's gateway, the gatewayd
+there opens `/v2/ws` (101) and the world's bootstrap comes from the viewers' origin (`canonical: true`), and the
+release's `pair.html` is there. After the reload it checks each world's bootstrap (200) and `/w/<slug>/v2/ws` (101)
+through the front door. Each install also keeps the file it replaced as `/etc/caddy/soul-game.caddy.before-last-install`.
+The undo in one line, without the script: `sudo cp -a /etc/caddy/soul-game.caddy.before-moved /etc/caddy/sites/soul-game.caddy && sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 
 Prove it locally (fake minds; caddy on the path; `cargo build -p directoryd -p gatewayd -p worldd -p testworld` and
 replica's package in `target/wasm-load/pkg`, or `DIRECTORYD=...` and `SOULS_REPLICA_PKG=...`):
@@ -65,11 +72,13 @@ replica's package in `target/wasm-load/pkg`, or `DIRECTORYD=...` and `SOULS_REPL
 node v2/tools/ops/proxy/moved-standin.mjs
 ```
 
-It runs a scratch Caddy with a live-shaped file in front of a real new-engine world named `eden` and a stand-in for
-today's launcher; a fresh `eden.mjs pair` fails `pair-world-routing`; `moved-install.sh install` runs as written; a
-fresh `eden.mjs pair` is approved and `act life:join` gets its receipt through the front door, while an old world's
-page, pairing, bootstrap and v2 paths, and Eden's page and `/v1/config`, still reach the launcher; `undo` puts the live
-file back; a file that fails `caddy validate` is never installed.
+It runs a scratch Caddy with a live-shaped file in front of two real new-engine worlds, `eden` and `hamlet`, each with
+its own gatewayd, and a stand-in for today's launcher. It shows production's two faults (`pair-world-routing`, then
+#4520's file answering `/w/eden/v2/ws` 404), that a line sending hamlet to Eden's gatewayd is refused, and then, after
+`install`: for each world a fresh `eden.mjs pair` approved through the front door, its socket opening (101), and
+`act life:join` answered with its receipt, recorded by that world's gatewayd and not the other's; an old world's page,
+pairing, bootstrap and v2 paths, and Eden's page and `/v1/config`, still on the launcher; `undo` putting the live
+file back; and a file that fails `caddy validate` never installed.
 
 ## Switch (the release owner, on the production host, as root)
 
