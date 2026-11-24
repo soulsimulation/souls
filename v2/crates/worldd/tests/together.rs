@@ -147,6 +147,11 @@ const W_HUG: &str = "test:w_hug";
 const W_HIGH_FIVE: &str = "test:w_high_five";
 const W_HOLD: &str = "test:w_hold_hands";
 const GIVER: &str = "test:giver";
+/// The greetings of #4454, #4459 and #4477, read from their entries (`tests/greetings/`): a one-off aimed move each.
+const BOW: &str = "test:bow_to_each_other";
+const NOD: &str = "test:nod_to_each_other";
+const WAVE: &str = "test:wave_to_each_other";
+const INTRO: &str = "test:speaker_introduction";
 const TAKER: &str = "test:taker";
 
 fn name(s: &str) -> Name {
@@ -175,6 +180,10 @@ fn kinds() -> Vec<(&'static str, String)> {
         (W_HUG, pinned(W_HUG, 13)),
         (W_HIGH_FIVE, pinned(W_HIGH_FIVE, 14)),
         (W_HOLD, pinned(W_HOLD, 15)),
+        (BOW, pinned(BOW, 16)),
+        (NOD, pinned(NOD, 17)),
+        (WAVE, pinned(WAVE, 18)),
+        (INTRO, pinned(INTRO, 19)),
     ]
 }
 
@@ -209,6 +218,70 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         beat: false,
         follows: None,
     }
+}
+
+/// The kind `serve::activity_kinds` reads from a greeting's entry `text`, named `plain`: each role claims a hand and
+/// names its `move`, standing at its slot's stand point, walked there from within its `within_mm`.
+fn greeting(plain: &str, text: &str) -> ActivityKind {
+    let e = replica::rules::json::parse(text).unwrap();
+    let mm = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).unwrap() * 1000,
+        other => panic!("a length: {other:?}"),
+    };
+    let roles = e
+        .get("roles")
+        .and_then(Json::obj)
+        .unwrap()
+        .iter()
+        .map(|(role, v)| {
+            let places = v.get("places").unwrap();
+            let slot = places.get("slots").and_then(Json::arr).unwrap()[0]
+                .str()
+                .unwrap();
+            let stand = e.get("slots").unwrap().get(slot).unwrap();
+            let at = e
+                .get("points")
+                .unwrap()
+                .get(stand.get("stand").and_then(Json::str).unwrap())
+                .unwrap();
+            let a = at.get("at_mm").and_then(Json::arr).unwrap();
+            let yaw = match at.get("yaw_mdeg") {
+                Some(Json::Int(n)) => i64::try_from(*n).unwrap(),
+                _ => 0,
+            };
+            Role {
+                name: name(&format!("eden:{role}")),
+                place: name("souls:here"),
+                claims: vec![Want::One(Class::Manipulator)],
+                mv: Some(name(&format!(
+                    "souls:{}",
+                    v.get("move").and_then(Json::str).unwrap()
+                ))),
+                stands: vec![(Vec3::new(mm(a.first()), mm(a.get(1)), mm(a.get(2))), yaw)],
+                within: Some(mm(places.get("within_mm"))),
+                link: None,
+            }
+        })
+        .collect();
+    ActivityKind {
+        name: name(&full(plain)),
+        revision: 1,
+        roles,
+        proposal_lasts: 60_000_000,
+        leave_within: 400_000,
+        most: 2,
+        beat: false,
+        follows: None,
+    }
+}
+
+fn greetings() -> Vec<ActivityKind> {
+    vec![
+        greeting(BOW, include_str!("greetings/bow_to_each_other.json")),
+        greeting(NOD, include_str!("greetings/nod_to_each_other.json")),
+        greeting(WAVE, include_str!("greetings/wave_to_each_other.json")),
+        greeting(INTRO, include_str!("greetings/speaker_introduction.json")),
+    ]
 }
 
 /// Dancing together (0.134 T3): content's `dance` on the world's beat, up to eight members.
@@ -339,6 +412,10 @@ fn tree_rules() -> TreeRules {
                         W_HUG,
                         W_HIGH_FIVE,
                         W_HOLD,
+                        BOW,
+                        NOD,
+                        WAVE,
+                        INTRO,
                     ],
                 ),
             ),
@@ -356,6 +433,10 @@ fn tree_rules() -> TreeRules {
             (full(W_HUG), k("activity", &[])),
             (full(W_HIGH_FIVE), k("activity", &[])),
             (full(W_HOLD), k("activity", &[])),
+            (full(BOW), k("activity", &[])),
+            (full(NOD), k("activity", &[])),
+            (full(WAVE), k("activity", &[])),
+            (full(INTRO), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -573,7 +654,7 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
     }));
     cfg.engine = Some((
         tree_rules(),
-        vec![
+        [
             handshake(HANDSHAKE, 60_000_000),
             handshake(BRIEF, 500_000),
             touch(HOLD, 60_000_000, "souls:hold_hand"),
@@ -587,7 +668,10 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
             content_touch(W_HOLD, "hold_hands", "souls:hold_hand"),
-        ],
+        ]
+        .into_iter()
+        .chain(greetings())
+        .collect(),
     ));
     let rules = Rules {
         kinds: Json::Obj(Vec::new()),
@@ -649,6 +733,10 @@ impl Run {
                             W_HUG,
                             W_HIGH_FIVE,
                             W_HOLD,
+                            BOW,
+                            NOD,
+                            WAVE,
+                            INTRO,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -1951,5 +2039,106 @@ fn r1_a_sit_by_either_lets_go_of_a_hold() {
     );
     assert_eq!(run.ended().len(), 4, "both hands came free again");
     println!("r1: a sit by the leader, and a sit in a standing hold, each let go for both");
+    run.stop();
+}
+
+impl Run {
+    /// The moves written for viewers in `activity`: the body, the move, its target and its planned last end.
+    fn played(&self, activity: Id) -> Vec<(Id, String, Id, Micros)> {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| {
+                ev.name.as_str() == "souls:form-move"
+                    && read_id(&ev.fields[&1]).ok() == Some(activity)
+            })
+            .map(|ev| {
+                let Value::Map(r) = &ev.fields[&3] else {
+                    panic!("a move record")
+                };
+                let Some(Value::Array(ends)) = r.get(&8) else {
+                    panic!("its phase ends")
+                };
+                let Some(Value::Uint(last)) = ends.last() else {
+                    panic!("an end")
+                };
+                let Some(Value::Bytes(mv)) = r.get(&2) else {
+                    panic!("a move's name")
+                };
+                (
+                    read_id(&ev.fields[&2]).unwrap(),
+                    String::from_utf8(mv.clone()).unwrap(),
+                    read_id(&r[&5]).unwrap(),
+                    *last as Micros,
+                )
+            })
+            .collect()
+    }
+
+    /// When each member left `activity`.
+    fn left_from(&self, activity: Id) -> Vec<Micros> {
+        self.entries()
+            .into_iter()
+            .filter(|e| e.envelope.node == activity)
+            .filter(|e| {
+                e.events
+                    .iter()
+                    .flatten()
+                    .any(|ev| ev.name.as_str() == "souls:activity-left")
+            })
+            .map(|e| e.envelope.at)
+            .collect()
+    }
+}
+
+/// Verifying #4456 and #4482: a greeting whose roles each name one aimed move (a bow, a nod, a host's point) was
+/// accepted and ended within 2 s with neither move drawn on the old page, while a returned wave (#4459) was. The engine
+/// is not where it is lost: each greeting, read from its own entry, plays each member's move once, aimed at the other
+/// member, with no `on_beat`, and then ends, both members leaving it after their moves' last phase. A gaze-claiming
+/// move (bow, nod, point) starts as a wave does: nothing else holds a body's gaze when an activity starts.
+#[test]
+fn greetings_play_each_members_aimed_move_once_then_end() {
+    let run = serve("greet");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    for (kind, role, first, second) in [
+        (WAVE, "eden:one", "souls:wave", "souls:wave"),
+        (BOW, "eden:one", "souls:bow", "souls:bow"),
+        (NOD, "eden:one", "souls:nod", "souls:nod"),
+        (INTRO, "eden:host", "souls:point", "souls:bow"),
+    ] {
+        let lefts = run.lefts();
+        let offered = a
+            .act(
+                "activity:offer",
+                Some(ground()),
+                &[
+                    (1, Value::Text(name(&full(kind)))),
+                    (2, Value::Text(name(role))),
+                    (3, Value::Array(vec![soul(2).to_value()])),
+                ],
+            )
+            .unwrap_or_else(|r| panic!("{kind}: offered: {r}"));
+        let greeting = run.created(&offered);
+        b.act("activity:accept", Some(greeting), &[])
+            .unwrap_or_else(|r| panic!("{kind}: accepted: {r}"));
+        // Both walk about a metre to their places, then make their moves (at most 1.5 s), then it ends.
+        std::thread::sleep(Duration::from_millis(4_500));
+        let played = run.played(greeting);
+        let left = run.left_from(greeting);
+        println!("{kind}: played {played:?}; left at {left:?}");
+        let mut by: Vec<(Id, &str, Id)> = played.iter().map(|p| (p.0, p.1.as_str(), p.2)).collect();
+        by.sort();
+        assert_eq!(
+            by,
+            vec![(soul(1), first, soul(2)), (soul(2), second, soul(1))],
+            "{kind}: each member's move, once, aimed at the other"
+        );
+        assert_eq!(run.lefts(), lefts + 2, "{kind}: both left by themselves");
+        let last = played.iter().map(|p| p.3).max().unwrap();
+        assert!(
+            left.iter().all(|t| *t >= last),
+            "{kind}: it ends after the moves' last phase ({last} µs): {left:?}"
+        );
+    }
     run.stop();
 }

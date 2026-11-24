@@ -64,7 +64,7 @@ import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shor
 import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
-import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import { ACTIVITY_OVERLAYS, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
@@ -192,6 +192,8 @@ type View = {
   waveRestAge?: number;
   prevBase?: string;
   prevDuration?: number;
+  /** The last drawn one-off gesture (activity-poses.ts RETURNS): its age and the take time it was drawn at. */
+  gesture?: { act: string; age: number; at: number };
   prevInstrument?: string;
   restAge?: number;
   restFrom?: number;
@@ -1036,11 +1038,18 @@ export class HumanViews {
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
     const fluteRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='flute'&&v.since!==undefined&&v.since<.8;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
+    // A one-off gesture's age (a bow, a point) is the take's, else carried on from this body's last frame of it: a live
+    // take window can begin inside it with no history (its age unknown, its arc restarted at a random phase). One that
+    // ends while still out then comes back from where it was over GESTURE_RETURN, on the same clock, not in one frame.
+    const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
+    if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
+    const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
+      : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
     h.rotation.z = 0; h.rotation.x = 0;
     let lieFloor = h.position.y;
