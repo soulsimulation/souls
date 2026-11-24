@@ -3782,7 +3782,8 @@ fn i3948_a_stream_begun_before_drops_closed_contents_at_its_next_generation() {
 }
 
 /// #4192: a take or a sit (a leave and its arrive in one cut), links made and ended (one to a private node, which is
-/// never public), and a node moved with what is under it are each published from their rows, not as a whole cut, and
+/// never public), a node moved with what is under it, and a node made with a link to it (an activity offered) are
+/// each published from their rows, not as a whole cut, and
 /// the parts and words are the same bytes as when every cut is worked out whole.
 #[test]
 fn i4192_takes_sits_and_links_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
@@ -3790,8 +3791,11 @@ fn i4192_takes_sits_and_links_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts
     let (whole, whole_whole) = i4192_run(false);
     assert!(whole.len() > 1000, "the log published");
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
-    assert_eq!(whole_whole, 5, "every reference cut is whole");
-    assert_eq!(rows_whole, 0, "a take, a sit or a link is a cut by rows");
+    assert_eq!(whole_whole, 6, "every reference cut is whole");
+    assert_eq!(
+        rows_whole, 0,
+        "a take, a sit, a link or a node made with its link is a cut by rows"
+    );
 }
 
 fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
@@ -3815,6 +3819,7 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
     let n = |s: u8| Id::new(Scope([0x90 + s; 16]), 1).unwrap();
     let (carrier, child, foreign, hidden) = (n(1), n(2), n(3), n(4));
     let (l1, l2, t1, t2) = (n(5), n(6), n(7), n(8));
+    let (offered, l3) = (n(9), n(10));
     let said = words
         .write(b"words on the child", Audience::Everyone, child)
         .unwrap();
@@ -3913,6 +3918,11 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
         vec![link(9, l2, hidden)],
         vec![unlink(10, l1), unlink(11, l2)],
         vec![move_to(12, foreign, t2, carrier), arrive(13, t2, carrier)],
+        // An activity offered: its node and the asker's member link to it, in one entry.
+        vec![
+            w3e_create(&h, 14, offered, h.zone, everyone),
+            link(15, l3, offered),
+        ],
     ];
     let mut whole = 0;
     for (i, effects) in log.into_iter().enumerate() {
@@ -4118,6 +4128,15 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
     let (p, asleep) = pointer(&out);
     assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
     assert_eq!(asleep, None);
+    // Rule 11: a still world's public pointer moves on every PUBLIC_QUIET_EVERY_US of world time, not at each idle
+    // (every 20 ms): each write is synced, and a storm of them held back the parts after an activity accept.
+    out.idle(real + 7_050_000).unwrap();
+    assert_eq!(pointer(&out).0.quiet_until, Some(7_000_000 - SETTLE_US));
+    out.idle(real + 7_000_000 + PUBLIC_QUIET_EVERY_US).unwrap();
+    assert_eq!(
+        pointer(&out).0.quiet_until,
+        Some(7_000_000 + PUBLIC_QUIET_EVERY_US - SETTLE_US)
+    );
 }
 
 /// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
