@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "words": {
-      "n": 1,
+      "n": 28,
       "type": "text",
       "default": null,
       "audience": {
@@ -12,7 +12,7 @@
       }
     },
     "stage": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "blank",

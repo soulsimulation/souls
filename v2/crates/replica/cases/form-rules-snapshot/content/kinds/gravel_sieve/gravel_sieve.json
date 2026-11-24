@@ -3,9 +3,9 @@
   "kind": "eden:gravel_sieve",
   "owner": "thing",
   "state": {
-    "mixed": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "coarse": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "fine": { "n": 3, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+    "mixed": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "coarse": { "n": 29, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "fine": { "n": 30, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip_left": { "role": "grip", "at_mm": [-265, 70, 0] },

@@ -81,7 +81,7 @@
         "change": "set",
         "node": "t1",
         "field": "food",
-        "n": 1,
+        "n": 28,
         "to": 4,
         "by": -4
        },
@@ -89,7 +89,7 @@
         "change": "set",
         "node": "w1",
         "field": "food",
-        "n": 1,
+        "n": 28,
         "to": 4,
         "by": 4
        }
@@ -139,7 +139,7 @@
         "change": "set",
         "node": "t1",
         "field": "food",
-        "n": 1,
+        "n": 28,
         "to": 0,
         "by": -4
        },
@@ -147,7 +147,7 @@
         "change": "set",
         "node": "w2",
         "field": "food",
-        "n": 1,
+        "n": 28,
         "to": 4,
         "by": 4
        }
