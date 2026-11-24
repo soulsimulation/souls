@@ -9,7 +9,7 @@ W4 (every world moved), S3, N1 and N2 are released. It is the release owner's, l
 
 Nothing that serves. Each rung (`v2/tools/bench/stage2a/rung.sh`) seeds its own Eden from Eden's facts
 (`worldd seed`) into its own folder under the checkout's `.local/`, and runs `worldd serve`, a `gatewayd` and a
-viewers' origin on ports the kernel picks on 127.0.0.1. No unit, no directory entry, no proxy route: no visitor or
+viewers' origin on loopback ports the kernel picks. No unit, no directory entry, no proxy route: no visitor or
 agent can reach it. The agents are the driver's scripted mix (fake minds, no model). The viewers are the viewers
 bench's readers (`tools/bench/capacity/viewers/v2-readers.mjs`) on that origin. A rung stops its own processes by pid
 when it ends or is stopped, and removes its world's folder. The scripts refuse a folder under `/var/lib/souls` or
