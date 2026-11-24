@@ -22,7 +22,7 @@
             "changes": [
               { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "left" } },
               { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
-              { "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "pulled_up" }
+              { "change": "set", "node": "t1", "field": "covers", "n": 28, "to": "pulled_up" }
             ],
             "events": [
               { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
@@ -102,7 +102,7 @@
             "changes": [
               { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "left" } },
               { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
-              { "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "pulled_up" }
+              { "change": "set", "node": "t1", "field": "covers", "n": 28, "to": "pulled_up" }
             ],
             "events": [
               { "event": "eden:got_into_bed", "node": "t1", "changes": [0] },
@@ -122,7 +122,7 @@
           "receipt": "rc4",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "turned_down" }],
+            "changes": [{ "change": "set", "node": "t1", "field": "covers", "n": 28, "to": "turned_down" }],
             "events": [{ "event": "eden:bed_made", "node": "t1", "changes": [0] }],
             "timers": []
           }

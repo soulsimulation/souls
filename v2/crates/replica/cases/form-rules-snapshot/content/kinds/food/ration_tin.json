@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "open": {
-      "n": 1,
+      "n": 28,
       "type": "bool",
       "default": false,
       "audience": {
@@ -12,7 +12,7 @@
       }
     },
     "bites": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 2,

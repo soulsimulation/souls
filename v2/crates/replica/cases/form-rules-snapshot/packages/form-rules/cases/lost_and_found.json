@@ -1,0 +1,11 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:lost_and_found (0.135 E2): hand in a thing you hold, up to six; claim one with a hand free.",
+ "cases": [
+  {"name": "hand_in_a_held_thing", "act": {"this": "x1", "form": "hand_in", "args": {"thing": "t1"}}, "state": {"actor": "b1", "nodes": {"x1": {"kind": "eden:lost_and_found"}, "b1": {"hands": {"left": "t1", "right": null}}, "t1": {"kind": "eden:cut_flower"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "hand_in_a_thing_not_in_hand", "act": {"this": "x1", "form": "hand_in", "args": {"thing": "t1"}}, "state": {"actor": "b1", "nodes": {"x1": {"kind": "eden:lost_and_found"}, "b1": {"hands": {"left": null, "right": null}}, "t1": {"kind": "eden:cut_flower"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "not_held", "need": 0}},
+  {"name": "hand_in_when_full", "act": {"this": "x1", "form": "hand_in", "args": {"thing": "t1"}}, "state": {"actor": "b1", "nodes": {"x1": {"kind": "eden:lost_and_found", "slots": {"box": ["f0", "f1", "f2", "f3", "f4", "f5"]}}, "f0": {"kind": "eden:cut_flower"}, "f1": {"kind": "eden:cut_flower"}, "f2": {"kind": "eden:cut_flower"}, "f3": {"kind": "eden:cut_flower"}, "f4": {"kind": "eden:cut_flower"}, "f5": {"kind": "eden:cut_flower"}, "b1": {"hands": {"left": "t1", "right": null}}, "t1": {"kind": "eden:cut_flower"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "slot_taken", "need": 1}},
+  {"name": "claim_with_a_hand_free", "act": {"this": "x1", "form": "claim", "args": {"thing": "f0"}}, "state": {"actor": "b1", "nodes": {"x1": {"kind": "eden:lost_and_found", "slots": {"box": ["f0"]}}, "f0": {"kind": "eden:cut_flower"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "claim_with_both_hands_full", "act": {"this": "x1", "form": "claim", "args": {"thing": "f0"}}, "state": {"actor": "b1", "nodes": {"x1": {"kind": "eden:lost_and_found", "slots": {"box": ["f0"]}}, "f0": {"kind": "eden:cut_flower"}, "b1": {"hands": {"left": "t1", "right": "t2"}}, "t1": {"kind": "eden:cut_flower"}, "t2": {"kind": "eden:cut_flower"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0}}
+ ]
+}

@@ -79,7 +79,7 @@
         "change": "set",
         "node": "t1",
         "field": "title",
-        "n": 1,
+        "n": 28,
         "to": {
          "text": "w_jumble"
         }
@@ -88,7 +88,7 @@
         "change": "set",
         "node": "t1",
         "field": "detail",
-        "n": 2,
+        "n": 29,
         "to": {
          "text": "w_saturday"
         }
@@ -97,7 +97,7 @@
         "change": "set",
         "node": "t1",
         "field": "out_of_date",
-        "n": 3,
+        "n": 30,
         "to": 0
        }
       ],
@@ -196,7 +196,7 @@
         "change": "set",
         "node": "t1",
         "field": "out_of_date",
-        "n": 3,
+        "n": 30,
         "to": 1
        }
       ],
@@ -232,19 +232,19 @@
         "change": "set",
         "node": "t1",
         "field": "title",
-        "n": 1
+        "n": 28
        },
        {
         "change": "set",
         "node": "t1",
         "field": "detail",
-        "n": 2
+        "n": 29
        },
        {
         "change": "set",
         "node": "t1",
         "field": "out_of_date",
-        "n": 3,
+        "n": 30,
         "to": 0
        }
       ]
@@ -342,19 +342,19 @@
         "change": "set",
         "node": "t1",
         "field": "title",
-        "n": 1
+        "n": 28
        },
        {
         "change": "set",
         "node": "t1",
         "field": "detail",
-        "n": 2
+        "n": 29
        },
        {
         "change": "set",
         "node": "t1",
         "field": "out_of_date",
-        "n": 3,
+        "n": 30,
         "to": 0
        }
       ],

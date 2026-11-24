@@ -3,10 +3,10 @@
   "kind": "eden:camp_chair_kit",
   "owner": "thing",
   "state": {
-    "timber": { "n": 1, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
-    "panels": { "n": 2, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } },
-    "covering": { "n": 3, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
-    "fasteners": { "n": 4, "type": "int", "unit": "count", "default": 8, "min": 0, "max": 8, "audience": { "rule": "everyone" } }
+    "timber": { "n": 28, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "panels": { "n": 29, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } },
+    "covering": { "n": 30, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "fasteners": { "n": 31, "type": "int", "unit": "count", "default": 8, "min": 0, "max": 8, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 900] }

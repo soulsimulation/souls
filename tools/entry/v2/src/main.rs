@@ -485,8 +485,11 @@ impl Stage {
                 Change::Set {
                     node, field, to, ..
                 } => self.read_set(*node, *field, to),
-                // A thing a form made is kept by a name of its own, so the case's state can name it.
-                Change::Create { node, kind, .. } if plain(kind.as_str()) != BODY => {
+                // A thing a form made, and the tree took, is kept by a name of its own, so the case's state can name
+                // it and its fields are read back from the tree. A create the tree refused is only in the log.
+                Change::Create { node, kind, .. }
+                    if plain(kind.as_str()) != BODY && self.tree.handle(*node).is_some() =>
+                {
                     let kind = plain(kind.as_str()).to_owned();
                     let fields = self.defaults(&kind);
                     self.placed += 1;
@@ -554,12 +557,32 @@ impl Stage {
             (Some("text"), r) => replica::audience::reference(r)
                 .and_then(|id| self.words.get(&id))
                 .map_or(J::Null, |w| J::Str(w.clone())),
+            // A list's records, each by the record's field names in the order of `of`.
+            (Some("list"), Cbor::Array(records)) => {
+                let of = def.get("of").and_then(J::obj).unwrap_or(&[]);
+                J::Arr(
+                    records
+                        .iter()
+                        .map(|r| {
+                            let Cbor::Map(m) = r else { return J::Null };
+                            J::Obj(
+                                (1u64..)
+                                    .zip(of)
+                                    .filter_map(|(i, (k, d))| {
+                                        Some((k.clone(), self.json_of(d, m.get(&i)?)))
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            }
             _ => J::Null,
         }
     }
 
-    /// A thing's fields as the tree holds them. A field the tree does not hold (a timed, schedule or list field, or
-    /// one K3 refused) is read from what the case set, since the tree cannot show it. None once it is gone.
+    /// A thing's fields as the tree holds them. A field the tree does not hold (a timed or schedule field, or one K3
+    /// refused) is read from what the case set, since the tree cannot show it. None once it is gone.
     fn tree_fields(&self, t: &Thing) -> Option<Vec<(String, J)>> {
         let node = self.tree.node(self.tree.handle(t.id)?)?;
         let state = self
@@ -582,10 +605,7 @@ impl Stage {
                             .find(|(f, _)| f == k)
                             .map_or(J::Null, |(_, v)| v.clone())
                     };
-                    let v = match (held, def.get("type").and_then(J::str)) {
-                        (Some(_), Some("list")) | (None, _) => own(),
-                        (Some(v), _) => self.json_of(def, v),
-                    };
+                    let v = held.map_or_else(own, |v| self.json_of(def, v));
                     (k.clone(), v)
                 })
                 .collect(),
@@ -790,6 +810,31 @@ impl Stage {
                 )]))
             }
             (Type::Text { .. }, J::Null) => Cbor::Map(BTreeMap::new()),
+            // A list's records, each an object by the record's field names, as maps numbered 1, 2, ... in the order
+            // of `of` (F11).
+            (Type::List { of, .. }, J::Arr(records)) => {
+                let ns = full.split(':').next().unwrap_or_default();
+                let record = |r: &J| -> Option<Cbor> {
+                    let mut m = BTreeMap::new();
+                    for (i, (fname, ty)) in (1u64..).zip(of) {
+                        let x = match (ty, r.get(fname.as_str())?) {
+                            (Type::Bool, J::Bool(b)) => Cbor::Uint(u64::from(*b)),
+                            (Type::Bool | Type::Int | Type::Duration, J::Int(i)) if *i >= 0 => {
+                                Cbor::Uint(u64::try_from(*i).ok()?)
+                            }
+                            (Type::Int, J::Int(i)) => Cbor::Nint(u64::try_from(-1 - *i).ok()?),
+                            (Type::Enum(_), J::Str(s)) => {
+                                let bare = s.split_once(':').map_or(s.as_str(), |(_, b)| b);
+                                Cbor::Text(Name::new(&format!("{ns}:{bare}"))?)
+                            }
+                            _ => return None,
+                        };
+                        m.insert(i, x);
+                    }
+                    Some(Cbor::Map(m))
+                };
+                Cbor::Array(records.iter().map(record).collect::<Option<_>>()?)
+            }
             _ => return None,
         };
         Some((*n, value))
@@ -1465,7 +1510,7 @@ impl Stage {
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
         // A thing argument the act leaves out goes to the form as the rules chose it, as worldd's `Acts` chooses it.
         let chosen = replica::rules::chosen_act(&self.kinds, act, &state, asker.get("sees"));
-        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids);
+        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names);
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -1536,14 +1581,20 @@ impl Stage {
     /// The act's arguments as the world hands them to the forms (F14): a thing argument as the id its case node was
     /// placed as, words as a reference kept here (a stand-in for K16's store), a whole number as itself, any other as a
     /// name.
-    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J) -> Args {
+    /// The form's arguments from the case's act. A node argument is named as the case names it: a thing it placed
+    /// (`ids`), else a body or Soul the case names (`names`), else a thing by the runner's own key.
+    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J, names: &Names) -> Args {
         let takes = entry
             .get("forms")
             .and_then(|f| f.get(form))
             .and_then(|f| f.get("takes"));
         let thing = |v: &J| {
-            let key = ids.get(v.str()?)?.str()?;
-            self.things.get(key).map(|t| t.id)
+            let n = v.str()?;
+            let placed = ids.get(n).and_then(J::str).and_then(|k| self.things.get(k));
+            placed
+                .map(|t| t.id)
+                .or_else(|| names.to_id.get(n).copied())
+                .or_else(|| self.things.get(n).map(|t| t.id))
         };
         let mut out = Args::new();
         for (k, v) in act.get("args").and_then(J::obj).unwrap_or(&[]) {

@@ -18,8 +18,9 @@
 //! copy checks are the originals deleted. A copy already there with the same bytes counts as made (a run stopped
 //! halfway is finished by the next); one with other bytes refuses, changing nothing more. `--back` refuses a key the
 //! world holds again (set the fresh world's objects aside first). The store is the one `deploy` and `supervisor` read:
-//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Exits 0 on success, 1 on a
-//! refusal, 2 on a usage error.
+//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Every store call, the listing
+//! included, is tried again with back-off while the store is out of reach (`tried`: a stall, a dropped connection, a
+//! 5xx; 0.132.1, 0.133 R13). Exits 0 on success, 1 on a refusal, 2 on a usage error.
 // Operations, not the engine: the default label is the wall clock.
 #![allow(clippy::disallowed_methods)]
 
@@ -59,11 +60,11 @@ fn places(world: &World) -> (String, [String; 4]) {
 pub fn keys(store: &dyn Store, world: &World) -> R<Vec<String>> {
     let (record, prefixes) = places(world);
     let mut out = Vec::new();
-    if store.get(&record)?.is_some() {
+    if tried(&record, || store.head(&record))?.is_some() {
         out.push(record);
     }
     for p in &prefixes {
-        out.extend(store.list(p)?);
+        out.extend(tried(p, || store.list(p))?);
     }
     Ok(out)
 }
@@ -95,7 +96,7 @@ pub fn plan_aside(store: &dyn Store, world: &World, label: &str) -> R<Vec<Move>>
 pub fn plan_back(store: &dyn Store, world: &World, label: &str) -> R<Vec<Move>> {
     let prefix = format!("aside/{label}/");
     let mut out = Vec::new();
-    for k in store.list(&prefix)? {
+    for k in tried(&prefix, || store.list(&prefix))? {
         let key = k[prefix.len()..].to_owned();
         if !belongs(world, &key) {
             return refuse(
@@ -118,7 +119,11 @@ pub struct Moved {
 /// How many times a request the store did not answer (a stall, a dropped connection, a 5xx) is tried again, and the
 /// first wait before it (doubled each time: 2, 4, 8, 16, 32 s).
 const RETRIES: u32 = 5;
-const FIRST_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+const FIRST_WAIT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(1)
+} else {
+    std::time::Duration::from_secs(2)
+};
 
 /// `f`, tried again up to [`RETRIES`] times while the store is out of reach (`store-unreachable`: no answer in time, a
 /// dropped connection or a 5xx). Any other refusal ends it.
@@ -495,6 +500,92 @@ mod tests {
             big
         );
         assert!(keys(&s, &w).unwrap().is_empty());
+    }
+
+    /// A store that drops the next `fail` calls (`store-unreachable`, as a dropped connection or a 5xx is named).
+    struct Flaky<'a> {
+        store: &'a dyn Store,
+        fail: std::sync::atomic::AtomicU32,
+    }
+
+    impl Flaky<'_> {
+        fn drop_one(&self) -> R<()> {
+            use std::sync::atomic::Ordering::SeqCst;
+            if self
+                .fail
+                .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return refuse("store-unreachable", "connection reset by peer");
+            }
+            Ok(())
+        }
+        fn set(&self, n: u32) {
+            self.fail.store(n, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl Store for Flaky<'_> {
+        fn get(&self, key: &str) -> R<Option<directoryd::directory::store::Object>> {
+            self.drop_one()?;
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.drop_one()?;
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.drop_one()?;
+            self.store.list(prefix)
+        }
+        fn delete(&self, key: &str) -> R<()> {
+            self.drop_one()?;
+            self.store.delete(key)
+        }
+        fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+            self.drop_one()?;
+            self.store.head(key)
+        }
+        fn copy(&self, from: &str, to: &str) -> R<String> {
+            self.drop_one()?;
+            self.store.copy(from, to)
+        }
+    }
+
+    /// 0.133 R13: dropped connections on the listing, the copies and the deletes are tried again (`tried`), and the
+    /// move finishes whole; past the last try the run refuses with nothing deleted; any other refusal is not retried.
+    #[test]
+    fn dropped_connections_are_tried_again_before_a_refusal() {
+        let (d, s) = folder("flaky");
+        let w = World::parse(WORLD).unwrap();
+        let mine = shipped(&s);
+        let flaky = Flaky {
+            store: &s,
+            fail: 0.into(),
+        };
+        // RETRIES drops in a row before each phase: the listing, then the run's first call.
+        flaky.set(RETRIES);
+        let plan = plan_aside(&flaky, &w, "t7").unwrap();
+        assert_eq!(plan.len(), 5);
+        flaky.set(RETRIES);
+        assert_eq!(run(&flaky, &plan).unwrap().objects, 5);
+        for (k, v) in &mine {
+            assert_eq!(s.get(&format!("aside/t7/{k}")).unwrap().unwrap().bytes, *v);
+            assert_eq!(s.get(k).unwrap(), None);
+        }
+        // One more drop than the tries: the run refuses, and nothing aside is deleted.
+        let back = plan_back(&s, &w, "t7").unwrap();
+        flaky.set(RETRIES + 1);
+        assert_eq!(run(&flaky, &back).unwrap_err().name, "store-unreachable");
+        assert_eq!(s.list("aside/t7/").unwrap().len(), 5, "nothing deleted");
+        // A refusal that is not a dropped connection is not tried again.
+        s.put("aside/t7/world/zz", b"z", When::Absent).unwrap();
+        flaky.set(0);
+        assert_eq!(
+            plan_back(&flaky, &w, "t7").unwrap_err().name,
+            "aside-foreign-key"
+        );
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

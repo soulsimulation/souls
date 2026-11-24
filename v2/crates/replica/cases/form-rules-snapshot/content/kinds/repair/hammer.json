@@ -6,6 +6,7 @@
     "grip": { "role": "grip", "at_mm": [-100, 70, 0] }
   },
   "geometry": { "bounds_mm": [300, 100, 30] },
+  "forms": {"take": {"who": "anyone", "starts": "act", "needs": [{"need": "hand", "free": true}], "steps": [{"step": "take"}], "effects": [{"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}]}},
   "motion": { "how": "one_hand" },
   "loose": { "ever": true },
   "looks": {

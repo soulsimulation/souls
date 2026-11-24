@@ -3,8 +3,8 @@
   "kind": "eden:camp_pillow",
   "owner": "thing",
   "state": {
-    "air": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "patches": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "air": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "patches": { "n": 29, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "valve": { "role": "contact", "at_mm": [220, 60, 0] }
