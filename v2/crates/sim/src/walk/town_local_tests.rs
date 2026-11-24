@@ -1,7 +1,8 @@
 //! S13 (0.133): a creator's building edit, which touches the open ground and a new floor, cuts again only the open
 //! ground's squares it touches and reads only its own building, and the town it leaves equals a town built whole from
 //! the same tree: every square's pieces, every floor's surface, every building, `link_at`, the basis's `known`,
-//! `reach` and `joined`, and routes between standing spots.
+//! `reach` and `joined`, and routes between standing spots. With the large and giant classes prepared, each class is
+//! cut again on its own basis and equals its own whole build the same way (S13b).
 //!
 //! `cargo test -p sim --release --lib walk::town::local_tests -- --ignored --nocapture` times the rebuild of a building
 //! edit, a small path edit, a single wall, and the building moved and removed, on Eden (the exported facts file, as
@@ -54,16 +55,22 @@ fn town_of(text: &str) -> Town {
     Town::new(im.tree, ground, Doors::new(header, im.rules, next)).expect("the town")
 }
 
-/// The town built whole from `t`'s tree as it stands.
+/// The town built whole from `t`'s tree as it stands, each of `t`'s prepared classes built whole with it.
 fn whole_of(t: &Town) -> Town {
     let d = &t.doors;
-    Town::new(
+    let mut w = Town::new(
         t.tree.frozen(),
         t.ground,
         Doors::new(d.header.clone(), d.rules.clone(), d.next),
     )
-    .expect("the whole town")
+    .expect("the whole town");
+    w.prepare_classes(t.classes.keys().copied())
+        .expect("the whole classes");
+    w
 }
+
+/// The body classes the released catalogue prepares besides the standard one (as `worldd serve` prepares them).
+const CLASSES: [Size; 2] = [Size::Large, Size::Giant];
 
 /// `changes` as one effect on the open ground by a creator, numbered from the zone's next sequence.
 fn part(t: &Town, changes: Vec<Change>) -> Part {
@@ -254,6 +261,11 @@ fn building(t: &Town, (x, z): (i64, i64)) -> Part {
 /// A single wall, 3 m by 0.2 m and 2.5 m tall, on the open ground at (x + 2, z + 4) m, half a metre before the open
 /// side of [`building`]'s building: a new box of the kind of the first thing standing there with a box of its own.
 fn wall(t: &Town, (x, z): (i64, i64)) -> Part {
+    wall_at(t, Vec3::new((x + 2) * M, 0, (z + 4) * M))
+}
+
+/// [`wall`]'s wall, its middle at `at` on the open ground (µm).
+fn wall_at(t: &Town, at: Vec3) -> Part {
     let tree = &t.tree;
     let gh = tree.handle(t.ground).unwrap();
     let kind = tree
@@ -275,7 +287,7 @@ fn wall(t: &Town, (x, z): (i64, i64)) -> Part {
         vec![Change::Create {
             node: new_id(t, 10),
             kind,
-            pose: on_ground(t, Vec3::new((x + 2) * M, 0, (z + 4) * M)),
+            pose: on_ground(t, at),
             audience: Audience::Everyone,
             fields: BTreeMap::from([(
                 F_SOLIDS,
@@ -483,11 +495,64 @@ fn building_key(b: &Building) -> String {
     )
 }
 
-/// Each difference between the town `t` as installed and `w`, built whole from the same tree; `routes` routes between
-/// standing spots of the whole map are compared too.
+/// One class's geometry in a town, as [`differences`] compares it.
+struct Class<'a> {
+    tree: &'a Tree,
+    ground: Id,
+    basis: &'a Basis,
+    map: &'a mut Map,
+    surfaces: &'a BTreeMap<Id, Surface>,
+    buildings: &'a [Building],
+    link_at: &'a BTreeMap<Id, (usize, usize)>,
+}
+
+/// Class `size` of town `x`: the standard class's is the town's own.
+fn class_of(x: &mut Town, size: Size) -> Class<'_> {
+    if size == Size::Standard {
+        return Class {
+            tree: &x.tree,
+            ground: x.ground,
+            basis: &x.basis,
+            map: &mut x.map,
+            surfaces: &x.surfaces,
+            buildings: &x.buildings,
+            link_at: &x.link_at,
+        };
+    }
+    let g = x.classes.get_mut(&size).expect("the class is prepared");
+    Class {
+        tree: &x.tree,
+        ground: x.ground,
+        basis: &g.basis,
+        map: &mut g.map,
+        surfaces: &g.surfaces,
+        buildings: &g.buildings,
+        link_at: &g.link_at,
+    }
+}
+
+/// Each difference between the town `t` as installed and `w`, built whole from the same tree, in the standard class
+/// and in each class `t` prepares (S13b); `routes` routes between standing spots of each whole map are compared too.
 fn differences(t: &mut Town, w: &mut Town, routes: usize) -> Vec<String> {
     let mut out = Vec::new();
-    let (a, b) = (&t.basis, &w.basis);
+    let sizes: Vec<Size> = std::iter::once(Size::Standard)
+        .chain(t.classes.keys().copied())
+        .collect();
+    assert!(
+        t.classes.keys().eq(w.classes.keys()),
+        "the same classes prepared"
+    );
+    for size in sizes {
+        let d = class_differences(class_of(t, size), class_of(w, size), routes);
+        out.extend(d.into_iter().map(|d| format!("{size:?}: {d}")));
+    }
+    out
+}
+
+/// Each difference between class geometry `t` as installed and `w`, built whole from the same tree.
+fn class_differences(t: Class<'_>, w: Class<'_>, routes: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let (a, b) = (t.basis, w.basis);
     let sq: BTreeSet<_> = a.open.squares.keys().chain(b.open.squares.keys()).collect();
     for s in sq {
         if format!("{:?}", a.square(*s)) != format!("{:?}", b.square(*s)) {
@@ -506,23 +571,23 @@ fn differences(t: &mut Town, w: &mut Town, routes: usize) -> Vec<String> {
     if a.joined != b.joined {
         out.push("joined".into());
     }
-    let floors = |x: &Town| -> BTreeMap<Id, String> {
+    let floors = |x: &Class<'_>| -> BTreeMap<Id, String> {
         x.surfaces
             .iter()
             .filter(|(n, _)| **n != x.ground)
             .map(|(n, s)| (*n, format!("{:?}", s.pieces())))
             .collect()
     };
-    if floors(t) != floors(w) {
+    if floors(&t) != floors(&w) {
         out.push("a floor's surface".into());
     }
-    let buildings = |x: &Town| -> BTreeMap<Id, String> {
+    let buildings = |x: &Class<'_>| -> BTreeMap<Id, String> {
         x.buildings
             .iter()
             .map(|b| (b.thing, building_key(b)))
             .collect()
     };
-    let (bt, bw) = (buildings(t), buildings(w));
+    let (bt, bw) = (buildings(&t), buildings(&w));
     for thing in bt.keys().chain(bw.keys()).collect::<BTreeSet<_>>() {
         if bt.get(thing) != bw.get(thing) {
             out.push(format!("building {thing:?}"));
@@ -530,8 +595,8 @@ fn differences(t: &mut Town, w: &mut Town, routes: usize) -> Vec<String> {
     }
     let links: BTreeSet<Id> = t.link_at.keys().chain(w.link_at.keys()).copied().collect();
     for l in links {
-        let of = |x: &Town| find_link(&x.link_at, &x.buildings, l).map(|k| format!("{k:?}"));
-        if of(t) != of(w) {
+        let of = |x: &Class<'_>| find_link(x.link_at, x.buildings, l).map(|k| format!("{k:?}"));
+        if of(&t) != of(&w) {
             out.push(format!("link_at {l:?}"));
         }
     }
@@ -561,7 +626,7 @@ fn differences(t: &mut Town, w: &mut Town, routes: usize) -> Vec<String> {
     let mut differ = 0;
     for _ in 0..routes {
         let (a, b) = (spots[next() % spots.len()], spots[next() % spots.len()]);
-        if go(&mut t.map, &t.tree, a, b) != go(&mut w.map, &w.tree, a, b) {
+        if go(&mut *t.map, t.tree, a, b) != go(&mut *w.map, w.tree, a, b) {
             differ += 1;
         }
     }
@@ -571,10 +636,13 @@ fn differences(t: &mut Town, w: &mut Town, routes: usize) -> Vec<String> {
     out
 }
 
-/// Rebuilds and installs `p` on `t`; whether it was built whole, why, and how long the rebuild took.
+/// Rebuilds and installs `p` on `t`; whether it was built whole in the standard class or any prepared one, why, and how
+/// long the rebuild took.
 fn apply(t: &mut Town, p: &Part) -> (bool, Option<&'static str>, f64) {
     let (r, ms) = rebuilt(t, p);
-    let (whole, why) = (r.whole(), r.why);
+    let classes = r.whole_classes();
+    let whole = r.whole() || !classes.is_empty();
+    let why = r.why.or_else(|| classes.iter().find_map(|(_, w)| *w));
     t.install(r, p)
         .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
     (whole, why, ms)
@@ -584,6 +652,8 @@ fn apply(t: &mut Town, p: &Part) -> (bool, Option<&'static str>, f64) {
 fn a_building_edit_rebuilds_only_its_squares_and_building_and_equals_the_whole() {
     let w = testworld::generate(1, 0).expect("the test world");
     let mut t = town_of(&w.text);
+    // Each prepared class is cut again as the standard one is, and equals its whole build too (S13b).
+    t.prepare_classes(CLASSES).unwrap();
     let at = clear_row(&t);
     let p = building(&t, at);
     let (whole, why, _) = apply(&mut t, &p);
@@ -603,6 +673,16 @@ fn a_building_edit_rebuilds_only_its_squares_and_building_and_equals_the_whole()
     assert!(
         d.is_empty(),
         "after a wall beside it, the town equals the whole: {d:?}"
+    );
+    // A small path edit: the narrowest path made wider, cut alone.
+    let p = path(&t).expect("the test world has a path");
+    let (whole, why, _) = apply(&mut t, &p);
+    assert!(!whole, "the path edit is rebuilt locally ({why:?})");
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(
+        d.is_empty(),
+        "after a path edit, the town equals the whole: {d:?}"
     );
     // The building moved 2 m along the row: its old squares and its new are cut again, and it is read again there.
     // Two walks planned beforehand: one across the square the building stands on, one on a square far from it, and
@@ -696,6 +776,7 @@ fn a_building_edit_rebuilds_only_its_squares_and_building_and_equals_the_whole()
 fn a_building_with_front_doors_moved_removed_and_placed_equals_the_whole() {
     let w = testworld::generate(1, 0).expect("the test world");
     let mut t = town_of(&w.text);
+    t.prepare_classes(CLASSES).unwrap();
     let doors = with_front_doors(&t);
     assert!(
         !doors.is_empty(),
@@ -745,6 +826,38 @@ fn a_building_with_front_doors_moved_removed_and_placed_equals_the_whole() {
     );
 }
 
+/// S13b review: a wall whose far edge stops short of a square's edge by less than a larger body's clearance changes the
+/// next square for that body: each class cuts it again with its own reach and equals its own whole build. The wall
+/// stops 1.2 m short (inside a giant's clearance, past a standard body's), and exactly each class's clearance short.
+#[test]
+fn a_wall_near_a_square_edge_equals_the_whole_in_each_class() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let edge = crate::ground::SQUARE * 1000;
+    let clearance = |s: Size| (s.radius_mm() + crate::ground::MARGIN + 1) * 1000;
+    let gaps = std::iter::once(1_200_000).chain(
+        [Size::Standard, Size::Large, Size::Giant]
+            .into_iter()
+            .map(clearance),
+    );
+    for gap in gaps {
+        let mut t = town_of(&w.text);
+        t.prepare_classes(CLASSES).unwrap();
+        // The wall is 3 m along x: its far edge `gap` short of x = 16 m, in the middle of the square in z.
+        let p = wall_at(&t, Vec3::new(edge - gap - 1_500_000, 0, edge / 2));
+        let (whole, why, _) = apply(&mut t, &p);
+        assert!(
+            !whole,
+            "the wall {gap} µm short of the edge is rebuilt locally ({why:?})"
+        );
+        let mut w = whole_of(&t);
+        let d = differences(&mut t, &mut w, 300);
+        assert!(
+            d.is_empty(),
+            "a wall {gap} µm short of a square's edge: the town equals the whole: {d:?}"
+        );
+    }
+}
+
 #[test]
 #[ignore = "needs the exported Eden facts file"]
 fn eden_building_path_and_wall_rebuild_times() {
@@ -755,8 +868,8 @@ fn eden_building_path_and_wall_rebuild_times() {
     let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").unwrap_or(path_of.into()))
         .expect("run v2/tools/import-eden/export/export.ts first");
     // The standard class alone, then with the released catalogue's large and giant classes prepared (as `worldd
-    // serve` prepares them for Eden): each prepared class is still built whole on every edit.
-    for classes in [vec![], vec![Size::Large, Size::Giant]] {
+    // serve` prepares them for Eden): each prepared class is cut again as the standard one is (S13b).
+    for classes in [vec![], CLASSES.to_vec()] {
         let t0 = Instant::now();
         let mut t = town_of(&text);
         t.prepare_classes(classes.iter().copied()).unwrap();
@@ -778,24 +891,22 @@ fn eden_building_path_and_wall_rebuild_times() {
                 continue;
             };
             let mut times = Vec::new();
-            let mut kind = (false, None);
+            let mut kind = (false, None, Vec::new());
             for _ in 0..3 {
                 let (r, ms) = rebuilt(&t, &p);
-                kind = (r.whole(), r.why);
+                kind = (r.whole(), r.why, r.whole_classes());
                 times.push(ms);
             }
             times.sort_by(f64::total_cmp);
             println!(
-                "  {what}: rebuild {:.1} ms (median of 3; all {times:.1?}), whole {}, why {:?}",
-                times[1], kind.0, kind.1
+                "  {what}: rebuild {:.1} ms (median of 3; all {times:.1?}), whole {}, why {:?}, classes whole {:?}",
+                times[1], kind.0, kind.1, kind.2
             );
             apply(&mut t, &p);
         }
-        if classes.is_empty() {
-            let mut w = whole_of(&t);
-            let d = differences(&mut t, &mut w, 500);
-            assert!(d.is_empty(), "the local rebuilds equal the whole: {d:?}");
-            println!("  the town after the five equals Eden built whole (500 routes)");
-        }
+        let mut w = whole_of(&t);
+        let d = differences(&mut t, &mut w, 500);
+        assert!(d.is_empty(), "the local rebuilds equal the whole: {d:?}");
+        println!("  the town after the five equals Eden built whole, each class (500 routes each)");
     }
 }

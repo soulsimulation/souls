@@ -70,14 +70,17 @@ const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
+const CIRCLE: &str = "test:circle";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
-        .iter()
-        .enumerate()
-        .map(|(i, k)| (*k, full(k, i as u8 + 1)))
-        .collect()
+    [
+        PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CIRCLE,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, k)| (*k, full(k, i as u8 + 1)))
+    .collect()
 }
 
 fn fullname(plain: &str) -> String {
@@ -228,6 +231,13 @@ fn tree_rules() -> TreeRules {
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
             (fullname(CAN), k("thing", &[], &[], Some(1))),
+            (
+                fullname(CIRCLE),
+                Kind {
+                    slots: BTreeMap::from([(1, BTreeSet::from(["family".to_owned()]))]),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -341,6 +351,7 @@ fn entries() -> Json {
         (COURT.into(), court),
         (CAN.into(), can),
         (PLANK.into(), plank),
+        (CIRCLE.into(), circle_entry()),
     ])
 }
 
@@ -390,6 +401,7 @@ fn world() -> Replica {
         create(far_can(), CAN, g, south(100_000_000)),
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
+        create(circle(), CIRCLE, g, circle_at()),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -435,7 +447,46 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     let mut b = Bodies::new(town, 50_000)?;
     b.add_body(humanoid(), p1)?;
     b.add_body(humanoid(), p2)?;
+    b.add_place(circle_place(ground))?;
     Ok(b)
+}
+
+/// 0.135 E16: a petanque circle's like, a standing slot of two bodies (`most: 2`), 3 m north of the walkers.
+fn circle() -> Id {
+    id(10)
+}
+fn circle_at() -> Vec3 {
+    Vec3::new(-41_350_000, 0, 33_000_000)
+}
+fn circle_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:circle", "owner": "thing",
+      "points": { "by": { "role": "stand", "at_mm": [0, 0, -600] } },
+      "slots": { "circle": { "admits": "body", "most": 2, "at_mm": [0, 0, 0], "stand": "by" } },
+      "geometry": { "bounds_mm": [3000, 100, 3000] },
+      "forms": { "play": { "who": "anyone", "starts": "act",
+        "takes": { "place": { "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+        "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+        "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+        "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }] } } }"#,
+    )
+    .unwrap()
+}
+/// The circle's seat as a served world registers it: its point, its stand point 600 mm south, and its other place.
+fn circle_place(ground: Id) -> sim::slots::PlaceAt {
+    sim::slots::PlaceAt {
+        thing: circle(),
+        place: replica::moves::Place {
+            slot: 1,
+            height: 0,
+            stand: [0, -600_000],
+        },
+        point: circle_at(),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: import_eden::more_places(Vec3::ZERO, 2, Some([3_000_000, 3_000_000])),
+    }
 }
 
 /// An answer frame's sequence and its receipt's entries, or its refusal's reason.
@@ -938,6 +989,49 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
         "the timer's run is keyed by the timer"
     );
     assert!(r.tree().timers().is_empty());
+}
+
+/// 0.135 E16, review of #4549: two Souls take one slot of two places (`most: 2`) through the gateway, each naming
+/// it. The second is not refused `place-taken` for the first's hold, as it was while any holder made a slot full; both
+/// end in the slot, each at its own place.
+#[test]
+fn e16_two_souls_take_a_slot_of_two_naming_it_through_the_gateway() {
+    let (run, mut a, mut b) = serve("e16");
+    let place = || {
+        p(&[(
+            1,
+            Value::Array(vec![Value::Array(vec![
+                Value::Bytes(b"place".to_vec()),
+                Value::Bytes(b"circle".to_vec()),
+            ])]),
+        )])
+    };
+    let first = a.act("test:play", Some(circle()), place());
+    println!("E16 first: {first:?}");
+    first.expect("the first takes a place");
+    let second = b.act("test:play", Some(circle()), place());
+    println!("E16 second: {second:?}");
+    second.expect("the second takes the other place, not place-taken");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(circle()), Some(1)));
+    assert_eq!(parent(&r, w2()), (Some(circle()), Some(1)));
+    let (pa, pb) = (
+        r.tree()
+            .node(r.tree().handle(w1()).unwrap())
+            .unwrap()
+            .place(),
+        r.tree()
+            .node(r.tree().handle(w2()).unwrap())
+            .unwrap()
+            .place(),
+    );
+    println!("E16 places: {pa:?} {pb:?}");
+    assert_ne!(
+        pa.map(|p| p.position),
+        pb.map(|p| p.position),
+        "each at its own place"
+    );
+    run.stop();
 }
 
 #[path = "acts/attend.rs"]

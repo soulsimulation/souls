@@ -185,7 +185,12 @@ impl State<'_> {
             {
                 let slot = i as u64 + 1;
                 let mut in_it: Vec<Value> = Vec::new();
-                if let Some(b) = self.bodies.and_then(|b| b.slots.holder_in(id, slot)) {
+                // Every body in it: a slot of several places holds several (E16).
+                for b in self
+                    .bodies
+                    .map(|b| b.slots.holders_in(id, slot))
+                    .unwrap_or_default()
+                {
                     in_it.push(Value::Str(key(b)));
                 }
                 for (s, c) in &children {

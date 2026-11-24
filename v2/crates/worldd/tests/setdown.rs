@@ -390,6 +390,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         point: Vec3::new(s.x, 450_000, s.z - 300_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }

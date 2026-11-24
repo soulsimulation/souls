@@ -450,3 +450,59 @@ fn deferred_walk_keeps_its_deadline_and_reads_a_moved_target_again() {
         matches!(runner.wake(&mut host, Woke::Timer(fixture(101))), Next::End(n) if n.as_str() == "deadline-passed")
     );
 }
+
+/// S13d: a walk the planner refuses by name (the ground changed under it, its answer failed) ends the form with that
+/// name, not `souls:no-way`.
+#[test]
+fn a_walk_the_planner_refuses_ends_the_form_with_the_planners_name() {
+    use replica::host::WalkPlan;
+    struct Refusing(Fake);
+    impl Host for Refusing {
+        fn now(&self) -> Micros {
+            self.0.now()
+        }
+        fn body(&self) -> Id {
+            self.0.body()
+        }
+        fn read(&self, n: Id) -> Option<Seen> {
+            let mut seen = self.0.read(n)?;
+            seen.parent = Some(fixture(0));
+            Some(seen)
+        }
+        fn ask(&self, q: &Ask) -> Option<Answer> {
+            self.0.ask(q)
+        }
+        fn plan_walk(&self, _: usize, _: Id, _: Vec3, _: i64) -> WalkPlan {
+            WalkPlan::Refused(Name::new("walk.ground-changed").unwrap())
+        }
+        fn set_timer(&mut self, after: Micros, n: Name) -> Id {
+            self.0.set_timer(after, n)
+        }
+        fn clear_timer(&mut self, id: Id) {
+            self.0.clear_timer(id);
+        }
+        fn draw(&mut self) -> u64 {
+            self.0.draw()
+        }
+        fn control(&mut self, input: ControllerInput) {
+            self.0.control(input);
+        }
+        fn cross(&mut self, id: Id, speed: i64) {
+            self.0.cross(id, speed);
+        }
+        fn emit(&mut self, c: Vec<Change>, e: Option<Event>) -> Result<(), Refusal> {
+            self.0.emit(c, e)
+        }
+    }
+    let steps = bind_with(&entry(), "visit", &args(&[("other", Arg::Node(other()))])).unwrap();
+    let mut host = Refusing(Fake {
+        places: BTreeMap::from([(other(), mm(5, 0, 5))]),
+        next: 0,
+        reads: RefCell::default(),
+    });
+    let mut runner = Runner::new(steps, node(), Limits::default());
+    assert!(matches!(
+        runner.wake(&mut host, Woke::Start),
+        Next::End(n) if n.as_str() == "walk.ground-changed"
+    ));
+}
