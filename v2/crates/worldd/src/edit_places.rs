@@ -15,7 +15,10 @@ use sim::slots::{PlaceAt, Slots};
 
 /// Each affected thing, its places on their floors, and the runs of those that move with their cabins (N14), so a god
 /// edit that moves a ride (or what it stands on) registers its runs again and the world writes its courses again.
-pub struct Projection(Vec<(Ref, Vec<(PlaceAt, Ref)>, Vec<sim::courses::rides::SeatRun>)>);
+pub struct Projection(Vec<Delta>);
+
+/// One affected thing: its places, each with its floor, and its runs.
+type Delta = (Ref, Vec<(PlaceAt, Ref)>, Vec<sim::courses::rides::SeatRun>);
 
 fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
     let mut next: Vec<_> = tree.handle(id).into_iter().collect();
