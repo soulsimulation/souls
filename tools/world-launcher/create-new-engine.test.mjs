@@ -182,6 +182,27 @@ test('W1: the per-address limit counts a create in flight; asking again for it i
   assert.equal((await create({ name: 'One', template: 'hello-hamlet', key: first.body.key, slug: first.body.slug }, 'Bearer dev:ada')).status, 202);
 });
 
+test('W1: a refusal gives its per-address slot back', async t => {
+  const { create } = await fixture(t, { dir: { starting: 5 }, launcher: { createLimit: 1 } });
+  assert.equal((await create({ name: 'Nowhere', template: 'nowhere' }, 'Bearer dev:ada')).status, 409);
+  assert.equal((await create({ name: 'Somewhere', template: 'hello-hamlet' }, 'Bearer dev:ada')).status, 202, 'the refused create did not use the slot');
+});
+
+test('W1: a resume with an address this launcher did not give is refused before the directory is asked', async t => {
+  const { stub, create } = await fixture(t);
+  const key = 'a'.repeat(32);
+  for (const [name, slug] of [['Mars', 'mars'], ['Anything', 'mars'], ['Anything', 'eden'], ['Willow', 'other'], ['Willow', 'willow-1'], ['Eden', 'eden']]) {
+    const out = await create({ name, template: 'hello-hamlet', key, slug }, 'Bearer dev:ada');
+    assert.equal(out.status, 400, `${name} → ${slug}`); assert.equal(out.body.code, 'invalid');
+  }
+  assert.equal(stub.asks.length, 0, 'none of them reached the directory');
+  // an issued key keeps its own address: the same key with another one is refused too
+  const first = await create({ name: 'Willow', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  assert.equal(first.status, 202);
+  assert.equal((await create({ name: 'Willow', template: 'hello-hamlet', key: first.body.key, slug: 'willow-2' }, 'Bearer dev:ada')).status, 400);
+  assert.equal(stub.asks.length, 1);
+});
+
 test('W1: with the flag off, New world is not sent to the directory', async t => {
   const { stub, create } = await fixture(t, { launcher: { v2Create: false } });
   const out = await create({ name: 'Old Way', template: 'empty' }, 'Bearer dev:ada');

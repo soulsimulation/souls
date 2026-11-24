@@ -337,7 +337,7 @@ export async function openLauncher(cfg = {}) {
   let canaryRun = null;
   const waitHandBack = async (slug, e) => (e.code === 'handed-back' || canaryRun?.slug === slug) && (await canaryRun?.passed) === false && handedBack();
   const adopting = Array.isArray(cfg.adopt) ? cfg.adopt : null;
-  const createLimit = cfg.createLimit ?? Infinity, made = new Map(), issued = new Map();   // issued (W1): key → slug of creates begun here
+  const createLimit = cfg.createLimit ?? Infinity, made = new Map(), issued = new Map();   // issued (W1): key → {slug, at} of creates begun here
   /** #2538: free MB on the data disk, read at most every 30 s (cfg.diskFreeMb: tests' fake reading); low under --disk-min-free-mb. */
   const diskMinFreeMb = cfg.diskMinFreeMb ?? 0, diskFree = cfg.diskFreeMb ?? (() => { const s = statfsSync(dataDir); return Math.floor(Number(s.bavail) * Number(s.bsize) / 1048576); });
   let diskSeen = { at: -Infinity, mb: Infinity };
@@ -783,7 +783,19 @@ export async function openLauncher(cfg = {}) {
   const v2Create = !!(cfg.v2Create ?? process.env.SOULS_V2_CREATE === '1');
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   const KEY_RE = /^[0-9a-f]{32}$/;
-  const transientAnswer = (r, d) => !r || r.status === 502 || r.status === 504 || (r.status === 503 && d.refused === 'store-unreachable');
+  /** A resume's {key, slug} is taken only as this launcher gave it back (`issued`), and, since `issued` does not survive
+   *  a restart, only for an address the name's own create could have chosen: slugFor's base for the name (never a
+   *  reserved or shadowing name) or base-N, and no old world's or archived world's. A made-up address is refused before
+   *  the directory is asked. */
+  function resumable(name, key, slug) {
+    if (typeof key !== 'string' || !KEY_RE.test(key) || typeof slug !== 'string' || !SLUG_RE.test(slug)) return false;
+    const known = issued.get(key);
+    if (known && known.slug !== slug) return false;
+    const base = slugFor(name), n = slug.startsWith(`${base}-`) ? slug.slice(base.length + 1) : null;
+    if (slug !== base && !(n && /^[1-9][0-9]{0,3}$/.test(n) && Number(n) >= 2)) return false;
+    return !registry.slugs().has(slug) && !archivedSlugs(dataDir).has(slug);
+  }
+  const transientAnswer = (r, d) =>!r || r.status === 502 || r.status === 504 || (r.status === 503 && d.refused === 'store-unreachable');
   async function createOnNewEngine(body, authorization) {
     const tok = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
     if (!tok || (!auth && !/^dev:[^\s:]{1,36}$/.test(tok))) return [401, { ok: false, code: 'signin-required', message: 'sign in first: a new world belongs to whoever makes it' }];
@@ -792,7 +804,7 @@ export async function openLauncher(cfg = {}) {
     if (!name || name.length > 40) return [400, { ok: false, code: 'invalid', message: 'name: 1–40 characters' }];
     const template = typeof body?.template === 'string' && body.template ? body.template : 'empty';
     const resume = body?.key !== undefined || body?.slug !== undefined;
-    if (resume && !(typeof body.key === 'string' && KEY_RE.test(body.key) && typeof body.slug === 'string' && SLUG_RE.test(body.slug)))
+    if (resume && !resumable(name, body.key, body.slug))
       return [400, { ok: false, code: 'invalid', message: 'key and slug: the ones a 202 or 503 answer for this world gave' }];
     let key = body?.key, slug = body?.slug;
     if (!resume) {
@@ -1629,18 +1641,24 @@ export async function openLauncher(cfg = {}) {
         // per-client creation limit (production): the first x-forwarded-for hop is the visitor Caddy saw
         const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
-        // W1: asking again for a world this launcher began (the key it gave back) is not another create
-        const again = v2Create && typeof body?.key === 'string' && issued.get(body.key) === body.slug;
+        // W1: asking again for a world this launcher began (the key it gave back, within 10 minutes) is not another create
+        for (const [k, v] of issued) if (Date.now() - v.at > 10 * 60_000) issued.delete(k);
+        const again = v2Create && typeof body?.key === 'string' && issued.get(body.key)?.slug === body.slug;
         if (!again && recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
-        // counted from the ask, so creates still in flight count; given back below when the answer is a plain refusal
-        const at = Date.now(); if (!again) made.set(who, [...recent, at]);
-        // W1: on the new engine the directory makes creates one at a time itself, and placement may take minutes
-        const run = v2Create ? createOnNewEngine(body, req.headers.authorization) : creating.then(() => createWorld(body, req.headers.authorization));
-        if (!v2Create) creating = run.catch(() => {});
-        const out = await run;
-        if (out[1].key) issued.set(out[1].key, out[1].slug);
-        if (!again && out[0] >= 400 && !out[1].key) made.set(who, (made.get(who) ?? []).filter((t) => t !== at));
-        if (out[0] === 201) { worldsCreated++; issued.delete(body?.key); }
+        // counted from the ask, so creates still in flight count; given back (this one slot) when the answer is a plain
+        // refusal or the create throws
+        const slot = { at: Date.now() }; if (!again) made.set(who, [...recent, slot.at]);
+        const giveBack = () => { const list = made.get(who) ?? [], i = list.indexOf(slot.at); if (i >= 0) list.splice(i, 1); };
+        let out = null;
+        try {
+          // W1: on the new engine the directory makes creates one at a time itself, and placement may take minutes
+          const run = v2Create ? createOnNewEngine(body, req.headers.authorization) : creating.then(() => createWorld(body, req.headers.authorization));
+          if (!v2Create) creating = run.catch(() => {});
+          out = await run;
+        } finally { if (!again && (!out || (out[0] >= 400 && !out[1].key))) giveBack(); }
+        if (out[1].key) issued.set(out[1].key, { slug: out[1].slug, at: issued.get(out[1].key)?.at ?? Date.now() });
+        else issued.delete(body?.key);   // made (201) or finally refused: nothing left to resume
+        if (out[0] === 201) worldsCreated++;
         json(res, out[0], out[1], out[1].retry_after ? { 'retry-after': String(out[1].retry_after) } : {}); return;
       }
       if (path === '/__sim/op/create-world' && req.method === 'POST') {
