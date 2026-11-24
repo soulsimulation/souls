@@ -75,6 +75,12 @@ esac
 [ -n "${RESEED_DATA:-}" ] || [ "$(id -u)" = 0 ] || die "run as root"
 
 # The bucket: the one deploy and worldd@ read (release.sh's directory_env).
+if [ -f "$ETC/directory.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ETC/directory.env"
+  set +a
+fi
 if [ -r "$ETC/secrets.env" ]; then
   while IFS='=' read -r k v; do
     k=${k#export }
@@ -85,12 +91,6 @@ if [ -r "$ETC/secrets.env" ]; then
         ;;
     esac
   done < "$ETC/secrets.env"
-fi
-if [ -f "$ETC/directory.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$ETC/directory.env"
-  set +a
 fi
 export WORLDS_ROOT=$ROOT
 

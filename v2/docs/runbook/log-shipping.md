@@ -31,6 +31,9 @@ AWS_SECRET_ACCESS_KEY=<secret>
 AWS_DEFAULT_REGION=auto                                   # R2's; omit for the default
 ```
 
+No store setting goes in `directory.env`: secrets.env is the one place, and every unit and script reads it last
+([store-switch.md](store-switch.md), which also moves the bucket to another provider).
+
 `--store`, `$WORLDD_STORE` and `ops world <role> <dir> <store> ...` (the restore, `--restore`) take the same form, or
 `folder:<path>` (or a bare path) for O9's folder store on one machine, kept for tests. A start prints only
 `store: the offsite bucket` or `store: a folder standing in for the offsite bucket`. Tests run against
