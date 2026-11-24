@@ -1765,19 +1765,44 @@ impl Forms {
         now: Micros,
     ) {
         self.planning.remove(&run);
+        let Some(fr) = self.runs.get_mut(&run) else {
+            return;
+        };
+        let body = fr.body;
+        if let Some(d) = fr.walk.take() {
+            self.walks.retain(|r| r.body != body);
+            let _ = w.controller.release(body, d);
+        }
+        // A seat's move ends through the places (E11b), as a cancel under it does in `Slots::fire`: a sit not yet in
+        // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
+        if let Some(n) = fr.mv.take() {
+            let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
+            let seat = w.places.as_mut().and_then(|p| {
+                p.slots.cancel(
+                    w.controller,
+                    w.due,
+                    w.moves,
+                    p.floors,
+                    body,
+                    n,
+                    now,
+                    name("form-ended"),
+                )
+            });
+            match seat {
+                Some(true) if sitting => self.seat_posture(w.tree, run, now),
+                Some(_) => {}
+                None => {
+                    w.moves
+                        .cancel(w.controller, w.due, n, now, name("form-ended"));
+                }
+            }
+        }
         let Some(fr) = self.runs.remove(&run) else {
             return;
         };
         self.by_body.remove(&fr.body);
         self.by_intent.remove(&fr.intent.id);
-        if let Some(d) = fr.walk {
-            self.walks.retain(|r| r.body != fr.body);
-            let _ = w.controller.release(fr.body, d);
-        }
-        if let Some(n) = fr.mv {
-            w.moves
-                .cancel(w.controller, w.due, n, now, name("form-ended"));
-        }
         let mine: Vec<Id> = self
             .by_timer
             .iter()

@@ -809,17 +809,59 @@ impl Slots {
                 self.sit_still(c, key);
                 None
             }
-            (Fired::Cancelled(_), State::Lowering { in_slot: false, .. }) => {
-                self.release(key);
-                None
-            }
-            (Fired::Cancelled(_), _) => {
-                self.sit_still(c, key);
-                self.give_way(c, &at, floors, key, now)
-            }
+            (Fired::Cancelled(_), state) => self.cancelled(c, &at, floors, key, state, now),
             _ => None,
         };
         Some((fired, handed))
+    }
+
+    /// Cancels `instance`, `body`'s sit, lie or rise under way, as `how` (its form run ended: a leave, a deadline,
+    /// E11b), and does for the seat what [`Slots::fire`] does for a move cancelled under it: a sit not yet in the slot
+    /// releases the seat; a body in the slot is left seated (handed onto the floor at the stand point when another
+    /// driver holds its legs). Whether the body holds the seat after; `None`, and nothing cancelled, when `instance`
+    /// is not `body`'s seat move.
+    #[allow(clippy::too_many_arguments)]
+    pub fn cancel(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        moves: &mut Moves,
+        floors: &dyn crate::mover::Floors,
+        body: Id,
+        instance: Instance,
+        now: Micros,
+        how: Name,
+    ) -> Option<bool> {
+        let key = *self.by_body.get(&body)?;
+        let hold = self.held.get(&key).copied()?;
+        let (State::Lowering { instance: n, .. } | State::Rising(n)) = hold.state else {
+            return None;
+        };
+        if n != instance {
+            return None;
+        }
+        let at = self.places.get(&key)?.clone();
+        moves.cancel(c, due, instance, now, how);
+        let _ = self.cancelled(c, &at, floors, key, hold.state, now);
+        Some(self.by_body.contains_key(&body))
+    }
+
+    /// What a seat move cancelled in `state` leaves: the seat released before contact, else the body seated still.
+    fn cancelled(
+        &mut self,
+        c: &mut Controller,
+        at: &PlaceAt,
+        floors: &dyn crate::mover::Floors,
+        key: Key,
+        state: State,
+        now: Micros,
+    ) -> Option<R<HandOff>> {
+        if let State::Lowering { in_slot: false, .. } = state {
+            self.release(key);
+            return None;
+        }
+        self.sit_still(c, key);
+        self.give_way(c, at, floors, key, now)
     }
 
     fn stand(
