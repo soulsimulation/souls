@@ -3,9 +3,9 @@
   "kind": "eden:kettle",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
-    "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "heat": { "n": 3, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
+    "heating": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "heat": { "n": 30, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-135, 150, 0] },
@@ -15,17 +15,24 @@
   },
   "geometry": { "bounds_mm": [560, 260, 200] },
   "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
     "fill": {
       "who": "holder",
       "starts": "act",
       "takes": {
-        "from": { "type": "thing", "select": { "of": "things", "kind": "eden:tap", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+        "from": { "type": "thing", "select": { "of": "things", "kind": "eden:sink", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
       },
       "needs": [
         { "need": "held_by_actor" },
         { "need": "state", "field": "water", "at_most": 0 }
       ],
-      "steps": [{ "step": "move", "move": "fill", "toward": { "arg": "from" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "from" } }, { "step": "move", "move": "fill", "toward": { "arg": "from" } }],
       "effects": [{ "change": "transfer", "field": "water", "from": { "arg": "from" }, "into": "this", "amount": "room", "event": "filled" }]
     },
     "switch_on": {
@@ -60,7 +67,7 @@
       "who": "holder",
       "starts": "act",
       "takes": {
-        "into": { "type": "thing", "select": { "of": "things", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+        "into": { "type": "thing", "select": { "of": "things", "kind": "eden:cup", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
       },
       "needs": [
         { "need": "held_by_actor" },
@@ -86,7 +93,7 @@
     "kitchen": "kitchen",
     "heat": "heat",
     "brew": "brew",
-    "howto_tea": "Fill the kettle at a tap, switch it on, wait for it to boil, then pour it into a cup."
+    "howto_tea": "Take the kettle, fill it at a sink, switch it on, wait for it to boil, then pour it into a cup."
   },
   "card": { "text": "card", "category": "kitchen", "synonyms": ["heat", "brew"] },
   "howtos": {

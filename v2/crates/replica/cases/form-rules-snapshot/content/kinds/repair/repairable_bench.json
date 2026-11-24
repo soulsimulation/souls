@@ -3,7 +3,7 @@
   "kind": "eden:repairable_bench",
   "owner": "thing",
   "state": {
-    "condition": { "n": 1, "type": "enum", "values": ["whole", "cracked"], "default": "whole", "audience": { "rule": "everyone" } }
+    "condition": { "n": 28, "type": "enum", "values": ["whole", "cracked"], "default": "whole", "audience": { "rule": "everyone" } }
   },
   "points": {
     "front_left": { "role": "stand", "at_mm": [-400, 0, 600] },

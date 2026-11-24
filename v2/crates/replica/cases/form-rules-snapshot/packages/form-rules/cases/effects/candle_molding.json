@@ -58,14 +58,14 @@
         "change": "set",
         "node": "k1",
         "field": "wax",
-        "n": 1,
+        "n": 28,
         "to": 5
        },
        {
         "change": "set",
         "node": "k1",
         "field": "wicks",
-        "n": 2,
+        "n": 29,
         "to": 5
        },
        {

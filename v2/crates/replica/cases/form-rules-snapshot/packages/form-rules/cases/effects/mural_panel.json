@@ -50,7 +50,7 @@
         "change": "set",
         "node": "m1",
         "field": "picture",
-        "n": 1,
+        "n": 28,
         "to": {
          "text": "t_mural_1"
         }
@@ -59,7 +59,7 @@
         "change": "set",
         "node": "m1",
         "field": "title",
-        "n": 2,
+        "n": 29,
         "to": {
          "text": "t_title_1"
         }
@@ -116,7 +116,7 @@
         "change": "set",
         "node": "m1",
         "field": "picture",
-        "n": 1,
+        "n": 28,
         "to": {
          "text": "t_mural_2"
         }
@@ -125,7 +125,7 @@
         "change": "set",
         "node": "m1",
         "field": "title",
-        "n": 2,
+        "n": 29,
         "to": {
          "text": "t_title_2"
         }

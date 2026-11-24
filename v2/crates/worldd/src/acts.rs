@@ -317,11 +317,11 @@ fn same_asker(query: &FormQuery, asked: &Moved, now: &Moved) -> bool {
 
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
-    bodies: BTreeMap<Id, Moved>,
+    bodies: Arc<BTreeMap<Id, Moved>>,
     /// The bodies carried across a link now.
-    carrying: BTreeSet<Id>,
+    carrying: Arc<BTreeSet<Id>>,
     split: Option<RefCell<Split<'a>>>,
-    builds: BTreeMap<Id, Build>,
+    builds: Arc<BTreeMap<Id, Build>>,
     tree: &'a Tree,
     kind: Name,
     /// The world's entries by kind, for a thing's points and bounds.
@@ -1478,6 +1478,44 @@ pub struct Args {
     pub values: skills::form_runner::Args,
 }
 
+/// The bodies as a [`Sight`] sees them: each body as the controller has it, those carried across a link now, and
+/// each body's build. Built once for a batch of form starts in which no body moves ([`Acts::hold_sight`], S10).
+type Held = (
+    Arc<BTreeMap<Id, Moved>>,
+    Arc<BTreeSet<Id>>,
+    Arc<BTreeMap<Id, Build>>,
+);
+
+trait HeldOf {
+    fn of(controller: &Controller) -> Held;
+}
+
+impl HeldOf for Held {
+    fn of(controller: &Controller) -> Held {
+        (
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.body(id).map(|b| (id, *b)))
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .bodies()
+                    .filter(|b| controller.carrying(b.id).is_some())
+                    .map(|b| b.id)
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.build(id).map(|build| (id, build)))
+                    .collect(),
+            ),
+        )
+    }
+}
+
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
     pub forms: Forms,
@@ -1508,6 +1546,9 @@ pub struct Acts {
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
     /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
     zone: replica::effects::Header,
+    /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
+    /// at its first use.
+    held: Option<Option<Held>>,
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -1854,6 +1895,7 @@ impl Acts {
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
             zone: header,
+            held: None,
         }
     }
 
@@ -1967,20 +2009,22 @@ impl Acts {
             (Some(slots), Some(floors)) => Some(Places { slots, floors }),
             _ => None,
         };
+        // Held for a batch of starts: built at the first of them and read by the rest, none of which moves a body.
+        let (bodies, carrying, builds) = match &mut self.held {
+            Some(Some(h)) => {
+                debug_assert!(
+                    *h == Held::of(controller),
+                    "a start moved a body while the bodies were held"
+                );
+                h.clone()
+            }
+            Some(slot) => slot.insert(Held::of(controller)).clone(),
+            None => Held::of(controller),
+        };
         let sight = Sight {
-            bodies: controller
-                .ids()
-                .filter_map(|id| controller.body(id).map(|b| (id, *b)))
-                .collect(),
-            carrying: controller
-                .bodies()
-                .filter(|b| controller.carrying(b.id).is_some())
-                .map(|b| b.id)
-                .collect(),
-            builds: controller
-                .ids()
-                .filter_map(|id| controller.build(id).map(|build| (id, build)))
-                .collect(),
+            bodies,
+            carrying,
+            builds,
             split: split.map(RefCell::new),
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
@@ -2068,6 +2112,19 @@ impl Acts {
                         .is_some_and(text)
                     && e.get("field").and_then(Json::str).is_some_and(everyone)
             })
+    }
+
+    /// Holds one snapshot of the bodies for every [`Sight`] until [`Acts::release_sight`] (S10): for the tick's form
+    /// starts, between which no body moves (a start claims legs and sets timers; the controller steps them in a later
+    /// tick). Each start otherwise rebuilt it whole: every body, every build, at about 0.4 ms each at 750 bodies.
+    /// The snapshot is built at the first start that needs it, so a tick with no starts builds none.
+    pub fn hold_sight(&mut self) {
+        self.held = Some(None);
+    }
+
+    /// Lets each [`Sight`] read the bodies afresh again.
+    pub fn release_sight(&mut self) {
+        self.held = None;
     }
 
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or

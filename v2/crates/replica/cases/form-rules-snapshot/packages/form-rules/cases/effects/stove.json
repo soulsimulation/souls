@@ -76,7 +76,7 @@
         "change": "set",
         "node": "t1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -105,7 +105,7 @@
         "change": "set",
         "node": "t1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],

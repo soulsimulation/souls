@@ -3,7 +3,7 @@
   "kind": "eden:lap_course",
   "owner": "thing",
   "state": {
-    "laps": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+    "laps": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "start": { "role": "stand", "at_mm": [0, 0, -2000], "yaw_mdeg": 0 },

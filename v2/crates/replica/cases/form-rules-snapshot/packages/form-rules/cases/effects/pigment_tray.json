@@ -50,7 +50,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "stage",
-                "n": 1,
+                "n": 28,
                 "to": "coarse"
               }
             ],
@@ -78,7 +78,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "stage",
-                "n": 1,
+                "n": 28,
                 "to": "fine"
               }
             ],

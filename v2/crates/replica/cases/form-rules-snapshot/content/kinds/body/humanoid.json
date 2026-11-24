@@ -4,7 +4,7 @@
   "owner": "family",
   "state": {
     "posture": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "stand",
@@ -128,6 +128,70 @@
         {
           "step": "move",
           "move": "shrug"
+        }
+      ],
+      "effects": []
+    },
+    "nod": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "nod"
+        }
+      ],
+      "effects": []
+    },
+    "nod_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "nod",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "shake_head": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "shake_head"
+        }
+      ],
+      "effects": []
+    },
+    "shake_head_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "shake_head",
+          "toward": {
+            "arg": "toward"
+          }
         }
       ],
       "effects": []
@@ -670,6 +734,132 @@
           "event": "took_hold_to_push"
         }
       ]
+    },
+    "jumping_jacks": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jumping_jacks"
+        }
+      ],
+      "effects": []
+    },
+    "yoga": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "yoga"
+        }
+      ],
+      "effects": []
+    },
+    "push_ups": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "push_ups"
+        }
+      ],
+      "effects": []
+    },
+    "sit_ups": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "sit_ups"
+        }
+      ],
+      "effects": []
+    },
+    "sing": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "sing"
+        }
+      ],
+      "effects": []
+    },
+    "listen": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "listen"
+        }
+      ],
+      "effects": []
+    },
+    "tell_story": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tell_story"
+        }
+      ],
+      "effects": []
+    },
+    "stargaze": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "stargaze"
+        }
+      ],
+      "effects": []
     }
   },
   "text": {

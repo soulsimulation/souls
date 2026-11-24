@@ -39,12 +39,12 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 
 ## Release order
 
-0. **Client stamp.** When `eden.mjs` or `skill.md` changed since the last release (the newest `v*` tag) and the client
-   is not stamped, the release workflow's first dispatch stamps it (`stamp.mjs <client version>`, default the next
-   patch; input `client_version`), opens the stamp commit as a pull request (branch `release/stamp-<version>`, like
-   publish's changelog, since the `main` ruleset requires checks and the merge queue) and ends there. Once it merges,
-   the gate, the dry run and the ship run on that head. Every dispatch fails when `stamp.mjs --check` fails, and a real ship
-   refuses a client that still needs a stamp ([versioning](process/versioning.md#the-client-version)).
+0. **Client stamp.** The client is stamped on main, before a release head is picked (0.133 R13): after each push that
+   changes the client, `eden-sync.yml` rebuilds `eden.mjs` and, when `eden.mjs` or `skill.md` changed since the last
+   release (the newest `v*` tag) and the client is not stamped, stamps it (`release-client.mjs stamp`: `stamp.mjs`
+   with the next patch) in its own pull request (`bot/eden-sync-<sha12>`, `merge:ready`). The release only checks the
+   head (`release-client.mjs check`) and refuses one from before that pull request merged, naming it; it never makes a
+   commit of its own that would need CI again ([versioning](process/versioning.md#the-client-version)).
 1. **Gate receipt.** The candidate commit has a clean full-scope receipt from the
    [remote gate](testing/remote-gate.md) (`tools/test-harness/release-gate.sh`), combined with the V7 browser walk
    into a ship receipt (`tools/test-harness/ship-receipt.mjs`). Start the gate after the head's push-to-main CI run is
@@ -79,7 +79,7 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 `release.yml -f sha=<full sha>` ships that exact commit while main keeps merging, so no freeze is needed. Preflight
 (`tools/world-launcher/deploy/ship/release-pin.mjs check`) refuses a sha that is not the full 40-hex commit, not an
 ancestor of `origin/main`, or not newer than the last release tag on main (`v0.*`, so nothing ships backwards), then
-checks it out: the changelog check, the client stamp, the receipts, ship, eyes and publish all use it, never main's
+checks it out: the changelog check, the client check, the receipts, ship, eyes and publish all use it, never main's
 HEAD. `RELEASE_FREEZE` is not consulted. The run's title names the sha (`release <version> at <sha>`), which is how
 [eyes](#the-eyes) matches a run at main's head to the commit it ships. Gate the sha, then dry-run and ship it:
 
@@ -92,9 +92,28 @@ gh workflow run release.yml --ref main -f version=0.131 -f sha=<sha> -f dry_run=
 Publish tags the sha and opens the changelog pull request against main with the fragments as of the sha that are still
 on main; fragments merged after it wait for the next release. The sha must contain this change (the eyes it runs come
 from its own tree, so preflight refuses a sha without `release-pin.mjs`). The workflow comes from main while ship.sh,
-eyes and the receipt checks come from the sha's tree, so pin a recent commit. A pin that needs a client stamp gets the
-stamp pull request as usual; once it merges, pin a commit at or after it and gate that. Without `sha`, a release ships
+eyes and the receipt checks come from the sha's tree, so pin a recent commit. A pin whose client is not stamped yet is
+refused at preflight: pin the merge of eden-sync's pull request or a later commit. Without `sha`, a release ships
 main's HEAD under the freeze below, as before.
+
+### A patch release in one run
+
+One dispatch takes a merged sha through both releases at that sha (0.133 R13): today's system (ship, eyes, publish)
+and Engine v2's ([release-v2.yml](../v2/docs/release.md), called twice). Preflight runs Engine v2's checks too, so a
+refusal on either side stops both before anything moves. The **v2** job builds and stages by hash while ship stages,
+under ship's own conditions; **v2-move** runs after ship's verdict and moves every world by canary; **eden-check**
+reads `/w/eden/` (HTTP 200 and the build it should name); publish waits for all of it and makes the tag, the GitHub
+Release and the changelog pull request once. Engine v2's checks count the merge queue's green `ci` run at the sha, so a
+merged fix needs no CI run of its own on main: the v2 legs' tests ran on the pull request's own head, not on the tree
+that ships, which the queue only compiled. When the build cannot read Eden's store, `-f reseed=fresh` runs Eden's
+reseed on the machine before the move, with Eden as the canary (a dry run runs its pre-check only); its label and undo
+(`rollback-v2.yml -f reseed=<label>`) are in the summary even when it stops.
+
+```sh
+gh workflow run release.yml --ref main -f version=0.133.1 -f sha=<merged fix>                    # dry run, both
+gh workflow run release.yml --ref main -f version=0.133.1 -f sha=<merged fix> -f dry_run=false   # the release
+gh workflow run release.yml --ref main -f version=0.133.1 -f sha=<merged fix> -f dry_run=false -f reseed=fresh
+```
 
 ## Release freeze
 
@@ -132,7 +151,8 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
 | `unload_still` | none (no change) | ship.sh's `--unload-still`. `1` lets still worlds leave memory from this release on: right before the activation, `install.sh unload-still production 1` writes `<data>/launcher-settings.json`. The reload starts a new launcher, and it reads the file. The conf is not touched, so the drift guard stands. A dry run only says what it would write. Roll back with `-f unload_still=0`, which removes the file at the next release's activation. A code rollback leaves the file in place (a build from before 0.130 does not read it). On the host, `bash /srv/sim-worlds/production/tools/world-launcher/deploy/install.sh unload-still production 0` followed by `systemctl reload sim-worlds@production` does the same at once |
 | `eyes` | **gpu-runner** | Where the browser checks (probe, walks, poster, stall) run. `gpu-runner`: [`ship/eyes.mjs`](#the-eyes) in the workflow's **eyes** job on a `souls-timed` runner with its GPU; `laptop`: the same script on a GPU workstation, started by hand. Both are handed over by commit status, and ship.sh runs `--no-eyes`. `runner`: on the GitHub runner, as before; it has no GPU, so they fail there (below) |
-| `client_version` | next patch | The Soul client version stamped when the client changed since the last release and is not stamped yet |
+| `v2` | **true** | Also release Engine v2 at the same sha, beside today's system (the **v2** job: release-v2.yml, called). `false` releases today's system alone |
+| `reseed` | none | Engine v2's reseed of Eden on this build, after the stage and before the move: `fresh`, or a label to resume one. A dry run runs only its pre-check. Undo: `rollback-v2.yml -f reseed=<label>` |
 | `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
 | `accept_exceptions` | false | The receipts release also holds the maintainer's [`accepted-exceptions.json`](#accepted-exceptions); the gate may be blocked only by what it accepts, exactly |
 | `receipts_only` | false | Run only preflight and the receipts check for this head, then stop: no production environment, no secret, no ssh. Any branch, so a test cut can use it |
@@ -152,9 +172,9 @@ Its jobs:
 
 1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, the
    tag does not exist yet, the inputs are sane. With `sha`, that commit passes `release-pin.mjs check` and is checked
-   out; it is the job's `sha` output, which every later job reads. Then the client stamp (`tools/world-launcher/deploy/ship/release-client.mjs
-   stamp`): a dry run that has to stamp opens the stamp pull request and skips the other jobs; a real ship
-   that would have to stamp stops; `stamp.mjs --check` must pass either way.
+   out; it is the job's `sha` output, which every later job reads. Then the client check
+   (`tools/world-launcher/deploy/ship/release-client.mjs check`): it refuses a head whose client is stale or not
+   stamped (eden-sync's pull request has not merged yet), and `stamp.mjs --check` must pass.
 2. **ship**: in the `production` environment (limited to `main`). It installs, pulls media, installs Chromium at a
    known `PLAYWRIGHT_BROWSERS_PATH`, builds the Mars web overlay (`MARS_WEB_SRC`: the viewer's static site from this
    commit plus the static manifests, Draco decoders and campus model from the public origin), writes the probe god
@@ -173,8 +193,11 @@ Its jobs:
    the run before anything touches the host.
 3. **eyes** (`eyes=gpu-runner`, or `eyes_only`): [`ship/eyes.mjs`](#the-eyes) on a `souls-timed` runner, beside
    the ship job, with `--gpu hardware`.
-4. **feed** (`feed_only` only): the release item of an already-tagged release, as above.
-5. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
+4. **v2**, **v2-move** and **eden-check** (`v2=true`, the default): Engine v2's release at the same sha
+   ([a patch release in one run](#a-patch-release-in-one-run)); release-v2.yml, called to stage beside the ship job and
+   to move after its verdict, with its own tag and changelog steps left to publish; then one read of Eden's page.
+5. **feed** (`feed_only` only): the release item of an already-tagged release, as above.
+6. **publish** (real ships only, once ship, v2-move and eden-check passed): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit, creates the GitHub Release and opens the changelog commit as a pull request (branch
    `release/changelog-<version>`, as `publish.yml` does). The `main` ruleset requires checks and the merge queue, so
    nothing in the release pushes to `main` directly; the pull request merges through the queue.
@@ -565,7 +588,12 @@ answers, so the pause is the world's boot: 3.6 to 5.1 s on 0.123, 4.17 and 4.18 
 6500 ms. Each drop carries both parts (`retryMs`, `heldMs`), and the probe's report keeps the probe machine's load.
 The new process answers while it is still running the ticks owed for the pause: its god layer's first perception pass
 runs in slices then, as on a running world. Run whole, it held `/healthz` and every welcome for about 0.9 s on Eden 2026
-(#2501). `tools/world-launcher/handover-reconnect.test.mjs` hands Eden 2026 over between two pools and holds the bar.
+(#2501). Its places pass (the door-safety index, a new day's places) runs in slices then too; whole, it held the
+viewer's upgrade about 0.3 s on Eden 2026 whenever it landed just after listen (R14). The standby also bakes the god
+world's terrain tiles from its stored ground, which the boot's first reconcile otherwise bakes inside the pause
+(about 0.23 s on Eden 2026). `tools/world-launcher/handover-reconnect.test.mjs` hands Eden 2026 over between two pools
+and holds the bar. `node tools/world-launcher/deploy/reload-local.mjs` runs a whole reload on this machine (keeper,
+launcher, an Eden 2026 world, the release probe in headless Chrome, one SIGHUP) and prints the probe's bar.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it keeps running and never
 reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts`).
 

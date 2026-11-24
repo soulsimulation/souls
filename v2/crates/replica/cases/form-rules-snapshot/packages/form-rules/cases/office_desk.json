@@ -147,6 +147,80 @@
           "form": "switch_off"
         }
       }
+    },
+    {
+      "name": "work_at_a_computer_that_is_on",
+      "act": {
+        "this": "t1",
+        "form": "work"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "work_when_off_fixed_by_switch_on",
+      "act": {
+        "this": "t1",
+        "form": "work"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk",
+            "fields": {
+              "computer_on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "computer_on",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "switch_on"
+        },
+        "says": "computer_off"
+      }
     }
   ]
 }

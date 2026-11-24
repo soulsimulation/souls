@@ -422,6 +422,7 @@ fn served_copy(w: &Seeded) -> (replica::apply::Replica, replica::tree::Rules) {
             children: Default::default(),
             slots: thing_slots(&seeded_entries(w), activity),
             hands: None,
+            fields: Default::default(),
         };
         assert!(
             rules

@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "darts_in": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -24,7 +24,7 @@
       "who": "anyone",
       "starts": "act",
       "needs": [{ "need": "state", "field": "darts_in", "at_most": 2 }, { "need": "hand", "free": true }],
-      "steps": [{ "step": "walk_to", "point": "oche" }, { "step": "move", "move": "point", "at": "board" }],
+      "steps": [{ "step": "walk_to", "point": "oche" }, { "step": "move", "move": "point" }],
       "effects": [{ "change": "set", "field": "darts_in", "by": 1, "event": "dart_thrown" }]
     },
     "collect": {

@@ -161,6 +161,9 @@ fn stamp(stage: &str) {
 const EVERY: u64 = 8 << 20;
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
+/// R15: how long a world going to sleep waits for its stream's backup, at most: under the sleep watch's 5 s wait for
+/// the stream's answer (`sleep.rs` STREAM_WITHIN), with room for the sleeping pointer's own write.
+const SLEEP_DRAIN: std::time::Duration = std::time::Duration::from_secs(3);
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 #[cfg(test)]
 const BOUND: usize = 1 << 16;
@@ -792,6 +795,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
                 children: Default::default(),
                 slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }
@@ -2780,6 +2784,9 @@ fn serve(args: &[String]) -> R<()> {
     let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
         .map_err(refusal)?
         .for_world();
+    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
+    // store moved to another bucket is learned again rather than fenced on.
+    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2918,7 +2925,10 @@ fn serve(args: &[String]) -> R<()> {
                             start,
                             &stream_store,
                             stream_closed.clone(),
-                            Some(view_out::backup_beside(&views_dir)),
+                            Some((
+                                view_out::backup_beside(&views_dir),
+                                backup_identity.clone(),
+                            )),
                         )
                     })?;
                     // Both the pointer and placement bootstrap resolve the existing strict public history export.
@@ -2987,6 +2997,30 @@ fn serve(args: &[String]) -> R<()> {
                     backup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
                 )?;
+                // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
+                // unit's 10 s stop timeout; best effort.
+                // A stopping world writes nothing new to `views/`: the stream thread is asked to stop cutting first, and
+                // the drain backs up only what is already spooled.
+                let stopping = Arc::new((
+                    std::sync::atomic::AtomicBool::new(false),
+                    std::sync::atomic::AtomicBool::new(false),
+                ));
+                if let Some(d) = writer.drainer() {
+                    let stopping = Arc::clone(&stopping);
+                    crate::stopped::on_stop(move || {
+                        use std::sync::atomic::Ordering;
+                        stopping.0.store(true, Ordering::Release);
+                        let parked = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                        while !stopping.1.load(Ordering::Acquire) && std::time::Instant::now() < parked {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
+                        let held = d.drain(std::time::Duration::from_secs(8));
+                        eprintln!(
+                            "worldd: the public stream's backup {} before the stop",
+                            if held { "is current" } else { "is still behind" }
+                        );
+                    });
+                }
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };
@@ -2995,6 +3029,13 @@ fn serve(args: &[String]) -> R<()> {
                 let _ = ready_tx.send(true);
                 drop(stream_found);
                 loop {
+                    // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
+                    if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
+                        stopping.1.store(true, std::sync::atomic::Ordering::Release);
+                        loop {
+                            std::thread::park();
+                        }
+                    }
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
                         Ok((record, bytes)) => {
                             if record >= writer.source_cursor() {
@@ -3023,9 +3064,17 @@ fn serve(args: &[String]) -> R<()> {
                         }
                         let slept = writer.sleep(answers::now(), due).map_err(refusal);
                         let done = slept.is_ok();
-                        let _ = answer.send(slept);
-                        if done {
-                            published(&writer);
+                        // R15: before the world exits to sleep, its backup is given a little time to hold the spool's
+                        // head, so a move finds the store current; best effort, and well inside the sleep watch's own
+                        // wait for this answer (`sleep.rs` STREAM_WITHIN, 5 s).
+                        if done && let Some(d) = writer.drainer() {
+                            d.drain(SLEEP_DRAIN);
+                        }
+                        // The sleep is taken only when the watch hears it; one that gave up waiting stays awake, and so
+                        // does the stream: its next idle writes the pointer without the sleep.
+                        let heard = answer.send(slept).is_ok();
+                        published(&writer);
+                        if done && heard {
                             return Ok(());
                         }
                     }
@@ -4315,6 +4364,7 @@ mod tests {
                         children: Default::default(),
                         slots: Default::default(),
                         hands: None,
+                        fields: Default::default(),
                     },
                 );
             }

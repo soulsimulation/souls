@@ -10,13 +10,22 @@
 //! then the head, and then removes the objects it put. A restart recovers its chain from the spool's head, reading an
 //! object from the spool where it is still there and from the store where it was backed up, so a crash before the
 //! backup replays the exact published bytes. Nothing is dropped: the spool's bound is the disk, as the log's is, and
-//! what it holds is said in `health.json` (`stream.backup.behind`).
+//! what it holds is said in `health.json` (`stream_backup.behind`, `behind_bytes`).
+//!
+//! **One writer.** The head is put only over the head this writer last confirmed in the store (`head.confirmed` in
+//! the spool: its ETag and bytes, from the store as the writer found it at open, or from its own last put), and a
+//! head it tried whose answer was lost (`head.tried`) counts as its own. A head in the store that is neither is
+//! another writer's: the backup is **fenced**, for good. It never adopts that head nor puts over it, and says so in
+//! `health.json`; the stream and its viewers go on from the local disk. A confirmed head is kept with the store's
+//! identity: a spool with none, or one of another store, learns the store's head again (and puts over it), and a
+//! store with no head gets this writer's; neither is fenced.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use directoryd::directory::store::{Store as ObjectStore, When};
 use replica::encode::to_hex;
@@ -35,31 +44,88 @@ pub enum State {
     /// The store holds the spool's head.
     Current,
     /// A pass was refused `tries` times in a row, the last with `fault`; the next in `next_try_ms`. `behind` objects
-    /// wait in the spool.
+    /// (`behind_bytes` bytes) wait in the spool.
     Degraded {
         fault: String,
         tries: u64,
         next_try_ms: u64,
         behind: u64,
+        behind_bytes: u64,
     },
+    /// The store's head is another writer's: this backup has stopped for good.
+    Fenced { fault: String },
 }
 
 /// The writer's side of the backup: where the spool is, and how it tells the thread there is more.
 pub struct Spool {
     pub(super) dir: PathBuf,
+    store: String,
     wake: Option<SyncSender<()>>,
     prunes: Prunes,
+    progress: Arc<Progress>,
 }
 
 /// Old generations' records to delete by, each with the objects the chain then named (never deleted).
 type Prunes = Arc<Mutex<Vec<(String, BTreeSet<Vec<u8>>)>>>;
 
+/// The passes made, whether the last left the store holding the spool's head, and whether the backup is fenced.
+#[derive(Default)]
+struct Progress {
+    passes: AtomicU64,
+    current: AtomicBool,
+    over: AtomicBool,
+}
+
+/// A handle that waits, bounded, for the backup to hold the spool's head ([`Drain::drain`]).
+#[derive(Clone)]
+pub struct Drain {
+    wake: SyncSender<()>,
+    progress: Arc<Progress>,
+}
+
+impl Drain {
+    /// Asks for a pass and waits until one begun after the ask leaves the store holding the spool's head, or `limit`
+    /// passes: before a stop, so a move to a new machine finds the store current. Whether it is.
+    #[allow(clippy::disallowed_methods)] // A stop's wait is real time, off the world's clock.
+    pub fn drain(&self, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let asked = self.progress.passes.load(Ordering::Acquire);
+        let _ = self.wake.try_send(());
+        while Instant::now() < end {
+            if self.progress.over.load(Ordering::Acquire) {
+                return false;
+            }
+            // One pass may be under way with an older head: the one after it began after the ask.
+            if self.progress.passes.load(Ordering::Acquire) >= asked + 2
+                && self.progress.current.load(Ordering::Acquire)
+            {
+                return true;
+            }
+            let _ = self.wake.try_send(());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+}
+
+fn confirmed_key(head_key: &str) -> String {
+    format!("{head_key}.confirmed")
+}
+
+fn tried_key(head_key: &str) -> String {
+    format!("{head_key}.tried")
+}
+
 impl Spool {
-    pub(super) fn new(dir: PathBuf) -> Spool {
+    /// The spool in `dir`, backed up to the store whose identity is `store` (a digest of its address: a store moved to
+    /// another bucket is another store, whose head the backup learns again).
+    pub(super) fn new(dir: PathBuf, store: String) -> Spool {
         Spool {
             dir,
+            store,
             wake: None,
             prunes: Arc::default(),
+            progress: Arc::default(),
         }
     }
 
@@ -67,27 +133,32 @@ impl Spool {
         self.dir.join(key)
     }
 
-    /// Writes `bytes` under `key` (an object once: its name is their hash).
-    pub(super) fn object(&self, key: &str, bytes: &[u8]) -> super::R<()> {
+    fn write(&self, key: &str, bytes: &[u8]) -> super::R<()> {
         let path = self.path(key);
-        if path.is_file() {
-            return Ok(());
-        }
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p).map_err(super::io)?;
         }
         super::write_whole(&path, bytes)
     }
 
+    /// Writes `bytes` under `key` (an object once: its name is their hash).
+    pub(super) fn object(&self, key: &str, bytes: &[u8]) -> super::R<()> {
+        if self.path(key).is_file() {
+            return Ok(());
+        }
+        self.write(key, bytes)
+    }
+
     /// The chain's head, written whole; then the thread is told.
     pub(super) fn head(&self, key: &str, bytes: &[u8]) -> super::R<()> {
-        let path = self.path(key);
-        if let Some(p) = path.parent() {
-            std::fs::create_dir_all(p).map_err(super::io)?;
-        }
-        super::write_whole(&path, bytes)?;
+        self.write(key, bytes)?;
         self.poke();
         Ok(())
+    }
+
+    /// The store's head under `head_key` as the writer found it there (`etag`, `bytes`): what its backup puts over.
+    pub(super) fn confirm(&self, head_key: &str, bytes: &[u8], etag: &str) -> super::R<()> {
+        confirm(&self.dir, &self.store, head_key, bytes, etag)
     }
 
     pub(super) fn read(&self, key: &str) -> Option<Vec<u8>> {
@@ -103,11 +174,35 @@ impl Spool {
         }
     }
 
+    /// The handle a stop drains the backup by, once the backup runs.
+    pub(super) fn drainer(&self) -> Option<Drain> {
+        Some(Drain {
+            wake: self.wake.clone()?,
+            progress: Arc::clone(&self.progress),
+        })
+    }
+
     fn poke(&self) {
         // Never waits: a wake already queued covers this one.
         if let Some(w) = &self.wake {
             let _ = w.try_send(());
         }
+    }
+}
+
+/// `head.confirmed`: the store's identity, a newline, the ETag, a newline, the head's bytes (an empty ETag and no
+/// bytes: the store had no head); and no head tried since.
+fn confirm(dir: &Path, store: &str, head_key: &str, bytes: &[u8], etag: &str) -> super::R<()> {
+    let mut b = format!("{store}\n{etag}\n").into_bytes();
+    b.extend_from_slice(bytes);
+    let path = dir.join(confirmed_key(head_key));
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).map_err(super::io)?;
+    }
+    super::write_whole(&path, &b)?;
+    match std::fs::remove_file(dir.join(tried_key(head_key))) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(super::io(e)),
+        _ => Ok(()),
     }
 }
 
@@ -121,14 +216,35 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
 ) -> super::R<()> {
     let (wake, woken) = std::sync::mpsc::sync_channel(1);
     spool.wake = Some(wake);
+    let head_key = format!("{prefix}head");
+    // Known only when it is this store's: a spool with none, or one of another store, learns the store's head again.
+    let confirmed = std::fs::read(spool.dir.join(confirmed_key(&head_key)))
+        .ok()
+        .and_then(|b| {
+            let mut fields = b.splitn(3, |c| *c == b'\n');
+            let (store, etag, bytes) = (fields.next()?, fields.next()?, fields.next()?);
+            if store != spool.store.as_bytes() {
+                return None;
+            }
+            let etag = String::from_utf8(etag.to_vec()).ok()?;
+            Some((!etag.is_empty()).then(|| (bytes.to_vec(), etag)))
+        });
+    let known = confirmed.is_some();
+    let confirmed = confirmed.flatten();
+    let tried = std::fs::read(spool.dir.join(tried_key(&head_key)))
+        .map(|b| unframe(&b))
+        .unwrap_or_default();
     let worker = Worker {
         store,
         dir: spool.dir.clone(),
         prefix,
+        head_key,
+        identity: spool.store.clone(),
         prunes: Arc::clone(&spool.prunes),
-        etag: None,
-        known: false,
-        put_head: None,
+        progress: Arc::clone(&spool.progress),
+        confirmed,
+        known,
+        tried,
         deletes: std::collections::VecDeque::new(),
         deleting: true,
     };
@@ -139,16 +255,56 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     Ok(())
 }
 
+/// Heads, each as its length (4 bytes, big-endian) and bytes.
+fn frame(heads: &[Vec<u8>]) -> Vec<u8> {
+    let mut b = Vec::new();
+    for h in heads {
+        b.extend_from_slice(&u32::try_from(h.len()).unwrap_or(u32::MAX).to_be_bytes());
+        b.extend_from_slice(h);
+    }
+    b
+}
+
+fn unframe(mut b: &[u8]) -> Vec<Vec<u8>> {
+    let mut heads = Vec::new();
+    while b.len() >= 4 {
+        let n = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
+        let Some(h) = b.get(4..4 + n) else { break };
+        heads.push(h.to_vec());
+        b = &b[4 + n..];
+    }
+    heads
+}
+
+/// Why a pass ended short.
+enum Short {
+    /// Tried again after the back-off.
+    Refused(super::Refusal),
+    /// The store's head is another writer's.
+    Fenced(String),
+}
+
+impl From<super::Refusal> for Short {
+    fn from(e: super::Refusal) -> Short {
+        Short::Refused(e)
+    }
+}
+
 struct Worker<S> {
     store: S,
     dir: PathBuf,
     prefix: String,
+    head_key: String,
+    /// The store's identity, kept with the confirmed head.
+    identity: String,
     prunes: Prunes,
-    /// The store's head's ETag, once read (`known`); none when the store has no head.
-    etag: Option<String>,
+    progress: Arc<Progress>,
+    /// The head this writer last knew the store to hold, and its ETag; none: the store had no head.
+    confirmed: Option<(Vec<u8>, String)>,
+    /// Whether `confirmed` is known (this store's, from the spool or this run); else learned at the first put.
     known: bool,
-    /// The head bytes last put.
-    put_head: Option<Vec<u8>>,
+    /// Heads put since, whose answers were lost: if the store holds one, it is this writer's.
+    tried: Vec<Vec<u8>>,
     deletes: std::collections::VecDeque<String>,
     deleting: bool,
 }
@@ -158,8 +314,13 @@ impl<S: ObjectStore> Worker<S> {
     fn run(mut self, woken: &Receiver<()>, report: &dyn Fn(State)) {
         let mut tries = 0u64;
         loop {
-            match self.pass() {
-                Ok(()) => {
+            let pass = self.pass();
+            self.progress
+                .current
+                .store(matches!(pass, Ok(true)), Ordering::Release);
+            self.progress.passes.fetch_add(1, Ordering::AcqRel);
+            match pass {
+                Ok(_) => {
                     if tries > 0 {
                         eprintln!(
                             "worldd: the public stream's backup caught up after {tries} refused passes"
@@ -175,20 +336,36 @@ impl<S: ObjectStore> Worker<S> {
                         return;
                     }
                 }
-                Err(e) => {
+                Err(Short::Fenced(fault)) => {
+                    eprintln!(
+                        "worldd: the public stream's backup is fenced, viewers unaffected: {fault}; it stops for good"
+                    );
+                    self.progress.over.store(true, Ordering::Release);
+                    report(State::Fenced { fault });
+                    return;
+                }
+                Err(Short::Refused(e)) => {
                     tries += 1;
                     let wait = BACKOFF_MS[(tries as usize - 1).min(BACKOFF_MS.len() - 1)];
                     let fault = format!("{}: {}", e.name, e.detail);
-                    let behind = self.objects().len() as u64;
+                    let objects = self.objects();
+                    let behind = objects.len() as u64;
+                    let behind_bytes = objects
+                        .iter()
+                        .filter_map(|k| std::fs::metadata(self.dir.join(k)).ok())
+                        .map(|m| m.len())
+                        .sum();
                     eprintln!(
-                        "worldd: the public stream's backup is behind, viewers unaffected: {fault}; pass {tries} refused, {behind} objects wait, the next in {wait} ms"
+                        "worldd: the public stream's backup is behind, viewers unaffected: {fault}; pass {tries} refused, {behind} objects ({behind_bytes} bytes) wait, the next in {wait} ms"
                     );
                     report(State::Degraded {
                         fault,
                         tries,
                         next_try_ms: wait,
                         behind,
+                        behind_bytes,
                     });
+                    // A drain's wake does not cut the back-off short: the store was refusing.
                     std::thread::sleep(Duration::from_millis(wait));
                 }
             }
@@ -211,63 +388,114 @@ impl<S: ObjectStore> Worker<S> {
         keys
     }
 
-    fn pass(&mut self) -> super::R<()> {
-        let head_key = format!("{}head", self.prefix);
+    /// One pass; whether it left the store holding the spool's head.
+    fn pass(&mut self) -> Result<bool, Short> {
         // The head first: every object it names was in the spool before it, or is already in the store.
-        let head = std::fs::read(self.dir.join(&head_key)).ok();
-        let objects = self.objects();
-        for key in &objects {
-            let Ok(bytes) = std::fs::read(self.dir.join(key)) else {
-                continue;
-            };
-            match self.store.put(key, &bytes, When::Absent) {
+        let head = std::fs::read(self.dir.join(&self.head_key)).ok();
+        let mut put = Vec::new();
+        for key in self.objects() {
+            let bytes = std::fs::read(self.dir.join(&key)).map_err(super::io)?;
+            match self.store.put(&key, &bytes, When::Absent) {
                 Ok(_) => {}
                 // Its name is its hash: the object there is these bytes.
                 Err(e) if e.name == "precondition-failed" => {}
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             }
+            put.push(key);
         }
-        if let Some(head) = head.filter(|h| self.put_head.as_ref() != Some(h)) {
-            if !self.known {
-                self.etag = self.store.get(&head_key)?.map(|o| o.etag);
-                self.known = true;
+        let current = match head {
+            Some(head) if self.confirmed.as_ref().map(|c| &c.0) != Some(&head) => {
+                self.put_head(head)?
             }
-            let when = match self.etag.as_deref() {
-                Some(e) => When::Is(e),
-                None => When::Absent,
-            };
-            match self.store.put(&head_key, &head, when) {
-                Ok(etag) => self.etag = Some(etag),
-                Err(e) if e.name == "precondition-failed" => {
-                    // A put whose answer was lost may have landed: the head there is ours, or another writer's.
-                    match self.store.get(&head_key)? {
-                        Some(o) if o.bytes == head => self.etag = Some(o.etag),
-                        Some(o) => {
-                            self.etag = Some(o.etag);
-                            return Err(super::fault(
-                                "stream-backup-head",
-                                "the store's head is not the one this writer last put",
-                            ));
-                        }
-                        None => {
-                            self.etag = None;
-                            return Err(e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Unknown whether it landed: the ETag is read again next pass.
-                    self.known = false;
-                    return Err(e);
-                }
-            }
-            self.put_head = Some(head);
-        }
+            _ => true,
+        };
         // In the store now, and named by a head there or by the next: off the spool.
-        for key in &objects {
+        for key in &put {
             let _ = std::fs::remove_file(self.dir.join(key));
         }
         self.prune();
+        Ok(current)
+    }
+
+    /// Puts `head` over the confirmed one; whether the store holds it now.
+    fn put_head(&mut self, head: Vec<u8>) -> Result<bool, Short> {
+        if !self.known {
+            self.reseed()?;
+            if self.confirmed.as_ref().is_some_and(|c| c.0 == head) {
+                return Ok(true);
+            }
+        }
+        if !self.tried.contains(&head) {
+            self.tried.push(head.clone());
+            let path = self.dir.join(tried_key(&self.head_key));
+            super::write_whole(&path, &frame(&self.tried))?;
+        }
+        let when = match &self.confirmed {
+            Some((_, etag)) => When::Is(etag),
+            None => When::Absent,
+        };
+        let lost = match self.store.put(&self.head_key, &head, when) {
+            Ok(etag) => {
+                self.confirm(head, etag)?;
+                return Ok(true);
+            }
+            Err(e) => e,
+        };
+        // Refused or unanswered: what the store holds now says whose head it is.
+        let there = self.store.get(&self.head_key).map_err(|_| lost.clone())?;
+        match there {
+            Some(o) if o.bytes == head => {
+                self.confirm(head, o.etag)?;
+                Ok(true)
+            }
+            // An earlier try of this writer's landed, or the confirmed head is still there: put over it next pass.
+            Some(o)
+                if self.tried.contains(&o.bytes)
+                    || self.confirmed.as_ref().is_some_and(|c| c.0 == o.bytes) =>
+            {
+                self.confirm(o.bytes, o.etag)?;
+                Err(lost.into())
+            }
+            // No head there (a store emptied or moved): learned again, and created next pass.
+            None => {
+                if self.confirmed.is_some() {
+                    eprintln!(
+                        "worldd: the public stream's backup finds no head in the store; it writes its own"
+                    );
+                    self.confirm_absent()?;
+                }
+                Err(lost.into())
+            }
+            Some(_) => Err(Short::Fenced(format!(
+                "stream-backup-fenced: the store's head {} is another writer's",
+                self.head_key
+            ))),
+        }
+    }
+
+    /// The store's head learned again, as the store holds it now: a spool with no confirmed head (or one of another
+    /// store) puts over what is there rather than fencing on it.
+    fn reseed(&mut self) -> super::R<()> {
+        match self.store.get(&self.head_key)? {
+            Some(o) => self.confirm(o.bytes, o.etag)?,
+            None => self.confirm_absent()?,
+        }
+        eprintln!("worldd: the public stream's backup learned the store's head again");
+        self.known = true;
+        Ok(())
+    }
+
+    fn confirm(&mut self, head: Vec<u8>, etag: String) -> super::R<()> {
+        confirm(&self.dir, &self.identity, &self.head_key, &head, &etag)?;
+        self.tried.clear();
+        self.confirmed = Some((head, etag));
+        Ok(())
+    }
+
+    fn confirm_absent(&mut self) -> super::R<()> {
+        confirm(&self.dir, &self.identity, &self.head_key, &[], "")?;
+        self.tried.clear();
+        self.confirmed = None;
         Ok(())
     }
 
