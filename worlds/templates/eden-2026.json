@@ -109866,6 +109866,26 @@
           "r": 3.141592653589793
         }
       ]
+    },
+    {
+      "note": "One radio console in Eden House 1 living room",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/radio@2",
+          "name": "eden-house-1-radio",
+          "in": {
+            "parent": "eden-house-1",
+            "slot": "living"
+          },
+          "p": [
+            1.5,
+            0,
+            -1.1
+          ],
+          "r": 0
+        }
+      ]
     }
   ]
 }
