@@ -49,7 +49,9 @@ blocks as they are, so two PRs that change form rules never collide on eden.mjs.
 - **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
   opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
   checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
-- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+- **Stamp**: the same sync pull request stamps the client when it changed since the last release
+  (`release-client.mjs stamp`), and release.yml refuses a head whose copy is stale or unstamped (`release-client.mjs
+  check`), so the client a world serves
   (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
 
 Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module

@@ -18,8 +18,11 @@
 //! copy checks are the originals deleted. A copy already there with the same bytes counts as made (a run stopped
 //! halfway is finished by the next); one with other bytes refuses, changing nothing more. `--back` refuses a key the
 //! world holds again (set the fresh world's objects aside first). The store is the one `deploy` and `supervisor` read:
-//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Exits 0 on success, 1 on a
-//! refusal, 2 on a usage error.
+//! the `DIRECTORY_STORE_*` variables' bucket, else the folder `$WORLDS_ROOT/directory`. Every store call that is
+//! refused `store-unreachable` (a dropped connection, no answer, a 5xx) is tried again after 1, 2, 4, 8 and 16 s
+//! before the run refuses (0.133 R13: one dropped connection stopped 0.132.1's reseed); each call is safe to repeat,
+//! since a create-only copy that did land is read back and compared. Exits 0 on success, 1 on a refusal, 2 on a usage
+//! error.
 // Operations, not the engine: the default label is the wall clock.
 #![allow(clippy::disallowed_methods)]
 
@@ -27,7 +30,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use directoryd::directory::s3::S3;
-use directoryd::directory::store::{R, Store, When, refuse};
+use directoryd::directory::store::{Object, R, Store, When, refuse};
 use replica::encode::to_hex;
 use replica::ids::sha256;
 use supervisor::World;
@@ -35,6 +38,63 @@ use supervisor::folder::Folder;
 
 /// The largest object this tool copies: 4 GiB (Eden's largest, a stream-recovery object, passes 10 MiB).
 const OBJECT_LIMIT: u64 = 4 << 30;
+
+/// The waits before each new try of a store call refused `store-unreachable`: five more tries over about 31 s.
+const BACK_OFF: [Duration; 5] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(16),
+];
+
+/// A store whose calls are tried again, after each of `waits`, while they are refused `store-unreachable` (the store's
+/// name for no answer, a dropped connection or a 5xx). Any other answer, and the last try's refusal, is the call's.
+pub struct Patient<'a> {
+    pub store: &'a dyn Store,
+    pub waits: &'a [Duration],
+}
+
+impl Patient<'_> {
+    fn again<T>(&self, what: &str, key: &str, call: impl Fn() -> R<T>) -> R<T> {
+        let mut tries = self.waits.iter();
+        loop {
+            match call() {
+                Err(e) if e.name == "store-unreachable" => match tries.next() {
+                    Some(wait) => {
+                        eprintln!(
+                            "world-aside: {what} {key}: {}: {}; trying again in {} s",
+                            e.name,
+                            e.detail,
+                            wait.as_secs_f32()
+                        );
+                        std::thread::sleep(*wait);
+                    }
+                    None => return Err(e),
+                },
+                other => return other,
+            }
+        }
+    }
+}
+
+impl Store for Patient<'_> {
+    fn get(&self, key: &str) -> R<Option<Object>> {
+        self.again("get", key, || self.store.get(key))
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        self.again("put", key, || self.store.put(key, bytes, when))
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.again("list", prefix, || self.store.list(prefix))
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.again("delete", key, || self.store.delete(key))
+    }
+}
 
 /// The keys that hold a world's objects: its record, then the prefixes under which the rest are.
 fn places(world: &World) -> (String, [String; 4]) {
@@ -237,6 +297,11 @@ fn main() {
             &folder
         }
     };
+    let patient = Patient {
+        store,
+        waits: &BACK_OFF,
+    };
+    let store: &dyn Store = &patient;
     let planned = match &back {
         Some(l) => plan_back(store, &world, l),
         None => plan_aside(store, &world, &label),
@@ -436,6 +501,85 @@ mod tests {
             2
         );
         assert_eq!(s.get(&key).unwrap().unwrap().bytes, big);
+    }
+
+    /// A store that drops the first `fail` calls (`store-unreachable`, as a dropped connection or a 5xx is named).
+    struct Flaky<'a> {
+        store: &'a dyn Store,
+        fail: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Flaky<'_> {
+        fn drop_one(&self) -> R<()> {
+            use std::sync::atomic::Ordering::SeqCst;
+            if self
+                .fail
+                .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return refuse("store-unreachable", "connection reset by peer");
+            }
+            Ok(())
+        }
+    }
+
+    impl Store for Flaky<'_> {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.drop_one()?;
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.drop_one()?;
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.drop_one()?;
+            self.store.list(prefix)
+        }
+        fn delete(&self, key: &str) -> R<()> {
+            self.drop_one()?;
+            self.store.delete(key)
+        }
+    }
+
+    /// 0.133 R13: dropped connections are tried again with back-off, and the move finishes whole; past the last try,
+    /// or on any other refusal, the run refuses as before.
+    #[test]
+    fn dropped_connections_are_tried_again_before_a_refusal() {
+        let (d, s) = folder("flaky");
+        let w = World::parse(WORLD).unwrap();
+        let mine = shipped(&s);
+        let waits = [Duration::from_millis(1); 3];
+        // Three dropped calls in a row, then answers: within the three tries again.
+        let flaky = Flaky {
+            store: &s,
+            fail: 3.into(),
+        };
+        let p = Patient {
+            store: &flaky,
+            waits: &waits,
+        };
+        let plan = plan_aside(&p, &w, "t6").unwrap();
+        assert_eq!(plan.len(), 5);
+        flaky.fail.store(3, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(run(&p, &plan).unwrap().objects, 5);
+        for (k, v) in &mine {
+            assert_eq!(s.get(&format!("aside/t6/{k}")).unwrap().unwrap().bytes, *v);
+            assert_eq!(s.get(k).unwrap(), None);
+        }
+        // Four in a row is one more than the tries: the call refuses, and the planned move deletes nothing.
+        let back = plan_back(&s, &w, "t6").unwrap();
+        flaky.fail.store(4, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(run(&p, &back).unwrap_err().name, "store-unreachable");
+        assert_eq!(s.list("aside/t6/").unwrap().len(), 5, "nothing deleted");
+        // A refusal that is not a dropped connection is not tried again.
+        s.put("aside/t6/world/zz", b"z", When::Absent).unwrap();
+        flaky.fail.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            plan_back(&p, &w, "t6").unwrap_err().name,
+            "aside-foreign-key"
+        );
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

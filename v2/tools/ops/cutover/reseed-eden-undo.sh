@@ -12,7 +12,8 @@
 #   bash reseed-eden-undo.sh <time> check    reads and prints every value and what it would do; changes nothing
 #   bash reseed-eden-undo.sh <time> run      the check, then the steps above
 #
-# <time> is the label reseed-eden.sh printed (YYYYMMDDTHHMMSSZ). Root on the production host.
+# <time> is the label reseed-eden.sh printed (YYYYMMDDTHHMMSSZ). Root on the production host. rollback-v2.yml runs it
+# (input reseed) with the world-aside of the release the reseed moved Eden to (release.sh reseed-undo).
 set -euo pipefail
 
 DATA=${RESEED_DATA:-/var/lib/souls}
@@ -24,6 +25,17 @@ ROOT=$DATA/worlds
 die() {
   echo "reseed-undo: refused: $*" >&2
   exit 1
+}
+# A store call that can fail for a dropped connection, tried again after 2, 4, 8 and 16 s (0.133 R13); world-aside
+# retries its own calls.
+patient() {
+  local wait
+  for wait in 2 4 8 16; do
+    "$@" && return 0
+    echo "reseed-undo: '$1 ${2:-}' failed; trying again in $wait s" >&2
+    sleep "$wait"
+  done
+  "$@"
 }
 STAMP=${1:-}
 mode=${2:-}
@@ -109,7 +121,7 @@ else
   echo "reseed-undo: 3. the folder: never moved"
 fi
 echo "reseed-undo: 4. pin the old build"
-"$LIB/supervisor" pin "$WORLD" "$OLD"
+patient "$LIB/supervisor" pin "$WORLD" "$OLD"
 echo "reseed-undo: 5. start the world and its gateway"
 systemctl start "worldd@$WORLD" "souls-gateway@$WORLD"
 echo "undone=$(date -u +%Y%m%dT%H%M%SZ)" >> "$RECEIPT"

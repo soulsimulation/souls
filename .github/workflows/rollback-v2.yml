@@ -3,19 +3,26 @@
 # and refuses a build that cannot read what the bad one wrote. Code rolls back; data never does. Docs:
 # v2/docs/release.md#a-rollback.
 #   gh workflow run rollback-v2.yml --ref main -f to=<good build> -f from=<live build> -f worlds="<world> ..." [-f target=production]
+# A reseed's undo (0.133 R13), on the machine, by the undo the release the reseed moved Eden to carries: Eden's old
+# folder, store objects and build back (reseed-eden-undo.sh; its pre-check first, then the undo; to, from and worlds
+# are not used):
+#   gh workflow run rollback-v2.yml --ref main -f target=production -f reseed=<label>
 name: rollback-v2
 on:
   workflow_dispatch:
     inputs:
       to:
         description: The build to go back to (1220 and 64 hex), on the machine
-        required: true
+        required: false
       from:
         description: The build the worlds run now (1220 and 64 hex)
-        required: true
+        required: false
       worlds:
         description: The worlds to take back, separated by spaces
-        required: true
+        required: false
+      reseed:
+        description: 'Instead: undo the reseed with this label (YYYYMMDDTHHMMSSZ, printed by release-v2''s reseed step); to, from and worlds are then not used'
+        required: false
       target:
         description: The GitHub environment that names the machine (scratch or production)
         type: choice
@@ -39,6 +46,7 @@ jobs:
           TO: ${{ inputs.to }}
           FROM: ${{ inputs.from }}
           WORLDS: ${{ inputs.worlds }}
+          RESEED: ${{ inputs.reseed }}
           SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
           SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
         run: |
@@ -46,6 +54,10 @@ jobs:
           echo "::add-mask::$SIM_DEPLOY_HOST"
           echo "::add-mask::$SIM_DEPLOY_USER"
           [ "$REF" = refs/heads/main ] || { echo "::error::rollback-v2 runs from main only (got $REF)"; exit 1; }
+          if [ -n "$RESEED" ]; then
+            [[ "$RESEED" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::reseed: the reseed's label, YYYYMMDDTHHMMSSZ"; exit 1; }
+            exit 0
+          fi
           [[ "$TO" =~ ^1220[0-9a-f]{64}$ && "$FROM" =~ ^1220[0-9a-f]{64}$ && "$TO" != "$FROM" ]] || { echo "::error::to and from: two different builds, 1220 and 64 hex"; exit 1; }
           [[ "$WORLDS" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+(\ [0-9a-f]{32}-[0-9a-f]{32}-[0-9]+)*$ ]] || { echo "::error::worlds: world names (<32 hex>-<32 hex>-<n>) separated by spaces"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +74,18 @@ jobs:
           printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
           printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
             "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: Undo the reseed (pre-check, then the undo)
+        if: ${{ inputs.reseed != '' }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          RESEED: ${{ inputs.reseed }}
+        run: |
+          set -o pipefail
+          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" check 2>&1 | tee "$RUNNER_TEMP/undo.txt"
+          bash v2/tools/ops/release/release.sh remote reseed-undo "$RESEED" run 2>&1 | tee -a "$RUNNER_TEMP/undo.txt"
+          { echo '```'; cat "$RUNNER_TEMP/undo.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: deploy rollback, world by world
+        if: ${{ inputs.reseed == '' }}
         env:
           RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
           TO: ${{ inputs.to }}
