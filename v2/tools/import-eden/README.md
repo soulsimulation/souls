@@ -56,9 +56,11 @@ entry.
 A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
 as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
 stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none. A def the
-world defines itself (a template's `define`, which no page's library has: hello-hamlet's reading room) rides its first
-thing as field 102, its whole stored def as JSON text (`def_body`), so that page draws it as the world's own page does
-(its roof) and not from the thing's solids.
+world defines itself (a template's `define`, which no page's library has: hello-hamlet's reading room) is kept once on
+the open ground as field 102, `[[ref, def] …]` with each whole stored def as JSON text (the exporter's `ground.defs`, the
+defs the world places), so that page draws it as the world's own page does (its roof) and not from the thing's solids.
+On the ground and not on a thing, removing any thing of the def never loses it. It is in every baseline: Eden-2026's
+31 such defs are about 64 KB of a baseline of about 9 MB.
 
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for

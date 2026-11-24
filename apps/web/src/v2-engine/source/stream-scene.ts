@@ -9,8 +9,8 @@
 // - things, buildings, paths and areas: every node that is an imported thing (its `origin`, today's id, with no `/` or
 //   `.`: a building's floors, rooms and windows and a place derived from a thing are drawn by the thing), at its world
 //   pose, with its shape (an area's outline, a path's line and width) and the def it was imported from (field 2) out of
-//   the core library the page already carries (`coreLibrary`), or, for a def the world defines itself, the def its first
-//   thing carries (field 102), with its def's params (field 19, W3); from a world imported before W3, a building's size
+//   the core library the page already carries (`coreLibrary`), or, for a def the world defines itself, the def the open
+//   ground keeps (field 102), with its def's params (field 19, W3); from a world imported before W3, a building's size
 //   and storeys from its floors' surfaces. A thing on a course no def draws (a punt) is the takes' (takes.ts).
 //
 // What the stream does not carry is drawn plain and named in `plain` (the hatch): a def the library does not have is
@@ -53,15 +53,21 @@ export function libraryDef(kind: string, ref?: string, lib: Lib = coreLibrary())
 }
 
 /** The defs the world defines itself (a template's `define`, which no page's library has), as the stream carries them:
- *  each on its first thing (import-eden's field 102, `NodeRec.defBody`), by ref. A body that is not a def is left out. */
+ *  once each, on the open ground (import-eden's field 102, `NodeRec.defBodies`), so removing a thing of one never loses
+ *  it; by the ref it is kept under and by its own `name@version` (a thing may name it either way). A body that is not a
+ *  def is left out. */
 export function worldDefs(nodes: readonly NodeRec[]): Map<string, StoredDef> {
   const out = new Map<string, StoredDef>();
   for (const n of nodes) {
-    if (!n.defBody) continue;
-    try {
-      const d = JSON.parse(n.defBody) as Partial<StoredDef>, def = defSchema.parse(d);
-      if (typeof d.ref === 'string' && typeof d.hash === 'string') out.set(d.ref, { ...def, ref: d.ref, hash: d.hash, by: typeof d.by === 'string' ? d.by : 'v2', born: 0 });
-    } catch { /* drawn from its solids */ }
+    for (const [ref, body] of n.defBodies ?? []) {
+      try {
+        const d = JSON.parse(body) as Partial<StoredDef>, def = defSchema.parse(d);
+        if (typeof d.hash !== 'string') continue;
+        const stored: StoredDef = { ...def, ref: typeof d.ref === 'string' ? d.ref : ref, hash: d.hash, by: typeof d.by === 'string' ? d.by : 'v2', born: 0 };
+        out.set(ref, stored);
+        out.set(`${def.name}@${def.version}`, stored);
+      } catch { /* drawn from its solids */ }
+    }
   }
   return out;
 }

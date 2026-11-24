@@ -104,18 +104,23 @@ test('a placed kind with no library def draws its entry\'s bounds; one with a li
   assert.equal(looks.get('eden:lamp_post'), undefined, 'the library draws a lamp post');
 });
 
-test('a def the world defines itself is drawn by the body its first thing carries (field 102), not its solids; a punt is the takes\'', () => {
+test('a def the world defines itself is drawn by the body the open ground keeps (field 102), not its solids; a punt is the takes\'', () => {
   // hello-hamlet's reading room: `lab-closeable-hall@1`, defined by the template, a building/1 with a roof
   const template = JSON.parse(readFileSync(new URL('../../../../../worlds/templates/hello-hamlet.json', import.meta.url), 'utf8')) as { batches: { ops: { op: string; def?: object }[] }[] };
   const define = template.batches.flatMap((b) => b.ops).find((o) => o.op === 'define')!.def!;
-  const defBody = JSON.stringify({ ...define, ref: 'lab-closeable-hall@1', hash: 'ab'.repeat(32), by: 'god', born: 3 });
-  const hall = (id: string, origin: string, x: number, extra: Partial<NodeRec> = {}) =>
-    at(id, 'eden:lab_closeable_hall@1220c7b7', 'g', [x, 0, 0], { origin, def: 'lab-closeable-hall@1', solids: [[0, 0, 4000, 3000, 0, 0, 4000, 0, 0]], params: { w: 8, d: 6, floors: 1, front: 's' }, ...extra });
+  const body = JSON.stringify({ ...define, ref: 'lab-closeable-hall@1', hash: 'ab'.repeat(32), by: 'god', born: 3 });
+  const ground = (bodies: [string, string][]) => ({ ...WORLD[1], defBodies: bodies });
+  const hall = (id: string, origin: string, x: number) =>
+    at(id, 'eden:lab_closeable_hall@1220c7b7', 'g', [x, 0, 0], { origin, def: 'lab-closeable-hall@1', solids: [[0, 0, 4000, 3000, 0, 0, 4000, 0, 0]], params: { w: 8, d: 6, floors: 1, front: 's' } });
   const punt = at('punt', 'core:rowing_punt@1220ab', 'g', [-19_569_000, 0, 36_157_000], { origin: 'e_punt0', def: 'core-rowing-punt@1', course: new Uint8Array([1]) });
-  const s = streamSnapshot([...WORLD.slice(0, 2), hall('h1', 'e_read1', -18_000_000, { defBody }), hall('h2', 'e_read2', 18_000_000), punt], 'hamlet');
+  const s = streamSnapshot([WORLD[0], ground([['lab-closeable-hall@1', body]]), hall('h1', 'e_read1', -18_000_000), hall('h2', 'e_read2', 18_000_000), punt], 'hamlet');
   const byId = new Map(s.entities.map((e) => [e.id, e]));
   assert.equal(byId.get('e_read1')!.def, 'lab-closeable-hall@1');
-  assert.equal(byId.get('e_read2')!.def, 'lab-closeable-hall@1', 'a second thing of the def draws by the body the first carries');
+  assert.equal(byId.get('e_read2')!.def, 'lab-closeable-hall@1');
+  // the first reading room removed (Op::Remove: its node gone from the stream): the second keeps its def and roof
+  const after = streamSnapshot([WORLD[0], ground([['lab-closeable-hall@1', body]]), hall('h2', 'e_read2', 18_000_000)], 'hamlet');
+  assert.deepEqual(after.entities.map((e) => [e.id, e.def]), [['e_read2', 'lab-closeable-hall@1']]);
+  assert.deepEqual(after.plain, []);
   const def = s.defs.find((d) => d.ref === 'lab-closeable-hall@1')!;
   assert.deepEqual(def.make, { kind: 'gen', gen: 'building/1', args: { style: 'hall' } });
   assert.equal((def.params.roof as { default?: unknown }).default, 'hip', 'its roof, as the old page draws it');
@@ -127,5 +132,5 @@ test('a def the world defines itself is drawn by the body its first thing carrie
   const box = m.bake(def, byId.get('e_read1')!.params ?? {}, 0).box;
   assert.ok(box[1] > 4.5, `${box}`);
   // a body that is not a def is left out, and the thing falls back to its solids
-  assert.match(streamSnapshot([...WORLD.slice(0, 2), hall('h1', 'e_read1', 0, { defBody: '{"schema":"def/1"}' })], 'hamlet').entities[0].def, /^v2-eden-lab-closeable-hall-/);
+  assert.match(streamSnapshot([WORLD[0], ground([['lab-closeable-hall@1', '{"schema":"def/1"}']]), hall('h1', 'e_read1', 0)], 'hamlet').entities[0].def, /^v2-eden-lab-closeable-hall-/);
 });

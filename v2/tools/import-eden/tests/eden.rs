@@ -5,9 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DEF_BODY, F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PARAMS,
-    F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import,
-    PLACE, ROOM, WINDOW, base64, count, load, world_of,
+    F_DEF_BODIES, F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE,
+    F_PARAMS, F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR,
+    Import, PLACE, ROOM, WINDOW, base64, count, load, world_of,
 };
 use replica::effects::{Header, Part};
 use replica::encode::{Name, Value};
@@ -474,31 +474,43 @@ fn a_things_params_are_its_field_19() {
     assert_eq!(field(&im, "e_chair"), None);
 }
 
-/// A def the world defines itself (the exporter's `def_body`, its def/1 JSON text) is the thing's field F_DEF_BODY,
-/// byte for byte; a thing of a core def carries none.
+/// The world's own defs (the exporter's `ground.defs`: ref and stored def as JSON text) are the open ground's field
+/// F_DEF_BODIES, `[[ref, def] …]` byte for byte, and on no thing: removing a thing of such a def never takes it away.
 #[test]
-fn a_world_defined_def_rides_its_thing() {
+fn the_worlds_own_defs_are_kept_once_on_the_open_ground() {
     let body = r#"{\"schema\":\"def/1\",\"name\":\"test-house\",\"version\":1}"#;
     let text = SMALL.replace(
-        r#""name": "test-house","#,
-        &format!(r#""name": "test-house", "def_body": "{body}","#),
+        r#""ground": {"tileM": 2,"#,
+        &format!(
+            r#""ground": {{"defs": [{{"ref": "test-house@1", "body": "{body}"}}], "tileM": 2,"#
+        ),
     );
     assert_ne!(text, SMALL);
     let im = load(&text).expect("loads");
-    let field = |im: &Import, key: &str| {
-        let n = im
-            .tree
-            .node(im.tree.handle(im.nodes[key]).unwrap())
-            .unwrap();
-        n.fields().get(&F_DEF_BODY).cloned()
-    };
+    let t = &im.tree;
+    let g = t.node(t.handle(im.nodes["ground"]).unwrap()).unwrap();
     assert_eq!(
-        field(&im, "e_house"),
-        Some(Value::Bytes(
-            br#"{"schema":"def/1","name":"test-house","version":1}"#.to_vec()
-        ))
+        g.fields().get(&F_DEF_BODIES),
+        Some(&Value::Array(vec![Value::Array(vec![
+            Value::Bytes(b"test-house@1".to_vec()),
+            Value::Bytes(br#"{"schema":"def/1","name":"test-house","version":1}"#.to_vec()),
+        ])]))
     );
-    assert_eq!(field(&im, "e_chair"), None);
+    for (key, id) in &im.nodes {
+        if key != "ground" {
+            let n = t.node(t.handle(*id).unwrap()).unwrap();
+            assert!(!n.fields().contains_key(&F_DEF_BODIES), "{key}");
+        }
+    }
+    let plain = load(SMALL).expect("loads");
+    let g = plain
+        .tree
+        .node(plain.tree.handle(plain.nodes["ground"]).unwrap())
+        .unwrap();
+    assert!(
+        !g.fields().contains_key(&F_DEF_BODIES),
+        "no own defs, no field"
+    );
 }
 
 #[test]
