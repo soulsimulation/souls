@@ -1173,4 +1173,137 @@ mod each_step {
         let r = way(&fixed, &load, at(0), at(8 * M), &began).unwrap_err();
         assert!(r.detail.contains("(9900, -100)"), "{}", r.detail);
     }
+
+    fn upright() -> Load {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction/rack_upright.json");
+        Load::of(&parse(&std::fs::read_to_string(root).unwrap()).unwrap()).unwrap()
+    }
+
+    /// An upright held standing, as a crew takes it from its slot, reaches 2.12 m: a lintel over a doorway (2.1 to
+    /// 2.4 m) and a beam seated high (1.98 to 2.08 m) stop it, though a walking body passes under both.
+    #[test]
+    fn c7_a_load_held_standing_is_stopped_by_a_lintel_and_a_high_beam() {
+        use replica::pose::Quat;
+        let standing = Load {
+            turn: Quat::IDENTITY,
+            ..upright()
+        };
+        assert!(standing.as_held().unwrap().1[1] > 2_100_000);
+        let at = |x: i64| ([x + M, 0], [x - M, 0]);
+        for (name, h) in [
+            ("lintel", [2_100_000, 2_400_000]),
+            ("beam", [1_981_000, 2_083_000]),
+        ] {
+            let fixed = Fixed::with_heights(vec![post(5 * M, 0, 100_000)], vec![h]);
+            let r = way(&fixed, &standing, at(0), at(8 * M), &[]).unwrap_err();
+            assert_eq!(r.name, "carry-load-blocked", "{name}");
+            let clear = outline(at(5 * M).0, at(5 * M).1, &standing.as_held().unwrap().0);
+            assert!(
+                fixed.hit(&clear).is_none(),
+                "{name}: a walking body passes under it"
+            );
+            assert!(fixed.within([4 * M, -M, 6 * M, M]).is_empty(), "{name}");
+        }
+    }
+
+    /// N2's test world, read as fixed geometry: boxes that start above a walking body's height (its lintels and its
+    /// upper floor's walls on the building's lowest floor) are kept, with their heights, and B9's checks still do not
+    /// see them.
+    #[test]
+    fn c7_fixed_geometry_keeps_the_boxes_above_a_body() {
+        let w = testworld::generate(1, 0).unwrap();
+        let im = import_eden::load(&w.text).unwrap();
+        let fixed = Fixed::of(&im.tree, im.nodes["ground"]).unwrap();
+        let high: Vec<usize> = (0..fixed.quads.len())
+            .filter(|k| fixed.heights[*k][0] >= 1_800_000)
+            .collect();
+        println!(
+            "{} boxes, {} start 1.8 m or more above their floor",
+            fixed.quads.len(),
+            high.len()
+        );
+        assert!(!high.is_empty(), "boxes above a body are kept");
+        // B9's checks read only the boxes a walking body meets.
+        for k in high {
+            let q = &fixed.quads[k];
+            let b = [
+                q.iter().map(|p| p[0]).min().unwrap(),
+                q.iter().map(|p| p[1]).min().unwrap(),
+                q.iter().map(|p| p[0]).max().unwrap(),
+                q.iter().map(|p| p[1]).max().unwrap(),
+            ];
+            assert!(
+                !fixed.within(b).iter().any(|f| std::ptr::eq(*f, q)),
+                "box {k}"
+            );
+        }
+    }
+
+    /// What its load began in is passed only until it is clear of it: carried away from a wall it touched at the lift,
+    /// then turned back into it, it is stopped.
+    #[test]
+    fn c7_a_load_clear_of_what_it_began_in_is_stopped_by_it_again() {
+        let load = frame();
+        let [b, f] = load.places();
+        let at = |x: i64, z: i64| ([x + f, z], [x + b, z]);
+        // The wall along x, just touching the frame's +z side where it was lifted.
+        let wall = [
+            [-4 * M, 500_000],
+            [4 * M, 500_000],
+            [4 * M, 750_000],
+            [-4 * M, 750_000],
+        ];
+        let fixed = Fixed::new(vec![wall]);
+        let mut but = fixed.hits(&outline(at(0, 0).0, at(0, 0).1, &load));
+        assert_eq!(but, vec![wall]);
+        assert!(
+            super::super::step_way(&fixed, &load, at(0, 0), at(0, -SWEEP_STEP), &mut but).is_ok()
+        );
+        assert_eq!(but, vec![wall], "still touching it");
+        assert!(
+            super::super::step_way(&fixed, &load, at(0, -SWEEP_STEP), at(0, -M), &mut but).is_ok()
+        );
+        assert!(but.is_empty(), "clear of it");
+        // Turned so its front end swings up through the wall.
+        let turned = ([2 * M, 1_500_000], [-2 * M, -M]);
+        let r = super::super::step_way(&fixed, &load, at(0, -M), turned, &mut but).unwrap_err();
+        assert_eq!(r.name, "carry-load-blocked");
+    }
+
+    /// Carried over a low box (a bench, 0.45 m) and stopped by a high one beyond it, it is set down on the bench, not
+    /// through it; stopped clear of the bench, on the floor.
+    #[test]
+    fn c7_a_load_stopped_over_a_low_box_rests_on_it() {
+        let load = frame();
+        let [b, f] = load.places();
+        let at = |x: i64| ([x + f, 0], [x + b, 0]);
+        let bench = post(0, 0, 400_000);
+        let wall = [
+            [5 * M, -3 * M],
+            [5 * M + 200_000, -3 * M],
+            [5 * M + 200_000, 3 * M],
+            [5 * M, 3 * M],
+        ];
+        let fixed = Fixed::with_heights(vec![bench, wall], vec![[0, 450_000], [0, 2_400_000]]);
+        let tick = 70_000;
+        let mut x = -M;
+        loop {
+            match way(&fixed, &load, at(x), at(x + tick), &[]) {
+                Ok(()) => x += tick,
+                Err(r) => {
+                    assert_eq!(r.name, "carry-load-blocked");
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            super::super::rest_top(&fixed, &load, at(x)).unwrap(),
+            450_000
+        );
+        assert_eq!(
+            super::super::rest_top(&fixed, &load, at(10 * M)).unwrap(),
+            0
+        );
+    }
 }
