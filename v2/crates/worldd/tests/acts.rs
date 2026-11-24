@@ -70,14 +70,30 @@ const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
+/// An open ground under the zone's place, and a thing of walls on it (R2 off the clock: the fixed geometry a carry
+/// reads, `sim::activity::carry::Fixed::of`).
+const OPEN_GROUND: &str = "eden:ground";
+const WALLS: &str = "test:walls";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
-        .iter()
-        .enumerate()
-        .map(|(i, k)| (*k, full(k, i as u8 + 1)))
-        .collect()
+    [
+        PLACE,
+        WALKER,
+        VESSEL,
+        RACK,
+        PLANK,
+        PAIR,
+        CARRY,
+        COURT,
+        CAN,
+        OPEN_GROUND,
+        WALLS,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, k)| (*k, full(k, i as u8 + 1)))
+    .collect()
 }
 
 fn fullname(plain: &str) -> String {
@@ -102,8 +118,8 @@ fn humanoid() -> Family {
     }
 }
 
-/// N2's test world as a town and its ground: the replica's zone is rooted at that ground, so a body the town stands
-/// on the ground stands under the tree's root.
+/// N2's test world as a town and its ground: the replica's zone is rooted at a place over that ground ([`zone_place`]),
+/// so a body the town stands on the ground stands on the ground's node, as in a served world.
 fn town() -> (Town, Id) {
     let w = testworld::generate(1, 0).expect("the test world");
     let Import {
@@ -228,6 +244,11 @@ fn tree_rules() -> TreeRules {
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
             (fullname(CAN), k("thing", &[], &[], Some(1))),
+            (
+                fullname(OPEN_GROUND),
+                k("place", &["body", "thing", PAIR, CARRY], &[], None),
+            ),
+            (fullname(WALLS), k("thing", &[], &[], None)),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -368,14 +389,13 @@ fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
     )
 }
 
-/// The world as built: the two walkers, the vessel 300 mm from the first, the rack 400 mm from it, the plank between
-/// the two.
+/// The world as built, on an open ground under the zone's place: the two walkers, the vessel 300 mm from the first,
+/// the rack 400 mm from it, the plank between the two.
 fn world() -> Replica {
     let g = ground();
-    let h = header(g);
-    let mut r = Replica::start(h.stored()).expect("a replica");
     let off = |p: Vec3, dx: i64| Vec3::new(p.x + dx, 0, p.z);
     let changes = vec![
+        create(g, OPEN_GROUND, zone_place(), Vec3::ZERO),
         create(w1(), WALKER, g, at1()),
         create(w2(), WALKER, g, at2()),
         create(vessel(), VESSEL, g, off(at1(), 300_000)),
@@ -391,6 +411,13 @@ fn world() -> Replica {
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
     ];
+    world_of(zone_place(), changes)
+}
+
+/// N2's test world's ground with `changes` written on it as built.
+fn world_of(g: Id, changes: Vec<(Id, Change)>) -> Replica {
+    let h = header(g);
+    let mut r = Replica::start(h.stored()).expect("a replica");
     let effects: Vec<Value> = changes
         .into_iter()
         .enumerate()
@@ -1856,4 +1883,283 @@ fn a2_4_a_walk_to_a_spot_ringed_by_bodies_arrives_through_make_way() {
         "on its spot: {off} µm off"
     );
     run.world.stop();
+}
+
+// ---- 0.135 R2 off the clock (follow-up to #4564): a lift whose way must turn its load waits for it off the clock. --
+
+/// How many crews lift in one tick.
+const CREWS: u64 = 20;
+
+/// Crew `k`'s front and back walkers and its plank.
+fn crew(k: u64) -> (Id, Id, Id) {
+    (id(100 + 2 * k), id(101 + 2 * k), id(200 + k))
+}
+
+/// Where crew `k`'s front and back stand: as A4's two, the crews in a row north of them 2.5 m apart.
+fn crew_at(k: u64) -> (Vec3, Vec3) {
+    let z = at1().z + k as i64 * 2_500_000;
+    (Vec3::new(at1().x, 0, z), Vec3::new(at2().x, 0, z))
+}
+
+/// Where every crew's lift sends its front: inside a room of walls with no door, 4 m square, east of the crews.
+fn sealed() -> Vec3 {
+    Vec3::new(-30_000_000, 0, 54_000_000)
+}
+
+/// The zone's place: the replica's root, the open ground under it (so a carry reads its fixed geometry, 0.135 C7).
+fn zone_place() -> Id {
+    id(90)
+}
+
+/// The test world with the crews and their planks, on an open ground under the zone's place, and the sealed room's
+/// walls: each plank between its crew's two (as A4's), the crews in a row west of the room.
+fn crews_world() -> Replica {
+    let g = ground();
+    let mut changes = vec![create(g, OPEN_GROUND, zone_place(), Vec3::ZERO)];
+    let (on, mut wall) = create(id(91), WALLS, g, sealed());
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let rows = [
+        [0, 2_000, 2_000, 100],
+        [0, -2_000, 2_000, 100],
+        [2_000, 0, 100, 2_000],
+        [-2_000, 0, 100, 2_000],
+    ]
+    .iter()
+    .map(|[cx, cz, hx, hz]| Value::Array([*cx, *cz, *hx, *hz, 0, 0, 2_400].map(int).to_vec()))
+    .collect();
+    if let Change::Create { fields, .. } = &mut wall {
+        fields.insert(sim::ground::scene::F_SOLIDS, Value::Array(rows));
+    }
+    changes.push((on, wall));
+    for k in 0..CREWS {
+        let ((f, b, plank), (at_f, at_b)) = (crew(k), crew_at(k));
+        changes.push(create(f, WALKER, g, at_f));
+        changes.push(create(b, WALKER, g, at_b));
+        changes.push(create(
+            plank,
+            PLANK,
+            g,
+            Vec3::new(at_b.x + 1_350_000, 0, at_b.z),
+        ));
+    }
+    world_of(zone_place(), changes)
+}
+
+fn crews_bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let mut placed = Vec::new();
+    for k in 0..CREWS {
+        let ((f, b, _), (at_f, at_b)) = (crew(k), crew_at(k));
+        placed.push(town.surfaces[&ground].place(f, frame, at_f, Quat::IDENTITY)?);
+        placed.push(town.surfaces[&ground].place(b, frame, at_b, Quat::IDENTITY)?);
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    for p in placed {
+        b.add_body(humanoid(), p)?;
+    }
+    Ok(b)
+}
+
+/// What a lift was answered, and at which tick.
+type Lift = (i64, Result<Vec<u64>, String>);
+
+/// The crews' run: what each lift was answered and at which tick, the zone's state after it, and the clock's ticks
+/// over the 50 ms budget while the lifts were taken and answered (ticks 4 to 8), and the longest of those ticks.
+#[derive(Debug, PartialEq)]
+struct Lifted {
+    answers: Vec<Lift>,
+    state: [u8; 32],
+    over: u64,
+    longest_us: u64,
+}
+
+/// In lockstep, every crew's carry is proposed (tick 1), joined (2) and started (3), then every crew lifts its plank
+/// in tick 4, its front sent into the sealed room east of them: the straight way there clips the room's walls, so each
+/// lift's way is searched off the clock, and no way gets in (the costliest search: its whole budget, or its band). `deadline`, when given, is how long each act stays open.
+fn crews_lift(deadline: Option<replica::time::Micros>) -> Lifted {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.measures = true;
+    if let Some(d) = deadline {
+        cfg.deadline = d;
+    }
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| crews_bodies()));
+    cfg.engine = Some((
+        tree_rules(),
+        vec![activity(CARRY, ["test:front", "test:back"])],
+    ));
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let world = answers::start(crews_world(), rules, store.clone(), cfg).expect("the world starts");
+    let run = Run {
+        world,
+        store,
+        path: std::env::temp_dir().join("r2-off-clock-unused.sock"),
+    };
+    let run_to = |tick| {
+        let (done, ran) = std::sync::mpsc::channel();
+        run.world
+            .events
+            .send(answers::Event::RunTo { tick, done })
+            .unwrap();
+        ran.recv().expect("the clock ran")
+    };
+    let mut sequence = BTreeMap::<Id, u64>::new();
+    let mut ask = |tick, soul: Id, verb: &str, target, parameters| {
+        let s = sequence.entry(soul).or_default();
+        *s += 1;
+        let (reply, rx) = std::sync::mpsc::channel();
+        let bytes = intent_bytes(soul, *s, verb, Some(target), parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+        rx
+    };
+    let answered = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        rx.try_iter()
+            .find(|f| answers::progress_of(f).is_none())
+            .map(|f| answer_in(&f).1)
+    };
+    let health = || {
+        let h = parse(&run.world.measures.as_ref().unwrap().health(0)).unwrap();
+        let int = |v: Option<&Json>| match v {
+            Some(Json::Int(n)) => *n as u64,
+            other => panic!("a count: {other:?}"),
+        };
+        // The last tick's time: its phases' sum.
+        let last = match h.get("last_tick_us") {
+            Some(Json::Obj(phases)) => phases.iter().map(|(_, us)| int(Some(us))).sum(),
+            other => panic!("the last tick's phases: {other:?}"),
+        };
+        (int(h.get("over_budget")), last)
+    };
+    let role = |r: &str| p(&[(1, Value::Text(name(r)))]);
+    let proposed: Vec<_> = (0..CREWS)
+        .map(|k| {
+            let kind = p(&[(1, Value::Text(name(&fullname(CARRY))))]);
+            ask(1, crew(k).0, "activity:propose", ground(), kind)
+        })
+        .collect();
+    run_to(1);
+    let carries: Vec<Id> = proposed
+        .iter()
+        .map(|rx| run.created(&answered(rx).expect("answered").expect("proposed"), CARRY))
+        .collect();
+    let mut steps = Vec::new();
+    for (k, &c) in carries.iter().enumerate() {
+        let (f, b, _) = crew(k as u64);
+        steps.push((2, ask(2, f, "activity:join", c, role("test:front"))));
+        steps.push((2, ask(2, b, "activity:join", c, role("test:back"))));
+        steps.push((3, ask(3, f, "activity:start", c, BTreeMap::new())));
+    }
+    run_to(3);
+    for (tick, rx) in &steps {
+        let a = answered(rx).unwrap_or_else(|| panic!("tick {tick}: unanswered"));
+        a.unwrap_or_else(|r| panic!("tick {tick}: {r}"));
+    }
+    let (over_before, _) = health();
+    let to = point(sealed()).remove(&1).unwrap();
+    let lifts: Vec<_> = carries
+        .iter()
+        .enumerate()
+        .map(|(k, &c)| {
+            let (f, _, plank) = crew(k as u64);
+            let lift = p(&[(1, plank.to_value()), (2, to.clone())]);
+            ask(4, f, "carry:lift", c, lift)
+        })
+        .collect();
+    let mut answers: Vec<Option<Lift>> = vec![None; lifts.len()];
+    let (mut state, mut longest_us) = ([0; 32], 0);
+    for tick in 4..=8 {
+        state = run_to(tick).state;
+        longest_us = longest_us.max(health().1);
+        for (a, rx) in answers.iter_mut().zip(&lifts) {
+            if a.is_none() {
+                *a = answered(rx).map(|r| (tick, r));
+            }
+        }
+    }
+    let (over_after, _) = health();
+    run.world.stop();
+    Lifted {
+        answers: answers
+            .into_iter()
+            .map(|a| a.expect("every lift answered"))
+            .collect(),
+        state,
+        over: over_after - over_before,
+        longest_us,
+    }
+}
+
+/// 0.135 R2 off the clock: twenty crews lift in one tick, each lift's way into the sealed room searched (up to
+/// `turn::BUDGET` poses, a few milliseconds each in release). The searches run on the way thread, never on the clock
+/// (there a search panics the clock in a debug build and is counted in a release build), so no tick runs over its
+/// 50 ms, and each lift is answered the tick after it was taken, lockstep having waited for its way before that tick
+/// as it waits for every check. Run again with the same inputs, every answer lands at the same tick and the zone ends
+/// in the same state.
+#[test]
+fn r2_twenty_crews_lift_in_one_tick_and_every_tick_is_on_time() {
+    let on_clock = sim::commit::checks_on_clock();
+    let first = crews_lift(None);
+    println!(
+        "R2 off the clock: {} lifts answered {:?}; ticks 4 to 8 over budget {}, the longest of them {} µs",
+        first.answers.len(),
+        first
+            .answers
+            .iter()
+            .map(|(t, r)| (*t, r.as_ref().map(|_| "lifted").map_err(String::as_str)))
+            .collect::<BTreeSet<_>>(),
+        first.over,
+        first.longest_us
+    );
+    assert_eq!(
+        sim::commit::checks_on_clock(),
+        on_clock,
+        "no search on the clock"
+    );
+    assert!(
+        first.answers.iter().all(|(tick, _)| *tick == 5),
+        "each lift answered the tick after it was taken: {:?}",
+        first.answers
+    );
+    assert!(
+        first.answers.iter().all(|(_, r)| matches!(
+            r.as_ref().map_err(String::as_str),
+            Err("carry-unproven" | "carry-load-blocked")
+        )),
+        "each searched, and no way into the sealed room: {:?}",
+        first.answers
+    );
+    assert_eq!(first.over, 0, "no tick over its budget");
+    let again = crews_lift(None);
+    assert_eq!(
+        again.answers, first.answers,
+        "the same answers at the same ticks"
+    );
+    assert_eq!(again.state, first.state, "the same state: the run replays");
+}
+
+/// 0.135 R2 off the clock: a lift whose way has not come back by its act's deadline is refused `carry-way-late`, and
+/// the way that comes back after is dropped (each act open one microsecond: the ways come back before tick 5 and the
+/// deadlines pass at its start).
+#[test]
+fn r2_a_lift_whose_way_is_late_is_refused_by_name() {
+    let late = crews_lift(Some(1));
+    assert!(
+        late.answers
+            .iter()
+            .all(|a| *a == (5, Err("carry-way-late".to_owned()))),
+        "{:?}",
+        late.answers
+    );
 }

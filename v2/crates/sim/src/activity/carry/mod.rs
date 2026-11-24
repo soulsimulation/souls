@@ -66,9 +66,11 @@
 //!
 //! - **A way that turns (0.135 R2, #2814).** When the straight way to a lift's destination clips, [`turn`] searches
 //!   the load's poses for a way that turns it (through a door narrower than its length, say), each move checked by
-//!   [`way`]; no way is refused `carry-load-blocked` before the lift, a search past its small budget (it runs on the
-//!   world's clock thread) `carry-unproven`. The way is kept on the carry ([`Carry::way`]) and said to its audience
-//!   at the lift (`souls:carry-way`, worldd's engine): its carriers walk it pose by pose, each tick checked as above.
+//!   [`way`]; no way is refused `carry-load-blocked` before the lift, a search past its small budget
+//!   `carry-unproven`. The sweep and the search run off the world's clock: worldd's engine asks a lift's way
+//!   ([`Load::way_to`]) of a thread of its own, and answers the lift when the way comes back. The way is kept
+//!   on the carry ([`Carry::way`]) and said to its audience at the lift (`souls:carry-way`, worldd's engine): its
+//!   carriers walk it pose by pose, each tick checked as above.
 //!
 //! Not here, proposed as tasks: carriers that swing about their grips (a corner between 1.2 m corridors); stairs;
 //! turning with three carriers or more; a sweep that counts the sides' bodies; a blocked
@@ -410,6 +412,23 @@ impl Load {
         axis: Option<Xz>,
         to: Option<(Xz, &Fixed)>,
     ) -> R<Option<Vec<turn::Ends>>> {
+        self.check_lift(crew, front, back, middle, axis)?;
+        match to {
+            Some((to, fixed)) => self.way_to(fixed, front, back, to),
+            None => Ok(None),
+        }
+    }
+
+    /// [`Load::check`] but the way: its crew and its grips. worldd's engine has the way ([`Load::way_to`]) found off
+    /// the clock and answers the lift when it comes back.
+    pub fn check_lift(
+        &self,
+        crew: usize,
+        front: Xz,
+        back: Xz,
+        middle: Xz,
+        axis: Option<Xz>,
+    ) -> R<()> {
         if (crew as u64) < self.crew {
             return refuse(
                 "carry-crew-too-small",
@@ -417,7 +436,6 @@ impl Load {
             );
         }
         let d = [front[0] - back[0], front[1] - back[1]];
-        let l = len(d);
         // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips.
         let a = axis.unwrap_or(d);
         for (who, at, along) in [
@@ -440,13 +458,19 @@ impl Load {
                 );
             }
         }
-        // 0.135 R2: a straight way that clips is searched for one that turns the load ([`turn::turn_way`]).
-        if let Some((to, fixed)) = to
-            && sweep_load(&[back, front, to], fixed, self, l).is_err()
-        {
-            return turn::turn_way(self, fixed, front, back, to, turn::BUDGET).map(Some);
+        Ok(())
+    }
+
+    /// The way for its front from `front` to `to`, its back at `back` (the open ground's plan, µm), past `fixed`:
+    /// none when the straight way is clear, else one that turns it (0.135 R2, [`turn::turn_way`]: where its carriers
+    /// stand at each pose), or `carry-load-blocked` or `carry-unproven`. A sweep and a search, so worldd runs it off
+    /// the clock.
+    pub fn way_to(&self, fixed: &Fixed, front: Xz, back: Xz, to: Xz) -> R<Option<Vec<turn::Ends>>> {
+        let span = len([front[0] - back[0], front[1] - back[1]]);
+        if sweep_load(&[back, front, to], fixed, self, span).is_ok() {
+            return Ok(None);
         }
-        Ok(None)
+        turn::turn_way(self, fixed, front, back, to, turn::BUDGET).map(Some)
     }
 }
 
@@ -558,6 +582,7 @@ fn spans(y0: i64, y1: i64, floor: i64) -> bool {
 
 /// The fixed geometry a carried board must not overlap, on the open ground's plan (µm): every box a walking body is
 /// cut against, on the open ground and on the lowest floor of each building on it, indexed by 4 m cells.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fixed {
     pub quads: Vec<Quad>,
     /// Each outline's height span above the floor or ground under it, µm (0.135 C7: a load carried over a low box
