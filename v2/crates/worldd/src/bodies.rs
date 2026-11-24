@@ -658,19 +658,27 @@ impl Bodies {
             Some((p, _)) => match p.support {
                 Support::Surface { surface, .. } => match surfaces.get(&surface) {
                     // A body the log had off its floor (killed mid-climb out of a seat, E11d) is placed where it was
-                    // and carried to the floor's nearest legal point, as N10's walk-out carries one: never refused,
-                    // so one body never stops the others starting.
+                    // and climbs on by the climb's own rule, or is left there when no way out is clean
+                    // (`sim::slots::Resumed`): never refused, so one body never stops the others starting.
                     Some(s) => {
-                        let (b, to) = sim::slots::resume_on(
+                        let r = self.slots.resume(
+                            &self.town,
                             s,
                             body.id,
                             p.frame,
                             p.position,
                             p.orientation,
                             build,
-                        )?;
-                        resume = to.map(|to| (surface, to));
-                        b
+                        );
+                        resume = r.to().map(|to| (surface, to));
+                        sim::slots::placed_off(
+                            s,
+                            body.id,
+                            p.frame,
+                            p.position,
+                            p.orientation,
+                            build,
+                        )?
                     }
                     None => {
                         return Err(Refusal {

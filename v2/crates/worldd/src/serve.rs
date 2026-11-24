@@ -1802,8 +1802,8 @@ fn bodies(
             name: "no-surface",
             detail: "recorded ground".into(),
         })?;
-        // A body killed mid-climb out of a seat (E11d) stands off its floor: placed where it was, carried on below.
-        let (moved, _) = sim::slots::resume_on(
+        // A body killed mid-climb out of a seat (E11d) stands off its floor: placed where it was; `Bodies::add_body_at_built` resumes it.
+        let moved = sim::slots::placed_off(
             surface,
             *id,
             Frame { node, slot: None },

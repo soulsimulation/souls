@@ -1229,3 +1229,101 @@ fn e11d_a_climb_out_never_lands_on_another_body() {
         "landed clear of body 1"
     );
 }
+
+/// A floor of pieces, each `[x0, z0, x1, z1, y]` mm (E11d recheck).
+fn floor_of(pieces: &[[i32; 5]]) -> Surface {
+    Surface::new(
+        fixture(1),
+        pieces
+            .iter()
+            .map(|&[x0, z0, x1, z1, y]| {
+                let corners = vec![[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]];
+                Piece {
+                    outline: vec![corners.clone()],
+                    vertices: corners,
+                    triangles: vec![[0, 2, 1], [0, 3, 2]],
+                    ground: crate::gaits::Ground::Dry,
+                }
+            })
+            .collect(),
+    )
+}
+
+/// E11d recheck: a restart that finds a body killed early in a climb out, still over its own hull (the chair's box,
+/// [`hull`]), with a bank 1.5 m away beyond another hull moored alongside (z -1.3 m to -0.5 m, no water) and a bank
+/// 2 m away across open water: it climbs on to the far bank, as the live climb would, never through the other hull.
+/// With no water at all it is left where the log had it (`resume-held`), never carried through a cut.
+#[test]
+fn e11d_a_restart_mid_climb_climbs_on_by_the_climbs_rule_not_through_another_hull() {
+    let mut w = world(chair());
+    w.slots.footprint(w.chair, hull());
+    let floor = floor_of(&[
+        [-5_000, -5_000, 5_000, -1_500, 0],
+        [-5_000, 2_000, 5_000, 5_000, 0],
+    ]);
+    let water = [
+        [-5_000_000, 500_000, 5_000_000, 2_000_000],
+        [-5_000_000, -1_500_000, 5_000_000, -1_300_000],
+    ];
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    let b = w.bodies[0];
+    let at = Vec3::new(0, 0, -200_000);
+    let wet = Wet {
+        floors: &w.floors,
+        water: &water,
+    };
+    let build = replica::kinds::sizes::Build::STANDARD;
+    let r = w
+        .slots
+        .resume(&wet, &floor, b, frame, at, Quat::IDENTITY, build);
+    let super::Resumed::Climbs(to) = r else {
+        panic!("climbs on: {r:?}")
+    };
+    assert_eq!(
+        (to.x, to.z),
+        (0, 2_000_000),
+        "the far bank, across the water"
+    );
+    assert_eq!(r.name(), "climb-out");
+    assert!(to.z > at.z, "away from the other hull, never across it");
+    let nearest = crate::ground::exits::nearest(floor.pieces(), at).unwrap().1;
+    assert!(
+        nearest.z < 0,
+        "the nearest legal point is the near bank, behind the other hull"
+    );
+    let dry = Wet {
+        floors: &w.floors,
+        water: &[],
+    };
+    let r = w
+        .slots
+        .resume(&dry, &floor, b, frame, at, Quat::IDENTITY, build);
+    assert_eq!(r, super::Resumed::Held, "no clean way: left where it is");
+    assert_eq!(r.name(), "resume-held");
+    let p = super::placed_off(&floor, b, frame, at, Quat::IDENTITY, build).unwrap();
+    assert_eq!(p.pose.position, at, "placed where the log had it");
+}
+
+/// E11d recheck: a climb out lands within a step's height (220 mm) of the seat's own floor. The bank behind the seat
+/// 1 m away is 300 mm up: refused, seated still. At 200 mm up it is climbed onto.
+#[test]
+fn e11d_a_climb_out_steps_up_no_more_than_a_step() {
+    for (y, climbs) in [(300, false), (200, true)] {
+        let (mut w, b, _, handed) =
+            seated_then_rise(floor_of(&[[-5_000, -5_000, 5_000, -1_000, y]]), &[LAKE]);
+        if climbs {
+            assert!(matches!(handed, Some(Ok(_))), "{y} mm: {handed:?}");
+            let [cl] = w.slots.climbs()[..] else {
+                panic!("one climb")
+            };
+            assert_eq!(cl.to.y, i64::from(y) * 1000, "on the bank");
+        } else {
+            let e = handed.expect("a hand-off").expect_err("refused");
+            assert_eq!(e.name, "off-surface", "{y} mm: {e}");
+            assert_eq!(w.slots.holder(w.chair), Some(b), "seated still");
+        }
+    }
+}

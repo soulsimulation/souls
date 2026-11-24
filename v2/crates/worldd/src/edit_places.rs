@@ -16,7 +16,9 @@ use sim::slots::{PlaceAt, Slots};
 /// One edited thing's places, each with its floor, and its own boxes (E11d).
 type Delta = (Ref, Vec<(PlaceAt, Ref)>, sim::slots::Footprint);
 
-pub struct Projection(Vec<Delta>);
+/// The edited things' places, and the refreshed boxes of each thing above an edited one (E11d: a box placed, moved or
+/// removed under a seat's thing changes what a climb out of it may pass over).
+pub struct Projection(Vec<Delta>, Vec<(Id, sim::slots::Footprint)>);
 
 fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
     let mut next: Vec<_> = tree.handle(id).into_iter().collect();
@@ -68,6 +70,7 @@ impl Projection {
                 .map_or(Ref::Node(id), |(n, _)| Ref::New(*n))
         };
         let mut affected = BTreeSet::new();
+        let mut edited = Vec::new();
         for op in &plan.checked.edit.ops {
             let id = match op {
                 Op::Place { name, .. } => committed.names[name],
@@ -80,8 +83,33 @@ impl Projection {
             };
             subtree(copy.tree(), id, &mut affected);
             subtree(preview.tree(), id, &mut affected);
+            edited.push(id);
         }
         let ground = crate::buildsafe::open_ground(&preview);
+        let mut above = BTreeSet::new();
+        for id in edited {
+            for tree in [copy.tree(), preview.tree()] {
+                let mut at = tree
+                    .handle(id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent());
+                while let Some(a) = at.filter(|a| Some(*a) != ground) {
+                    above.insert(a);
+                    at = tree
+                        .handle(a)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| n.parent());
+                }
+            }
+        }
+        let refresh = above
+            .into_iter()
+            .filter(|a| !affected.contains(a))
+            .filter_map(|a| {
+                let (floor, ..) = on_floor(preview.tree(), ground, a, Vec3::ZERO)?;
+                (floor != a).then(|| (a, crate::places::footprint(preview.tree(), a, floor)))
+            })
+            .collect();
         let mut deltas = Vec::new();
         for thing in affected {
             let mut places = Vec::new();
@@ -129,7 +157,7 @@ impl Projection {
             }
             deltas.push((named(thing), places, own));
         }
-        Ok(Self(deltas))
+        Ok(Self(deltas, refresh))
     }
 
     /// Rechecked on the commit tick, before any replica or slot mutation.
@@ -160,6 +188,11 @@ impl Projection {
             Ref::Node(id) => id,
             Ref::New(n) => names[&n],
         };
+        for (thing, own) in self.1 {
+            if slots.place(thing).is_some() {
+                slots.footprint(thing, own);
+            }
+        }
         for (thing, places, own) in self.0 {
             let thing = id(thing);
             slots.footprint(thing, own);

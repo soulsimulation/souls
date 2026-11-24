@@ -169,9 +169,11 @@ slot) with the stance the request named. Postures are the controller's stance in
   end while someone stands there (#4215). It never appears there. The climb is named `climb-out`
   (`slots::ClimbOut`), and the rise's run goes on once the body stands on the floor. With no such floor the rise ends
   `off-surface` at contact. The body is not stuck: it stays seated with its seat held, does what a seated body does,
-  leaves the world as one does, and rises once there is floor near again. A restart that finds a body off its floor
-  (killed mid-climb) places it where it was and carries it to the floor's nearest legal point
-  (`slots::resume_on`), so one body never stops the others starting.
+  leaves the world as one does, and rises once there is floor near again. A restart that finds a body off its floor (killed mid-climb) places it where it was and
+  never refuses it, so one body never stops the others starting (`Slots::resume`). It climbs on by the climb's own
+  rule from where it is, over water or the boxes of the thing it is over (`climb-out`); else to the floor's nearest
+  legal point when that line is as clean (`resume-nearest`); else it is left where it was (`resume-held`), never
+  carried through a cut. A thing's boxes are refreshed when an edit changes anything under it.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
