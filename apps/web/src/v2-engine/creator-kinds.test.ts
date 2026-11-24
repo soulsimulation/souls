@@ -143,3 +143,28 @@ test('a content kind with its own shape (looks.shape) draws as it, in its state;
   k.apply([node('z.1', 'eden:zoetrope@1220ab', [1_000_000, 0, 0], { fields: { 28: 0, 29: 0 } })], []);
   assert.deepEqual((k.next(layer, 3)!.diff.upserts as { state?: unknown }[])[0].state, { strip: 0, released: false }, 'a changed state is sent');
 });
+
+test('a road a creator lays (place --path) is drawn along its line by its library def; on a world with roads, by theirs', () => {
+  const k = new CreatorKinds();
+  const layer = { seq: 2, model: { entities: new Map<string, { id: string; def?: string }>(), defs: new Map<string, unknown>() } };
+  // as shapes.mjs lays it: at the ground's origin, its line (16), width (17) and ribbon outline (11) in mm
+  const road = node('ee44.1', 'eden:footpath@1220ab', [0, 0, 0], { line: [[0, 0], [9000, 0]], lineWidth: 2000, outline: [[0, 1000], [9000, 1000], [9000, -1000], [0, -1000]] });
+  k.apply([root, road], []);
+  const d = k.next(layer, 1)!;
+  const up = d.diff.upserts as { id: string; def: string; shape: unknown; p?: unknown }[];
+  assert.equal(up.length, 1);
+  assert.match(up[0].def, /^core-footpath@\d+$/);
+  assert.deepEqual(up[0].shape, { path: [[0, 0], [9, 0]], width: 2 }, 'its line in metres, world, and its width');
+  assert.equal(up[0].p, undefined, 'world-frame geometry: no pose of its own');
+  assert.deepEqual((d.diff.defs as { ref: string }[]).map((x) => x.ref), [up[0].def]);
+  layer.model.entities.set(up[0].id, up[0]);
+  for (const x of d.diff.defs as { ref: string }[]) layer.model.defs.set(x.ref, x);
+  assert.equal(k.next(layer, 2), null, 'drawn already');
+  // on a world whose own roads the layer draws (Eden's), the creator's road takes their def
+  const k2 = new CreatorKinds(), eden = { id: 'e_path01', def: 'core-footpath@1', in: { parent: 'world' }, shape: { path: [[0, 5], [5, 5]] } };
+  const layer2 = { seq: 1, model: { entities: new Map<string, { id: string; def?: string }>([['e_path01', eden]]), defs: new Map<string, unknown>() } };
+  k2.apply([root, node('ab.1', 'eden:footpath@1220ab', [0, 0, 0], { origin: 'e_path01', line: [[0, 5000], [5000, 5000]] }), road], []);
+  const d2 = k2.next(layer2, 1)!;
+  assert.deepEqual(d2.diff.defs, []);
+  assert.deepEqual((d2.diff.upserts as { def: string }[]).map((u) => u.def), ['core-footpath@1']);
+});

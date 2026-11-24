@@ -789,13 +789,13 @@ async fn r4_scripted_run_for_the_usage_rollup() {
     println!("r4: {} lines under {}", lines.len(), root.display());
 }
 
-/// O2 (#2731) A4 and A5: the world is asleep (nothing listens on its socket). With a wake set, an intent is held, the
-/// wake is asked once, and the world, started by it a second later, answers the intent within 3 s. A reader's sync
-/// request asks no wake: it is answered `world.restarting` and the world stays asleep.
+/// O2 (#2731) A4: the world is asleep (nothing listens on its socket). With a wake set, an agent's sync request (a
+/// client syncs before its first intent) is answered `world.restarting` and asks the wake; an intent is held, asks no
+/// second wake, and the world, started a second later, answers it within 3 s.
 #[tokio::test]
 // The test measures how long the answer took in real time (the wall-clock rule, K7).
 #[allow(clippy::disallowed_methods)]
-async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
+async fn o2_an_agents_sync_or_intent_wakes_a_sleeping_world_once() {
     use replica::sync::wire;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
@@ -830,7 +830,7 @@ async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
     let (mut ws, o) = connect(&url, t.reveal(), None).await;
     assert_eq!(o, "stream.started");
 
-    // A5: a reader's request wakes no world.
+    // An agent's sync request asks the wake: its client sends no intent before it has synced.
     put(
         &mut ws,
         encode(&Value::Map([(wire::ASK, Value::Uint(1))].into())).unwrap(),
@@ -844,7 +844,7 @@ async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
         matches!(m.get(&wire::REFUSED), Some(Value::Text(n)) if n.as_str() == world_link::RESTARTING)
     );
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(wakes.load(Ordering::SeqCst), 0, "a reader woke the world");
+    assert_eq!(wakes.load(Ordering::SeqCst), 1, "the sync asked no wake");
     assert!(!gw.link.up());
 
     // A4: an intent wakes it and is answered within 3 s; a second one asks no second wake. Held while the world is

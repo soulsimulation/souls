@@ -18,13 +18,13 @@
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
 import { placedOf, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
-import { placedDef } from './source/stream-scene.ts';
+import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
   slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
-  fields?: Record<number, unknown> };
+  line?: number[][]; lineWidth?: number; outline?: number[][]; fields?: Record<number, unknown> };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
 
@@ -247,15 +247,28 @@ export class CreatorKinds {
       // W2 (0.135): a kind neither defined by a creator nor shown by the world's own things draws by its library def,
       // else by its content entry's own shape
       const own = this.defs.get(n.kind), old = own ? undefined : this.oldDefs.get(plain(n.kind));
+      const tint = tintState(n.tint); // R4: a creator's tint, as world-state.ts gives the world's own things theirs
+      const eid = entityId(id);
+      // a road or an area a creator lays (`place --path | --area`): world-frame geometry along its line or outline, as an
+      // imported one is (stream-scene.ts), with no pose of its own; by the world's own roads' def, else the library's
+      const shaped = own || isBody(n) ? undefined : placedDef(n.kind, n), shape = shaped ? shapeOf(shaped, n) : null;
+      if (shaped && shape) {
+        const ref = old ?? shaped.ref, key = JSON.stringify([ref, shape, tint ?? null]), send = !old && need(shaped);
+        live.add(eid);
+        if (this.sent.get(eid) === key && m.entities.has(eid) && !send) continue;
+        if (send) defs.push(shaped);
+        upserts.push({ id: eid, def: ref, in: { parent: 'world' }, shape, ...(tint !== undefined ? { state: { tint } } : {}) });
+        this.sent.set(eid, key);
+        continue;
+      }
       const lib = own || old || isBody(n) ? undefined : placedDef(n.kind);
       const d = own ?? (lib ? { def: lib, model: null } : old ? undefined : this.shapes.get(n.kind));
       if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
-      const tint = tintState(n.tint); // R4: a creator's tint, as world-state.ts gives the world's own things theirs
       // a kind drawn from its own shape shows its state: the parts its `when`s and looks table pick
       const shown = d?.fields ? { ...lookState(n.fields as Fields | undefined, d.fields), ...(tint !== undefined ? { tint } : {}) } : tint !== undefined ? { tint } : undefined;
-      const ref = d ? d.def.ref : old!, eid = entityId(id), key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), shown ?? null]);
+      const ref = d ? d.def.ref : old!, key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), shown ?? null]);
       live.add(eid);
       if (this.sent.get(eid) === key && m.entities.has(eid) && !(d && need(d.def))) continue;
       if (d && need(d.def)) defs.push(d.def);
