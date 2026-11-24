@@ -84,14 +84,24 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   }, [hourOpen]);
   // X3: a moved world's link to a moment. Opened, the page seeks that moment once and plays from there.
   const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
+  // Until it lands, the arrival card stays up and the pill says Loading…: the present is never shown first. It lifts
+  // anyway when the world keeps no history, or a while after a seek that found nothing, so a link never holds the page.
+  const [landing, setLanding] = useState(landingMoment !== null), [seeked, setSeeked] = useState(false);
   useEffect(() => {
-    if (opened.current || !handle || state?.shownTick == null || state.loading || !v2History()) return;
+    if (opened.current || !handle || state?.shownTick == null || state.loading) return;
+    if (!v2History()) { opened.current = true; setLanding(false); return; }
     // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: hours back), and
     // a seek is never past the shown clock: wait until it reaches the moment, or is about now (a link names a past time)
     if (landingMoment !== null && state.shownTick < landingMoment && state.shownTick * TICK_US < Date.now() * 1000 - 120e6) return;
     opened.current = true;
-    if (landingMoment !== null) void handle.seek(landingMoment);
+    if (landingMoment !== null) void handle.seek(landingMoment).finally(() => setSeeked(true));
   }, [handle, state?.shownTick, state?.loading]);
+  useEffect(() => {
+    if (!landing) return;
+    if (seeked && state?.presentation === 'history') { setLanding(false); return; }
+    const id = setTimeout(() => setLanding(false), seeked ? 2000 : 60_000);
+    return () => clearTimeout(id);
+  }, [landing, seeked, state?.presentation]);
   const copyMoment = (tick: number) => {
     const link = momentLink(location.href, tick);
     void navigator.clipboard?.writeText(link).catch(() => {});
@@ -124,7 +134,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const blocked = !!reason && /graphics|3D|stream is not available/.test(reason);
   const drawnOnce = useRef(false);
   if (state?.shownTick != null && !state.loading) drawnOnce.current = true;
-  const arriving = !blocked && (!state || state.shownTick == null || (state.loading && !drawnOnce.current));
+  const arriving = !blocked && (landing || !state || state.shownTick == null || (state.loading && !drawnOnce.current));
   const [settledReason, setSettledReason] = useState<string | null>(null);
   useEffect(() => {
     if (!reason || arriving) { setSettledReason(null); return; }

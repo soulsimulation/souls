@@ -17,7 +17,8 @@ export function earlyLayerWanted(search = location.search): boolean {
   const q = new URLSearchParams(search);
   // lane PAIR-UI: an #approve link may be handed to an open tab of this world (Shell.tsx); never draw a world before that
   if (/^#approve\//.test(globalThis.location?.hash ?? '')) return false;
-  return q.get('earlyLayer') !== '0' && earlyArrivalWanted(browserQuality().tier, newWorld, search, q.has('shot'));
+  // a moment link (#t=) shows nothing before its moment (ViewerFrame holds the card until it lands)
+  return q.get('earlyLayer') !== '0' && earlyArrivalWanted(browserQuality().tier, newWorld, search, q.has('shot') || /^#(.*&)?t=\d/.test(globalThis.location?.hash ?? ''));
 }
 
 /** Start the layer now (once per page; never after LiveWorld has made its own). `onSnapshot` as WorldEntityLayer.start. */

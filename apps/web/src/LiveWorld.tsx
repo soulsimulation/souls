@@ -6,7 +6,7 @@ import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from '
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { playSpeed, v2History } from './v2-engine/history.ts';
 import { CABIN } from './v2-engine/bridge.ts';
-import { seekTick } from './v2-engine/moment-link.ts';
+import { momentTick, seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
 import {SoulSwipe,swipeStep,soulRing,interestScores} from './touch/soul-swipe.ts';
@@ -329,7 +329,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ~8 s of a 1.6 Mbps link) wait until the arrival is over. Before, they shared the link with the world's own build (its
     // building worker's code waited behind them) and held the card ~12 s; until they land, a simple figure stands in.
     // Desktop, old worlds and pictures load them at once and wait for them as before. `?people=wait|later` overrides.
-    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode);
+    // a moment link (#t=) draws nothing before its moment: no early arrival, the card holds until the recording is drawn
+    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode||momentTick(location.hash)!==null);
     // Old worlds on phones (F12): undecided until the first snapshot, held meanwhile; the people wait for the arrival
     // only when none of them stands in the arrival camera's view (otherwise the card waits for them as before).
     const peopleAsk=new URLSearchParams(location.search).get('people'),peopleRule=((q:string|null)=>q==='wait'?false:q==='later'?true:quality.tier==='phone'&&!shotMode)(peopleAsk);

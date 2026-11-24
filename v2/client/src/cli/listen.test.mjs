@@ -41,6 +41,7 @@ function run(path, args, ready) {
     p.stdout.on('data', (d) => { out += d; const m = ready.exec(out); if (m) ok(m); });
     p.stderr.on('data', (d) => { out += d; });
     p.on('exit', (c) => fail(new Error(`${path} ended (${c}): ${out}`)));
+    p.on('error', (e) => fail(new Error(`${path} did not start: ${e.message}`)));   // a missing binary emits only 'error'
   });
 }
 
@@ -79,7 +80,7 @@ before(async () => {
 });
 
 after(async () => {
-  await ask({ op: 'stop' }).catch(() => {});
+  if (rt) await ask({ op: 'stop' }).catch(() => {});   // no runtime when a program did not start
   await stopThenRemove(procs, dir);
 });
 
