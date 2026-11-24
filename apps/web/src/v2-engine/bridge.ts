@@ -35,7 +35,8 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null;
   /** N14: the courses' places up to the time a still world is still to (the worker's), since it writes no part. */
   courses?: CoursePlaces };
-type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number };
+type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number }
+  | { t: 'catching'; behind: number };
 
 /** N14: the def of a cabin a seat that moves with its cabin is drawn in (WorldRideCars, by LiveWorld). */
 export const CABIN = 'ride-cabin';
@@ -55,6 +56,9 @@ export type V2View = {
   /** #4535: the stream's format this bundle cannot read, while the page shows its notice and reloads (stream-format.ts). */
   reloading?: number;
   parts: number;
+  /** #4684: the reader is catching up: how many parts it was behind at its latest word, and how many words it has said
+   *  (each one the stream alive); absent once a part or a snapshot has come since. */
+  catching?: { behind: number; said: number };
   /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
   speech: ReturnType<typeof speechOf>[];
@@ -191,6 +195,7 @@ export class V2Bridge {
 
   receive(m: Msg): void {
     if (m.t === 'error') { this.view.error = m.message; return; }
+    if (m.t === 'catching') { this.view.catching = { behind: m.behind, said: (this.view.catching?.said ?? 0) + 1 }; return; }
     // #4535: the worker posts this at each try at a baseline it cannot read; a reload refused (one a minute ago for the
     // same format) is tried again at a later one
     if (m.t === 'format') { if (this.view.reloading === undefined && this.reloadFor(m.format)) this.view.reloading = m.format; return; }
@@ -209,7 +214,7 @@ export class V2Bridge {
       this.publish();
       return;
     }
-    if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
+    if (m.t === 'snapshot') { delete this.view.catching; this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
     const p = m.p;
     this.liveFrom ??= p.from;
     for (const id of p.removed) for (const k of [...this.places.keys()]) if (k === id || k.startsWith(`${id}#`)) this.places.delete(k);
@@ -238,6 +243,7 @@ export class V2Bridge {
     this.talk(p);
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
+    delete this.view.catching;
     this.publish();
   }
 
