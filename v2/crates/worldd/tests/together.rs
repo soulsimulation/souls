@@ -393,6 +393,7 @@ fn bodies_on(indoor: bool) -> Result<Bodies, replica::effects::Refusal> {
         point: Vec3::new(-44_000_000, 450_000, 34_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
