@@ -832,10 +832,9 @@ fn apart(p: Vec3, q: Vec3) -> i64 {
     ((i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt()) as i64
 }
 
-/// Waits up to 10 s for `done` to hold of `run`.
+/// Waits up to about 10 s (100 waits of 0.1 s) for `done` to hold of `run`.
 fn until(run: &Run, done: impl Fn(&Run) -> bool) -> bool {
-    let end = std::time::Instant::now() + Duration::from_secs(10);
-    while std::time::Instant::now() < end {
+    for _ in 0..100 {
         if done(run) {
             return true;
         }
