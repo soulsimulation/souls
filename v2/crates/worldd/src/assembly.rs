@@ -17,7 +17,9 @@
 //!   part in a bay) or at rest, in one commit.
 //! - **Through the walkers' maps.** A take and a seating change what walkers go round, so their entries are not
 //!   written with the tick's others: they wait in [`Assembly::ready`] and the clock commits each through the walkers'
-//!   prepared maps (`crate::answers`, as a set-down's), so the ground is rebuilt with the commit. The set-in track,
+//!   prepared maps (`crate::answers`, as a set-down's), so the ground is rebuilt with the commit. There G2's rule
+//!   (`sim::edit::safety::check_on`, as for a creator's edit) refuses a seating that would bury a Soul or leave it no
+//!   way out (`edit.would-cut-off`, naming the Soul) before it commits; it is then stopped as below. The set-in track,
 //!   which moves only the crew's node, is written as any engine act's entries are.
 //!
 //! - **Only a crew takes, only a part, only one nobody else has** ([`Assembly::take`]): the activity must be a kind
