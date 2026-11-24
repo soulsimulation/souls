@@ -732,9 +732,12 @@ export async function openLauncher(cfg = {}) {
       unlisted: row?.unlisted === true, god: typeof row?.creator === 'string' };
   }
   const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
-  /** Whether a world's old process is not awake: not running, stopped in place or stopping (none, for a world with no old
-   *  twin). A moved world's page and views then never wake it (cutover.mjs handle `cold`, routeOnlyPage). */
-  const oldCold = (w) => { if (!w) return false; if (w.routeOnly) return true; const k = pool.state(w.slug); return (!k?.child && !k?.adopted) || sleeping(w.slug); };
+  /** Whether a world's old process is not awake (not running, stopped in place or stopping) and need not be: a world with
+   *  no old twin, or a moved world whose old views are published for its stream. Its page and reads then never wake it
+   *  (cutover.mjs handle `cold`, routeOnlyPage). A moved world with none published wakes it once, as before: drawn from
+   *  its stream alone, an old world's buildings can lose their finish (24 Nov, hello-hamlet's hall drawn roofless), so
+   *  its first page publishes the old views and every later one is drawn from them. */
+  const oldCold = (w) => { if (!w) return false; if (w.routeOnly) return true; const k = pool.state(w.slug); return ((!k?.child && !k?.adopted) || sleeping(w.slug)) && !!cutover?.published(w); };
   /** A world with no old twin as the world list shows it (the fields `describe` gives an old world's row). */
   const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: w.unlisted, key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
     basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
@@ -1315,14 +1318,24 @@ export async function openLauncher(cfg = {}) {
     // #2304 A3/A4: a world that is not up serves its page and the web build's files from here, without loading it: to a
     // declared crawler always (and nothing else: a crawler never loads a world, nor thaws one), to anyone with
     // --unload-still. The world loads when the page's live connection or its first data request arrives.
-    // 24 Nov: a visitor's page of a world routed to the new engine whose old process is not awake is the launcher's own
+    // 24 Nov: a visitor's page of a world routed to the new engine whose old process is not awake (oldCold) is the launcher's own
     // (routeOnlyPage: the world's inline config with its stream), with the build's files, and loads nothing: the bare
     // page said "There is no world at this address" (its /v1/config is the new client's), and loading the old world for
     // its page cost about 3 s and made the page depend on it (#4561).
     const crawler = crawlerAgent(req.headers['user-agent']), k0 = pool.state(slug);
-    if (!crawler && oldCold(w) && cutover?.v2Stream(w) && (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true))) return;
+    // Its other old reads are answered as a world's with no old twin (its sign-in here, the rest 404 world.new-engine), so
+    // none of them (the page's visitors, context, seq) wakes it either: the page draws the world from its stream.
+    if (!crawler && oldCold(w) && cutover?.v2Stream(w)) {
+      if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
+      if ((req.method === 'GET' || req.method === 'HEAD') && /^\/(?:v1|mcp)(?:\/|$)/.test(edgeRest)) {
+        if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
+        json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; its old process is not awake, and this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
+      }
+    }
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
-      if (worldPage(req, res, slug, w, edgeRest)) return;
+      // #4561: a visitor's page of a routed world is never the bare one (its /v1/config is the new client's: "There is no
+      // world at this address"); with no old views published it loads the world (above: published, the launcher's page)
+      if (worldPage(req, res, slug, w, edgeRest, !crawler && !!cutover?.v2Stream(w))) return;
       if (crawler) { json(res, 503, { ok: false, code: 'world.unloaded', slug, message: 'This world is not loaded; its page is served without it.' }, { 'retry-after': '3600', 'cache-control': 'no-store' }); return; }
     }
     const resident = residentRead(edgeRest, req.method);

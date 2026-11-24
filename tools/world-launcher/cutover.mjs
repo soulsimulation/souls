@@ -100,6 +100,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
+    published: (w) => load()?.published(w) ?? false,
     handle: (req, res, w, url, o) => load()?.handle(req, res, w, url, o) ?? false,
   };
 }
@@ -140,6 +141,7 @@ function withRouteOnly(fence, bindings) {
     v2Bodies: (w) => (of(w) ?? fence).v2Bodies(w),
     v2Fields: (w) => (of(w) ?? fence).v2Fields(w),
     publish: (w, read) => (of(w) ? Promise.resolve(null) : fence.publish(w, read)),
+    published: (w) => (of(w) ? false : fence.published(w)),
     handle: (req, res, w, url, o) => (of(w) ?? fence).handle(req, res, w, url, o),
   };
 }
@@ -159,6 +161,7 @@ function fenceOf(binding) {
     v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
+    published: (w) => of(w)?.published(w) ?? false,
     handle: (req, res, w, url, o) => of(w)?.handle(req, res, w, url, o) ?? false,
   }, binding.worlds);
 }
@@ -300,6 +303,13 @@ function oneFence(binding) {
     /** `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
      *  404 `world.new-engine`, as for a world with no old twin, and the page draws the world from its stream (W2,
      *  stream-scene.ts); it never wakes the old process. A running one answers it live, as before. */
+    /** Whether the old views are published for the world's current stream (its snapshot, in staticDir or held). */
+    published(w) {
+      const stream = this.v2Stream(w);
+      if (!stream || !staticDir) return false;
+      const m = manifest();
+      return (m?.stream === stream && !!m.files?.['snapshot.json']) || (held?.m.stream === stream && !!held.m.files['snapshot.json']);
+    },
     handle(req, res, w, url, o) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
