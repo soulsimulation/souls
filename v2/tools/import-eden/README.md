@@ -74,7 +74,10 @@ own floor, one with a room on its level or raised more than a step (a pavilion's
 thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that
 floor, in the room there that holds it. The open ground is cut out under such a floor and a roof is no ground, so
 otherwise nobody could stand by them. A lawn's or a path's low floor is ground cover and keeps its things on the
-open ground, and so does a decor thing (a cableway reaches far past its valley station).
+open ground. A decor thing at the root is placed on the floor too (verdelis-eden's bubbles and succulents under its
+dome, 24 Nov), unless a point its kind's entry declares is off that floor: a cableway reaches far past its valley
+station, so it stays on the open ground. That needs the world's entries (`load_with`, as `worldd seed` loads); with
+none (`load`) a decor thing stays where it is, and a decor thing in a building's slot keeps its slot.
 
 Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
 (radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand
