@@ -45,7 +45,13 @@ fn selects_body_slot(form: &Value, key: &str) -> bool {
 /// `chosenSlots`' body half: each body slot argument left out, the free one nearest the actor (from the slot's stand
 /// point, else the slot) when the input places both the actor and this thing, else the first free in the entry's
 /// order. `Err` names an argument with no slot free.
-fn chosen_slots(entry: &Value, form: &Value, this: &Value, actor: Option<&Value>, args: &mut Vec<(String, Value)>) -> Result<bool, String> {
+fn chosen_slots(
+    entry: &Value,
+    form: &Value,
+    this: &Value,
+    actor: Option<&Value>,
+    args: &mut Vec<(String, Value)>,
+) -> Result<bool, String> {
     let mut changed = false;
     for key in sorted(form.get("takes")) {
         if args.iter().any(|(k, _)| k == key) || !selects_body_slot(form, key) {
@@ -57,7 +63,9 @@ fn chosen_slots(entry: &Value, form: &Value, this: &Value, actor: Option<&Value>
             .unwrap_or(&[])
             .iter()
             .filter(|(name, d)| {
-                let taken = has(this.get("slots"), name).and_then(Value::arr).map_or(0, |l| l.len() as i128);
+                let taken = has(this.get("slots"), name)
+                    .and_then(Value::arr)
+                    .map_or(0, |l| l.len() as i128);
                 d.get("admits").and_then(Value::str) == Some("body")
                     && matches!(d.get("most"), Some(Value::Int(m)) if taken < *m)
             })
@@ -66,10 +74,16 @@ fn chosen_slots(entry: &Value, form: &Value, this: &Value, actor: Option<&Value>
         let Some(first) = free.first() else {
             return Err(key.to_owned());
         };
-        let (origin, me) = (at(this.get("at_mm")), at(actor.and_then(|a| a.get("at_mm"))));
+        let (origin, me) = (
+            at(this.get("at_mm")),
+            at(actor.and_then(|a| a.get("at_mm"))),
+        );
         let far = |name: &str| -> Option<i128> {
             let d = has(slots, name)?;
-            let stand = d.get("stand").and_then(Value::str).and_then(|p| has(entry.get("points"), p));
+            let stand = d
+                .get("stand")
+                .and_then(Value::str)
+                .and_then(|p| has(entry.get("points"), p));
             let p = at(stand.map_or(d.get("at_mm"), |s| s.get("at_mm")))?;
             let (o, m) = (origin?, me?);
             Some((0..3).map(|k| (m[k] - (o[k] + p[k])).pow(2)).sum())
@@ -225,8 +239,12 @@ pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Va
         .map(<[_]>::to_vec)
         .unwrap_or_default();
     let nodes = state.get("nodes");
-    let actor = has(nodes, state.get("actor").and_then(Value::str).unwrap_or_default());
-    let mut changed = match has(nodes, this).map(|n| chosen_slots(entry, form, n, actor, &mut args)) {
+    let actor = has(
+        nodes,
+        state.get("actor").and_then(Value::str).unwrap_or_default(),
+    );
+    let mut changed = match has(nodes, this).map(|n| chosen_slots(entry, form, n, actor, &mut args))
+    {
         Some(Ok(c)) => c,
         Some(Err(key)) => return Choice::NoSlot(key),
         None => false,
@@ -238,7 +256,8 @@ pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Va
         let Some(select) = t.get("select") else {
             continue;
         };
-        if args.iter().any(|(k, _)| k == key) || t.get("type").and_then(Value::str) != Some("thing") {
+        if args.iter().any(|(k, _)| k == key) || t.get("type").and_then(Value::str) != Some("thing")
+        {
             continue;
         }
         if select.get("in").and_then(Value::str) == Some("this")

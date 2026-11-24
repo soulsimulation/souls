@@ -767,7 +767,10 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
             .and_then(|n| n.get("held"));
         let kind = kind_of(&w.kinds, case, node).unwrap();
         let sees = case.get("asker").unwrap().get("sees").unwrap();
-        let audience = if let Some(field) = client.get("field").and_then(Value::str) {
+        let audience = if client.get("field") == Some(&s("closed")) {
+            // A closed container's contents (#4360): its `closed` section's audience.
+            kind.get("closed").and_then(|c| c.get("audience"))
+        } else if let Some(field) = client.get("field").and_then(Value::str) {
             let closed = kind.get("closed").filter(|c| {
                 c.get("fields")
                     .and_then(Value::arr)

@@ -618,7 +618,11 @@ pub fn decide_parts(
                 ("need", Value::Int(-1)),
                 (
                     "detail",
-                    Value::object([("node", this), ("arg", Value::s(&arg)), ("free", Value::Int(0))]),
+                    Value::object([
+                        ("node", this),
+                        ("arg", Value::s(&arg)),
+                        ("free", Value::Int(0)),
+                    ]),
                 ),
                 ("fix", Value::Null),
                 ("read", Value::Arr(Vec::new())),
