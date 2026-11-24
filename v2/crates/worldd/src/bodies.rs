@@ -149,11 +149,6 @@ enum Live {
     Place(Instance),
 }
 
-/// The most threads a tick's skills are stepped on side by side (N17b's `beside`, S10), the clock's own included:
-/// the outcome is the one a single thread gives, bit for bit, whatever the count. At 750 agents the bodies' phase was
-/// 8-10 ms of a 28 ms tick on one thread.
-pub const BODY_THREADS: usize = 4;
-
 /// Only the exact slot and pending move's planner answer may supply a reach check.
 struct Reached<'a> {
     cache: &'a BTreeMap<ReachKey, [i64; 2]>,
@@ -395,11 +390,7 @@ impl Bodies {
             forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
-            runner: {
-                let mut r = Runner::new(tick);
-                r.threads = sim::ground::fan_out(BODY_THREADS, usize::MAX);
-                r
-            },
+            runner: Runner::new(tick),
             form_map: Arc::new(town.versions.clone()),
             form_answers: BTreeMap::new(),
             form_questions: BTreeMap::new(),
