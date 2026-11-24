@@ -4402,6 +4402,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
     let socket = d.join("s");
     let served = serve_with(&w, &socket, None);
     served.line("listening ", 120);
+    println!("a4: world dir {}", w.dir.display());
     let im = import_eden::load(&facts).unwrap();
     let n = |k: &str| im.nodes[k];
     let (bw, bm, be) = (n("site-bay-w"), n("site-bay"), n("site-bay-e"));
@@ -4431,6 +4432,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         g,
         crew: pinned_activity(&w, "mars:carry_activity"),
     };
+    if let Ok(t) = std::env::var("A4_WAIT") { std::thread::sleep(Duration::from_secs(t.parse().unwrap())); }
     // As built: every node, where each part rests, and the slots' places (the bays and stands never move).
     let built: std::collections::BTreeSet<Id> = {
         let (copy, _) = served_copy(&w);
@@ -5040,4 +5042,5 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         "{} nodes as built, all still there; the log replays to here",
         built.len()
     );
+    if let Ok(t) = std::env::var("A4_HOLD") { std::thread::sleep(Duration::from_secs(t.parse().unwrap())); }
 }
