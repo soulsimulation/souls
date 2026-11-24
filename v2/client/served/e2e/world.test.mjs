@@ -321,6 +321,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const key = ((await (await post('/v1/account/souls', {})).json()).souls ?? [])[0]?.soul;
   assert.equal((await post('/v1/account/souls/profile', { soul: key, name: 'Alder Quill' })).status, 200, "A's owner names A");
   await waitFor("A's body by its name in B's copy", async () => ((await B.cli('find', 'alder', 'quill')).found ?? []).find((r) => r.id === meA), 20_000);
+  // 24 Nov staged scene: `say --to "<name>"` addresses that Soul by its owner's name, any case, as `find` reads it
+  // (the 0.132.3 client named other bodies "body <n>" and refused `say-to-unknown`)
+  const toName = await B.cli('say', '--to', 'ALDER quill', 'morning, Alder');
+  assert.equal(toName.ok, true, `B's say --to A by A's name: ${JSON.stringify(toName)}`);
+  assert.deepEqual([toName.to?.id, toName.to?.name], [meA, 'Alder Quill'], `addressed to A's body by its name: ${JSON.stringify(toName.to)}`);
+  assert.ok(accepted(await answered(B, toName.sequence)), "B's words to A are accepted");
 
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
