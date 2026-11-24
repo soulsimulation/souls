@@ -125,6 +125,7 @@ if [ -n "$RESUME" ]; then
   STAMP=$RESUME
   RECEIPT=$ROOT/aside/$WORLD-$STAMP.reseed
   [ -f "$RECEIPT" ] || die "no reseed $STAMP to resume ($RECEIPT)"
+  ! grep -q '^undone=' "$RECEIPT" || die "reseed $STAMP was undone: start a fresh reseed instead"
   OLD=$(sed -n 's/^old=//p' "$RECEIPT")
   [ "$(sed -n 's/^new=//p' "$RECEIPT")" = "$NEW" ] || die "reseed $STAMP was for another build"
 else

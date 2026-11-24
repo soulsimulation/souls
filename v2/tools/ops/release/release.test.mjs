@@ -87,6 +87,10 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   assert.match(again.stderr, /reseed 20261124T000000Z to this build is not undone: resume it \(reseed=20261124T000000Z/);
   writeFileSync(join(data, 'worlds/aside', `${world}-20261124T000000Z.reseed`), `world=${world}\nnew=${built}\nlabel=20261124T000000Z\nundone=20261124T010000Z\n`);
   assert.equal(run(['reseed', sha, 'check'], env).status, 0, 'an undone reseed does not block a fresh one');
+  // and an undone reseed is not resumed
+  const resumed = run(['reseed', sha, 'check', '20261124T000000Z'], env);
+  assert.equal(resumed.status, 1, resumed.stdout + resumed.stderr);
+  assert.match(resumed.stderr, /reseed 20261124T000000Z was undone: start a fresh reseed instead/);
   // a label that is not one is refused before anything runs
   assert.equal(run(['reseed', sha, 'run', 'tomorrow'], env).status, 1);
   assert.equal(run(['reseed-undo', 'nope', 'check'], env).status, 2);
