@@ -11,8 +11,9 @@
 //   together accept|decline <offer id>                   accepts, and both touch; or declines, and nobody moves
 //
 // The offer's id: the other's `wait` shows `{"kind":"together","what":"offered","touch":..,"offer":..,"from":..}`.
-// When the touch is done, either one leaves it with `converse leave <id>`'s intent, `activity:leave`. Holding hands
-// lasts until one of them leaves or walks; then both hands come free.
+// When the touch is done, either one leaves it with `converse leave <id>`'s intent, `activity:leave`. Holding hands,
+// the first to walk leads and the other walks beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or
+// act lets go, and both hands come free.
 
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({

@@ -15,8 +15,8 @@
 //!   [`BELOW_FEET`] under its feet is that much further (a thing on the floor above or below is out of reach).
 //! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
 //!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
-//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`], [`AT_AIM`];
-//!   a `toward` from a seat of the form's own thing aims what the body rides); a missing one is refused `arg-missing`.
+//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
+//!   one is refused `arg-missing`.
 //! - **Written once.** What the runner writes ([`Forms::out`]) is numbered at the replica's version, applied as one
 //!   part with the tick's other entries and handed back to [`Forms::logged`] (F2's log hook, #3257, as its issue
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
@@ -97,6 +97,11 @@ type R<T> = Result<T, Refusal>;
 /// today's game, a walk that stops making progress ends `walk.blocked` by C21's watch ([`BLOCKED`]), and one that
 /// cannot go on by its own name. It was 180 s, and every walk over about 250 m ended `act.timed-out` while moving.
 pub const WALK_MOST: Micros = 1_800_000_000;
+
+/// How an act its Soul stopped ends when its form had already seated the body on another thing's seat and linked it
+/// (E14b: a listener on the hall's bench): it stays seated and linked until it leaves, which its form's own `leave`
+/// does, or any rise does ([`Acts::untie`]).
+pub const STILL_SEATED: &str = "act.stopped-still-seated";
 
 /// The ending of a form's walk that stopped making progress (C21, #3484).
 pub const BLOCKED: &str = "walk.blocked";
@@ -1074,13 +1079,20 @@ impl Geometry for Sight<'_> {
             ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
         };
         match planning.ask(key, *me, query, &self.map) {
-            Some(FormResult::Walk(legs)) => {
+            Some(FormResult::Walk(walk)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
                 planning.current.remove(&key);
                 planning.answers.remove(&key);
                 planning.queued.remove(&key);
-                WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect())
+                match walk {
+                    Ok(legs) => WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect()),
+                    // The planner's refusal reaches the form by its own name (S13d); a name the profile does not
+                    // allow (none does today) is no way.
+                    Err(r) => {
+                        Name::new(r.name).map_or(WalkPlan::Legs(Vec::new()), WalkPlan::Refused)
+                    }
+                }
             }
             _ => WalkPlan::Pending,
         }
@@ -1237,14 +1249,10 @@ impl Reach for Sight<'_> {
         point: &Name,
     ) -> Option<i64> {
         let me = self.bodies.get(&body)?;
-        // C23: a move at the body itself, or at the thing argument its run named. A move aimed toward an argument
-        // from a slot of the run's own thing (a tiller's steer toward a heading) aims what it rides (0.135 E20).
-        let seated =
-            me.pose.support == replica::pose::Support::Slot && me.pose.frame.node == target;
+        // C23: a move at the body itself, or at the thing argument its run named.
         let target = match point.as_str() {
             AT_SELF => return Some(0),
-            AT_AIM if seated => return Some(0),
-            AT_ARG | AT_AIM => *self.toward.get(&body)?,
+            AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
         // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
@@ -1288,7 +1296,7 @@ impl Reach for Sight<'_> {
     /// The thing argument this body's run named, for a move at it ([`AT_ARG`]). The record that names it is seen by
     /// everyone, so a thing in a closed container is not named (#4339): the record keeps the form's own node.
     fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
-        if point.as_str() != AT_ARG && point.as_str() != AT_AIM {
+        if point.as_str() != AT_ARG {
             return None;
         }
         let thing = *self.toward.get(&body)?;
@@ -1306,7 +1314,7 @@ impl Reach for Sight<'_> {
     }
 }
 
-pub use sim::reach::{AT_AIM, AT_ARG, AT_SELF};
+pub use sim::reach::{AT_ARG, AT_SELF};
 use sim::reach::{obj_mut, targets};
 
 /// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
@@ -1457,6 +1465,81 @@ pub struct Acts {
     /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
     /// at its first use.
     held: Option<Option<Held>>,
+    /// Each body seated by a form on a seat of another thing, with the links that form made from it (E14b): held
+    /// with the seat, so a body that leaves the seat by any way but a form ([`Acts::untie`]) leaves them too.
+    ties: BTreeMap<Id, Tie>,
+    /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
+    tied: bool,
+}
+
+/// A form's links from a body that sat it on a seat of another thing (E14b: a lecture's listener on the hall's
+/// bench): the form's node, the seat (its thing and slot), the links' types, and whether the body was seen in it.
+#[derive(Clone, Debug)]
+struct Tie {
+    node: Id,
+    on: Id,
+    slot: u64,
+    links: Vec<String>,
+    seated: bool,
+}
+
+/// The tie form `form` of `entry` makes when it starts with arguments `all`: a slot of another thing the actor is
+/// seated in (a `sit` or `lie` step's slot, or a `reparent` of the actor into it) and the links it makes from the
+/// actor. `None` when it makes no such link or takes no such seat.
+fn tie_of(entry: &Json, form: &str, all: &skills::form_runner::Args, node: Id) -> Option<Tie> {
+    let f = entry.get("forms")?.get(form)?;
+    fn arg(v: Option<&Json>) -> Option<&str> {
+        v.and_then(|v| v.get("arg")).and_then(Json::str)
+    }
+    let steps = f.get("steps").and_then(Json::arr).unwrap_or(&[]);
+    let effects = f.get("effects").and_then(Json::arr).unwrap_or(&[]);
+    let seat_key = steps
+        .iter()
+        .filter(|s| matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")))
+        .find_map(|s| arg(s.get("slot")))
+        .or_else(|| {
+            effects
+                .iter()
+                .filter(|e| {
+                    e.get("change").and_then(Json::str) == Some("reparent")
+                        && e.get("what").and_then(Json::str) == Some("actor")
+                })
+                .find_map(|e| arg(e.get("into")))
+        })?;
+    let &skills::form_runner::Arg::Slot(on, slot) = all.get(seat_key)? else {
+        return None;
+    };
+    let kind = entry.get("kind").and_then(Json::str)?;
+    let links: Vec<String> = effects
+        .iter()
+        .filter(|e| {
+            e.get("change").and_then(Json::str) == Some("link")
+                && e.get("from").and_then(Json::str) == Some("actor")
+        })
+        .filter_map(|e| e.get("link").and_then(Json::str))
+        .map(|l| replica::audience::link_type(kind, l))
+        .collect();
+    (!links.is_empty()).then_some(Tie {
+        node,
+        on,
+        slot,
+        links,
+        seated: false,
+    })
+}
+
+/// Every slot argument form `form` takes, as slot `slot` of `on`: what [`tie_of`] reads a restart's seat by.
+fn seat_args(entry: &Json, form: &str, on: Id, slot: u64) -> skills::form_runner::Args {
+    entry
+        .get("forms")
+        .and_then(|f| f.get(form))
+        .and_then(|f| f.get("takes"))
+        .and_then(Json::obj)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|(_, t)| t.get("type").and_then(Json::str) == Some("slot"))
+        .map(|(k, _)| (k.clone(), skills::form_runner::Arg::Slot(on, slot)))
+        .collect()
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -1574,6 +1657,27 @@ pub(crate) fn select_thing(
     if select.get("of").and_then(Json::str) != Some("things") {
         return Err(());
     }
+    let (ranked, rank) = ranked_things(tree, kinds, select, node, body, body_at)?;
+    Ok(match rank {
+        Some(r) => ranked.get(r - 1).map(|(_, id)| *id),
+        None => ranked.last().map(|(_, id)| *id),
+    })
+}
+
+/// Things in a selector's order, each with its squared distance from the anchor (none for a thing with no place).
+type Ranked = Vec<(Option<i128>, Id)>;
+
+/// [`select_thing`]'s set in its order, each with its squared distance from the anchor (none for a thing with no
+/// place), and the selector's rank (`None` for `last`). Reads `in`, `anchor`, `order`, `rank` and `kind`, whatever
+/// `of` says: a seat of another thing (E14b) is chosen from the same set in the same order.
+fn ranked_things(
+    tree: &Tree,
+    kinds: &Json,
+    select: &Json,
+    node: Id,
+    body: Id,
+    body_at: Option<Vec3>,
+) -> Result<(Ranked, Option<usize>), ()> {
     let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
     let here = select.get("in").and_then(Json::str) == Some("here");
     let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
@@ -1682,10 +1786,129 @@ pub(crate) fn select_thing(
         };
         by.then(a.cmp(b))
     });
-    Ok(match rank {
-        Some(r) => ranked.get(r - 1).map(|(_, id)| *id),
-        None => ranked.last().map(|(_, id)| *id),
-    })
+    Ok((ranked, rank))
+}
+
+/// Why slot `slot` of `on`, which argument `key` names, is not the act's to take, by the names `Forms::other_slots`
+/// gives at commit (E14): `slot-of-a-body`, `object.private` (another Soul's, #3700), `slot-unknown` (neither its
+/// entry declares it nor the world holds it as a seat). `None` when it may be.
+fn other_refused(
+    tree: &Tree,
+    kinds: &Json,
+    b: &Bodies,
+    body: Id,
+    key: &str,
+    on: Id,
+    slot: u64,
+) -> Option<Refusal> {
+    let body_of = |id: Id| {
+        tree.links_at(id)
+            .iter()
+            .find(|e| plain(tree.ty(e)) == "souls:body-of")
+            .map(|e| e.other)
+    };
+    if b.runner.controller.body(on).is_some() || body_of(on).is_some() {
+        return Some(refusal("slot-of-a-body", key));
+    }
+    let soul = body_of(body).unwrap_or(body);
+    if let Some(words) = replica::who_may::private_to(tree, on, soul) {
+        return Some(refusal(
+            "object.private",
+            format!("{key}: who may: {words}"),
+        ));
+    }
+    if b.slots.place_in(on, slot).is_none() && slot_name(tree, kinds, on, slot).is_none() {
+        return Some(refusal("slot-unknown", format!("{key}: slot {slot}")));
+    }
+    None
+}
+
+/// The name of slot `slot` (1, 2, ... in its entry's order) of `thing`, by its entry.
+fn slot_name(tree: &Tree, kinds: &Json, thing: Id, slot: u64) -> Option<String> {
+    let n = tree.node(tree.handle(thing)?)?;
+    let entry = entry_in(kinds, tree, &n)?;
+    let names = entry.get("slots").and_then(Json::obj)?;
+    let i = usize::try_from(slot).ok()?.checked_sub(1)?;
+    names.get(i).map(|(name, _)| name.clone())
+}
+
+/// A free seat [`other_seat`] may choose: its thing's squared distance from the anchor, the thing, the slot, and the
+/// slot's stand point's squared distance from the body across x and z.
+type Open = (Option<i128>, Id, u64, Option<i128>);
+
+/// A body's seat the caller left out that the form selects from the free slots `in` its node's `parent` or `here`
+/// (E14b: a lecture's attendee on a bench of its hall): the things [`ranked_things`] ranks by the select's anchor,
+/// order, rank and `kind`, those with a free seat only, and that thing's free slot whose stand point is nearest the
+/// body (C19's pick). Two open that rank the same, on different things equally far from the anchor, go to the one
+/// nearer the body; equally near both, the choice is not the world's: refused `arg-ambiguous`, naming the argument.
+/// None free is refused by name, as on the act's own thing. `None` for a select of the node's own slots (`in`:
+/// `this`, or none), which [`Acts::start`]'s own pick takes.
+fn other_seat(
+    tree: &Tree,
+    kinds: &Json,
+    b: &Bodies,
+    select: &Json,
+    node: Id,
+    body: Id,
+    key: &str,
+) -> Option<R<(Id, u64)>> {
+    if !matches!(
+        select.get("in").and_then(Json::str),
+        Some("parent" | "here")
+    ) {
+        return None;
+    }
+    let c = &b.runner.controller;
+    let me = c.body(body).map(|m| m.pose.position);
+    let body_at = c
+        .body(body)
+        .and_then(|m| carried(tree, Some(m.pose.frame.node), m.pose.position));
+    let Ok((ranked, rank)) = ranked_things(tree, kinds, select, node, body, body_at) else {
+        return Some(Err(refusal("arg-malformed", key)));
+    };
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    // Never a thing private to someone else (#3700): the body's Soul, or the body with none, as `private_to` asks.
+    let soul = tree
+        .links_at(body)
+        .iter()
+        .find(|e| plain(tree.ty(e)) == "souls:body-of")
+        .map_or(body, |e| e.other);
+    // Each thing with a free seat, in the selector's order: its anchor distance, the seat, and the seat's stand
+    // point's squared distance from the body across x and z.
+    let open: Vec<Open> = ranked
+        .into_iter()
+        .filter(|(_, t)| replica::who_may::private_to(tree, *t, soul).is_none())
+        .filter_map(|(far, t)| {
+            let s = b.slots.free(c, body, t)?;
+            let near = b
+                .slots
+                .place_in(t, s)
+                .and_then(|p| p.stand().ok())
+                .zip(me)
+                .map(|(p, m)| d(p.x, m.x) + d(p.z, m.z));
+            Some((far, t, s, near))
+        })
+        .collect();
+    let at = match rank {
+        Some(r) => r.checked_sub(1).filter(|i| *i < open.len()),
+        None => open.len().checked_sub(1),
+    };
+    let Some(at) = at else {
+        return Some(Err(refusal(sim::commit::bind::NONE_FREE, key)));
+    };
+    let far = open[at].0;
+    let mut even: Vec<&Open> = open
+        .iter()
+        .filter(|s| far.is_some() && s.0 == far)
+        .collect();
+    if even.len() < 2 {
+        return Some(Ok((open[at].1, open[at].2)));
+    }
+    even.sort_by_key(|s| s.3.unwrap_or(i128::MAX));
+    if even[0].3 == even[1].3 {
+        return Some(Err(refusal("arg-ambiguous", key)));
+    }
+    Some(Ok((even[0].1, even[0].2)))
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
@@ -1804,7 +2027,116 @@ impl Acts {
             hatches: BTreeMap::new(),
             zone: header,
             held: None,
+            ties: BTreeMap::new(),
+            tied: false,
         }
+    }
+
+    /// The ties of the world as it stands, read once at the first tick (a restart's seated bodies, K18c): each body
+    /// seated in a seat of another thing that a link from it to a node holds, where that node's entry has a form that
+    /// sits the actor on a slot argument and makes that link from it. A tie a form made since is kept.
+    fn tie_from_state(&mut self, tree: &Tree, b: &Bodies) {
+        for (body, on, _) in b.slots.seated() {
+            if self.ties.contains_key(&body) {
+                continue;
+            }
+            let Some(slot) = b.slots.held_place(body).map(|p| p.place.slot) else {
+                continue;
+            };
+            for l in tree.links_at(body) {
+                let Some((ty, ..)) = tree.link(l.link) else {
+                    continue;
+                };
+                let node = l.other;
+                let Some(n) = tree.handle(node).and_then(|h| tree.node(h)) else {
+                    continue;
+                };
+                if node == on {
+                    continue;
+                }
+                let Some(entry) = entry_in(&self.kinds, tree, &n) else {
+                    continue;
+                };
+                let seats_with = entry
+                    .get("forms")
+                    .and_then(Json::obj)
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|(form, _)| {
+                        let all = seat_args(&entry, form, on, slot);
+                        tie_of(&entry, form, &all, node)
+                            .is_some_and(|t| t.links.iter().any(|x| x == ty.as_str()))
+                    });
+                if !seats_with {
+                    continue;
+                }
+                let t = self.ties.entry(body).or_insert(Tie {
+                    node,
+                    on,
+                    slot,
+                    links: Vec::new(),
+                    seated: true,
+                });
+                if t.node == node && !t.links.iter().any(|x| x == ty.as_str()) {
+                    t.links.push(ty.as_str().to_owned());
+                }
+            }
+        }
+    }
+
+    /// E14b: the links to end because their body left the seat of another thing its form sat it in, by any way but a
+    /// form (a rise, a carry, a restart's eject): each `(node, link)`, for one world entry at the node. A form running
+    /// on the body is left to end first, so a form's own unlink (the lecture's `leave`) is never written twice. A tie
+    /// whose body never reached its seat is dropped once no run holds the body.
+    pub fn untie(&mut self, tree: &Tree, bodies: Option<&Bodies>) -> Vec<(Id, Id)> {
+        let Some(b) = bodies else {
+            self.ties.clear();
+            return Vec::new();
+        };
+        if !self.tied {
+            self.tied = true;
+            self.tie_from_state(tree, b);
+        }
+        let mut out = Vec::new();
+        let forms = &self.forms;
+        self.ties.retain(|body, t| {
+            if b.slots.holder_in(t.on, t.slot) == Some(*body) {
+                t.seated = true;
+                return true;
+            }
+            if forms.at(*body).is_some() {
+                return true;
+            }
+            if t.seated {
+                for l in tree.links_at(*body) {
+                    if l.other == t.node
+                        && let Some((ty, ..)) = tree.link(l.link)
+                        && t.links.iter().any(|n| n == ty.as_str())
+                    {
+                        out.push((t.node, l.link));
+                    }
+                }
+            }
+            false
+        });
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Whether `body` sits in the seat of another thing its form took, still linked by it (E14b): an act stopped
+    /// after its seat was taken is answered so ([`STILL_SEATED`]).
+    pub fn still_seated(&self, tree: &Tree, bodies: Option<&Bodies>, body: Id) -> bool {
+        let (Some(t), Some(b)) = (self.ties.get(&body), bodies) else {
+            return false;
+        };
+        b.slots.holder_in(t.on, t.slot) == Some(body)
+            && tree.links_at(body).iter().any(|l| {
+                l.other == t.node
+                    && tree
+                        .link(l.link)
+                        .is_some_and(|(ty, ..)| t.links.iter().any(|n| n == ty.as_str()))
+            })
     }
 
     /// N2 (0.133): the forms read back from the log at a restart at `now` (`Forms::recover`): every run the log shows
@@ -2066,10 +2398,6 @@ impl Acts {
                 continue;
             };
             let entry: &Json = &entry;
-            if let Some(key) = args.things.keys().find(|k| args.slots.contains_key(*k)) {
-                first.get_or_insert(refusal("arg-ambiguous", key));
-                continue;
-            }
             // A whole number the form takes as a `count`, an `int` or a `duration` is that value (#3703, #3713); any
             // other is a slot of the node by number (C12).
             let (counts, slots) = numbers(entry, form, &args.slots);
@@ -2093,23 +2421,55 @@ impl Acts {
             }
             // A body's slot the caller left out, which the form selects from the thing's free slots, is the free one
             // whose stand point is nearest the body (C19's pick); a thing with none free is refused by name (#3802).
-            // One the caller named that another body holds is refused `place-taken`, also before any walk.
-            let (mut picked, mut none_free, mut taken) = (false, None, None);
+            // One the caller named that another body holds is refused `place-taken`, also before any walk. A seat
+            // of another thing (E14b): one named that another body holds is refused `place-taken` too, and one left
+            // out that the form selects `in` its `parent` or `here` is the free seat of the thing its selector ranks
+            // ([`other_seat`]).
+            let (mut picked, mut none_free, mut taken, mut other) = (false, None, None, None);
             if let (Some(b), Some(f)) = (
-                bodies.as_deref().filter(|b| b.slots.place(*node).is_some()),
+                bodies.as_deref(),
                 entry.get("forms").and_then(|f| f.get(form)),
             ) {
+                let own = b.slots.place(*node).is_some();
                 let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
-                for (key, _) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if let Some(skills::form_runner::Arg::Slot(on, s)) = all.get(key) {
+                        // Refused by the names the form runner's commit gives (`Forms::other_slots`, E14), here
+                        // before the needs read the slot: a body, a thing private to another, an undeclared slot.
+                        if let Some(e) = other_refused(tree, &self.kinds, b, body, key, *on, *s) {
+                            other = Some(e);
+                        } else if b.slots.holder_in(*on, *s).is_some_and(|h| h != body) {
+                            taken =
+                                Some(slot_name(tree, &self.kinds, *on, *s).unwrap_or(key.clone()));
+                        }
+                        continue;
+                    }
                     if !selects_body_slot(f, key) {
+                        continue;
+                    }
+                    if !all.contains_key(key)
+                        && let Some(chosen) = take.get("select").and_then(|select| {
+                            other_seat(tree, &self.kinds, b, select, *node, body, key)
+                        })
+                    {
+                        match chosen {
+                            Ok((on, s)) => {
+                                all.insert(key.clone(), skills::form_runner::Arg::Slot(on, s));
+                                picked = true;
+                            }
+                            Err(e) => other = Some(e),
+                        }
+                        continue;
+                    }
+                    if !own {
                         continue;
                     }
                     if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
                         let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
-                        if slot
-                            .and_then(|s| b.slots.holder_in(*node, s))
-                            .is_some_and(|h| h != body)
-                        {
+                        // Taken when every place of it is held, by others (a tent's two sleepers, E16).
+                        if slot.is_some_and(|s| {
+                            b.slots.full(*node, s) && !b.slots.holders_in(*node, s).contains(&body)
+                        }) {
                             taken = Some(n.clone());
                         }
                         continue;
@@ -2133,6 +2493,10 @@ impl Acts {
             }
             if let Some(key) = none_free {
                 first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                continue;
+            }
+            if let Some(e) = other {
+                first.get_or_insert(e);
                 continue;
             }
             // A thing the caller left out, which the form describes by a selector, is bound by it now (#3914); a
@@ -2311,12 +2675,20 @@ impl Acts {
                     effects.extend(sets);
                 }
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                // A slot of another thing is checked as `Forms::commit` checks it (E14): no body, nothing private
+                // to another, a slot its kind declares or a seat the world holds.
+                forms.other_slots(w, body, &entry, form, &all)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
             match r {
                 Ok(a) => {
                     if let Asked::Started(run) | Asked::Running(run) = a {
                         self.runs.insert(run, intent.id);
+                    }
+                    if let Asked::Started(_) = a
+                        && let Some(t) = tie_of(&entry, form, &all, *node)
+                    {
+                        self.ties.insert(body, t);
                     }
                     return Ok(a);
                 }

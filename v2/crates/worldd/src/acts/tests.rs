@@ -223,6 +223,24 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         !planning.borrow().answers.contains_key(&line_key),
         "duplicate old line result cannot be reinstalled"
     );
+    // S13d: a walk the planner refuses reaches the form by the planner's own name, not as a walk with no legs.
+    assert_eq!(sight.plan_walk(id, 0, ground, goal, 0), WalkPlan::Pending);
+    let generation = planning.borrow().current[&walk_key].0.generation;
+    planning.borrow_mut().receive(BTreeMap::from([(
+        walk_key,
+        FormAnswer {
+            generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Err(Refusal {
+                name: sim::planner::GROUND_CHANGED,
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert_eq!(
+        sight.plan_walk(id, 0, ground, goal, 0),
+        WalkPlan::Refused(Name::new(sim::planner::GROUND_CHANGED).unwrap())
+    );
     planning.borrow_mut().keep(&BTreeMap::new());
     assert!(
         planning.borrow().current.is_empty(),
@@ -271,7 +289,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     let old = FormAnswer {
         generation: 1,
         map: Arc::clone(&map),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.ask(key, body, question(Vec3::new(1, 0, 0)), &map);
     planning.receive(BTreeMap::from([(key, old.clone())]));
@@ -286,7 +304,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     let current = FormAnswer {
         generation: 3,
         map: Arc::clone(&changed),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.receive(BTreeMap::from([(key, current.clone())]));
     assert!(planning.answer(&key, &map).is_none(), "old map refused");
@@ -444,7 +462,7 @@ fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it(
         FormAnswer {
             generation: first[0].generation,
             map: Arc::clone(&map),
-            result: FormResult::Walk(Vec::new()),
+            result: FormResult::Walk(Ok(Vec::new())),
         },
     );
     planning.ask(key, body, walk.clone(), &map);
@@ -1275,12 +1293,7 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     for slot in ["stern", "berth", "galley"] {
         ride(room, &narrowboat, slot, "hatch");
     }
-    // 0.135 E20: each rider's run steers toward a thing far off (a heading): the ring for those on the building or the
-    // room in it, the building for those on the ring.
-    let toward: BTreeMap<Id, Id> = riders
-        .iter()
-        .map(|&(body, thing, ..)| (body, if thing == east { west } else { east }))
-        .collect();
+    let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
         bodies: Arc::new(bodies.clone()),
@@ -1325,22 +1338,26 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
             assert_eq!(was, d, "{slot}: the same from another place");
         }
     }
-    // 0.135 E20: a steer toward the heading from a seat of the thing ridden aims what it rides, from any of its seats:
-    // in reach. A move at the heading itself is measured to it, far off.
-    for &(body, thing, slot, _) in &riders {
-        let d = |point: &str| {
-            sight
-                .distance(
-                    body,
-                    &Effector::Held,
-                    None,
-                    thing,
-                    &Name::new(point).unwrap(),
-                )
-                .expect("measured")
-        };
-        assert_eq!(d(AT_AIM), 0, "{slot}: aimed from where it sits");
-        assert!(d(AT_ARG) > 50_000_000, "{slot}: the heading is far off");
+    // 0.135 E20: a steer is at the thing's control point (the motorboat's wheel, the narrowboat's tiller), so the seat
+    // decides: the helm and the seat beside it reach the wheel, the back seats do not; only the stern reaches the
+    // tiller, not the berth or the galley 7 m off. The steer move's reach (content/moves/steer.json).
+    for &(body, thing, slot, point) in &riders {
+        let control = if point == "key" { "wheel" } else { "tiller" };
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(control).unwrap(),
+            )
+            .expect("measured");
+        println!("E20: seated in {slot}, {d} µm from the {control}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "front" | "stern"),
+            "{slot} to the {control}: {d} µm"
+        );
     }
 }
 

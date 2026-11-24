@@ -63,6 +63,11 @@ refused). Every call is an audit row.
 
 All take `--port <port>` and `--base /` for production (no `--base` on legacy).
 
+A moved world's static views (`v2-switch.mjs --static`) go in `/srv/sim-worlds-data/production/<slug>-static`, the
+one folder the launcher unit lets it write; the switch refuses any other system folder (`v2-switch.static-not-writable`).
+The log line `cutover: <slug>'s static views held in memory ... cutover.static-unwritable` means a binding names a folder
+the launcher cannot write: the page still works from memory; switch again with the right `--static`.
+
 ### Pausing uploads or new worlds
 
 Two site switches stop the two things that can fill the machine, at once and without a release (#2540). They are kept

@@ -51,6 +51,19 @@
 //!   its place at the lift ([`Carry::sides`]) breaks the carry off. A side's leave with the load's crew left goes on,
 //!   its place empty (worldd's engine, `souls:carrier-left`); below the crew it is set down.
 //!
+//! - **Every step checked (0.135 C7).** The lift's sweep covers only a named destination's straight way; while the
+//!   load is carried, each [`Carry::step`] first checks the way from its last sample ([`way`]): the load's outline
+//!   between its carriers at every [`SWEEP_STEP`] of either end, as it is held ([`Load::as_held`]: its bounds turned
+//!   by [`Load::turn`], at carrying height), against its ground's fixed geometry, each box with its height above its
+//!   floor ([`Fixed::heights`]: a load passes over a beam seated low in a bay, not one at its own height). A step into it
+//!   is refused `carry-load-blocked` and nothing is written; worldd's engine then sets the load down at its last
+//!   sample (`souls:carry-blocked`), so it is never moved through a wall nor moved anywhere else, and its carriers are
+//!   free; stopped over a low box it was carried over, it is set down on top of it ([`rest_top`]). Every box above a
+//!   step is read, however high (a lintel, a beam seated high); B9's checks still read only those a walking body meets
+//!   ([`Fixed::hit`], [`Fixed::within`]). What the load met where the carry began (a part taken from beside the parts
+//!   of its bay) does not count until it is clear of it ([`Carry::began_in`], [`step_way`]), so it can be carried out
+//!   from there and not back through it.
+//!
 //! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; turning with three carriers or
 //! more; a sweep that counts the sides' bodies; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
@@ -71,7 +84,7 @@ use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
-use crate::ground::scene::{FLOOR, Scene, Terrain, Xz, xform_to};
+use crate::ground::scene::{FLOOR, GROUND, Scene, Terrain, Xz, xform_to};
 use crate::ground::{BODY_HIGH, BODY_LOW};
 use crate::slots::hands::{Entry, Log};
 
@@ -128,6 +141,8 @@ pub struct Load {
     pub rest: i64,
     /// The end of its long axis in its own frame, from its middle, µm (half its length along that axis, +).
     pub long: Vec3,
+    /// Half its bounds in its own frame, µm (0.135 C7: what it takes up as it is held, whichever way it is turned).
+    pub half: Vec3,
 }
 
 impl Load {
@@ -143,6 +158,7 @@ impl Load {
             middle: Vec3::ZERO,
             rest: 0,
             long: Vec3::new(HALF_LENGTH, 0, 0),
+            half: Vec3::new(HALF_LENGTH, 0, HALF_WIDTH),
         }
     }
 
@@ -268,7 +284,36 @@ impl Load {
                 1 => Vec3::new(0, h * 500, 0),
                 _ => Vec3::new(0, 0, d * 500),
             },
+            half: Vec3::new(w * 500, h * 500, d * 500),
         })
+    }
+
+    /// What it takes up as it is held turned [`Load::turn`] (0.135 C7), about its middle at the carry's slot: half its
+    /// extent along the carry (x), up (y) and across (z), µm, the bounds of its turned corners.
+    pub fn held_half(&self) -> R<Vec3> {
+        let h = self.half;
+        let mut e = Vec3::ZERO;
+        for k in 0..8 {
+            let s = |b: i64, v: i64| if k & b == 0 { v } else { -v };
+            let c = self
+                .turn
+                .rotate(Vec3::new(s(1, h.x), s(2, h.y), s(4, h.z)))
+                .map_err(pose_refusal)?;
+            e = Vec3::new(e.x.max(c.x.abs()), e.y.max(c.y.abs()), e.z.max(c.z.abs()));
+        }
+        Ok(e)
+    }
+
+    /// Its outline as it is held, as a load to draw on the plan ([`outline`]), and the heights it spans, µm above its
+    /// carriers' feet: its middle at [`HEIGHT`] (0.135 C7).
+    pub fn as_held(&self) -> R<(Load, [i64; 2])> {
+        let e = self.held_half()?;
+        let plan = Load {
+            half_length: e.x,
+            half_width: e.z,
+            ..*self
+        };
+        Ok((plan, [HEIGHT - e.y, HEIGHT + e.y]))
     }
 
     /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
@@ -508,6 +553,9 @@ fn spans(y0: i64, y1: i64, floor: i64) -> bool {
 /// cut against, on the open ground and on the lowest floor of each building on it, indexed by 4 m cells.
 pub struct Fixed {
     pub quads: Vec<Quad>,
+    /// Each outline's height span above the floor or ground under it, µm (0.135 C7: a load carried over a low box
+    /// passes it).
+    pub heights: Vec<[i64; 2]>,
     cells: BTreeMap<(i64, i64), Vec<u32>>,
 }
 
@@ -515,21 +563,29 @@ impl Fixed {
     /// The fixed geometry of the open ground `ground` and the lowest floor of each building standing on it.
     pub fn of(tree: &Tree, ground: Id) -> Result<Fixed, String> {
         let gh = tree.handle(ground).ok_or("no such ground")?;
+        // A node that is neither an open ground nor a floor has no ground of its own, so nothing on it is cut out of
+        // a walk: it has no fixed geometry (0.135 C7: a carry over it is not stopped for want of a scene).
+        let kind = plain(tree.node(gh).ok_or("no such ground")?.kind().as_str()).to_owned();
+        if kind != GROUND && kind != FLOOR {
+            return Ok(Fixed::new(Vec::new()));
+        }
         // On the open ground a box is read against the ground's height under it (its terrain's, raised or sloped).
         let scene = Scene::of(tree, ground)?;
         let t = scene.terrain.as_ref();
-        let mut quads: Vec<Quad> = scene
-            .solids
-            .iter()
-            .filter(|s| {
-                let c = s
-                    .ring
-                    .iter()
-                    .fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
-                spans(s.y0, s.y1, Terrain::ground(t, c[0], c[1], s.y0))
-            })
-            .map(|s| s.ring)
-            .collect();
+        let mut quads: Vec<Quad> = Vec::new();
+        let mut heights = Vec::new();
+        for s in &scene.solids {
+            let c = s
+                .ring
+                .iter()
+                .fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
+            let g = Terrain::ground(t, c[0], c[1], s.y0);
+            // 0.135 C7: every box above a step, however high: a load held high meets a lintel or a beam seated high.
+            if s.y1 > g + BODY_LOW * 1000 {
+                quads.push(s.ring);
+                heights.push([s.y0 - g, s.y1 - g]);
+            }
+        }
         // The lowest floor of each building: by parent, the floor whose frame stands lowest on the ground.
         let mut lowest: BTreeMap<Handle, (i64, Handle)> = BTreeMap::new();
         let mut stack = vec![gh];
@@ -556,9 +612,23 @@ impl Fixed {
                 continue;
             };
             for b in &s.solids {
-                if !s.surfaces.iter().any(|f| spans(b.y0, b.y1, f.y)) {
+                // Read against a surface a walking body meets it from, else the highest it stands above a step over
+                // (a lintel over the floor; 0.135 C7).
+                let over = || {
+                    s.surfaces
+                        .iter()
+                        .filter(|f| b.y1 > f.y + BODY_LOW * 1000 && f.y <= b.y0 + BODY_LOW * 1000)
+                        .max_by_key(|f| f.y)
+                };
+                let Some(f) = s
+                    .surfaces
+                    .iter()
+                    .find(|f| spans(b.y0, b.y1, f.y))
+                    .or_else(over)
+                else {
                     continue;
-                }
+                };
+                heights.push([b.y0 - f.y, b.y1 - f.y]);
                 let mut q = [[0; 2]; 4];
                 for (k, v) in b.ring.iter().enumerate() {
                     let p = x.point(Vec3::new(v[0], 0, v[1]))?;
@@ -567,10 +637,17 @@ impl Fixed {
                 quads.push(q);
             }
         }
-        Ok(Fixed::new(quads))
+        Ok(Fixed::with_heights(quads, heights))
     }
 
+    /// Outlines of any height.
     pub fn new(quads: Vec<Quad>) -> Fixed {
+        let heights = vec![[i64::MIN, i64::MAX]; quads.len()];
+        Fixed::with_heights(quads, heights)
+    }
+
+    /// Outlines, each with its height span above its floor (µm).
+    pub fn with_heights(quads: Vec<Quad>, heights: Vec<[i64; 2]>) -> Fixed {
         let mut cells: BTreeMap<(i64, i64), Vec<u32>> = BTreeMap::new();
         for (k, q) in quads.iter().enumerate() {
             let b = bounds(q);
@@ -580,17 +657,30 @@ impl Fixed {
                 }
             }
         }
-        Fixed { quads, cells }
+        Fixed {
+            quads,
+            heights,
+            cells,
+        }
     }
 
-    /// The first fixed outline `q` overlaps, if any.
+    /// The first fixed outline `q` overlaps that a walking body meets (a height span within [`BODY_LOW`] to
+    /// [`BODY_HIGH`] of its floor), if any.
     pub fn hit(&self, q: &Quad) -> Option<&Quad> {
+        self.hit_but(q, [BODY_LOW * 1000, BODY_HIGH * 1000], &[])
+    }
+
+    /// The first fixed outline `q` overlaps whose height span meets `band` (µm above the floor)
+    /// and that is not one of `but`, if any (0.135 C7).
+    pub fn hit_but(&self, q: &Quad, band: [i64; 2], but: &[Quad]) -> Option<&Quad> {
         let b = bounds(q);
         for i in b[0].div_euclid(CELL)..=b[2].div_euclid(CELL) {
             for j in b[1].div_euclid(CELL)..=b[3].div_euclid(CELL) {
                 for &k in self.cells.get(&(i, j)).into_iter().flatten() {
                     let f = &self.quads[k as usize];
-                    if overlap(q, f) {
+                    let [lo, hi] = self.heights[k as usize];
+                    let meets = lo < band[1] && hi > band[0];
+                    if meets && overlap(q, f) && !but.contains(f) {
                         return Some(f);
                     }
                 }
@@ -599,15 +689,47 @@ impl Fixed {
         None
     }
 
-    /// The fixed outlines that meet the box `b` (`[x0, z0, x1, z1]`, µm), each once: for drawing.
-    pub fn within(&self, b: [i64; 4]) -> Vec<&Quad> {
+    /// Every fixed outline `q` overlaps, each once.
+    pub fn hits(&self, q: &Quad) -> Vec<Quad> {
+        let mut out: Vec<Quad> = Vec::new();
+        for k in self.near(bounds(q)) {
+            let f = &self.quads[k];
+            if overlap(q, f) && !out.contains(f) {
+                out.push(*f);
+            }
+        }
+        out
+    }
+
+    /// The indices of the outlines indexed in the cells that meet the box `b`, each once.
+    fn near(&self, b: [i64; 4]) -> std::collections::BTreeSet<usize> {
         let mut seen = std::collections::BTreeSet::new();
         for i in b[0].div_euclid(CELL)..=b[2].div_euclid(CELL) {
             for j in b[1].div_euclid(CELL)..=b[3].div_euclid(CELL) {
-                seen.extend(self.cells.get(&(i, j)).into_iter().flatten().copied());
+                seen.extend(
+                    self.cells
+                        .get(&(i, j))
+                        .into_iter()
+                        .flatten()
+                        .map(|k| *k as usize),
+                );
             }
         }
-        seen.into_iter().map(|k| &self.quads[k as usize]).collect()
+        seen
+    }
+
+    /// The fixed outlines a walking body meets that meet the box `b` (`[x0, z0, x1, z1]`, µm), each once: for
+    /// drawing, and B9's checks.
+    pub fn within(&self, b: [i64; 4]) -> Vec<&Quad> {
+        let body = |k: &usize| {
+            let [lo, hi] = self.heights[*k];
+            lo < BODY_HIGH * 1000 && hi > BODY_LOW * 1000
+        };
+        self.near(b)
+            .into_iter()
+            .filter(body)
+            .map(|k| &self.quads[k])
+            .collect()
     }
 }
 
@@ -686,6 +808,73 @@ pub fn sweep_load(path: &[Xz], fixed: &Fixed, load: &Load, span: i64) -> R<u64> 
     }
 }
 
+/// Whether `load` may be carried from carriers at `from` to carriers at `to` (each `(front, back)` on the open ground's
+/// plan, µm) without meeting fixed geometry (0.135 C7): its outline between them at every [`SWEEP_STEP`] of either
+/// end on the way, both ends moving together, clear of `fixed` but the outlines in `but` and those wholly above or
+/// below it, as it is held ([`Load::as_held`]); else `carry-load-blocked`, naming where.
+pub fn way(fixed: &Fixed, load: &Load, from: (Xz, Xz), to: (Xz, Xz), but: &[Quad]) -> R<()> {
+    let (load, band) = load.as_held()?;
+    let moved = |a: Xz, b: Xz| len([b[0] - a[0], b[1] - a[1]]);
+    let far = moved(from.0, to.0).max(moved(from.1, to.1));
+    let n = far.div_euclid(SWEEP_STEP) + 1;
+    let between = |a: Xz, b: Xz, k: i64| {
+        let d = scale([b[0] - a[0], b[1] - a[1]], k, n);
+        [a[0] + d[0], a[1] + d[1]]
+    };
+    for k in 1..=n {
+        let q = outline(between(from.0, to.0, k), between(from.1, to.1, k), &load);
+        if let Some(f) = fixed.hit_but(&q, band, but) {
+            return refuse(
+                "carry-load-blocked",
+                format!(
+                    "the load between ({}, {}) and ({}, {}) mm meets the box at ({}, {}) mm",
+                    q[0][0] / 1000,
+                    q[0][1] / 1000,
+                    q[2][0] / 1000,
+                    q[2][1] / 1000,
+                    f[0][0] / 1000,
+                    f[0][1] / 1000
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// One step of a carry (0.135 C7): [`way`] from carriers at `from` to `to`, passing the outlines in `but`, which then
+/// keeps only those the load still meets at `to`: what it began in is passed only until it is clear of it.
+pub fn step_way(
+    fixed: &Fixed,
+    load: &Load,
+    from: (Xz, Xz),
+    to: (Xz, Xz),
+    but: &mut Vec<Quad>,
+) -> R<()> {
+    way(fixed, load, from, to, but)?;
+    let (plan, _) = load.as_held()?;
+    let now = fixed.hits(&outline(to.0, to.1, &plan));
+    but.retain(|q| now.contains(q));
+    Ok(())
+}
+
+/// How far above its carriers' floor `load` comes to rest when set down between carriers at `ends` (`(front, back)`
+/// on the plan, µm), turned as it is held (0.135 C7): on the top of the highest fixed box under its outline that lies
+/// below it as it is carried (one it was carried over) and is not one of `own` (the load's own boxes, when it is not
+/// carried but seated), else on the floor.
+pub fn rest_top(fixed: &Fixed, load: &Load, ends: (Xz, Xz), own: &[Quad]) -> R<i64> {
+    let (plan, band) = load.as_held()?;
+    let q = outline(ends.0, ends.1, &plan);
+    let mut top = 0;
+    for k in fixed.near(bounds(&q)) {
+        let [lo, hi] = fixed.heights[k];
+        let f = &fixed.quads[k];
+        if hi > top && hi <= band[0] && lo < hi && !own.contains(f) && overlap(&q, f) {
+            top = hi;
+        }
+    }
+    Ok(top)
+}
+
 /// The yaw that turns +x toward `d` (x and z), to the nearest millidegree: whole-number search on T4's integer
 /// rotation, so no float and no platform trigonometry.
 pub fn yaw_toward(d: Xz) -> R<Quat> {
@@ -759,6 +948,13 @@ pub struct Carry {
     /// lift, `[along, across]` in the carry's frame, µm ([`Carry::place_of`]). Each walks its own way; one that drifts
     /// more than [`STRETCH`] from its place breaks the carry off, as its ends do.
     pub sides: Vec<(Id, [i64; 2])>,
+    /// The fixed outlines its load already met where the carry began (0.135 C7: a part taken from beside the parts of
+    /// its bay), read at its first step and kept only while it still meets them ([`step_way`]): the way is checked
+    /// against every other. None before its first step.
+    pub began_in: Option<Vec<Quad>>,
+    /// How far above its carriers' floor it comes to rest when set down where the carry last had it, µm (0.135 C7: a
+    /// carry stopped over a low box sets its load on top of it, [`rest_top`]).
+    pub raise: i64,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -807,6 +1003,8 @@ impl Carry {
             span: 0,
             load: Load::board(),
             sides: Vec::new(),
+            began_in: None,
+            raise: 0,
         }
     }
 
@@ -927,8 +1125,40 @@ impl Carry {
         Ok(())
     }
 
-    /// One tick of the carry: the frame's sample between the carriers (µm, the open ground's frame).
-    pub fn step(&mut self, tree: &mut Tree, at: Micros, front: Vec3, back: Vec3) -> R<()> {
+    /// Where its carriers were at its last sample, `(front, back)` on the open ground's plan, µm: its span apart along
+    /// the sample's turn, about its middle. None before its first.
+    pub fn ends(&self) -> R<Option<(Xz, Xz)>> {
+        let Some(&(_, c, q)) = self.track.last() else {
+            return Ok(None);
+        };
+        let d = q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose_refusal)?;
+        let h = scale([d.x, d.z], self.span / 2, len([d.x, d.z]));
+        Ok(Some(([c.x + h[0], c.z + h[1]], [c.x - h[0], c.z - h[1]])))
+    }
+
+    /// One tick of the carry: the frame's sample between the carriers (µm, the open ground's frame). The way from its
+    /// last sample is checked first against `fixed`, the fixed geometry of its ground (0.135 C7, [`way`]): a step
+    /// that would take the load into it is refused `carry-load-blocked` and nothing is written, so the load stays at
+    /// its last sample.
+    pub fn step(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        front: Vec3,
+        back: Vec3,
+        fixed: &Fixed,
+    ) -> R<()> {
+        let to = ([front.x, front.z], [back.x, back.z]);
+        let from = self.ends()?.unwrap_or(to);
+        let (plan, _) = self.load.as_held()?;
+        let but = self
+            .began_in
+            .get_or_insert_with(|| fixed.hits(&outline(from.0, from.1, &plan)));
+        if let Err(r) = step_way(fixed, &self.load, from, to, but) {
+            // Set down where it stopped, it rests on what it was carried over (0.135 C7).
+            self.raise = rest_top(fixed, &self.load, from, &[])?;
+            return Err(r);
+        }
         let (c, q) = Carry::pose(front, back)?;
         let e = (
             self.activity,
@@ -959,6 +1189,35 @@ impl Carry {
         self.put(tree, at, node, c, q, transfer)
     }
 
+    /// How far above the floor at `c` its load comes to rest, set down there turned `q` on `node` (0.135 C7, every
+    /// set-down: the crew's, and a carry broken off as its partner leaves, its carriers drift apart, the world
+    /// restarts or a step is blocked): on the top of a low box under it ([`rest_top`], the fixed geometry of its open
+    /// ground read now), else on the floor. On another node, or when that geometry cannot be read, what the carry's
+    /// last step found ([`Carry::raise`]).
+    pub fn rests_on(&self, tree: &Tree, node: Id, c: Vec3, q: Quat) -> R<i64> {
+        if node != self.ground {
+            return Ok(self.raise);
+        }
+        let Ok(fixed) = Fixed::of(tree, node) else {
+            return Ok(self.raise);
+        };
+        // A part laid down from its bay's slot is fixed geometry itself until it is moved: its own boxes do not count.
+        let own: Vec<Quad> = match (tree.handle(self.board), tree.handle(node)) {
+            (Some(b), Some(g)) => crate::ground::scene::solids_under(tree, b, g)
+                .map(|v| v.into_iter().map(|s| s.ring).collect())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let d = q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose_refusal)?;
+        let h = scale([d.x, d.z], 1_000_000, len([d.x, d.z]));
+        rest_top(
+            &fixed,
+            &self.load,
+            ([c.x + h[0], c.z + h[1]], [c.x - h[0], c.z - h[1]]),
+            &own,
+        )
+    }
+
     /// The board, at rest at `c` turned `q`, on `node`: its leave and its arrival under `transfer`.
     fn put(
         &mut self,
@@ -969,6 +1228,7 @@ impl Carry {
         q: Quat,
         transfer: Id,
     ) -> R<()> {
+        let c = Vec3::new(c.x, c.y + self.rests_on(tree, node, c, q)?, c.z);
         let (position, orientation) = self.load.resting(c, q)?;
         let leave = TransferRec::Leave {
             transfer,
