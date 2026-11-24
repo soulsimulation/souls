@@ -25,6 +25,9 @@
 // placed that is missing, duplicate = a name placed twice. Every placed barrel is then removed (`select --name z1-<run>-* --remove`, bulk) unless
 // --keep-edits. Unclean = a CLI failure whose output is not the CLI's own sentence (an HTML page, a stack trace).
 //
+// A page the new engine runs (it has `window.__soulsV2`) opens no world socket (0.133): its build is the site's
+// (/__sim/healthz) at its mark and at the end, and its stream must advance from its mark to the end with no reader error,
+// else it is `streamStuck` and fails the bar.
 // Builds: every world socket records the build its welcome names. --expect-build (the release id; a legacy root's
 // -root suffix matches too) checks every page ends on it; without it, a page whose build did not change is reported.
 // A release that rolled back (activate.sh put the previous build back) is flagged ROLLED BACK even when visitors were
@@ -122,10 +125,16 @@ async function load(w, timeout = 30_000) {
   if (okStatus(w.status) && w.loadedAt == null) w.loadedAt = at();
   return okStatus(w.status);
 }
+// A page the new engine runs reads the world from its v2 stream (`window.__soulsV2`, use-v2-souls.ts: by the mark the
+// app has taken the inline config that named it) and opens no world socket: its build is the site's (/__sim/healthz),
+// and it must keep receiving the stream (`newestTo`, the newest world time it has, grows; bridge.ts) with no reader error.
+const siteBuild = () => fetch(`${origin}/__sim/healthz`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.json()).then((j) => (typeof j?.build === 'string' ? j.build : null)).catch(() => null);
+const streamOf = (page) => page.evaluate(() => { const v = window.__soulsV2; return v ? { to: v.newestTo ?? null, error: v.error ?? null } : null; }).catch(() => null);
 async function mark(w) {
   w.markAt = at();
   await w.page.evaluate(() => { window.__z1mark = 'arrived'; }).catch(() => {});
   w.marked = true; w.navigationsAtMark = w.navigations;
+  w.streamAtMark = await streamOf(w.page); w.siteBuildAtMark = await siteBuild();
   await w.page.screenshot({ path: join(out, `${w.device}-${slugOf(w.path)}-1-before.png`) }).catch(() => {});
 }
 const slugOf = (p) => p.replace(/^\/|\/$/g, '').replace(/[^a-z0-9]+/gi, '-') || 'home';
@@ -155,6 +164,8 @@ async function finish(w) {
   const built = w.sockets.filter((s) => s.build != null);
   w.buildAtMark = w.marked ? built.filter((s) => s.first !== null && s.first <= w.markAt).at(-1)?.build ?? null : null;
   w.buildAtEnd = built.at(-1)?.build ?? null;
+  w.streamAtEnd = await streamOf(w.page); w.v2 = w.streamAtMark !== null || w.streamAtEnd !== null;
+  if (w.v2) { w.buildAtMark = w.siteBuildAtMark ?? null; w.buildAtEnd = await siteBuild(); }
   await w.page.screenshot({ path: join(out, `${w.device}-${slugOf(w.path)}-2-after.png`) }).catch(() => {});
   delete w.page;
 }
@@ -292,6 +303,8 @@ report.bar = {
   reconnectMaxMs: drops.length ? Math.max(...drops.map((d) => d.reconnectMs ?? Infinity)) : 0, reconnectBarMs: RECONNECT_BAR_MS,
   reconnectRetryMaxMs: Math.max(0, ...drops.map((d) => d.retryMs ?? 0)), reconnectHeldMaxMs: Math.max(0, ...drops.map((d) => d.heldMs ?? 0)),
   notResumed: drops.filter((d) => d.reconnectMs === null).length,
+  // which ones, in the bar itself: the bar is what leaves the runner (eyes' probe-bar.json)
+  notResumedAt: drops.filter((d) => d.reconnectMs === null).map((d) => `${d.device} ${d.path}: closed (${d.code}${d.reason ? ` ${String(d.reason).slice(0, 40)}` : ''}) at +${(d.closeAt / 1000).toFixed(1)}s`),
   arrivals: report.arrivals.length, arrivalsSlowestGotoMs: Math.max(0, ...report.arrivals.map((a) => a.gotoMs ?? 0)),
   arrivalsBusy: report.arrivals.filter((a) => a.busy).length, arrivalsNotLoaded: report.arrivals.filter((a) => a.error).map((a) => `${a.device} ${a.path} +${(a.at / 1000).toFixed(1)}s: ${a.error}`),
   cliCalls: report.cli.reduce((n, c) => n + c.calls, 0), cliPlaced: report.cli.reduce((n, c) => n + c.placed.length, 0),
@@ -307,9 +320,12 @@ const b = report.bar;
 // A page with no build seen is unknown, never a rollback (#1414): it never loaded, or no welcome named a build.
 const landed = (w) => (expectBuild ? !!w.buildAtEnd?.startsWith(expectBuild) : w.buildAtEnd !== w.buildAtMark);
 b.notLoaded = report.watchers.filter((w) => !w.marked).map((w) => `${w.device} ${w.path}: never loaded (first ${w.firstStatus}, last ${w.status}, ${w.loads} tries)`);
+// a v2 page whose stream stopped: no newer world time since it was marked, or its reader failed (a viewer on a stale world)
+b.streamStuck = report.watchers.filter((w) => w.v2 && w.marked && (!(w.streamAtEnd?.to > (w.streamAtMark?.to ?? -Infinity)) || w.streamAtEnd?.error))
+  .map((w) => `${w.device} ${w.path}: stream ${w.streamAtEnd?.error ? `failed (${String(w.streamAtEnd.error).slice(0, 80)})` : `did not advance (${w.streamAtMark?.to ?? null} -> ${w.streamAtEnd?.to ?? null})`}`);
 b.noBuild = report.watchers.filter((w) => w.marked && w.buildAtEnd == null).map((w) => `${w.device} ${w.path}: loaded${w.loadedAt > (readyAt ?? 0) ? ` late (+${(w.loadedAt / 1000).toFixed(1)}s)` : ''}, but no world socket welcome named a build`);
 b.rolledBack = report.watchers.filter((w) => w.buildAtEnd != null && !landed(w)).map((w) => `${w.device} ${w.path}: serves ${w.buildAtEnd}${expectBuild ? `, not ${expectBuild}` : ' (unchanged)'}`);
-b.pass = b.errorPages === 0 && b.notLoaded.length === 0 && b.noBuild.length === 0 && b.arrivalsNotLoaded.length === 0 && b.lost === 0 && b.unclean === 0 && b.notResumed === 0 && b.reconnectMaxMs <= RECONNECT_BAR_MS && b.reloaded.length === 0
+b.pass = b.errorPages === 0 && b.notLoaded.length === 0 && b.noBuild.length === 0 && b.streamStuck.length === 0 && b.arrivalsNotLoaded.length === 0 && b.lost === 0 && b.unclean === 0 && b.notResumed === 0 && b.reconnectMaxMs <= RECONNECT_BAR_MS && b.reloaded.length === 0
   && b.watchedAfterReleaseMs !== null && b.watchedAfterReleaseMs >= afterMs;
 report.endedAt = iso(); report.host.end = hostLoad(); b.hostLoad = [report.host.start.load1, report.host.end.load1];
 writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
@@ -320,6 +336,7 @@ for (const w of report.watchers) { const [x, y] = (w.stalls ?? []).reduce((m, s)
 if (b.watchedAfterReleaseMs === null) console.log(`  never told the release ended (touch ${RELEASED}): late drops unwatched`);
 else if (b.watchedAfterReleaseMs < afterMs) console.log(`  watched only ${b.watchedAfterReleaseMs} ms after the release (need ${afterMs})`);
 for (const r of [...b.notLoaded, ...b.noBuild]) console.log(`  UNKNOWN BUILD: ${r}`);
+for (const r of b.streamStuck) console.log(`  STREAM STUCK: ${r}`);
 if (b.rolledBack.length) { console.log('  ROLLED BACK: the release did not land on every page'); for (const r of b.rolledBack) console.log(`    ${r}`); }
 say(`${b.pass ? 'PASS' : 'FAIL'}${b.rolledBack.length ? ' (visitors), but the release ROLLED BACK' : ''}`);
 // a rollback wins over any visitor failure: ship.sh stops on 3, and records 1 as "the release is live"

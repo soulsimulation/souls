@@ -15,6 +15,8 @@
 //!   cannot hold, or a number that is not whole;
 //! - `kind.too-large`: over [`ENTRY_MOST`] bytes as stored, or `geometry.bounds_mm` over [`BOUNDS_MOST_MM`];
 //! - `kind.namespace`: `souls:` and `eden:`, and every namespace a boot kind uses, are not the creator's;
+//! - `kind.field-reserved`: a state field numbered like a field the engine keeps on things ([`crate::fields`]: the
+//!   owner and access marks, a tint, a schedule), which a form could then write past the engine's own checks;
 //! - `kind.collision`: the same full name is already defined (by a node with other bytes, or already the same);
 //! - `kind.in-use`: removing a kind that placed things still use, or that another definition's form creates (in
 //!   `edit::check`, and again on the live copy in `edit::confirm`);
@@ -142,6 +144,30 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
         return Err((
             "kind.namespace",
             format!("{ns}: is not the creator's; use your own namespace"),
+        ));
+    }
+    if let Some((field, f)) = entry
+        .get("state")
+        .and_then(Json::obj)
+        .unwrap_or(&[])
+        .iter()
+        .find_map(|(k, v)| match v.get("n") {
+            Some(Json::Int(n)) => u64::try_from(*n)
+                .ok()
+                .and_then(crate::fields::on_things)
+                .map(|f| (k, f)),
+            _ => None,
+        })
+    {
+        return Err((
+            "kind.field-reserved",
+            format!(
+                "state field {field} takes n {}, the engine's {}: number it from {} to {}",
+                f.n,
+                f.name,
+                crate::fields::ENTRY_FIELDS.start,
+                crate::fields::ENTRY_FIELDS.end - 1
+            ),
         ));
     }
     if let Some(b) = entry

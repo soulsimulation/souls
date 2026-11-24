@@ -131,6 +131,8 @@ export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 export const F_COURSE = 80;
 /** A place's title (#3699): field 4, a public name's hash (named at import) or a creator's words (`{21: id}`). */
 export const F_TITLE = 4;
+/** A Soul's body's public name (worldd `words::NAME`, field 30): its owner's words for it, set by a describe (`{21: id}`). */
+export const F_BODY_NAME = 30;
 /** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
 export const F_ALIASES = 101;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
@@ -206,7 +208,8 @@ export function rowsOf(copy) {
     const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
     // A thing of a creator's kind (#3697) goes by that kind's full name, so its own revision's record is read.
     const full = String(m.get(2)), entry = own.has(full) ? full : entryKind(m);
-    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? wordsAt(copy, fields, F_BODY_NAME) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.

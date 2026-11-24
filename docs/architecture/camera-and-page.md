@@ -90,6 +90,13 @@ A thing placed while the world runs (a creator's, or one a Soul makes) is drawn 
 own kind, else the def the world's own things of its kind have, else the library def named like its kind, else a box
 the size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`).
 
+A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
+the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to
+`world-state.ts`, so a load the world was captured with moves with its carriers too. A load lifted or set down keeps
+its old record until the page's time reaches the end of the part that changed it, and a load carried off its feet (a
+6 m frame laid flat) is drawn tilted (the layer's `r: [yaw, x, z]`). The page's rewind does not draw a carry yet:
+history chunks carry bodies and things on a course only.
+
 ## What follows from the boundary
 
 - A body that jumps on screen jumps for the camera too. Fixes belong in the adapter (`bridge.ts`, `takes.ts`) or in
