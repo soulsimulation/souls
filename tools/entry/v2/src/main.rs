@@ -39,6 +39,9 @@ use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
+use replica::activity::{ActivityKind, Role, RoleLink};
+use replica::bodies::{Class, Want};
+use sim::activity::{Activities, Ask as Asking};
 use sim::controller::Controller;
 use sim::forms::{Asked, Forms, Intent, World};
 use sim::host::Geometry;
@@ -170,6 +173,11 @@ struct Stage {
     refused_by: BTreeMap<Id, Vec<String>>,
     /// What of the current case's scene the tree would not hold, until the case is cleared.
     scene_refused: Vec<String>,
+    /// The activities the entries' roles make (B10, #4239), by their entry's kind, and the engine's writer of them
+    /// with its own due list: a case's role links are its members', taken by offer and accept as a world takes them.
+    roles: BTreeMap<String, ActivityKind>,
+    acts: Activities,
+    acts_due: DueList,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -261,6 +269,74 @@ fn header(kinds: &[String]) -> Header {
     Header::read(&encode(&v).expect("a header's bytes")).expect("a header")
 }
 
+/// The tree's role name of entry `kind`'s link `t`: `<namespace>:t`, as worldd names an entry's roles.
+fn role_of(kind: &str, t: &str) -> String {
+    format!("{}:{t}", kind.split_once(':').map_or("world", |(n, _)| n))
+}
+
+/// The activity kinds the entries' roles make (B10), as worldd serves them (`worldd::serve::activity_kinds`): one
+/// for each entry with two or more roles, each role claiming a hand and holding its entry's link of its name on the
+/// entry's own thing. Its pin here is the gate's own, not the served one.
+fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
+    let mut out = BTreeMap::new();
+    for (kind, entry) in kinds.obj().unwrap_or(&[]) {
+        let roles: Vec<&String> = entry
+            .get("roles")
+            .and_then(J::obj)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|(n, v)| n != "now" && v.obj().is_some())
+            .map(|(n, _)| n)
+            .collect();
+        if roles.len() < 2 {
+            continue;
+        }
+        let mut most = 0usize;
+        let mut rs = Vec::new();
+        for role in roles {
+            let link = entry.get("links").and_then(|l| l.get(role));
+            most += match link.and_then(|l| l.get("most")) {
+                Some(J::Int(n)) => usize::try_from(*n).unwrap_or(1),
+                _ => 1,
+            };
+            let from = link.and_then(|l| l.get("from")).and_then(J::str);
+            rs.push(Role {
+                name: name(&role_of(kind, role)),
+                place: name("souls:here"),
+                claims: vec![Want::One(Class::Manipulator)],
+                mv: None,
+                stands: Vec::new(),
+                within: None,
+                link: matches!(from, Some("body" | "soul")).then(|| RoleLink {
+                    ty: name(&replica::audience::link_type(kind, role)),
+                    soul: from == Some("soul"),
+                    on: kind.clone(),
+                }),
+            });
+        }
+        let pin: String = Hash::of(Purpose::Fixture, format!("souls/entry-v2/activity/{kind}").as_bytes())
+            .to_bytes()
+            .iter()
+            .skip(2)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        out.insert(
+            kind.clone(),
+            ActivityKind {
+                name: name(&format!("{kind}_activity@1220{pin}")),
+                revision: 1,
+                roles: rs,
+                proposal_lasts: 60_000_000,
+                leave_within: 400_000,
+                most: most.max(2),
+                beat: false,
+                follows: None,
+            },
+        );
+    }
+    out
+}
+
 impl Stage {
     fn new() -> Stage {
         let g = ground();
@@ -305,6 +381,9 @@ impl Stage {
             unapplied: 0,
             refused_by: BTreeMap::new(),
             scene_refused: Vec::new(),
+            roles: BTreeMap::new(),
+            acts: Activities::new(header(&[]), Rules::default(), 0, Vec::new()),
+            acts_due: DueList::new(),
         };
         s.look();
         s
@@ -354,6 +433,23 @@ impl Stage {
         if let Some(root) = self.full.get(PLACE).and_then(|p| admits.get_mut(p)) {
             root.children.extend(every);
         }
+        // B10: each entry's activity is pinned, and its own thing takes it as a child, as worldd serves it.
+        self.roles = role_kinds(&self.kinds);
+        for (kind, a) in &self.roles {
+            admits.insert(
+                a.name.as_str().to_owned(),
+                replica::world_model::Kind {
+                    owner: "activity".into(),
+                    children: Default::default(),
+                    slots: Default::default(),
+                    hands: None,
+                    fields: Default::default(),
+                },
+            );
+            if let Some(t) = self.full.get(kind).and_then(|f| admits.get_mut(f)) {
+                t.children.insert(plain(a.name.as_str()).to_owned());
+            }
+        }
         let pinned: Vec<String> = admits.keys().cloned().collect();
         self.header = header(&pinned);
         self.rules = Rules {
@@ -361,6 +457,12 @@ impl Stage {
             souls: BTreeSet::from([self.soul]),
             audiences: BTreeMap::new(),
         };
+        self.acts = Activities::new(
+            self.header.clone(),
+            self.rules.clone(),
+            0,
+            self.roles.values().cloned().collect(),
+        );
         let place = self.full[PLACE].clone();
         self.tree = Tree::start(ground_id(), name(&place));
         self.forms.zone(self.header.clone());
@@ -900,6 +1002,9 @@ impl Stage {
     /// What a case leaves behind taken away, so the next starts as the first: what the body holds, the other
     /// bodies the case named (and what they hold), and the body's and its Soul's links but its own.
     fn reset(&mut self) -> J {
+        if let Err(why) = self.leave_activities() {
+            return err(format!("the case's activities could not be left: {why}"));
+        }
         let bodies: Vec<Id> = std::mem::take(&mut self.others)
             .into_iter()
             .filter(|(k, id)| k.starts_with("body:") && *id != self.body)
@@ -941,6 +1046,171 @@ impl Stage {
         }
         self.look();
         obj(vec![])
+    }
+
+    /// The engine's activities given the world as it stands, then their entries logged.
+    fn with_acts<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, Refusal>,
+    ) -> Result<T, String> {
+        self.acts.next = self.tree.next();
+        self.acts.rules = self.rules.clone();
+        let r = f(self);
+        for e in std::mem::take(&mut self.acts.stream) {
+            self.commit(e);
+        }
+        r.map_err(|r| format!("{}: {}", r.name, r.detail))
+    }
+
+    fn asking(&mut self, body: Id) -> Asking {
+        Asking {
+            soul: self.souls_of.get(&body).copied().unwrap_or(self.soul),
+            intent: self.mint.mint().unwrap_or(self.soul),
+            at: self.now,
+        }
+    }
+
+    /// B10: the case's members of `thing`'s activity take their roles as a world's Souls do: the first role's first
+    /// end offers it at the thing to the other role's ends, and each accepts. A side the case leaves empty is filled
+    /// by a stand-in body that leaves once the others are in, so its link is gone again. The engine writes each
+    /// member's role link (`sim::activity`); none is written here.
+    fn seat(&mut self, thing: Id, kind: &str, seats: &[(String, Vec<Id>)]) -> Result<(), String> {
+        let Some(a) = self.roles.get(kind).cloned() else {
+            return Ok(());
+        };
+        if seats.iter().all(|(_, e)| e.is_empty()) {
+            return Ok(());
+        }
+        let [r1, r2] = &a.roles[..] else {
+            return Err(format!("{kind}: {} roles; an offer takes two", a.roles.len()));
+        };
+        let ends = |r: &Role| {
+            seats
+                .iter()
+                .find(|(n, _)| *n == r.name.as_str())
+                .map_or_else(Vec::new, |(_, e)| e.clone())
+        };
+        let (first, second) = (ends(r1), ends(r2));
+        if first.len() > 1 {
+            return Err(format!(
+                "{} has {} members; the one who offers takes it alone",
+                r1.name.as_str(),
+                first.len()
+            ));
+        }
+        let mut stand_ins = Vec::new();
+        let asker = match first.first() {
+            Some(b) => *b,
+            None => {
+                let b = self.stand_in("stand-in-1");
+                stand_ins.push(b);
+                b
+            }
+        };
+        let asked: Vec<Id> = match second.is_empty() {
+            false => second,
+            true => {
+                let b = self.stand_in("stand-in-2");
+                stand_ins.push(b);
+                vec![b]
+            }
+        };
+        let ask = self.asking(asker);
+        let (kname, rname) = (a.name.clone(), r1.name.clone());
+        let to: BTreeSet<Id> = asked.iter().copied().collect();
+        let offer = self.with_acts(|s| {
+            s.acts.offer(
+                &mut s.tree,
+                &mut s.mint,
+                &mut s.acts_due,
+                ask,
+                asker,
+                &kname,
+                &rname,
+                thing,
+                to,
+                None,
+            )
+        })?;
+        for b in asked {
+            let ask = self.asking(b);
+            self.with_acts(|s| {
+                s.acts
+                    .accept(&mut s.tree, &mut s.mint, &mut s.c, &mut s.acts_due, ask, b, offer)
+            })?;
+        }
+        for b in stand_ins {
+            let ask = self.asking(b);
+            self.with_acts(|s| {
+                s.acts.leave(
+                    &mut s.tree,
+                    &mut s.c,
+                    &mut s.moves,
+                    &mut s.acts_due,
+                    &mut s.mint,
+                    ask,
+                    b,
+                    offer,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// A body of the gate's own standing beside this one, with its Soul: a role's stand-in (B10).
+    fn stand_in(&mut self, n: &str) -> Id {
+        let id = self.other(n, true);
+        if !self.souls_of.contains_key(&id) {
+            let sid = self.other(&format!("{n}'s soul"), false);
+            if let Ok(link) = self.mint.mint() {
+                let _ = self.write(vec![Change::Link {
+                    link,
+                    ty: name(BODY_OF),
+                    ends: [id, sid],
+                    owner: End::First,
+                    audience: Audience::Everyone,
+                }]);
+            }
+            self.souls_of.insert(id, sid);
+        }
+        id
+    }
+
+    /// Every member of every activity leaves it (B10): a case's roles end with the case.
+    fn leave_activities(&mut self) -> Result<(), String> {
+        for act in self.acts.ids() {
+            let members: Vec<(Id, Id)> = self
+                .acts
+                .members(act)
+                .unwrap_or(&[])
+                .iter()
+                .map(|m| (m.body, m.soul))
+                .collect();
+            for (body, soul) in members {
+                let ask = Asking {
+                    soul,
+                    intent: self.mint.mint().unwrap_or(soul),
+                    at: self.now,
+                };
+                self.with_acts(|s| {
+                    s.acts.leave(
+                        &mut s.tree,
+                        &mut s.c,
+                        &mut s.moves,
+                        &mut s.acts_due,
+                        &mut s.mint,
+                        ask,
+                        body,
+                        act,
+                    )
+                })?;
+            }
+        }
+        // A leave lets a body in a move go at the move's next phase end: let every one go now.
+        while let Some(t) = self.acts_due.fire(Micros::MAX) {
+            self.acts.fire(&mut self.c, &mut self.moves, &mut self.acts_due, &t);
+        }
+        Ok(())
     }
 
     /// The things in `body`'s hands, by hand.
@@ -995,11 +1265,29 @@ impl Stage {
                     }
                 }
             };
-        let bodies: Vec<(String, String)> = nodes
+        let mut bodies: Vec<(String, String)> = nodes
             .iter()
             .filter(|(k, n)| *k == actor || (n.get("hands").is_some() && n.get("kind").is_none()))
             .map(|(k, n)| (k.clone(), soul_of(k, n)))
             .collect();
+        // B10: an end of a role's link is a member's body: it takes its role by an accept, so it is a body here.
+        for (_, n) in nodes {
+            let kind = n.get("kind").and_then(J::str).unwrap_or_default();
+            let Some(a) = self.roles.get(kind) else {
+                continue;
+            };
+            for (t, ends) in n.get("links").and_then(J::obj).unwrap_or(&[]) {
+                if !a.roles.iter().any(|r| role_of(kind, t) == r.name.as_str()) {
+                    continue;
+                }
+                for e in strs(Some(ends)) {
+                    if !nodes.iter().any(|(k, _)| *k == e) && !bodies.iter().any(|(b, _)| *b == e) {
+                        let s = soul_of(&e, &J::Null);
+                        bodies.push((e, s));
+                    }
+                }
+            }
+        }
         for (b, s) in bodies {
             let id = self.other(&b, true);
             out.add(&b, id);
@@ -1204,12 +1492,22 @@ impl Stage {
                 .map(|(_, v)| v.clone())
                 .unwrap_or(J::Null);
             let mut cs = Vec::new();
+            let mut seats: Vec<(String, Vec<Id>)> = Vec::new();
             for t in declared {
                 let ty = replica::audience::link_type(&kind, &t);
                 let want: Vec<Id> = strs(node.get("links").and_then(|l| l.get(&t)))
                     .iter()
                     .filter_map(|e| names.to_id.get(e).copied())
                     .collect();
+                // B10: a role's link is never written here: its ends take the role (below).
+                if self
+                    .roles
+                    .get(&kind)
+                    .is_some_and(|a| a.roles.iter().any(|r| r.name.as_str() == role_of(&kind, &t)))
+                {
+                    seats.push((role_of(&kind, &t), want));
+                    continue;
+                }
                 let have: Vec<(Id, Id)> = self
                     .tree
                     .links_at(*id)
@@ -1243,6 +1541,10 @@ impl Stage {
             {
                 self.scene_refused
                     .push(format!("{n}'s links: {}: {}", r.name, r.detail));
+                unset.insert(*id);
+            }
+            if let Err(why) = self.seat(*id, &kind, &seats) {
+                self.scene_refused.push(format!("{n}'s roles: {why}"));
                 unset.insert(*id);
             }
         }
@@ -1861,6 +2163,18 @@ impl Stage {
             }
         }
         self.c = c;
+        // A new process's activities: read back from their nodes and membership links (E26).
+        match Activities::restore(
+            self.header.clone(),
+            self.rules.clone(),
+            self.roles.values().cloned().collect(),
+            &self.tree,
+            &mut self.c,
+        ) {
+            Ok(a) => self.acts = a,
+            Err(r) => return err(format!("activities: {}: {}", r.name, r.detail)),
+        }
+        self.acts_due = DueList::new();
         self.surfaces = BTreeMap::from([(ground_id(), g)]);
         self.due = DueList::new();
         self.moves = Moves::new();

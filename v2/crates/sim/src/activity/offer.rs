@@ -46,7 +46,7 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{Audience, End, show};
 
-use super::{Activities, Ask, Live, R, create, minted, name, refuse};
+use super::{Activities, Ask, Bound, Live, R, create, minted, name, refuse};
 use crate::controller::Controller;
 use crate::slots::hands::{free_hands, hands, occupies, transfer};
 use crate::timers::{DueList, Timer};
@@ -223,9 +223,17 @@ impl Activities {
         if let Some(thing) = given {
             fields.insert(6, thing.to_value());
         }
+        // B10: the asker's role link on the activity's thing, when it is offered at one.
+        let bound: Vec<Bound> = match given {
+            Some(_) => Vec::new(),
+            None => self
+                .role_link(tree, mint, kind, place, &node.members[0])?
+                .into_iter()
+                .collect(),
+        };
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(tree, place, audience, by, OFFER, fields, changes)?;
+        self.emit_with(tree, place, audience, by, OFFER, fields, changes, bound)?;
         if given.is_none() {
             self.live.insert(
                 id,
@@ -385,10 +393,15 @@ impl Activities {
             ];
             (pair, node, changes)
         };
+        // B10: the role links of the pair's members on the activity's thing (the asker's is there already).
+        let mut bound: Vec<Bound> = Vec::new();
+        for m in &node.members {
+            bound.extend(self.role_link(tree, mint, &o.kind, o.place, m)?);
+        }
         let fields = BTreeMap::from([(1, offer.to_value())]);
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(
+        self.emit_with(
             tree,
             if first { offer } else { o.place },
             o.audience,
@@ -396,6 +409,7 @@ impl Activities {
             "souls:activity-joined",
             fields,
             changes,
+            bound,
         )?;
         self.live
             .entry(pair)
@@ -478,19 +492,25 @@ impl Activities {
                     );
                 }
                 let role = k.role(&o.other).expect("the offer's other role");
-                Some(c.claim(body, &k.shape(role))?)
+                Some(c.claim(body, &self.role_shape(tree, k, role, Some(o.place)))?)
             }
             State::Proposed => None,
         };
         let link = minted(mint)?;
         let mut node = l.node.clone();
-        node.members.push(Member {
+        let me = Member {
             role: o.other.clone(),
             body,
             soul: ask.soul,
             link,
             intent: ask.intent,
-        });
+        };
+        // B10: its role link on the activity's thing.
+        let bound: Vec<Bound> = self
+            .role_link(tree, mint, &o.kind, o.place, &me)?
+            .into_iter()
+            .collect();
+        node.members.push(me);
         let changes = vec![
             Change::Link {
                 link,
@@ -508,7 +528,7 @@ impl Activities {
         ];
         let fields = BTreeMap::from([(1, offer.to_value())]);
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        if let Err(r) = self.emit(
+        if let Err(r) = self.emit_with(
             tree,
             offer,
             o.audience,
@@ -516,6 +536,7 @@ impl Activities {
             "souls:activity-joined",
             fields,
             changes,
+            bound,
         ) {
             if let Some(d) = driver {
                 let _ = c.release(body, d);
@@ -641,9 +662,9 @@ impl Activities {
     ) -> R<()> {
         let o = self.answerable(offer, body, ask.at)?;
         let ended = !o.taken && o.answered.len() + 1 == o.asked.len();
-        let changes = match ended {
-            true => self.withdraw(offer),
-            false => Vec::new(),
+        let (changes, bound) = match ended {
+            true => (self.withdraw(offer), self.role_unlinks(tree, offer)),
+            false => (Vec::new(), Vec::new()),
         };
         let fields = BTreeMap::from([
             (1, offer.to_value()),
@@ -656,7 +677,16 @@ impl Activities {
             o.place
         };
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(tree, node, o.audience, by, OFFER_DECLINED, fields, changes)?;
+        self.emit_with(
+            tree,
+            node,
+            o.audience,
+            by,
+            OFFER_DECLINED,
+            fields,
+            changes,
+            bound,
+        )?;
         if ended {
             self.live.remove(&offer);
             self.offers.open.remove(&offer);
@@ -713,9 +743,9 @@ impl Activities {
         };
         let unanswered: Vec<&Id> = o.asked.difference(&o.answered).collect();
         let ended = !o.taken && self.live.contains_key(&offer);
-        let changes = match ended {
-            true => self.withdraw(offer),
-            false => Vec::new(),
+        let (changes, bound) = match ended {
+            true => (self.withdraw(offer), self.role_unlinks(tree, offer)),
+            false => (Vec::new(), Vec::new()),
         };
         if unanswered.is_empty() && changes.is_empty() {
             return Ok(());
@@ -731,7 +761,16 @@ impl Activities {
             o.place
         };
         let by = (now, Actor::World, Cause::Effect(o.sequence));
-        self.emit(tree, node, o.audience, by, OFFER_LAPSED, fields, changes)?;
+        self.emit_with(
+            tree,
+            node,
+            o.audience,
+            by,
+            OFFER_LAPSED,
+            fields,
+            changes,
+            bound,
+        )?;
         if ended {
             self.live.remove(&offer);
         }
@@ -765,8 +804,18 @@ impl Activities {
                 (4, pair.to_value()),
             ]);
             let changes = self.withdraw(pair);
+            let bound = self.role_unlinks(tree, pair);
             let by = (now, Actor::World, Cause::Effect(p.sequence));
-            self.emit(tree, pair, audience, by, OFFER_LAPSED, fields, changes)?;
+            self.emit_with(
+                tree,
+                pair,
+                audience,
+                by,
+                OFFER_LAPSED,
+                fields,
+                changes,
+                bound,
+            )?;
             self.live.remove(&pair);
         }
         self.advance(tree, c, due, p.asker, now);

@@ -62,6 +62,21 @@ pub struct Role {
     /// How near the activity's middle a member stands to be walked to its stand, µm (0.135 G3, the entry's
     /// `within_mm`): one farther keeps where it is. None: any distance.
     pub within: Option<i64>,
+    /// The link a member of this role holds on the activity's thing while it is a member (B10, #4239): the entry's
+    /// link of the role's name, which its forms' `who: {link}` and `linked` needs read. None: no link is written.
+    pub link: Option<RoleLink>,
+}
+
+/// A role's link on the activity's thing (B10, #4239). The activity's thing is the node its offer or proposal was
+/// made under when that node is of kind `on` (an entry's own thing, whose roles made the activity's kind); on any
+/// other place (the open ground) no link is written. The link is of tree type `ty`, from the member's body (or its
+/// Soul when `soul`) to the thing, owned by the thing, as a form's `link` effect writes it (`sim::forms::links`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoleLink {
+    pub ty: Name,
+    pub soul: bool,
+    /// The plain kind of the thing the link is written on.
+    pub on: String,
 }
 
 /// An activity's kind, as data.
@@ -194,6 +209,7 @@ impl ActivityKind {
                 mv,
                 stands,
                 within,
+                link: None,
             });
         }
         if roles.len() < 2 {

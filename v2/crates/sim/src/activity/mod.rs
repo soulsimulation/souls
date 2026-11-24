@@ -41,6 +41,13 @@
 //! - **A leave completes within the time the kind states.** Membership ends at once, in the log. A body with no move
 //!   in progress is let go at once; a body in a move is let go at the move's next phase end, or at the kind's
 //!   `leave_within`, whichever is first, by a timer in K9's due list ([`Activities::fire`]).
+//! - **A role binds its member on the activity's thing (B10, #4239).** An activity offered or proposed at a thing
+//!   whose kind its roles' links are on (an entry's own thing, [`replica::activity::RoleLink`]) is that thing's: each
+//!   member holds its role's link on the thing, its body (or Soul) to the thing, owned by the thing, so the entry's
+//!   forms that ask for the link (`who: {link}`, a `linked` need) pass for it and refuse others by name. The link is
+//!   written in the part of the offer, accept or join that makes the member, one more effect at the thing acted and
+//!   caused as that step; it is taken down in the part of its leave, or of the offer's lapse or decline that ends the
+//!   node, unless the member holds the same role at the thing in another activity. On the open ground none is written.
 //! - **A restart does not end an activity.** Its node and its membership links are in the log; [`Activities::restore`]
 //!   reads them back and takes each started activity's claims again. A move in progress is not stored, so after a
 //!   restart no claim is held by a move that did not come back, and a member can leave at once.
@@ -51,7 +58,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use replica::activity::{ActivityKind, F_MEMBERS, F_STATE, MEMBER, Member, Node, State};
+use replica::activity::{
+    ActivityKind, F_MEMBERS, F_STATE, MEMBER, Member, Node, RoleLink, State,
+};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
 };
@@ -61,7 +70,7 @@ use replica::moves::Move;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::time::{Micros, Timeline};
 use replica::tree::{Rules, Tree};
-use replica::world_model::{Audience, End, show};
+use replica::world_model::{Audience, End, plain, show};
 
 use crate::controller::{Controller, Driver};
 use crate::moves::{Instance, Moves, Reach};
@@ -74,6 +83,16 @@ pub mod places;
 pub mod seating;
 
 type R<T> = Result<T, Refusal>;
+
+/// One more effect in an activity's part (B10): its node, its audience and its changes.
+type Bound = (Id, Audience, Vec<Change>);
+
+/// The node `id` is under, if it is in the tree.
+fn parent(tree: &Tree, id: Id) -> Option<Id> {
+    tree.handle(id)
+        .and_then(|h| tree.node(h))
+        .and_then(|n| n.parent())
+}
 
 fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     Err(Refusal {
@@ -283,8 +302,32 @@ impl Activities {
         event: &'static str,
         changes: Vec<Change>,
     ) -> R<()> {
+        self.write_with(tree, node, audience, ask, event, changes, Vec::new())
+    }
+
+    /// [`Activities::write`] with `bound` in its part ([`Activities::emit_with`]).
+    #[allow(clippy::too_many_arguments)]
+    fn write_with(
+        &mut self,
+        tree: &mut Tree,
+        node: Id,
+        audience: Audience,
+        ask: Ask,
+        event: &'static str,
+        changes: Vec<Change>,
+        bound: Vec<Bound>,
+    ) -> R<()> {
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(tree, node, audience, by, event, BTreeMap::new(), changes)
+        self.emit_with(
+            tree,
+            node,
+            audience,
+            by,
+            event,
+            BTreeMap::new(),
+            changes,
+            bound,
+        )
     }
 
     /// Writes one effect at `node`: `by` is (when, who acted, why), with one event of `fields` naming every change.
@@ -298,6 +341,23 @@ impl Activities {
         event: &'static str,
         fields: BTreeMap<u64, Value>,
         changes: Vec<Change>,
+    ) -> R<()> {
+        self.emit_with(tree, node, audience, by, event, fields, changes, Vec::new())
+    }
+
+    /// [`Activities::emit`] with `bound` after it in the same part: each one more effect at its node, with no event,
+    /// acted and caused alike (B10: a role's links written or taken down with the membership that holds them).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_with(
+        &mut self,
+        tree: &mut Tree,
+        node: Id,
+        audience: Audience,
+        by: (Micros, Actor, Cause),
+        event: &'static str,
+        fields: BTreeMap<u64, Value>,
+        changes: Vec<Change>,
+        bound: Vec<Bound>,
     ) -> R<()> {
         let n = changes.len() as u64;
         let effect = Effect {
@@ -326,9 +386,36 @@ impl Activities {
             }]),
             rest: Rest::new(),
         };
+        let mut effects = vec![effect];
+        for (k, (node, audience, changes)) in bound.into_iter().enumerate() {
+            effects.push(Effect {
+                envelope: Envelope {
+                    sequence: self.next + 1 + k as u64,
+                    at: by.0,
+                    cause: by.2,
+                    actor: by.1,
+                    audience,
+                    node,
+                },
+                body: Body::Changes(
+                    changes
+                        .into_iter()
+                        .map(|change| ChangeRec {
+                            change,
+                            rest: Rest::new(),
+                        })
+                        .collect(),
+                ),
+                events: None,
+                rest: Rest::new(),
+            });
+        }
         let bytes = encode(&Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.header.hash().to_bytes())),
-            (2, Value::Array(vec![effect.to_value()])),
+            (
+                2,
+                Value::Array(effects.iter().map(Effect::to_value).collect()),
+            ),
         ])))
         .map_err(|e| Refusal {
             name: "encoding",
@@ -337,9 +424,127 @@ impl Activities {
         let part = Part::read(&bytes)?;
         self.structure.check(tree, &part.effects)?;
         tree.commit(&self.header, &part, &self.rules)?;
-        self.next += 1;
-        self.stream.push(effect);
+        self.next += effects.len() as u64;
+        self.stream.extend(effects);
         Ok(())
+    }
+
+    /// The role link (B10) `kind`'s `role` names, and `place`'s audience, when `place` is a thing of the kind that
+    /// link is on; else None (an activity on the open ground binds nothing).
+    fn bound_on(
+        &self,
+        tree: &Tree,
+        kind: &Name,
+        place: Id,
+        role: &Name,
+    ) -> Option<(RoleLink, Audience)> {
+        let link = self.kinds.get(kind)?.role(role)?.link.as_ref()?;
+        let n = tree.handle(place).and_then(|h| tree.node(h))?;
+        (plain(n.kind().as_str()) == link.on).then(|| (link.clone(), n.audience()))
+    }
+
+    /// What `role` of `kind` claims on its member's body when its activity is under `place`: the role's claims, or
+    /// nothing when the activity is bound to its thing there (B10): it is played through the thing's own forms, whose
+    /// runs take what they use, so its members' hands stay theirs.
+    pub(super) fn role_shape(
+        &self,
+        tree: &Tree,
+        kind: &ActivityKind,
+        role: &replica::activity::Role,
+        place: Option<Id>,
+    ) -> replica::bodies::SkillShape {
+        let mut shape = kind.shape(role);
+        if place.is_some_and(|p| self.bound_on(tree, &kind.name, p, &role.name).is_some()) {
+            shape.claims.clear();
+        }
+        shape
+    }
+
+    /// `place`'s own links of type `ty` ending at `end`.
+    fn role_links_at(tree: &Tree, place: Id, ty: &Name, end: Id) -> Vec<Id> {
+        tree.links_at(place)
+            .iter()
+            .filter(|e| tree.ty(e) == ty && e.other == end)
+            .filter(|e| {
+                tree.link(e.link).is_some_and(|(_, ends, owner, _)| {
+                    ends[usize::from(owner == End::Second)] == place
+                })
+            })
+            .map(|e| e.link)
+            .collect()
+    }
+
+    /// The entry that gives member `m` of an activity of `kind` under `place` its role's link (B10): its body (or its
+    /// Soul) linked to the thing, owned by the thing. None when its role binds nothing there, or the link is there.
+    fn role_link(
+        &self,
+        tree: &Tree,
+        mint: &mut Minter,
+        kind: &Name,
+        place: Id,
+        m: &Member,
+    ) -> R<Option<Bound>> {
+        let Some((rl, audience)) = self.bound_on(tree, kind, place, &m.role) else {
+            return Ok(None);
+        };
+        let end = if rl.soul { m.soul } else { m.body };
+        if !Self::role_links_at(tree, place, &rl.ty, end).is_empty() {
+            return Ok(None);
+        }
+        let link = minted(mint)?;
+        Ok(Some((
+            place,
+            audience,
+            vec![Change::Link {
+                link,
+                ty: rl.ty,
+                ends: [end, place],
+                owner: End::Second,
+                audience,
+            }],
+        )))
+    }
+
+    /// The entry that takes down the role link (B10) member `m` of `activity` holds on its thing, as it stops being a
+    /// member. None when it binds nothing, or the member holds the same role on the same thing in another activity.
+    fn role_unlink(&self, tree: &Tree, activity: Id, m: &Member) -> Option<Bound> {
+        let l = self.live.get(&activity)?;
+        let place = parent(tree, activity)?;
+        let (rl, audience) = self.bound_on(tree, &l.kind, place, &m.role)?;
+        let other = self.live.iter().any(|(id, o)| {
+            *id != activity
+                && o.kind == l.kind
+                && parent(tree, *id) == Some(place)
+                && o
+                    .node
+                    .members
+                    .iter()
+                    .any(|x| x.body == m.body && x.role == m.role)
+        });
+        let end = if rl.soul { m.soul } else { m.body };
+        let links = Self::role_links_at(tree, place, &rl.ty, end);
+        if other || links.is_empty() {
+            return None;
+        }
+        Some((
+            place,
+            audience,
+            links
+                .into_iter()
+                .map(|link| Change::Unlink { link })
+                .collect(),
+        ))
+    }
+
+    /// The entries that take down the role links of every member of `activity` (B10), as its node ends.
+    pub(super) fn role_unlinks(&self, tree: &Tree, activity: Id) -> Vec<Bound> {
+        self.live.get(&activity).map_or_else(Vec::new, |l| {
+            l.node
+                .members
+                .iter()
+                .filter_map(|m| self.role_unlink(tree, activity, m))
+                .collect()
+        })
     }
 
     /// `entries` as one part, caused and acted as `by` says, with no event: a give's transfer (T1's leave and arrive).
@@ -487,14 +692,24 @@ impl Activities {
         }
         let link = minted(mint)?;
         let mut node = l.node.clone();
-        node.members.push(Member {
+        let me = Member {
             role: role.clone(),
             body,
             soul: ask.soul,
             link,
             intent: ask.intent,
-        });
+        };
+        let kind = l.kind.clone();
+        node.members.push(me.clone());
         let audience = l.audience;
+        // B10: the role's link on the activity's thing, in the join's part.
+        let bound: Vec<Bound> = match parent(tree, activity) {
+            Some(place) => self
+                .role_link(tree, mint, &kind, place, &me)?
+                .into_iter()
+                .collect(),
+            None => Vec::new(),
+        };
         let changes = vec![
             Change::Link {
                 link,
@@ -510,13 +725,14 @@ impl Activities {
                 by: None,
             },
         ];
-        self.write(
+        self.write_with(
             tree,
             activity,
             audience,
             ask,
             "souls:activity-joined",
             changes,
+            bound,
         )?;
         if let Some(l) = self.live.get_mut(&activity) {
             l.node = node;
@@ -559,15 +775,14 @@ impl Activities {
                 );
             }
         }
+        let place = parent(tree, activity);
         let shapes: Vec<_> = l
             .node
             .members
             .iter()
             .map(|m| {
-                (
-                    m.body,
-                    kind.shape(kind.role(&m.role).expect("a member's role")),
-                )
+                let role = kind.role(&m.role).expect("a member's role");
+                (m.body, self.role_shape(tree, kind, role, place))
             })
             .collect();
         for (body, shape) in &shapes {
@@ -1133,6 +1348,11 @@ impl Activities {
         let member = node.members.remove(i);
         let audience = l.audience;
         let within = self.kinds[&l.kind].leave_within;
+        // B10: the role's link on the activity's thing goes with the membership.
+        let bound: Vec<Bound> = self
+            .role_unlink(tree, activity, &member)
+            .into_iter()
+            .collect();
         let mut changes = vec![Change::Unlink { link: member.link }];
         changes.push(if node.members.is_empty() {
             Change::Remove { node: activity }
@@ -1144,13 +1364,14 @@ impl Activities {
                 by: None,
             }
         });
-        self.write(
+        self.write_with(
             tree,
             activity,
             audience,
             ask,
             "souls:activity-left",
             changes,
+            bound,
         )?;
         let l = self.live.get_mut(&activity).expect("live above");
         l.node = node;
@@ -1432,10 +1653,11 @@ impl Activities {
             if node.state == State::Started {
                 let kind = &a.kinds[&n.kind];
                 for m in &node.members {
-                    let shape = kind.shape(kind.role(&m.role).ok_or_else(|| Refusal {
+                    let role = kind.role(&m.role).ok_or_else(|| Refusal {
                         name: "role-unknown",
                         detail: m.role.as_str().to_owned(),
-                    })?);
+                    })?;
+                    let shape = a.role_shape(tree, kind, role, parent(tree, *id));
                     match c.claim(m.body, &shape) {
                         Ok(d) => {
                             drivers.insert(m.body, d);

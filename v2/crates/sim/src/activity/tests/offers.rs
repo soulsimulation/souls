@@ -34,7 +34,7 @@ fn bodies(v: Option<&Value>) -> Vec<Id> {
 
 impl World {
     /// Soul `who` offers the pair, in its first role, to `asked`.
-    fn offer(&mut self, who: usize, asked: BTreeSet<Id>, at: Micros) -> Id {
+    pub(super) fn offer(&mut self, who: usize, asked: BTreeSet<Id>, at: Micros) -> Id {
         let ask = self.ask(who, at);
         let body = self.bodies[who];
         self.acts
@@ -53,7 +53,7 @@ impl World {
             .expect("offered")
     }
 
-    fn accept(
+    pub(super) fn accept(
         &mut self,
         who: usize,
         offer: Id,
@@ -73,7 +73,7 @@ impl World {
     }
 
     /// Runs every offer timer due before `before`.
-    fn lapse_until(&mut self, before: Micros) {
+    pub(super) fn lapse_until(&mut self, before: Micros) {
         while let Some(t) = self.due.fire(before) {
             self.acts
                 .lapse(&mut self.tree, &mut self.c, &mut self.due, &t)
