@@ -4126,6 +4126,7 @@ impl Clock {
                 self.replica.tree(),
                 &mut b.runner.controller,
                 &mut b.slots,
+                &b.town.versions,
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
