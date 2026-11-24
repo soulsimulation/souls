@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { cpSync, existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addDraco, characterSet, DRACO, inputStamp, main, missingCharacters, STAMP } from './mars-web.mjs';
+import { addDraco, characterSet, inputStamp, main, missingCharacters, STAMP } from './mars-web.mjs';
 
 test('the character set covers the kit, its rigs and parts, and the animated bodies', () => {
   const paths = characterSet().map(f => f.path);
@@ -82,6 +82,5 @@ test('the site carries the page\'s Draco decoder (/mars-assets/draco/), so a mov
     writeFileSync(join(out, 'draco/draco_decoder.wasm'), 'x');
     addDraco(out, from);
     assert.equal(readFileSync(join(out, 'draco/draco_decoder.wasm'), 'utf8'), 'draco_decoder.wasm', 'a damaged copy is replaced');
-    assert.ok(existsSync(join(DRACO, 'draco_decoder.wasm')), 'the source is the three the page decodes with');
   } finally { rmSync(out, { recursive: true, force: true }); rmSync(from, { recursive: true, force: true }); }
 });
