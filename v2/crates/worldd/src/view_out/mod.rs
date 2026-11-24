@@ -70,8 +70,11 @@
 //!
 //! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and drawing the words (W4).
 
+mod backup;
 #[cfg(test)]
 mod tests;
+
+pub use backup::{Drain as BackupDrain, State as BackupState, beside as backup_beside};
 
 use std::fs;
 use std::io::Write as _;
@@ -1190,6 +1193,13 @@ pub struct PublicWriter<S> {
     /// Whether this generation keeps what closed containers hold out (#3948): its recovery seed's field 17. A stream
     /// begun before keeps it all until its next generation ([`PublicWriter::rollover`]).
     hides: bool,
+    /// R15: the recovery chain written here first and backed up to the store behind the stream ([`backup`]); none:
+    /// written to the store before each part is published, as before.
+    spool: Option<backup::Spool>,
+    /// R15: after a recovery from the store alone, the next cut is a fresh generation, once the source cursor has
+    /// passed `fresh_at`, the cursor recovered ([`PublicWriter::fresh_generation`]).
+    fresh: bool,
+    fresh_at: u64,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1481,6 +1491,10 @@ impl<S: ObjectStore> PublicWriter<S> {
     fn put(&self, bytes: &[u8]) -> R<Vec<u8>> {
         let hash = replica::ids::sha256(bytes).to_vec();
         let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(&hash));
+        if let Some(spool) = &self.spool {
+            spool.object(&key, bytes)?;
+            return Ok(hash);
+        }
         match self.store.put(&key, bytes, When::Absent) {
             Ok(_) => {}
             Err(e) if e.name == "precondition-failed" => {
@@ -1497,11 +1511,16 @@ impl<S: ObjectStore> PublicWriter<S> {
             return Err(fault("stream-recovery", "invalid object hash"));
         }
         let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(hash));
-        let bytes = self
-            .store
-            .get(&key)?
-            .ok_or_else(|| fault("stream-recovery-missing", "required immutable object"))?
-            .bytes;
+        // R15: what is not yet backed up is read from the spool.
+        let bytes = match self.spool.as_ref().and_then(|s| s.read(&key)) {
+            Some(bytes) => bytes,
+            None => {
+                self.store
+                    .get(&key)?
+                    .ok_or_else(|| fault("stream-recovery-missing", "required immutable object"))?
+                    .bytes
+            }
+        };
         if replica::ids::sha256(&bytes).as_slice() != hash {
             return Err(fault(
                 "stream-recovery-hash",
@@ -1518,6 +1537,17 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// [`PublicWriter::open`] for a world whose kinds declare `closed` (#3948): what such a container holds is kept
     /// out of the stream, its state and its entries, until it is taken out.
     pub fn open_hiding(start: PublicStart<'_>, store: S, closed: Closed) -> R<Self> {
+        Self::open_spooled(start, store, closed, None)
+    }
+    /// [`PublicWriter::open_hiding`] with its recovery chain in `spool` first (R15, [`backup`]): it recovers from the
+    /// spool's head where there is one, and writes no part's recovery objects to the store itself;
+    /// [`PublicWriter::back_up`] starts the thread that does.
+    pub fn open_spooled(
+        start: PublicStart<'_>,
+        store: S,
+        closed: Closed,
+        spool: Option<(PathBuf, String)>,
+    ) -> R<Self> {
         let PublicStart {
             root,
             header,
@@ -1603,14 +1633,42 @@ impl<S: ObjectStore> PublicWriter<S> {
             closed_kinds: closed,
             inside,
             hides: true,
+            spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
+            fresh: false,
+            fresh_at: 0,
         };
-        if let Some(head) = w.store.get(&format!("{}head", w.prefix))? {
+        let head_key = format!("{}head", w.prefix);
+        // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
+        let (head, from_store) = match w.spool.as_ref().and_then(|s| s.read(&head_key)) {
+            Some(bytes) => (
+                Some(directoryd::directory::store::Object {
+                    etag: String::new(),
+                    bytes,
+                }),
+                false,
+            ),
+            None => (w.store.get(&head_key)?, true),
+        };
+        // R15: a spooled writer that recovered from the store alone (a new machine, or a spool lost) may be behind
+        // what an earlier writer published from its own spool: it starts a new generation below, so it never cuts a
+        // part at an address of that lost tail (rule: exact bytes before exposure).
+        let mut fresh = false;
+        if let Some(head) = head {
             let h = object_map(&head.bytes)?;
             let hash = obj_bytes(&h, 1)?;
-            w.etag = Some(head.etag);
             w.recover(&hash)?;
+            if from_store && let Some(spool) = &w.spool {
+                // The store's head as this writer found it: what its backup writes against, and fences on.
+                spool.confirm(&head_key, &head.bytes, &head.etag)?;
+                fresh = true;
+            }
+            w.etag = Some(head.etag);
             w.head = Some(hash);
         } else {
+            if let Some(spool) = &w.spool {
+                // A new chain: the store had no head, and its backup's first head is created, not put over one.
+                spool.confirm(&head_key, &[], "")?;
+            }
             if record != 0 && checkpoint.is_none() {
                 return Err(fault(
                     "stream-recovery-checkpoint",
@@ -1798,7 +1856,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         )?;
         w.closed_generations();
         // A writer stopped between a generation's last part and its rollover rolls over now, at the same place.
-        if w.rollover_due() {
+        // A fresh writer cuts no part, and rolls over at no cursor the store names: its new generation waits for the
+        // source to move on ([`PublicWriter::fresh_generation`]).
+        let fresh = fresh && !w.force_remainder && w.migration_cut.is_none();
+        w.fresh = fresh;
+        w.fresh_at = w.cursor;
+        if w.rollover_due() && !fresh {
             w.rollover()?;
         }
         w.prune();
@@ -2065,7 +2128,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         let number = self.player.next();
         // A generation begun before #3948 keeps closed contents out from the next one on: its baseline is the state
         // with them left out, and, when that differs from the last state, it has no hand-off.
-        let switch = !self.hides;
+        // R15: a fresh generation (after a recovery from the store alone) starts from the source's state too, with the
+        // records it took since in its baseline, and no hand-off.
+        let switch = !self.hides || self.fresh;
+        let hides = self.hides;
         let (baseline, state) = if switch {
             let state = shown(
                 &self.header,
@@ -2114,7 +2180,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.live = [seed_hash.clone(), text.clone()].into();
         if let Err(e) = self.commit(&manifest) {
             self.live = live;
-            self.hides = !switch;
+            self.hides = hides;
             return Err(e);
         }
         self.seed = seed_hash;
@@ -2125,6 +2191,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.prune();
         self.prune_store();
         Ok(())
+    }
+    /// R15: the fresh generation of a writer recovered from the store alone, once the source has moved past the
+    /// recovered cursor: its baseline holds the records taken since, at a later cursor than any the store names, so
+    /// it is not the id of a generation an earlier writer may have published from its own spool. Those records are in
+    /// the baseline, not in a part.
+    fn fresh_generation(&mut self) -> R<()> {
+        self.rollover()?;
+        self.fresh = false;
+        self.clear_pending();
+        self.still_at = None;
+        self.pointer(None)
     }
     /// How a live viewer crosses from the current generation (#3825): its id, the public version and part count it
     /// ends at, and its state's digest.
@@ -2341,6 +2418,27 @@ impl<S: ObjectStore> PublicWriter<S> {
         if !self.deleting || !self.deletes.is_empty() {
             return;
         }
+        if self.spool.is_some() {
+            // R15: read and deleted by the backup's thread, never on the stream's.
+            let gone = {
+                let now = crate::answers::now();
+                let grace = i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX);
+                let keep = self
+                    .closed
+                    .iter()
+                    .enumerate()
+                    .position(|(i, c)| i > 0 && now.saturating_sub(c.1) >= grace)
+                    .unwrap_or(self.closed.len());
+                self.closed.split_off(keep)
+            };
+            for (record, _) in gone.iter().rev() {
+                let key = self.object_key(record);
+                if let Some(spool) = &self.spool {
+                    spool.prune(key, self.live.clone());
+                }
+            }
+            return;
+        }
         let now = crate::answers::now();
         let grace = i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX);
         let keep = self
@@ -2501,6 +2599,23 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         Ok(())
     }
+    /// R15: backs this writer's spooled recovery chain up to `store` on its own thread ([`backup`]), telling `report`
+    /// how it stands. A writer opened without a spool has nothing to back up.
+    pub fn back_up<T: ObjectStore + Send + 'static>(
+        &mut self,
+        store: T,
+        report: Box<dyn Fn(BackupState) + Send>,
+    ) -> R<()> {
+        let prefix = self.prefix.clone();
+        match &mut self.spool {
+            Some(spool) => backup::start(spool, store, prefix, report),
+            None => Ok(()),
+        }
+    }
+    /// R15: what a stop waits on, bounded, for the backup to hold the spool's head; none before [`Self::back_up`].
+    pub fn drainer(&self) -> Option<BackupDrain> {
+        self.spool.as_ref()?.drainer()
+    }
     pub fn public_player(&self) -> &PublicPlayer {
         &self.player
     }
@@ -2511,6 +2626,11 @@ impl<S: ObjectStore> PublicWriter<S> {
             1,
             Value::Bytes(hash.clone()),
         )])))?;
+        if let Some(spool) = &self.spool {
+            spool.head(&format!("{}head", self.prefix), &bytes)?;
+            self.head = Some(hash);
+            return Ok(());
+        }
         let etag = self.store.put(
             &format!("{}head", self.prefix),
             &bytes,
@@ -3064,6 +3184,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
+        if self.fresh && self.cursor > self.fresh_at {
+            return self.fresh_generation();
+        }
         let began = trace::on().then(trace::now_ms);
         let mut lap = prof::Lap::start();
         // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
@@ -3407,8 +3530,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         ])))?;
         self.commit(&manifest)?;
         lap.mark(7);
-        // Commit exact recovery bytes before exposing local immutable files. A killed publication replays the
-        // same committed bytes, never a new cut at an orphan file's address.
+        // Commit exact recovery bytes (to the spool, R15, or else the store) before exposing local immutable files. A
+        // killed publication replays the same committed bytes, never a new cut at an orphan file's address.
         immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         lap.mark(8);
