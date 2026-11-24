@@ -27,6 +27,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// The page's pointer poll (`worker.ts`, `setInterval(poll, 250)`).
 pub const POLL: Duration = Duration::from_millis(250);
 
+/// One motion sample of a node (S11): Unix ms of its part's arrival, its pose's frame, x and z µm, and whether it moved.
+pub type Sample = (u64, Id, [i64; 2], bool);
+
 /// What the reader saw: each intent's first visible effect (Unix ms of the part's arrival), the stream's lag per part
 /// (ms), the parts read and the reads that failed.
 #[derive(Default)]
@@ -37,6 +40,12 @@ pub struct Seen {
     pub writer_lag_ms: Vec<i64>,
     pub parts: u64,
     pub failed: u64,
+    /// S11: each node's motion samples (T4's hand-offs) as the stream showed them: Unix ms of the part's arrival, the
+    /// frame its pose is in, x and z µm in that frame, and whether it was moving (a speed).
+    pub motion: HashMap<Id, Vec<Sample>>,
+    /// S11: the `body-of` links the stream showed, each its two ends: a Soul born during the run (C3: at its first
+    /// act) and its body.
+    pub body_of: Vec<[Id; 2]>,
 }
 
 /// An HTTP/1.1 GET (one connection a request, as `--remote` is plain): the status and the body.
@@ -175,6 +184,25 @@ pub async fn read(base: String, stop: Arc<AtomicBool>) -> Seen {
             for e in &part.effects {
                 if let (Cause::Intent(id), true) = (e.envelope.cause, visible(e)) {
                     seen.first.entry(id).or_insert(at);
+                }
+                if let Body::Changes(changes) = &e.body {
+                    for c in changes {
+                        if let replica::effects::Change::Link { ty, ends, .. } = &c.change
+                            && ty.as_str().ends_with("body-of")
+                        {
+                            seen.body_of.push(*ends);
+                        }
+                        if let replica::effects::Change::Motion(h) = &c.change {
+                            let p = h.pose.position;
+                            let moving = h.linear != replica::pose::Vec3::ZERO;
+                            seen.motion.entry(h.node).or_default().push((
+                                at,
+                                h.pose.frame.node,
+                                [p.x, p.z],
+                                moving,
+                            ));
+                        }
+                    }
                 }
             }
         }

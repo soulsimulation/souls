@@ -11,7 +11,10 @@
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
 //!   lines for the creator's local checks of the existing boot registrations and admissions.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
-//!   live world). The world as built is read from it at each start: its header and the walkers' town.
+//!   live world). The world as built is read from it at each start: its rules and the walkers' town.
+//! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
+//!   world under it, never under one rebuilt from the build's code ([`own_header`], [`adopt`]). `header.kinds`: the
+//!   owner of each kind it pins, `<full pin> <owner>` a line.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
@@ -130,6 +133,7 @@ use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
+use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
 #[cfg(test)]
@@ -155,6 +159,8 @@ fn stamp(stage: &str) {
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
+/// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
+const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 #[cfg(test)]
 const BOUND: usize = 1 << 16;
@@ -862,6 +868,184 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
     })
 }
 
+/// The owner of each kind a header pins, `<full pin> <owner>` a line (K16): kept beside the world's header as
+/// `header.kinds`, so a later build pairs a kind it changed with the world's revision only when both are owned alike.
+fn owners_text(built: &Built) -> String {
+    built
+        .header
+        .kinds
+        .iter()
+        .filter_map(|k| {
+            Some(format!(
+                "{} {}\n",
+                k.as_str(),
+                built.rules.kinds.get(k.as_str())?.owner
+            ))
+        })
+        .collect()
+}
+
+/// [`owners_text`] read back. A missing or unreadable file gives none, and then no kind is paired.
+fn owners(dir: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(dir.join("header.kinds"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(k, o)| (k.to_owned(), o.to_owned()))
+        .collect()
+}
+
+/// Keeps `built`'s header as the world's own (K16): `header.kinds`, then `header`, each written whole.
+fn keep_header(dir: &Path, built: &Built) -> R<()> {
+    view_out::write_whole(&dir.join("header.kinds"), owners_text(built).as_bytes())
+        .map_err(refusal)?;
+    view_out::write_whole(&dir.join("header"), built.header.stored()).map_err(refusal)
+}
+
+/// The world's own header (K16, 0.133): the one its log's parts name, kept in `<dir>/header` since the seed wrote it.
+/// A build never rebuilds it, so a change to how code or entries become kinds no longer refuses an existing world
+/// (`header-mismatch`, twice on Eden on 23 Nov). A world seeded before K16 keeps no header file: this build's is its
+/// own only if its log names it, and is then kept (`header-missing` otherwise). What is still checked, and why:
+///
+/// - its hash is the one the log's parts name (`header-mismatch`; each part names its header, and replay refuses a
+///   part naming another), from the newest part (the import's on a fresh world; a tick's is small, the import's may be
+///   megabytes). A log compacted to a checkpoint with nothing written since holds no part: then this is not checked;
+/// - its schema is one this build applies ([`Header::read`]'s `schema-unknown`): the effects are read by it;
+/// - its lineage and zone are the world's, as the facts' root and `world.json`'s name give them
+///   (`world-identity-mismatch`): not another world's.
+///
+/// Its kinds may differ from this build's: [`adopt`] reconciles them, with the owners `header.kinds` keeps.
+fn own_header(
+    dir: &Path,
+    built: &Built,
+    records: &[Vec<u8>],
+) -> R<(Header, BTreeMap<String, String>)> {
+    let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
+        Some(bytes) => Some(replica::effects::Part::read(bytes).map_err(refusal)?.header),
+        None => None,
+    };
+    let path = dir.join("header");
+    let header = match std::fs::read(&path) {
+        Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if named.as_ref() != Some(&built.header.hash().to_bytes()) {
+                return Err(format!(
+                    "header-missing: the log names header {}, the world keeps none, and this build's is {}: \
+                     reseed the world",
+                    named.as_deref().map_or("none".into(), to_hex),
+                    to_hex(&built.header.hash().to_bytes())
+                ));
+            }
+            keep_header(dir, built)?;
+            println!("header: kept this build's, the one the log names");
+            built.header.clone()
+        }
+        Err(e) => return Err(io(&path)(e)),
+    };
+    if let Some(named) = named
+        && header.hash().to_bytes() != named
+    {
+        return Err(format!(
+            "header-mismatch: {} is header {}, the log names {}",
+            path.display(),
+            to_hex(&header.hash().to_bytes()),
+            to_hex(&named)
+        ));
+    }
+    if header.zone != built.root || header.lineage != built.header.lineage {
+        return Err("world-identity-mismatch: the header is another world's".into());
+    }
+    Ok((header, owners(dir)))
+}
+
+/// Serves the built world under its own `header` (K16). A kind this build pins by another revision than the header
+/// (its definition changed in code or in an entry) is paired with the header's by plain name, when each side has
+/// exactly one unmatched revision of that name and `owners` (the world's `header.kinds`) gives the world's revision
+/// this build's owner: its rules are this build's definition under the header's pin, and the activity and body kinds
+/// the engine makes and `world.kinds`' boot activity lines name the header's pin. `world.kinds`' kind lines and boot
+/// targets keep this build's defined pins, so the creator's client still loads it. Any other unmatched revision is not
+/// guessed: one only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per
+/// act); one only the header pins has no rules (`kind-unknown`, per act). When the header is this build's, nothing
+/// changes. Prints what differs, each paired pin in full.
+fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
+    if header.stored() == built.header.stored() {
+        return;
+    }
+    let unmatched = |of: &Header, by: &Header| -> BTreeMap<String, Vec<String>> {
+        let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for k in of.kinds.iter().filter(|k| !by.kinds.contains(k)) {
+            m.entry(plain(k.as_str()).to_owned())
+                .or_default()
+                .push(k.as_str().to_owned());
+        }
+        m
+    };
+    let (mut world, mut build) = (
+        unmatched(&header, &built.header),
+        unmatched(&built.header, &header),
+    );
+    // This build's pin -> the world's, for each plain name with one unmatched revision on each side, owned alike.
+    let mut renames = BTreeMap::new();
+    for (name, ours) in &build {
+        if let (Some(theirs), [ours]) = (world.get(name), ours.as_slice())
+            && let [theirs] = theirs.as_slice()
+            && let Some(kind) = built.rules.kinds.get(ours).cloned()
+            && owners.get(theirs) == Some(&kind.owner)
+        {
+            built.rules.kinds.insert(theirs.clone(), kind);
+            renames.insert(ours.clone(), theirs.clone());
+        }
+    }
+    for (ours, theirs) in &renames {
+        build.remove(plain(ours));
+        world.remove(plain(theirs));
+    }
+    for a in &mut built.activities {
+        if let Some(k) = renames.get(a.name.as_str()).and_then(|k| Name::new(k)) {
+            a.name = k;
+        }
+    }
+    if let Some(k) = renames.get(&built.body_kind) {
+        built.body_kind = k.clone();
+    }
+    built.kinds_text = built
+        .kinds_text
+        .lines()
+        .map(|l| {
+            match l
+                .strip_prefix("# souls-boot-activity ")
+                .and_then(|p| p.split_once(' '))
+            {
+                Some((target, a)) => format!(
+                    "# souls-boot-activity {target} {}\n",
+                    renames.get(a).map_or(a, String::as_str)
+                ),
+                None => format!("{l}\n"),
+            }
+        })
+        .collect();
+    let list =
+        |m: &BTreeMap<String, Vec<String>>| m.values().flatten().cloned().collect::<Vec<_>>();
+    let (anew, unknown) = (list(&build), list(&world));
+    let taken: Vec<String> = renames
+        .iter()
+        .map(|(ours, theirs)| format!("{theirs} as {ours}"))
+        .collect();
+    println!(
+        "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
+         pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
+        to_hex(&header.hash().to_bytes()),
+        to_hex(&built.header.hash().to_bytes()),
+        taken.len(),
+        taken.join(", "),
+        anew.len(),
+        anew.join(", "),
+        unknown.len(),
+        unknown.join(", ")
+    );
+    built.header = header;
+}
+
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
 /// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
 fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
@@ -1156,8 +1340,7 @@ fn seed_in(args: &[String]) -> R<String> {
         entries(Path::new(e), &mut found)?;
     }
     // C13's stand-point repair first: the header is built from the entries the folder keeps, the ones `serve` builds
-    // it from again at each start. Built before the repair, an activity's stands (G3) differed and every start of a
-    // fresh seed was refused `header-mismatch` (0.132.1).
+    // its rules from at each start. Built before the repair, an activity's stands (G3) differed from its rules (0.132.1).
     if arg(args, "--entries").is_some() {
         for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
             println!("stand point: {line}");
@@ -1223,9 +1406,11 @@ fn seed_in(args: &[String]) -> R<String> {
     // The log, its first record the import's part: the world from empty.
     let (mut log, _) =
         Log::open(FileStore::open(&dir.join("log")).map_err(refusal)?, EPOCH).map_err(refusal)?;
-    let n = log.append(built.part).map_err(refusal)?;
+    let n = log.append(built.part.clone()).map_err(refusal)?;
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
+    // Its header, the one the part names (K16): every start serves the world under it.
+    keep_header(&dir, &built)?;
     // The world's one creator (G7b), if named: `serve` takes its edits.
     let creator = match arg(args, "--creator") {
         Some(c) => format!(", \"creator\": \"{c}\"", c = creator_of(c).map(|_| c)?),
@@ -2286,6 +2471,12 @@ fn serve(args: &[String]) -> R<()> {
     // Shared with the public stream's thread, which reads it after the world has started (#3746).
     let found = Arc::new(found);
     let store = log.close();
+    // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
+    // A fork's is its `header`, checked above against this build's kinds.
+    if stored_header.is_none() {
+        let (header, owners) = own_header(&dir, &built, &found.records)?;
+        adopt(&mut built, header, &owners);
+    }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
@@ -2670,7 +2861,8 @@ fn serve(args: &[String]) -> R<()> {
     // for the stream's first flush, which on a fresh world has no history to replay.
     let pointer_path = views.join("world.json");
     let fresh = !pointer_path.exists();
-    let (ready_tx, ready_rx) = channel::<()>();
+    // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
+    let (ready_tx, ready_rx) = channel::<bool>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
     // What a closed container holds stays out of the public stream too (#3948).
@@ -2706,45 +2898,93 @@ fn serve(args: &[String]) -> R<()> {
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
-                let start = view_out::PublicStart {
-                    root: &views_dir,
-                    header: &stream_header,
-                    key,
-                    initial: stream_initial,
-                    record: stream_record,
-                    checkpoint: stream_checkpoint,
-                    text: stream_text,
-                    names: stream_names,
-                    clock_seed: stream_clock,
-                    history: Some(&*stream_found),
-                };
-                // Its recovery reads are the world's start: patient (#1960).
-                let mut writer = patiently(|| {
-                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)
-                })?;
-                // Both the pointer and placement bootstrap resolve the existing strict public history export.
-                let history = "history/";
-                let pointer = format!(
-                    "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
-                    stream::dir(&stream_header, &key)
-                );
-                view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
-                // Physical cursor includes input records; public effect versions are independently validated by the
-                // observer.
-                writer.bridge_to(stream_found.first)?;
-                for (offset, bytes) in stream_found.records.iter().enumerate() {
-                    let record = stream_found.first + offset as u64;
-                    if record >= writer.source_cursor() {
-                        writer.push(record, bytes)?;
+                let recover = || -> Result<_, Refusal> {
+                    let start = view_out::PublicStart {
+                        root: &views_dir,
+                        header: &stream_header,
+                        key,
+                        initial: stream_initial.frozen(),
+                        record: stream_record,
+                        checkpoint: stream_checkpoint.clone(),
+                        text: stream_text.clone(),
+                        names: stream_names.clone(),
+                        clock_seed: stream_clock,
+                        history: Some(&*stream_found),
+                    };
+                    // Its recovery reads are the world's start: patient (#1960).
+                    let mut writer = patiently(|| {
+                        view_out::PublicWriter::open_hiding(
+                            start,
+                            &stream_store,
+                            stream_closed.clone(),
+                        )
+                    })?;
+                    // Both the pointer and placement bootstrap resolve the existing strict public history export.
+                    let history = "history/";
+                    let pointer = format!(
+                        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
+                        stream::dir(&stream_header, &key)
+                    );
+                    view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
+                    // Physical cursor includes input records; public effect versions are independently validated by
+                    // the observer.
+                    writer.bridge_to(stream_found.first)?;
+                    for (offset, bytes) in stream_found.records.iter().enumerate() {
+                        let record = stream_found.first + offset as u64;
+                        if record >= writer.source_cursor() {
+                            writer.push(record, bytes)?;
+                        }
                     }
+                    writer.flush()?;
+                    Ok(writer)
+                };
+                // R12: a refused recovery (the store out of reach or refusing, as a read past its cap did on 23 Nov)
+                // never ends the world, which systemd would only start again into the same refusal. It stays up,
+                // degraded: no public pointer, so no viewers; `health.json` names the fault; tried again with back-off
+                // until the store answers. Records wait in `stream_rx` meanwhile.
+                measures::STREAM.recovering();
+                let mut tries = 0u64;
+                let mut writer = loop {
+                    match recover() {
+                        Ok(w) => break w,
+                        Err(e) => {
+                            tries += 1;
+                            let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                            let fault = refusal(e);
+                            // Degraded before the pointer goes: the main thread's check of it reads both.
+                            measures::STREAM.degraded(&fault, tries, wait);
+                            let _ = std::fs::remove_file(views_dir.join("world.json"));
+                            eprintln!(
+                                "worldd: the public stream is degraded, no viewers: {fault}; try {tries} refused, the next in {wait} ms"
+                            );
+                            let _ = ready_tx.send(false);
+                            // The wait, answering each ask to sleep meanwhile: a degraded stream writes no sleeping
+                            // pointer, so the world stays awake.
+                            for _ in 0..wait / 100 {
+                                if let Ok((_, answer)) =
+                                    sleep_rx.recv_timeout(std::time::Duration::from_millis(100))
+                                {
+                                    let _ = answer.send(Err(format!("stream-degraded: {fault}")));
+                                }
+                            }
+                        }
+                    }
+                };
+                // An ask made during the last try is as old as that try, its asker likely gone: answered no, never
+                // taken for a sleep the world would not make (the stream would stop with it).
+                while let Ok((_, answer)) = sleep_rx.try_recv() {
+                    let _ = answer.send(Err("stream-recovering: asked before it served".to_owned()));
                 }
-                writer.flush()?;
+                measures::STREAM.serving();
+                if tries > 0 {
+                    eprintln!("worldd: the public stream recovered after {tries} refused tries");
+                }
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };
                 published(&writer);
                 stamp("public stream");
-                let _ = ready_tx.send(());
+                let _ = ready_tx.send(true);
                 drop(stream_found);
                 loop {
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
@@ -2786,13 +3026,14 @@ fn serve(args: &[String]) -> R<()> {
                 }
             })();
             if let Err(e) = result {
-                eprintln!(
-                    "worldd: the public stream stopped, the world goes on: {}",
-                    refusal(e)
-                );
+                let fault = refusal(e);
+                measures::STREAM.stopped(&fault);
+                eprintln!("worldd: the public stream stopped, the world goes on: {fault}");
             }
         })
         .map_err(|e| e.to_string())?;
+    // A fresh world waits for its stream's first flush, or for its first refused try (R12): then it listens degraded,
+    // with no pointer, and the stream thread tries again until it serves.
     if fresh && ready_rx.recv().is_err() {
         return Err(
             "public-stream: stopped before its first flush; the world is not servable".into(),
@@ -2804,7 +3045,7 @@ fn serve(args: &[String]) -> R<()> {
     while world.beat.read().0 < 0 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    if !pointer_path.is_file() {
+    if !pointer_path.is_file() && !measures::STREAM.is_degraded() {
         return Err(format!(
             "public-pointer-missing: {}",
             pointer_path.display()
@@ -4130,5 +4371,248 @@ mod conversation_tests {
             let held = body.plan(1, &kind.shape(role)).unwrap();
             assert_eq!(held.holds, vec![Name::new("souls:voice").unwrap()]);
         }
+    }
+}
+
+/// K16: the world's own header and its reconciliation with this build ([`own_header`], [`adopt`]).
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    fn built() -> Built {
+        build(&testworld::generate(1, 0).unwrap().text, &[]).unwrap()
+    }
+
+    /// `h` with its record changed by `f`.
+    fn header_with(h: &Header, f: impl FnOnce(&mut BTreeMap<u64, Value>)) -> Header {
+        let Value::Map(mut m) = decode(h.stored()).unwrap().value else {
+            panic!("a header is a map")
+        };
+        f(&mut m);
+        Header::read(&encode(&Value::Map(m)).unwrap()).unwrap()
+    }
+
+    fn kinds_of(h: &Header, f: impl FnOnce(&mut Vec<String>)) -> Header {
+        header_with(h, |m| {
+            let mut k: Vec<String> = h.kinds.iter().map(|k| k.as_str().to_owned()).collect();
+            f(&mut k);
+            m.insert(
+                6,
+                Value::Array(
+                    k.into_iter()
+                        .map(|k| Value::Text(Name::new(&k).unwrap()))
+                        .collect(),
+                ),
+            );
+        })
+    }
+
+    /// A pin of `plain` at a made-up revision.
+    fn pin(plain: &str, byte: u8) -> String {
+        format!("{plain}@1220{}", to_hex(&[byte; 32]))
+    }
+
+    /// A part with no effects that names `h`.
+    fn naming(h: &Header) -> Vec<u8> {
+        encode(&Value::Map(
+            [
+                (1, Value::Bytes(h.hash().to_bytes())),
+                (2, Value::Array(Vec::new())),
+            ]
+            .into(),
+        ))
+        .unwrap()
+    }
+
+    fn folder(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("k16-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn owners_of(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, o)| ((*k).to_owned(), (*o).to_owned()))
+            .collect()
+    }
+
+    /// `b` with two revisions of `eden:hall` pinned, as Eden's facts have (`core:hall` at 2 and 4).
+    fn with_two_halls(mut b: Built) -> (Built, String, String) {
+        let place = b
+            .rules
+            .kinds
+            .values()
+            .find(|k| k.owner == "place")
+            .unwrap()
+            .clone();
+        let (h1, h2) = (pin("eden:hall", 1), pin("eden:hall", 2));
+        let mut other = place.clone();
+        other.children.insert("hall-two-only".into());
+        b.rules.kinds.insert(h1.clone(), place);
+        b.rules.kinds.insert(h2.clone(), other);
+        b.header = kinds_of(&b.header, |k| k.extend([h1.clone(), h2.clone()]));
+        (b, h1, h2)
+    }
+
+    #[test]
+    fn the_header_the_log_names_is_the_worlds_and_a_world_with_none_keeps_this_builds() {
+        let b = built();
+        let d = folder("keep");
+        let (h, owners) = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap();
+        assert_eq!(h.stored(), b.header.stored());
+        assert_eq!(std::fs::read(d.join("header")).unwrap(), b.header.stored());
+        assert_eq!(owners, self::owners(&d));
+        assert_eq!(
+            owners.len(),
+            b.header.kinds.len(),
+            "every pinned kind's owner"
+        );
+        // The next start reads it.
+        let (again, _) = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap();
+        assert_eq!(again.stored(), b.header.stored());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_header_file_the_log_does_not_name_is_refused_header_mismatch() {
+        let b = built();
+        let d = folder("tampered");
+        let other = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        std::fs::write(d.join("header"), other.stored()).unwrap();
+        let e = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap_err();
+        assert!(e.starts_with("header-mismatch: "), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn another_worlds_header_is_refused_world_identity_mismatch() {
+        let b = built();
+        let d = folder("identity");
+        let lineage = Scope([9; 16]);
+        let other = header_with(&b.header, |m| {
+            m.insert(3, Value::Bytes(lineage.0.to_vec()));
+            m.insert(4, Id::new(lineage, 0).unwrap().to_value());
+        });
+        std::fs::write(d.join("header"), other.stored()).unwrap();
+        let e = own_header(&d, &b, &[naming(&other)]).unwrap_err();
+        assert!(e.starts_with("world-identity-mismatch: "), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_header_file_and_a_log_naming_another_is_refused_header_missing() {
+        let b = built();
+        let d = folder("missing");
+        let older = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        let e = own_header(&d, &b, &[naming(&older)]).unwrap_err();
+        assert!(e.starts_with("header-missing: "), "{e}");
+        assert!(!d.join("header").exists(), "nothing is kept");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_log_compacted_with_no_part_since_keeps_its_header_file() {
+        let b = built();
+        let d = folder("compacted");
+        let older = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        // With no part, a missing file is not taken on trust.
+        let e = own_header(&d, &b, &[]).unwrap_err();
+        assert!(
+            e.starts_with("header-missing: the log names header none"),
+            "{e}"
+        );
+        std::fs::write(d.join("header"), older.stored()).unwrap();
+        let (h, _) = own_header(&d, &b, &[]).unwrap();
+        assert_eq!(h.stored(), older.stored());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn this_builds_header_changes_nothing() {
+        let mut b = built();
+        let (rules, text, header) = (
+            b.rules.kinds.clone(),
+            b.kinds_text.clone(),
+            b.header.clone(),
+        );
+        adopt(&mut b, header.clone(), &BTreeMap::new());
+        assert_eq!(b.rules.kinds, rules);
+        assert_eq!(b.kinds_text, text);
+        assert_eq!(b.header.stored(), header.stored());
+    }
+
+    #[test]
+    fn one_of_two_revisions_changed_pairs_only_the_changed_one() {
+        let (mut b, h1, h2) = with_two_halls(built());
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2);
+            k.push(h3.clone());
+        });
+        let (one, two) = (b.rules.kinds[&h1].clone(), b.rules.kinds[&h2].clone());
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "place")]));
+        assert_eq!(b.rules.kinds[&h3], two, "the changed revision's rules");
+        assert_eq!(b.rules.kinds[&h1], one, "the unchanged one keeps its own");
+        assert_eq!(b.header.stored(), world.stored());
+    }
+
+    #[test]
+    fn both_revisions_changed_are_not_guessed() {
+        let (mut b, h1, h2) = with_two_halls(built());
+        let (h3, h4) = (pin("eden:hall", 3), pin("eden:hall", 4));
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h1 && *k != h2);
+            k.extend([h3.clone(), h4.clone()]);
+        });
+        adopt(&mut b, world, &owners_of(&[(&h3, "place"), (&h4, "place")]));
+        assert!(!b.rules.kinds.contains_key(&h3) && !b.rules.kinds.contains_key(&h4));
+    }
+
+    #[test]
+    fn a_revision_owned_otherwise_is_not_paired() {
+        let (mut b, _, h2) = with_two_halls(built());
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2);
+            k.push(h3.clone());
+        });
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "thing")]));
+        assert!(!b.rules.kinds.contains_key(&h3));
+        // And with no owners kept, nothing is paired either.
+        let (mut b, _, _) = with_two_halls(built());
+        adopt(&mut b, world, &BTreeMap::new());
+        assert!(!b.rules.kinds.contains_key(&h3));
+    }
+
+    #[test]
+    fn a_changed_activity_is_made_and_offered_by_the_worlds_pin() {
+        let mut b = built();
+        let ours = b.activities[0].name.as_str().to_owned();
+        let theirs = pin(plain(&ours), 7);
+        let world = kinds_of(&b.header, |k| {
+            for n in k.iter_mut().filter(|n| **n == ours) {
+                *n = theirs.clone();
+            }
+        });
+        let text = b.kinds_text.clone();
+        adopt(&mut b, world, &owners_of(&[(&theirs, "activity")]));
+        assert_eq!(b.activities[0].name.as_str(), theirs);
+        assert_eq!(b.rules.kinds[&theirs], b.rules.kinds[&ours]);
+        assert!(
+            b.kinds_text
+                .lines()
+                .any(|l| l.starts_with("# souls-boot-activity ") && l.ends_with(&theirs)),
+            "the boot activity lines name the world's pin"
+        );
+        // Everything else, kind lines and boot targets included, is as this build wrote it.
+        assert_eq!(b.kinds_text, text.replace(&ours, &theirs));
     }
 }

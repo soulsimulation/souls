@@ -4,7 +4,7 @@
 // person or agent sends: more than 30 requests a second from one god token, or 100 API requests/writes a second from one
 // address (several people behind one NAT included). Page and static-file GETs are never counted here.
 import { createHash } from 'node:crypto';
-import { addressKey } from '../../apps/server/src/address-key.ts';
+import { addressKey } from './address-key.mjs';
 
 export const LAUNCHER_FLOOD = Object.freeze({ godTokenPerS: 30, godTokenBurst: 900, ipPerS: 100, ipBurst: 2000 });
 

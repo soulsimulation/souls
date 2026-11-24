@@ -8,32 +8,46 @@ promises.
 ## 0.133, 23 Nov 2026: the planner asks each question once (S7, S8)
 
 **Builds:** before = main `9717c6ff2` (with C6, before S7); after = S8's head (#4355): S7's cheaper passages and
-triangles (#4335) and S8's one request per walk, line and form cursor out at the planner at a time. **Machine,
-placement and load:** a timed runner on the build machine, 6 CPUs: the world (worldd, gatewayd, the viewers' origin)
-on 5, the driver on 1. Stage 2a's rung (`v2/tools/bench/stage2a/rung.sh`), 120 s, two repeats, before and after
-alternating, by `.github/workflows/planner-500.yml`. Figures are ranges over the two repeats.
+triangles (#4335), and S8's rule that a walk's place, a walker's line and a form's walk question are each asked once
+while out at the planner, and not again once answered. **Machine, placement and load:** a timed runner on the build
+machine, 6 CPUs: the world (worldd, gatewayd, the viewers' origin) on 5, the driver on 1. Stage 2a's rung
+(`v2/tools/bench/stage2a/rung.sh`), 120 s, two repeats, run by `.github/workflows/planner-500.yml`. Figures are
+ranges over the two repeats.
 
-| Rung (agents, rate, arm) | intents/s | planner cores, before / after | ticks on time, before / after | viewer delay p95 ms, before / after |
-| --- | --- | --- | --- | --- |
-| 500, burst, even | 333 | 0.38–0.39 / 0.40–0.41 | 100 / 99.82–99.96 % | 711–777 / 849–1007 |
-| 500, burst, uneven | 327 | 0.42–0.45 / 0.43–0.66 | 99.82–100 / 99.91–100 % | 813–851 / 826–1075 |
-| 750, burst, even | 500 | 1.0 / 1.0 | 99.91 / 99.78–99.87 % | 650–706 / 797–817 |
-| 750, burst, uneven | 503 | 1.0 / 1.0 | 99.05–99.30 / 98.86–99.35 % | 803–806 / 798–821 |
-| 1,000, `every4`, even | 250 | 1.0 / 1.0 | 99.86–99.91 / 99.87–99.96 % | 925–2269 / 1093–1607 |
+| Rung (agents, rate, arm) | intents/s | planner cores, before / after | ticks on time, before / after | viewer delay p95 ms, before / after | stuck, after |
+| --- | --- | --- | --- | --- | --- |
+| 500, burst, even | 333 | 0.38–1.0 / 0.40–0.41 | 99.78–100 / 99.82–99.96 % | 711–777 / 849–1007 | 0 |
+| 500, burst, uneven | 327 | 0.42–1.0 / 0.43–0.66 | 99.82–100 / 99.91–100 % | 813–851 / 826–1075 | 0–1 |
+| 750, burst, even | 500 | 1.0 / **0.45–0.46** | 99.91 / 98.03–98.47 % | 650–706 / 1150–1249 | 0 |
+| 750, burst, uneven | 503 | 1.0 / **0.45** | 99.05–99.30 / 97.59–97.76 % | 803–806 / 951–1078 | 1–2 |
+| 1,000, `every4`, even | 250 | 1.0 / **0.31** | 99.86–99.91 / 96.87–98.71 % | 925–2269 / 1037–4520 | 0 |
+| 1,000, `every4`, uneven | 246 | (no result) / **0.26–0.28** | — / 98.45–98.71 % | — / 1629–4742 | 19–20 |
 
-**What it shows.** At 500 agents in bursts the planner either keeps up at about 0.4 of a core or sits at a full
-core, and which one happens varies from run to run on the same build. Before S8, a walk, a walker's line or a form's
-walk question still out at the planner was asked again every tick. A planner that fell behind therefore answered
-each request once for every tick it was behind, and stayed at a full core. Across the four runs of this work it
-sat at a full core in 7 of 20 rungs before S8 (one more at 0.9) and in 1 of 12 after: S7's run (main 3 of 4, S7 4 of 4), S7 against
-S8's first version (0 of 4, 0 of 4), main against S8 with exact generations (0 of 4, 1 of 4), and the run above
-(0 of 4, 0 of 4). "Before" counts main and S7 together. In the run above, before also kept up, so that run
-alone does not separate them; the tests do (`s8_*` in `sim/tests/planner.rs` and `worldd/src/acts/tests.rs`). At
-750 agents in bursts and 1,000 agents `every4` the planner is at a full core before and after. That is its real
-demand, not repeats: each form's walk question is a full `stand_near_shape` search (C7's profile below). Ticks stay
-on time, and the viewer delay p95 stays under 1.1 s at 750 burst and under 2.3 s at 1,000 `every4`. The next step is
-C7's: a cheaper `stand_near_shape`, or forms' walk questions answered on more than one thread. The 1,000 `every4`
-uneven rows did not print in this run.
+**What it shows.** Before S8, a request still out at the planner was asked again every tick. A form's walk question
+was also sent once more in the tick its answer came back, because the questions are sent before the forms read the
+answers. Every form walk question therefore cost at least two full searches, and one per tick behind once the
+planner fell behind. At 500 agents in bursts that tipped the planner to a full core in some runs and not others;
+at 750 and 1,000 it held it there. With each question asked once, the planner is at 0.45 of a core at 750 in
+bursts and 0.26–0.31 at 1,000 `every4`.
+
+**Next limit: the clock.** Now that walks are answered and run, the clock (0.47–0.61 of a core) and the public
+stream (0.45–0.64) do more. Ticks on time fall to 96.9–98.7 % at 750 burst and 1,000 `every4`, under the 99 % bar.
+Before S8 they were above it only because Souls stood waiting for the planner. The 1,000 `every4` uneven rung gave
+no result before, because the gateway's control socket path was too long in the bench's folder; that is fixed in
+the workflow.
+
+**Stuck Souls (S11).** The driver's rule is now: *stuck is an act unanswered for 60 s while its Soul, as the public
+stream shows it, was neither moving at the window's end (its latest motion sample in the window has a speed) nor
+1 m or more, net, from where it was at the window's start* (`stuck.rule` in its report, with `onTheirWay` and
+`unseen`). A Soul moved by others (pushed,
+stepped aside) counts as moving. Before,
+any act unanswered for 60 s counted. On the uneven arm that was 19–22 Souls at 1,000 `every4`, and 18–19 of them were
+long walks still going at walking speed, their agents otherwise silent (the uneven arm's heavy-tailed rates). S11 also
+fixed two real faults found on the way: a walking form run whose legs its Soul's own walk took stood at its walk
+step for good, and a jostled form walker's line question was asked anew at every pose, so its answer never matched.
+At 1,000 `every4` (two repeats) the even arm has 0 stuck, and the uneven arm has 18–19 on their way and 1 counted
+stuck: the same `take` each run, by a Soul whose body the driver does not know (outside the first agent's copy), so
+its motion cannot be read.
 
 ## 0.133, 23 Nov 2026: past 500 agents
 

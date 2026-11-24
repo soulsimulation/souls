@@ -66,7 +66,12 @@ test("a cast's and a battery's old words in the new client's, and what the strea
   const { placeIds, receiptsOf, kindName } = await import('./battery.mjs');
   assert.deepEqual(newWords(['act', 'walk to the pond hall', '--wait', '100']), ['act', '?the pond hall', '--wait']);
   assert.deepEqual(newWords(['act', 'walk:lab-presentation-hall', '--wait', '60']), ['act', '?lab-presentation-hall', '--wait']);
-  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '{{prev.found[0].id}}']);
+  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '!{{prev.found[0].id}}', '--wait'], 'the found thing\'s own offer, waited for');
+  assert.deepEqual(newWords(['act', 'walk:pond']), ['act', '?pond', '--wait'], 'an act waits for the world\'s verdict');
+  const { offerOf } = await import('./director.mjs');
+  const seat = (offers) => ({ cli: async (...w) => (w[0] === 'inspect' ? { offers } : null) });
+  assert.equal(await offerOf(seat([{ name: 'walk', act: 'walk:t-1' }, { name: 'sit', act: 'sit:t-1' }]), 't-1'), 'sit:t-1');
+  assert.equal(await offerOf(seat([{ name: 'walk', act: 'walk:t-1' }]), 't-1'), 't-1', 'a thing that offers only a walk is walked to');
   assert.deepEqual(newWords(['say', 'Hello']), ['say', 'Hello']);
   assert.match(newWords(['act', 'sit-ground:here']).skip, /sit-ground/);
   assert.match(newWords(['plan', '["walk:cottage"]', '--for', '{id}']).skip, /plan/);
@@ -77,4 +82,20 @@ test("a cast's and a battery's old words in the new client's, and what the strea
   assert.equal(kindName('eden:bench@1220ab'), 'core-bench');
   const r = receiptsOf([{ at: 5, words: ['act', 't-1', '--wait'], answer: { phase: 'done', receipt: { verbs: ['dev:sit'], target: 't-1' } } }, { at: 1, words: ['act', 'x'], answer: { receipt: { verbs: ['dev:walk'] } } }], 2);
   assert.deepEqual(r.map((x) => [x.capability, x.phase]), [['sit:t-1', 'completed']]);
+});
+
+test("whatson-interest: a notice board in the genesis, and a notice's interest read from the stream's links", async () => {
+  const { placeBoard } = await import('./battery.mjs');
+  const { calendarKind } = await import('./director.mjs');
+  const { linksOf } = await import('../../observer/new-engine/stream.mjs');
+  const facts = placeBoard({ kinds: [], things: [] }, { name: 'the green notice board', at: [4, 3], yaw: 90 });
+  assert.equal(facts.kinds[0].name, 'eden:notice_board', 'the board is of the notice board entry\'s kind');
+  assert.deepEqual(facts.things[0].pose, [4000, 0, 3000, 90000]);
+  assert.equal(facts.things[0].name, 'the green notice board');
+  assert.equal(placeBoard(facts, { at: [0, 0] }).kinds.length, 1, 'one kind row for any number of boards');
+  const scope = Uint8Array.from([0xab, 0x12]), audience = new Map([[1, 1]]);
+  const record = new Map([[1, [scope, 5]], [2, 'eden:calendar_entry@1220'], [9, [[2, 'eden:poster@1', [scope, 2], audience], [3, 'eden:interested@1', [Uint8Array.from([0xcd]), 0], audience], 'not a link']]]);
+  assert.deepEqual(linksOf(record), [{ type: 'eden:poster', end: 'ab12-2' }, { type: 'eden:interested', end: 'cd-0' }]);
+  assert.deepEqual(linksOf(new Map([[1, [scope, 1]]])), [], 'a record with no links');
+  assert.ok(calendarKind('eden:calendar_entry@1220ab') && !calendarKind('eden:notice_board@1'));
 });

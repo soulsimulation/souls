@@ -29,7 +29,7 @@
 # host's folders in a test.
 set -euo pipefail
 
-ASIDE_TOOL_SHA256=${RESEED_TOOL_SHA256:-2ca1a2790546905466786285ae8149863b429e6c32c86e7c7f82f2394b2191e5}
+ASIDE_TOOL_SHA256=${RESEED_TOOL_SHA256:-782db8c40daeec90196fcdb7aea116b9ba631ed71cf38d68da1f4c7c16ccaf5a}
 DATA=${RESEED_DATA:-/var/lib/souls}
 ETC=${RESEED_ETC:-/etc/souls}
 LIB=${RESEED_LIB:-/usr/local/lib/souls}
