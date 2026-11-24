@@ -31,11 +31,17 @@ export const soul = (name) => { const s = seats.get(name); if (!s) throw Error(`
 
 /** What `name`'s own copy finds for `words` (not a body), or null: the thing named exactly that first (Eden's things keep
  *  their old ids as names: `street-bench-1`), else the first found. `"<words> in <thing>"` keeps to what is inside that
- *  thing (`Top room in eden-tower-house`). */
+ *  thing (`Top room in eden-tower-house`, `Bedroom in canal-west-home-3`): rooms carry their building's room names
+ *  (`Bedroom`, `Landing`), shared by every house of a kind, so they are searched near that thing, not world-wide, where
+ *  the first 50 found may all be other houses'. */
 export async function find(name, words) {
   const [what, within] = words.split(/ in (?=\S+$)/);
-  const r = await soul(name).cli('find', ...what.split(/\s+/), '--limit', '50');
-  const rows = (r.found ?? []).filter((x) => !x.kind?.startsWith('souls:body') && (!within || String(x.in ?? '').includes(within)));
+  const s = soul(name), notBody = (x) => !x.kind?.startsWith('souls:body');
+  const host = within ? ((await s.cli('find', within, '--limit', '50')).found ?? []).find((x) => notBody(x) && x.name === within) : null;
+  const r = host
+    ? ((await s.cli('query', JSON.stringify([{ find: what, near: host.id, within: 40, limit: 50 }]))).answers?.[0] ?? {})
+    : await s.cli('find', ...what.split(/\s+/), '--limit', '50');
+  const rows = (r.found ?? []).filter((x) => notBody(x) && (!within || String(x.in ?? '').split(', ').includes(within)));
   return rows.find((x) => x.name === what) ?? rows[0] ?? null;
 }
 
