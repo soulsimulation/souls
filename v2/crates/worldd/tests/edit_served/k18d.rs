@@ -211,9 +211,8 @@ fn furnishing_batch(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs the exported static Eden facts file"]
 async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exact_slot() {
-    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let (text, chair) = seat_world();
     let im = import_eden::load(&text).unwrap();
     let source = |id| im.tree.node(im.tree.handle(id).unwrap()).unwrap();
     let building = im
@@ -228,7 +227,7 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
                 && node.fields().contains_key(&import_eden::F_SOLIDS)
         })
         .expect("an existing pinned floor-admitting building kind");
-    let chair_source = source(im.nodes["e_0fc49dc9"]);
+    let chair_source = source(im.nodes[chair]);
     let door_source = im
         .nodes
         .values()
