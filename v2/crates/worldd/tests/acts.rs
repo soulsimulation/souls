@@ -2466,6 +2466,7 @@ const LIFT_LEFT: i64 = 10_000_000;
 /// The lift's cabin seat as a served world registers it, and its run (`sim::courses::rides::seat_runs`, as
 /// `worldd::places::runs` gives it) on the open ground, its clock set so the cabin leaves its low stop
 /// [`LIFT_LEFT`] after the world starts (world time is real time).
+#[allow(clippy::disallowed_methods)]
 fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun) {
     let place = sim::slots::PlaceAt {
         thing: lift(),
@@ -2501,6 +2502,8 @@ fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun)
 /// (a rise is refused `boarding-frame-away` and it stays in the slot), and gets off at the far stop, on its feet at
 /// that stop's stand point, 4 m from where it got on: never set down mid-way, never left aloft.
 #[test]
+// The world's clock is real time: the test reads it to set the cabin's clock and to wait for it (#1926's way).
+#[allow(clippy::disallowed_methods)]
 fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
     let started = std::time::Instant::now();
     let (run, mut a, _) = serve("n14");

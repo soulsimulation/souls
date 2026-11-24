@@ -2525,40 +2525,6 @@ impl Engine {
     }
 }
 
-#[cfg(test)]
-mod kind_tests {
-    use super::*;
-
-    #[test]
-    fn activity_kinds_preserve_the_exact_pin_and_short_names() {
-        let plain = Name::new("souls:conversation").unwrap();
-        let mut hash = vec![0x12, 0x20];
-        hash.extend([7; 32]);
-        let params = |v| BTreeMap::from([(1, v)]);
-        let pair = |h| Value::Array(vec![Value::Text(plain.clone()), Value::Bytes(h)]);
-        assert_eq!(
-            param_kind(&params(pair(hash.clone())), 1, "bad")
-                .unwrap()
-                .as_str(),
-            format!("souls:conversation@{}", replica::encode::to_hex(&hash))
-        );
-        assert_eq!(
-            param_kind(&params(Value::Text(plain.clone())), 1, "bad").unwrap(),
-            plain
-        );
-        for h in [
-            vec![0; 34],
-            hash[..33].to_vec(),
-            [hash.as_slice(), &[0]].concat(),
-        ] {
-            assert_eq!(
-                param_kind(&params(pair(h)), 1, "bad").unwrap_err().name,
-                "bad"
-            );
-        }
-    }
-}
-
 /// The courses of the rides' seats that move with their cabins (N14), written once at a start onto each ride whose
 /// [`replica::schedule::F_SEAT_COURSES`] is not what its seats run now (`slots`, from its entry): one entry of the
 /// world's a ride, so every copy and the page read where each seat and its rider are. A restart with the same entries
@@ -2599,4 +2565,38 @@ fn seat_courses(live: &Tree, slots: &Slots, now: Micros) -> Vec<Effect> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+
+    #[test]
+    fn activity_kinds_preserve_the_exact_pin_and_short_names() {
+        let plain = Name::new("souls:conversation").unwrap();
+        let mut hash = vec![0x12, 0x20];
+        hash.extend([7; 32]);
+        let params = |v| BTreeMap::from([(1, v)]);
+        let pair = |h| Value::Array(vec![Value::Text(plain.clone()), Value::Bytes(h)]);
+        assert_eq!(
+            param_kind(&params(pair(hash.clone())), 1, "bad")
+                .unwrap()
+                .as_str(),
+            format!("souls:conversation@{}", replica::encode::to_hex(&hash))
+        );
+        assert_eq!(
+            param_kind(&params(Value::Text(plain.clone())), 1, "bad").unwrap(),
+            plain
+        );
+        for h in [
+            vec![0; 34],
+            hash[..33].to_vec(),
+            [hash.as_slice(), &[0]].concat(),
+        ] {
+            assert_eq!(
+                param_kind(&params(pair(h)), 1, "bad").unwrap_err().name,
+                "bad"
+            );
+        }
+    }
 }
