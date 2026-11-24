@@ -1949,7 +1949,8 @@ const BODY_OF: &str = "souls:body-of";
 /// resolved when written), and otherwise names the group alone. A refusal never holds an account id: ends are Soul or
 /// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
 /// `who` outside the closed list), `object.private` (a private thing not the asker's, #3700), `not-permitted` with the
-/// sentence.
+/// sentence. For `who: holder`, the holder is a body with the thing in a hand, or a body seated in a vehicle's drive
+/// seat ([`drives`]): a rider steers, a passenger does not.
 pub fn may(
     tree: &Tree,
     audiences: &BTreeMap<Id, BTreeSet<Id>>,
@@ -1977,7 +1978,8 @@ pub fn may(
         return refuse("object.private", format!("who may: {words}"));
     }
     let thing = tree.handle(node).and_then(|h| tree.node(h));
-    let holds = thing.as_ref().and_then(|n| n.parent()) == Some(body);
+    let holds =
+        thing.as_ref().and_then(|n| n.parent()) == Some(body) || drives(tree, body, node, entry);
     let (ends, seen) = match (&who, &thing) {
         (Who::Link(t), Some(n)) => {
             let ty = audience::link_type(n.kind().as_str(), t);
@@ -2007,6 +2009,32 @@ pub fn may(
             refuse("not-permitted", format!("who may: {words}"))
         }
     }
+}
+
+/// `body` sits in `node`'s drive seat (SA-F14, E10): its entry's `vehicle.drive` names one body slot, and a body held
+/// there is the vehicle's holder for `who: holder`, as a thing in a hand is held. Every other body slot is a
+/// passenger's and does not count. Slots are numbered from 1 in the entry's order, as their places are registered
+/// (`import_eden::body_slots_of`), and a seated body is the thing's child in that slot.
+fn drives(tree: &Tree, body: Id, node: Id, entry: &replica::rules::json::Value) -> bool {
+    use replica::rules::json::Value as J;
+    let Some(drive) = entry
+        .get("vehicle")
+        .and_then(|v| v.get("drive"))
+        .and_then(J::str)
+    else {
+        return false;
+    };
+    let slots = entry.get("slots").and_then(J::obj).unwrap_or(&[]);
+    let Some(slot) = (1u64..)
+        .zip(slots)
+        .find(|(_, (s, _))| s == drive)
+        .map(|(n, _)| n)
+    else {
+        return false;
+    };
+    tree.handle(body)
+        .and_then(|h| tree.node(h))
+        .is_some_and(|b| b.parent() == Some(node) && b.slot() == Some(slot))
 }
 
 /// `v` with every text as bytes: a move record's names (a contact point such as `grip`) need not be namespaced, and an
