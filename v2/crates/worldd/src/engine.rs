@@ -650,14 +650,55 @@ impl Engine {
                 {
                     return Err(refusal("carry-lifted", show(offer)));
                 }
-                // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
+                // 0.134 T1: a touch starts only where its moves reach, read from the places the two will take when
+                // it starts (0.135 G3), so two who walked up to each other touch: each steps to its place no farther
+                // than the move reaches, and two farther apart are refused here, before anyone moves.
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
-                    let feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
+                    let mut feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
+                    let pair = [asker, a.body];
+                    let roles = e
+                        .offered_roles(offer)
+                        .map(|r| r.map(|n| kind.role(n)))
+                        .unwrap_or_default();
+                    let mut steps = Vec::new();
+                    if let [Some(r0), Some(r1)] = roles {
+                        let at = |b: Id| {
+                            c.body(b)
+                                .map(|m| (sim::index::place_of(m).0, m.pose.position))
+                        };
+                        let ahead =
+                            sim::activity::places::ahead(&[(r0, at(pair[0])), (r1, at(pair[1]))]);
+                        for (b, p) in pair.into_iter().zip(ahead) {
+                            // A seated member is placed where it sits (`Bodies::take_places`).
+                            let seated = c.body(b).is_none_or(|m| m.pose.frame.slot.is_some());
+                            if let (Some(p), false, Some((_, now))) =
+                                (p, seated, feet.0.get_mut(&b))
+                            {
+                                let (dx, dz) = (i128::from(now[0] - p.x), i128::from(now[1] - p.z));
+                                steps.push((
+                                    b,
+                                    i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX),
+                                ));
+                                *now = [p.x, p.z];
+                            }
+                        }
+                    }
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
                             continue;
                         };
+                        if let Some((b, step)) = steps.iter().find(|(_, s)| *s > m.reach) {
+                            return Err(refusal(
+                                "together.too-far",
+                                format!(
+                                    "{}: {} stands {step} µm from its place, it steps at most {} µm: walk up first",
+                                    mv.as_str(),
+                                    show(*b),
+                                    m.reach
+                                ),
+                            ));
+                        }
                         let held = Effector::Held;
                         match feet.distance(asker, &held, None, a.body, &m.contact) {
                             Some(d) if d <= m.reach => {}

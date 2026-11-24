@@ -17,7 +17,8 @@
 //                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
 //                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
-//                                with --create-on-new-engine (or SOULS_V2_CREATE=1) and a cutover binding: the directory's create makes it
+//                                with a cutover binding (or --create-on-new-engine, SOULS_V2_CREATE=1; off: --no-create-on-new-engine,
+//                                SOULS_V2_CREATE=0): the directory's create makes it
 //                                on the new engine, owned by the signed-in person; served and listed once its route is (0.135 W1)
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
@@ -862,8 +863,8 @@ export async function openLauncher(cfg = {}) {
     json(res, 200, { me: { userId: id, short: `u${(h >>> 0).toString(36)}`, souls: [] }, souls: [] }, { 'cache-control': 'no-store' });
   }
 
-  // W1 (0.135): a signed-in person's New world, made on the new engine. With `v2Create` (--create-on-new-engine, or
-  // SOULS_V2_CREATE=1) and a cutover binding, POST /__sim/worlds asks the directory's create (`POST /v1/worlds`,
+  // W1 (0.135): a signed-in person's New world, made on the new engine. With `v2Create` (on wherever a cutover binding
+  // is in place; see v2CreateOn), POST /__sim/worlds asks the directory's create (`POST /v1/worlds`,
   // {key, name, template, label}) as that person, so the world is theirs from its name record on. Each request asks
   // with the token it carries and stays under a minute (a Clerk session token lives about 60 s; Cloudflare gives a
   // request 100 s), so a create that takes longer is resumable:
@@ -874,7 +875,10 @@ export async function openLauncher(cfg = {}) {
   // - no answer, or `store-unreachable`, is asked again with the same key within the request; still nothing: 503 with
   //   the key, as resumable as 202 (whether the world was begun is not known, so nothing says it was not);
   // - made and routed: 201, the world served at /w/<slug>/ and listed as a world with no old twin (D2).
-  const v2Create = !!(cfg.v2Create ?? process.env.SOULS_V2_CREATE === '1');
+  // On (Gene's yes, 24 Nov) wherever a cutover binding is in place, as on soul.game; off with --no-create-on-new-engine
+  // or SOULS_V2_CREATE=0, and on without a binding only by --create-on-new-engine or SOULS_V2_CREATE=1.
+  const v2CreateSet = cfg.v2Create ?? (process.env.SOULS_V2_CREATE ? process.env.SOULS_V2_CREATE === '1' : undefined);
+  const v2CreateOn = () => v2CreateSet ?? !!cutover?.bound?.();
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   const KEY_RE = /^[0-9a-f]{32}$/;
   /** A resume's {key, slug} is taken only as this launcher gave it back (`issued`), and, since `issued` does not survive
@@ -1776,6 +1780,7 @@ export async function openLauncher(cfg = {}) {
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
         // W1: asking again for a world this launcher began (the key it gave back, within 10 minutes) is not another create
         for (const [k, v] of issued) if (Date.now() - v.at > 10 * 60_000) issued.delete(k);
+        const v2Create = v2CreateOn();
         const again = v2Create && typeof body?.key === 'string' && issued.get(body.key)?.slug === body.slug;
         if (!again && recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
         // counted from the ask, so creates still in flight count; given back (this one slot) when the answer is a plain
@@ -2317,7 +2322,7 @@ if (isMain(import.meta.url)) {
       publicOrigin: flag('public-origin'), clerkSatellite: flag('clerk-satellite'), clerkLegacySatellites: flag('clerk-legacy-satellites'), clerkSignInUrl: flag('clerk-sign-in-url'), authEnvFile: flag('auth-env') ?? flag('auth-env-file'), devAuth: argv.includes('--dev-auth') ? true : undefined,
       maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'), diskMinFreeMb: num('disk-min-free-mb'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
-      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;
     const stop = (why, gentle) => { if (stopping) return; stopping = true; console.log(`[launcher] ${why}: stopping worlds…`); void l.close(gentle ? { gentle } : {}).then(() => process.exit(0)); };

@@ -1801,8 +1801,8 @@ fn bodies(
         detail: e,
     })?;
     // Each recorded body is placed on its own: one that cannot be is left out by name, and the others start (a local
-    // failure never stops unrelated actors). One standing off its ground is restored onto the nearest legal point
-    // (`worldd::bodies::restore_place`).
+    // failure never stops unrelated actors). One standing off its floor is placed where it was
+    // (`sim::slots::placed_off`) and `Bodies::add_body_at_built` resumes it (E11d).
     let mut at = Vec::new();
     for (id, (pose, _)) in placed {
         match recorded_body(&town, &places, *id, pose, builds) {
@@ -1828,9 +1828,19 @@ fn bodies(
             }
         }
     }
+    let owns: Vec<(Id, sim::slots::Footprint)> = places
+        .iter()
+        .map(|p| (p.thing, p.floor))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|(thing, floor)| (thing, worldd::places::footprint(&town.tree, thing, floor)))
+        .collect();
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, own) in owns {
+        b.slots.footprint(thing, own);
     }
     for (thing, course) in moving {
         let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
@@ -1858,7 +1868,8 @@ fn bodies(
 }
 
 /// One recorded body placed again for [`bodies`]: on its recorded ground, or by its seat's stand point when it sat,
-/// with its build; restored onto the nearest legal point when its ground no longer holds where it stood.
+/// with its build. A body killed off its floor (mid-climb out of a seat, E11d) is placed where it was
+/// (`sim::slots::placed_off`); `Bodies::add_body_at_built` resumes it.
 fn recorded_body(
     town: &Town,
     places: &[PlaceAt],
@@ -1903,7 +1914,7 @@ fn recorded_body(
         name: "no-surface",
         detail: "recorded ground".into(),
     })?;
-    let (moved, _) = worldd::bodies::restore_place(
+    let moved = sim::slots::placed_off(
         surface,
         id,
         Frame { node, slot: None },
@@ -3624,8 +3635,8 @@ mod tests {
                 assert_eq!(
                     s,
                     vec![
-                        (Vec3::new(-250_000, 0, 0), 0),
-                        (Vec3::new(250_000, 0, 0), 0)
+                        (Vec3::new(-225_000, 0, 0), 0),
+                        (Vec3::new(225_000, 0, 0), 0)
                     ]
                 );
             }
@@ -5649,12 +5660,12 @@ mod s10c_lockstep {
     }
 
     /// The minimised fixture of the bricked world's saved state: two bodies logged standing, one on the floor past its
-    /// door end (off its surface), one on the open ground. The restart starts both: the first restored onto the
-    /// nearest point its own floor holds, the other where it stood; neither stops the other, and a third with no
-    /// recorded build is left out by name while both start.
+    /// door end (off its surface), one on the open ground, and a third with no recorded build. The restart starts the
+    /// first two (the first resumed by E11d's rule, the second where it stood) and leaves the third out by name: one
+    /// bad row never stops the others.
     #[test]
     fn a_body_logged_off_its_ground_is_restored_and_never_stops_the_others() {
-        use replica::kinds::sizes::{Build, Size};
+        use replica::kinds::sizes::Build;
         let (town, planner, floor, places, _, door, ground) = door_world();
         let past = past_door(&town, floor, door);
         let off = Id::new(Scope([7; 16]), 1).unwrap();
@@ -5669,28 +5680,13 @@ mod s10c_lockstep {
         let builds = BTreeMap::from([(off, Build::STANDARD), (fine, Build::STANDARD)]);
         let b = bodies(town, planner, ground, &placed, places, Vec::new(), &builds)
             .expect("the bodies start");
-        let (node, at) = b.pose(off).expect("the off-surface body was restored");
-        assert_eq!(node, floor, "restored on its own floor");
-        // The nearest point its floor holds: no farther than the door end it was logged past.
-        let d = ((i128::from(at.x - past.x)).pow(2) + (i128::from(at.z - past.z)).pow(2)).isqrt();
+        let (node, _) = b.pose(off).expect("the body logged off its floor started");
+        assert_eq!(node, floor, "on its own floor's frame");
+        // E11d's resume: carried on to the floor's nearest legal point (a way out through the door), never refused.
         assert!(
-            d <= 765_000 + 2_000,
-            "restored {d} µm from where it was logged: {at:?}"
-        );
-        let surface = &b.town.surfaces_for(Size::Standard).unwrap()[&floor];
-        assert!(
-            surface
-                .place(
-                    off,
-                    Frame {
-                        node: floor,
-                        slot: None
-                    },
-                    at,
-                    replica::pose::Quat::IDENTITY
-                )
-                .is_ok(),
-            "restored on a point its floor holds"
+            b.runner.controller.carried(off) || !b.resumed.is_empty(),
+            "resumed by rule: {:?}",
+            b.resumed
         );
         let (gnode, gat) = b.pose(fine).expect("the other body started");
         assert_eq!((gnode, gat.x, gat.z), (ground, on_ground.x, on_ground.z));
@@ -5698,14 +5694,6 @@ mod s10c_lockstep {
             b.pose(unknown).is_none(),
             "a body that cannot be placed is left out"
         );
-        // The restored pose is written again in the first record, so the log heals.
-        let mut b = b;
-        let rows = b.moved();
-        assert!(
-            rows.iter().any(|(id, p, _)| *id == off && p.position == at),
-            "{rows:?}"
-        );
-        assert!(!rows.iter().any(|(id, ..)| *id == fine), "{rows:?}");
     }
 
     /// The write path: a body carried across a link is not logged while it is carried (its pose then follows the

@@ -61,18 +61,13 @@ impl World {
 #[derive(Clone, Copy, PartialEq)]
 enum LeftOut {
     WindowNoRoom,
-    StairToItself,
 }
 
-/// What a loader note leaves out on purpose (W2b, 0.133), if anything.
+/// What a loader note leaves out on purpose (W2b, 0.133), if anything. A flight within one storey is walked as that
+/// floor (0.133); one the loader notes rises more than a step, a piece cut off, which nothing explains.
 fn left_out(note: &str) -> Option<LeftOut> {
-    if note.ends_with(": a window in no room") {
-        Some(LeftOut::WindowNoRoom)
-    } else if note.contains(": a stair on floor ") && note.ends_with(" to itself, not linked") {
-        Some(LeftOut::StairToItself)
-    } else {
-        None
-    }
+    note.ends_with(": a window in no room")
+        .then_some(LeftOut::WindowNoRoom)
 }
 
 fn notes_like(notes: &[String], what: LeftOut) -> i64 {
@@ -82,14 +77,11 @@ fn notes_like(notes: &[String], what: LeftOut) -> i64 {
 /// Why the loader leaves it out, or None for a note nobody has explained.
 fn note_reason(note: &str) -> Option<&'static str> {
     Some(match left_out(note)? {
-        // import-eden: a window node belongs to the room it looks out of; one outside every room (a serving hatch in an
-        // outer wall, a lantern's glazing) has none. The thing keeps its solids and its look.
+        // import-eden: a window node belongs to a room, the one it looks out of or, in no room's wall (a serving
+        // hatch), the nearest; a thing with no rooms (a lantern's glazing) has none. The thing keeps its solids and
+        // its look.
         LeftOut::WindowNoRoom => {
-            "explained: outside every room, so no room to look out of; the thing keeps its walls and look"
-        }
-        // import-eden: a step between two surfaces of one level joins a floor to itself; that floor holds both.
-        LeftOut::StairToItself => {
-            "explained: a step between two surfaces of one level, which one floor already holds"
+            "explained: its thing has no rooms, so no room to look out of; the thing keeps its walls and look"
         }
     })
 }
@@ -180,11 +172,10 @@ pub fn row(text: &str) -> World {
             w.counts.insert(key, r.tree);
         }
         if r.tree != r.bake {
-            // W2b: a window in no room and a stair from a floor to itself are left out by design (`note_reason`), so a
-            // count short by exactly those is explained.
+            // W2b: a window of a thing with no rooms is left out by design (`note_reason`), so a count short by exactly
+            // those is explained.
             let skipped = match r.what.as_str() {
                 "windows (nodes)" => notes_like(&im.notes, LeftOut::WindowNoRoom),
-                "stairs (links)" => notes_like(&im.notes, LeftOut::StairToItself),
                 _ => 0,
             };
             let explained = skipped > 0 && r.tree + skipped == r.bake;

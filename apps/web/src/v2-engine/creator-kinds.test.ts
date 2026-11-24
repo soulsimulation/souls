@@ -112,6 +112,38 @@ test('W2: a content kind\'s own shape draws only what no old or library def draw
   assert.match(ups.find((u) => u.id === entityId('cc.3'))?.def ?? '', /^v2-mars-crate-x-/, 'a kind nothing else draws: its entry\'s box');
 });
 
+test('a content kind with its own shape (looks.shape) draws as it, in its state; one arriving later replaces its box', async () => {
+  const { readFileSync } = await import('node:fs');
+  const zoe = JSON.parse(readFileSync(new URL('../../../../content/kinds/optical_toys/zoetrope.json', import.meta.url), 'utf8'));
+  const d = kindDef('eden:zoetrope@1220abcdef012345', bytes(zoe))!;
+  const args = (d.def.make as unknown as { args: { shapes: Record<string, unknown>[]; looks_table?: unknown[] } }).args;
+  assert.equal(args.shapes.length, zoe.looks.shape.shapes.length, 'every shape of the entry, not one box');
+  assert.deepEqual(args.shapes[0], { kind: 'box', at: [0, 0.45, 0], size: [0.1, 0.9, 0.1], tint: 'wood' }, 'in metres, its palette key kept');
+  assert.equal(args.shapes[4].yaw, Math.PI / 6, 'millidegrees as radians');
+  assert.equal(args.shapes.at(-1)!.role, 'lid', 'a role the looks table moves is kept');
+  assert.equal(args.looks_table?.length, 2, 'the looks table rides in the make');
+  assert.equal(d.def.palette?.wood, '#79563c');
+  assert.deepEqual(Object.keys(d.def.state ?? {}).sort(), ['released', 'strip']);
+  assert.doesNotMatch(d.def.ref, /-box@/);
+  // its state from its node's fields (by the entry's numbers), as the picture reads it
+  const k = new CreatorKinds();
+  const layer = { seq: 1, model: { entities: new Map<string, { id: string }>(), defs: new Map<string, unknown>() } };
+  const plainEntry = bytes({ format: 'souls-entry/1', kind: 'eden:zoetrope', geometry: { bounds_mm: [500, 1400, 400] } });
+  k.apply([root, node('entry:eden:zoetrope@1220ab', 'souls:kind', [0, 0, 0], { defines: 'eden:zoetrope@1220ab', entry: plainEntry }),
+    node('z.1', 'eden:zoetrope@1220ab', [1_000_000, 0, 0], { fields: { 28: 2, 29: 1 } })], []);
+  const first = k.next(layer, 1)!.diff.upserts as { def: string; state?: unknown }[];
+  assert.match(first[0].def, /-box@1$/, 'its bounds as one box until its look is here');
+  for (const e of first) layer.model.entities.set(entityId('z.1'), e as never);
+  k.apply([node('entry:eden:zoetrope@1220ab', 'souls:kind', [0, 0, 0], { defines: 'eden:zoetrope@1220ab', entry: bytes(zoe) })], []);
+  const then = k.next(layer, 2)!;
+  const up = then.diff.upserts as { def: string; state?: Record<string, unknown> }[];
+  assert.doesNotMatch(up[0].def, /-box@/, 'drawn again from its shape');
+  assert.deepEqual(up[0].state, { strip: 2, released: true });
+  assert.equal(then.diff.defs.length, 1, 'the new def goes with it');
+  k.apply([node('z.1', 'eden:zoetrope@1220ab', [1_000_000, 0, 0], { fields: { 28: 0, 29: 0 } })], []);
+  assert.deepEqual((k.next(layer, 3)!.diff.upserts as { state?: unknown }[])[0].state, { strip: 0, released: false }, 'a changed state is sent');
+});
+
 test('a road a creator lays (place --path) is drawn along its line by its library def; on a world with roads, by theirs', () => {
   const k = new CreatorKinds();
   const layer = { seq: 2, model: { entities: new Map<string, { id: string; def?: string }>(), defs: new Map<string, unknown>() } };

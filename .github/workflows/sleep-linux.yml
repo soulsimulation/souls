@@ -39,7 +39,7 @@ jobs:
       - name: A bundle (the real supervisor, stand-ins for the rest)
         run: |
           d=$RUNNER_TEMP/b && mkdir -p "$d/bins" "$d/page" "$d/client"
-          for p in worldd gatewayd directoryd register-world deploy gateway-upgrade import-world templates; do
+          for p in worldd gatewayd assets-check directoryd register-world deploy gateway-upgrade import-world templates; do
             printf '#!/bin/sh\necho stand-in\n' > "$d/bins/$p"
           done
           cp v2/target/release/supervisor "$d/bins/"

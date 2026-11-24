@@ -12,8 +12,9 @@ import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
+import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
-import { KIND_BOUNDS } from './source/kind-bounds.ts';
+import { KIND_BOUNDS, KIND_LOOKS_URL } from './source/kind-bounds.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
@@ -54,11 +55,18 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
+    setBuildNodes(() => kinds.seen); // 0.133 item 6: the creator panel's Build places, moves and removes from what the stream shows
     // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
     // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
     const looks = entryLooks(KIND_BOUNDS);
     for (const [k, v] of bundledEntries(import.meta.glob('../../../../content/kinds/construction/*.json', { eager: true }))) looks.set(k, v);
     const parts = new CarriedParts(kinds, looks);
+    // a content kind with its own shape draws as it, in its state, once the build's looks file is here (kind-bounds.ts)
+    if (KIND_LOOKS_URL) void fetch(KIND_LOOKS_URL).then((r) => (r.ok ? r.json() : null)).then((all: Record<string, unknown> | null) => {
+      if (stopped || !all) return;
+      const enc = new TextEncoder();
+      parts.addLooks(new Map(Object.entries(all).map(([k, e]) => [k, enc.encode(JSON.stringify(e))])));
+    }).catch(() => {});
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -142,7 +150,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };
   }, [stream]);
   return s.current;
 }

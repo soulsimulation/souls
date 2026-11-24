@@ -132,6 +132,7 @@ import {cameraGround,cameraGroundSampler,clearShotEye} from './WorldCameraGround
 import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
+import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
@@ -718,8 +719,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       renderer.domElement.dataset.sceneHash='';renderer.domElement.dataset.sceneBinding='loading';sceneryStatus('Loading the scenery for this recording.');
       const active=()=>!abort.signal.aborted&&request===sceneRequest;
       if(reference===undefined){
-        const pending=history?Promise.resolve(parseSceneInfo(null)):currentLayout();
-        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(history?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=history?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
+        // a world drawn from its stream (W2) has no old scenery to name: its past draws the stream's ground, as its live view does
+        const plain=history&&!streamBound();
+        const pending=plain?Promise.resolve(parseSceneInfo(null)):currentLayout();
+        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(plain?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=plain?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
       }else if(mismatch){failLayout('The scenery reference does not match this recording.');}
       else void sceneHistory.resolve(reference).then(result=>{
         if(!active())return;
@@ -1295,6 +1298,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; return; }
       down = null;
       if (entityLayer.active && godFeature('flags') && (e.altKey || flagModeRef.current)) return;  // a flag drop (onFlagClick), not a selection: no place card over the god panel
+      if (buildTakesClicks()) return;  // 0.133 item 6: the creator panel's Build places or selects (god-ui/BuildBar.tsx), not a card
       const target=hover.pick(e.clientX,e.clientY);
       if(touch&&target?.kind==='soul'&&controlsApi.current?.flyToSoul(target.id,{chip:true}))return;  // #892: one tap follows (the card's flight)
       if(touch&&(!target||target.kind==='place')&&(context.current.cameraMode==='follow'||chipFlight())){setPlaceCard(null);soulFlight=null;rts.flyToGround(e);return;}  // #892: a tap on the ground frees the camera there

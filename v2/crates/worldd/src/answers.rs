@@ -417,6 +417,8 @@ pub struct Door {
     pub events: Sender<Event>,
     pub measures: Option<Arc<Measures>>,
     syncs: Sender<ToSync>,
+    /// The gateway's connections: an ended one's answers go to the next ([`crate::handover`]).
+    pub handover: Arc<crate::handover::Handover>,
 }
 
 impl Door {
@@ -931,6 +933,7 @@ pub struct World {
     pub durable: Durable,
     /// Still and next due, for sleep (O2).
     pub quiet: Arc<Quiet>,
+    handover: Arc<crate::handover::Handover>,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -941,6 +944,7 @@ impl World {
             events: self.events.clone(),
             measures: self.measures.clone(),
             syncs: self.syncs.clone(),
+            handover: self.handover.clone(),
         }
     }
 
@@ -6294,6 +6298,7 @@ pub fn start<S: Storage + 'static>(
         restart,
         durable: world_durable,
         quiet,
+        handover: Arc::default(),
         clock: Some(clock),
     })
 }
@@ -6695,6 +6700,8 @@ fn edit_checker(
                         }),
                         Some(c) => {
                             world.creator = c;
+                            let mut e = e;
+                            buildsafe::stand_as_kinds(&mut e, &entries);
                             edit::check(e, &copy, world)
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
@@ -6842,49 +6849,87 @@ pub fn states_frame(words: &[(Id, &str)]) -> Vec<u8> {
 
 /// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
-/// connection, in the order sent.
+/// connection, in the order sent. Once the connection has ended, a gateway's answers still to come (a walk it sent
+/// that ends after a gateway restart) are handed to its next connection ([`crate::handover`]).
 pub fn serve(world: Door, mut stream: UnixStream) {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
     let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
     let ask = states_ask();
-    std::thread::spawn(move || {
-        for frame in answers {
-            delivery_trace(trace, "native-write-start", &frame, "ready");
-            let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
-            if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
-                delivery_trace(trace, "native-write", &frame, "failed");
-                return;
+    let handover = world.handover.clone();
+    let n = handover.connection();
+    // Ended: the gateway's end closed, or a write to it failed. A gateway's: it sent the handover's ask.
+    let ended = Arc::new(AtomicBool::new(false));
+    let gateway = Arc::new(AtomicBool::new(false));
+    {
+        let (ended, gateway, handover) = (ended.clone(), gateway.clone(), handover.clone());
+        // The writer lives while anything may still answer on this connection (an open act's waiter), so what comes
+        // after the end is handed on rather than lost.
+        std::thread::spawn(move || {
+            for frame in answers {
+                if !ended.load(SeqCst) {
+                    delivery_trace(trace, "native-write-start", &frame, "ready");
+                    let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
+                    if out.write_all(&len).is_ok() && out.write_all(&frame).is_ok() {
+                        delivery_trace(trace, "native-write", &frame, "sent");
+                        continue;
+                    }
+                    delivery_trace(trace, "native-write", &frame, "failed");
+                    ended.store(true, SeqCst);
+                    handover.ended(n);
+                }
+                if gateway.load(SeqCst) {
+                    handover.hand_on(n, frame);
+                }
             }
-            delivery_trace(trace, "native-write", &frame, "sent");
-        }
-    });
+        });
+    }
+    let end = || {
+        ended.store(true, SeqCst);
+        handover.ended(n);
+    };
     loop {
         let mut len = [0u8; 4];
         if stream.read_exact(&mut len).is_err() {
-            return;
+            return end();
         }
         let len = u32::from_be_bytes(len) as usize;
         // A creator's bulk edit (#3695) is the largest frame the gateway hands on; `Intent::read` keeps every other
         // intent to the frame limit.
         if len > BULK_MOST as usize {
-            return;
+            return end();
         }
         let mut bytes = vec![0u8; len];
         if stream.read_exact(&mut bytes).is_err() {
-            return;
+            return end();
         }
-        // #3784: a gateway with a directory asks to be told the Souls' wind-down words, now and on each change.
+        if bytes == crate::handover::ask() {
+            gateway.store(true, SeqCst);
+            handover.asked(n, &reply);
+            continue;
+        }
+        // #3784: a gateway with a directory asks to be told the Souls' wind-down words, now and on each change. They
+        // go through a queue of their own that ends with the connection, so the world stops telling an ended one.
         if bytes == ask {
-            if world.events.send(Event::States(reply.clone())).is_err() {
-                return;
+            let (words, told) = channel::<Vec<u8>>();
+            let (to, ended) = (reply.clone(), ended.clone());
+            std::thread::spawn(move || {
+                for f in told {
+                    if ended.load(SeqCst) || to.send(f).is_err() {
+                        return;
+                    }
+                }
+            });
+            if world.events.send(Event::States(words)).is_err() {
+                return end();
             }
             continue;
         }
         if !world.arrive(bytes, reply.clone()) {
-            return;
+            return end();
         }
     }
 }

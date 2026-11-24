@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! deploy <world> <build hash> [--window-s 60] [--records 200]
+//! deploy <world> <build hash> --rehearse-only [--records 200]
 //! deploy rollback <world> <to hash> --from <hash>
 //! deploy pinned <world>
 //! ```
@@ -14,6 +15,10 @@
 //! `$WORLDS_ROOT/directory`. Prints the timeline and how it ended; exits 0 when the new build is kept or the rollback
 //! served, 1 otherwise. It holds the machine's step (`step.rs`) shared while it runs, and refuses
 //! `deploy.gateway-upgrading` while the gateway is upgraded (O16, #2809).
+//!
+//! `--rehearse-only` runs the deploy's first step and stops: the build on a scratch copy of the world
+//! (`$WORLDS_ROOT/rehearsals/`), fed the recorded intents and probed by its own operator body there. It reads no pin,
+//! restarts nothing, takes no step lock and writes only under `rehearsals/`; exits 0 when the rehearsal passes.
 // Operations, not the engine: the rollback's timeline is wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
@@ -72,13 +77,22 @@ fn main() {
     let build = from_hex(a.get(at + 1).unwrap_or_else(|| fail("no build named")))
         .unwrap_or_else(|e| fail(e));
     let num = |n: &str, d: u64| get(n).map_or(d, |v| v.parse().unwrap_or_else(|_| fail(n)));
-    // Never in the same step as the gateway's upgrade.
-    let _step = step::deploying(&root).unwrap_or_else(|e| {
-        println!("refused: {e}");
-        std::process::exit(1)
+    let rehearse_only = a.iter().any(|x| x == "--rehearse-only");
+    // Never in the same step as the gateway's upgrade. A rehearsal alone touches neither, so it takes no step.
+    let _step = (!rehearse_only).then(|| {
+        step::deploying(&root).unwrap_or_else(|e| {
+            println!("refused: {e}");
+            std::process::exit(1)
+        })
     });
     // O18d: no user pairing or profile. A stable per-world probe lock also serializes interrupted-watch recovery.
-    let mut probe = Probe::operator(&root.join("deploys").join(format!("{}.probe", world.name())))
+    // A rehearsal alone probes with its own body in the scratch copy; its lock stays under `rehearsals/`.
+    let receipts = root.join(if rehearse_only {
+        "rehearsals"
+    } else {
+        "deploys"
+    });
+    let mut probe = Probe::operator(&receipts.join(format!("{}.probe", world.name())))
         .unwrap_or_else(|e| fail(e));
     let d = Deploy {
         store,
@@ -101,6 +115,35 @@ fn main() {
         },
         window: num("--records", 200) as usize,
     };
+    if rehearse_only {
+        let t0 = std::time::Instant::now();
+        match d.rehearse(&build, &mut probe) {
+            Ok(r) => {
+                println!(
+                    "{:>7} ms  rehearsed on {}: {} records copied, {} recorded intents fed, {} named ends \
+                     ({} receipts, refused {:?}); served log kept: {}",
+                    t0.elapsed().as_millis(),
+                    r.scratch.display(),
+                    r.copied,
+                    r.fed,
+                    r.ended,
+                    r.receipts,
+                    r.refused,
+                    r.served_kept
+                );
+                println!("Rehearsed");
+            }
+            Err(why) => {
+                println!(
+                    "{:>7} ms  rehearsal failed: {why}",
+                    t0.elapsed().as_millis()
+                );
+                println!("NotRehearsed {{ why: {why:?} }}");
+                std::process::exit(1)
+            }
+        }
+        return;
+    }
     let mut unit = Systemd::new(world.name());
     if rollback {
         let from = from_hex(get("--from").unwrap_or_else(|| fail("no --from build")))

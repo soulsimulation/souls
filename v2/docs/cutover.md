@@ -237,6 +237,14 @@ with the release's `worldd`, pins it, and leaves the world stopped for release-v
 the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
 it and `switch-eden.sh` after release-v2.
 
+Any other moved world starts fresh from its own kept facts the same way, by hand, with `bash
+v2/tools/ops/cutover/reseed-world.sh <world> <sha> check`, then `run` (0.133; `<world>` is its folder's name under
+`/var/lib/souls/worlds/worlds/`, root on the host, with release `<sha>` staged). That is how an importer fix reaches a
+world already seeded (Chiba's entrance, mars-college-2026), so the release may be the build the world is on already.
+It has the same steps and the same safety as Eden's (receipt first, folder and bucket objects aside, nothing deleted,
+`resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
+the world from the receipt. Re-seeding a world needs Gene's yes; `reseed-world.test.mjs` runs it on stand-ins.
+
 ## One writer
 
 - **In the directory.** The new Eden is one world with one claim (its epoch) in the store, made when it was first

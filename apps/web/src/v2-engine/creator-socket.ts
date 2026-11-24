@@ -1,11 +1,13 @@
 // 0.133 G1: the old god panel on a world the new engine runs. The panel's undo, redo and weather are the creator's own
 // edits on the gateway's creator socket, signed in with a token the session exchange gives for the page's sign-in
 // (gatewayd `creator.rs`, `POST /v2/creator-token`); its command box goes to the creator's agent through the gateway
-// mailbox (as the owner's box does for a Soul, owner-mailbox.ts), so the agent's `listen` prints it. Placing, moving and
-// removing things stay the agent's, as on old worlds. Nothing outside v2/ imports from it (K14), so the session and the
-// edit's bytes follow v2/web/src/panel/session.ts and edit.ts (T10's intent, `souls:edit`) rather than importing them.
+// mailbox (as the owner's box does for a Soul, owner-mailbox.ts), so the agent's `listen` prints it. 0.133 item 6: the
+// panel's Build places, moves and removes a thing with the same verb's batch (place, move and remove, as the creator
+// client's `souls-god place|move|remove` send them; god-ui/BuildBar.tsx). Nothing outside v2/ imports from it (K14), so
+// the session and the edit's bytes follow v2/web/src/panel/session.ts and edit.ts (T10's intent, `souls:edit`) rather
+// than importing them.
 // The token stays in memory only.
-import { MailBox, BoxSocket, V2OwnerMailbox, mailboxPlace, viewToken, type MailboxPlace } from './owner-mailbox.ts';
+import { MailBox, BoxSocket, V2OwnerMailbox, v2MailboxPlace, v2World, viewToken, type MailboxPlace } from './owner-mailbox.ts';
 import { session as pageSession } from '../auth-session.ts';
 import type { AgentInbox } from '../AgentMessageBox.tsx';
 
@@ -13,12 +15,22 @@ import type { AgentInbox } from '../AgentMessageBox.tsx';
 export type IdValue = [Uint8Array, number];
 /** A version: lineage, zone, epoch, sequence (T3). */
 export type Version = [Uint8Array, IdValue, number, number];
-/** What an edit asks: a batch of sets (weather), or an undo or a redo of the newest edit (G4). */
-export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number }[] };
-/** An answer, as the panel reads it. */
+/** A point in a parent's frame, µm (T4). */
+export type Spot = { x: number; y: number; z: number };
+/** A turn `[w, x, y, z]`, each scaled by 2^30, as the stream's nodes carry it. */
+export type Turn = [number, number, number, number];
+/** One operation of a build batch (`replica::edit::wire`): a place names its new thing by a number of the batch until the
+ *  receipt maps it; a move keeps the thing's facing and slot when given them. */
+export type Op =
+  | { op: 'place'; name: number; kind: string; parent: string; at: Spot }
+  | { op: 'move'; node: string; at: Spot; rot?: Turn; slot?: number | null }
+  | { op: 'remove'; node: string };
+/** What an edit asks: a batch of sets (weather), a build batch, or an undo or a redo of the newest edit (G4). */
+export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number }[] } | { ops: Op[] };
+/** An answer, as the panel reads it: a receipt maps a place's batch name to its new id (`<scope hex>.<counter>`). */
 export type Frame =
   | { t: 'outcome'; name: string }
-  | { t: 'receipt'; sequence: number; version: Version | null }
+  | { t: 'receipt'; sequence: number; version: Version | null; names: Map<number, string> }
   | { t: 'refused'; sequence: number; version: Version | null; reason: string }
   | { t: 'other' };
 type Cbor = { encode(v: unknown): Uint8Array; decode(b: Uint8Array, o: { useMaps: true }): unknown };
@@ -38,13 +50,39 @@ export function idOf(text: string): IdValue {
   if (!m) throw new Error(`not an id: ${text}`);
   return [bytes(m[1]!), Number(m[2])];
 }
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 const num = (v: unknown) => Number(v as number | bigint);
 const sequenceOf = (v: Version | null) => (v ? num(v[3]) : 0);
+
+const IDENTITY: Turn = [1 << 30, 0, 0, 0];
+/** A whole number, never -0 (cborg writes -0 as a float, which T0's integers are not). */
+const whole = (v: number) => Math.round(v) || 0;
+/** A spot `{1: position, 2: orientation, 3: support, 4: slot}`: held by its slot when it has one, else on nothing (as a
+ *  place `--at` and a move `--at` are). */
+function spotValue(s: Spot, rot: Turn = IDENTITY, slot: number | null = null): Map<number, unknown> {
+  const m = new Map<number, unknown>([[1, [s.x, s.y, s.z].map(whole)], [2, rot.map(whole)], [3, new Map([[1, slot === null ? 0 : 2]])]]);
+  if (slot !== null) m.set(4, slot);
+  return m;
+}
+
+/** One build operation's value (`replica::edit::wire`): place `{1: 1, 2: name, 3: kind, 4: kind's hash, 5: parent, 6:
+ *  spot}`, move `{1: 2, 2: node, 3: spot}`, remove `{1: 4, 2: node}`. */
+export function opValue(o: Op): Map<number, unknown> {
+  if (o.op === 'remove') return new Map<number, unknown>([[1, 4], [2, idOf(o.node)]]);
+  if (o.op === 'move') return new Map<number, unknown>([[1, 2], [2, idOf(o.node)], [3, spotValue(o.at, o.rot, o.slot ?? null)]]);
+  const [plain, h] = o.kind.split('@');
+  const m = new Map<number, unknown>([[1, 1], [2, o.name], [3, plain]]);
+  if (h) m.set(4, bytes(h));
+  m.set(5, idOf(o.parent));
+  m.set(6, spotValue(o.at));
+  return m;
+}
 
 /** The edit intent's value (v2/web/src/panel/edit.ts `editIntent`): by the creator, its sequence, planned against `basis`. */
 export function intentOf(creator: IdValue, sequence: number, basis: Version, asked: Asked): Map<number, unknown> {
   const params = 'undo' in asked
     ? new Map<number, unknown>([[UNDO, asked.undo === 'undo' ? 1 : 2]])
+    : 'ops' in asked ? new Map<number, unknown>([[1, asked.ops.map(opValue)]])
     : new Map<number, unknown>([[1, asked.sets.map((s) => new Map<number, unknown>([[1, 3], [2, idOf(s.node)], [3, s.field], [4, s.value]]))]]);
   return new Map<number, unknown>([[1, new Map<number, unknown>([[1, 2], [2, creator]])], [2, VERB], [4, params], [5, sequence], [6, basis], [7, EXPIRY]]);
 }
@@ -56,7 +94,11 @@ export function readFrame(v: unknown): Frame {
   const a = v.get(2);
   if (!(a instanceof Map)) return { t: 'other' };
   const version = Array.isArray(v.get(1)) ? (v.get(1) as Version) : null, sequence = num(a.get(2)), kind = num(a.get(3));
-  if (kind === 1) return { t: 'receipt', sequence, version };
+  if (kind === 1) {
+    const names = new Map<number, string>();
+    if (a.get(6) instanceof Map) for (const [n, id] of a.get(6) as Map<unknown, IdValue>) if (Array.isArray(id)) names.set(num(n), `${hex(id[0])}.${num(id[1])}`);
+    return { t: 'receipt', sequence, version, names };
+  }
   if (kind === 2 || kind === 5) return { t: 'refused', sequence, version, reason: String(a.get(4)) };
   return { t: 'other' };
 }
@@ -152,9 +194,9 @@ export async function creatorToken(place: MailboxPlace, post: typeof fetch = fet
   return { token: body.token, grant: body.grant };
 }
 
-// Read when this module loads, as owner-mailbox.ts reads it: the page's main deletes the inline config at mount.
-const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig;
-const placeNow = (stream: string) => mailboxPlace(location.href, PAGE_CONFIG, stream);
+// The inline config as owner-mailbox.ts read it when the page loaded: this module loads later (the panel imports it on
+// demand), after the page's main has deleted the inline config, so a read here found none and named no gateway.
+const placeNow = (stream: string) => (stream === v2World() ? v2MailboxPlace() : null);
 
 /** The world as the page's stream reader has it (use-v2-souls.ts `__soulsV2`): its own node and its time now. */
 const worldNow = () => (window as unknown as { __soulsV2?: { world?: string | null; newestTo?: number | null } }).__soulsV2 ?? null;
@@ -198,11 +240,17 @@ export class V2Creator {
     return this.session;
   }
 
-  /** One edit; the words the panel's note shows: what was done, or the refusal by name. */
+  /** One edit; the words the panel's note shows: what was done, or the refusal by name (and what it means, for one of
+   *  build safety's). */
   async edit(asked: Asked, done: string): Promise<string> {
+    return (await this.answer(asked, done)).said;
+  }
+
+  /** One edit and its receipt's names (a place's new id), or the refusal as `edit` throws it. */
+  async answer(asked: Asked, done: string): Promise<{ said: string; names: Map<number, string> }> {
     const f = await (await this.open()).edit(asked);
-    if (f.t === 'receipt') return done;
-    throw new Error(f.t === 'refused' ? `Refused: ${f.reason}` : 'The world did not answer.');
+    if (f.t === 'receipt') return { said: done, names: f.names };
+    throw new Error(f.t === 'refused' ? refusalText(f.reason) : 'The world did not answer.');
   }
 
   undo(which: 'undo' | 'redo'): Promise<string> { return this.edit({ undo: which }, which === 'undo' ? 'Undid the newest edit.' : 'Redid the newest undone edit.'); }
@@ -234,6 +282,14 @@ export class V2Creator {
     return this.box;
   }
 }
+
+/** Build safety's refusals (AGENTS.md BUILDSAFE) and the plain words the panel shows beside the name (souls-god.mjs). */
+export const BUILDSAFE: Record<string, string> = {
+  'edit.would-bury': 'a Soul stands there now: wait until it has moved, or choose another place',
+  'edit.would-cut-off': 'that would shut a Soul in: leave it a way out, or wait until it has moved',
+  'edit.in-use': 'a Soul is using that thing: wait until it is done',
+};
+export const refusalText = (reason: string) => `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the
  *  creator's agent reads (gatewayd `mailbox.rs`: a Soul's, or a world's creator's). */

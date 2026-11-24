@@ -5,8 +5,9 @@
 # It is the live file with the new engine's own addresses added. Everything the live file did, it still does in the
 # same way: the compression, the headers, the blobs snippet, /s/* to the viewers' origin, and every other path to
 # today's launcher with the same trusted proxies. The additions:
-# - A moved world's agent paths, /w/<slug>/v2/(ws|creator-token|entries|uploads/<hash>), straight to THAT world's own
-#   gatewayd, with /w/<slug> stripped: gatewayd answers /v2/ws, /v2/creator-token, /v2/entries and /v2/uploads/<hash>.
+# - A moved world's agent paths, /w/<slug>/v2/(ws|creator-token|entries|uploads/<hash>) and its creator's
+#   (creator-upload|creator-edit|creator-helper|kinds, #1960), straight to THAT world's own gatewayd, with /w/<slug>
+#   stripped: gatewayd answers each of them at /v2/<path>.
 # - Only for a moved world the routes file marks canonical: its bootstrap, /w/<slug>/v1/bootstrap, to the viewers'
 #   origin (7320), which the new Soul client reads to pair (`node eden.mjs pair https://soul.game/w/<slug>/`). The
 #   origin refuses the bootstrap of a world that is not canonical, so such a world's bootstrap stays on the launcher.
@@ -30,7 +31,7 @@
 # Placeholders, never real values in this repository; moved-install.sh takes both from the live file it replaces:
 # @@LAUNCHER_PORT@@ is today's launcher's loopback port and @@TRUSTED_PROXIES@@ the live file's trusted_proxies.
 (moved-gateway) {
-  @gateway-{args[0]} path_regexp ^/w/{args[0]}/v2/(ws|creator-token|entries|uploads/1220[0-9a-f]{64})$
+  @gateway-{args[0]} path_regexp ^/w/{args[0]}/v2/(ws|creator-token|creator-upload|creator-edit|creator-helper|entries|kinds|uploads/1220[0-9a-f]{64})$
   handle @gateway-{args[0]} {
     header X-Souls-System v2
     header X-Robots-Tag "noindex, nofollow"

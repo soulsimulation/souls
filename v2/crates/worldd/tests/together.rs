@@ -5,7 +5,10 @@
 //! - An accepted handshake writes both members' moves for viewers (`souls:form-move`), each aimed at the other, with
 //!   their contact times within 50 ms of each other; when the moves are done the handshake ends, both leaving it.
 //! - A declined offer, and one left to lapse, move nobody. An accept from 2.6 m away is refused `together.too-far`
-//!   (nothing walks a member to its place yet) and leaves the offer open.
+//!   and leaves the offer open.
+//! - 0.134 item 5: after one Soul walks up to another, content's handshake, hug, high-five and holding hands are each
+//!   accepted (the reach read from the places the two will take, 0.135 G3), the two walk there and the moves play;
+//!   from 5 m apart each is refused `together.too-far` and nobody moves.
 //!
 //! - 0.134 T2: holding hands (content's `hold_hand`, its last phase held) lasts while both stay. One leaving releases
 //!   both holds, each written again ended `released`; a walk sent by either leaves the activity the same way.
@@ -31,7 +34,7 @@ use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
 use replica::moves::Place;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
-use replica::rules::json::Value as Json;
+use replica::rules::json::{Value as Json, parse};
 use replica::time::Micros;
 use replica::tree::Rules as TreeRules;
 use replica::world_model::{Audience, Kind};
@@ -57,6 +60,35 @@ fn hold_at() -> ActivityKind {
     let mut k = touch(HOLD_AT, 60_000_000, "souls:hold_hand");
     k.roles[0].stands = vec![(Vec3::new(-250_000, 0, 0), 0)];
     k.roles[1].stands = vec![(Vec3::new(250_000, 0, 0), 0)];
+    k
+}
+
+/// Content's own touch `file` (`content/kinds/together/<file>.json`) as a test kind whose roles name move `mv`: the
+/// giver stands where the entry's slot `one` stands a member, the taker at `other` (each slot's stand point, mm to
+/// µm, with its facing), as `serve::activity_kinds` reads them (0.134 item 5).
+fn content_touch(plain: &str, file: &str, mv: &str) -> ActivityKind {
+    let path = format!(
+        "{}/../../../content/kinds/together/{file}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let entry = parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let int = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).unwrap(),
+        _ => 0,
+    };
+    let mut k = touch(plain, 60_000_000, mv);
+    for (role, slot) in k.roles.iter_mut().zip(["one", "other"]) {
+        let stand = entry
+            .get("slots")
+            .and_then(|s| s.get(slot))
+            .and_then(|s| s.get("stand"))
+            .and_then(Json::str)
+            .unwrap();
+        let p = entry.get("points").and_then(|ps| ps.get(stand)).unwrap();
+        let a = p.get("at_mm").and_then(Json::arr).unwrap();
+        let mm = |i: usize| int(a.get(i)) * 1000;
+        role.stands = vec![(Vec3::new(mm(0), mm(1), mm(2)), int(p.get("yaw_mdeg")))];
+    }
     k
 }
 
@@ -109,6 +141,11 @@ const FOLLOW: &str = "test:follow";
 /// Holding hands and a dance whose roles say where members stand (0.135 G3).
 const HOLD_AT: &str = "test:hold_at";
 const DANCE_AT: &str = "test:dance_at";
+/// Content's handshake, hug, high-five and holding hands, standing where their entries place them (0.134 item 5).
+const W_HANDSHAKE: &str = "test:w_handshake";
+const W_HUG: &str = "test:w_hug";
+const W_HIGH_FIVE: &str = "test:w_high_five";
+const W_HOLD: &str = "test:w_hold_hands";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -134,6 +171,10 @@ fn kinds() -> Vec<(&'static str, String)> {
         (FOLLOW, pinned(FOLLOW, 9)),
         (HOLD_AT, pinned(HOLD_AT, 10)),
         (DANCE_AT, pinned(DANCE_AT, 11)),
+        (W_HANDSHAKE, pinned(W_HANDSHAKE, 12)),
+        (W_HUG, pinned(W_HUG, 13)),
+        (W_HIGH_FIVE, pinned(W_HIGH_FIVE, 14)),
+        (W_HOLD, pinned(W_HOLD, 15)),
     ]
 }
 
@@ -284,8 +325,20 @@ fn tree_rules() -> TreeRules {
                 k(
                     "place",
                     &[
-                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                        "body",
+                        HANDSHAKE,
+                        BRIEF,
+                        HOLD,
+                        DANCE,
+                        HUG,
+                        HIGH_FIVE,
+                        FOLLOW,
+                        HOLD_AT,
                         DANCE_AT,
+                        W_HANDSHAKE,
+                        W_HUG,
+                        W_HIGH_FIVE,
+                        W_HOLD,
                     ],
                 ),
             ),
@@ -299,6 +352,10 @@ fn tree_rules() -> TreeRules {
             (full(FOLLOW), k("activity", &[])),
             (full(HOLD_AT), k("activity", &[])),
             (full(DANCE_AT), k("activity", &[])),
+            (full(W_HANDSHAKE), k("activity", &[])),
+            (full(W_HUG), k("activity", &[])),
+            (full(W_HIGH_FIVE), k("activity", &[])),
+            (full(W_HOLD), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -526,6 +583,10 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             follow(),
             hold_at(),
             dance_at(),
+            content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
+            content_touch(W_HUG, "hug", "souls:hug"),
+            content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
+            content_touch(W_HOLD, "hold_hands", "souls:hold_hand"),
         ],
     ));
     let rules = Rules {
@@ -575,8 +636,19 @@ impl Run {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
                         && [
-                            HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                            HANDSHAKE,
+                            BRIEF,
+                            HOLD,
+                            DANCE,
+                            HUG,
+                            HIGH_FIVE,
+                            FOLLOW,
+                            HOLD_AT,
                             DANCE_AT,
+                            W_HANDSHAKE,
+                            W_HUG,
+                            W_HIGH_FIVE,
+                            W_HOLD,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -745,6 +817,143 @@ fn t1_a_declined_or_lapsed_handshake_moves_nobody() {
     println!(
         "t1: declined; lapsed (a late accept refused {late:?}); too far ({refused:?}): no move written"
     );
+    run.stop();
+}
+
+/// Content's four touches: the move each names, its reach and how far apart its members stand once placed, µm.
+const WALKED: [(&str, &str, i64, i64); 4] = [
+    (W_HANDSHAKE, "souls:handshake", 700_000, 550_000),
+    (W_HUG, "souls:hug", 700_000, 550_000),
+    (W_HIGH_FIVE, "souls:high_five", 700_000, 550_000),
+    (W_HOLD, "souls:hold_hand", 600_000, 450_000),
+];
+
+fn apart(p: Vec3, q: Vec3) -> i64 {
+    ((i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt()) as i64
+}
+
+/// Waits up to about 10 s (100 waits of 0.1 s) for `done` to hold of `run`.
+fn until(run: &Run, done: impl Fn(&Run) -> bool) -> bool {
+    for _ in 0..100 {
+        if done(run) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    done(run)
+}
+
+impl Run {
+    /// The world time of each `souls:activity-left` event, in order.
+    fn left_at(&self) -> Vec<Micros> {
+        self.entries()
+            .into_iter()
+            .filter(|e| {
+                e.events
+                    .iter()
+                    .flatten()
+                    .any(|ev| ev.name.as_str() == "souls:activity-left")
+            })
+            .map(|e| e.envelope.at)
+            .collect()
+    }
+}
+
+/// 0.134 item 5: a touch after a walk-up. Soul 3, 2 m from Soul 2, walks up to it (a walk to a body ends beside it,
+/// at speaking distance); then each of content's handshake, hug, high-five and holding hands, offered by Soul 3 and
+/// accepted by Soul 2, starts: the two walk to their places (0.6 m apart, 0.5 m holding hands), within the move's
+/// reach, and their moves play past contact to the end (a touch ends by itself after its last phase, never at
+/// contact, where a move out of reach is cancelled; the hold holds until a leave releases it). Each on a fresh
+/// world, so each starts from the walk-up.
+#[test]
+fn t1_each_touch_after_a_walk_up_is_accepted_and_plays() {
+    for (i, (kind, mv, reach, placed)) in WALKED.into_iter().enumerate() {
+        let run = serve(&format!("walk-up-{i}"));
+        let (mut a, mut b) = (run.client(3), run.client(2));
+        a.act("eden:walk", Some(soul(2)), &[])
+            .expect("Soul 3 walks up to Soul 2");
+        let from = apart(run.last(3).0, run.last(2).0);
+        assert!(
+            (1_000_000..1_500_000).contains(&from),
+            "walked up to speaking distance: {from} µm"
+        );
+        let offer = run.created(&a.offer(kind, 2).expect("offered"));
+        b.act("activity:accept", Some(offer), &[])
+            .unwrap_or_else(|r| panic!("{kind} accepted from {from} µm apart: {r}"));
+        assert!(
+            until(&run, |r| r.touches().len() == 2),
+            "{kind}: both moves begin once both are placed"
+        );
+        let at = apart(run.last(3).0, run.last(2).0);
+        assert!(
+            (at - placed).abs() <= 100_000 && at <= reach,
+            "{kind}: placed {placed} µm apart and within its {reach} µm reach: stood {at} µm"
+        );
+        let touches = run.touches();
+        assert!(touches.iter().all(|t| t.1 == mv));
+        let aimed: BTreeSet<(Id, Id)> = touches.iter().map(|t| (t.0, t.2)).collect();
+        assert_eq!(
+            aimed,
+            BTreeSet::from([(soul(3), soul(2)), (soul(2), soul(3))])
+        );
+        let contact = touches.iter().map(|t| t.3).max().unwrap();
+        let how = if mv == "souls:hold_hand" {
+            std::thread::sleep(Duration::from_millis(1_500));
+            assert_eq!(run.lefts(), 0, "the hold holds");
+            b.act("activity:leave", Some(offer), &[]).expect("left");
+            assert!(until(&run, |r| r.ended().len() == 2), "the hold released");
+            let ended = run.ended();
+            assert!(ended.iter().all(|(_, h)| h == "released"), "{ended:?}");
+            "held, then released by a leave"
+        } else {
+            assert!(until(&run, |r| r.lefts() == 2), "{kind} ended by itself");
+            let left = run.left_at();
+            assert!(
+                left.iter().all(|t| *t >= contact + 300_000),
+                "{kind}: ended after its last phase, not at contact {contact}: {left:?}"
+            );
+            "played past contact and ended by themselves"
+        };
+        println!("item 5: {kind} accepted {from} µm apart; placed {at} µm apart; both moves {how}");
+        run.stop();
+    }
+}
+
+/// 0.134 item 5: two Souls 5 m apart are still too far for each touch. Soul 3 walks to a point 5 m from Soul 2; each
+/// accept is refused `together.too-far`, the offer stays open (declined after), and nobody moves.
+#[test]
+fn t1_a_touch_from_5_m_apart_is_refused_and_moves_nobody() {
+    let run = serve("walk-up-far");
+    let (mut a, mut b) = (run.client(3), run.client(2));
+    let two = at(2);
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(two.x - 5_000_000, two.z))],
+    )
+    .expect("Soul 3 walks to 5 m from Soul 2");
+    let (p3, p2) = (run.last(3).0, run.last(2).0);
+    let from = apart(p3, p2);
+    assert!((from - 5_000_000).abs() <= 200_000, "5 m apart: {from} µm");
+    for (kind, _, _, _) in WALKED {
+        let offer = run.created(&a.offer(kind, 2).expect("offered"));
+        let refused = b.act("activity:accept", Some(offer), &[]);
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|r| r.contains("together.too-far")),
+            "{kind} from {from} µm: {refused:?}"
+        );
+        b.act("activity:decline", Some(offer), &[])
+            .expect("the offer stayed open");
+        println!(
+            "item 5: {kind} from {from} µm refused: {}",
+            refused.unwrap_err()
+        );
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(run.touches().is_empty(), "no move written");
+    assert_eq!((run.last(3).0, run.last(2).0), (p3, p2), "nobody moved");
     run.stop();
 }
 

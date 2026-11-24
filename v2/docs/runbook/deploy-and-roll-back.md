@@ -63,7 +63,9 @@ bash v2/tools/ops/world-rollback.sh <world>   # back to the build that deploy le
 ```
 
 The wrappers call the `deploy` program as `deploy <world> <build hash> [--window-s 60] [--records 200]` and `deploy
-rollback <world> <to hash> --from <hash>`. `world-deploy.sh` takes the build from the install
+rollback <world> <to hash> --from <hash>`. `deploy <world> <build hash> --rehearse-only` runs step 1 alone and stops:
+it reads no pin, restarts nothing, takes no step lock and writes only under `$WORLDS_ROOT/rehearsals/`, so a staged
+build can be rehearsed against every live world before a release moves any. `world-deploy.sh` takes the build from the install
 (`/usr/local/lib/souls/worldd`, staged under its hash) and the build it leaves from the world's pin (`deploy pinned
 <world>`), which it keeps in `$WORLDS_ROOT/deploys/<world>` for `world-rollback.sh`. The install puts `deploy` in
 `/usr/local/lib/souls`. `release.sh` uses the same probe.
