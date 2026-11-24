@@ -6695,6 +6695,8 @@ fn edit_checker(
                         }),
                         Some(c) => {
                             world.creator = c;
+                            let mut e = e;
+                            buildsafe::stand_as_kinds(&mut e, &entries);
                             edit::check(e, &copy, world)
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
