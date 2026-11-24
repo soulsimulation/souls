@@ -1077,6 +1077,11 @@ async fn c6_clip_four_souls_carry_the_6_m_upright_on_a_running_world() {
     let at = Vec3::new(metres(&at[0]), 0, metres(&at[1]));
     hold("C6_WAIT").await;
     let ns = w.get("ns").and_then(json::Value::str).unwrap_or("dev");
+    let from = answers::now();
     carry_tall(&mut crew, &souls, &dir, ground, tall, at, ns).await;
-    println!("C6 clip: four Souls carried the 6.1 m upright 25 m");
+    // The span a recorder plays back on the old page (`scene.mjs --span --from .. --to ..`), world µs.
+    println!(
+        "C6 clip: four Souls carried the 6.1 m upright 25 m, from {from} to {}",
+        answers::now()
+    );
 }
