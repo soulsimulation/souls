@@ -6049,6 +6049,10 @@ fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
 ///
 /// The same thread checks a Soul's set-down (#3604, [`crate::setdown::check`]) on the same town, with the engine's
 /// rules: a world with the engine and no creator has the thread for set-downs alone, and refuses every edit.
+///
+/// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
+/// lockstep (S10c).
+#[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
     mut set_downs: Option<(replica::tree::Rules, Minter)>,
