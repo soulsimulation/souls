@@ -30,7 +30,9 @@
 //! - **In the log** (K18, #3160). Each tick's part lists the bodies whose pose changed ([`Bodies::moved`]), a body in
 //!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
-//!   the seat is held in the slots table again and a rise or another sit sees it.
+//!   the seat is held in the slots table again and a rise or another sit sees it. A body being carried across a link
+//!   is not written while it crosses: its pose then lies on neither end's ground, so the log keeps where it last
+//!   stood until it lands (#4669: a kill mid-crossing once left every later restart refusing every move).
 //!
 //! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
 //!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
@@ -808,11 +810,19 @@ impl Bodies {
         c.ids()
             .filter_map(|id| {
                 let b = c.body(id)?;
-                let stance = match b.pose.support {
+                // A body carried across a link follows the link's line in the frame of the floor it set out from,
+                // past that floor's edge: it is kept where it last stood until it lands, so a restart never finds it
+                // off its ground. The world's own carries (a step aside, a walk-out) stay on their ground and are
+                // written as they go.
+                let pose = match self.logged.get(&id) {
+                    Some(p) if c.carrying(id).is_some() => *p,
+                    _ => b.pose,
+                };
+                let stance = match pose.support {
                     Support::Slot => self.slots.stance(id),
                     _ => self.sleeping.contains_key(&id).then_some(Stance::Lie),
                 };
-                Some((id, (b.pose, stance)))
+                Some((id, (pose, stance)))
             })
             .collect()
     }
@@ -919,8 +929,9 @@ impl Bodies {
         out
     }
 
-    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c): part of the zone's
-    /// state hash.
+    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c), one crossing a link
+    /// where it last stood ([`Bodies::placed`]): part of the zone's state hash, so a restart's state equals the last
+    /// record's.
     pub fn poses(&self) -> Vec<(Id, Pose)> {
         self.every()
             .into_iter()

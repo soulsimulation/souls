@@ -91,7 +91,11 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    (refused, stopped, replaced, timed out) carries none.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
-   named reason (K13 builds it).
+   named reason (K13 builds it). A body is logged where it stands, never mid-crossing: while it is carried across a
+   link its row keeps where it last stood. A restart that finds a logged body off its floor anyway (an older log, a
+   kill mid-climb out of a seat) resumes it by E11d's rule (`sim::slots::Slots::resume`: carried on to a landing or
+   the floor's nearest legal point, seated again, or held by name). A body that cannot be placed again at all is left
+   out by name and the others start: one bad row never leaves a world refusing every move.
 
 ## The controller (B1)
 
