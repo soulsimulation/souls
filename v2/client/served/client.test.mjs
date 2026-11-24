@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,6 +17,7 @@ import { DEFAULT_PKG, request } from '../src/daemon/client.mjs';
 import { runtimeOf } from '../src/home/home.mjs';
 import { build } from './build.mjs';
 import { answer } from './serve.mjs';
+import { stopThenRemove } from '../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -88,10 +89,9 @@ before(async () => {
   site = `http://127.0.0.1:${server.address().port}/local`;
 });
 
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
   server?.close();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 const folder = join(dir, 'empty'), home = join(folder, '.souls');

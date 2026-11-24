@@ -511,4 +511,11 @@ writeFileSync(join(OUT, 'table.md'), table + '\n');
 console.log(`\n${table}`);
 console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
+// The world's folder is removed on exit, so its worldd (which backs up its stream when stopped, R15) has ended first:
+// v2/tools/teardown/stop.mjs's rule, here because nothing outside v2/ imports from it (K14).
+await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? null : new Promise((ok) => {
+  const hard = setTimeout(() => p.kill('SIGKILL'), 15_000);
+  p.once('exit', () => { clearTimeout(hard); ok(); });
+  p.kill();
+})));
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

@@ -241,7 +241,14 @@ driver_served() {
 # refusal by name), the says with receipts, with no error and no socket closed; the report's minutes are printed.
 step driver-served bash -c 'set -euo pipefail
   cargo build -p gatewayd -p worldd -p testworld -p driver --locked --quiet
-  t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap "kill \$(jobs -p) 2>/dev/null; rm -rf $d" EXIT
+  # The folder goes only once worldd and gatewayd have ended (SIGKILL after 15 s): a stopping worldd still backs up its
+  # stream for up to 8 s (R15, #4469), as v2/tools/teardown/stop.mjs does for the Node tests.
+  stop() {
+    local p x; p=$(jobs -p); kill $p 2>/dev/null || true
+    for x in $p; do for _ in $(seq 150); do kill -0 "$x" 2>/dev/null || break; sleep 0.1; done; done
+    kill -9 $p 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$d"
+  }
+  t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap stop EXIT
   "$t"/testworld --out "$d" >/dev/null
   "$t"/worldd seed --facts "$d/testworld-s1-t0.facts.json" --dir "$d/w" --souls 10 --at -40,30 >/dev/null
   "$t"/worldd serve --dir "$d/w" --socket "$d/w.sock" >"$d/worldd.log" 2>&1 &

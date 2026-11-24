@@ -10,7 +10,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -18,6 +18,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -52,9 +53,8 @@ async function waitFor(f, ms = 10_000) {
 
 const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 
-after(() => {
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+after(async () => {
+  await stopThenRemove(procs, dir);
 });
 
 /** The test world's facts (N2, seed 1, three boxes), the box on the open ground, and an entry with its take. */
