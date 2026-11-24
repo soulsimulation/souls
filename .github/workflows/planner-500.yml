@@ -114,6 +114,14 @@ jobs:
                   const fm = (o.threads.world.find(([n]) => n === "planner-forms") ?? [, 0])[1];
                   console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${pl} | ${fm} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} | ${o.accepted.p95Ms} | ${o.wait.p50Ms} / ${o.wait.p95Ms} | ${o.stuck?.stuck ?? "-"} |`);
                 ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
+                grep -h '^bodies:' "$d/driver.out" 2> /dev/null | sed "s/^/$r $rung $arm r$k /"
+                # The stuck agents' acts (S11): verb, accepted or unanswered, counted, with the longest time since sent.
+                node -e '
+                  const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const by = {}; for (const a of o.stuck?.stuckActs ?? []) { const [v, st, ms, how] = a.split(" "); const e = (by[v + " " + st + " " + (how ?? "")] ??= { n: 0, ms: 0 }); e.n++; e.ms = Math.max(e.ms, parseInt(ms)); }
+                  const t = Object.entries(by).sort((x, y) => y[1].n - x[1].n).map(([key, e]) => `${key} ${e.n} (up to ${Math.round(e.ms / 1000)} s)`).join("; ");
+                  if (t) console.log(`long acts ${r} ${rung} ${arm} r${k}: ${t}; stuck ${o.stuck.stuck} (${o.stuck.rule ?? "unanswered 60 s"}), on their way ${o.stuck.onTheirWay ?? "-"} (${o.stuck.unseen ?? "-"} never seen on the stream); refused only ${o.stuck.refusedOnly}, longest stall ${Math.round(o.stuck.stallMaxMs / 1000)} s`);
+                ' "$r" "$rung" "$arm" "$k" "$line"
               done
             done
           done

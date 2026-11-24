@@ -148,6 +148,12 @@ struct Sent {
     /// the longest time it acted with only refusals back (its Soul moves nowhere); ms. Its last answer's age at the
     /// end of the schedule, ms.
     stall_ms: u64,
+    /// S11: the act outstanding at the longest stall: its verb, whether the world had accepted it (its end still to
+    /// come) and how long since it was sent, ms.
+    stall_act: String,
+    /// S11: the longest stall's window, Unix ms: from the later of its act's send and the last answer, to when it
+    /// was longest.
+    stall_window: (u64, u64),
     refused_only_ms: u64,
     last_answer_age_ms: u64,
     /// #4154's accuracy check: the sequences the world took (accepted or receipted) and those it said were done.
@@ -355,8 +361,49 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
 /// #4154's stuck measure, per agent from its own answers (not the gateway's receipts file, which logs few Souls):
 /// stuck is an act outstanding with no answer for 60 s or more; refused-only is 60 s or more of acting with nothing
 /// but refusals back. Also the agents' last answer's age at the end of the schedule.
-fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
+/// S11: how many agents read their own copy at once, before the run, to learn their Soul's body.
+const BODY_READS: usize = 16;
+/// S11: how far a Soul must have gone in a stall's window to be on its way, not stuck, µm.
+const MOVED_UM: i128 = 1_000_000;
+/// S11: each node's motion samples as the public stream showed them ([`stream::Seen::motion`]).
+type Motion = HashMap<Id, Vec<stream::Sample>>;
+
+fn stuck_report(
+    agents: &[Sent],
+    motion: Option<&Motion>,
+    bodies: &[Option<Id>],
+) -> serde_like::Obj {
     const STUCK_MS: u64 = 60_000;
+    // S11: a Soul whose act is unanswered for 60 s is on its way, not stuck, when the public stream shows its body
+    // moving at the window's end (its latest motion sample in the window has a speed), or a metre or more on, net, from
+    // where it was at the window's start (its last sample by then) to where it was at its end. A Soul moved by others
+    // (pushed, stepped aside) counts as on its way too. With no stream, or no sample of its body, it counts as stuck.
+    let moved = |k: usize, (from, to): (u64, u64)| -> bool {
+        let Some(samples) = bodies
+            .get(k)
+            .copied()
+            .flatten()
+            .and_then(|b| motion?.get(&b))
+        else {
+            return false;
+        };
+        // Moving at the window's end: its latest sample in the window has a speed (one nudge earlier does not count).
+        if samples
+            .iter()
+            .rfind(|x| x.0 >= from && x.0 <= to)
+            .is_some_and(|x| x.3)
+        {
+            return true;
+        }
+        let at = |t: u64| samples.iter().rfind(|x| x.0 <= t);
+        match (at(from).or(samples.first()), at(to)) {
+            (Some(a), Some(b)) => {
+                let (dx, dz) = ((a.2[0] - b.2[0]) as i128, (a.2[1] - b.2[1]) as i128);
+                a.1 == b.1 && dx * dx + dz * dz >= MOVED_UM * MOVED_UM
+            }
+            _ => false,
+        }
+    };
     let who = |f: &dyn Fn(&Sent) -> bool| -> Vec<String> {
         agents
             .iter()
@@ -365,14 +412,47 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
             .map(|(k, _)| k.to_string())
             .collect()
     };
-    let stuck = who(&|a| a.stall_ms >= STUCK_MS);
+    let long: Vec<usize> = agents
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.stall_ms >= STUCK_MS)
+        .map(|(k, _)| k)
+        .collect();
+    let on_way: Vec<usize> = long
+        .iter()
+        .copied()
+        .filter(|&k| moved(k, agents[k].stall_window))
+        .collect();
+    let stuck: Vec<String> = long
+        .iter()
+        .filter(|k| !on_way.contains(k))
+        .map(|k| k.to_string())
+        .collect();
     let refused = who(&|a| a.refused_only_ms >= STUCK_MS);
     let mut ages: Vec<u64> = agents.iter().map(|a| a.last_answer_age_ms).collect();
     ages.sort_unstable();
     let mut stalls: Vec<u64> = agents.iter().map(|a| a.stall_ms).collect();
     stalls.sort_unstable();
     serde_like::Obj::new()
+        .raw(
+            "rule",
+            "\"stuck: an act unanswered for 60 s while its Soul, as the public stream shows it, was neither moving at its end nor 1 m or more, net, from where it was at its start; a Soul moved by others counts as moving\"".into(),
+        )
         .n("stuck", stuck.len() as f64)
+        .n("onTheirWay", on_way.len() as f64)
+        .n(
+            "unseen",
+            long.iter()
+                .filter(|&&k| {
+                    bodies
+                        .get(k)
+                        .copied()
+                        .flatten()
+                        .and_then(|b| motion?.get(&b))
+                        .is_none()
+                })
+                .count() as f64,
+        )
         .n("refusedOnly", refused.len() as f64)
         .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
         .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
@@ -381,6 +461,26 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
             ages.last().copied().unwrap_or(0) as f64,
         )
         .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
+        .raw(
+            "stuckActs",
+            format!(
+                "[{}]",
+                agents
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| a.stall_ms >= STUCK_MS)
+                    .map(|(k, a)| {
+                        let how = if on_way.contains(&k) {
+                            "moving"
+                        } else {
+                            "still"
+                        };
+                        format!("\"{} {how}\"", a.stall_act)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
         .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
 }
 
@@ -796,11 +896,28 @@ async fn agent(
         // #4154's stuck measure, at every step: acts outstanding with no answer since the later of the last answer and
         // the oldest outstanding send; acts sent with only refusals since the last receipt.
         let now = Instant::now();
-        if let Some(oldest) = pending.values().map(|p| p.0).min() {
+        if let Some((&seq, oldest)) = pending
+            .iter()
+            .map(|(s, p)| (s, p.0))
+            .min_by_key(|(_, t)| *t)
+        {
             let since = last_answer.map_or(oldest, |l| l.max(oldest));
-            out.stall_ms = out
-                .stall_ms
-                .max(now.duration_since(since).as_millis() as u64);
+            let stall = now.duration_since(since).as_millis() as u64;
+            if stall > out.stall_ms {
+                out.stall_ms = stall;
+                let end = unix_ms();
+                out.stall_window = (end.saturating_sub(stall), end);
+                out.stall_act = format!(
+                    "{} {} {}ms",
+                    verb_of.get(&seq).map_or("?", |v| v.as_str()),
+                    if accepted.contains(&seq) {
+                        "accepted"
+                    } else {
+                        "unanswered"
+                    },
+                    now.duration_since(oldest).as_millis()
+                );
+            }
         }
         if let (Some(sent), Some(first)) = (last_sent, start) {
             let since = last_ok.unwrap_or(first);
@@ -1466,6 +1583,45 @@ async fn main() {
             }
         }
     }
+    // S11: each agent's Soul's body, for the stuck rule's reading of its motion. The first agent's copy holds only the
+    // Souls in its scope; each other agent reads its own Soul's body from its own copy, before the run, at most
+    // BODY_READS at a time.
+    let mut own_bodies: BTreeMap<Id, Id> =
+        aimed.as_ref().map(|t| t.bodies.clone()).unwrap_or_default();
+    if aimed.is_some() {
+        let began = Instant::now();
+        let gate = Arc::new(Semaphore::new(BODY_READS));
+        let mut reads = Vec::new();
+        for (k, x) in actors.iter().enumerate() {
+            let Actor::Soul(soul) = *x else { continue };
+            if own_bodies.contains_key(&soul) {
+                continue;
+            }
+            let Some(c) = chans.get(k).cloned() else {
+                continue;
+            };
+            let gate = gate.clone();
+            reads.push(tokio::spawn(async move {
+                let _slot = gate.acquire_owned().await.ok()?;
+                let (back, seen) = tokio::sync::oneshot::channel();
+                c.send(Job::Read(back)).ok()?;
+                let seen = seen.await.ok()?.ok()?;
+                Some((soul, *seen.bodies.get(&soul)?))
+            }));
+        }
+        let asked = reads.len();
+        for r in reads {
+            if let Ok(Some((soul, body))) = r.await {
+                own_bodies.insert(soul, body);
+            }
+        }
+        println!(
+            "bodies: {} of {} Souls' bodies known ({asked} read from their own copies in {} ms, before the run)",
+            own_bodies.len(),
+            actors.len(),
+            began.elapsed().as_millis()
+        );
+    }
 
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
@@ -1603,7 +1759,15 @@ async fn main() {
     stop_reading.store(true, Ordering::Relaxed);
     let seen = reader.map(|r| r.join().unwrap_or_default());
     let visible = seen.as_ref().map(|v| visible_report(&sent, v));
-    let stuck = stuck_report(&sent);
+    // S11: each agent's Soul's body, to read its motion off the public stream.
+    let bodies: Vec<Option<Id>> = actors
+        .iter()
+        .map(|x| match x {
+            Actor::Soul(id) => own_bodies.get(id).copied(),
+            _ => None,
+        })
+        .collect();
+    let stuck = stuck_report(&sent, seen.as_ref().map(|v| &v.motion), &bodies);
     let accuracy = after
         .as_ref()
         .map(|seen| accuracy_report(&sent, &last_place, &actors, seen));
@@ -1775,6 +1939,59 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// S11: an act unanswered for 60 s is stuck only while its Soul, as the public stream shows it, stays where it
+    /// is: a Soul seen moving at the window's end, or a metre on within it, is on its way. With no sample of its
+    /// body, it counts as stuck.
+    #[test]
+    fn s11_a_soul_on_its_way_is_not_stuck() {
+        let agent = |stall_ms, window| Sent {
+            stall_ms,
+            stall_window: window,
+            stall_act: "eden:go_to accepted 70000ms".into(),
+            ..Sent::default()
+        };
+        let agents = [
+            agent(70_000, (1_000, 71_000)),
+            agent(70_000, (1_000, 71_000)),
+            agent(70_000, (1_000, 71_000)),
+            agent(70_000, (1_000, 71_000)),
+            agent(5_000, (1_000, 6_000)),
+        ];
+        let id = |n| Id::new(Scope([7; 16]), n).unwrap();
+        let ground = id(100);
+        let bodies: Vec<Option<Id>> =
+            vec![Some(id(1)), Some(id(2)), Some(id(3)), None, Some(id(5))];
+        let motion: Motion = HashMap::from([
+            // Walking in the window: a sample with a speed in it.
+            (
+                id(1),
+                vec![(500, ground, [0, 0], false), (30_000, ground, [0, 0], true)],
+            ),
+            // Stopped in the window after 5 m: on its way.
+            (
+                id(2),
+                vec![
+                    (500, ground, [0, 0], true),
+                    (20_000, ground, [5_000_000, 0], false),
+                ],
+            ),
+            // A speed before the window only, and back where it began by its end: stuck.
+            (
+                id(3),
+                vec![
+                    (500, ground, [0, 0], true),
+                    (20_000, ground, [3_000_000, 0], false),
+                    (60_000, ground, [0, 0], false),
+                ],
+            ),
+        ]);
+        let json = stuck_report(&agents, Some(&motion), &bodies).json();
+        assert!(json.contains("\"stuck\": 2"), "{json}");
+        assert!(json.contains("\"onTheirWay\": 2"), "{json}");
+        assert!(json.contains("\"stuckAgents\": [2, 3]"), "{json}");
+        assert!(json.contains("\"unseen\": 1"), "{json}");
+    }
 
     #[test]
     fn a5_an_unmapped_kind_is_kept_with_no_verb() {
