@@ -1,0 +1,11 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:drying_line (0.135 E2): hang up a linen you hold, up to three; take one down with a hand free.",
+ "cases": [
+  {"name": "hang_a_held_linen", "act": {"this": "d1", "form": "hang", "args": {"linen": "l1"}}, "state": {"actor": "b1", "nodes": {"d1": {"kind": "eden:drying_line"}, "b1": {"hands": {"left": "l1", "right": null}}, "l1": {"kind": "eden:camp_linen"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "hang_a_linen_not_in_hand", "act": {"this": "d1", "form": "hang", "args": {"linen": "l1"}}, "state": {"actor": "b1", "nodes": {"d1": {"kind": "eden:drying_line"}, "b1": {"hands": {"left": null, "right": null}}, "l1": {"kind": "eden:camp_linen"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "not_held", "need": 0}},
+  {"name": "hang_when_full", "act": {"this": "d1", "form": "hang", "args": {"linen": "l1"}}, "state": {"actor": "b1", "nodes": {"d1": {"kind": "eden:drying_line", "slots": {"line": ["k0", "k1", "k2"]}}, "k0": {"kind": "eden:camp_linen"}, "k1": {"kind": "eden:camp_linen"}, "k2": {"kind": "eden:camp_linen"}, "b1": {"hands": {"left": "l1", "right": null}}, "l1": {"kind": "eden:camp_linen"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "slot_taken", "need": 1}},
+  {"name": "take_down_with_a_hand_free", "act": {"this": "d1", "form": "take_down", "args": {"linen": "k0"}}, "state": {"actor": "b1", "nodes": {"d1": {"kind": "eden:drying_line", "slots": {"line": ["k0"]}}, "k0": {"kind": "eden:camp_linen"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "take_down_with_both_hands_full", "act": {"this": "d1", "form": "take_down", "args": {"linen": "k0"}}, "state": {"actor": "b1", "nodes": {"d1": {"kind": "eden:drying_line", "slots": {"line": ["k0"]}}, "k0": {"kind": "eden:camp_linen"}, "b1": {"hands": {"left": "t1", "right": "t2"}}, "t1": {"kind": "eden:cut_flower"}, "t2": {"kind": "eden:cut_flower"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0}}
+ ]
+}

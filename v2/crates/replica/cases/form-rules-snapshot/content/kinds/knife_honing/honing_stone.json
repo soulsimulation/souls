@@ -3,7 +3,7 @@
   "kind": "eden:honing_stone",
   "owner": "thing",
   "state": {
-    "honings": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "honings": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [0, 40, 0] }

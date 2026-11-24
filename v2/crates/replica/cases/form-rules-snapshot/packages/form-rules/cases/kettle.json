@@ -1,7 +1,37 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:kettle. Its water is an amount in grams, 0 to 1700. Its fill form moves water out of a tap until the kettle is full, so a need for water names fill as its fix, and a need for an empty kettle names pour.",
+  "about": "eden:kettle. Its water is an amount in grams, 0 to 1700. Its fill form moves water out of a sink until the kettle is full, so a need for water names fill as its fix, and a need for an empty kettle names pour.",
   "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": { "this": "k1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 0 } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "take_hands_full",
+      "act": { "this": "k1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 0 } },
+          "c1": { "kind": "eden:cup" },
+          "c2": { "kind": "eden:cup" },
+          "b1": { "hands": { "left": "c1", "right": "c2" } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0 }
+    },
     {
       "name": "switch_on_every_need_met",
       "act": { "this": "k1", "form": "switch_on" },
@@ -16,7 +46,7 @@
       "asker": { "sees": ["public"] },
       "expect": {
         "verdict": "yes",
-        "read": [["k1/field/2", false], ["k1/field/1", 1700], ["b1/effector_mm", [-60, 40, 400]], ["move/press/reach_mm", 600]]
+        "read": [["k1/field/29", false], ["k1/field/28", 1700], ["b1/effector_mm", [-60, 40, 400]], ["move/press/reach_mm", 600]]
       }
     },
     {
@@ -87,7 +117,7 @@
         }
       },
       "asker": { "sees": "all" },
-      "expect": { "verdict": "yes", "read": [["k1/field/2", true], ["k1/field/3", 100000]] }
+      "expect": { "verdict": "yes", "read": [["k1/field/29", true], ["k1/field/30", 100000]] }
     },
     {
       "name": "boiled_not_heating_fixed_by_switch_on",
@@ -114,7 +144,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", "k1"], ["k1/field/1", 1700]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", "k1"], ["k1/field/28", 1700]] }
     },
     {
       "name": "pour_not_held",
@@ -156,7 +186,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", "k1"], ["b1/hand/right", null], ["k1/field/1", 0]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "k1"], ["b1/hand/right", null], ["k1/field/28", 0]] }
     },
     {
       "name": "fill_not_held",

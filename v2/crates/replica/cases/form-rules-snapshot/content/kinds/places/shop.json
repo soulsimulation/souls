@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "open_times": {
-      "n": 1,
+      "n": 28,
       "type": "schedule",
       "most": 14,
       "default": [

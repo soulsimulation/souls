@@ -7,7 +7,7 @@
       "act": { "this": "l1", "form": "begin", "args": { "topic": "t_soil" } },
       "state": { "actor": "b1", "nodes": { "l1": { "kind": "eden:lecture" }, "b1": { "hands": {} } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["l1/field/1", false], ["l1/link/1", 0]] }
+      "expect": { "verdict": "yes", "read": [["l1/field/28", false], ["l1/link/1", 0]] }
     },
     {
       "name": "begin_already_running_has_no_fix",
@@ -41,7 +41,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["l1/field/1", true], ["s1/slot/left", 0]] }
+      "expect": { "verdict": "yes", "read": [["l1/field/28", true], ["s1/slot/left", 0]] }
     },
     {
       "name": "attend_not_running_fixed_by_begin",

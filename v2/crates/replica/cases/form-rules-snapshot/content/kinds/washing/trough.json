@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "water": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "g",
       "default": 300000,

@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:hammock",
   "owner": "thing",
-  "state": { "swaying": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "swaying": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "links": { "sleeper": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
   "points": { "side": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 } },
   "slots": { "sling": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 800, 0], "stand": "side" } },

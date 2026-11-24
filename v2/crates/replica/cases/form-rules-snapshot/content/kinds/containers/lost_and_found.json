@@ -1,0 +1,48 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lost_and_found",
+  "owner": "thing",
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "box": { "admits": "thing", "most": 6, "at_mm": [0, 400, 0], "fits_mm": [300, 250, 300], "stand": "stand" }
+  },
+  "geometry": { "bounds_mm": [700, 600, 450] },
+  "forms": {
+    "hand_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing" } },
+      "needs": [
+        { "need": "held_by_actor", "thing": { "arg": "thing" } },
+        { "need": "slot_free", "slot": "box" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "put", "slot": "box" }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "box", "event": "handed_in" }]
+    },
+    "claim": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing", "select": { "of": "things", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "take", "slot": "box" }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "actor_hand", "event": "claimed" }]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A lost-and-found box: hand in a thing you found, or claim one you lost.",
+    "storage": "storage",
+    "lost_property": "lost property",
+    "found_box": "found box"
+  },
+  "card": { "text": "card", "category": "storage", "synonyms": ["lost_property", "found_box"] }
+}
