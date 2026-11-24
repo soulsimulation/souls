@@ -21,7 +21,7 @@ export const KINDS = Object.freeze({
   dance: 'eden:dance_together_activity@1220543a9d3587368b26535d8be47d25e08f30ba23549b9adf3a312b91da91ad3731',
   handshake: 'eden:handshake_activity@1220bd24bded16d8b48b25e9dfed2777dab8a8cbb3063062b81ce920f5ed22becc88',
   'high-five': 'eden:high_five_activity@1220ba8315cc807df05a932b3dcf04344ea1d9dd1c011d93395a53dcb7f777eb1f2f',
-  'hold-hands': 'eden:hold_hands_activity@1220925c2d0989adfde15f1b3afd895e9d5fedbf2c6038c7692b5d6c024c5d89369c',
+  'hold-hands': 'eden:hold_hands_activity@1220d816976cd152816a8a99114b15027bbde7395160da72bc07f5a621748126e70f',
   hug: 'eden:hug_activity@12203c0411a7549ce250decf5b69406c2ecbff8057cebaf5ce41fa1bbe4471f13932',
   // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
   'fist-bump': 'eden:fist_bump_activity@1220155d17b8d8c9f78bb7579181ff553121e915ec38362be884f45815a17a6d78b9',

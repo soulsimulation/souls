@@ -825,7 +825,7 @@ const WALKED: [(&str, &str, i64, i64); 4] = [
     (W_HANDSHAKE, "souls:handshake", 700_000, 550_000),
     (W_HUG, "souls:hug", 700_000, 550_000),
     (W_HIGH_FIVE, "souls:high_five", 700_000, 550_000),
-    (W_HOLD, "souls:hold_hand", 600_000, 500_000),
+    (W_HOLD, "souls:hold_hand", 600_000, 450_000),
 ];
 
 fn apart(p: Vec3, q: Vec3) -> i64 {
