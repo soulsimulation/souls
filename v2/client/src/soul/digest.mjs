@@ -2,7 +2,8 @@
 // and nothing else: no request, no model call, nothing sent. Every line names the records it came from (`--refs`): a line
 // with no source would be a memory fault. Words other Souls said are quoted and marked as theirs.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

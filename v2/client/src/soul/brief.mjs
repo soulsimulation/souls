@@ -1,7 +1,8 @@
 // brief.mjs: what a Soul knows about here and now, in a few lines, put in front of the mind. Pure: it is handed what
 // memory.mjs looked up, and it makes no request and no model call. Design: docs/design/soul-context.md section 3.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 /** The default budget. The brief never exceeds what it is given, whatever the log holds. An owner sets `briefBytes` in config.json; 0 turns it off. */
 export const BRIEF_BYTES = 1500;

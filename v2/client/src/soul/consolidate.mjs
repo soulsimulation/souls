@@ -2,7 +2,8 @@
 // days into MEMORY.md, gathers repeated notes and proposes SOUL.md changes as a diff for the owner. It never touches the log,
 // never writes SOUL.md and never changes a pinned line. Design: docs/design/soul-context.md section 5.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";

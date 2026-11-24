@@ -3,8 +3,8 @@
 // Nothing here talks to a world or a server, and nothing about memory goes into the replica.
 //
 // The record format, its validators and budgets, people, the brief, `digest` and `consolidate` are the shipping line's
-// modules, in `../soul/` (moved from tools/world-launcher/soul/ in 0.134 D3; today's client re-exports them from there
-// and inlines them): they read no world, and one copy can't drift from the other. What is new for v2 is the feeder
+// modules, in `../soul/` (copied from tools/world-launcher/soul/ in 0.134 D3, where today's client keeps its own until
+// D4): they read no world. What is new for v2 is the feeder
 // (`feeder.mjs`), and the alias table read here.
 //
 // Ids change at the clean start. Old records keep old ids as text and are never rewritten. The home holds one alias

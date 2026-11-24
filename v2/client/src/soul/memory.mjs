@@ -3,8 +3,8 @@
 //
 // Everything here comes from a world, and a world may lie: this is where its answers are bounded to what a record takes.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file, so this module
-// lives inside it as a generated block.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";

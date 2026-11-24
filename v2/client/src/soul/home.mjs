@@ -1,8 +1,8 @@
 // home.mjs: the Souls home, one `.souls/` folder holding every Soul a person keeps on this machine. No HTTP and no
 // model: `doctor` is handed its one way of asking a world. Design: docs/design/soul-context.md section 1.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file, so this module
-// lives inside it as a generated block.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 import { accessSync, appendFileSync, chmodSync, closeSync, constants as fsConstants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";

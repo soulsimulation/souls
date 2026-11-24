@@ -1,7 +1,8 @@
 // people.mjs: what a Soul knows of each Soul it has met, one record per person across worlds. Pure: it folds log records and
 // makes the markdown; memory.mjs says when and where. Design: docs/design/soul-context.md section 4.
 //
-// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+// The v2 client's copy (0.134 D3). Today's client keeps its own in tools/world-launcher/soul/, inlined into eden.mjs;
+// nothing outside v2/ imports from v2/ (K14), so a fix that both clients need goes into both copies.
 
 import { createHash } from "node:crypto";
 
