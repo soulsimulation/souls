@@ -128,10 +128,20 @@ async function walkWorld(browser, origin, slug, dir) {
     throw last;
   };
   const escape = async () => { await page.keyboard.press('Escape'); await sleep(300); };
+  // #4627: Back 1 min, Link to this moment and From the start live in the time panel the clock button opens. A world
+  // with no clock (or a page before #4627) keeps them in the header: the same names there.
+  const moment = async (name) => {
+    const clock = page.locator('.world-time-button').first(), panel = page.locator('.time-preview-moments');
+    if (await clock.count()) {
+      if (!await panel.isVisible().catch(() => false)) await press(clock);
+      if (await until(() => panel.isVisible().catch(() => false), 5000)) return panel.getByRole('button', { name, exact: true });
+    }
+    return page.getByRole('button', { name, exact: true });
+  };
   const back = async (label) => {
     const before = await view();
     if (before.tick == null) fail('no moment shown before the click');
-    await press(page.getByRole('button', { name: 'Back 1 min', exact: true }));
+    await press(await moment('Back 1 min'));
     const landed = await until(async () => { const v = await view(); const bad = await notLoaded(); if (bad) return { bad }; return v.pres === 'history' && v.tick < before.tick ? v : null; }, 25000);
     if (!landed) fail(`${label}: never landed on an earlier moment (presentation ${(await view()).pres})`);
     if (landed.bad) fail(`${label}: "${landed.bad}"`);
@@ -153,14 +163,14 @@ async function walkWorld(browser, origin, slug, dir) {
   await step('Back again', () => back('Back again'));
   await step('From the start', async () => {
     const before = await view();
-    await press(page.getByRole('button', { name: 'From the start', exact: true }));
+    await press(await moment('From the start'));
     const landed = await until(async () => { const bad = await notLoaded(); if (bad) return { bad }; const v = await view(); return v.pres === 'history' && v.tick < (before.tick ?? Infinity) ? v : null; }, 25000);
     if (!landed) fail('never landed on the first moment');
     if (landed.bad) fail(`"${landed.bad}"`);
     return `tick ${landed.tick}`;
   });
   await step('Link to this moment', async () => {
-    const b = page.getByRole('button', { name: 'Link to this moment', exact: true });
+    const b = await moment('Link to this moment');
     await press(b);
     const link = await until(() => page.evaluate(() => document.querySelector('[data-moment-link]')?.getAttribute('data-moment-link') || null), 5000);
     if (!link) fail('no link was made');
@@ -177,7 +187,9 @@ async function walkWorld(browser, origin, slug, dir) {
   await step('Return to live', async () => {
     const r = page.getByRole('button', { name: 'Return to live', exact: true });
     if (await r.count()) await press(r);
+    else if ((await view()).pres === 'history') await press(await moment('Back to live'));   // #4627: in the time panel
     if (!await until(async () => (await view()).pres === 'live', 20000)) fail('never back to live');
+    await escape();
   });
   await step('Broadcast menu', async () => {
     await press(page.locator('button[aria-label="Camera modes and help"]').first());
