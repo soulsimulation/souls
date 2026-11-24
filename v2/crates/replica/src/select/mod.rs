@@ -308,6 +308,52 @@ pub fn position(tree: &Tree, id: Id) -> R<Xz> {
     Ok([x.pos.x, x.pos.z])
 }
 
+/// How far `at` (a point in `frame`'s own frame) lies from `target`'s shape, on the level, µm: 0 inside its area, else
+/// to its outline, its line or its point (0.133: a walk's end says how far from its target it stood).
+pub fn gap(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<i64> {
+    let v = View { tree };
+    let p = v.to_root(frame)?.xz([at.x, at.z])?;
+    Ok(gap_to(&v.shape(target)?, p))
+}
+
+/// [`gap`] on a shape in the root's frame.
+fn gap_to(s: &Shape, p: Xz) -> i64 {
+    let seg = |a: Xz, b: Xz| -> i64 {
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = (i128::from(p[0] - a[0]) * ex + i128::from(p[1] - a[1]) * ez).clamp(0, l2);
+        let q = [a[0] + (ex * t / l2) as i64, a[1] + (ez * t / l2) as i64];
+        d2(p, q).isqrt() as i64
+    };
+    match s {
+        Shape::Point(q) => d2(p, *q).isqrt() as i64,
+        Shape::Line(l) => l.windows(2).map(|w| seg(w[0], w[1])).min().unwrap_or(0),
+        Shape::Area(a) => {
+            // inside by the crossing count, else to the nearest edge
+            let mut inside = false;
+            for i in 0..a.len() {
+                let (u, w) = (a[i], a[(i + 1) % a.len()]);
+                if (u[1] > p[1]) != (w[1] > p[1]) {
+                    let x = i128::from(u[0])
+                        + i128::from(w[0] - u[0]) * i128::from(p[1] - u[1])
+                            / i128::from(w[1] - u[1]);
+                    if i128::from(p[0]) < x {
+                        inside = !inside;
+                    }
+                }
+            }
+            if inside {
+                0
+            } else {
+                (0..a.len())
+                    .map(|i| seg(a[i], a[(i + 1) % a.len()]))
+                    .min()
+                    .unwrap_or(0)
+            }
+        }
+    }
+}
+
 /// The node a body standing at `id`'s origin stands in (as [`Resolved::frame`]) and that origin in its frame.
 pub fn standing(tree: &Tree, id: Id) -> R<(Id, Vec3)> {
     let v = View { tree };
@@ -814,6 +860,31 @@ mod tests {
         assert_eq!(along(&l, 0, 1000), [0, 0]);
         assert_eq!(along(&l, 1000, 1000), [8_000_000, 6_000_000]);
         assert_eq!(middle(&Shape::Line(l)), [1_000_000, 6_000_000]);
+    }
+
+    /// 0.133: how far a point is from a shape: 0 inside an area, else to its nearest edge; to a line; to a point.
+    #[test]
+    fn a_gap_is_zero_inside_an_area_and_to_the_nearest_edge_outside() {
+        let sq = Shape::Area(vec![
+            [0, 0],
+            [10_000_000, 0],
+            [10_000_000, 10_000_000],
+            [0, 10_000_000],
+        ]);
+        assert_eq!(gap_to(&sq, [5_000_000, 5_000_000]), 0);
+        assert_eq!(gap_to(&sq, [5_000_000, -300_000]), 300_000);
+        assert_eq!(gap_to(&sq, [13_000_000, 14_000_000]), 5_000_000);
+        assert_eq!(
+            gap_to(
+                &Shape::Line(vec![[0, 0], [0, 6_000_000]]),
+                [400_000, 3_000_000]
+            ),
+            400_000
+        );
+        assert_eq!(
+            gap_to(&Shape::Point([0, 0]), [3_000_000, 4_000_000]),
+            5_000_000
+        );
     }
 
     #[test]

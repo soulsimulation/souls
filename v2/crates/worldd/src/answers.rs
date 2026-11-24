@@ -1095,6 +1095,8 @@ struct Clock {
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
+    /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
+    away_next: Option<u64>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<Sender<CheckJob>>,
@@ -3591,6 +3593,12 @@ impl Clock {
         self.note_with(id, event, how, None, at);
     }
 
+    /// [`Clock::note`], with field 7 how far from its target a walk ended, mm, when known (0.133).
+    fn note_away(&mut self, id: Id, event: &str, how: Option<&str>, away: Option<u64>, at: Micros) {
+        self.away_next = away;
+        self.note_with(id, event, how, None, at);
+    }
+
     /// [`Clock::note`], with field 5 the act's deadline, world time µs, when given (C20).
     fn note_with(
         &mut self,
@@ -3613,6 +3621,9 @@ impl Clock {
         }
         if let Some(d) = due.and_then(|d| u64::try_from(d).ok()) {
             fields.insert(5, Value::Uint(d));
+        }
+        if let Some(mm) = self.away_next.take() {
+            fields.insert(7, Value::Uint(mm));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -4435,11 +4446,13 @@ impl Clock {
             true => Err(TIMED_OUT.to_owned()),
             false => how,
         };
-        let (actor, sequence) = (o.actor, o.sequence);
+        let (actor, sequence, body) = (o.actor, o.sequence, o.body);
         match how {
             Ok(()) => {
                 let done = if short { DONE_SHORT } else { "done" };
-                self.note(id, MOVE_ENDED, Some(done), now);
+                // 0.133: how far from its target the walk ended, mm, as field 7 of its end (a fact, never a label)
+                let away = self.bodies.as_mut().and_then(|b| b.away(id, body));
+                self.note_away(id, MOVE_ENDED, Some(done), away, now);
                 self.end(id, |c| Answer::Receipt {
                     actor,
                     sequence,
@@ -5629,6 +5642,7 @@ pub fn start<S: Storage + 'static>(
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
         overdue: BTreeSet::new(),
+        away_next: None,
         edits,
         editing,
         set_down: Vec::new(),

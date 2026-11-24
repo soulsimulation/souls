@@ -145,13 +145,14 @@ export async function onboard({ out, asks = ASKS, only = null, model = 'sonnet',
   const facts = exportFacts(template, join(out, 'genesis.facts.json'));
   writeFileSync(facts, JSON.stringify(placeThings(JSON.parse(readFileSync(facts, 'utf8')), [
     { kind: 'eden:apple', ref: 'q1-apple@1', name: 'a red apple', at: [3, 2] }, { kind: 'eden:apple', ref: 'q1-apple@1', name: 'a green apple', at: [2.4, 3.2] }])));
-  const world = await startWorld({ facts, dir: join(out, 'world') });
-  let front = null, moss = null, resp = null;
   // The agent's folder is outside this checkout: the client finds its home by walking up from the folder it runs in,
-  // and a checkout can sit below a real Souls home (whose Souls are live). Refused if any folder above holds one.
+  // and a checkout can sit below a real Souls home (whose Souls are live). Refused if any folder above holds one,
+  // before anything starts.
   const rows = [], agentDir = realpathSync(mkdtempSync(join(tmpdir(), 'souls-q1-agent-')));
   for (let d = dirname(agentDir); d !== dirname(d); d = dirname(d)) if (existsSync(join(d, '.souls'))) throw new Error(`a Souls home above the agent's folder (${d}): refused`);
   writeFileSync(join(out, 'agent-folder.txt'), agentDir + '\n');
+  const world = await startWorld({ facts, dir: join(out, 'world') });
+  let front = null, moss = null, resp = null;
   try {
     front = await standIn(served, world.base);
     const page = `${front.url}/w/dev/`;

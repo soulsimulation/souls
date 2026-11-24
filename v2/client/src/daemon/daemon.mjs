@@ -758,6 +758,8 @@ function remember(entries) {
  */
 /** The world's ladder's ended orders of my body, newest last (stuck.mjs). */
 const stuckSeen = [];
+/** 0.133: my walks' ends that say how far from their target they stood, newest last ({at, mm}). */
+const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
 function onEntry(e) {
   counts.entries++;
   // The version after an entry is its sequence and one (`replica::apply`).
@@ -765,6 +767,12 @@ function onEntry(e) {
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  // 0.133: how far from its target a walk of mine ended (its end's field 7, mm), for that walk's receipt (`away_m`)
+  for (const ev of events) {
+    if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
+    const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ at: Date.now(), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+  }
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
   for (const ev of events) {
     const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
@@ -1158,9 +1166,9 @@ function actsOf(words) {
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
       // Q1: `<verb>:<thing>` where the thing offers no such act and the Soul's own body does, with a thing to take
-      // (`pick_up:<apple>`, `wave_at:<their body>`, `point:<pond>`): that act of the body, on the thing
+      // (`pick_up:<apple>`, `point:<pond>`): that act of the body, on the thing
       const theirs = !verb.includes(':') && !MOVES.has(form) ? formsOf(tail) : null;
-      const f = HANDS[form] ?? form.replace(/-/g, '_'), mine = theirs && !theirs[form] && tail !== own().id ? own().forms[f] : null;
+      const snake = form.replace(/-/g, '_'), f = HANDS[form] ?? snake, mine = theirs && !theirs[snake] && tail !== own().id ? own().forms[f] : null;
       const take = mine ? Object.entries(mine.takes ?? {}).find(([, t]) => t?.type === 'thing' && !t.select)?.[0] : null;
       if (take && own().id) { out.push({ verb: `${NS}:${f}`, this: own().id, form: f, args: { [take]: tail } }); continue; }
       out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
@@ -1397,10 +1405,10 @@ async function answer(req, conn = null) {
       if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
       if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
       if (!mail.has(id) && closedMail.has(id)) {
-        // Q1: closed already by an act's end: the reply goes as a note under it (#3781's line), and the close stands
-        const line = JSON.stringify({ note: { id, reply } });
-        if (ws && signedIn) ws.send(line); else closes.push(line);
-        return { ok: true, acked: id, reply, closed: closedMail.get(id), already: true, sent: signedIn, ...ageNow() };
+        // Q1: closed already by an act's end. The mailbox takes no word on a closed message, so nothing is sent and the
+        // agent is told: its owner will not see this reply (say it in your report instead)
+        return { ok: false, code: 'mail-closed', closed: closedMail.get(id), shown: false, sent: false,
+          detail: `message ${id} was already closed (${closedMail.get(id)}) by an act's end: your owner will not see this reply; say it in your report` };
       }
       if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
       if (close === null) {
@@ -1790,6 +1798,12 @@ async function answer(req, conn = null) {
       if (why) got.receipt.why = why;
       const instead = r.answers.at(-1)?.answer === 'refused' && !stuck ? suggestionFor(r) : null;
       if (instead) got.receipt.try = instead;
+      // 0.133: a walk that ended says how far from its target it stood, metres (a fact: 0 is on or in it)
+      const walked = done && r.verbs.some((v) => /:walk$/.test(v)), since = Date.parse(r.sentAt);
+      // its end entry can trail the receipt by a moment
+      for (let i = 0; walked && i < 10 && !awayEnded.some((a) => a.at >= since); i++) await new Promise((ok) => setTimeout(ok, 100));
+      const away = walked ? awayEnded.findLast((a) => a.at >= since) : null;
+      if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
