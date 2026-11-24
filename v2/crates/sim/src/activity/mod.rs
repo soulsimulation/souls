@@ -927,6 +927,16 @@ impl Activities {
         gone
     }
 
+    /// When the next unstarted activity no offer or pair waits on expires ([`Activities::expire`]): a sleeping world
+    /// wakes for it.
+    pub fn next_expiry(&self) -> Option<Micros> {
+        self.live
+            .iter()
+            .filter(|(a, l)| self.lapses(**a, l, Micros::MAX))
+            .map(|(_, l)| l.node.expires)
+            .min()
+    }
+
     /// Whether an unstarted activity no offer or pair waits on is past its expiry at `now` ([`Activities::expire`]).
     pub fn expiring(&self, now: Micros) -> bool {
         self.live.iter().any(|(a, l)| self.lapses(*a, l, now))

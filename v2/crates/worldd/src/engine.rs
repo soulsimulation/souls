@@ -313,7 +313,11 @@ impl Engine {
 
     /// The earliest due time of the activities and the boats on their loops (O2: when a sleeping world must be up).
     pub fn next_due(&self) -> Option<Micros> {
-        self.due.next_due()
+        // B10: an unstarted activity's expiry is due too, so a sleeping world wakes to end it.
+        match (self.due.next_due(), self.activities.next_expiry()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// The systems for a zone under `header`, checked by `rules`, with activities of `kinds`, minting ids of `scope`.

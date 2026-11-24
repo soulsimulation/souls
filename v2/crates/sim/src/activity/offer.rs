@@ -498,6 +498,19 @@ impl Activities {
         if l.node.members.iter().any(|m| m.body == body) {
             return refuse("already-member", show(body));
         }
+        let link = minted(mint)?;
+        let me = Member {
+            role: o.other.clone(),
+            body,
+            soul: ask.soul,
+            link,
+            intent: ask.intent,
+        };
+        // B10: its role link on the activity's thing, refused (`role-taken`) before anything is claimed.
+        let bound: Vec<Bound> = self
+            .role_link(tree, mint, &o.kind, o.place, &me)?
+            .into_iter()
+            .collect();
         let driver = match l.node.state {
             State::Started => {
                 if let Some(other) = self.holding.get(&body) {
@@ -511,20 +524,7 @@ impl Activities {
             }
             State::Proposed => None,
         };
-        let link = minted(mint)?;
         let mut node = l.node.clone();
-        let me = Member {
-            role: o.other.clone(),
-            body,
-            soul: ask.soul,
-            link,
-            intent: ask.intent,
-        };
-        // B10: its role link on the activity's thing.
-        let bound: Vec<Bound> = self
-            .role_link(tree, mint, &o.kind, o.place, &me)?
-            .into_iter()
-            .collect();
         node.members.push(me);
         let changes = vec![
             Change::Link {

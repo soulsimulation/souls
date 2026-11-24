@@ -476,3 +476,23 @@ fn holds_nothing(w: &World, body: Id) -> bool {
     w.c.claims(body)
         .is_some_and(|cl| cl.running().values().all(|i| i.holds.is_empty()))
 }
+
+#[test]
+fn b10_a_refused_join_of_a_started_game_claims_nothing() {
+    let mut w = world(3, 0xb9);
+    let (b1, b2) = (w.bodies[1], w.bodies[2]);
+    let board = board(&mut w);
+    // A kind that takes three: a later accept joins the offer's own started activity.
+    w.acts.kinds.get_mut(&n(PAIR)).expect("the pair").most = 3;
+    let offer = w
+        .offer_at(0, board, "test:first", BTreeSet::from([b1, b2]), 1_000)
+        .expect("offered");
+    let game = w.accept(1, offer, 2_000).expect("accepted");
+    assert!(w.acts.started(game));
+    let r = w
+        .accept(2, offer, 2_500)
+        .expect_err("the second side is held");
+    assert_eq!(r.name, "role-taken");
+    assert!(w.free(b2), "nothing was claimed on the refused body");
+    assert!(!w.held(b2));
+}

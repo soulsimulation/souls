@@ -3999,3 +3999,243 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         built.len()
     );
 }
+
+/// B10 (#4239): a two-sided turn game, the counter match's shape (#4391) cut to one form a side: its roles are its
+/// links.
+const B10_GAME: &str = r#"{
+  "format": "souls-entry/1",
+  "kind": "eden:turn_test",
+  "owner": "thing",
+  "state": {
+    "turn": {"n": 1, "type": "enum", "default": "first", "audience": {"rule": "everyone"}, "values": ["first", "second"]}
+  },
+  "links": {
+    "first": {"n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "second": {"n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"}}
+  },
+  "points": {"first_stand": {"role": "stand", "at_mm": [-550, 0, 450], "yaw_mdeg": 90000}},
+  "geometry": {"bounds_mm": [1500, 900, 1500]},
+  "forms": {
+    "take_first": {
+      "who": {"link": "first"},
+      "starts": "act",
+      "steps": [{"step": "walk_to", "point": "first_stand"}],
+      "effects": [{"change": "set", "field": "turn", "to": "second", "event": "turn_passed"}]
+    }
+  },
+  "roles": {
+    "first": {"need": "required", "places": {"in": "here", "within_mm": 3000}},
+    "second": {"need": "required", "places": {"in": "here", "within_mm": 3000}}
+  },
+  "motion": {"how": "fixed"},
+  "loose": {"ever": true},
+  "text": {"card": "A two-sided turn game."}
+}"#;
+/// Where the board stands, mm: 4 m north of where the Souls are born.
+const B10_BOARD: [i64; 2] = [44_000, -14_000];
+
+/// N2's test world with the board on the open ground, and the folder of entries: the game and the body.
+fn b10_world(d: &Path) -> String {
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    std::fs::write(entries.join("turn_test.json"), B10_GAME).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    let def = "core-turn_test@1";
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(
+                json::parse(&format!(
+                    r#"{{"ref":"{def}","hash":"{}","name":"core:turn_test","form":"point","layer":"solid","door":false,"mesh":false,"slots":1}}"#,
+                    "b10".repeat(21) + "b"
+                ))
+                .unwrap(),
+            ),
+            ("things", json::Value::Arr(a)) => {
+                let pose =
+                    json::Value::Arr([B10_BOARD[0], 0, B10_BOARD[1], 0].map(num).to_vec());
+                a.push(json::Value::Obj(vec![
+                    ("id".into(), json::Value::s("turn-board")),
+                    ("def".into(), json::Value::s(def)),
+                    ("ref".into(), json::Value::s(def)),
+                    ("parent".into(), json::Value::Null),
+                    ("pose".into(), pose.clone()),
+                    ("world".into(), pose),
+                    ("scale_ppm".into(), num(1_000_000)),
+                    ("name".into(), json::Value::s("a turn game")),
+                ]));
+            }
+            _ => {}
+        }
+    }
+    f.to_json()
+}
+
+/// The role links (`eden:first`, `eden:second`) at `board`, and the turn game's activity nodes, in the served world
+/// as its log stands.
+fn b10_game_left(w: &Seeded, board: Id) -> (usize, usize) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let links = t
+        .links_at(board)
+        .iter()
+        .filter(|e| ["eden:first", "eden:second"].contains(&t.ty(e).as_str()))
+        .count();
+    let games = t
+        .to_state()
+        .nodes
+        .values()
+        .filter(|n| n.kind.as_str().starts_with("eden:turn_test_activity@"))
+        .count();
+    (links, games)
+}
+
+/// B10 (#4239) review: through the creator's real edit path and BUILDSAFE, on a served world.
+/// - Two Souls start a turn game at its board: Soul 1 offers it there as the first side, Soul 2 accepts; each then
+///   holds its side's link on the board.
+/// - The creator removes the board mid-game: the tree takes the game's node and links with it, both players are told
+///   by name (`souls:activity-ended`, why `souls:thing-gone`) and let go at once: a new offer on the open ground is
+///   accepted and starts.
+/// - The creator undoes the removal: the board is back, with its fields, and no role link or game node with it (an
+///   undo restores things, never a game).
+#[test]
+fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_board_alone() {
+    let d = scratch("b10undo");
+    let facts = b10_world(&d);
+    let w = seed_entries(&d, &facts, 2, (44, -18), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xb1);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut sequence, mut planned) = (0, 0);
+    let mut creator_asks = |asked: Asked| loop {
+        sequence += 1;
+        let bytes = asked_intent(&w, creator_actor, sequence, planned, &asked);
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let board = import_eden::load(&facts).unwrap().nodes["turn-board"];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // Each walks up to the board: a body is born at its Soul's first intent.
+    for (k, dx) in [(0, -1_500_000), (1, 1_500_000)] {
+        hands[k].walk_to(
+            g,
+            v3(B10_BOARD[0] * 1000 + dx, 0, B10_BOARD[1] * 1000 + 1_000_000),
+        );
+        let got = socket_end(&mut hands[k].s);
+        assert_eq!(got.kind, 1, "walked to the board: {got:?}");
+    }
+    let bodies = [body_of(&w, w.souls[0]), body_of(&w, w.souls[1])];
+    let kind = pinned_activity(&w, "eden:turn_test_activity");
+    let start_at = |hands: &mut [Hand], place: Id| {
+        let got = hands[0].act(
+            "activity:offer",
+            place,
+            BTreeMap::from([
+                (1, kind.clone()),
+                (2, Value::Text(Name::new("eden:first").unwrap())),
+                (3, Value::Array(vec![bodies[1].to_value()])),
+            ]),
+        );
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let made = created_by(&w, &got.entries, "eden:turn_test_activity@");
+        let got = hands[1].act("activity:accept", made, BTreeMap::new());
+        assert_eq!(got.kind, 1, "accepted: {got:?}");
+        made
+    };
+    let game = start_at(&mut hands, board);
+    let got = hands[0].act("eden:take_first", board, BTreeMap::new());
+    assert_eq!(got.kind, 1, "the first side's move: {got:?}");
+    assert_eq!(
+        b10_game_left(&w, board),
+        (2, 1),
+        "both sides linked, one game"
+    );
+
+    // The creator removes the board mid-game.
+    let got = creator_asks(Asked::Batch(
+        vec![Op::Remove {
+            node: Ref::Node(board),
+        }],
+        None,
+    ));
+    assert_eq!(got.kind, 1, "the board removed: {got:?}");
+    // Both players are told, by name, within a few ticks.
+    let end = Instant::now() + Duration::from_secs(20);
+    let told = loop {
+        let told: Vec<Id> = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| {
+                e.events.iter().flatten().any(|ev| {
+                    ev.name.as_str() == "souls:activity-ended"
+                        && ev.fields.get(&1) == Some(&game.to_value())
+                        && ev.fields.get(&2)
+                            == Some(&Value::Text(Name::new("souls:thing-gone").unwrap()))
+                })
+            })
+            .map(|e| e.envelope.node)
+            .collect();
+        if told.len() == 2 || Instant::now() > end {
+            break told;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(told, bodies.to_vec(), "each player told at its body");
+    // Let go at once: the same two start a game on the open ground.
+    let again = start_at(&mut hands, g);
+    let got = hands[0].act("activity:leave", again, BTreeMap::new());
+    assert_eq!(got.kind, 1, "left: {got:?}");
+    let got = hands[1].act("activity:leave", again, BTreeMap::new());
+    assert_eq!(got.kind, 1, "left: {got:?}");
+
+    // The creator undoes the removal: the board alone comes back.
+    let got = creator_asks(Asked::Undo);
+    println!("b10: undo of the board's removal: {got:?}");
+    assert_eq!(got.kind, 1, "the undo commits: {got:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let n = t
+        .handle(board)
+        .and_then(|h| t.node(h))
+        .expect("the board is back");
+    assert_eq!(n.parent(), Some(g), "on the open ground");
+    assert_eq!(
+        b10_game_left(&w, board),
+        (0, 0),
+        "no role link and no game came back with it"
+    );
+    let got = hands[0].act("eden:take_first", board, BTreeMap::new());
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "not-permitted"),
+        "nobody holds the first side of the board that came back: {got:?}"
+    );
+    drop(s);
+    println!(
+        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone and \
+         playing again on the ground at once), and its undo brought the board back with no game or role link"
+    );
+}
