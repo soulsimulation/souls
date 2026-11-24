@@ -48,8 +48,10 @@ socket is group-writable and a world or a gateway running as souls can reach it.
   due change. A world woken early waits; it never commits early.
 - **By an intent:** the gateway, started with `--wake $WORLDS_ROOT/alarms.sock --world-name <world>`, holds an
   intent for a world that is away and asks the daemon, once, to wake it (`wake <world>`); the intent goes when the
-  world is reachable. A sync request (a reader) asks no wake and is answered `world.restarting`. A viewer never
-  reaches the daemon.
+  world is reachable. A sync request asks the same wake (only an agent sends one, and a Soul's client syncs before
+  its first intent, so a Soul arriving at a sleeping world would otherwise wait forever); it is still answered
+  `world.restarting`, and the client asks again a few seconds later, when the world is up. A viewer never reaches
+  the daemon.
 - **Waking** is `systemctl start --no-block worldd@<world>.service` (a world already running is left as it is), or
   with `$SUPERVISOR_WAKE` set, that program run with the world's name.
 - **Idle**, it blocks on its queue and reads the wall clock again at least once a second, so a stepped clock moves an

@@ -72,12 +72,24 @@ export function worldDefs(nodes: readonly NodeRec[]): Map<string, StoredDef> {
   return out;
 }
 
-/** The library def a thing placed while the world runs draws by (creator-kinds.ts): a point thing's only, since such
- *  a node carries no outline or line the page reads; none for a building's parts, places or the engine's own kinds. */
-export function placedDef(kind: string): StoredDef | undefined {
+/** The library def a thing placed while the world runs draws by (creator-kinds.ts): a point thing's, or, given the
+ *  node's shape (a creator's `place --path | --area`: its line, field 16, or its outline, field 11), a path's or an
+ *  area's; none for a building's parts, places or the engine's own kinds. */
+export function placedDef(kind: string, shape?: { line?: number[][]; outline?: number[][] }): StoredDef | undefined {
   if (kind.startsWith('souls:') || NOT_THINGS.has(plainKind(kind).split(':').pop() ?? '')) return undefined;
   const d = libraryDef(kind);
-  return d?.form === 'point' ? d : undefined;
+  if (d?.form === 'point') return d;
+  if (d?.form === 'path' && (shape?.line?.length ?? 0) >= 2) return d;
+  if (d?.form === 'area' && (shape?.outline?.length ?? 0) >= 3) return d;
+  return undefined;
+}
+
+/** A shaped thing's shape as the layer's entity holds it (metres, world: a path's line and width, an area's outline),
+ *  or null for a point def or a node without its shape. */
+export function shapeOf(def: StoredDef, n: { line?: number[][]; lineWidth?: number; outline?: number[][] }): Entity['shape'] | null {
+  if (def.form === 'area' && n.outline && n.outline.length >= 3) return { area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]) };
+  if (def.form === 'path' && n.line && n.line.length >= 2) return { path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), ...(n.lineWidth ? { width: m(n.lineWidth) } : {}) };
+  return null;
 }
 
 /** The content kinds' entries as CarriedParts draws a part from its own shape (take-parts.ts): `souls-entry/1` with the
@@ -155,8 +167,8 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
     if (!def) continue;
     defs.set(def.ref, def);
     const e: Entity = { id: o, def: def.ref, in: { parent: 'world' }, by: 'v2', born: 0, v: 1 };
-    if (n.outline && n.outline.length >= 3 && def.form === 'area') e.shape = { area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]) };
-    else if (n.line && n.line.length >= 2 && def.form === 'path') e.shape = { path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), ...(n.lineWidth ? { width: m(n.lineWidth) } : {}) };
+    const shape = shapeOf(def, n);
+    if (shape) e.shape = shape;
     else {
       const at = placedOf(byId, n.id);
       if (!at) continue; // in a hand: the bodies' adapter draws it
