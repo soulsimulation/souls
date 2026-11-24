@@ -9,13 +9,14 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -98,8 +99,7 @@ before(async () => {
 
 after(async () => {
   for (const s of seats) await request(runtimeOf(home, s.soul).socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('C6 A2 A3: A says a sentence and B gets it with its words; a whisper from A to C never reaches B', async () => {

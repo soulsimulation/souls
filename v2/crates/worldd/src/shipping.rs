@@ -406,6 +406,14 @@ impl<S: Store, C: Clock> Shipper<S, C> {
         self.mark.clone()
     }
 
+    /// Keeps its marks in `mark`, one handed out before the shipper opened (R17: a world that listens before the
+    /// store answers gives its compactor the marks first; at nothing landed they hold the whole log).
+    pub fn sharing(mut self, mark: &Mark) -> Shipper<S, C> {
+        *mark.lock() = std::mem::take(&mut *self.mark.lock());
+        self.mark = mark.clone();
+        self
+    }
+
     /// The seal age: the loss bar less the slowest recent upload and the margin, never below [`SEAL_AGE_LEAST_US`].
     pub fn seal_age(&self) -> u64 {
         seal_age(self.mark.upload_us())

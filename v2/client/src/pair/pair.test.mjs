@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { pair } from './pair.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -65,9 +66,8 @@ before(async () => {
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
 });
 
-after(() => {
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+after(async () => {
+  await stopThenRemove(procs, dir);
 });
 
 /** What the card does in the browser: a POST, signed in as W1's test person. Its reply is kept for A2. */

@@ -7,7 +7,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { pair } from './pair.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -62,17 +63,7 @@ function souls(home, args) {
 
 after(async () => {
   if (daemon) await request(daemon.socket, { op: 'stop' }).catch(() => {});
-  // Each child is stopped and its exit awaited before its folder goes: a stopping worldd still backs up its stream.
-  await Promise.all(procs.map((p) => new Promise((done) => {
-    if (typeof p.once !== 'function' || p.exitCode !== null || p.signalCode !== null) {
-      p.kill();
-      return done();
-    }
-    const hard = setTimeout(() => p.kill('SIGKILL'), 15_000);
-    p.once('exit', () => { clearTimeout(hard); done(); });
-    p.kill();
-  })));
-  if (process.env.SERVED_HISTORY_KEEP !== '1') rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir, { keep: process.env.SERVED_HISTORY_KEEP === '1' });
 });
 
 test('A2: pairing to worldd serve writes the history it advertises, and history --at <place> answers after scripted acts', async () => {
