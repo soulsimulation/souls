@@ -3,10 +3,12 @@
 //! two effects in one tick never read the same stale amount or the same free slot. No code here names a kind.
 //!
 //! - **Amounts** are whole numbers in the field's unit, with the least and the capacity its kind gives (K3 section 3,
-//!   [`replica::kinds::Field`]). A transfer works out one number, the least of what was asked, what the source has
+//!   [`replica::kinds::Field`]). A transfer names its field, and each end finds that field by name on its own kind
+//!   (`field-unknown` when it has none). It works out one number, the least of what was asked, what the source has
 //!   above its least and the room the target has left, and writes the source's set (minus it) and the target's (plus
 //!   it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to zero. Nothing
-//!   to move is refused `nothing-to-move`.
+//!   to move is refused `nothing-to-move`. Two ends whose kinds number the field differently are refused
+//!   `transfer-fields-differ`, ending the run here, while the tree's balance sums by number.
 //! - **Take and put** are B4's transfer ([`crate::slots::transfer`], called, not edited): T1's leave and arrive under
 //!   one transfer id, into a free hand of the body or a slot of the node. A put moves a thing the body holds, or one
 //!   standing loose on what the body stands on (wheeled or pushed in, C12).
@@ -495,6 +497,19 @@ impl Cx<'_> {
                     return refuse("transfer-to-itself", show(from));
                 }
                 let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, field)?);
+                // The tree's balance (T6 rule 3.4) sums a part's `by` per field number, so it would refuse the whole
+                // part, the run's own end with it. Refused here, the run ends as any refused effect does (E5b lifts it).
+                if nf != ni {
+                    return refuse(
+                        "transfer-fields-differ",
+                        format!(
+                            "{} is field {nf} of {} and field {ni} of {}",
+                            field.as_str(),
+                            show(from),
+                            show(into)
+                        ),
+                    );
+                }
                 let there = self.view.amount(from, nf).unwrap_or(src.default);
                 let has = self.view.amount(into, ni).unwrap_or(dst.default);
                 let above = there.saturating_sub(src.min.unwrap_or(0)).max(0);
