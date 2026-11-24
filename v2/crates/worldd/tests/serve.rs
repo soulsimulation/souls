@@ -339,6 +339,120 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 
+/// K16 (0.133): a world seeded by an older build is served by today's, under the header its log names. The older
+/// build is stood for by rewriting the seeded world's header and import part as one whose code differed: its ground's
+/// kind at another revision (an import loader change; every body is born under the ground) and no give (an activity
+/// it did not have). Today's build rebuilds another header, so before K16 every start was refused `header-mismatch`.
+/// It starts, takes the ground's kind at the world's revision, a Soul is born and walks, and it restarts from its
+/// checkpoint with the last logged state (C1's run).
+#[test]
+fn k16_a_world_seeded_by_an_older_build_is_served_under_its_own_header() {
+    use replica::effects::Header;
+    fn renamed(v: Value, from: &str, to: &str) -> Value {
+        match v {
+            Value::Text(t) if t.as_str() == from => Value::Text(Name::new(to).unwrap()),
+            Value::Array(a) => Value::Array(a.into_iter().map(|v| renamed(v, from, to)).collect()),
+            Value::Map(m) => Value::Map(
+                m.into_iter()
+                    .map(|(k, v)| (k, renamed(v, from, to)))
+                    .collect(),
+            ),
+            v => v,
+        }
+    }
+    let d = scratch("k16");
+    let (dir, body, root, ground) = seeded(&d);
+    let today =
+        Header::read(&std::fs::read(dir.join("header")).expect("the seed keeps its header"))
+            .unwrap();
+    let records = logged(&dir.join("log"));
+    assert_eq!(records.len(), 1, "a seed's log is its import part");
+    let part = Part::read(&records[0]).unwrap();
+    assert_eq!(
+        part.header,
+        today.hash().to_bytes(),
+        "the part names the kept header"
+    );
+
+    // The older build's header: the ground's kind at another revision, and no give.
+    let ground_kind = today
+        .kinds
+        .iter()
+        .find(|k| k.as_str().split('@').next() == Some(import_eden::GROUND))
+        .expect("the ground's kind")
+        .as_str()
+        .to_owned();
+    let (plain, pin) = ground_kind.split_once('@').unwrap();
+    // Another SHA-256 multihash: its code and length, then the digest reversed.
+    let (code, digest) = pin.split_at(4);
+    let older_ground = format!("{plain}@{code}{}", digest.chars().rev().collect::<String>());
+    assert_ne!(older_ground, ground_kind);
+    let Value::Map(mut h) = renamed(
+        decode(today.stored()).unwrap().value,
+        &ground_kind,
+        &older_ground,
+    ) else {
+        panic!("a header is a map")
+    };
+    let Some(Value::Array(kinds)) = h.get_mut(&6) else {
+        panic!("the header's kinds")
+    };
+    kinds.retain(|k| !matches!(k, Value::Text(t) if t.as_str().starts_with("souls:give@")));
+    let older = Header::read(&encode(&Value::Map(h)).unwrap()).unwrap();
+    assert_ne!(older.kinds, today.kinds);
+    let Value::Map(mut p) = renamed(
+        decode(&records[0]).unwrap().value,
+        &ground_kind,
+        &older_ground,
+    ) else {
+        panic!("a part is a map")
+    };
+    p.insert(1, Value::Bytes(older.hash().to_bytes()));
+    std::fs::remove_file(dir.join("log")).unwrap();
+    let (mut log, _) = Log::open(FileStore::open(&dir.join("log")).unwrap(), 1).unwrap();
+    let n = log.append(encode(&Value::Map(p)).unwrap()).unwrap();
+    log.wait_durable(n + 1).unwrap();
+    drop(log.close());
+    std::fs::write(dir.join("header"), older.stored()).unwrap();
+
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    let said = w.line("header: ");
+    println!("{said}");
+    assert!(
+        said.contains("not this build's")
+            && said.contains(&format!(
+                "1 kinds taken at the world's revision [{}]",
+                import_eden::GROUND
+            ))
+            && said.contains(
+                "1 this build pins that the world cannot make until it is reseeded [souls:give@"
+            ),
+        "{said}"
+    );
+    w.line("worldd: started at tick");
+    serves_walks_and_restarts(w, &d, &dir, body, root, ground);
+}
+
+/// K16: a world seeded before K16 keeps no header file. Served by a build whose header is the one its log names, it
+/// keeps that header and serves; a later start reads it.
+#[test]
+fn k16_a_world_with_no_header_file_keeps_the_one_its_log_names() {
+    let d = scratch("k16b");
+    let (dir, ..) = seeded(&d);
+    let kept = std::fs::read(dir.join("header")).unwrap();
+    std::fs::remove_file(dir.join("header")).unwrap();
+    let w = serve(&dir, &d.join("s"));
+    assert_eq!(
+        w.line("header: "),
+        "header: kept this build's, the one the log names"
+    );
+    w.line("worldd: started at tick");
+    w.kill();
+    assert_eq!(std::fs::read(dir.join("header")).unwrap(), kept);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
 /// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
 #[test]

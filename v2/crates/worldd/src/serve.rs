@@ -11,7 +11,9 @@
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
 //!   lines for the creator's local checks of the existing boot registrations and admissions.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
-//!   live world). The world as built is read from it at each start: its header and the walkers' town.
+//!   live world). The world as built is read from it at each start: its rules and the walkers' town.
+//! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
+//!   world under it, never under one rebuilt from the build's code ([`own_header`], [`adopt`]).
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
@@ -862,6 +864,122 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
     })
 }
 
+/// The world's own header (K16, 0.133): the one its log's parts name, kept in `<dir>/header` since the seed wrote it.
+/// A build never rebuilds it, so a change to how code or entries become kinds no longer refuses an existing world
+/// (`header-mismatch`, twice on Eden on 23 Nov). A world seeded before K16 keeps no header file: this build's is its
+/// own only if its log names it, and is then kept. What is still checked, and why:
+///
+/// - its hash is the one the log's parts name (each part names its header; replay refuses a part naming another),
+///   from the newest part (the import's on a fresh world; a tick's is small, the import's may be megabytes);
+/// - its schema is one this build applies ([`Header::read`]'s `schema-unknown`): the effects are read by it;
+/// - its lineage and zone are the world's, as the facts' root and `world.json`'s name give them: not another world's.
+///
+/// Its kinds may differ from this build's: [`adopt`] reconciles them.
+fn own_header(dir: &Path, built: &Built, records: &[Vec<u8>]) -> R<Header> {
+    let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
+        Some(bytes) => replica::effects::Part::read(bytes).map_err(refusal)?.header,
+        None => return Err("header-unnamed: the log holds no part".into()),
+    };
+    let path = dir.join("header");
+    let header = match std::fs::read(&path) {
+        Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if built.header.hash().to_bytes() != named {
+                return Err(format!(
+                    "header-missing: the log names header {}, the world keeps none, and this build's is {}: \
+                     reseed the world",
+                    to_hex(&named),
+                    to_hex(&built.header.hash().to_bytes())
+                ));
+            }
+            view_out::write_whole(&path, built.header.stored()).map_err(refusal)?;
+            println!("header: kept this build's, the one the log names");
+            built.header.clone()
+        }
+        Err(e) => return Err(io(&path)(e)),
+    };
+    if header.hash().to_bytes() != named {
+        return Err(format!(
+            "header-mismatch: {} is header {}, the log names {}",
+            path.display(),
+            to_hex(&header.hash().to_bytes()),
+            to_hex(&named)
+        ));
+    }
+    if header.zone != built.root || header.lineage != built.header.lineage {
+        return Err("world-identity-mismatch: the header is another world's".into());
+    }
+    Ok(header)
+}
+
+/// Serves the built world under its own `header` (K16). Where this build would pin a kind by another revision than the
+/// header (a kind whose definition code or an entry changed), the header's revision is taken, by plain name: its
+/// rules are this build's definition, the activity and body kinds the engine makes are named by the header's pin.
+/// A kind only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per act); a
+/// kind only the header pins, with no definition of that plain name here, has no rules (`kind-unknown`, per act).
+/// When the header is this build's, nothing changes. Prints what differs.
+fn adopt(built: &mut Built, header: Header) {
+    if header.stored() == built.header.stored() {
+        return;
+    }
+    let pinned = |n: &str| header.kinds.iter().any(|k| k.as_str() == n);
+    let same = |n: &str| {
+        header
+            .kinds
+            .iter()
+            .find(|k| plain(k.as_str()) == plain(n))
+            .cloned()
+    };
+    let mut taken = Vec::new();
+    let mut unknown = Vec::new();
+    for k in &header.kinds {
+        if built.rules.kinds.contains_key(k.as_str()) {
+            continue;
+        }
+        let ours = built
+            .rules
+            .kinds
+            .iter()
+            .find(|(n, _)| plain(n) == plain(k.as_str()))
+            .map(|(_, kind)| kind.clone());
+        match ours {
+            Some(kind) => {
+                built.rules.kinds.insert(k.as_str().to_owned(), kind);
+                taken.push(plain(k.as_str()).to_owned());
+            }
+            None => unknown.push(k.as_str().to_owned()),
+        }
+    }
+    for a in &mut built.activities {
+        if let Some(k) = same(a.name.as_str()).filter(|_| !pinned(a.name.as_str())) {
+            a.name = k;
+        }
+    }
+    if let Some(k) = same(&built.body_kind).filter(|_| !pinned(&built.body_kind)) {
+        built.body_kind = k.as_str().to_owned();
+    }
+    let anew: Vec<&str> = built
+        .header
+        .kinds
+        .iter()
+        .filter(|k| same(k.as_str()).is_none())
+        .map(|k| k.as_str())
+        .collect();
+    println!(
+        "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
+         pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
+        to_hex(&header.hash().to_bytes()),
+        to_hex(&built.header.hash().to_bytes()),
+        taken.len(),
+        taken.join(", "),
+        anew.len(),
+        anew.join(", "),
+        unknown.len(),
+        unknown.join(", ")
+    );
+    built.header = header;
+}
+
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
 /// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
 fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
@@ -1156,8 +1274,7 @@ fn seed_in(args: &[String]) -> R<String> {
         entries(Path::new(e), &mut found)?;
     }
     // C13's stand-point repair first: the header is built from the entries the folder keeps, the ones `serve` builds
-    // it from again at each start. Built before the repair, an activity's stands (G3) differed and every start of a
-    // fresh seed was refused `header-mismatch` (0.132.1).
+    // its rules from at each start. Built before the repair, an activity's stands (G3) differed from its rules (0.132.1).
     if arg(args, "--entries").is_some() {
         for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
             println!("stand point: {line}");
@@ -1226,6 +1343,8 @@ fn seed_in(args: &[String]) -> R<String> {
     let n = log.append(built.part).map_err(refusal)?;
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
+    // Its header, the one the part names (K16): every start serves the world under it.
+    view_out::write_whole(&dir.join("header"), built.header.stored()).map_err(refusal)?;
     // The world's one creator (G7b), if named: `serve` takes its edits.
     let creator = match arg(args, "--creator") {
         Some(c) => format!(", \"creator\": \"{c}\"", c = creator_of(c).map(|_| c)?),
@@ -2286,6 +2405,12 @@ fn serve(args: &[String]) -> R<()> {
     // Shared with the public stream's thread, which reads it after the world has started (#3746).
     let found = Arc::new(found);
     let store = log.close();
+    // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
+    // A fork's is its `header`, checked above against this build's kinds.
+    if stored_header.is_none() {
+        let header = own_header(&dir, &built, &found.records)?;
+        adopt(&mut built, header);
+    }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
