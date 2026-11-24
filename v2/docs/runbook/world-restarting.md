@@ -40,8 +40,13 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
   (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
 - **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
-  that recovers from the store alone (no `stream-backup/`) starts a new generation, so it never cuts a part again at
-  an address viewers may hold. If the store was behind, the parts it lacked are a gap in the stream's history.
+  that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,
+  once the world has moved past the recovered cursor, starts a new generation whose baseline holds those records, so
+  it does not cut a part again at an address viewers may hold. If the store was behind, the parts it lacked are a gap
+  in the stream's history. One case is left: a generation's address is its baseline's digest, and the stream is
+  deterministic, so if the old machine's lost tail rolled over at the very cursor the new machine first moves to, the
+  two generations' addresses match. Salting the address with the takeover epoch would fix that; it is a format change,
+  follow-up R16.
 - **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
   this world still running beside a newer one (on this machine or another). The fenced one never writes over it
   and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running. If the

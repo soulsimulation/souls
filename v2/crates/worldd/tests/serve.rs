@@ -1418,9 +1418,10 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
         "viewer delay before the stall: at most {} ms",
         before / 1000
     );
-    // Under 2 s; on a machine loaded by other tests (the whole file runs at once), no more than the unstalled delay
-    // and 0.5 s: what is measured is that the stall adds nothing a viewer waits on.
-    let bar = 2_000_000.max(before + 500_000);
+    // Under 2 s on a quiet machine. On one loaded by other tests (the whole file runs at once, a debug build), the
+    // stream's own cadence slows with no stall at all, so the bar follows what was measured before the stall: what is
+    // measured is that the stall adds nothing a viewer waits on.
+    let bar = 2_000_000.max(before * 3 / 2 + 500_000);
 
     // The stall: the stream serves on, the backup falls behind and says so.
     stall(true);
@@ -1738,29 +1739,151 @@ fn r15_a_world_whose_backup_is_behind_sleeps_properly() {
         !said.contains("the public stream stopped"),
         "the stream never stopped:\n{said}"
     );
-    match status {
-        Some(status) => {
-            assert_eq!(status.code(), Some(75), "it exits asleep:\n{said}");
-            assert!(said.contains("asleep: next due"), "{said}");
-            let world =
-                json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap())
-                    .unwrap();
-            let stream = dir.join(world.get("stream").and_then(json::Value::str).unwrap());
-            let Value::Map(p) = decode(&std::fs::read(stream.join("pointer")).unwrap())
-                .unwrap()
-                .value
-            else {
-                panic!("the pointer is a map")
-            };
-            assert!(p.contains_key(&11), "the pointer says asleep");
-            println!("it slept, its backup behind");
-        }
-        None => {
-            let h = std::fs::read_to_string(&health).unwrap_or_default();
-            assert!(h.contains("\"stream\":{\"state\":\"serving\"}"), "{h}");
-            println!("it stayed awake, serving");
-        }
+    let h = std::fs::read_to_string(&health).unwrap_or_default();
+    let status = status.unwrap_or_else(|| panic!("it never slept:\n{h}\n{said}"));
+    assert_eq!(status.code(), Some(75), "it exits asleep:\n{said}");
+    assert!(said.contains("asleep: next due"), "{said}");
+    let world =
+        json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap()).unwrap();
+    let stream = dir.join(world.get("stream").and_then(json::Value::str).unwrap());
+    let Value::Map(p) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    assert!(p.contains_key(&11), "the pointer says asleep");
+    println!("it slept, its backup behind");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): a store-only recovery (a new machine) whose store head is a generation with no parts serves at once:
+/// its fresh generation waits for the world to move past the recovered cursor, so it never rebuilds the baseline the
+/// store names, and it is never refused or degraded for it.
+// A real process on the real clock: the backup's passes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_a_new_machine_on_a_generation_with_no_parts_serves() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use directoryd::directory::store::Store;
+    use std::ffi::OsStr;
+    let d = scratch("r15g");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let keys = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    // Every part closes its generation: the store's head is a generation with no parts once the backup is current.
+    let every_part = [keys[0], keys[1], ("SOULS_STREAM_GENERATION_PARTS", "1")];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15g", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let bucket = supervisor::bucket::Bucket::parse(&spec, |k| {
+        keys.iter()
+            .find(|(n, _)| *n == k)
+            .map_or(String::new(), |(_, v)| (*v).to_owned())
+    })
+    .expect("the store");
+    let w = serve_env(&dir, &socket, &args, &every_part);
+    w.line("listening");
+    let mut c = connect(&socket);
+    for n in 1..=2u64 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            n,
+            if n % 2 == 0 { -40 } else { -34 },
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
     }
+    std::thread::sleep(Duration::from_millis(1_500));
+    // The store's head, once it is the spool's: a rollover's manifest (no previous manifest, no chunk).
+    let key = s
+        .paths()
+        .into_iter()
+        .find(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+        .map(|p| p.trim_start_matches("souls/r15g/").to_owned())
+        .expect("a head in the store");
+    let spooled = dir.join("stream-backup").join(&key);
+    let prefix = key.trim_end_matches("head").to_owned();
+    // Whether `head` names a generation's first manifest (no previous one) with no part (no chunk).
+    let no_parts = |head: &[u8]| -> bool {
+        let Ok(Value::Map(h)) = decode(head).map(|d| d.value) else {
+            return false;
+        };
+        let Some(Value::Bytes(manifest)) = h.get(&1) else {
+            return false;
+        };
+        let Ok(Some(m)) = bucket.get(&format!("{prefix}objects/{}", to_hex(manifest))) else {
+            return false;
+        };
+        let Ok(Value::Map(m)) = decode(&m.bytes).map(|d| d.value) else {
+            return false;
+        };
+        m.get(&2) == Some(&Value::Bytes(Vec::new())) && m.get(&3) == Some(&Value::Bytes(Vec::new()))
+    };
+    // The world is still now; its last cut rolled over, and its backup puts that head last.
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(there) = bucket.get(&key).ok().flatten().map(|o| o.bytes)
+            && Some(&there) == std::fs::read(&spooled).ok().as_ref()
+            && no_parts(&there)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "the store holds the spool's head, a generation with no parts"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let generation = generation_of(&dir);
+    w.kill();
+    // A new machine: no views, no spool.
+    std::fs::remove_dir_all(dir.join("views")).expect("views");
+    std::fs::remove_dir_all(dir.join("stream-backup")).expect("the spool");
+    let w = serve_env(&dir, &socket, &args, &keys);
+    w.line("listening");
+    let health = dir.join("health.json");
+    let end = Instant::now() + Duration::from_secs(5);
+    while !std::fs::read_to_string(&health)
+        .unwrap_or_default()
+        .contains("\"stream\":{\"state\":\"serving\"}")
+    {
+        assert!(Instant::now() < end, "it serves within one back-off");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let mut c = connect(&socket);
+    for n in 3..=6u64 {
+        walk(
+            &mut c,
+            body,
+            root.scope(),
+            ground,
+            n,
+            if n % 2 == 0 { -40 } else { -34 },
+            30,
+        );
+        assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+    }
+    std::thread::sleep(Duration::from_millis(1_500));
+    let said = w.all.lock().unwrap().join("\n");
+    assert!(
+        !said.contains("the public stream is degraded"),
+        "never degraded:\n{said}"
+    );
+    served_stream(&dir);
+    assert_ne!(generation_of(&dir), generation, "a new generation");
+    w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
 

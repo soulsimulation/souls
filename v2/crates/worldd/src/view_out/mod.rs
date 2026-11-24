@@ -1196,8 +1196,10 @@ pub struct PublicWriter<S> {
     /// R15: the recovery chain written here first and backed up to the store behind the stream ([`backup`]); none:
     /// written to the store before each part is published, as before.
     spool: Option<backup::Spool>,
-    /// R15: the next rollover is a fresh generation's, after a recovery from the store alone.
+    /// R15: after a recovery from the store alone, the next cut is a fresh generation, once the source cursor has
+    /// passed `fresh_at`, the cursor recovered ([`PublicWriter::fresh_generation`]).
     fresh: bool,
+    fresh_at: u64,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1633,6 +1635,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             hides: true,
             spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
             fresh: false,
+            fresh_at: 0,
         };
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
@@ -1853,13 +1856,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         )?;
         w.closed_generations();
         // A writer stopped between a generation's last part and its rollover rolls over now, at the same place.
-        let fresh = fresh
-            && w.generation_parts > 0
-            && w.chunks.is_empty()
-            && !w.force_remainder
-            && w.migration_cut.is_none();
+        // A fresh writer cuts no part, and rolls over at no cursor the store names: its new generation waits for the
+        // source to move on ([`PublicWriter::fresh_generation`]).
+        let fresh = fresh && !w.force_remainder && w.migration_cut.is_none();
         w.fresh = fresh;
-        if w.rollover_due() || fresh {
+        w.fresh_at = w.cursor;
+        if w.rollover_due() && !fresh {
             w.rollover()?;
         }
         w.prune();
@@ -2126,7 +2128,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         let number = self.player.next();
         // A generation begun before #3948 keeps closed contents out from the next one on: its baseline is the state
         // with them left out, and, when that differs from the last state, it has no hand-off.
-        let switch = !self.hides;
+        // R15: a fresh generation (after a recovery from the store alone) starts from the source's state too, with the
+        // records it took since in its baseline, and no hand-off.
+        let switch = !self.hides || self.fresh;
+        let hides = self.hides;
         let (baseline, state) = if switch {
             let state = shown(
                 &self.header,
@@ -2142,20 +2147,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             (self.generation_baseline()?, self.player.state().clone())
         };
-        // R15: a fresh generation (a writer recovered from the store alone) never takes the id of the generation it
-        // leaves, or the one before: a lost tail of parts may have been published under it.
-        let id = replica::ids::sha256(&baseline).to_vec();
-        if self.fresh
-            && (id == replica::ids::sha256(&self.baseline).to_vec()
-                || self.handoff.as_ref().is_some_and(|h| h.0 == id))
-        {
-            return Err(fault(
-                "stream-generation-reused",
-                "a new generation from the store alone would take the id of the one it leaves; copy the spool or \
-                 let the old machine's backup catch up",
-            ));
-        }
-        self.fresh = false;
         // A new generation's baseline text holds every public name, as the first baseline's does (#3574).
         let words = self.words(&state, &state)?;
         let text = self.put(&words)?;
@@ -2189,7 +2180,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.live = [seed_hash.clone(), text.clone()].into();
         if let Err(e) = self.commit(&manifest) {
             self.live = live;
-            self.hides = !switch;
+            self.hides = hides;
             return Err(e);
         }
         self.seed = seed_hash;
@@ -2200,6 +2191,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.prune();
         self.prune_store();
         Ok(())
+    }
+    /// R15: the fresh generation of a writer recovered from the store alone, once the source has moved past the
+    /// recovered cursor: its baseline holds the records taken since, at a later cursor than any the store names, so
+    /// it is not the id of a generation an earlier writer may have published from its own spool. Those records are in
+    /// the baseline, not in a part.
+    fn fresh_generation(&mut self) -> R<()> {
+        self.rollover()?;
+        self.fresh = false;
+        self.clear_pending();
+        self.still_at = None;
+        self.pointer(None)
     }
     /// How a live viewer crosses from the current generation (#3825): its id, the public version and part count it
     /// ends at, and its state's digest.
@@ -3181,6 +3183,9 @@ impl<S: ObjectStore> PublicWriter<S> {
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
+        }
+        if self.fresh && self.cursor > self.fresh_at {
+            return self.fresh_generation();
         }
         let began = trace::on().then(trace::now_ms);
         let mut lap = prof::Lap::start();
