@@ -111,13 +111,27 @@ async function walkWorld(browser, origin, slug, dir) {
     return s;
   };
   const fail = (m) => { throw Error(m); };
-  // Header buttons are clicked with `force`: the bar re-renders every tick, so Playwright's "stable" wait can time out
-  // on a working button. Each step then waits for its result (a menu, a moment, a form), so a dead button still fails.
+  // Controls are pressed with `force`: the bar re-renders every tick, so Playwright's "stable" wait can time out on a
+  // working button. A press waits for the button to be shown and enabled (a busy page disables "Back 1 min" while it
+  // loads) and is tried up to 3 times. Only the click is retried: each step then waits for its result (a menu, a
+  // moment, a form), so a dead button still fails, and every 4xx/5xx and console error still counts.
+  const press = async (loc, tries = 3) => {
+    let last;
+    for (let i = 0; i < tries; i++) {
+      try {
+        await loc.waitFor({ state: 'visible', timeout: 15000 });
+        await until(() => loc.isEnabled().catch(() => false), 15000);
+        await loc.click({ force: true, timeout: 10000 });
+        return;
+      } catch (e) { last = e; await sleep(1000); }
+    }
+    throw last;
+  };
   const escape = async () => { await page.keyboard.press('Escape'); await sleep(300); };
   const back = async (label) => {
     const before = await view();
     if (before.tick == null) fail('no moment shown before the click');
-    await page.getByRole('button', { name: 'Back 1 min', exact: true }).click({ timeout: 15000 });
+    await press(page.getByRole('button', { name: 'Back 1 min', exact: true }));
     const landed = await until(async () => { const v = await view(); const bad = await notLoaded(); if (bad) return { bad }; return v.pres === 'history' && v.tick < before.tick ? v : null; }, 25000);
     if (!landed) fail(`${label}: never landed on an earlier moment (presentation ${(await view()).pres})`);
     if (landed.bad) fail(`${label}: "${landed.bad}"`);
@@ -131,7 +145,7 @@ async function walkWorld(browser, origin, slug, dir) {
     return `presentation ${(await view()).pres}`;
   });
   await step('Live', async () => {
-    await page.click('.live-pill', { timeout: 10000, force: true });
+    await press(page.locator('.live-pill').first());
     await page.locator('input[aria-label="Preview hour"]').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
@@ -139,7 +153,7 @@ async function walkWorld(browser, origin, slug, dir) {
   await step('Back again', () => back('Back again'));
   await step('From the start', async () => {
     const before = await view();
-    await page.getByRole('button', { name: 'From the start', exact: true }).click({ timeout: 15000 });
+    await press(page.getByRole('button', { name: 'From the start', exact: true }));
     const landed = await until(async () => { const bad = await notLoaded(); if (bad) return { bad }; const v = await view(); return v.pres === 'history' && v.tick < (before.tick ?? Infinity) ? v : null; }, 25000);
     if (!landed) fail('never landed on the first moment');
     if (landed.bad) fail(`"${landed.bad}"`);
@@ -147,7 +161,7 @@ async function walkWorld(browser, origin, slug, dir) {
   });
   await step('Link to this moment', async () => {
     const b = page.getByRole('button', { name: 'Link to this moment', exact: true });
-    await b.click({ timeout: 15000 });
+    await press(b);
     const link = await until(() => page.evaluate(() => document.querySelector('[data-moment-link]')?.getAttribute('data-moment-link') || null), 5000);
     if (!link) fail('no link was made');
     const tab = await ctx.newPage();
@@ -162,16 +176,16 @@ async function walkWorld(browser, origin, slug, dir) {
   });
   await step('Return to live', async () => {
     const r = page.getByRole('button', { name: 'Return to live', exact: true });
-    if (await r.count()) await r.click({ timeout: 10000 });
+    if (await r.count()) await press(r);
     if (!await until(async () => (await view()).pres === 'live', 20000)) fail('never back to live');
   });
   await step('Broadcast menu', async () => {
-    await page.click('button[aria-label="Camera modes and help"]', { timeout: 10000, force: true });
+    await press(page.locator('button[aria-label="Camera modes and help"]').first());
     await page.locator('[role=dialog][aria-label="Camera modes and help"]').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
   await step('Sound toggle', async () => {
-    await page.click('button[aria-label="Audio"]', { timeout: 10000, force: true });
+    await press(page.locator('button[aria-label="Audio"]').first());
     const sw = page.locator('[role=dialog][aria-label="Audio"] [role=switch]').first();
     await sw.waitFor({ state: 'visible', timeout: 5000 });
     const a = (await sw.textContent())?.trim();
@@ -183,7 +197,7 @@ async function walkWorld(browser, origin, slug, dir) {
     return `${a} -> ${b} -> back`;
   });
   await step('Search (Explore)', async () => {
-    await page.click('.explore-open', { timeout: 10000, force: true });
+    await press(page.locator('.explore-open').first());
     await page.locator('input.explore-search').waitFor({ state: 'visible', timeout: 5000 });
     return `${await page.locator('.explore-soul').count()} Souls listed`;
   });
@@ -193,21 +207,21 @@ async function walkWorld(browser, origin, slug, dir) {
     const places = page.locator('.explore-locations button');
     const n = await places.count();
     if (!n) return 'no places listed';
-    await places.first().click({ timeout: 10000, force: true });
+    await press(places.first());
     return `${n} places; clicked the first`;
   });
   await step('Follow a Soul', async () => {
-    if (!await page.locator('input.explore-search').isVisible()) await page.click('.explore-open', { timeout: 10000, force: true });
+    if (!await page.locator('input.explore-search').isVisible()) await press(page.locator('.explore-open').first());
     const soul = page.locator('.explore-soul').first();
     await soul.waitFor({ state: 'visible', timeout: 10000 });
     const name = (await soul.textContent())?.trim();
-    await soul.click();
+    await press(soul);
     if (!await until(async () => (await view()).camera === 'follow', 20000)) fail(`clicking ${name} did not follow (camera ${(await view()).camera})`);
     return `following ${name}`;
   });
   await escape();
   await step('New Soul', async () => {
-    await page.click('.bring-agent-open', { timeout: 10000, force: true });
+    await press(page.locator('.bring-agent-open').first());
     await page.locator('section.bring-agent').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
@@ -219,7 +233,7 @@ async function walkWorld(browser, origin, slug, dir) {
       }
       return false;
     }, 15000, 500);
-    await page.click('.account-sign-in', { timeout: 10000, force: true });
+    await press(page.locator('.account-sign-in').first());
     if (await form()) { const u = new URL(page.url()); return `sign-in form at ${u.host}${u.pathname}`; }
     // the click may open the account panel first, with its own Sign in
     const again = page.locator('[role=dialog] button:has-text("Sign in"), dialog button:has-text("Sign in")').first();
