@@ -1394,7 +1394,8 @@ export class WorldEntityLayer {
     return c;
   }
 
-  /** A box worth looking at first: the placed things if any, else the middle of the world. */
+  /** A box worth looking at first: the placed things if any (each at least 10 m round its origin, and all of its
+   *  footprint: a 20 m box round RnA Studio's origin put the arrival eye against its wall), else the middle of the world. */
   viewBounds(): [number, number, number, number] {
     if (!this.model) return [-60, -60, 60, 60];
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -1403,6 +1404,7 @@ export class WorldEntityLayer {
       const d = this.model.resolvedDef(e.def); if (!d || d.components.landform || d.make.kind === 'gen' && (d.make.gen === 'landform/1' || d.make.gen === 'lake/1')) continue;
       if (e.shape && 'area' in e.shape) { for (const [x, z] of e.shape.area) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); } continue; }
       const wp = this.model.worldPose(e); x0 = Math.min(x0, wp.x - 10); z0 = Math.min(z0, wp.z - 10); x1 = Math.max(x1, wp.x + 10); z1 = Math.max(z1, wp.z + 10);
+      try { for (const b of this.model.footprint(e, d)) { const r = Math.hypot(b.half[0], b.half[1]); x0 = Math.min(x0, b.c[0] - r); z0 = Math.min(z0, b.c[1] - r); x1 = Math.max(x1, b.c[0] + r); z1 = Math.max(z1, b.c[1] + r); } } catch { /* no colliders: its origin box stands */ }
     }
     if (!Number.isFinite(x0)) { const h = Math.min(120, this.model.constants.extent / 4); return [-h, -h, h, h]; }
     return [x0, z0, x1, z1];
