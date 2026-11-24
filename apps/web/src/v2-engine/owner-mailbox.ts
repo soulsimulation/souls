@@ -197,8 +197,14 @@ export class V2OwnerMailbox {
   stop(): void { this.sock?.stop(); }
 }
 
+/** A signed-in person who owns nothing on the new engine yet (the directory's `{"owned": []}`, or an older directory's
+ *  404 `nothing-owned`): a normal state, not a failure. There is no view token to hold; ask again later, quietly. */
+export class NothingOwned extends Error {
+  constructor() { super('no view: nothing owned'); this.name = 'NothingOwned'; }
+}
+
 /** The directory's session exchange (V13b, v2/web/src/source/socket.ts `exchange`): a short-lived view token, held in
- *  memory alone, and the grants it may watch. */
+ *  memory alone, and the grants it may watch. Throws `NothingOwned` for a signed-in person with no Soul. */
 export async function viewToken(place: MailboxPlace, post: typeof fetch = fetch, signedIn: () => Promise<string | null> = () => pageSession().getToken()): Promise<{ token: string; expires: number; owned: { grant: string }[] }> {
   let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
   if (!name) {
@@ -210,6 +216,7 @@ export async function viewToken(place: MailboxPlace, post: typeof fetch = fetch,
     headers: bearer ? { authorization: `Bearer ${bearer}` } : { 'content-type': 'application/json' },
     ...(bearer ? {} : { body: JSON.stringify({ name }) }), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
   const body = await res.json() as { token?: unknown; expires?: unknown; owned?: { grant: string }[]; refused?: string };
+  if (body.refused === 'nothing-owned' || (res.ok && typeof body.token !== 'string' && Array.isArray(body.owned) && !body.owned.length)) throw new NothingOwned();
   if (!res.ok || typeof body.token !== 'string') throw new Error(`no view: the directory said ${body.refused ?? res.status}`);
   return { token: body.token, expires: Number(body.expires), owned: body.owned ?? [] };
 }

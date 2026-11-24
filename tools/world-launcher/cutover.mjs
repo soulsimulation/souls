@@ -338,9 +338,9 @@ function oneFence(binding) {
       })().finally(() => { publishing = null; });
     },
     /** `o.config()`: the routed world's page config, which its `/v1/config` answers beside `soulClient` (else only that).
-     *  `o.cold`: the world's old process is not running (24 Nov): a view not published for this stream is then answered
-     *  404 `world.new-engine`, as for a world with no old twin, and the page draws the world from its stream (W2,
-     *  stream-scene.ts); it never wakes the old process. A running one answers it live, as before. */
+     *  `o.cold`: the world has no old process to ask (24 Nov; D2b: every moved world, launcher.mjs oldCold): a view not
+     *  published for this stream is then answered 404 `world.new-engine`, as for a world with no old twin, and the page
+     *  draws the world from its stream (W2, stream-scene.ts). */
     /** Whether the old views are published for the world's current stream (its snapshot, in staticDir or held). */
     published(w) {
       const stream = this.v2Stream(w);

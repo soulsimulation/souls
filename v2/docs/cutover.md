@@ -31,9 +31,9 @@ Before starting the old launcher, install its operator-owned `/etc/souls/cutover
 
 While Eden is routed (#4177), the launcher writes `v2Stream` (the route's `stream`) into the world page's inline config,
 and `v2Bodies` when the binding names it: the same-origin directory serving the v2 body catalogue (`bodies.json`). Rollback
-removes both. With an optional absolute `staticDir` (the directory the v2 origin serves as `<stream>static/`), the first
-routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
-`platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
+removes both. With an optional absolute `staticDir` (the directory the v2 origin serves as `<stream>static/`), the old world's
+read-only views published there before 0.134 (`scene.json`, `snapshot.json`, `items.json`, `platforms.json`,
+`config.json`, `kernel.json`, then `manifest.json`) are kept, and the page's reads of them are answered from those
 files. So is the page's read of that scene's capture (`/v1/scenes/<the published scene's hash>`): the old world keeps a
 scene's capture only once one of its takes carried it, so a world nobody watched since its scene last changed would
 answer 404, and the page would stop at "World layout could not be prepared". `/v1/config` answers the routed world's page config (the launcher's `movedConfig`: every field an old world's config gives, from the launcher's sign-in, the registry and the route, never from the old process) beside the served client's `soulClient`; the launcher-built page inlines the same config. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
@@ -41,19 +41,22 @@ the launcher serves from `clientDir` for the routed world, by version: the page'
 `v2Replica`, `/w/<world>/v2/replica/<version>/replica.js` (the version is the first 16 hex of sha256 over both files), and
 the current version's two files answer `public, max-age=31536000, immutable`, so viewers and the CDN keep the 2 MB wasm;
 any other version, and the plain `/replica.js` and `/replica_bg.wasm` the Soul client's upgrade reads, answer `no-store`. God edits made on v2 after the switch are not in those files;
-the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
-made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
-The snapshot's wire forms the page asks first (`?defs=ref&cols=1`, `&v=<key>`) get the published plain snapshot. Once a
-routed world's views are published for its stream, the launcher never wakes its old process for its page: while that
-process is not awake (not running, or stopped in place), the launcher builds the page itself (the inline config with its
-stream, as for a world with no old twin), answers each view from the published files, and answers the page's other old
-reads in the old process's shapes: `/v1/me` with its sign-in, `/v1/world/visitors` as a world without travel
-(`available: false`), `/v1/world/seq` from the published snapshot, `/v1/world/context` (Explore's places) from the
-published snapshot too: each thing at the world's root, the ones with an authored meaning listed and every one found by
-a search, paged as the old process pages them; the rest 404 `world.new-engine`. A world with no views published for
-its stream (a fresh move, or views held in memory before a restart) wakes its old process once for its page, which
-publishes them: drawn from its stream alone, an old world's buildings can lose their finish (a hall without its roof, in
-hello-hamlet), so the stream alone is not its picture. A running old process still serves its page.
+the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files is
+drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2; a world's own defs ride the import since #4588).
+The launcher's user must be able to write `staticDir`.
+The snapshot's wire forms the page asks first (`?defs=ref&cols=1`, `&v=<key>`) get the published plain snapshot.
+
+**No old process for a moved world (0.134 D2b).** While a world is routed (switched), the launcher never starts, wakes,
+keeps alive or loads by alarm its old process, and a handover from the previous launcher releases that process and starts
+none (`children.mjs` `refuse`, code `new-engine`); one still running from before the switch is stopped within 30 s. Every
+request of the world is answered by the launcher: its page is the launcher's own (the inline config with its stream, as
+for a world with no old twin), a crawler's too; each view from the published files, else 404 `world.new-engine` (the page
+draws it from its stream); `/v1/me` with its sign-in; `/v1/world/visitors` as a world without travel (`available:
+false`); `/v1/world/seq` from the published snapshot (else seq 0); `/v1/world/context` (Explore's places) from the published snapshot
+too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search, paged as
+the old process pages them, and with nothing published a listing with no places; Explore's place pictures as each
+`unavailable` (a place stays text); writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
+an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)
 

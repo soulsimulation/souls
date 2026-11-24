@@ -15,8 +15,10 @@
 // - stuck Souls: none (the driver's rule, `stuck.rule` in its report);
 // - no result: the rung gave no result (a world, gateway or driver ended); a crash, never a number;
 // - memory: the world's, gateway's and origin's resident memory together at most MEM_LIMIT_MB, when it is set.
+// - aborted: a served rung (served.sh) the guard stopped, Eden past the guard's bars (guard.mjs); named with its reason.
 // Reported beside them, not judged: refusals by cause, processor cores and the busiest world thread, send to the
 // first visible move, the viewers' first picture and drops.
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { analyze } from './analyze.mjs';
 
@@ -32,7 +34,8 @@ export function delayOf(r) {
 /** The limits a rung missed, each `<limit> (<value> against <bar>)`; [] when every one held. `memLimitMb` is optional. */
 export function judge(r, memLimitMb = 0) {
   if (!r) return ['no result (a world, gateway or driver ended)'];
-  const missed = [];
+  if (r.aborted && !r.acts) return [`aborted by the guard (${r.aborted})`];
+  const missed = r.aborted ? [`aborted by the guard (${r.aborted})`] : [];
   const a = r.accepted ?? {};
   if (a.p50Ms == null || a.p50Ms > BARS.receiptP50Ms || a.p95Ms > BARS.receiptP95Ms) missed.push(`receipt (p50 ${a.p50Ms ?? '-'} / p95 ${a.p95Ms ?? '-'} ms against ${BARS.receiptP50Ms} / ${BARS.receiptP95Ms})`);
   const d = delayOf(r);
@@ -53,6 +56,9 @@ export function rung(dir) {
   const [n, arm, rate, k] = name.split('-');
   let r = null;
   try { r = analyze(dir); } catch { /* no result: judged as that */ }
+  // A served rung the guard stopped (guard.mjs): judged as aborted, beside whatever it measured before the stop.
+  const aborted = existsSync(`${dir}/abort.txt`) ? readFileSync(`${dir}/abort.txt`, 'utf8').trim() : null;
+  if (aborted) r = { ...(r ?? {}), aborted };
   return { dir, name, n: Number(n), arm, rate, repeat: k, r };
 }
 
@@ -64,7 +70,7 @@ export function table(rows, memLimitMb = 0, label = '') {
   t.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const x of rows) {
     const r = x.r, missed = judge(r, memLimitMb);
-    if (!r) { t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${Array(10).fill('-').join(' | ')} | **${missed.join('; ')}** |`); continue; }
+    if (!r || (r.aborted && !r.acts)) { t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${Array(10).fill('-').join(' | ')} | **${missed.join('; ')}** |`); continue; }
     const d = delayOf(r), v = r.viewers, b = r.threads?.world?.[0];
     t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${d.p50Ms ?? '-'} / ${d.p95Ms ?? '-'}${d.from === 'viewers' ? ` (${d.firstP50Ms ?? '-'}, ${d.lastP50Ms ?? '-'})` : ' (driver)'} | ${r.wait.p95Ms ?? '-'} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} | ${top(r.byCause, 3)} | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin}${b ? ` (${b[0]} ${b[1]})` : ''} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} / ${r.cpu.originMb} | ${v ? `${v.peakViewers}, ${v.firstPicture?.p95Ms ?? '-'}, ${v.drops}; readers ${v.readerCores} cores` : 'none'} | ${missed.length ? `**${missed.join('; ')}**` : 'held'} |`);
   }

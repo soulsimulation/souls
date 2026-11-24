@@ -78,11 +78,23 @@ export async function accountRequest(id: string, action?: 'approve' | 'cancel'):
   if (!r.ok || !validRequest(d.request, id)) throw new Error(r.status === 403 ? 'This request belongs to another account.' : errorMessage(d) ?? 'This request is unavailable. Sign in with the intended account and check again.');
   return d.request;
 }
+/** On a world the new engine runs, the account's agent logins are the directory's (`POST /v1/account/agents` and
+ *  `/v1/account/agents/<id>/revoke`, site-level, which the front door sends there; the world's own path is not served,
+ *  24 Nov): the request for `path`, signed in as the view-token exchange signs in (a provider session as the bearer, a
+ *  local `dev:<name>` as the directory's test person). Null on a world of the old engine. */
+async function directoryAccount(path: string, authorization: string): Promise<[string, RequestInit] | null> {
+  const { v2MailboxPlace } = await import('../v2-engine/owner-mailbox.ts');
+  const place = v2MailboxPlace(); if (!place) return null;
+  const token = authorization.replace(/^Bearer\s+/i, ''), dev = token.startsWith('dev:') ? token.slice(4) : null;
+  return [`${place.directory}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${token}` }) },
+    body: JSON.stringify(dev ? { test_person: dev } : {}), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' }];
+}
 /** #2245: the agents logged in to this account (its live grants); null when this world has no such list. */
 export async function connectedAgents(): Promise<ConnectedAgent[] | null> {
   const headers = await userAuthHeaders(); if (!headers.authorization) return null;
   try {
-    const r = await fetch(apiPath('/v1/account/agents'), { headers, cache: 'no-store' });
+    const v2 = await directoryAccount('/v1/account/agents', headers.authorization);
+    const r = await (v2 ? fetch(...v2) : fetch(apiPath('/v1/account/agents'), { headers, cache: 'no-store' }));
     if (!r.ok) return null;
     const d = await r.json() as { agents?: ConnectedAgent[] };
     return (Array.isArray(d.agents) ? d.agents : []).filter((g) => g && typeof g.id === 'string' && typeof g.agentLabel === 'string' && typeof g.device?.name === 'string');
@@ -91,12 +103,15 @@ export async function connectedAgents(): Promise<ConnectedAgent[] | null> {
 /** #2245: end one agent's login to this account. */
 export async function disconnectAgent(id: string): Promise<void> {
   const headers = await userAuthHeaders(); if (!headers.authorization) throw new Error('Sign in first.');
-  const r = await fetch(apiPath(`/v1/account/agents/${encodeURIComponent(id)}/revoke`), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}', cache: 'no-store' });
+  const v2 = await directoryAccount(`/v1/account/agents/${encodeURIComponent(id)}/revoke`, headers.authorization);
+  const r = await (v2 ? fetch(...v2) : fetch(apiPath(`/v1/account/agents/${encodeURIComponent(id)}/revoke`), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}', cache: 'no-store' }));
   if (!r.ok) throw new Error(errorMessage(await r.json().catch(() => ({})) as ErrorBody) ?? 'Could not disconnect this agent.');
 }
 /** Lane PUX: this page's window code (ABCD-EFGH), for the New Soul prompt; an agent that passes it reaches this window. */
 export async function windowCode(): Promise<string | null> {
   const headers = await userAuthHeaders(); if (!headers.authorization) return null;
+  // A world the new engine runs has no window codes (its world refuses the write, 409 `world.new-engine`): none asked.
+  if ((await import('../v2-engine/owner-mailbox.ts')).v2MailboxPlace()) return null;
   try {
     const r = await fetch(apiPath('/v1/account/window-code'), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}', cache: 'no-store' });
     const d = await r.json().catch(() => ({})) as { code?: string };
