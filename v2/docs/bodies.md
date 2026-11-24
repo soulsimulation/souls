@@ -85,9 +85,10 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    while it is still one), and its walk ends `done.as-near-as-the-crowd-allows`. A place the walker cannot reach at
    all, or with no such point within 15 m, is refused `spot-none-free`. A target with no standing place on its 10 rings
    (the middle of a pond wider than they reach) has the rings go on out to 15 m, to the first with one: the walk ends on
-   its nearest bank, and only a target with none within 15 m is refused `spot-none-near` (0.133). Every walk's
+   its nearest bank, and only a target with none within 15 m is refused `spot-none-near` (0.133). A done walk's
    `souls:move-ended` carries field 7: how far from its target the body ended, mm (0 on or inside its area; to a body,
-   from that body), which the client gives as `away_m` on the walk's receipt.
+   from that body), which the client gives as `away_m` on the walk's receipt. A walk that ends any other way
+   (refused, stopped, replaced, timed out) carries none.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -186,7 +187,13 @@ C14 (#3442): a walk to a node that is neither a point nor a seat (a room, the sq
 spot in it: its middle by E2's shared library (`replica::select`), granted by N9's table, the same every run. A walk,
 sit or lie with ranked fallbacks (other targets of the same form) takes the first that holds: a sit's or a lie's
 through I5's `sim::commit::bind` (the first free seat), a walk's the first with somewhere to go; none is refused by
-name (`place-taken`). The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
+name (`place-taken`). 0.133 Q2: a walk to a building (a node with rooms under it, not a room, the ground or a
+place) ends in its main room: of its rooms at most three levels down, the one with the largest outline, the first by id
+on a tie; a building whose main room the walker cannot reach is refused like any target out of reach. A walk to
+another body ends 1.2 m beside it on the walker's side (along +z when they stand on different floors), and to a seated
+body at the thing it sits in. That point is fixed when the walk starts: a body that moves on meanwhile is not followed,
+and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
+The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
 the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
 receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),
 `place-already-held`, `place-taken`, `not-seated`. A seat's holds are not in a client's copy, so its verdict on a sit

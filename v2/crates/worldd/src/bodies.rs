@@ -974,6 +974,11 @@ impl Bodies {
             let from = self.pose(body).filter(|(f, _)| *f == frame).map(|(_, p)| p);
             return Ok(Target::new(frame, beside(at, from, SPEAKING)));
         }
+        // The world's root is the whole world, not somewhere in it: refused by name, never its largest room.
+        let tree = &self.town.tree;
+        if tree.node(tree.root()).is_some_and(|n| n.id() == node) {
+            return Err(refusal("move.whole-world", node));
+        }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
         match spot::once(&r) {
