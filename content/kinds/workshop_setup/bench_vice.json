@@ -1,0 +1,318 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bench_vice",
+  "owner": "thing",
+  "state": {
+    "clamped": {
+      "n": 28,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "jaw_gap": {
+      "n": 29,
+      "type": "int",
+      "unit": "mm",
+      "default": 120,
+      "min": 0,
+      "max": 120,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        900,
+        250
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      700,
+      1050,
+      600
+    ]
+  },
+  "forms": {
+    "release_jaws": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "clamped",
+          "to": false,
+          "event": "release_jaws"
+        }
+      ]
+    },
+    "set_gap": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "jaw_gap",
+          "not": {
+            "arg": "gap"
+          }
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "jaw_gap",
+          "to": {
+            "arg": "gap"
+          },
+          "event": "set_jaw_gap"
+        }
+      ],
+      "takes": {
+        "gap": {
+          "type": "count"
+        }
+      }
+    },
+    "clamp_jaws": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "clamped",
+          "to": true,
+          "event": "clamp_jaws"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bench_vice",
+    "table": [
+      {
+        "part": "jaw",
+        "field": "jaw_gap",
+        "do": "slide",
+        "axis": "x",
+        "range": [
+          0,
+          120
+        ],
+        "to": [
+          0,
+          120
+        ],
+        "over_us": 350000
+      },
+      {
+        "part": "handle",
+        "field": "clamped",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "false": 0,
+          "true": 90000
+        },
+        "over_us": 350000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            425,
+            0
+          ],
+          "size": [
+            500,
+            850,
+            500
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            950,
+            0
+          ],
+          "size": [
+            60,
+            180,
+            400
+          ],
+          "tint": "steel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            950,
+            0
+          ],
+          "size": [
+            60,
+            180,
+            400
+          ],
+          "tint": "steel",
+          "role": "jaw",
+          "pivot": [
+            -120,
+            950,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            250
+          ],
+          "size": [
+            260,
+            25,
+            25
+          ],
+          "tint": "handle",
+          "role": "handle",
+          "pivot": [
+            0,
+            900,
+            250
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#72583e",
+        "steel": "#7a8b98",
+        "handle": "#b54c35"
+      },
+      "tags": [
+        "workshop",
+        "fixture",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Set a bench vice jaw gap, then clamp or release its screw.",
+    "workshop": "workshop",
+    "unlock_first": "Release the vice screw before changing the jaw gap.",
+    "vice": "vice",
+    "jaws": "jaws"
+  },
+  "card": {
+    "text": "card",
+    "category": "workshop",
+    "synonyms": [
+      "vice",
+      "jaws"
+    ]
+  }
+}
