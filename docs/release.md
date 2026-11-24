@@ -596,6 +596,10 @@ and holds the bar. `node tools/world-launcher/deploy/reload-local.mjs` runs a wh
 launcher, an Eden 2026 world, the release probe in headless Chrome, one SIGHUP) and prints the probe's bar.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it keeps running and never
 reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts`).
+A page on a new-engine world reads no welcome: it reloads when a stream generation's baseline names a format (its
+field 1) its bundle does not list, showing "A new version of this world is out: reloading." first, at most once a
+minute per format (`apps/web/src/v2-engine/stream-format.ts`). A release that raises the format ships the page that
+reads it before the worlds that write it; one that only adds fields an older page ignores keeps the number.
 
 ## Rollback
 
