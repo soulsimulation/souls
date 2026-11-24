@@ -81,6 +81,8 @@ struct World {
     bodies: Vec<Id>,
     /// Reach on the floor's plane, as the served world asks it (#3600): see [`World::geo`].
     flat: bool,
+    /// Water on the floor (E11d), each `[x0, z0, x1, z1]` µm: what a climb out may pass over.
+    water: Vec<[i64; 4]>,
 }
 
 const FLOOR: i64 = 5_000_000;
@@ -146,6 +148,7 @@ fn world_with(place: Place, point: Vec3, front: i32, at: i64) -> World {
         chair,
         bodies,
         flat: false,
+        water: Vec::new(),
     }
 }
 
@@ -833,6 +836,24 @@ fn floor_only(x0: i32, z0: i32, x1: i32, z1: i32) -> Surface {
 type Handed = Option<Result<replica::pose::HandOff, replica::effects::Refusal>>;
 
 /// Fires every timer due before `until` with reach not in question ([`Near`]): the last hand-off the places made.
+/// The world's floors with its water (E11d).
+struct Wet<'a> {
+    floors: &'a BTreeMap<Id, Surface>,
+    water: &'a [[i64; 4]],
+}
+
+impl crate::mover::Floors for Wet<'_> {
+    fn for_build(&self, b: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
+        self.floors.for_build(b)
+    }
+
+    fn wet(&self, _: Id, at: Vec3) -> bool {
+        self.water
+            .iter()
+            .any(|r| at.x >= r[0] && at.z >= r[1] && at.x <= r[2] && at.z <= r[3])
+    }
+}
+
 fn run_near(w: &mut World, until: i64) -> Handed {
     let mut handed = None;
     while let Some(t) = w.due.fire(until) {
@@ -844,7 +865,10 @@ fn run_near(w: &mut World, until: i64) -> Handed {
                 &mut w.mint,
                 &mut w.moves,
                 &Near,
-                &w.floors,
+                &Wet {
+                    floors: &w.floors,
+                    water: &w.water,
+                },
                 &t,
             )
             .expect("a move's timer");
@@ -874,8 +898,9 @@ fn rise_to_contact(w: &mut World, b: Id, now: i64) -> (i64, Handed) {
 
 /// E11d: body 0 seated in the chair (slot at the origin, stand point 300 mm in front, +z), then the floor becomes
 /// `floor`, and the body rises to the rise's contact.
-fn seated_then_rise(floor: Surface) -> (World, Id, i64, Handed) {
+fn seated_then_rise(floor: Surface, water: &[[i64; 4]]) -> (World, Id, i64, Handed) {
     let mut w = world(chair());
+    w.water = water.to_vec();
     let b = w.bodies[0];
     w.sit(&[0], &mv("souls:sit"))[0].1.clone().expect("started");
     w.run(i64::MAX);
@@ -901,6 +926,9 @@ fn step_until_landed(w: &mut World, b: Id, from: i64) -> Vec<Vec3> {
     path
 }
 
+/// Water over the whole test floor's plan, µm (E11d): the floor's own pieces are still floor.
+const LAKE: [i64; 4] = [-5_000_000, -5_000_000, 5_000_000, 5_000_000];
+
 /// E11d: a seat whose stand point faces the water, the bank on its other side (the floor from 1 m behind the seat):
 /// the stand point and every point out along its exit are off the floor, so the body climbs out to the nearest floor
 /// by a straight line that leaves only the seat's own hole, carried at walking speed (never further in a tick than
@@ -910,7 +938,7 @@ fn e11d_a_seat_facing_the_water_climbs_out_onto_the_bank_behind_it() {
     let mut paths = Vec::new();
     for _ in 0..2 {
         let (mut w, b, contact, handed) =
-            seated_then_rise(floor_only(-5_000, -5_000, 5_000, -1_000));
+            seated_then_rise(floor_only(-5_000, -5_000, 5_000, -1_000), &[LAKE]);
         let h = handed
             .expect("a hand-off at contact")
             .expect("the stand is not refused");
@@ -971,7 +999,7 @@ fn e11d_a_seat_facing_the_water_climbs_out_onto_the_bank_behind_it() {
 /// (`release_body`), and with floor near again it rises as normal.
 #[test]
 fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
-    let (mut w, b, _, handed) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000));
+    let (mut w, b, _, handed) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000), &[LAKE]);
     let e = handed
         .expect("a hand-off at contact")
         .expect_err("no floor within the bound");
@@ -1009,7 +1037,7 @@ fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
         "at the stand point"
     );
     // And a body left seated so leaves the world as a seated body does.
-    let (mut w, b, _, _) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000));
+    let (mut w, b, _, _) = seated_then_rise(floor_only(4_000, -5_000, 5_000, 5_000), &[LAKE]);
     run_near(&mut w, i64::MAX);
     assert_eq!(w.slots.release_body(b), Some((w.chair, None)));
     assert_eq!(w.slots.holder(w.chair), None);
@@ -1021,6 +1049,7 @@ fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
 #[test]
 fn e11d_the_things_other_stand_point_comes_first() {
     let mut w = world(chair());
+    w.water = vec![LAKE];
     let b = w.bodies[0];
     let at = w.slots.place(w.chair).unwrap().clone();
     w.slots
@@ -1071,4 +1100,132 @@ fn e11d_the_things_other_stand_point_comes_first() {
     step_until_landed(&mut w, b, contact + 1);
     let p = w.c.body(b).unwrap().pose.position;
     assert_eq!((p.x, p.z), (2_000_000, 300_000));
+}
+
+/// The chair's own box (E11d review): 2 m wide, 1 m deep, round its slot at the origin, µm.
+fn hull() -> super::Footprint {
+    vec![[
+        [-1_000_000, -500_000],
+        [1_000_000, -500_000],
+        [1_000_000, 500_000],
+        [-1_000_000, 500_000],
+    ]]
+}
+
+/// E11d review: the bank is 1.5 m behind the seat, water between, and a thin wall (200 mm, across the whole water)
+/// stands in it. No line from the seat to the bank passes only over water, so the body does not climb through the
+/// wall: the rise ends `off-surface` and it stays seated. With water where the wall was, it climbs out.
+#[test]
+fn e11d_a_seat_behind_a_thin_wall_does_not_climb_through_it() {
+    let bank = || floor_only(-5_000, -5_000, 5_000, -1_500);
+    let walled = [
+        [-5_000_000, -800_000, 5_000_000, 5_000_000],
+        [-5_000_000, -5_000_000, 5_000_000, -1_000_000],
+    ];
+    let (w, b, _, handed) = seated_then_rise(bank(), &walled);
+    let e = handed.expect("a hand-off").expect_err("refused");
+    assert_eq!(e.name, "off-surface", "{e}");
+    assert_eq!(
+        w.c.body(b).unwrap().pose.support,
+        Support::Slot,
+        "seated still"
+    );
+    assert_eq!(w.slots.holder(w.chair), Some(b));
+    let (mut w, b, _, handed) = seated_then_rise(bank(), &[LAKE]);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let [cl] = w.slots.climbs()[..] else {
+        panic!("one climb")
+    };
+    assert_eq!((cl.to.x, cl.to.z), (0, -1_500_000));
+    assert!(w.c.carried(b));
+}
+
+/// E11d review: the seat's thing (its own box, [`hull`]) is moored against another hull (z -1.3 m to -0.5 m, no
+/// water), and the bank lies beyond it. The climb may pass over its own hull but not the other: refused, seated
+/// still. With water where the other hull was, it climbs over its own hull and the water to the bank.
+#[test]
+fn e11d_a_seat_against_another_hull_does_not_climb_through_it() {
+    let bank = || floor_only(-5_000, -5_000, 5_000, -1_500);
+    let moored = [
+        [-5_000_000, 500_000, 5_000_000, 5_000_000],
+        [-5_000_000, -5_000_000, 5_000_000, -1_300_000],
+    ];
+    for (water, climbs) in [(&moored[..], false), (&[LAKE][..], true)] {
+        let mut w = world(chair());
+        w.water = water.to_vec();
+        w.slots.footprint(w.chair, hull());
+        let b = w.bodies[0];
+        w.sit(&[0], &mv("souls:sit"))[0].1.clone().expect("started");
+        w.run(i64::MAX);
+        w.floors.insert(fixture(1), bank());
+        let (_, handed) = rise_to_contact(&mut w, b, 2_000_000);
+        if climbs {
+            assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+            assert_eq!(w.slots.climbs().len(), 1);
+        } else {
+            let e = handed.expect("a hand-off").expect_err("refused");
+            assert_eq!(e.name, "off-surface", "{e}");
+            assert_eq!(w.slots.holder(w.chair), Some(b), "seated still");
+            assert!(w.slots.climbs().is_empty());
+        }
+    }
+}
+
+/// E11d review: a climb out never lands on a body. The seat faces the water (its stand point 300 mm behind it) and
+/// the floor starts 300 mm in front, where body 1 stands (100 mm aside of the seat's line). The nearest floor points
+/// are within [`crate::controller::LANDING_ROOM`] of it, so the body climbs out to the nearest one clear of it.
+#[test]
+fn e11d_a_climb_out_never_lands_on_another_body() {
+    let mut w = world(Place {
+        stand: [0, -300_000],
+        ..chair()
+    });
+    w.water = vec![LAKE];
+    let (b, other) = (w.bodies[0], w.bodies[1]);
+    let req = Request {
+        body: b,
+        thing: w.chair,
+        slot: None,
+        mv: &mv("souls:sit"),
+        stance: Stance::Sit,
+    };
+    let r = w.slots.commit(
+        &mut w.c,
+        &mut w.due,
+        &mut w.mint,
+        &mut w.moves,
+        &Near,
+        &w.floors,
+        &[req],
+        0,
+    );
+    r[0].1.as_ref().expect("started");
+    run_near(&mut w, i64::MAX);
+    w.floors
+        .insert(fixture(1), floor_only(-5_000, 300, 5_000, 5_000));
+    let o = w.c.body(other).unwrap().pose.position;
+    assert_eq!((o.x, o.z), (100_000, 300_000), "body 1 on the floor's edge");
+    let (contact, handed) = rise_to_contact(&mut w, b, 2_000_000);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let [cl] = w.slots.climbs()[..] else {
+        panic!("one climb")
+    };
+    let apart =
+        |p: Vec3| (i128::from(p.x - o.x).pow(2) + i128::from(p.z - o.z).pow(2)).isqrt() as i64;
+    assert_ne!(
+        (cl.to.x, cl.to.z),
+        (0, 300_000),
+        "not the nearest floor point: body 1 is there"
+    );
+    assert!(
+        apart(cl.to) >= crate::controller::LANDING_ROOM,
+        "clear of body 1: {} µm",
+        apart(cl.to)
+    );
+    step_until_landed(&mut w, b, contact + 1);
+    let p = w.c.body(b).unwrap().pose.position;
+    assert!(
+        apart(p) >= crate::controller::LANDING_ROOM,
+        "landed clear of body 1"
+    );
 }

@@ -1997,7 +1997,7 @@ fn a_seat_taken_or_left_writes_the_bodys_posture() {
 }
 
 /// E11d through a form run: the floor now ends 2 m behind the seat, so the stand point and the short search beside it
-/// are off it but floor lies within the climb-out bound. The rise ends `done`, the body climbs out (named once) and
+/// are off it but floor lies within the climb-out bound, across the seat's thing's own box. The rise ends `done`, the body climbs out (named once) and
 /// stands on that floor, its seat free, and nothing is left over.
 #[test]
 fn e11d_a_rise_with_floor_behind_the_seat_climbs_out_and_ends_done() {
@@ -2012,6 +2012,14 @@ fn e11d_a_rise_with_floor_behind_the_seat_climbs_out_and_ends_done() {
         .expect("started");
     b.run(30_000_000);
     b.forms.ended.clear();
+    // The seat's thing reaches back to the floor's new edge: its own box is what the climb passes over.
+    let slots = b.slots.as_mut().expect("slots");
+    let p = slots.held_place(body).expect("seated").point;
+    let (x0, x1, z1) = (p.x - 1_000_000, p.x + 1_000_000, p.z + 500_000);
+    slots.footprint(
+        chair,
+        vec![[[x0, -2_100_000], [x1, -2_100_000], [x1, z1], [x0, z1]]],
+    );
     let corners = vec![
         [-30_000, 0, -30_000],
         [30_000, 0, -30_000],

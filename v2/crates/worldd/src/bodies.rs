@@ -653,10 +653,25 @@ impl Bodies {
             name: "body-class-unprepared",
             detail: "no prepared geometry".into(),
         })?;
+        let mut resume = None;
         let body = match placed.get(&body.id) {
             Some((p, _)) => match p.support {
                 Support::Surface { surface, .. } => match surfaces.get(&surface) {
-                    Some(s) => s.place_built(body.id, p.frame, p.position, p.orientation, build)?,
+                    // A body the log had off its floor (killed mid-climb out of a seat, E11d) is placed where it was
+                    // and carried to the floor's nearest legal point, as N10's walk-out carries one: never refused,
+                    // so one body never stops the others starting.
+                    Some(s) => {
+                        let (b, to) = sim::slots::resume_on(
+                            s,
+                            body.id,
+                            p.frame,
+                            p.position,
+                            p.orientation,
+                            build,
+                        )?;
+                        resume = to.map(|to| (surface, to));
+                        b
+                    }
                     None => {
                         return Err(Refusal {
                             name: "no-surface",
@@ -669,7 +684,14 @@ impl Bodies {
             None => body,
         };
         self.logged.insert(body.id, body.pose);
-        self.add_body_built(family, body, build)
+        let id = body.id;
+        self.add_body_built(family, body, build)?;
+        if let Some((floor, to)) = resume {
+            self.runner
+                .controller
+                .carry(id, sim::slots::climb_track(floor, to))?;
+        }
+        Ok(())
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back

@@ -13,7 +13,10 @@ use sim::edit::Planned;
 use sim::ground::scene::FLOOR;
 use sim::slots::{PlaceAt, Slots};
 
-pub struct Projection(Vec<(Ref, Vec<(PlaceAt, Ref)>)>);
+/// One edited thing's places, each with its floor, and its own boxes (E11d).
+type Delta = (Ref, Vec<(PlaceAt, Ref)>, sim::slots::Footprint);
+
+pub struct Projection(Vec<Delta>);
 
 fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
     let mut next: Vec<_> = tree.handle(id).into_iter().collect();
@@ -82,6 +85,7 @@ impl Projection {
         let mut deltas = Vec::new();
         for thing in affected {
             let mut places = Vec::new();
+            let mut own = Vec::new();
             if let Some(n) = preview
                 .tree()
                 .handle(thing)
@@ -103,6 +107,9 @@ impl Projection {
                         else {
                             continue;
                         };
+                        if own.is_empty() {
+                            own = crate::places::footprint(preview.tree(), thing, floor);
+                        }
                         places.push((
                             PlaceAt {
                                 thing,
@@ -120,14 +127,14 @@ impl Projection {
                     }
                 }
             }
-            deltas.push((named(thing), places));
+            deltas.push((named(thing), places, own));
         }
         Ok(Self(deltas))
     }
 
     /// Rechecked on the commit tick, before any replica or slot mutation.
     pub fn check(&self, slots: &Slots) -> Result<(), Refused> {
-        for (thing, _) in &self.0 {
+        for (thing, ..) in &self.0 {
             if let Ref::Node(id) = thing
                 && slots.holder(*id).is_some()
             {
@@ -153,8 +160,9 @@ impl Projection {
             Ref::Node(id) => id,
             Ref::New(n) => names[&n],
         };
-        for (thing, places) in self.0 {
+        for (thing, places, own) in self.0 {
             let thing = id(thing);
+            slots.footprint(thing, own);
             let places = places
                 .into_iter()
                 .map(|(mut p, floor)| {

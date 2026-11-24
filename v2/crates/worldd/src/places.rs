@@ -16,6 +16,17 @@ use sim::walk::town::Town;
 /// no such place whose slot has a boarding reach (a boat afloat) is boarded from clear ground ([`board_from`]). Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
+/// `thing`'s own boxes in `floor`'s frame (E11d): what a body climbing out of one of its seats may pass over.
+pub fn footprint(tree: &replica::tree::Tree, thing: Id, floor: Id) -> sim::slots::Footprint {
+    tree.handle(thing)
+        .zip(tree.handle(floor))
+        .and_then(|(h, f)| sim::ground::scene::solids_under(tree, h, f).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.ring)
+        .collect()
+}
+
 pub fn register(
     town: &mut Town,
     kinds: &[(String, Json)],

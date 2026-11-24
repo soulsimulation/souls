@@ -160,13 +160,18 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Climbing out** (E11d). A rise whose stand point, and the short search out from it (the body's own radius), are
   all off the floor (a boat moored with its stand point's side away from the bank, the floor changed under a seat)
   climbs out instead (`slots::climb_point`): to the thing's other stand points first, then the nearest floor within
-  3 m of the seat (`CLIMB_BOUND`), by a straight line that, once on the floor, stays on it, so it leaves only the
-  seat's own hole and never crosses a wall's or a box's cut. At the rise's contact the body is handed onto the floor's
-  frame at the seat's point, and the world carries it along that line at walking speed, as N10's walk-out does. It
-  never appears there. The climb is named `climb-out` (`slots::ClimbOut`), and the rise's run goes on once the body
-  stands on the floor. With no such floor the rise ends `off-surface` at contact. The body is not stuck: it stays
-  seated with its seat held, does what a seated body does, leaves the world as one does, and rises once there is floor
-  near again.
+  3 m of the seat (`CLIMB_BOUND`). A target is a dry floor point within a step's height (220 mm) of the seat's own
+  floor, with no body standing within the landing room (315 mm). The straight line from the seat to it may pass off
+  the floor only over water or wading ground (`Floors::wet`, the map's wet pieces) or over the seat's thing's own
+  boxes (`Slots::footprint`, given by `worldd` from the tree), and once on the floor it stays on it. So it never
+  crosses a wall, a fence, a box or another hull. At the rise's contact the body is handed onto the floor's frame at
+  the seat's point, and the world carries it along that line at walking speed, as N10's walk-out does, waiting at the
+  end while someone stands there (#4215). It never appears there. The climb is named `climb-out`
+  (`slots::ClimbOut`), and the rise's run goes on once the body stands on the floor. With no such floor the rise ends
+  `off-surface` at contact. The body is not stuck: it stays seated with its seat held, does what a seated body does,
+  leaves the world as one does, and rises once there is floor near again. A restart that finds a body off its floor
+  (killed mid-climb) places it where it was and carries it to the floor's nearest legal point
+  (`slots::resume_on`), so one body never stops the others starting.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
