@@ -365,7 +365,7 @@ There is no host option. The host and operator paths come from the environment o
 | backup | Row-verified compact copy of every database, `quick_check` on each, the same filenames as the snapshot | Stops |
 | probe-start | Starts `release-probe.mjs` and waits for `<out>/probe/ready` | Stops |
 | activate | Checks that the snapshot and backup are under an hour old and that nothing drifted, then runs `ship/host-activate.sh` on the host: one `activate.sh --reload`, one refresh of host health with the timer's own oneshot (`systemctl start sim-worlds-health@<stage>.service`, so a code recorded before the activation can't fail it), and a health check | Stops and reports the host's exit (below) |
-| probe-check | Reads the probe's exit | 3 stops (the release rolled back: a watched page ended on another build). Anything else is recorded and the run continues. A watched page that answered an error when the probe started (a world that is down until this release fixes it) is retried every 5 s and marked when it first loads; one that never loads, or never names a build, is `notLoaded` or `noBuild` in `probe/report.json`: exit 1, never a rollback. A watcher's error pages before it is watched are reported as `errorPagesBeforeReady`, not counted against the release; fresh arrivals always count |
+| probe-check | Reads the probe's exit | 3 stops (the release rolled back: a watched page ended on another build). Anything else is recorded and the run continues. A watched page that answered an error when the probe started (a world that is down until this release fixes it) is retried every 5 s and marked when it first loads; one that never loads, or never names a build, is `notLoaded` or `noBuild` in `probe/report.json`: exit 1, never a rollback. A page the new engine runs opens no world socket: its build is the site's (`/__sim/healthz`), and its v2 stream must advance from its mark to the end with no reader error, else `streamStuck` (exit 1). A socket that closed and never resumed is named in the bar (`notResumedAt`, carried in the eyes' `probe-bar.json`). A watcher's error pages before it is watched are reported as `errorPagesBeforeReady`, not counted against the release; fresh arrivals always count |
 | healthz | Public healthz reports this build, every world and `hostOk` | Stops |
 | walks | `ship/walk.mjs` on desktop and phone at dpr 1 and 2, then `checks.mjs walks` | Recorded |
 | poster | `ship/poster.mjs` three times, `poster-count.py`, `checks.mjs poster` | Recorded |
@@ -596,6 +596,10 @@ and holds the bar. `node tools/world-launcher/deploy/reload-local.mjs` runs a wh
 launcher, an Eden 2026 world, the release probe in headless Chrome, one SIGHUP) and prints the probe's bar.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it keeps running and never
 reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts`).
+A page on a new-engine world reads no welcome: it reloads when a stream generation's baseline names a format (its
+field 1) its bundle does not list, showing "A new version of this world is out: reloading." first, at most once a
+minute per format (`apps/web/src/v2-engine/stream-format.ts`). A release that raises the format ships the page that
+reads it before the worlds that write it; one that only adds fields an older page ignores keeps the number.
 
 ## Rollback
 

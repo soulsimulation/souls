@@ -37,7 +37,10 @@ routed page publishes the old world's read-only views there (`scene.json`, `snap
 files. So is the page's read of that scene's capture (`/v1/scenes/<the published scene's hash>`): the old world keeps a
 scene's capture only once one of its takes carried it, so a world nobody watched since its scene last changed would
 answer 404, and the page would stop at "World layout could not be prepared". `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
-the launcher serves from `clientDir` for the routed world. God edits made on v2 after the switch are not in those files;
+the launcher serves from `clientDir` for the routed world, by version: the page's config names
+`v2Replica`, `/w/<world>/v2/replica/<version>/replica.js` (the version is the first 16 hex of sha256 over both files), and
+the current version's two files answer `public, max-age=31536000, immutable`, so viewers and the CDN keep the 2 MB wasm;
+any other version, and the plain `/replica.js` and `/replica_bg.wasm` the Soul client's upgrade reads, answer `no-store`. God edits made on v2 after the switch are not in those files;
 the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
 made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
 

@@ -1034,7 +1034,8 @@ impl Forms {
         // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
         // which a seated body's legs would refuse (`resource-held`, #4143). So is a move on the thing whose seat or
         // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
-        // are the seat's, and the move's reach is measured from the seat (0.135 E13).
+        // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
+        // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
         // A form that leaves the body in that slot (no rise or sit of its own, nor the rise the binding adds to a form
         // that moves the actor, `form_runner::rises_out`) is done from inside: its own walks to the thing's points are
         // dropped too (a phone box opened from inside, 0.135 E17), never walked by legs the slot holds.
@@ -1979,6 +1980,8 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
 
 /// The type of a body's link to its Soul (contract T2).
 const BODY_OF: &str = "souls:body-of";
+/// A Soul's body's kind (plain): a thing whose parent is one is in its hand.
+const BODY: &str = "souls:body";
 
 /// Who may, on the world's side (F6): whether `body` may do form `form` of `entry` at `node`, as the tree stands. The
 /// test is [`who_may::test`], the client's own. The actor's Soul is the far end of the body's `souls:body-of` link,
@@ -1988,7 +1991,7 @@ const BODY_OF: &str = "souls:body-of";
 /// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
 /// `who` outside the closed list), `object.private` (a private thing not the asker's, #3700), `not-permitted` with the
 /// sentence. For `who: holder`, the holder is a body with the thing in a hand, or a body seated in a vehicle's drive
-/// seat ([`drives`]): a rider steers, a passenger does not.
+/// seat ([`drives`]) while no body carries it: a rider steers, a passenger does not, and there is never a second holder.
 pub fn may(
     tree: &Tree,
     audiences: &BTreeMap<Id, BTreeSet<Id>>,
@@ -2016,8 +2019,14 @@ pub fn may(
         return refuse("object.private", format!("who may: {words}"));
     }
     let thing = tree.handle(node).and_then(|h| tree.node(h));
-    let holds =
-        thing.as_ref().and_then(|n| n.parent()) == Some(body) || drives(tree, body, node, entry);
+    // One holder (E10b): a thing whose parent is a body is in that body's hand and is its alone, so a body seated in
+    // its drive seat while someone carries it does not hold it too, and the carrier can always put it down.
+    let parent = thing.as_ref().and_then(|n| n.parent());
+    let carried = parent
+        .and_then(|p| tree.handle(p))
+        .and_then(|h| tree.node(h))
+        .is_some_and(|p| plain(p.kind().as_str()) == BODY);
+    let holds = parent == Some(body) || (!carried && drives(tree, body, node, entry));
     let (ends, seen) = match (&who, &thing) {
         (Who::Link(t), Some(n)) => {
             let ty = audience::link_type(n.kind().as_str(), t);

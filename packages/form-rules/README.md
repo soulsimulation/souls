@@ -211,7 +211,9 @@ it before the needs. A form's `who` is one of a closed list (`WHO`), shared with
 ([#2771](https://github.com/soulsimulation/souls/issues/2771)), and every test is on links or holding, never on a field:
 
 - `anyone`, the default. Owning does not lock: only a form whose `who` names the owner link does.
-- `holder`: the thing is in one of the actor's hands (holding is a parent).
+- `holder`: the thing is in one of the actor's hands (holding is a parent), or the actor sits in the body slot its
+  `vehicle.drive` names while the thing is in nobody's hand: a rider steers, a passenger does not. A vehicle in
+  someone's hand is that body's alone, so there is never a second holder (0.135 E10, E10b; `cases/who/vehicles.json`).
 - `world`: a form a timer starts; no Soul's act may do it.
 - `{"link": <type>}`: the actor, or the actor's Soul (the end of the body's `soul` link), is an end of a link of that
   type on the thing. Its owner, a member, the Soul whose turn it is, a Soul in a named role of the activity and a
@@ -221,7 +223,8 @@ The rule is the form's own data, so anyone can read it before trying. The answer
 `{verdict: "no", reason: "not_permitted", who, detail, read}`, where `who` is the rule and, for a link, `detail` is
 `{link, ends}`, the ends that may ("its owner, s1"); `{verdict: "unknown", who, node, link, read}` when the link is
 outside the asker's audience, so a hidden members list is never read or named; or `bad_input`. `read` holds
-`<body>/soul`, `<node>/link/<n>/ends` and, for `holder`, the hands.
+`<body>/soul`, `<node>/link/<n>/ends` and, for `holder`, the hands, a vehicle's `<node>/slot/<drive>/occupants` and the
+hand that carries it.
 
 A file in `cases/who/` is `{"format": "souls-who-cases/1", "about": ..., "cases": [...]}`, each case shaped like a rule
 case. Its three examples, a private workbench, a chess move and a lecture speech, use the test kinds in

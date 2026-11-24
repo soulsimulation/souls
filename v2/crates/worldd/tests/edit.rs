@@ -250,8 +250,8 @@ impl W {
     }
 
     /// Ends the tier and the log; the archive (the disk read back and applied from the start) equals the live state,
-    /// and holds each edit's effects under its cause.
-    fn close(self) {
+    /// and holds each edit's effects under its cause. Returns the archive: the world as a restart reads it back.
+    fn close(self) -> Replica {
         let stats = self.tier.close();
         assert_eq!(stats.fault, None);
         let mut disk = self.log.close();
@@ -291,6 +291,7 @@ impl W {
             self.committed.len(),
             state.next
         );
+        archive
     }
 
     /// A room under the root with a crate in it and a key in the crate's slot: the batch's minted ids.
@@ -1770,6 +1771,111 @@ fn a1_a_private_mark_is_its_owners_alone_and_passes_down_to_what_is_inside() {
     .expect("cleared");
     assert!(may(&w, other, cr).is_ok());
     w.close();
+}
+
+// --- 0.134 R4: a creator's tint ---------------------------------------------------------------------------------
+
+/// A tint of rows `[part, rgb]`.
+fn tint(rows: &[(&str, u64)]) -> Value {
+    Value::Array(
+        rows.iter()
+            .map(|(p, c)| Value::Array(vec![text(p), Value::Uint(*c)]))
+            .collect(),
+    )
+}
+
+/// The tint a node holds, if any.
+fn tint_of(live: &Replica, id: Id) -> Option<Value> {
+    let Some(Value::Map(n)) = live.node(id) else {
+        panic!("the node")
+    };
+    let Some(Value::Map(fields)) = n.get(&6) else {
+        return None;
+    };
+    fields.get(&replica::tint::F_TINT).cloned()
+}
+
+/// R4: the creator's recolour of a thing and of one part commits as one set each, seen by the client's replica, the
+/// public stream and the log (`W::edit` compares all three); anyone else's is refused by name, and so is a tint that
+/// does not read, with nothing written; the log read back from the disk, as a restart reads it, holds the tint.
+#[test]
+fn r4_a_recolour_is_the_creators_alone_logged_streamed_and_kept_across_a_restart() {
+    use replica::tint::F_TINT;
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    assert_eq!(tint_of(&w.live, cr), None, "an old thing has no tint");
+    let set = |to: Value| Op::Set {
+        node: Ref::Node(cr),
+        field: F_TINT,
+        to,
+    };
+    let v = w.live.version();
+    w.edit(w.creator(), v, vec![set(tint(&[("tint:whole", 0xff0000)]))])
+        .expect("the creator recolours the crate");
+    let seat = tint(&[("tint:whole", 0xff0000), ("part:seat", 0x0000ff)]);
+    let v = w.live.version();
+    w.edit(w.creator(), v, vec![set(seat.clone())])
+        .expect("and its seat");
+    assert_eq!(tint_of(&w.live, cr), Some(seat.clone()));
+    assert_eq!(
+        tint_of(&w.client, cr),
+        Some(seat.clone()),
+        "the client's copy"
+    );
+
+    let log = w.log_hash();
+    let v = w.live.version();
+    let other = Id::new(Scope([0xc0; 16]), 2).expect("an id");
+    for actor in [Actor::Creator(other), Actor::Soul(other), Actor::World] {
+        let r = w
+            .edit(actor, v, vec![set(tint(&[("tint:whole", 0x00ff00)]))])
+            .expect_err("not the creator");
+        assert_eq!(r.name, "edit.not-the-creator", "{actor:?}");
+    }
+    for bad in [
+        Value::Uint(0xff0000),
+        tint(&[("tint:whole", 0x100_0000)]),
+        tint(&[("part:seat", 1), ("part:seat", 2)]),
+    ] {
+        let r = w
+            .edit(w.creator(), v, vec![set(bad.clone())])
+            .expect_err("malformed");
+        assert_eq!((r.op, r.name), (Some(0), "edit.tint-malformed"), "{bad:?}");
+    }
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(cr),
+                field: F_TINT,
+                rows: vec![Value::Array(vec![text("part:seat"), Value::Uint(7)])],
+            }],
+        )
+        .expect_err("a second seat row");
+    assert_eq!(r.name, "edit.tint-malformed");
+    // Nor a link's row (R4 review): its row would land in the owner's field 145 as `[link, ...]`.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Link {
+                name: 1,
+                ty: Name::new("test:link").expect("a name"),
+                ends: [Ref::Node(cr), Ref::Node(room)],
+                owner: replica::world_model::End::First,
+                field: F_TINT,
+                row: vec![Value::Uint(7)],
+                door: None,
+            }],
+        )
+        .expect_err("a link into the tint");
+    assert_eq!((r.op, r.name), (Some(0), "edit.tint-malformed"));
+    assert_eq!(w.log_hash(), log, "nothing refused reached the log");
+    assert_eq!(tint_of(&w.live, cr), Some(seat.clone()));
+
+    let reread = w.close();
+    assert_eq!(tint_of(&reread, cr), Some(seat), "kept across a restart");
 }
 
 #[test]
