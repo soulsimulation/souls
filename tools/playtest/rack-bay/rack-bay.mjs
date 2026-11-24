@@ -15,8 +15,9 @@
 //           title ("spare frame"), and Ada and Bo take it and lay it down again, naming it only by that title.
 //             node tools/playtest/rack-bay/rack-bay.mjs local [--template worlds/templates/mars-camp.json] [--dir <folder>] [--record 240]
 //           With --stage live the yard is placed instead by the world's creator in one `souls-god.mjs batch`, as a staged
-//           world on soul.game would get it. Until a thing placed live gets its slots' points (another lane), the first
-//           `part take` of a frame standing in the live-placed stand is refused `part-pose` (24 Nov 2026).
+//           world on soul.game would get it, each thing titled ("rack frame 1"); its slots have their points (#4688).
+//           One such run (24 Nov 2026) built the bay and took it down to the last step, where `part put` of frame 2
+//           back into the live-placed stand was refused `part.not-held` (82 of 90 commands); not yet looked into.
 //   stage   the creator's `souls-god.mjs` lines that place the same yard live in a staged world (printed, not run):
 //             node tools/playtest/rack-bay/rack-bay.mjs stage
 //   run     the steps against four Souls already paired and standing in a world (soul.game's staged test world):
