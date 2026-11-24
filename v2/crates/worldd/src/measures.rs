@@ -354,6 +354,7 @@ impl Measures {
         STALLS.json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
+        STREAM.json(&mut o);
         o.push_str("}\n");
         o
     }
@@ -459,6 +460,63 @@ impl Syncs {
             l(&self.big_seals),
             l(&self.big_ms)
         );
+    }
+}
+
+/// The public stream's state (R12), set by `worldd serve`'s stream thread: `recovering` until its first flush,
+/// `serving` after it, and `degraded` while its recovery is refused, with the fault, the tries refused so far and the
+/// wait before the next. A degraded world stays up with no viewers; a crash loop would hide the fault. Unset (no
+/// field in `health.json`) where no public stream runs.
+pub struct Stream(Mutex<String>);
+
+/// This process's public stream.
+pub static STREAM: Stream = Stream(Mutex::new(String::new()));
+
+impl Stream {
+    pub fn recovering(&self) {
+        self.set("{\"state\":\"recovering\"}".to_owned());
+    }
+
+    pub fn serving(&self) {
+        self.set("{\"state\":\"serving\"}".to_owned());
+    }
+
+    /// Its recovery refused `fault` for the `tries`th time; the next try in `next_try_ms`.
+    pub fn degraded(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        let mut quoted = String::with_capacity(fault.len());
+        for c in fault.chars() {
+            match c {
+                '"' => quoted.push_str("\\\""),
+                '\\' => quoted.push_str("\\\\"),
+                c if (c as u32) < 0x20 => {
+                    let _ = write!(quoted, "\\u{:04x}", c as u32);
+                }
+                c => quoted.push(c),
+            }
+        }
+        self.set(format!(
+            "{{\"state\":\"degraded\",\"fault\":\"{quoted}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}"
+        ));
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"degraded\"")
+    }
+
+    fn set(&self, json: String) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = json;
+    }
+
+    /// `,"stream":{...}`, or nothing while unset.
+    fn json(&self, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !s.is_empty() {
+            o.push_str(",\"stream\":");
+            o.push_str(&s);
+        }
     }
 }
 
