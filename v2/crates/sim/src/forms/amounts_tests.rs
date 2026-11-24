@@ -1014,3 +1014,118 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     );
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
+
+/// E5: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's field 1)
+/// binds each end's field by its name on that end's own kind, moves the amount, and commits with its balance.
+#[test]
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amount() {
+    const LINEN: &str = r#"{ "format": "souls-entry/1", "kind": "e5:linen", "owner": "thing",
+      "state": {
+        "dirt": { "n": 1, "type": "int", "unit": "count", "default": 5, "min": 0, "max": 9, "audience": { "rule": "everyone" } },
+        "soap": { "n": 2, "type": "int", "unit": "g", "default": 30, "min": 0, "max": 50, "audience": { "rule": "everyone" } }
+      },
+      "forms": { "wash": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+        "effects": [{ "change": "transfer", "field": "soap", "from": "this", "into": { "arg": "other" }, "amount": 10, "event": "washed" }] } } }"#;
+    const BOARD: &str = r#"{ "format": "souls-entry/1", "kind": "e5:board", "owner": "thing",
+      "state": {
+        "soap": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } },
+        "dirt": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 9, "audience": { "rule": "everyone" } }
+      } }"#;
+    let numbered = |e: &str| {
+        let mut v = parse(e).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let (linen_k, board_k) = (numbered(LINEN), numbered(BOARD));
+    let mut kinds = Kinds::default();
+    kinds.load(&[("linen", linen_k.as_str()), ("board", board_k.as_str())]);
+    assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
+    let limits = super::amounts::limits(&kinds);
+
+    let kinds_diag = "{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}\n\
+                      {1: \"e5:linen\", 2: \"thing\"}\n\
+                      {1: \"e5:board\", 2: \"thing\"}";
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:board\", 3: 1}], 4: []}";
+    let (mut tree, rules) = Tree::load(
+        &parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"),
+    )
+    .expect("loads");
+    let (linen, board) = (id(100), id(101));
+
+    let args = BTreeMap::from([("other".to_owned(), board)]);
+    let effects = bind_effects_with(&parse(LINEN).expect("JSON"), "wash", &args).expect("bound");
+    let reserved: Vec<Id> = Vec::new();
+    let cx = super::amounts::Cx {
+        view: View {
+            tree: &tree,
+            out: &[],
+        },
+        limits: &limits,
+        header: None,
+        body: id(2),
+        soul: id(2),
+        hands: &[],
+        node: linen,
+        reserved: &reserved,
+        now: 0,
+    };
+    let mut mint = Minter::new(Scope([0xe5; 16]));
+    let made = cx
+        .entries(&mut mint, &effects[0])
+        .expect("the transfer is not refused");
+    let mut entries: Vec<Effect> = made
+        .into_iter()
+        .map(|(node, _, body)| {
+            let mut e = world_set(node, 0);
+            e.body = body;
+            e
+        })
+        .collect();
+    let sets: Vec<(Id, u64, Value)> = entries
+        .iter()
+        .flat_map(Effect::changes)
+        .filter_map(|c| match &c.change {
+            Change::Set {
+                node, field, to, ..
+            } => Some((*node, *field, to.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sets,
+        vec![(linen, 2, Value::Uint(20)), (board, 1, Value::Uint(10))],
+        "each end's soap, by its own kind's number"
+    );
+
+    // The part commits onto the tree (its balance sums to zero), and the amounts are there.
+    let pinned: Vec<&str> = rules.kinds.keys().map(String::as_str).collect();
+    let header = header(id(1), &pinned);
+    let next = tree.to_state().next;
+    for (e, s) in entries.iter_mut().zip(next..) {
+        e.envelope.sequence = s;
+    }
+    let bytes = encode(&Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (
+            2,
+            Value::Array(entries.iter().map(Effect::to_value).collect()),
+        ),
+    ])))
+    .expect("bytes");
+    drop(cx);
+    tree.commit(&header, &Part::read(&bytes).expect("a part"), &rules)
+        .expect("the part commits");
+    let field = |n: Id, f: u64| {
+        tree.node(tree.handle(n).expect("there"))
+            .expect("a node")
+            .fields()
+            .get(&f)
+            .cloned()
+    };
+    assert_eq!(field(linen, 2), Some(Value::Uint(20)));
+    assert_eq!(field(board, 1), Some(Value::Uint(10)));
+    assert_eq!(field(board, 2), None, "the board's dirt is untouched");
+}

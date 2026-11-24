@@ -51,9 +51,10 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
-/// An amount field as its kind gives it: its default, its least and its capacity, in its unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An amount field as its kind gives it: its name, its default, its least and its capacity, in its unit.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limit {
+    pub name: Name,
     pub default: i64,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -92,6 +93,7 @@ pub fn limits(kinds: &Kinds) -> Limits {
                     Some((
                         *n,
                         Limit {
+                            name: f.name.clone(),
                             default,
                             min: f.min,
                             max: f.max,
@@ -337,10 +339,10 @@ impl Cx<'_> {
         }
     }
 
-    /// Field `field`'s limit on `node`'s kind: by its full name, or, for a kind written without its hash, the one
+    /// The amount fields of `node`'s kind: by its full name, or, for a kind written without its hash, the one
     /// revision loaded of that `namespace:name`.
-    fn limit(&self, node: Id, field: u64) -> R<Limit> {
-        let kind = self.view.kind(node);
+    fn fields(&self, node: Id) -> Option<&BTreeMap<u64, Limit>> {
+        let kind = self.view.kind(node)?;
         let by_plain = |k: &str| {
             let mut same = self.limits.iter().filter(|(n, _)| plain(n) == plain(k));
             match (same.next(), same.next()) {
@@ -348,13 +350,30 @@ impl Cx<'_> {
                 _ => None,
             }
         };
-        kind.as_ref()
-            .and_then(|k| self.limits.get(k.as_str()).or_else(|| by_plain(k.as_str())))
+        self.limits
+            .get(kind.as_str())
+            .or_else(|| by_plain(kind.as_str()))
+    }
+
+    /// Field `field`'s limit on `node`'s kind, refused `field-unknown` when the kind has no such amount field.
+    fn limit(&self, node: Id, field: u64) -> R<&Limit> {
+        self.fields(node)
             .and_then(|fs| fs.get(&field))
-            .copied()
             .ok_or_else(|| Refusal {
                 name: "field-unknown",
                 detail: format!("field {field} of {}", show(node)),
+            })
+    }
+
+    /// The amount field named `name` on `node`'s own kind, with its number (E5: a transfer's two ends may be of kinds
+    /// that number it differently), refused `field-unknown` when the kind has no amount field of that name.
+    fn named(&self, node: Id, name: &Name) -> R<(u64, &Limit)> {
+        self.fields(node)
+            .and_then(|fs| fs.iter().find(|(_, l)| l.name == *name))
+            .map(|(n, l)| (*n, l))
+            .ok_or_else(|| Refusal {
+                name: "field-unknown",
+                detail: format!("field {} of {}", name.as_str(), show(node)),
             })
     }
 
@@ -475,9 +494,9 @@ impl Cx<'_> {
                 if from == into {
                     return refuse("transfer-to-itself", show(from));
                 }
-                let (src, dst) = (self.limit(from, *field)?, self.limit(into, *field)?);
-                let there = self.view.amount(from, *field).unwrap_or(src.default);
-                let has = self.view.amount(into, *field).unwrap_or(dst.default);
+                let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, field)?);
+                let there = self.view.amount(from, nf).unwrap_or(src.default);
+                let has = self.view.amount(into, ni).unwrap_or(dst.default);
                 let above = there.saturating_sub(src.min.unwrap_or(0)).max(0);
                 let room = dst.max.map_or(i64::MAX, |m| m.saturating_sub(has).max(0));
                 let asked = match amount {
@@ -496,8 +515,8 @@ impl Cx<'_> {
                     );
                 }
                 Ok(vec![
-                    set(from, *field, there - moved, -moved),
-                    set(into, *field, has + moved, moved),
+                    set(from, nf, there - moved, -moved),
+                    set(into, ni, has + moved, moved),
                 ])
             }
             Bound::Make { kind, into } => {
