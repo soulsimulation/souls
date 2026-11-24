@@ -107,7 +107,9 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
 /// it (#3743), handed off once.
 ///
 /// The clock builds a snapshot only when the edit checker has asked for one since the last ([`Moving::fresh`], S10):
-/// at 750 bodies a build cost 2-3.7 ms of every tick, and edits are rare. The checker waits for the next tick's.
+/// at 750 bodies a build cost 2-3.7 ms of every tick, and edits are rare. Each check job carries the tick it was sent
+/// at; the checker uses a snapshot built at that tick or later, waiting for the clock's next build when it has none,
+/// and never one older.
 #[derive(Default)]
 pub struct Moving(
     Mutex<Arc<BodySnapshot>>,
@@ -117,8 +119,8 @@ pub struct Moving(
     Asked,
 );
 
-/// The edit checker's asks for a fresh snapshot (S10): whether one is wanted, and how many the clock has built, which
-/// a waiting checker watches.
+/// The edit checker's asks for a fresh snapshot (S10): whether one is wanted, and the tick the newest was built at,
+/// which a waiting checker watches.
 #[derive(Default)]
 pub struct Asked {
     wanted: AtomicBool,
@@ -299,11 +301,26 @@ impl PreparedMaps {
 impl Moving {
     /// Clock thread: a shared map basis, never a geometry build or whole-tree copy. The first offer, at boot before the
     /// first tick, also hands the edit checker a memory copy of the town to seed its own with (#3743).
-    pub fn offer_map(&self, bodies: &Bodies, version: u64) {
+    /// `tick` is the tick whose bodies these are: the snapshot is that tick's.
+    pub fn offer_map(&self, bodies: &Bodies, version: u64, tick: u64) {
         // Seeded already and nobody asked since the last: nothing to build (S10).
         if self.3.load(Ordering::Acquire) && !self.4.wanted.swap(false, Ordering::AcqRel) {
             return;
         }
+        self.build(bodies, version, tick);
+    }
+
+    /// Clock thread: whether the edit checker has asked for a snapshot since the last build (S10).
+    pub fn asked(&self) -> bool {
+        self.4.wanted.load(Ordering::Acquire)
+    }
+
+    /// Clock thread: the edit checker will want a snapshot (a check job is sent): the next offer builds one.
+    pub fn want(&self) {
+        self.4.wanted.store(true, Ordering::Release);
+    }
+
+    fn build(&self, bodies: &Bodies, version: u64, tick: u64) {
         if !self.3.swap(true, Ordering::AcqRel) {
             let town = bodies.town.duplicate();
             self.1.lock().unwrap_or_else(|e| e.into_inner()).seed = Some((version, town));
@@ -335,23 +352,34 @@ impl Moving {
             map: Some(map),
         });
         let mut built = self.4.built.lock().unwrap_or_else(|e| e.into_inner());
-        *built += 1;
+        *built = (*built).max(tick);
         self.4.done.notify_all();
     }
 
-    /// Edit checker: the bodies as the clock offers them at its next tick (S10). It asks, then waits for that tick's
-    /// snapshot, at most `wait` (a clock that is not ticking moves no body: the last snapshot stands).
-    pub fn fresh(&self, wait: std::time::Duration) -> Arc<BodySnapshot> {
+    /// Edit checker: the bodies as the clock had them at tick `need` or later (S10): a check job's sending tick. With
+    /// no such snapshot yet it asks and waits for the clock's next build, at most `wait`; past that it is `Err` with
+    /// the newest there is, which a check must refuse by a name its sender may try again (`edit.stale`), never use.
+    pub fn fresh(
+        &self,
+        need: u64,
+        wait: std::time::Duration,
+    ) -> Result<Arc<BodySnapshot>, Arc<BodySnapshot>> {
         let built = self.4.built.lock().unwrap_or_else(|e| e.into_inner());
-        let before = *built;
-        self.4.wanted.store(true, Ordering::Release);
-        drop(
-            self.4
-                .done
-                .wait_timeout_while(built, wait, |n| *n == before)
-                .unwrap_or_else(|e| e.into_inner()),
-        );
-        self.current()
+        if *built < need {
+            self.4.wanted.store(true, Ordering::Release);
+        }
+        let (built, _) = self
+            .4
+            .done
+            .wait_timeout_while(built, wait, |n| *n < need)
+            .unwrap_or_else(|e| e.into_inner());
+        let ok = *built >= need;
+        drop(built);
+        if ok {
+            Ok(self.current())
+        } else {
+            Err(self.current())
+        }
     }
 
     pub fn map(&self) -> Option<Arc<MapBasis>> {
@@ -691,7 +719,7 @@ mod class_snapshot_tests {
             .unwrap();
         assert_eq!(bodies.runner.controller.bodies().count(), 0);
         let moving = Moving::default();
-        moving.offer_map(&bodies, 0);
+        moving.offer_map(&bodies, 0, 0);
         let snapshot = moving.current();
         assert_eq!(snapshot.classes.get(&id), Some(&Size::Large));
         assert_eq!(
@@ -711,8 +739,8 @@ mod class_snapshot_tests {
         assert_eq!(bodies.classes().get(&id), Some(&Size::Large));
 
         // S10: after the seed, the clock builds a snapshot only when the edit checker asks, and what the checker gets
-        // is the one built at that tick: the same map and bodies an offer at every tick would have given it.
-        moving.offer_map(&bodies, 7);
+        // is the one built at the tick it needs or later: the same map and bodies an offer at every tick gives.
+        moving.offer_map(&bodies, 7, 7);
         assert_eq!(
             moving.current().map.as_ref().map(|m| m.version),
             Some(0),
@@ -721,26 +749,39 @@ mod class_snapshot_tests {
         let asked = std::sync::Arc::new(moving);
         let reader = {
             let m = std::sync::Arc::clone(&asked);
-            std::thread::spawn(move || m.fresh(std::time::Duration::from_secs(5)))
+            std::thread::spawn(move || m.fresh(7, std::time::Duration::from_secs(5)))
         };
-        while !asked.4.wanted.load(Ordering::Acquire) {
+        while !asked.asked() {
             std::thread::yield_now();
         }
-        asked.offer_map(&bodies, 8);
-        let got = reader.join().unwrap();
+        asked.offer_map(&bodies, 8, 8);
+        let Ok(got) = reader.join().unwrap() else {
+            panic!("built at tick 8, past the 7 it needed")
+        };
         assert_eq!(
             got.map.as_ref().map(|m| m.version),
             Some(8),
             "the next tick's map"
         );
         let every = Moving::default();
-        every.offer_map(&bodies, 8);
+        every.offer_map(&bodies, 8, 8);
         let want = every.current();
         assert_eq!(got.classes, want.classes);
         assert_eq!(got.bodies.len(), want.bodies.len());
         for (a, b) in got.bodies.iter().zip(want.bodies.iter()) {
             assert_eq!((a.body, a.pose, a.crossing), (b.body, b.pose, b.crossing));
         }
+        // Queued jobs sent at tick 8 (a burst of five seatings): each has the snapshot it needs at once, no tick apart.
+        for _ in 0..5 {
+            assert!(
+                asked.fresh(8, std::time::Duration::ZERO).is_ok(),
+                "no wait for a job sent at the built tick"
+            );
+        }
+        // A free-running clock that stalls past the wait: the checker gets no snapshot older than its job's tick.
+        let late = asked.fresh(9, std::time::Duration::from_millis(100));
+        assert!(late.is_err(), "refused, not checked on tick 8's bodies");
+        assert!(asked.asked(), "and the next tick builds one");
     }
 }
 

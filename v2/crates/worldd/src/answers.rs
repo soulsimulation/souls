@@ -1097,7 +1097,7 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
-    edits: Option<Sender<CheckJob>>,
+    edits: Option<EditQueue>,
     editing: bool,
     /// Set-downs checked since the last tick, committed (or refused) at the next (#3604).
     set_down: Vec<(Id, R<SetDownChecked>)>,
@@ -1168,6 +1168,33 @@ struct Clock {
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
+}
+
+/// The edit checker's queue (S10): each job goes with the tick whose bodies it is checked against, the newest tick
+/// whose snapshot point has passed ([`EditQueue::offered`]), so the checker never checks it on older bodies, and waits
+/// only when the snapshot it has is older than that.
+struct EditQueue {
+    tx: Sender<(u64, CheckJob)>,
+    walkers: Arc<buildsafe::Moving>,
+    /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
+    offered: std::cell::Cell<u64>,
+}
+
+impl EditQueue {
+    // The job comes back whole when the checker is gone, as `Sender::send` gives it.
+    #[allow(clippy::result_large_err)]
+    fn send(&self, job: CheckJob) -> Result<(), std::sync::mpsc::SendError<CheckJob>> {
+        // A job that reads the bodies: the next snapshot point builds them.
+        if matches!(
+            job,
+            CheckJob::Edit(..) | CheckJob::Undo(_) | CheckJob::SetDown(_) | CheckJob::Part(_)
+        ) {
+            self.walkers.want();
+        }
+        self.tx
+            .send((self.offered.get(), job))
+            .map_err(|e| std::sync::mpsc::SendError(e.0.1))
+    }
 }
 
 enum CheckJob {
@@ -1551,8 +1578,8 @@ fn has_words(v: &Value) -> bool {
     }
 }
 
-/// The longest the edit checker waits for the clock's next body snapshot (S10, [`buildsafe::Moving::fresh`]): two
-/// ticks, past which the last snapshot stands (a clock not ticking moves no body).
+/// The longest the edit checker waits for the bodies at a job's tick (S10, [`buildsafe::Moving::fresh`]): two ticks.
+/// Past that the job is refused `edit.stale`, which its sender may try again, never checked on older bodies.
 const FRESH_WAIT: Duration = Duration::from_millis(100);
 
 /// The body an intent drives: the Soul's own, or the one a creator names.
@@ -4482,6 +4509,17 @@ impl Clock {
 
     /// One tick, `n`, at world time `now` (its start), in the trunk's order (the module's list). With measures on,
     /// each phase is timed on the machine's steady clock ([`measures::PHASES`]; O4, K18c).
+    /// Lockstep, between ticks: when the edit checker asked for the bodies and the last snapshot point passed unasked,
+    /// they are built now as that tick left them, labelled with it (S10). Nothing moves a body between ticks.
+    fn offer_asked(&mut self) {
+        if let (Some(c), Some(b)) = (&self.edits, &self.bodies)
+            && c.walkers.asked()
+        {
+            c.walkers
+                .offer_map(b, self.replica.version(), c.offered.get());
+        }
+    }
+
     fn tick(&mut self, n: i64, now: Micros) {
         let on = self.measures.is_some();
         let mark = || on.then(measures::steady_us);
@@ -4635,7 +4673,11 @@ impl Clock {
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
-            w.offer_map(b, self.replica.version());
+            let tick = u64::try_from(n).unwrap_or(0);
+            w.offer_map(b, self.replica.version(), tick);
+            if let Some(c) = &self.edits {
+                c.offered.set(tick);
+            }
         }
         at[5] = mark();
         remember_orders(&mut self.order_records, &self.effects);
@@ -5526,10 +5568,15 @@ pub fn start<S: Storage + 'static>(
                 set_downs,
                 creator,
                 Arc::clone(&publisher),
-                m,
+                Arc::clone(&m),
                 events.clone(),
                 rules.kinds.clone(),
             )
+            .map(|tx| EditQueue {
+                tx,
+                walkers: m,
+                offered: std::cell::Cell::new(0),
+            })
         })
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
@@ -5749,7 +5796,7 @@ pub fn start<S: Storage + 'static>(
                             &births,
                         );
                         if let Some(w) = &c.walkers {
-                            w.offer_map(&b, c.replica.version());
+                            w.offer_map(&b, c.replica.version(), 0);
                         }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
@@ -5852,14 +5899,18 @@ pub fn start<S: Storage + 'static>(
                     while ticker.next_tick() <= to && !stop {
                         // Every check back before the tick, so the same inputs commit at the same ticks.
                         while c.outstanding > 0 {
-                            match rx.recv() {
-                                Ok(Event::Stop) | Err(_) => {
+                            // The edit checker waits on the bodies of a tick whose snapshot point passed unasked:
+                            // built now, as they stood there (nothing has moved a body since), S10.
+                            c.offer_asked();
+                            match rx.recv_timeout(Duration::from_millis(2)) {
+                                Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => {
                                     stop = true;
                                     break;
                                 }
                                 Ok(e) => {
                                     take(&mut c, e);
                                 }
+                                Err(RecvTimeoutError::Timeout) => {}
                             }
                         }
                         // And the checkers' copy caught up with the live tree: it is published on its own thread, and
@@ -6002,8 +6053,8 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     entries: replica::rules::json::Value,
-) -> R<Sender<CheckJob>> {
-    let (tx, rx) = channel::<CheckJob>();
+) -> R<Sender<(u64, CheckJob)>> {
+    let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
     let kinds = match (&world, &set_downs) {
         (Some(w), _) => w.kinds.clone(),
@@ -6015,7 +6066,12 @@ fn edit_checker(
         .spawn(move || {
             let mut town = buildsafe::TownCopy::new(kinds.clone());
             loop {
-                let next = match rx.recv_timeout(EDIT_IDLE) {
+                // The tick whose bodies the job is checked against (S10).
+                let (need, next) = match rx.recv_timeout(EDIT_IDLE) {
+                    Ok((need, job)) => (need, Ok(job)),
+                    Err(e) => (0, Err(e)),
+                };
+                let next = match next {
                     Err(RecvTimeoutError::Disconnected) => break,
                     Ok(CheckJob::Release(kept)) => {
                         drop(kept);
@@ -6056,7 +6112,10 @@ fn edit_checker(
                     // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
                     CheckJob::Undo(job) => {
                         let (id, actor, redo, effects) = *job;
-                        let snapshot = walkers.fresh(FRESH_WAIT);
+                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6066,11 +6125,15 @@ fn edit_checker(
                             (None, _) => None,
                             (Some(w), c) => c.as_ref().map_or(Some(w.creator), |c| c.get()),
                         };
-                        let checked = if copy.version() < needed {
+                        let checked = if late || copy.version() < needed {
                             Err(Refused {
                                 op: None,
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             })
                         } else {
                             crate::undo::check(
@@ -6097,7 +6160,10 @@ fn edit_checker(
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {
-                        let snapshot = walkers.fresh(FRESH_WAIT);
+                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6106,9 +6172,13 @@ fn edit_checker(
                         let copy = publisher.wait_for(needed, Duration::from_secs(1));
                         let ground = buildsafe::open_ground(&copy);
                         let checked = match &mut set_downs {
-                            _ if copy.version() < needed => Err(Refusal {
+                            _ if late || copy.version() < needed => Err(Refusal {
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             }),
                             Some((rules, mint)) => {
                                 let souls = buildsafe::souls(&copy, &kinds);
@@ -6159,7 +6229,10 @@ fn edit_checker(
                     // A crew's take or seating (0.135 A2): the walkers' maps from its part, as a set-down's.
                     CheckJob::Part(job) => {
                         let (r, planned) = *job;
-                        let snapshot = walkers.fresh(FRESH_WAIT);
+                        let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6167,9 +6240,13 @@ fn edit_checker(
                             .max(planned);
                         let copy = publisher.wait_for(needed, Duration::from_secs(1));
                         let checked = match &snapshot.map {
-                            _ if copy.version() < needed => Err(Refusal {
+                            _ if late || copy.version() < needed => Err(Refusal {
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             }),
                             Some(source) => {
                                 let mut effects = r.town_part();
@@ -6236,7 +6313,10 @@ fn edit_checker(
                         continue;
                     }
                 };
-                let snapshot = walkers.fresh(FRESH_WAIT);
+                let (snapshot, late) = match walkers.fresh(need, FRESH_WAIT) {
+                    Ok(s) => (s, false),
+                    Err(s) => (s, true),
+                };
                 let source = snapshot.map.as_ref();
                 let needed = source
                     .as_ref()
@@ -6260,10 +6340,14 @@ fn edit_checker(
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let checked = match who {
-                        _ if copy.version() < needed => Err(Refused {
+                        _ if late || copy.version() < needed => Err(Refused {
                             op: None,
                             name: "edit.stale",
-                            detail: "the published copy has not reached the map basis".into(),
+                            detail: if late {
+                                "the bodies at the job's tick were not built in time".into()
+                            } else {
+                                "the published copy has not reached the map basis".into()
+                            },
                         }),
                         Some(c) => {
                             world.creator = c;
