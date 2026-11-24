@@ -604,14 +604,10 @@ impl Slots {
         let Some(place) = place else {
             return refuse("place-unknown", show(thing));
         };
-        let seat = (thing, place.place.slot);
+        let n = place.place.slot;
         let position = |k| place.spot(k);
-        let Some(spot) = self.free_spot(seat) else {
-            let by: Vec<String> = self
-                .holders_in(thing, seat.1)
-                .into_iter()
-                .map(show)
-                .collect();
+        let Some(spot) = self.free_spot((thing, n)) else {
+            let by: Vec<String> = self.holders_in(thing, n).into_iter().map(show).collect();
             return refuse(
                 "place-taken",
                 format!("{}: held by {}", show(thing), by.join(", ")),
@@ -621,10 +617,10 @@ impl Slots {
         if self.by_body.contains_key(&body) {
             return refuse("place-already-held", show(body));
         }
-        let key = (thing, seat.1, spot);
+        let key = (thing, n, spot);
         let frame = Frame {
             node: thing,
-            slot: Some(seat.1),
+            slot: Some(n),
         };
         let d = c.claim(body, &seated_shape())?;
         c.slot_in_at(body, d, frame, position, at)?;
