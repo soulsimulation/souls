@@ -7,7 +7,8 @@
 // of two sockets per viewer. Slow readers ask for the baseline and never read.
 // Messages from v2.mjs: {init: {base, stream, pkg}}, {add: n, overMs}, {slow: n}, {unslow: true}, {take: true}
 // (answers with the counters since the last take, and resets them), {stop: true}.
-import { Agent, request } from 'node:http';
+import { Agent as HttpAgent, request as httpRequest } from 'node:http';
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +32,7 @@ const fail = (code) => { w.errors[code] = (w.errors[code] ?? 0) + 1; };
 function get(url, agent) {
   const type = fileType(url.pathname);
   return new Promise((ok, no) => {
-    const req = request(url, { agent, timeout: TIMEOUT_MS }, (res) => {
+    const req = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { agent, timeout: TIMEOUT_MS }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
@@ -51,6 +52,8 @@ function get(url, agent) {
 }
 
 const streamUrl = () => new URL(cfg.stream, cfg.base);
+// 0.133 P3: the limits run's viewers read a served world's stream through the front door, over https.
+const newAgent = (o) => (new URL(cfg.base).protocol === 'https:' ? new HttpsAgent(o) : new HttpAgent(o));
 const at = (p, file) => new URL(p.generation ? `g/${p.generation}/${file}` : file, streamUrl());
 const pointer = async (agent) => JSON.parse(readPointer(await get(new URL('pointer', streamUrl()), agent)));
 
@@ -80,7 +83,7 @@ async function parts(agent, p, from, to, far) {
 }
 
 async function viewer(v) {
-  const agent = new Agent({ keepAlive: true, maxSockets: 2 });
+  const agent = newAgent({ keepAlive: true, maxSockets: 2 });
   const t0 = performance.now();
   w.joined++;
   try {
@@ -159,7 +162,7 @@ process.on('message', async (m) => {
     }
   } else if (m.slow) {
     try {
-      const p = await pointer(new Agent({ keepAlive: false }));
+      const p = await pointer(newAgent({ keepAlive: false }));
       for (let k = 0; k < m.slow; k++) slowReader(p);
     } catch { fail('slow-reader'); }
   } else if (m.unslow) {
