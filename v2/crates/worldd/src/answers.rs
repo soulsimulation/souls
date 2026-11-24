@@ -800,6 +800,9 @@ struct Lives {
     life: Life,
     ring: Ring,
     entry: Id,
+    /// The entry as configured ([`Join::entry`]): when the ring round it on the open ground holds no free place, births
+    /// try the floor that holds it ([`sim::walk::town::Town::entry_floor`]).
+    at: (Id, Vec3),
     family: Family,
     kind: Name,
     /// The ids of a leave's set-downs (their transfers).
@@ -3324,7 +3327,19 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        let mut born = b.births_built(&mut l.life, now, &l.ring, &l.family, &|soul| {
+        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
+        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
+        let floor = (l.at.0 == b.town.ground)
+            .then(|| b.town.entry_floor(l.at.1))
+            .flatten()
+            .map(|e| Ring {
+                entries: BTreeMap::from([(l.entry, e)]),
+                radius: l.ring.radius,
+                gap: l.ring.gap,
+                rings: l.ring.rings,
+            });
+        let standing = sim::life::Then(&l.ring, floor.as_ref());
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
             self.birth_builds
                 .get(&soul)
                 .copied()
@@ -3351,6 +3366,35 @@ impl Clock {
                 .partition(|h| h.0 == x.soul);
             l.unborn = rest;
             taken.push((x.clone(), mine));
+        }
+        // A birth that found no place after the whole search is withdrawn, and its Soul's waiting intents are refused
+        // by its name (`birth-no-free-place`, `birth-off-surface`): never left with no answer.
+        let mut refused = Vec::new();
+        let held: Vec<(Id, &'static str)> = l
+            .unborn
+            .iter()
+            .map(|h| h.0)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|s| Some((s, l.life.held_back(s)?)))
+            .collect();
+        for (soul, why) in held {
+            l.life.withdraw(soul);
+            let (mine, rest) = std::mem::take(&mut l.unborn)
+                .into_iter()
+                .partition::<Vec<_>, _>(|h| h.0 == soul);
+            l.unborn = rest;
+            refused.extend(
+                mine.into_iter()
+                    .map(|(_, bytes, reply, stamps)| (why, bytes, reply, stamps)),
+            );
+        }
+        for (why, bytes, reply, stamps) in refused {
+            let (Ok(intent), Some(key)) = (Intent::read(&bytes), actor_key(&bytes)) else {
+                continue;
+            };
+            let a = self.refusal(intent.actor, intent.sequence, why);
+            self.answered(key, intent.sequence, None, None, &a, (vec![reply], stamps));
         }
         for (x, mine) in taken {
             let mut later: Vec<(Vec<u8>, Reply, Stamps)> = Vec::new();
@@ -5560,6 +5604,7 @@ pub fn start<S: Storage + 'static>(
                 rings: 8,
             },
             entry,
+            at: j.entry,
             family: j.family,
             kind: j.kind,
             mint: Minter::new(scope("leave")),
