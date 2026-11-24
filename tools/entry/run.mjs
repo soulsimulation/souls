@@ -33,8 +33,10 @@
 // A transport is a module whose default export makes `{name, timers, events, start(), place(kind, entry), set(id,
 // fields), remove(id), offers(id), fields(id), act(id, form, args)}` from `{world, ...flags}`; for the disturbances also
 // `begin(id, form, args)` → `{verdict: "started", rid, progress}`, `progress(rid)` → `{phase, step, moving}` (step null
-// when the world does not say), `wait(rid)`, `leave(rid)`, `body()` → `{posture, activity, holding}` and `restart()`. `act` answers `{verdict:
-// "yes"|"no", reason, code, receipt}`: `reason` is the rules' reason when the world names one. The built-in one,
+// when the world does not say), `wait(rid)`, `leave(rid)`, `body()` → `{posture, activity, holding, seat}` (`seat`: the
+// id of the thing whose seat the body holds, when the world says), `restart()` and, optionally, `rise()` (the body up
+// from its seat by the world's own rise, answered as `wait` answers). `act` answers `{verdict: "yes"|"no", reason, code,
+// receipt}`: `reason` is the rules' reason when the world names one. The built-in one,
 // `today`, drives today's local world through its adapters (tools/entry/load.mjs, SA-F3a's forms adapter): the god CLI
 // (tools/god-skill/cli.mjs) from the creator's folder (--god <dir>, default here) and the Soul CLI
 // (tools/world-launcher/soul/eden.mjs) for the Soul in SOULS_HOME (--soul <name> when there are several).
@@ -366,6 +368,16 @@ async function disturbCase(t, row, kinds, placed) {
   // a thing removed from the Soul's hand is gone from it: it holds the rest as before
   const held0 = row.how === 'remove' ? (body0.holding ?? []).filter(h => h !== id) : body0.holding;
   if (!same(body1.holding, held0)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(held0)} as before`);
+  // A seat outlives the run (#4187, E7 #4481): a Soul that leaves while seated on the thing stays seated until it
+  // rises. It rises first, so the form is done again on the thing as it stands; a world that cannot make it rise from
+  // here refuses the redo `slot_taken`, its own seat held.
+  const seated = row.how === 'leave' && body1.seat === id;
+  let rose;
+  if (seated && t.rise) {
+    const up = await t.rise();
+    rose = up.verdict === 'yes' && (await t.body()).seat == null;
+    if (!rose) off.push(`the Soul, left seated, could not rise (${up.code ?? up.reason ?? up.verdict})`);
+  }
   let again;
   if (row.how === 'remove') {
     const fresh = await scene(), ids2 = {...ids, [c.act.this]: fresh.id};
@@ -379,11 +391,12 @@ async function disturbCase(t, row, kinds, placed) {
     if (!(await t.offers(id)).includes(row.form)) off.push(`afterwards the thing no longer offers ${row.form}`);
     else {
       again = await t.act(id, row.form, c.act.args, {case: c, ids});
-      if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
+      if (seated && !t.rise) { if (again.reason !== 'slot_taken' && again.code !== 'slot_taken') off.push(`afterwards ${row.form} on the thing the Soul is still seated on was not refused slot_taken (${again.code ?? again.reason ?? again.verdict})`); }
+      else if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
     }
   }
   for (const r of [stopRefused, refusedBy(again).run]) if (r) off.push(r);
-  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
+  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(seated ? {left_seated: true, ...(t.rise ? {rose} : {})} : {}), ...(again ? {again: brief(again)} : {})};
 }
 
 /** A change other than a set as one line to compare, by the case's names: what it did, to what, and where to (a made

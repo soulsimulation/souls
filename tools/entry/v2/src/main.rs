@@ -60,6 +60,8 @@ use skills::form_runner::{Arg, Args, Limits, check};
 const AWAY: i64 = 3_000_000;
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
+/// How long a body left on its way down into a seat is given to finish sitting before its rise is refused (E11).
+const SETTLE: Micros = 10_000_000;
 /// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
 const PLACE: &str = "souls:place";
 const BODY: &str = "souls:body";
@@ -2092,6 +2094,86 @@ impl Stage {
         }
     }
 
+    /// The body up from the seat it holds by the forms' own `rise` step, as a one-step form on the seat's thing, and
+    /// run until it ends: what a Soul left seated by a leave (#4187: the seat outlives the run) does before it sits
+    /// again (0.135 E11). Answered as `wait` answers; a body in no seat has nothing to rise from. A body left on its
+    /// way down keeps its seat and finishes sitting first (`not-seated` until then), as the clock runs on.
+    fn rise(&mut self) -> J {
+        let end = self.now + SETTLE;
+        for k in 0.. {
+            let r = self.rise_once(k);
+            let lowering = r.get("code").and_then(J::str) == Some("not-seated")
+                && self.slots.held_by(self.body).is_some();
+            if !lowering || self.now >= end {
+                return r;
+            }
+            self.tick();
+        }
+        err("no rise")
+    }
+
+    /// One try at [`Self::rise`]; its intents are numbered apart from the acts' (`k` the try).
+    fn rise_once(&mut self, k: u64) -> J {
+        let Some(node) = self.slots.held_by(self.body) else {
+            return obj(vec![("verdict", J::s("yes")), ("receipt", J::s("completed"))]);
+        };
+        let Ok(entry) = parse(r#"{"forms":{"rise":{"steps":[{"step":"rise"}]}}}"#) else {
+            return err("the rise form does not parse");
+        };
+        let n = self.runs.len() as u64 + 1;
+        let Some(id) = Id::new(Scope([0xe3; 16]), (2 << 40) + (k << 20) + n) else {
+            return err("no intent id");
+        };
+        let mut digest = [0u8; 32];
+        digest[..8].copy_from_slice(&n.to_le_bytes());
+        digest[8..16].copy_from_slice(&k.to_le_bytes());
+        digest[16] = 0xe1;
+        let intent = Intent {
+            id,
+            expiry: i64::MAX,
+            actor: Actor::Soul(self.soul),
+            digest,
+        };
+        let (body, now, from) = (self.body, self.now, self.log.len());
+        let asked = {
+            let (mut w, forms) = self.world();
+            forms.commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                node,
+                &entry,
+                "rise",
+                &Args::default(),
+                intent,
+                Limits::default(),
+                now,
+            )
+        };
+        self.flush();
+        if let Err(r) = asked {
+            return obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::s(r.name)),
+                ("code", J::s(r.name)),
+                ("receipt", J::s("refused")),
+            ]);
+        }
+        let rid = format!("r{n}");
+        let last = self.forms.at(body);
+        self.runs.insert(
+            rid.clone(),
+            Run {
+                intent: id,
+                last,
+                from,
+                body,
+            },
+        );
+        self.wait(&rid)
+    }
+
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
     /// The tree is the store's, and stays.
     fn restart(&mut self) -> J {
@@ -2248,6 +2330,17 @@ impl Stage {
         )
     }
 
+    /// The thing whose seat the body holds, by the gate's name for it; null when it holds none.
+    fn seat_held(&self) -> J {
+        let Some(t) = self.slots.held_by(self.body) else {
+            return J::Null;
+        };
+        self.things.iter().find(|(_, x)| x.id == t).map_or_else(
+            || J::Str(replica::world_model::show(t)),
+            |(k, _)| J::Str(k.clone()),
+        )
+    }
+
     fn handle(&mut self, q: &J) -> J {
         let s = |k: &str| q.get(k).and_then(J::str).unwrap_or_default().to_owned();
         let none = J::Obj(Vec::new());
@@ -2331,7 +2424,9 @@ impl Stage {
                     }),
                 ),
                 ("holding", self.holding()),
+                ("seat", self.seat_held()),
             ]),
+            "rise" => self.rise(),
             "restart" => self.restart(),
             "unapplied" => obj(vec![("entries", J::Int(i128::from(self.unapplied)))]),
             op => err(format!("unknown op {op}")),
