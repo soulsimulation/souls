@@ -8,7 +8,7 @@ each due change at its due time.
 ## Going to sleep
 
 `worldd serve --sleep <alarm socket>` (the launcher passes `--sleep $WORLDS_ROOT/alarms.sock` only with
-`SOULS_SLEEP=1` in the unit's environment, off by default until S4p and S5; 0.133 S3b,
+`SOULS_SLEEP=1` in the unit's environment, off by default and turned on per world by `sleep-rollout.sh` below; 0.133 S3b,
 `worldd/src/sleep.rs`) reads its clock each second: **still** (no intent queued or open, no act forming or checking,
 no body moving for an intent or for the wind-down) and its **next due time**, the earliest over its due lists (the
 sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends).
@@ -59,6 +59,36 @@ socket is group-writable and a world or a gateway running as souls can reach it.
 WORLDS_ROOT=/var/lib/souls/worlds /usr/local/lib/souls/supervisor wake <world>   # wake one now
 cat /var/lib/souls/worlds/directory/alarms/local                                  # the alarms (folder store)
 ```
+
+## Turning it on, one world at a time
+
+`v2/tools/ops/sleep-rollout.sh`, as root on the host, from the release's checkout. Sleep is on for a world when its unit
+has `SOULS_SLEEP=1` (the drop-in `worldd@<world>.service.d/60-sleep.conf`) and its gateway has `--wake`; worlds
+placed before 0.133 have neither, and a world with the first and not the second could never be woken by an intent, so
+the script sets both or neither. `<world>` is the placed instance or its slug in the authority map.
+
+```sh
+bash v2/tools/ops/sleep-rollout.sh plan release-probe        # every world's state, and what apply would change
+bash v2/tools/ops/sleep-rollout.sh apply release-probe       # sleep on for that world alone
+bash v2/tools/ops/sleep-rollout.sh check                     # exit 1 when a world is half set, down and not asleep,
+                                                             # or has sleep on without a healthy alarm daemon
+bash v2/tools/ops/sleep-rollout.sh undo release-probe        # always on again
+```
+
+- **apply** installs the alarm daemon when it is not installed: given `--from` and the release's bundle after the
+  world, it runs that bundle's `install.sh apply` (once a machine), else it stops there, changing nothing. Then it refuses, changing nothing, unless the daemon is healthy: active, not restarting, its socket group-writable and
+  answering. It backs up the world's gateway settings under `/etc/souls/sleep-rollout/<world>/<time>/`, writes the
+  drop-in, adds `--wake <alarm socket> --world-name <world>` to `GATEWAYD_ARGS`, and restarts the gateway, then the
+  world (it resumes from its checkpoint and catches up), checking each stays up. A failed step puts the settings back
+  and restarts both. Run again, it changes nothing.
+- **undo** puts the last backup back, removes the drop-in and restarts both: a sleeping world is started. The alarm
+  daemon stays (other worlds may sleep), and an alarm it holds for that world is harmless.
+- **Order on production:** after the release that carries it, `release-probe` first, then `check` and one wake timed
+  (a test Soul's intent while it sleeps, [test-souls.md](test-souls.md)); then the other worlds one at a time.
+- **The local run:** `v2/tools/ops/tests/sleep-rollout-e2e.sh` (header lists its builds) runs plan, a refused apply,
+  apply, check and undo on two local worlds, with imported Eden as the one that sleeps. Measured on a laptop (24 Nov
+  2026): Eden slept 56 s after its restart; a test Soul's say while it slept was answered with a receipt in 1.87 s;
+  world time less wall time moved 0.6 ms (the pointer's millisecond anchor) across the sleep and wake.
 
 ## The runs
 

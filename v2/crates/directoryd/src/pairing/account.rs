@@ -462,8 +462,12 @@ impl Pairing {
         .map_err(err)?;
         sql(tx.execute("INSERT INTO paired_world_tokens_v1(grant_text,world,device,token_hash) VALUES(?1,?2,?3,?4)",params![grant,authority.world,login.name,hash(&token)])).map_err(err)?;
         sql(tx.execute("INSERT INTO agent_pair_deliveries_v1(login,idem_hash,input_hash,grant_text) VALUES(?1,?2,?3,?4)",params![login.id,hash(key),input,grant])).map_err(err)?;
-        self.write_tokens(&tx).map_err(|_| err("tokens-file"))?;
+        self.publish_world(&tx, &authority)
+            .map_err(|_| err("tokens-file"))?;
         sql(tx.commit()).map_err(err)?;
+        if !authority.fresh {
+            self.owe(Some(&authority.world));
+        }
         Ok((grant, token))
     }
 }

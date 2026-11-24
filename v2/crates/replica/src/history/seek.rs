@@ -143,6 +143,11 @@ pub fn state_at(bundle: &Bundle, header: &crate::effects::Header, at: i64) -> R<
         if let Some(c) = carried.take() {
             insert(&mut s, c.get(&2), c.get(&3))?;
         }
+        // A snapshot holds no timers (they are not public state), so a timer set before the window and cleared in
+        // it would be refused (`timer-missing`, 24 Nov: Eden's past on soul.game). Timers change no node or link.
+        if matches!(e.body, crate::effects::Body::Timers(_)) {
+            continue;
+        }
         // The view leaves entries out (other audiences, thinned samples): each applies after the last it holds.
         s.next = e.envelope.sequence;
         s.apply_entry(header, &e)?;

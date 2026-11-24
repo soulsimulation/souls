@@ -1923,7 +1923,7 @@ fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
 
 /// A node's entry: the world's entry for its kind (or the entry it names), else the record of a creator's kind the
 /// world defines, read by the one loader (`replica::kinds::defined`, #3697), so a creator's forms run as content's do.
-fn entry_in<'a>(
+pub(crate) fn entry_in<'a>(
     kinds: &'a Json,
     tree: &Tree,
     n: &replica::tree::NodeRef<'_>,

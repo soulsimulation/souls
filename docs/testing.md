@@ -98,6 +98,29 @@ The comparison runs in two places: the CI job `types-web`, on the build it alrea
 PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
 `types-web`.
 
+## Controls gate
+
+`tools/test-harness/e2e-controls/controls.mjs` opens every moved world's page (`/w/<slug>/` whose config carries
+`v2Stream`) in headless Chromium and clicks each main header control: Live, then in its time panel (the header for a world with no clock) Back 1 min (it must land on an earlier
+moment, never "could not be loaded"), Back again, From the start, Link to this moment (opened in a new tab, which must
+show that moment), Return to live, the Broadcast menu, the sound switch, Explore, its places, following a Soul from
+Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
+failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
+only exception and is empty. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
+401, `/mars-assets/static-manifest.json` is 200. It only clicks: it never submits a form or signs in, so run it against
+production any time:
+
+```sh
+node tools/test-harness/e2e-controls/controls.mjs                       # production, every moved world
+node tools/test-harness/e2e-controls/controls.mjs --slugs eden --origin https://soul.game --out .local/e2e-controls/now
+```
+
+It writes `<out>/<slug>/verdict.json`, one screenshot per step and `<out>/summary.json` (default out
+`.local/e2e-controls/<time>`), and exits 1 on any failure. Playwright comes from `mars/viewer` (`SHIP_PLAYWRIGHT_FROM`
+points elsewhere). In a release it is the `controls` job of `release.yml`, after the activation and the engine move,
+and `publish` needs it: a failure publishes nothing and the summary gives the rollback. `eyes_only=true` runs it alone
+against the live site.
+
 ## Replay corpus
 
 Old history must keep its meaning. `apps/server/test/fixtures/replay-corpus/` holds frozen event logs from fake-mind

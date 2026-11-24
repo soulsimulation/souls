@@ -32,6 +32,8 @@ export class V2History {
   private readonly hour: string | undefined;
   constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; }
 
+  /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
+  private floor: number | undefined;
   private seek(at: number): Promise<Seeked> {
     if (!this.worker) {
       this.worker = this.make();
@@ -44,7 +46,7 @@ export class V2History {
     const seq = ++this.seq;
     return new Promise((ok, no) => {
       this.waiting.set(seq, (r) => (r instanceof Error ? no(r) : ok(r)));
-      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at });
+      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at, floor: this.floor });
     });
   }
 
@@ -53,9 +55,11 @@ export class V2History {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     let at = from * TICK_US, first = true, next: number | null = null;
-    // K3: once the first moment is known, a window before it starts there (no walk back through empty days)
-    const known = this.firstAt ? await this.firstAt.catch(() => null) : null;
+    // K3: a window before the world's first moment starts there, and no seek walks back through the empty days before
+    // it (a young world: each would be a 404). Not known (no public events yet): no day before the asked one's.
+    const known = await this.first(endUs).catch(() => null);
     if (known !== null && at < known) at = known;
+    this.floor = known ?? Math.min(at, this.floor ?? Infinity);
     const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {

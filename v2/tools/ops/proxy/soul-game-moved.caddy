@@ -13,6 +13,10 @@
 # - Pairing, which names its world in the request: /v1/pair/* and /v1/agent/account[/*] to the directory (7310), and
 #   /pair, the owner's pairing card (pair.html from the live release's web build). Old-engine worlds never use these
 #   site-level paths: today's client pairs at /w/<slug>/v1/agent/pair, which stays with today's launcher.
+# - The accounts, /v1/account[/*], to the directory too: a moved world's page exchanges its sign-in there for its view
+#   token (/v1/account/view-token, the owner's box and the private turns its Souls hear), and the pairing card approves
+#   an agent's login at /v1/account/requests/<id>. Today's pages ask their own world's /w/<slug>/v1/account/*, which
+#   stays with today's launcher. (Left out, the page's sign-in got 404 from the launcher on every try, 24 Nov.)
 # A world that has not moved keeps every path on today's launcher, its bootstrap and v2 paths included; so does a
 # moved world's page, its client files and /v1/config (the launcher serves those for a moved world itself).
 #
@@ -62,7 +66,7 @@ https://soul.game {
   import moved-gateway release-probe 7349
   import moved-gateway follow-20261027-scratch 7350
   import moved-gateway bench-hamlet 7348
-  @pairing path /v1/pair/* /v1/agent/account /v1/agent/account/*
+  @pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account /v1/account/*
   handle @pairing {
     header X-Souls-System v2
     header X-Robots-Tag "noindex, nofollow"

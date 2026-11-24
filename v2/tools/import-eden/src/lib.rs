@@ -278,6 +278,56 @@ fn into(frame: [i64; 4], p: [i64; 4]) -> R<[i64; 4]> {
     ])
 }
 
+/// Point `p` (`[x, y, z]` mm, in the frame of the thing posed at `frame`) in the frame `frame` is in: [`into`]'s inverse.
+fn onto(frame: [i64; 4], p: [i64; 3]) -> R<[i64; 4]> {
+    let e = |e| format!("{e:?}");
+    let q = Quat::from_yaw_mdeg(frame[3].rem_euclid(360_000))
+        .map_err(e)?
+        .rotate(Vec3::new(p[0] * 1000, p[1] * 1000, p[2] * 1000))
+        .map_err(e)?;
+    let mm = |v: i64| (v + v.signum() * 500) / 1000;
+    Ok([
+        frame[0] + mm(q.x),
+        frame[1] + mm(q.y),
+        frame[2] + mm(q.z),
+        frame[3],
+    ])
+}
+
+/// Each entry's points (`points.*.at_mm`, its thing's frame), keyed by the kind the entry is for.
+fn entry_points(entries: &[(String, String)]) -> BTreeMap<String, Vec<[i64; 3]>> {
+    use replica::rules::json::Value as J;
+    let mut out = BTreeMap::new();
+    for (_, text) in entries {
+        let Ok(e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        let Some(kind) = e.get("kind").and_then(J::str) else {
+            continue;
+        };
+        let mut at = Vec::new();
+        if let Some(J::Obj(ps)) = e.get("points") {
+            for (_, p) in ps {
+                let v: Vec<i64> = p
+                    .get("at_mm")
+                    .and_then(J::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|n| match n {
+                        J::Int(n) => i64::try_from(*n).ok(),
+                        _ => None,
+                    })
+                    .collect();
+                if let [x, y, z] = v[..] {
+                    at.push([x, y, z]);
+                }
+            }
+        }
+        out.insert(plain(kind).to_owned(), at);
+    }
+    out
+}
+
 /// Whether `[x, z]` lies inside the polygon `poly` (`[[x, z] …]` mm), by crossings.
 fn inside(q: [i64; 2], poly: &Json) -> bool {
     let pts: Vec<[i64; 2]> = poly
@@ -935,14 +985,20 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
     // --- On another thing's floor (C27, #3509): a thing at the root standing on a building's own floor (a pavilion's,
     // a deck's), or in a building's slot that lies on one of its floors (a roof terrace), stands on that floor, in
     // the room there that holds it: the open ground is cut out under such a floor, and a roof is no ground. Moved
-    // after every node has its id, so no id changes. A decor thing stays where it is: scenery may reach far past the
-    // building its origin is in (a cableway from its valley station).
-    let decor: BTreeSet<&str> = need(&f, "kinds")?
+    // after every node has its id, so no id changes. A decor thing at the root goes too (the bubbles and succulents
+    // in verdelis-eden's dome garden), unless a point its kind's entry declares is off that floor: scenery may reach
+    // far past the building its origin is in (a cableway from its valley station). With no entries at all (`load`),
+    // its points are not known, so a decor thing stays where it is.
+    let decor: BTreeMap<&str, String> = need(&f, "kinds")?
         .arr()
         .iter()
         .filter(|k| k.get("layer").and_then(Json::str) == Some("decor"))
-        .filter_map(|k| k.get("ref").and_then(Json::str))
+        .filter_map(|k| {
+            let r = k.get("ref").and_then(Json::str)?;
+            Some((r, kind_name(k.get("name").and_then(Json::str)?)))
+        })
         .collect();
+    let reach = entry_points(entries);
     let hosts: Vec<&Json> = things
         .iter()
         .filter(|t| t.get("parent").and_then(Json::str).is_none() && t.get("floors").is_some())
@@ -952,7 +1008,14 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         at.insert(sp.id, k);
     }
     for t in things {
-        if t.get("floors").is_some() || t.get("rooms").is_some() || decor.contains(s(t, "ref")?) {
+        if t.get("floors").is_some() || t.get("rooms").is_some() {
+            continue;
+        }
+        // Scenery in a building's own slot (a big top's canopy on its roof) keeps its slot.
+        let scenery = decor.get(s(t, "ref")?);
+        if scenery.is_some()
+            && (entries.is_empty() || t.get("parent").and_then(Json::str).is_some())
+        {
             continue;
         }
         let found = match (t.get("parent").and_then(Json::str), t.get("slot")) {
@@ -962,7 +1025,7 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
                 for h in &hosts {
                     let local = into(pose4(need(h, "pose")?)?, w)?;
                     if let Some(f) = on_floor(h, local)? {
-                        found = Some((s(h, "id")?, f));
+                        found = Some((*h, local, f));
                         break;
                     }
                 }
@@ -973,11 +1036,33 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
                     .iter()
                     .find(|h| h.get("id").and_then(Json::str) == Some(p))
                 {
-                    Some(h) => on_floor(h, pose4(need(t, "pose")?)?)?.map(|f| (p, f)),
+                    Some(h) => {
+                        let local = pose4(need(t, "pose")?)?;
+                        on_floor(h, local)?.map(|f| (*h, local, f))
+                    }
                     None => None,
                 }
             }
             _ => None,
+        };
+        // Scenery whose entry puts a point off this floor (above it, or past its outline) stays on the open ground.
+        let found = match (found, scenery) {
+            (Some((h, local, f)), Some(kind)) => {
+                let entry = t
+                    .get("entry")
+                    .and_then(Json::str)
+                    .map_or(plain(kind), plain);
+                let mut on = true;
+                for p in reach.get(entry).map(Vec::as_slice).unwrap_or(&[]) {
+                    on &= on_floor(h, onto(local, *p)?)?.is_some();
+                }
+                on.then_some((h, local, f))
+            }
+            (found, _) => found,
+        };
+        let found = match found {
+            Some((h, _, f)) => Some((s(h, "id")?, f)),
+            None => None,
         };
         if let Some((host, (key, pose))) = found {
             let (Some(&node), Some(&parent)) = (
