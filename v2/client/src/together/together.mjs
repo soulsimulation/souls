@@ -19,12 +19,12 @@
 export const KINDS = Object.freeze({
   follow: 'eden:follow_activity@1220390b841bf789d26cfe815f2f44765945b061efce3c95e01c3f86ead53b5ea588',
   dance: 'eden:dance_together_activity@1220543a9d3587368b26535d8be47d25e08f30ba23549b9adf3a312b91da91ad3731',
-  handshake: 'eden:handshake_activity@1220028df8f261580f491fe35195ff3f0718206eb6046d7196fdf0047117d6444ef4',
-  'high-five': 'eden:high_five_activity@1220bc341d543434979069ffa7eea975fafe2d625170e1e23c8284d97a154bba69a0',
+  handshake: 'eden:handshake_activity@1220bd24bded16d8b48b25e9dfed2777dab8a8cbb3063062b81ce920f5ed22becc88',
+  'high-five': 'eden:high_five_activity@1220ba8315cc807df05a932b3dcf04344ea1d9dd1c011d93395a53dcb7f777eb1f2f',
   'hold-hands': 'eden:hold_hands_activity@1220925c2d0989adfde15f1b3afd895e9d5fedbf2c6038c7692b5d6c024c5d89369c',
-  hug: 'eden:hug_activity@12203217be3b8fea603bfb607aec34b776f5aee4846e894bee49eda3126e5142b12f',
+  hug: 'eden:hug_activity@12203c0411a7549ce250decf5b69406c2ecbff8057cebaf5ce41fa1bbe4471f13932',
   // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
-  'fist-bump': 'eden:fist_bump_activity@122050a3ab206702afc4995432c38cc93da6396c5688fd52b34938ca5672383b4938',
+  'fist-bump': 'eden:fist_bump_activity@1220155d17b8d8c9f78bb7579181ff553121e915ec38362be884f45815a17a6d78b9',
   harvest: 'eden:harvest_together_activity@122070d31cf09790b76bf43d135b5f50e99f0ba68a528a22119ef70e5a451a44207f',
 });
 export const OFFERER = 'eden:one';
