@@ -70,9 +70,18 @@ delay ends when a part is in the viewer's hands: the page then plays it 2 s behi
 
 ## How long it takes
 
-DRY_RUN_TIMING
+A rung takes its load (`SECS`) plus about 65 s: seeding and starting the world (about 17 s), signing the agents in,
+the driver's 15 s drain and the teardown. The dry run on the build machine (24 Nov 2026: 100 and 500 agents, even
+and uneven, two repeats, 120 s a rung, 500 viewers) took 24 minutes for 8 rungs, 181 to 186 s each. The production
+run is 5 counts, 2 arms and 2 repeats of 600 s: 20 rungs of about 665 s, **about 3 h 45 min** when every limit holds
+(the 750 and 1,000 rungs' extra seeding and sign-in are not yet measured). It is shorter when the ladder stops:
+about 2 h 15 min when 500 is the first count to give way.
 
 ## Drill
 
-The same command on the build machine, as the dry run above was run: `WORLD_CPUS` set to 8 threads (the production
-machine's size) and `DRIVER_CPUS` to others, with `SECS=120`.
+The dry run, on the build machine from the unpacked kit: the world on 8 threads (the production machine's size),
+the driver and the readers on 4 others, quiet cores chosen at the time:
+
+```sh
+SECS=120 STOP=0 WORLD_CPUS=12-15,36-39 DRIVER_CPUS=16-17,40-41 bash v2/tools/bench/stage2a/limits.sh "100 500"
+```
