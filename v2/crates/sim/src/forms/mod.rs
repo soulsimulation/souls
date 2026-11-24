@@ -700,8 +700,13 @@ impl Forms {
         self.runs
             .values()
             .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
-                (Step::WalkTo { on, .. }, Step::Sit { slot, on: seat, .. }) if on == seat => {
-                    Some((fr.body, (fr.runner.at()?, seat.unwrap_or(fr.node), *slot)))
+                (
+                    Step::WalkTo { on, .. },
+                    Step::Sit {
+                        slot, on: place, ..
+                    },
+                ) if on == place => {
+                    Some((fr.body, (fr.runner.at()?, place.unwrap_or(fr.node), *slot)))
                 }
                 _ => None,
             })

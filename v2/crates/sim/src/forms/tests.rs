@@ -1656,7 +1656,7 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
         forms.leave(&mut w, body, None, now).expect("left");
     };
     let walk = |at: Vec3| Step::WalkTo {
-        point: Name::new("seat").expect("a name"),
+        point: Name::new("place").expect("a name"),
         at,
         on: None,
         approach: false,
@@ -1682,7 +1682,7 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
         pose.position
     );
     assert_eq!(how, "left");
-    assert_eq!(seated(&b, body), None, "no seat kept");
+    assert_eq!(seated(&b, body), None, "no place kept");
     assert_ne!(pose.support, replica::pose::Support::Slot);
     assert_eq!((pose.position.x, pose.position.z), (stand.x, stand.z));
     assert!(
@@ -1756,11 +1756,11 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
     b.run(30_000_000);
     let how = ended(&mut b);
     println!(
-        "E14 the taken seat: ended {how}; the other body in {:?}",
+        "E14 the taken place: ended {how}; the other body in {:?}",
         seated(&b, other)
     );
     assert_eq!((how.as_str(), seated(&b, other)), ("place-taken", None));
-    assert_eq!(seated(&b, body), Some(chair), "the first keeps its seat");
+    assert_eq!(seated(&b, body), Some(chair), "the first keeps its place");
     // The lecture's `leave`: its rise gives the seat back.
     b.steps(
         body,
