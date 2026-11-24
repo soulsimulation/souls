@@ -31,7 +31,12 @@ and rolling builds (O1, O7) are not here.
    The token names the claim; the machine is only where it runs, so two processes on one machine, or one machine
    claiming again, are two claims. Of two writers that start at once, the store lets exactly one through; the other
    is refused (`precondition-failed`, HTTP 412). A machine that claims again keeps nothing on its disk at or after its
-   new takeover.
+   new takeover. A world serves before its claim is held (R17, 0.133): a start whose store does not answer listens
+   at once and claims on its shipping thread, tried with back-off until the store answers. The records it writes
+   meanwhile wait on its disk and are shipped under that claim, its history archive writes nothing until the claim is
+   held, and acts with stakes (rule 2) stay fenced, since the mark cannot move before it. Any refusal of the claim
+   other than a store out of reach (`restart-gap`, another writer's claim, a record that does not decode) still ends
+   the start by name.
 6. **A lease is for liveness, never for safety.** It is elapsed time on the writer's own machine, never a comparison
    of clocks across machines, counted from when its last renewing write was sent. A writer renews by moving the mark,
    or, with nothing new, by rewriting the record (a heartbeat, which changes its bytes: rule 10). Past its lease it
