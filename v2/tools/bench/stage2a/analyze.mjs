@@ -58,6 +58,7 @@ export function analyze(D) {
       const span = endS - beginS;
       return { perS: +(lines.length / span).toFixed(1), takenPerS: +((v.taken ?? 0) / span).toFixed(1), threads: Object.keys(byPid).length, busiestThreadPerS: +(Math.max(0, ...Object.values(byPid)) / span).toFixed(1) };
     })(),
+    viewers: fs.existsSync(`${D}/viewers.json`) ? J('viewers.json') : null,
     driverCores: rep.driverCores, loadavgBefore: fs.existsSync(`${D}/loadavg.before`) ? fs.readFileSync(`${D}/loadavg.before`, 'utf8').trim() : null,
   };
   out.bar = {

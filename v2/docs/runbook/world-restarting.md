@@ -20,14 +20,60 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A store that does not answer at the start** (R17). No read of the store ends a world's start. The claim and
+  shipping, the history archive's open (its header, bundle index and public history) and the creator's record are
+  read on their own threads after the world listens, each tried after 1, 2, 4 … s, then every 60 s, until the store
+  answers. The journal says `worldd: <shipping | the archive | the creator's record> waits for the store: <fault>; try
+  <n> unanswered, the next in <ms> ms`, and `health.json` has `"shipping"`, `"archive"` and `"creator"`, each
+  `{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` while it waits and `current` once answered. The log on
+  the disk is the truth: shipping catches up from it once the store answers, and the compactor keeps the whole log
+  until it has. The archive writes nothing until the claim is held. While the creator's record waits, no one is the
+  creator and edits are refused; its first try (two reads) holds the start for at most about 10 s. Only a fork's
+  archive base is read before listening, tried the same way. A refusal of another kind (not `store-unreachable`) of
+  the claim or of an unforked world's archive open (`restart-gap`, another writer's claim, a record that does not
+  decode) ends the process by name, `worldd serve: <refusal>`, as before; the unit restarts it and a deploy's canary
+  fails `canary.exited`.
 - **A degraded public stream** (R12). When the public stream cannot recover from the store (refused or out of reach
   after its patient tries), the world does not exit: it serves its Souls with no viewers (no `views/world.json`) and
   tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public
   stream is degraded, no viewers: <fault>; try <n> refused, the next in <ms> ms` at each try, and `health.json` has
   `"stream":{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` (`serving` once it recovers). Fix the store or
   the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait in
-  memory until the stream catches up. A stream that ends after serving says `"state":"stopped"` with its fault; a
-  restart starts it again.
+  memory until the stream catches up. A stream that ends after serving (a local fault, such as the disk) says
+  `"state":"stopped"` with its fault; a restart starts it again.
+- **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
+  its words, its recovery objects and the chain's head are written there first: the parts under `views/`, the recovery
+  chain in the spool `<world>/stream-backup/` (never served, because it holds the world's records). The store gets
+  them from the backup thread, behind the stream, so a stall or refusal delays only the backup. The journal says
+  `worldd: the public stream's backup is behind, viewers unaffected: <fault>; pass <n> refused, <k> objects wait, the
+  next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
+  `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
+  holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
+  log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
+  so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
+  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
+- **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
+  that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,
+  once the world has moved past the recovered cursor, starts a new generation whose baseline holds those records, so
+  it does not cut a part again at an address viewers may hold. If the store was behind, the parts it lacked are a gap
+  in the stream's history. One case is left: a generation's address is its baseline's digest, and the stream is
+  deterministic, so if the old machine's lost tail rolled over at the very cursor the new machine first moves to, the
+  two generations' addresses match. Salting the address with the takeover epoch would fix that; it is a format change,
+  follow-up R16.
+- **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
+  this world still running beside a newer one (on this machine or another). The fenced one never writes over it
+  and stops backing up for good; its viewers are unaffected. Stop the instance that should not be running. If the
+  fenced one is the one that should run (the other is gone for good), unfence it: stop it, remove its confirmed and
+  tried heads, and start it; its backup learns the store's head again and writes over it.
+
+  ```sh
+  sudo systemctl stop worldd@<world>
+  sudo find /var/lib/souls/worlds/worlds/<world>/stream-backup \( -name head.confirmed -o -name head.tried \) -delete
+  sudo systemctl start worldd@<world>
+  ```
+
+  A spool with no confirmed head, or one written for another store (the stream's store moved to another bucket), is
+  learned again the same way by itself; a store whose head is gone gets this writer's.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
@@ -36,14 +82,19 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   `$WORLDS_ROOT/builds/<hash>/worldd` hashes to the pin (SHA-256 of the file, `1220` in front), and runs it as
   `worldd serve --dir $WORLDS_ROOT/worlds/<world>`, the world folder `worldd seed` made and `place-world.sh` placed (C1).
 - **Limits per world** go in `/etc/systemd/system/worldd@<world>.service.d/limits.conf`. Never write it by hand: to
-  set a world's cap, add its slug to `v2/tools/ops/units/world-limits.json` (`"eden": { "memory_max": "8G",
-  "start_within_s": 600 }`) and install a build (`install.sh apply`), which writes the file for each listed world placed
+  set a world's cap, add its slug to `v2/tools/ops/units/world-limits.json` (`"eden": { "memory_max": "4G",
+  "memory_low": "2G", "start_within_s": 600 }`) and install a build (`install.sh apply`), which writes the file for each listed world placed
   on the machine (`world-limits.mjs`, slug to instance through the world-authority map) and runs `systemctl
-  daemon-reload`; the cap applies at the world's next start. A world not listed keeps the unit's `MemoryMax=2G`, and
-  `souls.slice` (12 GB) leaves room for one 8 GB world. `start_within_s` is how long `deploy` waits for the world to
+  daemon-reload`; the cap applies at the world's next start, or at once with `memory-bounds.sh apply` (below). A
+  world not listed keeps the unit's `MemoryMax=2G`. Each world's own `MemoryMax` is what ends a world that overruns, so
+  only that world is killed and restarted; `souls.slice`'s 14 GB is a backstop sized never to be reached (24 Nov: a 3 GB
+  slice cap ended Eden when a fourth world started), and its `MemoryLow` of 2 GB lets Eden's own `MemoryLow` count. To
+  put the slice and the limits on a machine live, restarting nothing: `sudo bash v2/tools/ops/memory-bounds.sh apply`
+  (it backs up what it replaces and prints the undo, `memory-bounds.sh undo <backup>`); `memory-bounds.sh check` reads
+  the effective values back from systemd and the cgroup files. `start_within_s` is how long `deploy` waits for the world to
   serve (30 s when not listed). Once a build with this and #4069 is installed on production, the hand-added drop-ins
   `worldd@<Eden>.service.d/40-memory.conf` and `30-start-timeout.conf` can be removed (`systemctl daemon-reload`
-  after): `limits.conf` carries Eden's 8 GB, and worldd's start-up progress replaces the raised start timeout.
+  after): `limits.conf` carries Eden's 4 GB (it sorts after `40-memory.conf`, so it already wins), and worldd's start-up progress replaces the raised start timeout.
   There is never a `CPUQuota`: it throttles the clock and slows world time. `MemoryHigh` stays `infinity`: below the
   limit with no swap it throttles a leaking world to a crawl that never reaches the limit (one leak run with
   `MemoryHigh` at 75 % of the limit: no exit in 10 s, the neighbours' tick 99th percentile up 11 and 18 %), a world held slow instead of restarted.

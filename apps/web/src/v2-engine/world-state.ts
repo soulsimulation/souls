@@ -12,7 +12,7 @@ import { TICK_US } from './takes.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; origin?: string; sky?: Record<number, unknown>; fields?: Record<number, unknown>;
-  slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
+  tint?: [string, number][]; slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 
 /** Doors and lamps: a kind's state fields (`content/kinds`, by `n`) and the entity state key the old page draws them by
@@ -34,9 +34,25 @@ const KINDS = new Set(['clear', 'cloudy', 'rain', 'wind', 'fog', 'storm']);
 const whole = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'bigint' ? Number(v) : typeof v === 'boolean' ? (v ? 1 : 0) : null);
 const plainName = (k: string) => k.split('@')[0].split(':').pop() ?? '';
 
-/** A door's or lamp's state as the old page's entity holds it, from its v2 fields; null for any other thing, or one
- *  that holds none of its fields yet (it is drawn as the layer has it). */
+/** R4 (0.134): a creator's tint as the entity's `state.tint` (gen-mesh/vocab-look.ts draws it): `#rrggbb` for the whole
+ *  thing, then `<part>=#rrggbb` for each part, space-separated; '' once undone (no tint); undefined when the thing was
+ *  never recoloured, so its state is left as the layer has it. */
+export function tintState(rows: [string, number][] | undefined): string | undefined {
+  if (!rows) return undefined;
+  const hex = (c: number) => '#' + (c >>> 0).toString(16).padStart(6, '0').slice(-6);
+  const whole = rows.filter(([p]) => p === 'tint:whole').map(([, c]) => hex(c));
+  const parts = rows.filter(([p]) => p.startsWith('part:')).map(([p, c]) => `${p.slice(5)}=${hex(c)}`);
+  return [...whole, ...parts].join(' ');
+}
+
+/** A door's or lamp's state as the old page's entity holds it, from its v2 fields, and a creator's tint on any thing;
+ *  null for a thing with neither, or one that holds none of its fields yet (it is drawn as the layer has it). */
 export function thingState(n: NodeLike): Record<string, boolean | number | string> | null {
+  const tint = tintState(n.tint), out = doorOrLamp(n);
+  return tint === undefined ? out : { ...out, tint };
+}
+
+function doorOrLamp(n: NodeLike): Record<string, boolean | number | string> | null {
   const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
   // a door by its kind or entry (`eden:door`, or a `…_door` kind); field 6 alone is not one: another kind may use it
   const name = plainName(entry), defs = STATE[name] ?? (name.endsWith('_door') ? STATE.door : undefined);
@@ -64,8 +80,10 @@ export function weatherOf(sky: Record<number, unknown> | undefined | null): OldW
   return w;
 }
 
-/** Where a moved thing is now, in the old page's world frame (the same as v2's: metres, yaw about +y). */
-export type Placed = { p: [number, number, number]; yaw: number };
+/** Where a moved thing is now, in the old page's world frame (the same as v2's: metres, yaw about +y). K5 (0.135): a
+ *  turn that is not about +y alone (a 6 m frame carried laid flat) also has `tilt`, its turns about x and z: the layer's
+ *  `r: [yaw, x, z]`, three's 'XYZ' order. */
+export type Placed = { p: [number, number, number]; yaw: number; tilt?: [number, number] };
 type Q4 = [number, number, number, number];
 const Q = 2 ** 30;
 const rotate = (q: Q4, v: [number, number, number]): [number, number, number] => {
@@ -93,8 +111,21 @@ export function placedOf(nodes: ReadonlyMap<string, NodeLike>, id: string): Plac
     if (s) p = [p[0] + s[1] * 1000, p[1] + s[2] * 1000, p[2] + s[3] * 1000];
     n = up;
   }
-  return { p: [p[0] / 1e6, p[1] / 1e6, p[2] / 1e6], yaw: 2 * Math.atan2(q[2], q[0]) };
+  const at: [number, number, number] = [p[0] / 1e6, p[1] / 1e6, p[2] / 1e6];
+  return Math.abs(q[1]) < 1e-6 && Math.abs(q[3]) < 1e-6 ? { p: at, yaw: 2 * Math.atan2(q[2], q[0]) } : { p: at, ...eulerOf(q) };
 }
+
+/** A turn as three's Euler angles in 'XYZ' order (Euler.setFromQuaternion): `yaw` its y, `tilt` its x and z. */
+export function eulerOf([w, x, y, z]: Q4): { yaw: number; tilt: [number, number] } {
+  const m11 = 1 - 2 * (y * y + z * z), m12 = 2 * (x * y - w * z), m13 = 2 * (x * z + w * y);
+  const m22 = 1 - 2 * (x * x + z * z), m23 = 2 * (y * z - w * x), m32 = 2 * (y * z + w * x), m33 = 1 - 2 * (x * x + y * y);
+  const yaw = Math.asin(Math.max(-1, Math.min(1, m13)));
+  return Math.abs(m13) < 0.9999999 ? { yaw, tilt: [Math.atan2(-m23, m33), Math.atan2(-m12, m11)] } : { yaw, tilt: [Math.atan2(m32, m22), 0] };
+}
+
+/** The layer's `r` for a placed thing: its yaw, or `[yaw, x, z]` when it is tilted or `was` (it was drawn tilted, so its
+ *  tilt goes back to none). */
+export const turnOf = (to: Placed, was: boolean): number | number[] => (to.tilt || was ? [to.yaw, ...(to.tilt ?? [0, 0])] : to.yaw);
 
 /** The entity layer, the parts read here (WorldEntityLayer's model and diff sequence, private there, read as world-env.ts
  *  reads them). */
@@ -124,7 +155,7 @@ const sameWeather = (a: unknown, b: OldWeather) => {
  *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
  *  page's picture reaches it (light-diff-clock.ts), not seconds before the bodies around it. */
 export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number | string>>, weather: OldWeather | null, at: number,
-  ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map()): WorldDiff | null {
+  ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map(), tilted: Set<string> = new Set()): WorldDiff | null {
   const m = layer?.model, seq = layer?.seq;
   if (!m || typeof seq !== 'number') return null;
   const upserts: unknown[] = [];
@@ -134,10 +165,16 @@ export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyM
     if (!e) continue;
     let next: EntityLike = e;
     if (want && !Object.entries(want).every(([k, v]) => e.state?.[k] === v)) next = { ...next, state: { ...e.state, ...want } };
-    if (to && !placedAt(e, to)) {
+    // K5: a thing v2 turns off its feet (carried laid flat) is drawn so, and stood up again when it is set down so
+    const drawn = Array.isArray(e.r) ? e.r.slice(1).map(Number) : [];
+    if (!to?.tilt && !drawn.some((v) => Math.abs(v) > 1e-3)) tilted.delete(id);
+    const tiltMoved = !!to && (to.tilt ? !(drawn.length === 2 && to.tilt.every((v, k) => turnBetween(drawn[k], v) < 1e-3)) : tilted.has(id));
+    if (to && (!placedAt(e, to) || tiltMoved)) {
       // at the root of the world, where v2 has it: the layer's world pose of a root thing is its own (WorldModel.worldPose)
       const tilt = Array.isArray(e.r) ? e.r.slice(1) : [], s = e.in?.parent !== 'world' && m.worldPose ? m.worldPose(e).s : e.s;
-      next = { ...next, in: { parent: 'world' }, p: [...to.p], r: tilt.length ? [to.yaw, ...tilt] : to.yaw, ...(s !== undefined ? { s } : {}) };
+      const r = to.tilt || tilted.has(id) ? turnOf(to, true) : tilt.length ? [to.yaw, ...tilt] : to.yaw;
+      if (to.tilt) tilted.add(id);
+      next = { ...next, in: { parent: 'world' }, p: [...to.p], r, ...(s !== undefined ? { s } : {}) };
     }
     if (next === e) continue;
     upserts.push(next);
@@ -162,6 +199,8 @@ export class WorldState {
   private readonly unchecked = new Set<string>();
   /** Old entity id → where v2 has a thing that has moved since, while it is not in a hand. */
   readonly moved = new Map<string, Placed>();
+  /** K5: the things this has drawn tilted (worldDiff stands them up again when v2 does). */
+  private readonly tilted = new Set<string>();
   /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
   private readonly ticks = new Map<string, number>();
   /** The sequence number of the last diff handed to the page: each is sent once (the layer applies the first of a seq). */
@@ -196,9 +235,13 @@ export class WorldState {
       if (was === undefined) { this.first.set(n.id, at); this.unchecked.add(n.id); }
       else if (was !== at || this.moved.has(n.origin)) { this.origins.set(n.id, n.origin); this.ticks.set(n.origin, tick); moves = true; }
     }
-    // a moved thing's world pose, again with every part that moves one (its frame may be what moved); while it is in a
-    // hand it is left where it was last at rest
-    if (moves) for (const [id, o] of this.origins) {
+    if (moves) this.place();
+  }
+
+  /** A moved thing's world pose, again with every part that moves one (its frame may be what moved); while it is in a
+   *  hand it is left where it was last at rest. */
+  private place(): void {
+    for (const [id, o] of this.origins) {
       const n = this.nodes.get(id);
       if (!n?.pos || (!this.moved.has(o) && this.first.get(id) === placeOf(n))) continue;
       const w = placedOf(this.nodes, id);
@@ -228,7 +271,21 @@ export class WorldState {
   }
 
   /** The diff for the page's entity layer now, or null (see worldDiff). */
-  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { this.check(layer); return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved); }
+  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { this.check(layer); return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved, this.tilted); }
+
+  /** K5 (0.135): the moving frames as they stand at the time the page draws (take-parts.ts CarriedParts.frames): a
+   *  carry's node where its samples have it, a load lifted or set down only once the picture reaches it. A thing of the
+   *  captured world carried in one is moved with it, not left where it was lifted until it is set down. */
+  frames(nodes: readonly NodeLike[]): void {
+    let moves = false;
+    for (const n of nodes) {
+      const was = this.nodes.get(n.id);
+      if (!was) continue;
+      this.nodes.set(n.id, { ...was, ...n, origin: was.origin });
+      moves = true;
+    }
+    if (moves) this.place();
+  }
 
   /** The diff to append to the page's edge log now, or null: once per sequence number (while the layer has not applied
    *  it, the same seq is not sent again; whatever is still unlike v2 after it goes in the next). */

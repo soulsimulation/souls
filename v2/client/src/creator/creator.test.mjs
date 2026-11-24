@@ -8,7 +8,7 @@
 import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -20,6 +20,7 @@ import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
 import { areaOf, buildOf, eventOps, historyOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -140,9 +141,8 @@ before(async () => {
 after(async () => {
   await god('stop').catch(() => {});
   await soul('quit').catch(() => {});
-  for (const p of procs) p.kill();
   relay?.server.close();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('the verbs make G1 batches, and a refusal names its usage', () => {

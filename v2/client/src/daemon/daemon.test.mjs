@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request, start } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
@@ -112,10 +113,9 @@ before(async () => {
 
 after(async () => {
   await request(rt.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
   relay?.server.close();
   relay?.cut();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('A1: the first command starts it, and it outlives the command that started it', async () => {

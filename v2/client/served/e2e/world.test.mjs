@@ -39,7 +39,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -48,6 +48,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { request } from '../../src/daemon/client.mjs';
 import { runtimeOf } from '../../src/home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -120,9 +121,9 @@ const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '12
 after(async () => {
   timers.forEach(clearInterval);
   for (const d of daemons) await request(d.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill('SIGKILL');
-  if (process.env.SERVED_E2E_KEEP !== '1') rmSync(dir, { recursive: true, force: true });
-  else console.log(`kept: ${dir}`);
+  const keep = process.env.SERVED_E2E_KEEP === '1';
+  await stopThenRemove(procs, dir, { signal: 'SIGKILL', keep });
+  if (keep) console.log(`kept: ${dir}`);
 });
 
 /** The thin command, as a harness runs it. */

@@ -16,12 +16,12 @@
 // is `looks.model: "upload:<hash>"`; the old page fetches it from where the world serves uploads (`/v2/uploads/<hash>`,
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
-import { placedOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { placedOf, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
 import { placedDef } from './source/stream-scene.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
-  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array };
+  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][] };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
 
@@ -111,6 +111,8 @@ export class CreatorKinds {
   private definers = new Map<string, string>();
   /** What the layer was last sent: each thing's def and place. */
   private sent = new Map<string, string>();
+  /** K5: the things last sent tilted. */
+  private readonly tilted = new Set<string>();
   /** V2: the old def each kind's own things have in the layer (its plain name → the def's ref), and the old entities
    *  whose nodes a creator removed. */
   private oldDefs = new Map<string, string>();
@@ -185,11 +187,15 @@ export class CreatorKinds {
       if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
-      const ref = d ? d.def.ref : old!, eid = entityId(id), key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), Math.round(to.yaw * 1000)]);
+      const tint = tintState(n.tint); // R4: a creator's tint, as world-state.ts gives the world's own things theirs
+      const ref = d ? d.def.ref : old!, eid = entityId(id), key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), tint ?? null]);
       live.add(eid);
       if (this.sent.get(eid) === key && m.entities.has(eid) && !(d && need(d.def))) continue;
       if (d && need(d.def)) defs.push(d.def);
-      upserts.push({ id: eid, def: ref, in: { parent: 'world' }, p: [...to.p], r: to.yaw });
+      // K5: a part carried laid flat is drawn so (the layer's `r: [yaw, x, z]`), and stood up again once set down so
+      const r = turnOf(to, this.tilted.has(eid));
+      if (to.tilt) this.tilted.add(eid); else this.tilted.delete(eid);
+      upserts.push({ id: eid, def: ref, in: { parent: 'world' }, p: [...to.p], r, ...(tint !== undefined ? { state: { tint } } : {}) });
       this.sent.set(eid, key);
     }
     // sent again with each diff until the layer has dropped it (a diff it did not apply loses nothing)

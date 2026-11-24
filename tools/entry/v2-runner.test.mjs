@@ -44,6 +44,22 @@ test("an argument naming a thing by the runner's own key reaches the form", {ski
   } finally { await t.stop(); }
 });
 
+test("a bench's sit takes its seat through the world's places, and the case's cleared body stands again (0.135 E9)", {skip: unbuilt}, async () => {
+  const t = await world(['eden:bench']);
+  try {
+    const c = caseNamed('sit_free_seat');
+    const id = await t.place('eden:bench');
+    const got = await t.act(id, 'sit', c.act.args, {case: c, ids: {s1: id}});
+    assert.notEqual(got.code, 'place-unknown', JSON.stringify(got));
+    assert.equal(got.verdict, 'yes', JSON.stringify(got));
+    assert.equal(got.receipt, 'completed', JSON.stringify(got));
+    // the body is cleared out of the seat with the case, so the bench is free for the next one
+    await t.reset();
+    const again = await t.act(id, 'sit', c.act.args, {case: c, ids: {s1: id}});
+    assert.equal(again.receipt, 'completed', JSON.stringify(again));
+  } finally { await t.stop(); }
+});
+
 test('a list field is written to the tree and read back from it, enums in records by their bare names', {skip: unbuilt}, async () => {
   const t = await world(['eden:chess_table', 'eden:signup_sheet']);
   try {

@@ -17,6 +17,7 @@ import { DEFAULT_PKG, request } from '../src/daemon/client.mjs';
 import { findHome, runtimeOf } from '../src/home/home.mjs';
 import { build } from './build.mjs';
 import { answer } from './serve.mjs';
+import { stopThenRemove } from '../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -89,10 +90,9 @@ before(async () => {
   site = `http://127.0.0.1:${server.address().port}/local`;
 });
 
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
   server?.close();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 const folder = join(dir, 'empty'), home = join(folder, '.souls');

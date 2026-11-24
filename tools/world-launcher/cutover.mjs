@@ -192,6 +192,21 @@ function oneFence(binding) {
     } catch { throw unavailable(); }
   };
   const active = () => route().canonical === true;
+  // The replica the routed page loads, by version (cdn-walk, 24 Nov: `/replica_bg.wasm` answered no-store, so every
+  // viewer fetched its 2 MB again). `<world>/v2/replica/<version>/` holds replica.js and the replica_bg.wasm it loads
+  // beside itself, the version being the first 16 hex of sha256 over both files, so the page's two files always match
+  // and the current version's answers are immutable. The plain `/replica.js` and `/replica_bg.wasm` the Soul client's
+  // upgrade reads keep no-store. Read again when either file's size or time changes.
+  let replica = null;
+  const replicaNow = () => {
+    const key = ['replica.js', 'replica_bg.wasm'].map((n) => { const s = statSync(join(clientDir, n)); return `${s.ino}:${s.size}:${s.mtimeMs}`; }).join('/');
+    if (replica?.key !== key) {
+      const js = readBounded(join(clientDir, 'replica.js'), 32 * 1024 * 1024), wasm = readBounded(join(clientDir, 'replica_bg.wasm'), 32 * 1024 * 1024);
+      replica = { key, js, wasm, version: createHash('sha256').update(js).update(wasm).digest('hex').slice(0, 16) };
+    }
+    return replica;
+  };
+  const replicaVersion = () => { try { return replicaNow().version; } catch { return null; } };
   const bound = (w) => !!w && worldIdOf(w) === oldWorldId;
   return {
     bound,
@@ -232,7 +247,9 @@ function oneFence(binding) {
       // R2 (0.133): the world's public history export (its route's `history`, `/s/…/`), for the page's past time
       let history = null;
       try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}) };
+      const version = replicaVersion();
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
+        ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once
@@ -266,7 +283,9 @@ function oneFence(binding) {
       // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
       const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
+      const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
+      const versioned = mutating ? null : /^\/v2\/replica\/([0-9a-f]{16})\/(replica\.js|replica_bg\.wasm)$/.exec(path);
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null && !versioned) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -283,6 +302,34 @@ function oneFence(binding) {
         try { if (BODY_FILE.test(body) && !url.search) bytes = readBounded(join(bodiesDir, body), 64 * 1024 * 1024); } catch { bytes = null; }
         if (!bytes) { res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'not-found' })); return true; }
         res.writeHead(200, { 'content-type': bodyType(body), 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
+      }
+      if (versioned) {
+        // The current version is immutable; another (a page loaded before the client changed) gets today's bytes, kept nowhere.
+        let r = null;
+        try { r = replicaNow(); } catch { r = null; }
+        if (!r) { res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.client-unavailable', message: 'The new engine client is unavailable. Ask the operator to restore the served bundle.' })); return true; }
+        const bytes = versioned[2] === 'replica.js' ? r.js : r.wasm, current = versioned[1] === r.version && !url.search;
+        res.writeHead(200, { 'content-type': types[versioned[2]], 'content-length': bytes.length, 'cache-control': current ? 'public, max-age=31536000, immutable' : 'no-store' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
+      }
+      if (capture !== null) {
+        // W4 prep (0.133): the page binds the scenery the published scene.json names, by its hash. The old world keeps a
+        // scene's capture only once one of its takes carried it, so a world loaded for the switch (or one nobody watched
+        // since its scene last changed) answers 404 and the page stops at "World layout could not be prepared". The
+        // published scene is that capture: answered as the old world answers it (`{worldId, ...capture}`, http.ts),
+        // only for this stream's file and this world; any other hash passes through.
+        const m = staticDir ? manifest() : null, world = url.searchParams.get('world');
+        let json = null;
+        try {
+          if (m?.files?.['scene.json'] && m.stream === this.v2Stream(w) && (world === null || world === oldWorldId) && [...url.searchParams.keys()].every((k) => k === 'world')) {
+            const { renderSceneRef: ref, ...scene } = JSON.parse(readBounded(join(staticDir, 'scene.json'), 64 * 1024 * 1024));
+            if (ref?.hash === capture) json = JSON.stringify({ worldId: oldWorldId, contract: 'render-scene-capture/1', ref, body: scene });
+          }
+        } catch { json = null; }
+        if (json === null) return false;
+        res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(json), 'cache-control': 'no-store', 'x-souls-static': 'published' })
+          .end(req.method === 'HEAD' ? undefined : json);
         return true;
       }
       if (SERVED.has(path)) {

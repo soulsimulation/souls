@@ -106,6 +106,8 @@ const RESERVED: &[Reserved] = &[
     r(142, "F_ZONES (#3913)", On::Place),
     r(143, "who_may::F_OWNER (#3913)", On::Thing),
     r(144, "who_may::F_ACCESS (#3913)", On::Thing),
+    // 0.134 R4: a creator's tint on a thing or one of its parts (`souls-god recolor`).
+    r(crate::tint::F_TINT, "tint::F_TINT", On::Thing),
 ];
 
 /// Every engine-reserved node field number above the import's, in the order listed.

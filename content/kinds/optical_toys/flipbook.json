@@ -1,0 +1,498 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flipbook",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 28,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "page": {
+      "n": 29,
+      "type": "int",
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      },
+      "unit": "count",
+      "min": 0,
+      "max": 8
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "open_book": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "says": "already_open",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "flipbook_opened"
+        }
+      ]
+    },
+    "close_book": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "says": "open_first",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "flipbook_closed"
+        }
+      ]
+    },
+    "riffle_page": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "says": "open_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "page",
+          "at_most": 7,
+          "says": "last_page"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "stroke",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "page",
+          "by": 1,
+          "event": "picture_page_riffled"
+        }
+      ]
+    },
+    "rewind_pages": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "says": "open_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "page",
+          "at_least": 1,
+          "says": "first_page"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "page",
+          "to": 0,
+          "event": "picture_pages_rewound"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:flipbook",
+    "table": [
+      {
+        "part": "lid",
+        "field": "open",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "true": 150000,
+          "false": 0
+        },
+        "over_us": 600000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1000,
+            0
+          ],
+          "size": [
+            260,
+            40,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1030,
+            0
+          ],
+          "size": [
+            240,
+            20,
+            180
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            0
+          ],
+          "size": [
+            260,
+            10,
+            200
+          ],
+          "tint": "red",
+          "role": "lid",
+          "pivot": [
+            -130,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -96,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -72,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -48,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -24,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            24,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            72,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=7"
+        },
+        {
+          "kind": "box",
+          "at": [
+            96,
+            1045,
+            0
+          ],
+          "size": [
+            16,
+            8,
+            30
+          ],
+          "tint": "blue",
+          "when": "@page=8"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "An eight-page picture book: open, riffle one page at a time, and rewind.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "already_open": "The picture book is already open.",
+    "open_first": "Open the picture book before closing, riffling or rewinding it.",
+    "last_page": "This is the last picture page; rewind to play it again.",
+    "first_page": "The picture sequence is already at its first page.",
+    "howto_play": "Open the book, riffle through its eight pages, rewind to the first picture, and close the cover.",
+    "toy": "optical toy"
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": [
+      "toy"
+    ]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "open_book"
+        },
+        {
+          "form": "riffle_page"
+        },
+        {
+          "form": "rewind_pages"
+        },
+        {
+          "form": "close_book"
+        }
+      ]
+    }
+  }
+}

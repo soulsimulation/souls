@@ -12,7 +12,7 @@ several worlds in one program and measured them beside today's form:
 - **Form 2, one thread.** One program, every world on one thread. The modules are loaded once and shared: code,
   definitions and content caches. This is design D8.
 
-The bench is `tools/bench/capacity/colocate/colocate.mjs` (timed-run command `colocate`). It is measurement code and
+The bench was `tools/bench/capacity/colocate/colocate.mjs` (timed-run command `colocate`; removed with v1, 0.134 D3). It is measurement code and
 the launcher never uses it. Form 2 runs `main.ts` once per world under its own query string and refills the one
 `config` object before each world loads.
 

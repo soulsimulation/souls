@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
+import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -84,6 +85,18 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     assert.deepEqual([eden.v2Gateway, eden.v2Directory], ['/w/eden/v2/ws', '/'], 'routed (B3-2b): where the owner\'s box finds the gateway and the directory');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
+  // cdn-walk (24 Nov): the routed page loads the replica by version, so both files are immutable; the plain addresses
+  // the Soul client's upgrade reads, and any other version, are kept nowhere (no-store), and the cdn-walk rule passes
+  const { v2Replica } = await pageConfig('/w/eden/');
+  const version = createHash('sha256').update('test module').update('test wasm').digest('hex').slice(0, 16);
+  assert.equal(v2Replica, `/w/eden/v2/replica/${version}/replica.js`, 'routed: the replica by its version');
+  for (const [path, body, cc] of [[v2Replica, 'test module', 'public, max-age=31536000, immutable'], [v2Replica.replace('replica.js', 'replica_bg.wasm'), 'test wasm', 'public, max-age=31536000, immutable'],
+    ['/w/eden/v2/replica/0000000000000000/replica_bg.wasm', 'test wasm', 'no-store'], [`${v2Replica}?x=1`, 'test module', 'no-store'], ['/w/eden/replica_bg.wasm', 'test wasm', 'no-store'], ['/w/eden/replica.js', 'test module', 'no-store']]) {
+    const r = await fetch(base + path);
+    assert.deepEqual([r.status, r.headers.get('cache-control'), await r.text()], [200, cc, body], path);
+    if (cc !== 'no-store') assert.equal(originCacheProblem({ path, status: 200, headers: Object.fromEntries(r.headers) }), null, path);
+  }
+  assert.equal(originCacheClass(v2Replica.replace('replica.js', 'replica_bg.wasm')), 'stable', 'cdn-walk judges the versioned wasm');
   // #4177: the page's arrival published the old world's static views beside the stream; the page's reads get those files
   for (let i = 0; i < 50 && !existsSync(join(staticDir, 'manifest.json')); i++) await new Promise(r => setTimeout(r, 20));
   const manifest = JSON.parse(readFileSync(join(staticDir, 'manifest.json')));
@@ -179,6 +192,28 @@ test('#4177: a rollback removes the published views, and a re-route whose snapsh
   await assert.rejects(fence.publish(w, (path) => (path === '/v1/world/snapshot' ? { status: 503, body: Buffer.from('{}') } : old(path))), /cutover.static-snapshot-unavailable/);
   assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
   assert.equal(served(), null, 'the snapshot falls through to the live old view');
+});
+test('W4 prep: a routed page\'s scenery is answered from the published scene, which the page verifies; any other hash passes through', async t => {
+  const { captureRenderScene } = await import('../../packages/engine-contract/src/scene-capture.ts');
+  const { decodeSceneCapturePublication } = await import('../../packages/protocol/src/scene-capture.ts');
+  const dir = mkdtempSync(new URL('w4-scene-', scratch)), routesFile = join(dir, 'routes.json'), staticDir = join(dir, 'static');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { lab: { gateway: 'http://127.0.0.1:7312', stream: '/s/lab/', canonical: true } } }));
+  const fence = cutoverFence({ binding: { oldWorldId: 'lab-1', canonicalSlug: 'lab', routesFile, clientDir: join(dir, 'client'), staticDir } }), w = { slug: 'lab', worldId: 'lab-1' };
+  // the old world's /v1/scene answer: its render scene and that scene's reference (apps/server/src/http.ts)
+  const scene = { scene: { name: 'lab' }, buildings: [{ file: 'hall.glb', p: [1, 0, 2] }], clock: { origin: 0, dayTicks: 72000 } };
+  const ref = captureRenderScene('rules/1', scene).ref;
+  const old = (path) => ({ status: path === '/v1/scene' || path === '/v1/world/snapshot' ? 200 : 404, body: Buffer.from(JSON.stringify(path === '/v1/scene' ? { ...scene, renderSceneRef: ref } : {})) });
+  await fence.publish(w, old);
+  const ask = (path) => { let out = null; const res = { writeHead: (status, headers) => ({ end: (b) => { out = { status, headers, body: String(b) }; } }) };
+    return fence.handle({ method: 'GET' }, res, w, new URL(`http://x/w/lab${path}`)) ? out : null; };
+  const got = ask(`/v1/scenes/${ref.hash}?world=lab-1`);
+  assert.equal(got.status, 200); assert.equal(got.headers['x-souls-static'], 'published');
+  const decoded = decodeSceneCapturePublication(JSON.parse(got.body));
+  assert.equal(decoded.worldId, 'lab-1'); assert.deepEqual(decoded.ref, ref, 'the page re-hashes the body and finds the scene it was named');
+  assert.equal(ask(`/v1/scenes/${ref.hash}`).status, 200, 'without the world: as the old world answers');
+  assert.equal(ask(`/v1/scenes/${'0'.repeat(64)}?world=lab-1`), null, 'another scene: the old world answers');
+  assert.equal(ask(`/v1/scenes/${ref.hash}?world=other-1`), null, 'another world named: the old world answers');
 });
 
 test('W1: one binding file, two worlds: each switches and turns back alone, its page names its own stream and static folder', async t => {
