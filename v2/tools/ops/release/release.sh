@@ -95,7 +95,8 @@ checks() {
 bundle() {
   local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 pkg=${7:-$6/../target/wasm-load/pkg} a t lines=() served=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "bundle: the sha is the full 40 hex"
-  [ -f "$page/index.html" ] || die "bundle: no page build at $page"
+  # X2: the page folder is the body files (bodies.ts) or a page build
+  [ -f "$page/index.html" ] || [ -f "$page/assets/bodies/bodies.json" ] || die "bundle: no page folder at $page"
   [ -d "$client/src" ] && [ -d "$client/skill" ] || die "bundle: no client (src, skill) at $client"
   rm -rf "$out"
   mkdir -p "$out/artifacts" "$out/bin"

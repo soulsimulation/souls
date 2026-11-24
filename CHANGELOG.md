@@ -6,6 +6,56 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.132.3 (2026-11-24)
+
+### Features
+
+- A new world made from the home page can now run on the new engine, owned by the person who made it, and is listed once it is ready. (#4458)
+- Souls can operate five mounted optical toys, changing picture strips, focusing stereo cards, winding discs and riffling picture pages.
+- Souls can set vice jaws, index a workshop head, extend a trestle and adjust a fence, with release and lock steps. The trestle’s sliding rail pieces share one pivot without changing their positions or travel.
+- Souls can collate paper, pierce a spine, sew three passes and case a portable cloth-bound volume using a binding bench's finite supplies. Bound-volume pickup now walks to its stand and touches its grip, with free-hand and reach guards.
+- Cut, punch and lace finite leather supplies into two portable open pouches, with one-place storage for a small held thing.
+- Add an argument-based combination-latch display with indexed dial positions, an interlocked demonstration bolt and supported conditional kit shapes.
+- Souls can practice six alternating three-strand braid crossings on an attached instructional frame and undo them one at a time.
+- A round of applause uses native activity roles and the existing clap move.
+- An object-free oral story circle gives native teller and listener roles with standing places, existing gestures and independent leaving.
+- A native performer acknowledgement pairs one bowing performer with an applauding audience, separated standing places and independent leaving.
+- On the new engine up to six Souls carry one long part together, one at each grip: a side carrier may step away while enough stay, and nobody joins once it is lifted.
+- Nearby standing Souls can offer a shared cheer for two to eight, with two rows of places reached through normal walking admission before cheering on the world's beat. Members can leave at any time.
+- Two to eight Souls can join separate object-free jumping-jack or push-up routines using the existing native moves, with individual admission and leaving; no automatic sequence or health effect is added.
+- Two to eight standing Souls can join a chorus that repeats the existing singing gesture at separate places, then leave independently; it adds no recorded or generated sound.
+- Souls can form, drain, couch and press three supplied wet paper sheets, then approach and touch their grip to carry them away.
+- A native photo lineup asks up to four standing Souls to take separate row places and wave, with independent leaving; it does not take a photograph.
+- Add a receiver-facing semaphore alphabet display with one letter selector and supported conditional kit shapes for its poses.
+- Souls can offer a shared wave, join the same beat and leave independently.
+- Nearby standing Souls can share a stretch, walking to well-spaced places through normal admission and leaving independently.
+
+### Fixes
+
+- A world's live view keeps playing when its cloud storage stalls; only the backup waits, and it catches up by itself. (#4469)
+- The new engine's client rules choose a seat or other body slot left out of an act as the world does, the free one nearest the Soul, so a client's check of "sit on the bench" agrees with the world's answer.
+- Washing, dyeing, tying, writing in ink, ladling, grinding coffee into a mug and toasting over a fire now move their amounts between the two things.
+- On the new engine, a Soul that walks away from an activity before it is finished (mending a tent, grinding beans, juggling) no longer gets its results.
+- On the new engine, a thing a Soul was using is freed when the world refuses the last step of what the Soul was doing, instead of staying reserved until the world restarted.
+- A world keeps running after an engine update that changes how its kinds are built, instead of refusing to start.
+- A world whose store is slow or out of reach at the start never exits for it: it listens and serves, and its claim, shipping, history archive and creator record are tried again with back-off until the store answers, named in health.json meanwhile. The release canary waits up to 120 s for a start and fails at once when the world exits.
+- A Soul whose own walk interrupts something it was walking to do is free at once, and a Soul jostled in a crowd no longer stands waiting for its way.
+- Keep this town-action family current with compact representative cases and argument-based controls.
+- Keep this town-action family current with compact representative cases.
+- Keep this town-action family current with compact representative cases.
+- Keep this town-action family current with compact representative cases.
+- Keep this town-action family current with compact representative cases.
+- Keep this town-action family current with compact representative cases and argument-based controls.
+- Keep this town-action family current with compact representative cases and argument-based controls.
+- Braid practice uses one crossing action and one undo, each naming the current crossing count.
+- On the new engine's page, a rack bay a creator places while the world runs is drawn as its frame, with its uprights and beams in their slots, instead of as a solid box that hid them.
+
+### Performance
+
+- In a quiet moment, what a Soul does reaches the page about a tenth of a second sooner.
+- During a release, an open world page reconnects sooner after the world moves to the new version.
+- A busy world keeps time better: starting many Souls' actions in the same moment costs much less.
+
 ## 0.132.1 (2026-11-23)
 
 ### Features

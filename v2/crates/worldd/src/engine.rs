@@ -8,7 +8,8 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
-//!   activity's first two members, the first in front. Only a load is lifted, a kind whose entry states its grips
+//!   activity's first two members, the first in front; each member after them carries beside it, at a grip between
+//!   (0.135 C5: one at each grip, `carry-crew-too-large`; nobody joins while it is lifted, `carry-lifted`). Only a load is lifted, a kind whose entry states its grips
 //!   (`lift-not-a-load`), and only in a carry, an activity whose kind has a slot 1 for a thing (`not-a-carry`, 0.135
 //!   C4). `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
@@ -515,6 +516,12 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
+                // 0.135 C5: nobody joins a crew's carry while its load is lifted; a replacement joins at a set-down.
+                if self.carries.contains_key(&offer)
+                    && e.offered(offer).is_some_and(|(k, _)| k.most > 2)
+                {
+                    return Err(refusal("carry-lifted", show(offer)));
+                }
                 // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
@@ -564,22 +571,10 @@ impl Engine {
                 {
                     return Err(refusal("crew.setting-in", show(activity)));
                 }
-                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is.
-                if let Some(mut carry) = self.carries.remove(&activity) {
-                    break_off(
-                        &mut carry,
-                        e,
-                        &mut self.mint,
-                        &mut tree,
-                        now,
-                        None,
-                        "souls:partner-left",
-                        Some((a.id, a.soul)),
-                    )?;
-                    if let Some(s) = self.asm.as_mut() {
-                        s.ended(activity);
-                    }
-                }
+                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is. A side carrier's
+                // with the load's crew left does not (C5).
+                self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
+                let e = &mut self.activities;
                 e.next = tree.next();
                 e.leave(
                     &mut tree,
@@ -737,6 +732,11 @@ impl Engine {
                     [f, b, ..] => (f.body, b.body),
                     _ => return Err(refusal("carry-needs-two", show(activity))),
                 };
+                // 0.135 C5: the members after the first two carry beside the load, in join order.
+                let sides = members[2..]
+                    .iter()
+                    .map(|m| stands(c, m.body).map(|(_, at)| (m.body, at)))
+                    .collect::<R<Vec<_>>>()?;
                 if !self.activities.started(activity) {
                     return Err(refusal("activity-not-started", show(activity)));
                 }
@@ -809,6 +809,9 @@ impl Engine {
                         axis,
                         to.map(xz).zip(fixed.as_ref()),
                     )?;
+                    let on_plan: Vec<(Id, [i64; 2])> =
+                        sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
+                    load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
@@ -824,6 +827,10 @@ impl Engine {
                     );
                     carry.load = load;
                     carry.lift(&mut tree, now, f, k, transfer)?;
+                    carry.sides = sides
+                        .iter()
+                        .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
+                        .collect();
                     self.carries.insert(activity, carry);
                 } else {
                     let mut carry = self
@@ -856,6 +863,54 @@ impl Engine {
         }
         self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
+        Ok(())
+    }
+
+    /// Carrier `body` leaves `activity` (a leave, or its retire), for `by`'s intent and Soul, before the leave is
+    /// written: a carry it is in breaks off, its load set down where it is (`souls:partner-left`, 0.135 C3), unless
+    /// it is a side carrier and the load's crew is left without it (0.135 C5), when the carry goes on with its place
+    /// empty and the world says so (`souls:carry-going-on`, `souls:carrier-left`).
+    fn carrier_leaves(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        body: Id,
+        now: Micros,
+        by: (Id, Id),
+    ) -> R<()> {
+        let Some(mut carry) = self.carries.remove(&activity) else {
+            return Ok(());
+        };
+        if let Some(i) = carry.sides.iter().position(|(b, _)| *b == body)
+            && (carry.sides.len() + 1) as u64 >= carry.load.crew
+        {
+            carry.sides.remove(i);
+            let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+            let (load, e) = (carry.board, &mut self.activities);
+            self.carries.insert(activity, carry);
+            e.next = tree.next();
+            return e.load_word(
+                tree,
+                activity,
+                load,
+                "souls:carry-going-on",
+                "souls:carrier-left",
+                word,
+            );
+        }
+        break_off(
+            &mut carry,
+            &mut self.activities,
+            &mut self.mint,
+            tree,
+            now,
+            None,
+            "souls:partner-left",
+            Some(by),
+        )?;
+        if let Some(s) = self.asm.as_mut() {
+            s.ended(activity);
+        }
         Ok(())
     }
 
@@ -1011,8 +1066,20 @@ impl Engine {
                     gone.push(*activity);
                     continue;
                 };
-                // 0.135 C3: one stopped (or its connection is gone) while the other walked on.
-                if carry.stretched(f, k) {
+                // 0.135 C5: a side carrier with no body has left, as its ends.
+                let mut sides = BTreeMap::new();
+                for (b, _) in &carry.sides {
+                    if let Ok((_, at)) = stands(c, *b) {
+                        sides.insert(*b, at);
+                    }
+                }
+                if sides.len() < carry.sides.len() {
+                    gone.push(*activity);
+                    continue;
+                }
+                // 0.135 C3: one stopped (or its connection is gone) while the other walked on; C5, a side carrier
+                // drifted from its place.
+                if carry.stretched(f, k) || carry.side_apart(f, k, &sides).is_some() {
                     apart.push(*activity);
                 } else {
                     step.push((*activity, f, k));
@@ -1182,25 +1249,8 @@ impl Engine {
             if !member {
                 continue;
             }
-            if let Some(mut carry) = self.carries.remove(&activity) {
-                let r = break_off(
-                    &mut carry,
-                    &mut self.activities,
-                    &mut self.mint,
-                    &mut tree,
-                    now,
-                    None,
-                    "souls:partner-left",
-                    Some((intent, soul)),
-                );
-                match r {
-                    Ok(()) => {
-                        if let Some(s) = self.asm.as_mut() {
-                            s.ended(activity);
-                        }
-                    }
-                    Err(r) => eprintln!("worldd: a carry was not set down at a retire: {r}"),
-                }
+            if let Err(r) = self.carrier_leaves(&mut tree, activity, body, now, (intent, soul)) {
+                eprintln!("worldd: a carry was not set down at a retire: {r}");
             }
             self.activities.next = tree.next();
             let left = self.activities.leave(

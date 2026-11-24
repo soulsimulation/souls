@@ -12,6 +12,7 @@
 //!   the pair before it is left.
 //! - **A kind that takes more than two** (`most`, 0.134 T3: a dance offered to several): the first accept makes the
 //!   pair as above, and each later one joins that same activity, taking its role's claims at once if it has started.
+//!   A kind of three roles that takes more than three (0.135 C5, a crew's carry) has a role several take ([`several`]).
 //! - **Declining is an intent** ([`Activities::decline`]) and **a lapse is a timer** ([`Activities::lapse`]). Each
 //!   reaches the asker as a named outcome, `souls:offer-declined` or `souls:offer-lapsed`. An offer that every body
 //!   asked declined, or that nobody accepted in time, ends: its node goes. A pair that waited past its own expiry lapses
@@ -50,6 +51,13 @@ use super::{Activities, Ask, Bound, Live, R, create, minted, name, refuse};
 use crate::controller::Controller;
 use crate::slots::hands::{free_hands, hands, occupies, transfer};
 use crate::timers::{DueList, Timer};
+
+/// The role several take in a kind of three roles that takes more members than that (0.135 C5: a crew's carry, its
+/// sides): its third. It is offered in one of the other two; each accept after the first takes it, and the activity
+/// starts without it.
+pub(super) fn several(k: &ActivityKind) -> Option<&Name> {
+    (k.roles.len() == 3 && k.most > 3).then(|| &k.roles[2].name)
+}
 
 /// The event of a give accepted: `{1: offer, 2: the thing, 3: the giver's body, 4: the taker's body}`.
 pub const GIVEN: &str = "souls:given";
@@ -160,7 +168,7 @@ impl Activities {
         let Some(k) = self.kinds.get(kind) else {
             return refuse("activity-kind-unknown", kind.as_str());
         };
-        if k.roles.len() != 2 {
+        if (k.roles.len() != 2 && several(k).is_none()) || several(k) == Some(role) {
             return refuse("offer-kind-not-a-pair", kind.as_str());
         }
         if k.role(role).is_none() {
@@ -169,7 +177,7 @@ impl Activities {
         let other = k
             .roles
             .iter()
-            .find(|r| r.name != *role)
+            .find(|r| r.name != *role && Some(&r.name) != several(k))
             .map(|r| r.name.clone())
             .unwrap_or_else(|| unreachable!("two roles"));
         asked.remove(&body);
@@ -499,8 +507,10 @@ impl Activities {
             return refuse("already-member", show(body));
         }
         let link = minted(mint)?;
+        // C5: the third and later joiners of a crew take its several role; others the offer's other role.
+        let role = several(k).unwrap_or(&o.other).clone();
         let me = Member {
-            role: o.other.clone(),
+            role,
             body,
             soul: ask.soul,
             link,
@@ -519,7 +529,7 @@ impl Activities {
                         format!("{} is held by {}", show(body), show(*other)),
                     );
                 }
-                let role = k.role(&o.other).expect("the offer's other role");
+                let role = k.role(&me.role).expect("the joiner's role");
                 Some(c.claim(body, &super::shape_of(k, role, l.bound))?)
             }
             State::Proposed => None,

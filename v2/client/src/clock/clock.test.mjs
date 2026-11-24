@@ -8,7 +8,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { clockOfFields, worldNow } from './clock.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -90,8 +91,7 @@ async function check(mapping, what) {
 
 after(async () => {
   await request(daemon(), { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill('SIGKILL');
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir, { signal: 'SIGKILL' });
 });
 
 test('E7b A2: a copy computes world now within one tick, across a rate change and a restart', { timeout: 120_000 }, async () => {

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -16,6 +16,7 @@ import { encode } from '../history/day.mjs';
 import { addEntry, parseLine } from './schedule.mjs';
 import { calendarOf, nextWorldTime, realDeadline, worldDue } from './world.mjs';
 import { durableReceipt } from './durable-proof.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const TICK = 50_000, HOUR = 3_600_000_000;
 const v2 = resolve(dirname(new URL(import.meta.url).pathname), '../../..');
@@ -296,8 +297,7 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
     throw err;
   } finally {
     await ask({ op: 'stop' }).catch(() => {});
-    for (const p of procs) await kill(p);
-    if (!process.env.R15B_KEEP) rmSync(dir, { recursive: true, force: true });
-    else console.log(`retained fixture ${dir}`);
+    await stopThenRemove(procs, dir, { signal: 'SIGKILL', keep: !!process.env.R15B_KEEP });
+    if (process.env.R15B_KEEP) console.log(`retained fixture ${dir}`);
   }
 });

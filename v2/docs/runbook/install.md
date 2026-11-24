@@ -9,7 +9,7 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
@@ -90,21 +90,10 @@ bash <bundle>/install.sh uninstall
 
 ## Installed migration commands
 
-The workflow builds both migration executables from the same checked-out head and locked release build as the
-serving programs. They are ordinary files in the recorded `/usr/local/lib/souls` tree, root-owned at mode 755;
-installing them does not run an import or start a service. The production machine needs no Rust toolchain.
-
-X11 reads a backup set and writes only a **fresh import output**, separate from the running installation's stores.
-Choose an output path that does not exist; do not point it at a serving account store or directory:
-
-```sh
-set -e
-test ! -e <fresh-import-dir>
-/usr/local/lib/souls/import-accounts <backup-set> --out <fresh-import-dir> --json
-```
-
-Add `--world <file.db>` for an original world's backup kept outside the set, as described in
-`v2/tools/import-accounts/README.md`. Both registries and all world backups open read-only and immutable.
+The workflow builds the world importer from the same checked-out head and locked release build as the serving
+programs. It is an ordinary file in the recorded `/usr/local/lib/souls` tree, root-owned at mode 755; installing it does
+not run an import or start a service. The production machine needs no Rust toolchain. (The accounts importer, X11's
+`import-accounts`, was removed in 0.134 D3: there are no migrations.)
 
 X6 has two steps: export one backup with Node, then validate the facts with the installed Rust executable. From
 a checkout of the same source head with its Node dependencies installed (Node 22.18 or later), create a fresh

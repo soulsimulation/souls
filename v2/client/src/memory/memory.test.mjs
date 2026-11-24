@@ -10,8 +10,8 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, join, relative, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { openMemoryFolder, PROJECTION_BUDGETS } from '../../../../tools/world-launcher/soul/memory-folder.mjs';
-import { openSoulMemory as shippingMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
+import { openMemoryFolder, PROJECTION_BUDGETS } from '../soul/memory-folder.mjs';
+import { openSoulMemory as shippingMemory } from '../soul/memory.mjs';
 import { feederFor } from './feeder.mjs';
 import { ALIASES, consolidateIn, digestOf, knownThrough, readAliases, soulDirOf } from './memory.mjs';
 

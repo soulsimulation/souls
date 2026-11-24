@@ -804,6 +804,7 @@ impl Activities {
         let open: Vec<&str> = kind
             .roles
             .iter()
+            .filter(|r| Some(&r.name) != offer::several(kind))
             .filter(|r| !l.node.members.iter().any(|m| m.role == r.name))
             .map(|r| r.name.as_str())
             .collect();
@@ -1053,7 +1054,9 @@ impl Activities {
         self.stands.remove(&activity);
     }
 
-    fn load_word(
+    /// The world's word `event` about `load`, held by `activity`, and `why`: `{1: activity, 2: load, 3: why}`, as
+    /// [`Activities::carry_set_down`] says it (0.135 C5: `souls:carry-going-on`, a side carrier left).
+    pub fn load_word(
         &mut self,
         tree: &mut Tree,
         activity: Id,
