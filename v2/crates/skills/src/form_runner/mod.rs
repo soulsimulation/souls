@@ -631,8 +631,10 @@ pub enum Effect {
     Add { field: u64, by: i64 },
     /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
     /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    /// The field is named, not numbered: the two ends may be of kinds that number it differently, and the world finds
+    /// its number on each end's own kind (E5).
     Transfer {
-        field: u64,
+        field: Name,
         from: Of,
         into: Of,
         amount: Amount,
@@ -1015,7 +1017,7 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                 return refuse("effect-not-built", "transfer into_field");
             }
             ("transfer", _) => Effect::Transfer {
-                field: field_n(entry, text(e.get("field"), "transfer.field")?)?,
+                field: a_name(text(e.get("field"), "transfer.field")?)?,
                 from: of(e.get("from"), args)?,
                 into: of(e.get("into"), args)?,
                 amount: match e.get("amount") {

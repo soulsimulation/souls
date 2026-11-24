@@ -109,7 +109,7 @@ use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
-use replica::world_model::{Audience, End, show};
+use replica::world_model::{Audience, End, plain, show};
 use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
@@ -117,6 +117,26 @@ use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
+
+/// A form's `create` with its kind as the zone's header pins it (`<kind>@<hash>`), the name every other entry gives
+/// its kind: an entry naming a kind's plain name is refused (`name-not-pinned`). `None` for any other effect, a kind
+/// already pinned, or one the header does not pin (its create is then refused by name, as before).
+fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_runner::Effect> {
+    let form_runner::Effect::Make { kind, into } = e else {
+        return None;
+    };
+    if kind.as_str().contains('@') {
+        return None;
+    }
+    let pinned = header?
+        .kinds
+        .iter()
+        .find(|n| plain(n.as_str()) == kind.as_str())?;
+    Some(form_runner::Effect::Make {
+        kind: pinned.clone(),
+        into: *into,
+    })
+}
 
 /// What a form's run reaches in the world: the tree as of the tick's start, the geometry's answers, the controller,
 /// the due list, the moves in progress and the moves' library (data), and the seed of the tick's draws.
@@ -1318,7 +1338,8 @@ impl Forms {
                 reserved: &reserved,
                 now: at,
             };
-            let entries = match cx.entries(mint, e) {
+            let made = pin_made(self.header.as_ref(), e);
+            let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {
                 Ok(x) => x,
                 Err(r) => {
                     self.out.truncate(len);
