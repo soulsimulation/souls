@@ -988,6 +988,7 @@ fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_mode
             children: Default::default(),
             slots: Default::default(),
             hands: None,
+            fields: Default::default(),
         };
         if kinds.get(*activity).is_some_and(|kind| kind != &runtime) {
             return Err(crate::world_model::Refusal::Source(

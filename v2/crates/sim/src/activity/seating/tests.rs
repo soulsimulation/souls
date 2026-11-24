@@ -353,6 +353,7 @@ fn world() -> W {
         children: children.iter().map(|c| plain(c).to_owned()).collect(),
         slots,
         hands: None,
+        fields: Default::default(),
     };
     admits.insert(
         PLACE.into(),

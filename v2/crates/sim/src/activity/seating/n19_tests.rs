@@ -87,6 +87,7 @@ fn site_area(w: &mut W) {
             children: BTreeSet::new(),
             slots: BTreeMap::new(),
             hands: None,
+            fields: Default::default(),
         },
     );
     let (cx, cz, h) = (SITE.x / 1000, SITE.z / 1000, 10_000);

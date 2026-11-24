@@ -1160,15 +1160,132 @@ fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>
         .collect())
 }
 
-/// E5: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's field 1)
-/// is refused `transfer-fields-differ`, so the run ends here rather than its part being refused by the tree's balance,
-/// which sums by number. Into a kind that numbers soap as linen does (the tub), it moves the amount.
+/// E5, E5b: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's
+/// field 1) binds each end's field by its name on that end's own kind: the source's soap goes down and the target's
+/// soap up, and neither end's other field (dirt, numbered as the other kind's soap) is written. The part commits onto
+/// a tree whose kinds are the same K3 kinds: T6 rule 3.4's balance sums the two sets by the field's name.
 #[test]
-fn e5_a_transfer_between_kinds_that_number_the_field_differently_is_refused_by_name() {
-    assert_eq!(
-        e5_transfer(0, "wash", &[("other", 101)]),
-        Err("transfer-fields-differ")
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amount() {
+    let (linen_e, board_e) = (E5_KINDS[0], E5_KINDS[1]);
+    let numbered = |e: &str| {
+        let mut v = parse(e).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let (linen_k, board_k) = (numbered(linen_e), numbered(board_e));
+    let mut kinds = Kinds::default();
+    kinds.load(&[("linen", linen_k.as_str()), ("board", board_k.as_str())]);
+    assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
+    let limits = super::amounts::limits(&kinds);
+
+    // The tree's kinds are the same numbered kinds, so it knows each field's name (section 3).
+    let kinds_diag = format!(
+        "{{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}}\n{}\n{}",
+        linen_k.trim(),
+        board_k.trim()
     );
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:board\", 3: 1}], 4: []}";
+    let (mut tree, rules) = Tree::load(
+        &parse_world(&parse_kinds(&kinds_diag).expect("kinds"), world).expect("a world"),
+    )
+    .expect("loads");
+    let (linen, board) = (id(100), id(101));
+
+    let args = BTreeMap::from([("other".to_owned(), board)]);
+    let effects = bind_effects_with(&parse(linen_e).expect("JSON"), "wash", &args).expect("bound");
+    let reserved: Vec<Id> = Vec::new();
+    let made = super::amounts::Cx {
+        view: View {
+            tree: &tree,
+            out: &[],
+        },
+        limits: &limits,
+        header: None,
+        body: id(2),
+        soul: id(2),
+        hands: &[],
+        node: linen,
+        reserved: &reserved,
+        now: 0,
+    }
+    .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
+    .expect("the transfer is not refused");
+    let mut entries: Vec<Effect> = made
+        .into_iter()
+        .map(|(node, _, body)| {
+            let mut e = world_set(node, 0);
+            e.body = body;
+            e
+        })
+        .collect();
+    let sets: Vec<(Id, u64, Value, Option<i64>)> = entries
+        .iter()
+        .flat_map(Effect::changes)
+        .filter_map(|c| match &c.change {
+            Change::Set {
+                node,
+                field,
+                to,
+                by,
+            } => Some((*node, *field, to.clone(), *by)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sets,
+        vec![
+            (linen, 2, Value::Uint(20), Some(-10)),
+            (board, 1, Value::Uint(10), Some(10))
+        ],
+        "each end's soap, by its own kind's number"
+    );
+
+    // The part commits onto the tree (its balance sums soap to zero), and the amounts are there.
+    let pinned: Vec<&str> = rules.kinds.keys().map(String::as_str).collect();
+    let header = header(id(1), &pinned);
+    for (e, s) in entries.iter_mut().zip(tree.to_state().next..) {
+        e.envelope.sequence = s;
+    }
+    let part = |entries: &[Effect]| {
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(entries.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .expect("bytes");
+        Part::read(&bytes).expect("a part")
+    };
+    // Half a transfer is still refused, and leaves the tree as it was: the balance is by name, not waived.
+    let half = tree.commit(&header, &part(&entries[..1]), &rules);
+    assert_eq!(
+        half.err().map(|r| r.name),
+        Some("by-not-balanced"),
+        "a lone set with a by"
+    );
+    tree.commit(&header, &part(&entries), &rules)
+        .expect("the part commits");
+    let field = |n: Id, f: u64| {
+        tree.node(tree.handle(n).expect("there"))
+            .expect("a node")
+            .fields()
+            .get(&f)
+            .cloned()
+    };
+    assert_eq!(field(linen, 2), Some(Value::Uint(20)));
+    assert_eq!(field(board, 1), Some(Value::Uint(10)));
+    assert_eq!(field(linen, 1), None, "the linen's dirt is untouched");
+    assert_eq!(field(board, 2), None, "the board's dirt is untouched");
+}
+
+/// E5: into a kind that numbers the field as the source does (the tub's soap is 2, as linen's), the transfer moves
+/// the amount, each end by its own field.
+#[test]
+fn e5_a_transfer_into_a_kind_that_numbers_the_field_alike_moves_the_amount() {
     assert_eq!(
         e5_transfer(0, "wash", &[("other", 102)]),
         Ok(vec![

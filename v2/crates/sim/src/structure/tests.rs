@@ -149,6 +149,7 @@ fn rules(rack: &Rack, souls: &[Id]) -> Rules {
         children: children.iter().map(|c| (*c).to_owned()).collect(),
         slots: BTreeMap::new(),
         hands: None,
+        fields: Default::default(),
     };
     kinds.insert(PLACE.into(), kind("place", &["thing", "body"]));
     kinds.insert(WALKER.into(), kind("family", &[]));

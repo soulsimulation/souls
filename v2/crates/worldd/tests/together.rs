@@ -272,6 +272,7 @@ fn tree_rules() -> TreeRules {
         children: children.iter().map(|c| (*c).to_owned()).collect(),
         slots: BTreeMap::new(),
         hands: None,
+        fields: Default::default(),
     };
     TreeRules {
         kinds: BTreeMap::from([

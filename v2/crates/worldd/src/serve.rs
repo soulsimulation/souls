@@ -792,6 +792,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
                 children: Default::default(),
                 slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }
@@ -4307,6 +4308,7 @@ mod tests {
                         children: Default::default(),
                         slots: Default::default(),
                         hands: None,
+                        fields: Default::default(),
                     },
                 );
             }
