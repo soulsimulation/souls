@@ -103,7 +103,7 @@ jobs:
                 mkdir -p "$OUT/$r"
                 SOULS_S10_DIAG=1 CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" "$n" "$arm" "$rate" "$world" 120 "$d" > "$d.log" 2>&1 || true
                 line=$(grep '^rung {' "$d.log" | tail -1)
-                grep s10-diag "$d/worldd.log" 2> /dev/null | tail -2 | sed "s/^/$r $rung $arm r$k /"
+                grep s10-diag "$d/worldd.log" 2> /dev/null | tail -3 | sed "s/^/$r $rung $arm r$k /"
                 if [ -z "$line" ]; then
                   echo "$r $rung $arm r$k: no result"
                   for f in "$d.log" "$d/gw.log" "$d/worldd.log"; do tail -4 "$f" 2> /dev/null | sed -E 's#[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?#<address>#g; s#https?://[^ ]*#<url>#g'; done
