@@ -17,7 +17,8 @@
 #           world, with every entry in content/kinds. Read only when the folder holds no world yet.
 #
 # The world is at <url>/w/dev/ and, signed in as the test person Ada, its creator, at <url>/w/dev/?as=Ada (any other
-# name is a test person who owns nothing). No Soul stands in it until one joins: a client pairs against the directory
+# name is a test person who owns nothing). V2_SEED_SOULS=<n> seeds n test Souls on its open ground (a viewer bench's
+# bodies; default 0). Otherwise no Soul stands in it until one joins: a client pairs against the directory
 # (port + 1) and a test person approves, as client/served/e2e/world.test.mjs does.
 #
 # What it needs: `caddy` and `node` on PATH (CADDY names another caddy). What is missing it builds, as `tools/ci.sh`
@@ -122,7 +123,7 @@ if [ ! -f world/world.json ]; then
     "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log && mv seed/testworld-s1-t0.facts.json seed/world.facts.json
     cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
   fi
-  "$BIN/worldd" seed --facts seed/world.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
+  "$BIN/worldd" seed --facts seed/world.facts.json --dir world --souls "${V2_SEED_SOULS:-0}" --at 0,0 --entries seed/entries \
     --creator "$(cat creator)" >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
 fi
 [ -f creator ] || die "$DIR holds a world seeded before its creator was Ada's principal: use a new --dir"
