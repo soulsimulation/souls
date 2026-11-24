@@ -646,6 +646,44 @@ impl Activities {
         self.load_word(tree, activity, load, "souls:carry-set-down", why, by)
     }
 
+    /// The world's word of the way `activity`'s carriers walk `load` (0.135 R2: one that turns it, found at the lift):
+    /// `souls:carry-way`, `{1: activity, 2: load, 3: [[front x, front z, back x, back z], ...]}`, each pose where its
+    /// front and back carriers stand on the open ground's plan, µm, the first where they stand at the lift.
+    pub fn carry_way(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        way: &[carry::turn::Ends],
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let num = |v: i64| {
+            u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+        };
+        let poses = way
+            .iter()
+            .map(|(f, b)| Value::Array(vec![num(f[0]), num(f[1]), num(b[0]), num(b[1])]))
+            .collect();
+        let fields = BTreeMap::from([
+            (1, activity.to_value()),
+            (2, load.to_value()),
+            (3, Value::Array(poses)),
+        ]);
+        self.emit(
+            tree,
+            activity,
+            audience,
+            by,
+            "souls:carry-way",
+            fields,
+            Vec::new(),
+        )
+    }
+
     /// The world's word that `load`, held by `activity`, was kept as it stands, and `why` (0.135 A2: its last holder
     /// left and setting it down would leave a joined part hanging): `souls:hold-kept`, `{1: activity, 2: load, 3: why}`,
     /// as [`Activities::carry_set_down`] says it.

@@ -66,9 +66,9 @@
 //!
 //! - **A way that turns (0.135 R2, #2814).** When the straight way to a lift's destination clips, [`turn`] searches
 //!   the load's poses for a way that turns it (through a door narrower than its length, say), each move checked by
-//!   [`way`]; no way is refused `carry-load-blocked` before the lift, a search past its budget `carry-unproven`.
-//!   The carriers walk that way ([`turn::turn_way`] gives where they stand at each pose), each tick checked as
-//!   above.
+//!   [`way`]; no way is refused `carry-load-blocked` before the lift, a search past its small budget (it runs on the
+//!   world's clock thread) `carry-unproven`. The way is kept on the carry ([`Carry::way`]) and said to its audience
+//!   at the lift (`souls:carry-way`, worldd's engine): its carriers walk it pose by pose, each tick checked as above.
 //!
 //! Not here, proposed as tasks: carriers that swing about their grips (a corner between 1.2 m corridors); stairs;
 //! turning with three carriers or more; a sweep that counts the sides' bodies; a blocked
@@ -399,7 +399,8 @@ impl Load {
     /// `back`, the load's middle at `middle` (each the open ground's plan, µm), its grips along `axis` on the plan from
     /// the back toward the front ([`Load::lies_along`]; the carriers' own line when it stands); and, if the lift names
     /// one, the front's destination `to` and the fixed geometry on the way, straight or turning (0.135 R2).
-    /// `carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`, `carry-unproven`.
+    /// `carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`, `carry-unproven`. A way that turns it,
+    /// when the straight way clips: where its carriers stand at each pose ([`turn::turn_way`]).
     pub fn check(
         &self,
         crew: usize,
@@ -408,7 +409,7 @@ impl Load {
         middle: Xz,
         axis: Option<Xz>,
         to: Option<(Xz, &Fixed)>,
-    ) -> R<()> {
+    ) -> R<Option<Vec<turn::Ends>>> {
         if (crew as u64) < self.crew {
             return refuse(
                 "carry-crew-too-small",
@@ -443,9 +444,9 @@ impl Load {
         if let Some((to, fixed)) = to
             && sweep_load(&[back, front, to], fixed, self, l).is_err()
         {
-            turn::turn_way(self, fixed, front, back, to, turn::BUDGET)?;
+            return turn::turn_way(self, fixed, front, back, to, turn::BUDGET).map(Some);
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -955,6 +956,10 @@ pub struct Carry {
     /// How far above its carriers' floor it comes to rest when set down where the carry last had it, µm (0.135 C7: a
     /// carry stopped over a low box sets its load on top of it, [`rest_top`]).
     pub raise: i64,
+    /// The way its carriers walk it when the lift found one that turns it (0.135 R2, [`turn::turn_way`]): where they
+    /// stand at each pose, `(front, back)` on the open ground's plan, µm, said to its audience at the lift
+    /// (`souls:carry-way`). Empty for a straight way.
+    pub way: Vec<turn::Ends>,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -1005,6 +1010,7 @@ impl Carry {
             sides: Vec::new(),
             began_in: None,
             raise: 0,
+            way: Vec::new(),
         }
     }
 

@@ -885,8 +885,8 @@ mod from_entry {
     }
 
     /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused
-    /// before the lift (`carry-load-blocked` since 0.135 R2: no way turns it through, nor round the walls) and the
-    /// beam (0.1 m) is not; a crew of one and a carrier off its grip are refused by name.
+    /// before the lift (`carry-unproven` since 0.135 R2: no way that turns it is found within the search's small
+    /// budget) and the beam (0.1 m) is not; a crew of one and a carrier off its grip are refused by name.
     #[test]
     fn c2_a_passage_a_crew_and_a_grip_refused_before_the_lift() {
         let wall = |z0: i64, z1: i64| {
@@ -910,7 +910,7 @@ mod from_entry {
             let r = load.check(2, [f, 0], [b, 0], [0, 0], None, Some(([20 * M, 0], &fixed)));
             match ok {
                 true => assert!(r.is_ok(), "{name}: {r:?}"),
-                false => assert_eq!(r.map_err(|e| e.name), Err("carry-load-blocked"), "{name}"),
+                false => assert_eq!(r.map_err(|e| e.name), Err("carry-unproven"), "{name}"),
             }
         }
         let beam = Load::of(&entry("rack_beam.json")).unwrap();
@@ -1366,7 +1366,7 @@ mod each_step {
 mod turning {
     use replica::rules::json::parse;
 
-    use super::super::turn::{BUDGET, Ends, STEP, turn_way};
+    use super::super::turn::{BUDGET, Ends, STEP, search, turn_way};
     use super::super::{Fixed, Load, Quad, len, outline, step_way, sweep_load};
 
     const M: i64 = 1_000_000;
@@ -1465,7 +1465,7 @@ mod turning {
     fn r2_twenty_runs_never_meet_fixed_geometry() {
         let (load, fixed) = (beam(), room(1_200_000));
         let [b, f] = load.places();
-        let mut poses = 0;
+        let (mut poses, mut tried) = (0, 0);
         for k in 0..20i64 {
             let (x, z) = ((k % 5 - 2) * 400_000, -M - (k / 5) * 150_000);
             let (front, back) = if k % 2 == 0 {
@@ -1474,12 +1474,13 @@ mod turning {
                 ([x + b, z], [x + f, z])
             };
             let to = [(k % 3 - 1) * 500_000, 5 * M];
-            let way = turn_way(&load, &fixed, front, back, to, BUDGET)
-                .unwrap_or_else(|r| panic!("run {k}: {r:?}"));
+            let (way, n) = search(&load, &fixed, front, back, to, BUDGET);
+            let way = way.unwrap_or_else(|r| panic!("run {k}: {r:?}"));
+            tried = tried.max(n);
             poses += walked(&fixed, &load, &way);
             assert!(way.last().unwrap().1[1] > 200_000, "run {k}: inside");
         }
-        println!("R2: 20 runs, {poses} poses, none meeting fixed geometry");
+        println!("R2: 20 runs, {poses} poses, none meeting fixed geometry; at most {tried} tried");
     }
 
     /// An L of corridors `width` wide: east along z 0 to a corner at the origin, then north.
@@ -1517,6 +1518,58 @@ mod turning {
         let fixed = corner(900_000);
         let (front, back) = ([-6 * M + f, 0], [-6 * M + b, 0]);
         turn_way(&board, &fixed, front, back, [-M, 0], BUDGET).expect("along the corridor");
+    }
+
+    /// The search runs on the world's clock thread, inside the lift's check (review of #4564): a destination no way
+    /// reaches (a sealed 4 m box 10 m and 40 m away, across a ground of 0.2 m posts every 1.5 m or 0.9 m) is refused
+    /// once [`BUDGET`] poses are tried, `carry-unproven` or `carry-load-blocked`, never more. Measured in release at
+    /// about 20 µs a pose, so a few milliseconds of a 50 ms tick; the bound asserted here is wide, for a loaded machine
+    /// and for a debug build.
+    #[test]
+    // The wall clock, to measure the search: the engine never reads it.
+    #[allow(clippy::disallowed_methods)]
+    fn r2_a_sealed_destination_never_holds_the_clock() {
+        let load = beam();
+        let [b, f] = load.places();
+        let mut worst = std::time::Duration::ZERO;
+        for (pitch, far) in [
+            (1_500_000i64, 10 * M),
+            (1_500_000, 40 * M),
+            (900_000, 40 * M),
+        ] {
+            let mut boxes = Vec::new();
+            for i in -12..(far / pitch + 12) {
+                for j in -15..15i64 {
+                    let (x, z) = (i * pitch + pitch / 2, j * pitch + pitch / 2);
+                    if (x.abs() > 3 * M || z.abs() > M) && (x - far).abs() > 3 * M {
+                        boxes.push(wall(x - 100_000, z - 100_000, x + 100_000, z + 100_000));
+                    }
+                }
+            }
+            boxes.extend([
+                wall(far - 2 * M, -2 * M, far + 2 * M, -2 * M + 200_000),
+                wall(far - 2 * M, 2 * M - 200_000, far + 2 * M, 2 * M),
+                wall(far - 2 * M, -2 * M, far - 2 * M + 200_000, 2 * M),
+                wall(far + 2 * M - 200_000, -2 * M, far + 2 * M, 2 * M),
+            ]);
+            let fixed = Fixed::new(boxes);
+            let t = std::time::Instant::now();
+            let (r, n) = search(&load, &fixed, [f, 0], [b, 0], [far, 0], BUDGET);
+            let took = t.elapsed();
+            worst = worst.max(took);
+            println!(
+                "R2: sealed {} m away, posts every {} mm: {:?} after {n} poses in {took:?}",
+                far / M,
+                pitch / 1000,
+                r.as_ref().map_err(|e| e.name)
+            );
+            assert!(r.is_err() && n <= BUDGET + 1, "{n} poses");
+        }
+        let bound = if cfg!(debug_assertions) { 400 } else { 20 };
+        assert!(
+            worst < std::time::Duration::from_millis(bound),
+            "the search held the clock for {worst:?}"
+        );
     }
 
     /// #2814 A4: the same door with a search allowed only twenty poses is refused `carry-unproven`.

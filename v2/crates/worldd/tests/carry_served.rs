@@ -287,6 +287,41 @@ fn moves_of(dir: &Path, load: Id) -> Vec<Pose> {
         .collect()
 }
 
+/// The way the world said for a carry that turns its load (0.135 R2, `souls:carry-way`), within 20 s: each pose's
+/// front x, front z, back x and back z, µm.
+fn carry_way(dir: &Path) -> Vec<[i64; 4]> {
+    let num = |v: &Value| match v {
+        Value::Uint(n) => i64::try_from(*n).ok(),
+        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+        _ => None,
+    };
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let found = effects(dir)
+            .iter()
+            .flat_map(|e| e.events.iter().flatten())
+            .find(|ev| ev.name.as_str() == "souls:carry-way")
+            .and_then(|ev| match ev.fields.get(&3) {
+                Some(Value::Array(ps)) => ps
+                    .iter()
+                    .map(|p| match p {
+                        Value::Array(v) => {
+                            let v: Vec<i64> = v.iter().filter_map(num).collect();
+                            v.try_into().ok()
+                        }
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<[i64; 4]>>>(),
+                _ => None,
+            });
+        if let Some(w) = found {
+            return w;
+        }
+        assert!(Instant::now() < end, "no souls:carry-way in the log");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn int(v: i64) -> Value {
     u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
 }
@@ -851,12 +886,11 @@ async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carri
 /// doorway, narrower than the beam's 2.74 m, by turning it a quarter. A room of walls stands on the open ground east of
 /// the beam: 5.8 m by 8 m clear inside, its one doorway in its west wall level with the beam's middle. The lift names
 /// a point 4.6 m inside; the straight way there clips the wall, so the lift's check finds a way that turns the beam
-/// (`turn::turn_way`) and the two Souls walk it pose by pose, by their own intents through the gateway, each tick
-/// checked by C7's check. The carry is never stopped, no sample of the beam meets a wall, it turns from north to
+/// (`turn::turn_way`) and says it (`souls:carry-way`); the two Souls read it from the world and walk it pose by pose,
+/// by their own intents through the gateway, each tick checked by C7's check. The carry is never stopped, no sample of the beam meets a wall, it turns from north to
 /// east, and it is set down inside the room.
 #[tokio::test(flavor = "multi_thread")]
 async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
-    use sim::activity::carry::turn::{BUDGET, turn_way};
     use sim::activity::carry::{Fixed, outline};
     let d = scratch("r2");
     // The room's west wall's west face, level with the beam's middle, 1.2 m east of it (mm).
@@ -903,15 +937,9 @@ async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
     let im = import_eden::load(&facts).unwrap();
     let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
     let lineage = im.nodes["world"].scope();
-    // The fixed geometry the world reads, and where the Souls will walk: the way the lift's check finds.
-    let fixed = Fixed::of(&im.tree, ground).unwrap();
     let entry = construction("rack_beam.json");
     let load = Load::of(&entry).unwrap();
-    let [back, front] = load.places();
-    let xz = |v: Vec3| [v.x, v.z];
     let to = Vec3::new((wx + 4_600) * 1000, 0, wz * 1000);
-    let (f0, b0) = (spot(beam_at(), front, true), spot(beam_at(), back, true));
-    let way = turn_way(&load, &fixed, xz(f0), xz(b0), xz(to), BUDGET).expect("a way that turns it");
     let (url, tokens) = gateway(&socket, &souls).await;
     let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
     let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
@@ -923,10 +951,12 @@ async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
     a.act("carry:lift", carry, lift)
         .await
         .expect("lifted, a way through the doorway found");
-    for (k, (fa, fb)) in way.iter().enumerate().skip(1) {
-        a.send("eden:walk", ground, point(Vec3::new(fa[0], 0, fa[1])))
+    // The way, as the world says it to the carry's audience: each pose where the front and the back stand.
+    let way = carry_way(&dir);
+    for (k, p) in way.iter().enumerate().skip(1) {
+        a.send("eden:walk", ground, point(Vec3::new(p[0], 0, p[1])))
             .await;
-        b.send("eden:walk", ground, point(Vec3::new(fb[0], 0, fb[1])))
+        b.send("eden:walk", ground, point(Vec3::new(p[2], 0, p[3])))
             .await;
         let (wa, wb) = (a.answer().await, b.answer().await);
         wa.unwrap_or_else(|r| panic!("the front's walk {k}: {r}"));

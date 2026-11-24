@@ -9,11 +9,15 @@
 //!   it is held, at its own height), the load grown by [`MARGIN`] each way so two carriers walking it a little out of
 //!   step stay legal; and each carrier's body, a square of [`BODY_HALF`] about it, against the boxes a walking body
 //!   meets ([`Fixed::hit`]), at the same steps. No move goes through forbidden geometry, so neither does the way.
-//! - **The search** is A* (cost: how far the farther end moves; estimate: the front's distance to the destination),
-//!   in a fixed order, so the same world gives the same way. The middle stays within [`ROOM`] beyond half the span of
+//! - **The search** is a weighted A* (cost: how far the farther end moves; estimate: [`GREED`] times the front's
+//!   distance to the destination), in a fixed order, so the same world gives the same way. The middle stays within [`ROOM`] beyond half the span of
 //!   the straight way (from the back, to the front, to the destination). It ends when the front is within [`STEP`]
 //!   of the destination. Every pose of that band tried, none there: `carry-load-blocked`, before the lift. More than
-//!   `budget` poses tried: `carry-unproven`.
+//!   `budget` poses tried: `carry-unproven`. It runs on the world's clock thread, so [`BUDGET`] is small: a way
+//!   through a door near the lift, not a long way round (a destination beyond it is refused unproven; lift for the
+//!   door's far side, then lift again).
+//! - **The way is the world's** ([`super::Carry::way`]): kept on the carry at the lift and said to its audience
+//!   (`souls:carry-way`), so its carriers walk it pose by pose; each tick is still checked by C7's check.
 //!
 //! Not here: carriers that swing about their grips (the group held in line is the load plus both reaches and both
 //! bodies, so a 2 m board cannot round a corner between 1.2 m corridors: #2814's corner, proposed as a task); three
@@ -38,8 +42,14 @@ pub const MARGIN: i64 = 100_000;
 pub const BODY_HALF: i64 = 330_000;
 /// How far beyond half the span the middle may stray from the straight way, µm.
 pub const ROOM: i64 = 2_000_000;
-/// How many poses the search tries before it gives up as unproven.
-pub const BUDGET: usize = 150_000;
+/// How many poses the search tries before it gives up as unproven. It runs on the world's clock thread inside the
+/// lift's check, so this bounds its time: measured in release at about 20 µs a pose on a ground of posts every 1.5 m
+/// (`r2_a_sealed_destination_never_holds_the_clock`), a few milliseconds at most. A door near the lift takes about a
+/// hundred.
+pub const BUDGET: usize = 200;
+/// How much the estimate counts against the cost so far: more than one, so the search heads for the destination
+/// and tries few poses (a weighted A*; the way found is legal, not always the shortest).
+pub const GREED: i64 = 2;
 
 /// A pose on the lattice: the middle's steps along x and z from the middle at the lift, and the heading's.
 type State = (i64, i64, i64);
@@ -59,10 +69,14 @@ fn square(p: Xz, d: Xz) -> Quad {
 }
 
 /// Whether both carriers' bodies stay clear of what a walking body meets as they walk from `a` to `b`, at every
-/// [`SWEEP_STEP`] of either.
+/// twice [`SWEEP_STEP`] of either: a body between two of those is within half that, 50 mm, of one, and the square
+/// checked there is 50 mm wider than the body's 0.28 m.
 fn bodies_clear(fixed: &Fixed, a: Ends, b: Ends) -> bool {
     let moved = |p: Xz, q: Xz| len([q[0] - p[0], q[1] - p[1]]);
-    let n = moved(a.0, b.0).max(moved(a.1, b.1)).div_euclid(SWEEP_STEP) + 1;
+    let n = moved(a.0, b.0)
+        .max(moved(a.1, b.1))
+        .div_euclid(2 * SWEEP_STEP)
+        + 1;
     let between = |p: Xz, q: Xz, k: i64| {
         let d = scale([q[0] - p[0], q[1] - p[1]], k, n);
         [p[0] + d[0], p[1] + d[1]]
@@ -103,6 +117,31 @@ pub fn turn_way(
     to: Xz,
     budget: usize,
 ) -> R<Vec<Ends>> {
+    search(load, fixed, front, back, to, budget).0
+}
+
+/// [`turn_way`], and how many poses it tried.
+pub fn search(
+    load: &Load,
+    fixed: &Fixed,
+    front: Xz,
+    back: Xz,
+    to: Xz,
+    budget: usize,
+) -> (R<Vec<Ends>>, usize) {
+    let mut tried = 0usize;
+    let r = search_counted(load, fixed, (front, back), to, budget, &mut tried);
+    (r, tried)
+}
+
+fn search_counted(
+    load: &Load,
+    fixed: &Fixed,
+    (front, back): Ends,
+    to: Xz,
+    budget: usize,
+    tried: &mut usize,
+) -> R<Vec<Ends>> {
     let h = load.half;
     let fat = Load {
         half: Vec3::new(h.x + MARGIN, h.y + MARGIN, h.z + MARGIN),
@@ -129,7 +168,7 @@ pub fn turn_way(
     };
     let fits = |e: Ends| way(fixed, &fat, e, e, &[]).is_ok() && bodies_clear(fixed, e, e);
     let goal = |e: Ends| len([e.0[0] - to[0], e.0[1] - to[1]]) <= STEP;
-    let guess = |e: Ends| len([e.0[0] - to[0], e.0[1] - to[1]]);
+    let guess = |e: Ends| GREED * len([e.0[0] - to[0], e.0[1] - to[1]]);
 
     let start: State = (0, 0, 0);
     let first = (front, back);
@@ -142,7 +181,6 @@ pub fn turn_way(
     let mut best: BTreeMap<State, (i64, Option<State>)> = BTreeMap::from([(start, (0, None))]);
     let mut fit: BTreeMap<State, bool> = BTreeMap::from([(start, true)]);
     let mut open = BinaryHeap::from([Reverse((guess(ends(start)), 0i64, start))]);
-    let mut tried = 0usize;
     let diag = STEP * 1_414_214 / 1_000_000;
     while let Some(Reverse((_, g, s))) = open.pop() {
         if best.get(&s).is_some_and(|b| b.0 < g) {
@@ -171,8 +209,8 @@ pub fn turn_way(
             }
             return Ok(out);
         }
-        tried += 1;
-        if tried > budget {
+        *tried += 1;
+        if *tried > budget {
             return refuse(
                 "carry-unproven",
                 format!("{budget} poses tried and no way found yet"),
@@ -217,10 +255,11 @@ pub fn turn_way(
     refuse(
         "carry-load-blocked",
         format!(
-            "no way turns it to ({}, {}) mm within {} mm of the straight way ({tried} poses tried)",
+            "no way turns it to ({}, {}) mm within {} mm of the straight way ({} poses tried)",
             to[0] / 1000,
             to[1] / 1000,
-            band / 1000
+            band / 1000,
+            *tried
         ),
     )
 }

@@ -6,7 +6,7 @@
 //! place by an ordinary walk. Soul 1 offers a carry to Soul 2 (E8's offer, Soul 1 in front). While Soul 1 is alone in
 //! it, its lift is refused `carry-needs-two`. Soul 2 accepts, so the carry starts; Soul 1 lifts the beam, both walk
 //! 25 m east side by side, and Soul 2 sets it down. Then they carry a rack upright, which is shorter and wider, 25 m west, Soul 2 in front. Before
-//! that, a lift naming a way through a passage narrower than the upright is refused `carry-load-blocked`. Last, in a
+//! that, a lift naming a way through a passage narrower than the upright is refused `carry-unproven`. Last, in a
 //! third carry, a crate that takes three is refused `carry-crew-too-small`, and the beam, now 25 m off, is refused
 //! `carry-grip-out-of-reach`; neither moves. Every node of the world as built is still there and no other is, and the
 //! log's effects replayed onto the world as built give the state hash its last part holds. A blocked set-down is not
@@ -949,7 +949,7 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
         .act("carry:lift", Some(second), lift(upright(), Some(narrow)))
         .await;
     assert!(
-        clips.as_ref().is_err_and(|r| r == "carry-load-blocked"),
+        clips.as_ref().is_err_and(|r| r == "carry-unproven"),
         "a passage too narrow: {clips:?}"
     );
     let ahead = on(place(upright_at(), front, false), -CARRIED);
@@ -1040,7 +1040,7 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
     );
     println!(
         "team gate: rung 1 reached ({}); a Soul alone refused carry-needs-two; a passage too narrow refused \
-         carry-load-blocked; a crew too small refused carry-crew-too-small; a grip out of reach refused \
+         carry-unproven; a crew too small refused carry-crew-too-small; a grip out of reach refused \
          carry-grip-out-of-reach; ids conserved; the log replays to its state hash; a blocked set-down: not reached",
         steps.join(", ")
     );
