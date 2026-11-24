@@ -17,20 +17,32 @@ const BUILD = 'we-aaaaaaaaaaaa';
 const PAGE = `<!doctype html><title>eden</title><body>Eden<script>
 const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/w/eden/ws');
 </script></body>`;
+// 24 Nov: a page the new engine runs reads its stream (bridge.ts `__soulsV2`, newest world time) and opens no world socket
+const V2_PAGE = (moving) => `<!doctype html><title>eden</title><script>window.__simConfig={"worldKey":"eden","v2Stream":"/s/eden/"}</script><body>Eden<script>
+window.__soulsV2 = { newestTo: 1, error: null };${moving ? ' setInterval(() => { window.__soulsV2.newestTo += 50000; }, 200);' : ''}
+</script></body>`;
+// the drop the dry run of 24 Nov saw: the page closes a world socket itself (code 1005, as the unadopted entry socket
+// did 20 s after it opened) and opens no other: nothing resumes it
+const DROP_PAGE = `<!doctype html><title>eden</title><body>Eden<script>
+const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/w/drop/ws'); setTimeout(() => ws.close(), 3000);
+</script></body>`;
 
 function origin({ upAfterMs, builds = {} }) {
   const t0 = Date.now(), sockets = new Set();
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://x').pathname, up = path !== '/w/down/' && upAfterMs !== null && Date.now() - t0 >= upAfterMs;
     if (!up) { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('world unavailable'); return; }
-    res.writeHead(200, { 'content-type': 'text/html' }); res.end(PAGE.replace("'/w/eden/ws'", `'${path}ws'`));
+    if (path === '/__sim/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, build: BUILD })); return; }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(path === '/w/v2/' ? V2_PAGE(true) : path === '/w/v2-stuck/' ? V2_PAGE(false) : path === '/w/drop/' ? DROP_PAGE : PAGE.replace("'/w/eden/ws'", `'${path}ws'`));
   });
   server.on('upgrade', (req, socket) => {
     const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     const msg = Buffer.from(JSON.stringify({ t: 'welcome', build: builds[new URL(req.url, 'http://x').pathname] ?? BUILD }));
     socket.write(Buffer.concat([Buffer.from([0x81, msg.length]), msg]));
-    socket.on('data', () => {}); socket.on('error', () => {}); sockets.add(socket);
+    // a close frame from the page is answered, so its close event fires as it does against the launcher
+    socket.on('data', (d) => { if ((d[0] & 0x0f) === 8) socket.end(Buffer.from([0x88, 0])); }); socket.on('error', () => {}); sockets.add(socket);
   });
   return new Promise((yes) => server.listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const s of sockets) s.destroy(); server.close(); } })));
 }
@@ -74,4 +86,25 @@ test('a page that ended on another build is a rollback (exit 3) even while anoth
   assert.deepEqual(r.bar.rolledBack, [`desktop /w/eden/: serves we-bbbbbbbbbbbb, not ${BUILD}`]);
   assert.equal(r.bar.notLoaded.length, 1);
   assert.match(r.log, /ROLLED BACK/);
+});
+
+test('a page that reads a v2 stream: the site\'s build, and a stream that advances, pass with no world socket', { timeout: 120_000 }, async () => {
+  const r = await probe(0, { pages: '/w/v2/', phonePages: '/w/v2/' });
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(r.bar.builds, { 'desktop /w/v2/': `${BUILD} -> ${BUILD}`, 'phone /w/v2/': `${BUILD} -> ${BUILD}` });
+  assert.deepEqual([r.bar.drops, r.bar.streamStuck, r.bar.noBuild], [0, [], []]);
+});
+
+test('a v2 page whose stream stops is streamStuck (exit 1): a viewer on a stale world', { timeout: 120_000 }, async () => {
+  const r = await probe(0, { pages: '/w/v2-stuck/', phonePages: '/w/v2-stuck/' });
+  assert.equal(r.code, 1, r.log);
+  assert.equal(r.bar.streamStuck.length, 2); assert.match(r.bar.streamStuck[0], /stream did not advance \(1 -> 1\)/);
+  assert.match(r.log, /STREAM STUCK/);
+});
+
+test('a world socket the page closes itself and never replaces is not resumed (exit 1), and the bar says which', { timeout: 120_000 }, async () => {
+  const r = await probe(0, { pages: '/w/drop/', phonePages: '/w/drop/' });
+  assert.equal(r.code, 1, r.log);
+  assert.equal(r.bar.notResumed, 2, r.log);
+  assert.match(r.bar.notResumedAt[0], /^desktop \/w\/drop\/: closed \(1005\) at \+\d/);
 });
