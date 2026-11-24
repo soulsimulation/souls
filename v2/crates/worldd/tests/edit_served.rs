@@ -3999,3 +3999,1014 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         built.len()
     );
 }
+
+/// [`yard_world`] with three bays side by side at the build site and parts for each from two yards (0.135 A4): the
+/// site's bay (x 65 m) with a bay 4 m west of it and one 4 m east, each its own two frames and two low beams. The west
+/// yard is the test world's (two frames on its stand, four beams) and a second stand 6 m south with one frame; the east
+/// yard, 23 m east of the site, mirrors it: a stand with two frames, two beams beside it, a second stand with one.
+fn three_bays_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+    let (text, slots) = yard_world(d);
+    let mut f = json::parse(&text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let things = top
+        .iter_mut()
+        .find_map(|(k, v)| match (k.as_str(), v) {
+            ("things", json::Value::Arr(a)) => Some(a),
+            _ => None,
+        })
+        .unwrap();
+    let find = |things: &[json::Value], id: &str| {
+        things
+            .iter()
+            .find(|t| t.get("id").and_then(json::Value::str) == Some(id))
+            .unwrap_or_else(|| panic!("the world's {id}"))
+            .clone()
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    // `t` as a new thing: its id, name, parent, pose and (in a stand) its slot.
+    let like = |t: &json::Value,
+                id: &str,
+                name: &str,
+                parent: Option<&str>,
+                pose: [i64; 3],
+                slot: Option<i64>| {
+        let json::Value::Obj(mut o) = t.clone() else {
+            panic!("a thing")
+        };
+        for (k, v) in o.iter_mut() {
+            match k.as_str() {
+                "id" => *v = json::Value::s(id),
+                "name" => *v = json::Value::s(name),
+                "parent" => *v = parent.map_or(json::Value::Null, json::Value::s),
+                "pose" => *v = json::Value::Arr([pose[0], pose[1], pose[2], 0].map(num).to_vec()),
+                "slot" => *v = json::Value::Obj(vec![("n".into(), num(slot.unwrap()))]),
+                _ => {}
+            }
+        }
+        json::Value::Obj(o)
+    };
+    let (bay, stand, frame, beam) = (
+        find(things, "site-bay"),
+        find(things, "yard-stand"),
+        find(things, "yard-frame-1"),
+        find(things, "yard-beam-1"),
+    );
+    for (id, name, x) in [
+        ("site-bay-w", "the site's west rack bay", 61_000),
+        ("site-bay-e", "the site's east rack bay", 69_000),
+    ] {
+        things.push(like(&bay, id, name, None, [x, 0, -24_000], None));
+    }
+    for (id, name, x, z) in [
+        (
+            "yard-stand-w2",
+            "the west yard's second stand",
+            40_000,
+            -30_000,
+        ),
+        (
+            "yard-stand-e",
+            "the east yard's frame stand",
+            88_000,
+            -24_000,
+        ),
+        (
+            "yard-stand-e2",
+            "the east yard's second stand",
+            88_000,
+            -30_000,
+        ),
+    ] {
+        things.push(like(&stand, id, name, None, [x, 0, z], None));
+    }
+    for (id, name, parent, n) in [
+        ("yard-frame-w", "rack frame w", "yard-stand-w2", 1),
+        ("yard-frame-e1", "rack frame e1", "yard-stand-e", 1),
+        ("yard-frame-e2", "rack frame e2", "yard-stand-e", 2),
+        ("yard-frame-e3", "rack frame e3", "yard-stand-e2", 1),
+    ] {
+        let z = if n == 1 { -150 } else { 150 };
+        things.push(like(&frame, id, name, Some(parent), [0, 100, z], Some(n)));
+    }
+    for (id, name, x) in [
+        ("yard-beam-5", "rack beam 5", 86_000),
+        ("yard-beam-6", "rack beam 6", 85_700),
+    ] {
+        things.push(like(&beam, id, name, None, [x, 0, -24_000], None));
+    }
+    (f.to_json(), slots)
+}
+
+/// What A4's steps share: the served world, its open ground and the crew's kind.
+struct Site<'a> {
+    w: &'a Seeded,
+    g: Id,
+    crew: Value,
+}
+
+/// A part's carriers 2.2 m either side of it along z (as A3's): a frame's first carrier on its -z side, a beam's on +z.
+fn frame_ends(at: Vec3) -> (Vec3, Vec3) {
+    (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000))
+}
+
+fn beam_ends(at: Vec3) -> (Vec3, Vec3) {
+    (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000))
+}
+
+/// Where a holder and its helper stand to start a hold crew on a frame at `at` in a bay: the holder 1 m to the side
+/// `side` (+1 east, -1 west: away from where the beams come in), the helper 1.2 m to the other side and 0.8 m out
+/// from the bay (`out` -1 for `upright_a`, +1 for `upright_b`).
+fn hold_places(at: Vec3, side: i64, out: i64) -> (Vec3, Vec3) {
+    (
+        v3(at.x + side * 1_000_000, 0, at.z),
+        v3(at.x - side * 1_200_000, 0, at.z + out * 800_000),
+    )
+}
+
+async fn walk_two(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    (pa, pb): (Vec3, Vec3),
+    what: &str,
+) {
+    a.send("eden:walk", s.g, to_point(pa)).await;
+    b.send("eden:walk", s.g, to_point(pb)).await;
+    let (x, y) = (a.end().await, b.end().await);
+    assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+}
+
+/// A walk's parameters: to `at` on the ground.
+fn to_point(at: Vec3) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, Value::Array(vec![int(at.x), int(0), int(at.z)]))])
+}
+
+/// A crew on `place` (the ground, or a part it then holds): `a` offers in front, `b` accepts.
+async fn crew_of(s: &Site<'_>, a: &mut GwSoul, b: &mut GwSoul, place: Id) -> Id {
+    let body = body_of(s.w, b.soul);
+    let got = a
+        .act(
+            "activity:offer",
+            place,
+            BTreeMap::from([
+                (1, s.crew.clone()),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![body.to_value()])),
+            ]),
+        )
+        .await;
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let c = created_by(s.w, &got.entries, "mars:carry_activity@");
+    let got = b.act("activity:accept", c, BTreeMap::new()).await;
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    c
+}
+
+async fn leave_crew(a: &mut GwSoul, c: Id, what: &str) {
+    let got = a.act("activity:leave", c, BTreeMap::new()).await;
+    assert_eq!(got.kind, 1, "{what}: {got:?}");
+}
+
+fn part_of(p: Id) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, p.to_value())])
+}
+
+fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))])
+}
+
+/// Where a part's carriers stand for it: [`frame_ends`] or [`beam_ends`].
+type Ends = fn(Vec3) -> (Vec3, Vec3);
+
+/// Pair `a`, `b` takes `part` on a new crew (its carriers at `ends` of it) and carries it along `via` (the part's
+/// middle at each): the crew, the part riding it.
+#[allow(clippy::too_many_arguments)]
+async fn take_along(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    part: Id,
+    ends: Ends,
+    via: &[Vec3],
+    what: &str,
+) -> Id {
+    walk_two(s, a, b, ends(where_is(s.w, part).2), what).await;
+    let c = crew_of(s, a, b, s.g).await;
+    let got = a.act("part:take", c, part_of(part)).await;
+    assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
+    for at in via {
+        walk_two(s, a, b, ends(*at), what).await;
+    }
+    c
+}
+
+/// As [`take_along`], then the part put by `to`: the crew (holding it if it stands in a bay).
+#[allow(clippy::too_many_arguments)]
+async fn carry_in(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    part: Id,
+    ends: Ends,
+    via: &[Vec3],
+    to: BTreeMap<u64, Value>,
+    what: &str,
+) -> Id {
+    let c = take_along(s, a, b, part, ends, via, what).await;
+    let got = a.act("part:put", c, to).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}");
+    c
+}
+
+/// A beam into slot `k` of `bay` (at `at`) by its own crew of `a`, `b`, who then go: it bears on its joints to the
+/// bay's frames.
+#[allow(clippy::too_many_arguments)]
+async fn beam_in(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    beam: Id,
+    bay: Id,
+    k: u64,
+    at: Vec3,
+    what: &str,
+) {
+    let c = carry_in(s, a, b, beam, beam_ends, &[at], into_slot(bay, k), what).await;
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// Holder `h` takes frame `f` from `q`, who holds it alone in crew `c`, with `p`'s help (A3's change of crew): a hold
+/// crew of `h` and `p` on the frame, `p` goes, then `q` leaves `c`. The hold crew.
+#[allow(clippy::too_many_arguments)]
+async fn hand_over(
+    s: &Site<'_>,
+    h: &mut GwSoul,
+    p: &mut GwSoul,
+    q: &mut GwSoul,
+    c: Id,
+    f: Id,
+    places: (Vec3, Vec3),
+    what: &str,
+) -> Id {
+    walk_two(s, h, p, places, what).await;
+    let hold = crew_of(s, h, p, f).await;
+    leave_crew(p, hold, what).await;
+    leave_crew(q, c, what).await;
+    println!("{what}");
+    hold
+}
+
+/// Holder `h` takes frame `f`, standing in its bay on its joints, with `p`'s help: the hold crew.
+async fn hold_frame(
+    s: &Site<'_>,
+    h: &mut GwSoul,
+    p: &mut GwSoul,
+    f: Id,
+    places: (Vec3, Vec3),
+    what: &str,
+) -> Id {
+    walk_two(s, h, p, places, what).await;
+    let hold = crew_of(s, h, p, f).await;
+    leave_crew(p, hold, what).await;
+    println!("{what}");
+    hold
+}
+
+/// A beam out of its bay's slot at `at` by a new crew of `a`, `b`, laid where it lay in its yard (`home`); they go.
+#[allow(clippy::too_many_arguments)]
+async fn beam_out(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    beam: Id,
+    at: Vec3,
+    home: Vec3,
+    what: &str,
+) {
+    walk_two(s, a, b, beam_ends(at), what).await;
+    let c = crew_of(s, a, b, s.g).await;
+    let got = a.act("part:unseat", c, part_of(beam)).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}: out");
+    walk_two(s, a, b, beam_ends(home), what).await;
+    let on_ground = BTreeMap::from([
+        (1, s.g.to_value()),
+        (3, Value::Array(vec![int(home.x), int(home.y), int(home.z)])),
+    ]);
+    let got = a.act("part:put", c, on_ground).await;
+    assert_eq!(got.kind, 1, "{what}: laid in the yard: {got:?}");
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// A crew of `a`, `b` on frame `f` (standing at `at` in its bay, held by `h` in `hold`), then `h` goes: the crew.
+#[allow(clippy::too_many_arguments)]
+async fn frame_crew(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    h: &mut GwSoul,
+    hold: Id,
+    f: Id,
+    at: Vec3,
+    what: &str,
+) -> Id {
+    walk_two(s, a, b, frame_ends(at), what).await;
+    let c = crew_of(s, a, b, f).await;
+    leave_crew(h, hold, what).await;
+    c
+}
+
+/// Crew `c` of `a`, `b` takes frame `f` out of its bay, carries it along `via` and stands it in slot `k` of `stand`
+/// (at `home`); they go.
+#[allow(clippy::too_many_arguments)]
+async fn frame_home(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    c: Id,
+    f: Id,
+    via: &[Vec3],
+    (stand, k, home): (Id, u64, Vec3),
+    what: &str,
+) {
+    let got = a.act("part:unseat", c, part_of(f)).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}: out");
+    for at in via.iter().chain([&home]) {
+        walk_two(s, a, b, frame_ends(*at), what).await;
+    }
+    let got = a.act("part:put", c, into_slot(stand, k)).await;
+    assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// How many parts are in `bay`, and how many crews hold them, as the served world has it.
+fn bay_holds(w: &Seeded, bay: Id) -> (usize, usize) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let kids: Vec<_> = t.children(t.handle(bay).unwrap()).unwrap().to_vec();
+    let held = kids
+        .iter()
+        .map(|h| t.children(*h).unwrap_or(&[]).len())
+        .sum();
+    (kids.len(), held)
+}
+
+/// 0.135 A4: six Souls in two teams of three, each a carry pair and a holder (as A3's), build three rack bays side by
+/// side from two yards and take them down again, each step its own intent on its own gateway connection, in a served
+/// world ([`three_bays_world`]). Each bay is its own two frames and two low beams.
+///
+/// A bay's frames are held while its beams go in (B18: a frame stands on beams on both its columns, or held), so a bay
+/// at its beams needs its two frames held and a pair at once: four Souls. The two holders hold whichever bay is at its
+/// beams; the two pairs work at once, each on its own part of the row:
+///
+/// - **The middle bay, both teams:** team 1 (Souls 1, 2; holder 3) carries a frame from the west yard into its
+///   `upright_a` while team 2 (Souls 4, 5; holder 6) carries one from the east yard. Team 2 asks for `upright_a` too:
+///   refused `slot.occupied`, and nothing moves. It brings its frame round to `upright_b`, where Soul 2 of team 1 stands:
+///   refused `site.occupied`, nothing moves. Soul 2 steps out to help holder 3 take frame A; team 2's frame goes in and
+///   holder 6 takes it. Team 1 seats the two beams from the west while team 2 seats the east bay's first frame.
+/// - **The east bay by team 2** (frames and beams from the east yard) and the holders, while team 1 seats the west
+///   bay's first frame. Then **the west bay by team 1** and the holders.
+/// - Every bay stands on its joints with nobody holding it.
+/// - **Take down**, in reverse: the west bay (team 1, the holders taking its frames again), then the east (team 2) while
+///   team 1 carries the west bay's last frame home, then the middle (team 1 its beams and frame A, team 2 its frame
+///   B). Every part goes back where it lay in its yard, under its id; every node of the world as built is still there;
+///   the checks read the world as its log replays from the start.
+#[tokio::test(flavor = "multi_thread")]
+async fn a4_two_teams_build_three_bays_and_take_them_down() {
+    let d = scratch("a4bays");
+    let (facts, slots) = three_bays_world(&d);
+    let w = seed_entries(&d, &facts, 6, (59, -34), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let n = |k: &str| im.nodes[k];
+    let (bw, bm, be) = (n("site-bay-w"), n("site-bay"), n("site-bay-e"));
+    let (stand, stand_w2, stand_e, stand_e2) = (
+        n("yard-stand"),
+        n("yard-stand-w2"),
+        n("yard-stand-e"),
+        n("yard-stand-e2"),
+    );
+    // Frames: the middle bay's A from the west stand, its B from the east stand; the west bay's from the west yard,
+    // the east bay's from the east yard. Beams 1, 2 to the middle bay, 3, 4 to the west, 5, 6 to the east.
+    let (ma, wa, wb) = (n("yard-frame-1"), n("yard-frame-2"), n("yard-frame-w"));
+    let (mb, ea, eb) = (n("yard-frame-e1"), n("yard-frame-e2"), n("yard-frame-e3"));
+    let beam: Vec<Id> = (1..=6).map(|k| n(&format!("yard-beam-{k}"))).collect();
+    let parts = [
+        ma, mb, wa, wb, ea, eb, beam[0], beam[1], beam[2], beam[3], beam[4], beam[5],
+    ];
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let s = Site {
+        w: &w,
+        g,
+        crew: pinned_activity(&w, "mars:carry_activity"),
+    };
+    // As built: every node, where each part rests, and the slots' places (the bays and stands never move).
+    let built: std::collections::BTreeSet<Id> = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let mut out = std::collections::BTreeSet::new();
+        let mut stack = vec![t.handle(w.root).unwrap()];
+        while let Some(h) = stack.pop() {
+            out.insert(t.node(h).unwrap().id());
+            stack.extend(t.children(h).unwrap_or(&[]).iter().copied());
+        }
+        out
+    };
+    let start: Vec<_> = parts.iter().map(|p| where_is(&w, *p)).collect();
+    let home = |k: usize| start[k].2;
+    let (ua, ub, ll, lr) = (
+        slots["upright_a"],
+        slots["upright_b"],
+        slots["beam_low_l"],
+        slots["beam_low_r"],
+    );
+    let places = |bay: Id| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let p = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+            .unwrap();
+        let at = |k: u64| p.iter().find(|(n, _)| *n == k).unwrap().1;
+        (at(ua), at(ub), at(ll), at(lr))
+    };
+    let (w_a, w_b, w_l, w_r) = places(bw);
+    let (m_a, m_b, m_l, m_r) = places(bm);
+    let (e_a, e_b, e_l, e_r) = places(be);
+    let refused = |got: &Got, name: &str, what: &str| {
+        println!("{what}: {got:?}");
+        assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
+    };
+    let [s1, s2, s3, s4, s5, s6] = &mut souls[..] else {
+        unreachable!()
+    };
+
+    // Build. The middle bay: team 1 carries frame A into `upright_a` while team 2 carries its frame from the east
+    // yard to wait 0.9 m north of it, inside the bay.
+    let wait_a = v3(m_a.x, 0, m_a.z + 900_000);
+    let (to_ma, to_wait, to_ea, to_wa) = ([m_a], [wait_a], [e_a], [w_a]);
+    let (crew_ma, crew_mb) = tokio::join!(
+        carry_in(
+            &s,
+            s1,
+            s2,
+            ma,
+            frame_ends,
+            &to_ma,
+            into_slot(bm, ua),
+            "team 1 seats frame A in the middle bay"
+        ),
+        take_along(
+            &s,
+            s4,
+            s5,
+            mb,
+            frame_ends,
+            &to_wait,
+            "team 2 brings frame B to the middle bay"
+        ),
+    );
+    leave_crew(s2, crew_ma, "Soul 2 lets go of frame A; Soul 1 holds it").await;
+    let was = where_is(&w, crew_mb);
+    let got = s4.act("part:put", crew_mb, into_slot(bm, ua)).await;
+    refused(
+        &got,
+        "slot.occupied",
+        "team 2 puts its frame in upright_a, where team 1's frame stands",
+    );
+    assert_eq!(
+        where_is(&w, ma).0,
+        Some(bm),
+        "frame A still in the middle bay"
+    );
+    assert_eq!(
+        where_is(&w, mb).0,
+        Some(crew_mb),
+        "team 2's frame still rides its crew"
+    );
+    assert_eq!(where_is(&w, crew_mb), was, "and nothing moved");
+    // Team 2 brings its frame round frame A (east, then north) to 0.9 m east of `upright_b`, while Soul 2 of team 1
+    // stands where frame B's west column would be.
+    let round = [
+        v3(m_a.x + 2_000_000, 0, wait_a.z),
+        v3(m_a.x + 2_000_000, 0, m_b.z),
+        v3(m_b.x + 900_000, 0, m_b.z),
+    ];
+    let column = v3(m_b.x - 572_000, 0, m_b.z);
+    let ((), got) = tokio::join!(
+        async {
+            for at in round {
+                walk_two(&s, s4, s5, frame_ends(at), "team 2 round frame A").await;
+            }
+        },
+        s2.act("eden:walk", g, to_point(column)),
+    );
+    assert_eq!(got.kind, 1, "Soul 2 to upright_b: {got:?}");
+    let was = where_is(&w, crew_mb);
+    let got = s4.act("part:put", crew_mb, into_slot(bm, ub)).await;
+    refused(
+        &got,
+        "site.occupied",
+        "team 2 puts its frame in upright_b, where Soul 2 of team 1 stands",
+    );
+    assert_eq!(
+        where_is(&w, mb).0,
+        Some(crew_mb),
+        "team 2's frame still rides its crew"
+    );
+    assert_eq!(where_is(&w, crew_mb), was, "and nothing moved");
+    // Soul 2 steps out to help holder 3 take frame A from Soul 1; then team 2's frame goes in and holder 6 takes it.
+    let hold_ma = hand_over(
+        &s,
+        s3,
+        s2,
+        s1,
+        crew_ma,
+        ma,
+        hold_places(m_a, 1, -1),
+        "holder 3 takes frame A from Soul 1",
+    )
+    .await;
+    let got = s4.act("part:put", crew_mb, into_slot(bm, ub)).await;
+    println!("team 2 seats frame B in the middle bay, Soul 2 gone: {got:?}");
+    assert_eq!(got.kind, 1, "frame B seated");
+    leave_crew(s4, crew_mb, "Soul 4 lets go of frame B; Soul 5 holds it").await;
+    let hold_mb = hand_over(
+        &s,
+        s6,
+        s4,
+        s5,
+        crew_mb,
+        mb,
+        hold_places(m_b, 1, 1),
+        "holder 6 takes frame B from Soul 5",
+    )
+    .await;
+    // Team 1 seats the middle bay's beams from the west while team 2 seats the east bay's frame A.
+    let ((), crew_ea) = tokio::join!(
+        async {
+            beam_in(
+                &s,
+                s1,
+                s2,
+                beam[0],
+                bm,
+                ll,
+                m_l,
+                "team 1 seats beam 1 in the middle bay",
+            )
+            .await;
+            beam_in(
+                &s,
+                s1,
+                s2,
+                beam[1],
+                bm,
+                lr,
+                m_r,
+                "team 1 seats beam 2 in the middle bay",
+            )
+            .await;
+        },
+        carry_in(
+            &s,
+            s4,
+            s5,
+            ea,
+            frame_ends,
+            &to_ea,
+            into_slot(be, ua),
+            "team 2 seats frame A in the east bay"
+        ),
+    );
+    leave_crew(
+        s4,
+        crew_ea,
+        "Soul 4 lets go of the east frame A; Soul 5 holds it",
+    )
+    .await;
+    leave_crew(s3, hold_ma, "holder 3 lets go").await;
+    leave_crew(s6, hold_mb, "holder 6 lets go").await;
+    let (parts_in, held) = bay_holds(&w, bm);
+    println!("the middle bay stands: {parts_in} parts in it, {held} crews holding them");
+    assert_eq!(
+        (parts_in, held),
+        (4, 0),
+        "the middle bay stands on its joints"
+    );
+
+    // The east bay by team 2 and the holders, while team 1 seats the west bay's frame A.
+    let (crew_wa, (hold_ea, hold_eb)) = tokio::join!(
+        carry_in(
+            &s,
+            s1,
+            s2,
+            wa,
+            frame_ends,
+            &to_wa,
+            into_slot(bw, ua),
+            "team 1 seats frame A in the west bay"
+        ),
+        async {
+            let hold_ea = hand_over(
+                &s,
+                s6,
+                s4,
+                s5,
+                crew_ea,
+                ea,
+                hold_places(e_a, -1, -1),
+                "holder 6 takes east frame A from Soul 5",
+            )
+            .await;
+            let via = [v3(e_b.x + 3_000_000, 0, e_b.z), e_b];
+            let crew_eb = carry_in(
+                &s,
+                s4,
+                s5,
+                eb,
+                frame_ends,
+                &via,
+                into_slot(be, ub),
+                "team 2 seats frame B in the east bay",
+            )
+            .await;
+            leave_crew(s4, crew_eb, "Soul 4 lets go of the east frame B").await;
+            let hold_eb = hand_over(
+                &s,
+                s3,
+                s4,
+                s5,
+                crew_eb,
+                eb,
+                hold_places(e_b, -1, 1),
+                "holder 3 takes east frame B from Soul 5",
+            )
+            .await;
+            beam_in(
+                &s,
+                s4,
+                s5,
+                beam[4],
+                be,
+                lr,
+                e_r,
+                "team 2 seats beam 5 in the east bay",
+            )
+            .await;
+            beam_in(
+                &s,
+                s4,
+                s5,
+                beam[5],
+                be,
+                ll,
+                e_l,
+                "team 2 seats beam 6 in the east bay",
+            )
+            .await;
+            (hold_ea, hold_eb)
+        },
+    );
+    leave_crew(s6, hold_ea, "holder 6 lets go").await;
+    leave_crew(s3, hold_eb, "holder 3 lets go").await;
+    let (parts_in, held) = bay_holds(&w, be);
+    println!("the east bay stands: {parts_in} parts in it, {held} crews holding them");
+    assert_eq!(
+        (parts_in, held),
+        (4, 0),
+        "the east bay stands on its joints"
+    );
+    // The west bay by team 1 and the holders.
+    leave_crew(
+        s1,
+        crew_wa,
+        "Soul 1 lets go of the west frame A; Soul 2 holds it",
+    )
+    .await;
+    let hold_wa = hand_over(
+        &s,
+        s3,
+        s1,
+        s2,
+        crew_wa,
+        wa,
+        hold_places(w_a, 1, -1),
+        "holder 3 takes west frame A from Soul 2",
+    )
+    .await;
+    let via = [v3(w_b.x - 3_000_000, 0, w_b.z), w_b];
+    let crew_wb = carry_in(
+        &s,
+        s1,
+        s2,
+        wb,
+        frame_ends,
+        &via,
+        into_slot(bw, ub),
+        "team 1 seats frame B in the west bay",
+    )
+    .await;
+    leave_crew(s1, crew_wb, "Soul 1 lets go of the west frame B").await;
+    let hold_wb = hand_over(
+        &s,
+        s6,
+        s1,
+        s2,
+        crew_wb,
+        wb,
+        hold_places(w_b, 1, 1),
+        "holder 6 takes west frame B from Soul 2",
+    )
+    .await;
+    beam_in(
+        &s,
+        s1,
+        s2,
+        beam[2],
+        bw,
+        ll,
+        w_l,
+        "team 1 seats beam 3 in the west bay",
+    )
+    .await;
+    beam_in(
+        &s,
+        s1,
+        s2,
+        beam[3],
+        bw,
+        lr,
+        w_r,
+        "team 1 seats beam 4 in the west bay",
+    )
+    .await;
+    leave_crew(s3, hold_wa, "holder 3 lets go").await;
+    leave_crew(s6, hold_wb, "holder 6 lets go").await;
+    for (bay, name) in [(bw, "west"), (bm, "middle"), (be, "east")] {
+        let (parts_in, held) = bay_holds(&w, bay);
+        println!("the {name} bay stands: {parts_in} parts in it, {held} crews holding them");
+        assert_eq!(
+            (parts_in, held),
+            (4, 0),
+            "the {name} bay stands, nobody holding it"
+        );
+    }
+
+    // Take down. The west bay: the holders take its frames again; team 1 takes its beams out and lays each where it
+    // lay; then frame B out and to its stand, then frame A out.
+    let hold_wa = hold_frame(
+        &s,
+        s3,
+        s1,
+        wa,
+        hold_places(w_a, 1, -1),
+        "holder 3 takes west frame A again",
+    )
+    .await;
+    let hold_wb = hold_frame(
+        &s,
+        s6,
+        s2,
+        wb,
+        hold_places(w_b, 1, 1),
+        "holder 6 takes west frame B again",
+    )
+    .await;
+    beam_out(
+        &s,
+        s1,
+        s2,
+        beam[3],
+        w_r,
+        home(9),
+        "team 1 takes beam 4 out of the west bay",
+    )
+    .await;
+    beam_out(
+        &s,
+        s1,
+        s2,
+        beam[2],
+        w_l,
+        home(8),
+        "team 1 takes beam 3 out of the west bay",
+    )
+    .await;
+    let out = frame_crew(&s, s1, s2, s6, hold_wb, wb, w_b, "team 1 on west frame B").await;
+    let via = [v3(w_b.x - 3_000_000, 0, w_b.z)];
+    frame_home(
+        &s,
+        s1,
+        s2,
+        out,
+        wb,
+        &via,
+        (stand_w2, 1, home(3)),
+        "team 1 takes west frame B home",
+    )
+    .await;
+    let out_wa = frame_crew(&s, s1, s2, s3, hold_wa, wa, w_a, "team 1 on west frame A").await;
+    // The east bay by team 2 and the holders, while team 1 carries west frame A home.
+    let ((), out_ea) = tokio::join!(
+        frame_home(
+            &s,
+            s1,
+            s2,
+            out_wa,
+            wa,
+            &[],
+            (stand, 2, home(2)),
+            "team 1 takes west frame A home"
+        ),
+        async {
+            let hold_ea = hold_frame(
+                &s,
+                s3,
+                s4,
+                ea,
+                hold_places(e_a, -1, -1),
+                "holder 3 takes east frame A again",
+            )
+            .await;
+            let hold_eb = hold_frame(
+                &s,
+                s6,
+                s5,
+                eb,
+                hold_places(e_b, -1, 1),
+                "holder 6 takes east frame B again",
+            )
+            .await;
+            beam_out(
+                &s,
+                s4,
+                s5,
+                beam[5],
+                e_l,
+                home(11),
+                "team 2 takes beam 6 out of the east bay",
+            )
+            .await;
+            beam_out(
+                &s,
+                s4,
+                s5,
+                beam[4],
+                e_r,
+                home(10),
+                "team 2 takes beam 5 out of the east bay",
+            )
+            .await;
+            let out = frame_crew(&s, s4, s5, s6, hold_eb, eb, e_b, "team 2 on east frame B").await;
+            let via = [v3(e_b.x + 3_000_000, 0, e_b.z)];
+            frame_home(
+                &s,
+                s4,
+                s5,
+                out,
+                eb,
+                &via,
+                (stand_e2, 1, home(5)),
+                "team 2 takes east frame B home",
+            )
+            .await;
+            frame_crew(&s, s4, s5, s3, hold_ea, ea, e_a, "team 2 on east frame A").await
+        },
+    );
+    // The middle bay: team 1 takes its beams out while team 2 carries east frame A home; then each team its frame.
+    let ((), (out_ma, hold_mb)) = tokio::join!(
+        frame_home(
+            &s,
+            s4,
+            s5,
+            out_ea,
+            ea,
+            &[],
+            (stand_e, 2, home(4)),
+            "team 2 takes east frame A home"
+        ),
+        async {
+            let hold_ma = hold_frame(
+                &s,
+                s3,
+                s1,
+                ma,
+                hold_places(m_a, 1, -1),
+                "holder 3 takes frame A again",
+            )
+            .await;
+            let hold_mb = hold_frame(
+                &s,
+                s6,
+                s2,
+                mb,
+                hold_places(m_b, 1, 1),
+                "holder 6 takes frame B again",
+            )
+            .await;
+            beam_out(
+                &s,
+                s1,
+                s2,
+                beam[1],
+                m_r,
+                home(7),
+                "team 1 takes beam 2 out of the middle bay",
+            )
+            .await;
+            beam_out(
+                &s,
+                s1,
+                s2,
+                beam[0],
+                m_l,
+                home(6),
+                "team 1 takes beam 1 out of the middle bay",
+            )
+            .await;
+            (
+                frame_crew(&s, s1, s2, s3, hold_ma, ma, m_a, "team 1 on frame A").await,
+                hold_mb,
+            )
+        },
+    );
+    let out_mb = frame_crew(&s, s4, s5, s6, hold_mb, mb, m_b, "team 2 on frame B").await;
+    // The holders stood east of the bay, where team 2 carries frame B home: they step out of its way first.
+    let aside = (
+        v3(m_a.x - 2_000_000, 0, -32_000_000),
+        v3(m_a.x + 2_000_000, 0, -32_000_000),
+    );
+    walk_two(&s, s3, s6, aside, "the holders step out of team 2's way").await;
+    tokio::join!(
+        frame_home(
+            &s,
+            s1,
+            s2,
+            out_ma,
+            ma,
+            &[],
+            (stand, 1, home(0)),
+            "team 1 takes frame A home"
+        ),
+        frame_home(
+            &s,
+            s4,
+            s5,
+            out_mb,
+            mb,
+            &[],
+            (stand_e, 1, home(1)),
+            "team 2 takes frame B home"
+        ),
+    );
+
+    // Every part where it started, under its id; every node of the world as built still there; the log replays.
+    for (p, was) in parts.iter().zip(&start) {
+        let now = where_is(&w, *p);
+        println!(
+            "part {}: was in {:?} slot {:?} at ({}, {}) mm, now in {:?} slot {:?} at ({}, {}) mm",
+            p.counter(),
+            was.0.map(|i| i.counter()),
+            was.1,
+            was.2.x / 1000,
+            was.2.z / 1000,
+            now.0.map(|i| i.counter()),
+            now.1,
+            now.2.x / 1000,
+            now.2.z / 1000
+        );
+        assert_eq!((now.0, now.1), (was.0, was.1), "back where it started");
+        let off =
+            (i128::from(now.2.x - was.2.x).pow(2) + i128::from(now.2.z - was.2.z).pow(2)).isqrt();
+        assert!(off < 5_000, "within 5 mm of where it lay: {off} µm");
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let missing: Vec<Id> = built
+        .iter()
+        .filter(|id| t.handle(**id).is_none())
+        .copied()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "every node as built is still there: {missing:?}"
+    );
+    println!(
+        "{} nodes as built, all still there; the log replays to here",
+        built.len()
+    );
+}
