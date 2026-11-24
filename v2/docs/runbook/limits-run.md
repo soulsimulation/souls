@@ -52,6 +52,10 @@ Fixed before the run (`guard.mjs` `BARS`):
 | | Eden's memory, or `souls.slice`'s | above 85 % of its `MemoryMax` (3.4 of 4 GB; 11.9 of 14 GB) |
 | | the probe | silent for 30 s |
 
+On 24 Nov 2026 the first preflight against production refused: the 11 moved worlds, idle, held 10.4 of the
+slice's 14 GB (74 %), above the 60 % start bar, while Eden itself stood at 1.8 of 4 GB. The start bar stays as it is
+until Gene decides between a higher start bar for the slice and a larger slice `MemoryMax`.
+
 An aborted rung is in the table as `aborted by the guard (<reason>)`, beside what it measured until the stop.
 `limits.sh` exits 4 after an abort or a refusal, and 0 when every rung ran.
 
@@ -89,7 +93,10 @@ ssh "$PROD" 'DIRECTORY_ORIGIN=<its loopback origin> node $REL/v2/tools/ops/test-
 
 **4. The forward and the run, on the build machine,** in `screen` or `tmux`. Choose the cores of a timed runner
 with no job running (`souls-timed-<n>` owns physical cores 3(n-1) to 3n-1 and their siblings, +24). The stream
-path is Eden's `views/world.json` `stream`, printed by the preflight as `stream ...`:
+path is `w/<Eden's instance>/` followed by Eden's `views/world.json` `stream`, which the preflight prints as
+`stream ...` (the origin serves each world under `w/<instance>/`; the bare `stream` answers 404). A release from
+before 24 Nov 2026 has a `guard.mjs` that exits silently when started by the symlinked `$REL` path: there, run the
+probe as `cd $REL && node v2/tools/bench/stage2a/guard.mjs probe --every 5`.
 
 ```sh
 ssh -fN -o ExitOnForwardFailure=yes -L "$LO:17330:$LO:7330" -L "$LO:17320:$LO:7320" "$PROD"

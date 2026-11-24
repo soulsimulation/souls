@@ -16,7 +16,7 @@
 //       (SIGTERM to every pid in <pids>), writing the reason to <abort>, when Eden's ticks on time over the last 30 s
 //       fall below 95 %, Eden's or the slice's memory passes 85 % of its MemoryMax, or the probe is silent for 30 s.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -170,7 +170,8 @@ function probe(o) {
   setInterval(once, 1000 * Number(o.every ?? 5));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// realpath: the release path on the production machine is a symlink, and the module's own URL is resolved.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...rest] = process.argv.slice(2), o = {};
   for (let i = 0; i < rest.length; i += 2) o[rest[i].replace(/^--/, '')] = rest[i + 1];
   if (mode === 'probe') probe(o);
