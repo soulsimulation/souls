@@ -27,7 +27,12 @@ import { imported, measure, measured, validate, write, type Report, type Importe
 
 const REPO = resolve(import.meta.dirname, '../../..');
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
-export type Entry = { preset: string; hash: string; size: string; height: number; hover: number; entry: string; entryHash: string; legacy: unknown[] };
+export type Entry = { preset: string; hash: string; size: string; height: number; hover: number; grip?: number; entry: string; entryHash: string; legacy: unknown[] };
+/** How far under its body a floater holds the middle of a load it carries, mm (0.135 Super): it has no hands, so the
+ *  catalogue states its grip, the height above its surface it holds at (`v2/crates/replica/src/kinds/sizes.rs`). A
+ *  body that stands states none and holds in its hands. */
+export const FLOATER_GRIP_BELOW = 300;
+export const gripOf = (hover: number) => (hover > FLOATER_GRIP_BELOW ? { grip: hover - FLOATER_GRIP_BELOW } : {});
 export function legacyBody(preset: string): unknown {
   const shared = [PIP_PRESET, MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET].find((p) => p.id === preset);
   if (shared) return structuredClone(shared.body);
@@ -71,7 +76,7 @@ export async function importPresets(out: string, media = REPO) {
     const result = write(body, out), entry = result.file.replace(/\.diag$/, '.json');
     const file = join(out, entry), data = JSON.parse(readFileSync(file, 'utf8'));
     writeFileSync(file, JSON.stringify({ ...data, ...extra }) + '\n');
-    bodies.push({ preset, hash: sha(body.text), size: body.size, height: body.heightMm, hover: body.hoverMm, entry, entryHash: sha(readFileSync(file)), legacy: [legacyBody(preset)] });
+    bodies.push({ preset, hash: sha(body.text), size: body.size, height: body.heightMm, hover: body.hoverMm, ...gripOf(body.hoverMm), entry, entryHash: sha(readFileSync(file)), legacy: [legacyBody(preset)] });
   }
   try {
     for (const model of FLOATER_MODELS) {

@@ -64,7 +64,7 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::Refusal;
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::kinds::sizes::{Build, Size};
+use replica::kinds::sizes::Build;
 use replica::moves::{Move, Place};
 use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
@@ -403,11 +403,7 @@ pub fn climb_track(floor: Id, to: Vec3) -> crate::controller::Track {
 pub const STANDARD_REACH: i64 = 2_060_000;
 
 /// The build a body has until its admitted one is given ([`Slots::admit`]): today's walking body, 1.75 m.
-pub const STANDARD_BUILD: Build = Build {
-    size: Size::Standard,
-    height_mm: 1_750,
-    hover_mm: 0,
-};
+pub const STANDARD_BUILD: Build = Build::STANDARD;
 
 /// A body's standing reach, µm (today's `seatReach`, #1083): [`STANDARD_REACH`] scaled by its height over the standard
 /// 1.75 m; a hovering body (a floater) reaches the standard height, unscaled.

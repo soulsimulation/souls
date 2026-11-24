@@ -152,8 +152,9 @@ pub struct Engine {
     loads: BTreeMap<String, Load>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
-    /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
-    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64)>,
+    /// Each take waiting for its commit: the crew's ground, its node's pose, its carriers' span and their grips (front,
+    /// back), to start its carry.
+    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64, (i64, i64))>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -376,11 +377,30 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
-/// Where the controller has a body: the node it stands on and its position there.
+/// Where the controller has a body: the node it stands on and its feet there, the point of that surface under it (a
+/// floater's position is held its hover above it).
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
-    c.body(body)
-        .map(|m| (sim::index::place_of(m).0, m.pose.position))
-        .ok_or_else(|| refusal("body-unknown", show(body)))
+    let m = c
+        .body(body)
+        .ok_or_else(|| refusal("body-unknown", show(body)))?;
+    let hover = match m.pose.support {
+        replica::pose::Support::Surface { height, .. } => height,
+        _ => 0,
+    };
+    let p = m.pose.position;
+    Ok((
+        sim::index::place_of(m).0,
+        Vec3::new(p.x, p.y - hover, p.z),
+    ))
+}
+
+/// Where a body holds a load it carries, µm above its feet: its build's grip, as its body's entry states it (a
+/// walker's hands, a floater's grip under its body; 0.135 Super).
+fn grip(c: &Controller, body: Id) -> i64 {
+    c.build(body)
+        .unwrap_or(replica::kinds::sizes::Build::STANDARD)
+        .grip_mm
+        .saturating_mul(1000)
 }
 
 impl Engine {
@@ -855,6 +875,7 @@ impl Engine {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
                     let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    let grips = (grip(c, front), grip(c, back));
                     let (at, turn) = asm.take(
                         &mut tree,
                         &self.activities,
@@ -867,9 +888,10 @@ impl Engine {
                         ground,
                         a.verb == Verb::Unseat,
                         slots.reach_of(front).min(slots.reach_of(back)),
+                        (grips.0 + grips.1) / 2,
                     )?;
                     self.taking
-                        .insert(activity, (ground, at, turn, apart(f, k)));
+                        .insert(activity, (ground, at, turn, apart(f, k), grips));
                 }
             }
             Verb::Lift | Verb::SetDown => {
@@ -964,6 +986,8 @@ impl Engine {
                         }
                         v => v,
                     };
+                    // Held where its two ends' bodies hold (0.135 Super): a walker's hands, a floater's grip.
+                    load = load.held_by(grip(c, front), grip(c, back));
                     let to = param_point(&a.params, 2, "lift-destination")?;
                     let fixed = match to {
                         Some(_) => Some(
@@ -1251,6 +1275,10 @@ impl Engine {
             }) {
                 carry.load = Load { turn: held, ..*l };
             }
+            // Set down from where its carriers held it, when they are still here (0.135 Super).
+            if let Some([f, k, ..]) = self.activities.members(activity) {
+                carry.load = carry.load.held_by(grip(c, f.body), grip(c, k.body));
+            }
             match break_off(
                 &mut carry,
                 &mut self.activities,
@@ -1467,6 +1495,9 @@ impl Engine {
             carry.span = s.span;
             if let Some(l) = self.held_load(tree, s.part) {
                 carry.load = l;
+            }
+            if let Some([f, k]) = self.activities.members(activity) {
+                carry.load = carry.load.held_by(grip(c, f.body), grip(c, k.body));
             }
             let middle = match self.activities.members(activity) {
                 Some([f, k]) => match (stands(c, f.body), stands(c, k.body)) {
@@ -2433,7 +2464,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span)) = taking else {
+        let Some((ground, at, turn, span, grips)) = taking else {
             return;
         };
         let part = self
@@ -2476,6 +2507,8 @@ impl Engine {
                 if let Some(l) = self.held_load(live, part) {
                     carry.load = l;
                 }
+                // Held where its carriers' bodies hold (0.135 Super): the node is at their grip, as the take put it.
+                carry.load = carry.load.held_by(grips.0, grips.1);
                 self.carries.insert(r.activity, carry);
             }
             _ => asm.written(r.activity, r.step, false),

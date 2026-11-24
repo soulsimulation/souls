@@ -8,6 +8,10 @@
 //!   whole mm; and `hover`, the height it is held above its surface in whole mm (0 or absent: it stands). A floater
 //!   walks on a surface like any walker, crosses nothing a walker of its class cannot, and its height is part of its
 //!   pose: `Support::Surface` with that height (T4 rule 6, settled at reconciliation), which the viewer draws.
+//! - **How it holds** (0.135 Super, Little Martians): `grip`, the height above its surface in whole mm at which the
+//!   body holds what it carries, the middle of a load it carries with others ([`Build::grip_mm`]). A walker holds
+//!   in its hands at [`GRIP_MM`], the field's default; a floater, which has no hands, holds a load by a grip point
+//!   under its body, as its entry states. A carry reads it from its carriers' builds, never from a body's kind name.
 //! - Not here: flying and swimming, custom meshes (B13), reach and seat height from the height (a later task reads
 //!   [`Build::height_mm`]).
 
@@ -90,7 +94,10 @@ impl Size {
     }
 }
 
-/// What a family's kind says of its body's size: its class, height and hover height.
+/// The height above its surface at which a body with no `grip` field holds a load, mm: a walker's hands.
+pub const GRIP_MM: i64 = 900;
+
+/// What a family's kind says of its body's size: its class, height and hover height, and where it holds a load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Build {
     pub size: Size,
@@ -98,6 +105,8 @@ pub struct Build {
     pub height_mm: i64,
     /// Held this far above the surface below it, mm; 0 stands.
     pub hover_mm: i64,
+    /// Where it holds a load it carries, mm above the surface below it: [`GRIP_MM`] unless its kind says.
+    pub grip_mm: i64,
 }
 
 impl Build {
@@ -106,10 +115,11 @@ impl Build {
         size: Size::Standard,
         height_mm: 1_750,
         hover_mm: 0,
+        grip_mm: GRIP_MM,
     };
 
-    /// Reads a family kind's `size`, `height` and `hover` fields (their defaults). A field missing, of another type
-    /// or out of range is refused as `family-size`.
+    /// Reads a family kind's `size`, `height`, `hover` and `grip` fields (their defaults). A field missing, of
+    /// another type or out of range is refused as `family-size`.
     pub fn of(kind: &KindDef) -> R<Build> {
         let field = |name: &str| kind.state.values().find(|f| f.name.as_str() == name);
         let bad = |what: &str| refuse("family-size", format!("{}: {what}", kind.name.as_str()));
@@ -134,6 +144,13 @@ impl Build {
         let Ok(hover_mm) = mm("hover", false) else {
             return bad("hover is a whole number of mm");
         };
+        let grip_mm = match field("grip") {
+            None => GRIP_MM,
+            Some(_) => match mm("grip", true) {
+                Ok(g) if g > 0 => g,
+                _ => return bad("grip is a whole number of mm, more than nothing"),
+            },
+        };
         if height_mm == 0 {
             return bad("height is more than nothing");
         }
@@ -141,6 +158,7 @@ impl Build {
             size,
             height_mm,
             hover_mm,
+            grip_mm,
         })
     }
 

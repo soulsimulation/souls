@@ -8,7 +8,7 @@ import { CREATURE_IDS } from '../../../mars/viewer/engine/bodies/creatures.ts';
 import { bodyAssetFiles } from '../../web/body-assets.ts';
 import { decodeMesh } from '../../web/src/crowd/lod.ts';
 import { decodeBaked } from '../../web/src/crowd/bake.ts';
-import { pinnedScan, legacyBody, legacyDefaults } from './presets.ts';
+import { pinnedScan, legacyBody, legacyDefaults, FLOATER_GRIP_BELOW } from './presets.ts';
 const repo = resolve(import.meta.dirname, '../../..');
 
 test('all released presets have measured admitted classes, exact resources and independently hashed models', () => {
@@ -23,6 +23,8 @@ test('all released presets have measured admitted classes, exact resources and i
     const entry = JSON.parse(files.get(body.entry)!.toString('utf8')), kind = files.get(body.entry.replace(/\.json$/, '.diag'))!;
     assert.equal(createHash('sha256').update(kind).digest('hex'), body.hash);
     assert.ok(body.height > 0 && body.hover >= 0 && body.size in radii);
+    // A floater has no hands: the catalogue states the grip under its body it holds a load by; a walker states none.
+    assert.deepEqual(body.grip, body.hover > FLOATER_GRIP_BELOW ? body.hover - FLOATER_GRIP_BELOW : undefined);
     const radius = /4: \{1: "radius", 2: "int", 3: (\d+)/.exec(kind.toString('utf8'));
     assert.ok(radius); assert.ok(Number(radius[1]) <= radii[body.size]);
     const mesh = decodeMesh(files.get(entry.simple)!); assert.ok(mesh.index.length > 0 && mesh.index.length / 3 <= 600);

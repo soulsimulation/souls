@@ -5,7 +5,8 @@
 //!   at each moment. A preset's hash is the SHA-256 of its kind file as B13's importer wrote it
 //!   (`v2/tools/import-body`), which names both its models by their own hashes and holds its size, height and hover.
 //! - **The catalogue** is the world's: `bodies.json` in its folder, `{"format": "souls/bodies/1", "bodies": [{"preset",
-//!   "hash" (64 hex), "size", "height" (mm), "hover" (mm)}, ...]}`, the presets it admits. A released preset is never
+//!   "hash" (64 hex), "size", "height" (mm), "hover" (mm), "grip" (mm, where it holds a load: absent, a walker's hands)},
+//!   ...]}`, the presets it admits. A released preset is never
 //!   re-pinned (`docs/design/custom-bodies.md`): a changed body is a new entry with a new hash.
 //! - **The intent** `life:wear` names the body in parameter 1 as T8's words shape, `{23: bytes}`: the preset's name
 //!   or its 64-hex hash. The world resolves it here and logs only the hash.
@@ -21,7 +22,7 @@ use std::collections::BTreeMap;
 use replica::effects::Change;
 use replica::encode::{Value, from_hex, to_hex};
 use replica::ids::Id;
-use replica::kinds::sizes::{Build, Size};
+use replica::kinds::sizes::{Build, GRIP_MM, Size};
 use replica::rules::json::{self, Value as Json};
 
 /// The Soul's intent that chooses its body, in the namespace of C3's `life:join` (`souls:` verbs are a closed list).
@@ -37,11 +38,7 @@ pub const LOOK_VERB: &str = "life:look";
 /// T8's words key: parameter 1 of a wear is `{23: bytes}`.
 const WORDS: u64 = 23;
 /// The body a node with no [`BODY`] field wears: the standard class, 1.75 m, standing.
-pub const DEFAULT: Build = Build {
-    size: Size::Standard,
-    height_mm: 1_750,
-    hover_mm: 0,
-};
+pub const DEFAULT: Build = Build::STANDARD;
 
 /// One body a world admits.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +74,7 @@ impl Catalogue {
             let mm = |k: &str| match e.get(k) {
                 Some(Json::Int(n)) if *n >= 0 => i64::try_from(*n).map_err(|_| bad(k)),
                 None if k == "hover" => Ok(0),
+                None if k == "grip" => Ok(GRIP_MM),
                 _ => Err(bad(k)),
             };
             let hash = hash_of(text("hash")?).ok_or_else(|| bad("hash is 64 hex"))?;
@@ -84,8 +82,13 @@ impl Catalogue {
                 size: Size::from_name(text("size")?).map_err(|r| bad(&r.detail))?,
                 height_mm: mm("height")?,
                 hover_mm: mm("hover")?,
+                grip_mm: mm("grip")?,
             };
-            if build.height_mm <= 0 || build.hover_mm.checked_mul(1000).is_none() {
+            if build.height_mm <= 0
+                || build.hover_mm.checked_mul(1000).is_none()
+                || build.grip_mm <= 0
+                || build.grip_mm.checked_mul(1000).is_none()
+            {
                 return Err(bad("body dimensions"));
             }
             let name = text("preset")?.to_owned();
@@ -245,6 +248,17 @@ mod tests {
             Err("body-unknown")
         );
         assert_eq!(c.build_of(Some(&Value::Uint(1))), Err("body-unknown"));
+        // A body that states no grip holds in a walker's hands; a floater's entry states the grip under its body.
+        assert_eq!(p.build.grip_mm, GRIP_MM);
+        let floater = Catalogue::read(&format!(
+            r#"{{"format": "souls/bodies/1", "bodies": [
+              {{"preset": "kalama", "hash": "{H}", "size": "large", "height": 495, "hover": 1245, "grip": 945}}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(floater.find("kalama").unwrap().build.grip_mm, 945);
+        let none = r#"{"format": "souls/bodies/1", "bodies": [
+              {"preset": "k", "hash": "0a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526272829", "size": "large", "height": 495, "grip": 0}]}"#;
+        assert!(Catalogue::read(none).is_err(), "a grip is more than nothing");
     }
 
     #[test]

@@ -3928,10 +3928,73 @@ impl GwSoul {
 ///   checks read the world as its log replays from the start, so the history plays back.
 #[tokio::test(flavor = "multi_thread")]
 async fn a3_four_souls_build_a_bay_and_take_it_down() {
-    const H: i64 = 1_200_000;
-    let d = scratch("a3bay");
+    a3_bay("a3bay", [None; 4]).await;
+}
+
+/// A3 with four Little Martians (the released floaters kalama, kweku, mycos and nyx: no hands, held some 1.2 m over
+/// the ground): the same build and take-down pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a3_four_little_martians_build_a_bay_and_take_it_down() {
+    a3_bay(
+        "a3lm",
+        [Some("kalama"), Some("kweku"), Some("mycos"), Some("nyx")],
+    )
+    .await;
+}
+
+/// A3 with every crew mixed: Souls 1 and 4 walk in the default body, Souls 2 and 3 are Little Martians.
+#[tokio::test(flavor = "multi_thread")]
+async fn a3_a_mixed_crew_builds_a_bay_and_takes_it_down() {
+    a3_bay("a3mix", [None, Some("kalama"), Some("kweku"), None]).await;
+}
+
+/// The released Little Martians as `v2/tools/import-body/presets.ts` writes them in a world's `bodies.json`: size,
+/// height and hover as measured, and the grip a floater holds a load by, under its body; the hashes stand in for
+/// theirs.
+const LITTLE_MARTIANS: &str = r#"{"format": "souls/bodies/1", "bodies": [
+  {"preset": "kalama", "hash": "4199545600000000000000000000000000000000000000000000000000000001", "size": "large", "height": 495, "hover": 1245, "grip": 945},
+  {"preset": "kweku", "hash": "f26cf64e00000000000000000000000000000000000000000000000000000002", "size": "large", "height": 516, "hover": 1234, "grip": 934},
+  {"preset": "mycos", "hash": "75a2005600000000000000000000000000000000000000000000000000000003", "size": "large", "height": 557, "hover": 1212, "grip": 912},
+  {"preset": "nyx", "hash": "9e36653d00000000000000000000000000000000000000000000000000000004", "size": "large", "height": 512, "hover": 1232, "grip": 932}]}"#;
+
+/// Each of `w`'s Souls born in the body `bodies` names for it (`world.json`'s fourth column), from
+/// [`LITTLE_MARTIANS`]; `None` is the default body.
+fn born_in(w: &Seeded, bodies: &[Option<&str>]) {
+    if bodies.iter().all(Option::is_none) {
+        return;
+    }
+    std::fs::write(w.dir.join("bodies.json"), LITTLE_MARTIANS).unwrap();
+    let path = w.dir.join("world.json");
+    let json::Value::Obj(mut meta) = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap()
+    else {
+        panic!("world.json is an object");
+    };
+    for (k, v) in &mut meta {
+        if let (true, json::Value::Arr(rows)) = (k == "souls", v) {
+            for (row, body) in rows.iter_mut().zip(bodies) {
+                if let (json::Value::Arr(r), Some(b)) = (row, body) {
+                    r.push(json::Value::Str((*b).to_owned()));
+                }
+            }
+        }
+    }
+    std::fs::write(&path, json::Value::Obj(meta).to_json()).unwrap();
+}
+
+/// 0.135 A3's build and take-down, each Soul born in the body `bodies` names (`None`: the default body).
+async fn a3_bay(tag: &str, bodies: [Option<&str>; 4]) {
+    // A hold crew stands this far either side of its frame across x; a crew with a Little Martian (the large class,
+    // 0.5 m) stands 0.6 m further out, so a beam's carriers pass between it and the bay.
+    let wide = bodies.iter().any(Option::is_some);
+    let h: i64 = if wide {
+        1_800_000
+    } else {
+        1_200_000
+    };
+    let d = scratch(tag);
     let (facts, slots) = yard_world(&d);
     let w = seed_entries(&d, &facts, 4, (36, -20), Some(&d.join("entries")));
+    born_in(&w, &bodies);
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
@@ -3967,21 +4030,40 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         .iter()
         .map(|p| where_is(&w, *p))
         .collect();
-    async fn both(
-        souls: &mut [GwSoul],
-        g: Id,
-        (a, b): (usize, usize),
-        pa: Vec3,
-        pb: Vec3,
-        what: &str,
-    ) {
+    let both = async |souls: &mut [GwSoul],
+                      g: Id,
+                      (a, b): (usize, usize),
+                      pa: Vec3,
+                      pb: Vec3,
+                      what: &str,
+                      line_up: bool| {
         let p = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
         souls[a].send("eden:walk", g, p(pa)).await;
         souls[b].send("eden:walk", g, p(pb)).await;
         let x = souls[a].end().await;
         let y = souls[b].end().await;
         assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
-    }
+        // At the yard a wide body's walk may end at a place beside its point (N9: the spot table weighs a walk round
+        // the stand against a place a ring out). Before its crew takes a part there, its Soul steps out along the
+        // crew's line and comes in again, as its own agent would: a crew out of line carries its part askew.
+        for (k, to, other) in [(a, pa, pb), (b, pb, pa)] {
+            let at = body_at(&w, body_of(&w, w.souls[k]));
+            let off = (i128::from(at.x - to.x).pow(2) + i128::from(at.z - to.z).pow(2)).isqrt();
+            if line_up && off > 100_000 {
+                let (dx, dz) = (to.x - other.x, to.z - other.z);
+                let d = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt().max(1);
+                let out = v3(
+                    to.x + (i128::from(dx) * 1_500_000 / d) as i64,
+                    0,
+                    to.z + (i128::from(dz) * 1_500_000 / d) as i64,
+                );
+                for step in [out, to] {
+                    let got = souls[k].act("eden:walk", g, p(step)).await;
+                    assert_eq!(got.kind, 1, "{what}: in line again: {got:?}");
+                }
+            }
+        }
+    };
     let crew_kind = pinned_activity(&w, "mars:carry_activity");
     // A crew on `place` (the ground, or a part it then holds): Soul `a` offers in front, Soul `b` accepts.
     let crew = async |souls: &mut [GwSoul], (a, b): (usize, usize), place: Id| {
@@ -4026,7 +4108,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         ])
     };
     // Crew `c` of Souls `ab` takes `p` (a frame across x, a beam along z), carries it to `to` and puts it there.
-    let frame_across = |at: Vec3| (v3(at.x + H, 0, at.z), v3(at.x - H, 0, at.z));
+    let frame_across = |at: Vec3| (v3(at.x + h, 0, at.z), v3(at.x - h, 0, at.z));
     // A frame's carriers stand 2.2 m either side of it along z, clear of the stand, the beams and the other frame, so
     // they walk side by side and keep their span (a carry whose carriers drift apart breaks off, C3).
     let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000));
@@ -4034,13 +4116,13 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
 
     // Build. Frame A by crew A (Souls 1, 2).
     let (f0, f1) = frame_ends(where_is(&w, fa).2);
-    both(&mut souls, g, (0, 1), f0, f1, "to frame A").await;
+    both(&mut souls, g, (0, 1), f0, f1, "to frame A", wide).await;
     let crew_a = crew(&mut souls, (0, 1), g).await;
     let got = souls[0].act("part:take", crew_a, part(fa)).await;
     assert_eq!(got.kind, 1, "frame A taken: {got:?}");
     let ua = slot_of(bay, slots["upright_a"]);
     let (f0, f1) = frame_ends(ua);
-    both(&mut souls, g, (0, 1), f0, f1, "frame A to the bay").await;
+    both(&mut souls, g, (0, 1), f0, f1, "frame A to the bay", false).await;
     let got = souls[0]
         .act("part:put", crew_a, in_slot(bay, slots["upright_a"]))
         .await;
@@ -4055,13 +4137,13 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     .await;
     // Frame B by crew B (Souls 1, 3).
     let (f0, f1) = frame_ends(where_is(&w, fb).2);
-    both(&mut souls, g, (0, 2), f0, f1, "to frame B").await;
+    both(&mut souls, g, (0, 2), f0, f1, "to frame B", wide).await;
     let crew_b = crew(&mut souls, (0, 2), g).await;
     let got = souls[0].act("part:take", crew_b, part(fb)).await;
     assert_eq!(got.kind, 1, "frame B taken: {got:?}");
     let ub = slot_of(bay, slots["upright_b"]);
     let (f0, f1) = frame_ends(ub);
-    both(&mut souls, g, (0, 2), f0, f1, "frame B to the bay").await;
+    both(&mut souls, g, (0, 2), f0, f1, "frame B to the bay", false).await;
     let got = souls[0]
         .act("part:put", crew_b, in_slot(bay, slots["upright_b"]))
         .await;
@@ -4083,6 +4165,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         f0,
         v3(f1.x, 0, f1.z - 800_000),
         "Souls 4 and 1 to frame A",
+        false,
     )
     .await;
     let crew_a2 = crew(&mut souls, (3, 0), fa).await;
@@ -4105,11 +4188,11 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     let crew_c = crew(&mut souls, (0, 1), g).await;
     for (beam, slot) in [(beams[0], "beam_low_l"), (beams[1], "beam_low_r")] {
         let (b0, b1) = beam_along(where_is(&w, beam).2);
-        both(&mut souls, g, (0, 1), b0, b1, "to the beam").await;
+        both(&mut souls, g, (0, 1), b0, b1, "to the beam", wide).await;
         let got = souls[0].act("part:take", crew_c, part(beam)).await;
         assert_eq!(got.kind, 1, "beam taken: {got:?}");
         let (b0, b1) = beam_along(slot_of(bay, slots[slot]));
-        both(&mut souls, g, (0, 1), b0, b1, "the beam to the bay").await;
+        both(&mut souls, g, (0, 1), b0, b1, "the beam to the bay", false).await;
         let got = souls[0]
             .act("part:put", crew_c, in_slot(bay, slots[slot]))
             .await;
@@ -4150,6 +4233,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         f0,
         v3(f1.x, 0, f1.z - 800_000),
         "Souls 3 and 4 to frame A",
+        false,
     )
     .await;
     let hold_a = crew(&mut souls, (2, 3), fa).await;
@@ -4162,6 +4246,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         f0,
         v3(f1.x, 0, f1.z + 800_000),
         "Souls 1 and 2 to frame B",
+        false,
     )
     .await;
     let hold_b = crew(&mut souls, (0, 1), fb).await;
@@ -4170,7 +4255,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     let crew_d = crew(&mut souls, (1, 3), g).await;
     for (k, slot) in [(1, "beam_low_r"), (0, "beam_low_l")] {
         let (b0, b1) = beam_along(slot_of(bay, slots[slot]));
-        both(&mut souls, g, (1, 3), b0, b1, "to the beam in the bay").await;
+        both(&mut souls, g, (1, 3), b0, b1, "to the beam in the bay", false).await;
         let got = souls[1].act("part:unseat", crew_d, part(beams[k])).await;
         println!(
             "crew D takes beam {} out of {slot}: {got:?}",
@@ -4179,7 +4264,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         assert_eq!(got.kind, 1, "beam out");
         let home = start[2 + k].2;
         let (b0, b1) = beam_along(home);
-        both(&mut souls, g, (1, 3), b0, b1, "the beam to the yard").await;
+        both(&mut souls, g, (1, 3), b0, b1, "the beam to the yard", false).await;
         let got = souls[1].act("part:put", crew_d, on_ground(home)).await;
         assert_eq!(got.kind, 1, "beam laid in the yard: {got:?}");
     }
@@ -4188,7 +4273,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     // Each frame out by a crew of two on it, its last holder then going; back to its slot on the stand.
     for (f, hold, holder, at, stand_slot) in [(fb, hold_b, 0, ub, 2), (fa, hold_a, 2, ua, 1)] {
         let (f0, f1) = frame_ends(at);
-        both(&mut souls, g, (1, 3), f0, f1, "to the frame").await;
+        both(&mut souls, g, (1, 3), f0, f1, "to the frame", false).await;
         let out = crew(&mut souls, (1, 3), f).await;
         leave(
             &mut souls,
@@ -4202,7 +4287,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         assert_eq!(got.kind, 1, "frame out");
         let to = slot_of(stand, stand_slot);
         let (f0, f1) = frame_ends(to);
-        both(&mut souls, g, (1, 3), f0, f1, "the frame to the stand").await;
+        both(&mut souls, g, (1, 3), f0, f1, "the frame to the stand", false).await;
         let got = souls[1]
             .act("part:put", out, in_slot(stand, stand_slot))
             .await;

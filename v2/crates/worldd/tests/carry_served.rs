@@ -145,6 +145,25 @@ fn seed_and_serve(
     socket: &Path,
     souls: u64,
 ) -> (PathBuf, Vec<Id>, Served) {
+    seed_and_serve_in(d, facts, at, socket, souls, &[])
+}
+
+/// Two released Little Martians as `v2/tools/import-body/presets.ts` writes them in a world's `bodies.json`: floaters
+/// with no hands, each holding a load by the grip under its body that its entry states.
+const FLOATERS: &str = r#"{"format": "souls/bodies/1", "bodies": [
+  {"preset": "kalama", "hash": "4199545600000000000000000000000000000000000000000000000000000001", "size": "large", "height": 495, "hover": 1245, "grip": 945},
+  {"preset": "nyx", "hash": "9e36653d00000000000000000000000000000000000000000000000000000004", "size": "large", "height": 512, "hover": 1232, "grip": 932}]}"#;
+
+/// [`seed_and_serve`], each Soul born in the body `bodies` names for it from [`FLOATERS`] (`world.json`'s fourth
+/// column; `None` or none named, the default body).
+fn seed_and_serve_in(
+    d: &Path,
+    facts: &str,
+    at: (i64, i64),
+    socket: &Path,
+    souls: u64,
+    bodies: &[Option<&str>],
+) -> (PathBuf, Vec<Id>, Served) {
     let path = d.join("facts.json");
     std::fs::write(&path, facts).unwrap();
     let dir = d.join("w");
@@ -164,6 +183,25 @@ fn seed_and_serve(
         "seed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    if bodies.iter().any(Option::is_some) {
+        std::fs::write(dir.join("bodies.json"), FLOATERS).unwrap();
+        let path = dir.join("world.json");
+        let json::Value::Obj(mut meta) =
+            json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap()
+        else {
+            panic!("world.json is an object");
+        };
+        for (k, v) in &mut meta {
+            if let (true, json::Value::Arr(rows)) = (k == "souls", v) {
+                for (row, body) in rows.iter_mut().zip(bodies) {
+                    if let (json::Value::Arr(r), Some(b)) = (row, body) {
+                        r.push(json::Value::Str((*b).to_owned()));
+                    }
+                }
+            }
+        }
+        std::fs::write(&path, json::Value::Obj(meta).to_json()).unwrap();
+    }
     let meta = json::parse(&std::fs::read_to_string(dir.join("world.json")).unwrap()).unwrap();
     let scope: [u8; 16] = from_hex(meta.get("souls_scope").and_then(json::Value::str).unwrap())
         .unwrap()
@@ -627,6 +665,13 @@ fn held_and_set_down(
     );
     let end = down.orientation.rotate(long).unwrap();
     println!("{name}: set down, its middle at {middle:?}, its long axis's end at {end:?}");
+    // On the floor, whatever its carriers' bodies (a floater's hover is not where its load comes to rest).
+    assert!(
+        (middle.y - l.rest).abs() < 5_000,
+        "{name}: set down on the floor, its middle {} mm up, half its height {} mm",
+        middle.y / 1000,
+        l.rest / 1000
+    );
     assert!(
         (middle.x - at.x - CARRIED).abs() < 600_000 && (middle.z - at.z).abs() < 600_000,
         "{name}: set down 25 m east: {middle:?}"
@@ -688,10 +733,27 @@ fn stood_at_set_down(dir: &Path, load: Id, carriers: [Id; 2]) -> (Vec3, Vec3) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_lengthwise() {
-    let d = scratch("c4");
+    c4("c4", &[]).await;
+}
+
+/// C4 with two Little Martians (floaters, no hands): each holds the beam and the upright by its grip, under its body;
+/// carried 25 m, each is set down on the floor, not where their bodies hover.
+#[tokio::test(flavor = "multi_thread")]
+async fn c4_two_floaters_carry_a_beam_and_an_upright_25_m() {
+    c4("c4lm", &[Some("kalama"), Some("nyx")]).await;
+}
+
+/// C4 with a walker in front and a floater behind: the load is held level between their grips.
+#[tokio::test(flavor = "multi_thread")]
+async fn c4_a_walker_and_a_floater_carry_a_beam_and_an_upright_25_m() {
+    c4("c4mix", &[None, Some("kalama")]).await;
+}
+
+async fn c4(tag: &str, bodies: &[Option<&str>]) {
+    let d = scratch(tag);
     let facts = world(&d);
     let socket = d.join("s");
-    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    let (dir, souls, served) = seed_and_serve_in(&d, &facts, (44, -18), &socket, 2, bodies);
     let activities = served.line("activities: ", 180);
     println!("{activities}");
     assert!(activities.contains(CARRY), "the carry is an activity kind");
