@@ -77,12 +77,15 @@ const WALL: &str = "test:wall";
 const CARRY: &str = "test:carry";
 /// A carry whose offer lapses in half a second (0.135 C3).
 const BRIEF: &str = "test:brief_carry";
-/// A carry that takes up to six (the crew test): the kind's members at most.
+/// A crew's carry (rung 3, 0.135 C5), as the served `mars:carry` is shaped: a front, a back and a side four take.
 const CREW: &str = "test:crew_carry";
+/// A 6 m plank with five grips that takes four to carry (rung 3).
+const PLANK: &str = "test:plank";
 /// How many Souls the crew test's world holds.
-const CREW_SOULS: u64 = 5;
+const CREW_SOULS: u64 = 6;
 const FRONT: &str = "test:front";
 const BACK: &str = "test:back";
+const SIDE: &str = "test:side";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap()
@@ -91,7 +94,7 @@ fn name(s: &str) -> Name {
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
     [
-        PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY, BRIEF, CREW,
+        PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY, BRIEF, CREW, PLANK,
     ]
     .iter()
     .enumerate()
@@ -136,6 +139,9 @@ fn crate_() -> Id {
 fn wall(n: u64) -> Id {
     id(5 + n)
 }
+fn plank() -> Id {
+    id(40)
+}
 
 /// A load's carrying places from its kind's entry (as the engine reads them, `sim::activity::carry::Load`): the
 /// back's and the front's, along the carry from its middle, µm.
@@ -167,12 +173,31 @@ fn crate_entry() -> Json {
     .unwrap()
 }
 
+/// A 6 m plank, its length along x, with five grips 1.4 m apart, that takes four to carry (rung 3).
+fn plank_entry() -> Json {
+    let grips: Vec<String> = [-2800, -1400, 0, 1400, 2800]
+        .iter()
+        .enumerate()
+        .map(|(k, x)| format!(r#""grip_{k}": {{"role": "grip", "at_mm": [{x}, 50, 0]}}"#))
+        .collect();
+    parse(&format!(
+        r#"{{"format": "souls-entry/1", "kind": "test:plank", "owner": "thing",
+            "state": {{"hold_crew": {{"n": 28, "type": "int", "unit": "count", "default": 4, "audience": {{"rule": "everyone"}}}}}},
+            "points": {{{}}},
+            "geometry": {{"bounds_mm": [6000, 100, 300]}}, "motion": {{"how": "two_souls"}}, "loose": {{"ever": true}},
+            "text": {{"card": "card"}}, "card": {{"text": "card"}}}}"#,
+        grips.join(", ")
+    ))
+    .unwrap()
+}
+
 /// The world's entries, by kind.
 fn entries() -> Json {
     Json::Obj(vec![
         (BEAM.into(), beam_entry()),
         (UPRIGHT.into(), upright_entry()),
         (CRATE.into(), crate_entry()),
+        (PLANK.into(), plank_entry()),
     ])
 }
 
@@ -186,6 +211,10 @@ fn upright_at() -> Vec3 {
 }
 fn crate_at() -> Vec3 {
     Vec3::new(-30_000_000, 0, 20_000_000)
+}
+/// The plank's middle in the crew test's world, its length along x, 3 m north of the crate; it is carried east.
+fn plank_at() -> Vec3 {
+    Vec3::new(-36_000_000, 0, 23_000_000)
 }
 /// Two walls north of the upright's way west: between them a passage 0.9 m wide, narrower than the upright (1.22 m),
 /// on the way from its front 10 m west and 10 m north. Each is (middle, half its length along z), µm.
@@ -312,6 +341,7 @@ fn tree_rules() -> TreeRules {
             (full(BEAM), k("thing", &[], &[], Some(2))),
             (full(UPRIGHT), k("thing", &[], &[], Some(2))),
             (full(CRATE), k("thing", &[], &[], Some(2))),
+            (full(PLANK), k("thing", &[], &[], Some(2))),
             (full(WALL), k("thing", &[], &[], None)),
             (full(CARRY), k("activity", &[], &[1], None)),
             (full(BRIEF), k("activity", &[], &[1], None)),
@@ -329,11 +359,16 @@ fn carry_kind() -> ActivityKind {
 
 /// A carry's kind of plain name `plain`, whose offer lasts `lasts` µs.
 fn carry_of(plain: &str, lasts: u64) -> ActivityKind {
-    carry_most(plain, lasts, None)
+    carry_roles(plain, lasts, None, &[FRONT, BACK])
 }
 
-/// [`carry_of`] taking up to `most` members (two when none), as a dance offered to several does (0.134 T3).
-fn carry_most(plain: &str, lasts: u64, most: Option<u64>) -> ActivityKind {
+/// A crew's carry (rung 3, 0.135 C5): a front, a back and a side, up to six members, as `mars:carry` is served.
+fn crew_kind() -> ActivityKind {
+    carry_roles(CREW, 60_000_000, Some(6), &[FRONT, BACK, SIDE])
+}
+
+/// [`carry_of`] taking up to `most` members (two when none), with the roles `roles`.
+fn carry_roles(plain: &str, lasts: u64, most: Option<u64>, roles: &[&str]) -> ActivityKind {
     let role = |r: &str| {
         Value::Map(BTreeMap::from([
             (1, Value::Text(name(r))),
@@ -350,7 +385,7 @@ fn carry_most(plain: &str, lasts: u64, most: Option<u64>) -> ActivityKind {
     let mut m = BTreeMap::from([
         (1, Value::Text(name(&full(plain)))),
         (2, Value::Uint(1)),
-        (3, Value::Array(vec![role(FRONT), role(BACK)])),
+        (3, Value::Array(roles.iter().map(|r| role(r)).collect())),
         (4, Value::Uint(lasts)),
         (5, Value::Uint(400_000)),
     ]);
@@ -406,6 +441,9 @@ fn world_of(souls: u64) -> Replica {
         create(upright(), UPRIGHT, g, upright_at()),
         create(crate_(), CRATE, g, crate_at()),
     ]);
+    if souls > 2 {
+        changes.push(create(plank(), PLANK, g, plank_at()));
+    }
     let solid = |hz: i64| {
         Value::Array(vec![Value::Array(
             [0, 0, 100, hz / 1000, 0, 0, 2_500]
@@ -454,12 +492,7 @@ fn world_of(souls: u64) -> Replica {
     r
 }
 
-/// The bodies, each where the log last had it on a restart (`placed`), else at its start.
-fn bodies(placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
-    bodies_of(2, placed)
-}
-
-/// [`bodies`] of `souls` Souls.
+/// The bodies of `souls` Souls, each where the log last had it on a restart (`placed`), else at its start.
 fn bodies_of(souls: u64, placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let frame = Frame {
@@ -643,8 +676,13 @@ impl Logged {
     /// The world as built with every logged effect applied, and the state hash that gives (`answers::state_hash`,
     /// the bodies' poses from the world's start and each part's rows), beside the one the last part holds.
     fn replay(&self) -> (Replica, [u8; 32], Vec<u8>) {
-        let mut r = world();
-        let mut poses: BTreeMap<Id, Pose> = bodies(&Placed::new())
+        self.replay_of(2)
+    }
+
+    /// [`Logged::replay`] onto the world of `souls` Souls (the crew test's six).
+    fn replay_of(&self, souls: u64) -> (Replica, [u8; 32], Vec<u8>) {
+        let mut r = world_of(souls);
+        let mut poses: BTreeMap<Id, Pose> = bodies_of(souls, &Placed::new())
             .unwrap()
             .poses()
             .into_iter()
@@ -765,11 +803,7 @@ fn start_world_of(
     cfg.bodies = Some(Box::new(move |p: &Placed| bodies_of(souls, p)));
     cfg.engine = Some((
         tree_rules(),
-        vec![
-            carry_kind(),
-            carry_of(BRIEF, 500_000),
-            carry_most(CREW, 60_000_000, Some(6)),
-        ],
+        vec![carry_kind(), carry_of(BRIEF, 500_000), crew_kind()],
     ));
     if watched {
         watch(&mut cfg);
@@ -1115,7 +1149,12 @@ async fn walk_on(s: &mut Soul, store: &Mem, by: i64) {
 
 /// Where the log last had body `body`.
 fn start_of(store: &Mem, body: Id) -> Vec3 {
-    let mut at = bodies(&Placed::new())
+    start_in(store, body, 2)
+}
+
+/// [`start_of`] in the world of `souls` Souls.
+fn start_in(store: &Mem, body: Id, souls: u64) -> Vec3 {
+    let mut at = bodies_of(souls, &Placed::new())
         .unwrap()
         .poses()
         .into_iter()
@@ -1307,18 +1346,96 @@ async fn leave(s: &mut Soul, carry: Id, what: &str) -> Duration {
     t.elapsed()
 }
 
-/// The crew measure (0.135, crews of up to six): what a crew of five meets today, each step by name. It reaches no
-/// rung yet. A two-role carry (as the served `mars:carry` is: its front and its back take one each,
-/// `content/kinds/construction/carry.json`) makes a second pair at a third Soul's accept, never a crew of three.
-/// Given a kind that takes six, five Souls join one carry, and then:
-/// - the crate, which takes three, is lifted with only its first two members at its grips: the lift counts members,
-///   not carriers, and carries between the first two (`worldd::engine`, `carry:lift`);
-/// - the fifth member, who holds nothing, leaves, and the carry breaks off: the crate is set down
-///   (`souls:partner-left`) though four remain, more than it takes.
+/// Where a load lies now in the world of `souls` Souls: its parent and its place there.
+fn lies_in(store: &Mem, load: Id, souls: u64) -> (Option<Id>, replica::tree::Place) {
+    let (r, _, _) = Logged::read(store).replay_of(souls);
+    let t = r.tree();
+    let n = t.node(t.handle(load).expect("the load")).unwrap();
+    (n.parent(), n.place().unwrap())
+}
+
+/// Where each member of a crew carrying the plank stands, as it lies now, in join order: the front at its + end, the
+/// back at its − end, then each side beside its grip between them (`Load::side_places`).
+fn crew_places(store: &Mem) -> Vec<Vec3> {
+    let (_, at) = lies_in(store, plank(), CREW_SOULS);
+    let load = Load::of(&plank_entry()).unwrap();
+    let a = load
+        .lies_along(at.orientation)
+        .unwrap()
+        .expect("the plank lies flat");
+    let l = load.half_length;
+    let on = |[along, across]: [i64; 2]| {
+        Vec3::new(
+            at.position.x + (a[0] * along - a[1] * across) / l,
+            0,
+            at.position.z + (a[1] * along + a[0] * across) / l,
+        )
+    };
+    let [back, front] = load.places();
+    let mut out = vec![on([front, 0]), on([back, 0])];
+    out.extend(load.side_places().into_iter().map(on));
+    out
+}
+
+/// The farthest any side carrier drifted from its place at the lift (`sim::activity::carry::Carry::place_of`) while
+/// the first carry of the plank was on: from the part that lifted it to the one that says a side left, µm.
+fn side_drift(logged: &Logged, front: Id, back: Id, sides: &[Id]) -> i64 {
+    use sim::activity::carry::Carry;
+    let mut at: BTreeMap<Id, Vec3> = bodies_of(CREW_SOULS, &Placed::new())
+        .unwrap()
+        .poses()
+        .into_iter()
+        .map(|(b, p)| (b, p.position))
+        .collect();
+    let (mut lifted, mut most) = (None::<Vec<[i64; 2]>>, 0);
+    for p in &logged.parts {
+        if let Some(Value::Array(rows)) = p.rest.get(&BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(read_row) {
+                at.insert(b, pose.position);
+            }
+        }
+        let places: Vec<[i64; 2]> = sides
+            .iter()
+            .map(|s| Carry::place_of(at[&front], at[&back], at[s]))
+            .collect();
+        let lifts = p.effects.iter().any(|e| {
+            matches!(&e.body, Body::Transfer(replica::effects::TransferRec::Leave { node, .. })
+                if *node == plank())
+        });
+        if lifted.is_none() && lifts {
+            lifted = Some(places.clone());
+        }
+        if let Some(was) = &lifted {
+            for (now, was) in places.iter().zip(was) {
+                let d = [now[0] - was[0], now[1] - was[1]];
+                most = most.max((i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2)).isqrt() as i64);
+            }
+        }
+        if p.effects
+            .iter()
+            .flat_map(|e| e.events.iter().flatten())
+            .any(|ev| ev.name.as_str() == "souls:carry-going-on")
+        {
+            break;
+        }
+    }
+    most
+}
+
+/// Rung 3 (0.135 C5): carriers at every grip. Six Souls, each by its own intents through the gateway, in one crew's
+/// carry shaped as the served `mars:carry` is (a front, a back and a side four take). A plank with five grips that
+/// takes four lies 3 m north of the crate:
+/// - with six in the carry, the lift is refused `carry-crew-too-large` (one carrier per grip); the sixth leaves;
+/// - with the fifth not yet beside its grip, refused `carry-grip-out-of-reach` (every member is checked);
+/// - five lift it and carry it 25 m east, each walking its own way, the front leading; the sixth's accept mid-carry
+///   is refused `carry-lifted` (nobody joins mid-carry);
+/// - a side carrier leaves and the carry goes on with four (`souls:carry-going-on`, `souls:carrier-left`), 3 m more;
+///   a second leaves, below four, and the plank is set down where it is (`souls:partner-left`);
+/// - in a new carry of four, a side who stays while the others walk on breaks it off (`souls:carriers-apart`).
 ///
-/// Each is asserted as it is today, so the task that carries with up to six changes this test where it changes that.
+/// Every id is conserved and the log replays to the state hash it holds.
 #[tokio::test(flavor = "multi_thread")]
-async fn crew_measure_five_souls_today_carry_on_two_and_break_off_at_any_leave() {
+async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
     let store = Mem::with(Vec::new());
     let path = socket_path("crew");
     let served = start_world_of(&store, &path, false, CREW_SOULS);
@@ -1328,9 +1445,9 @@ async fn crew_measure_five_souls_today_carry_on_two_and_break_off_at_any_leave()
         crew.push(Soul::connect(&url, soul(n), token).await);
     }
     let g = ground();
-    let offer_to = |kind: &str, to: &[u64]| {
+    let offer_to = |to: &[u64]| {
         BTreeMap::from([
-            (1, pinned(kind)),
+            (1, pinned(CREW)),
             (2, Value::Text(name(FRONT))),
             (
                 3,
@@ -1338,74 +1455,203 @@ async fn crew_measure_five_souls_today_carry_on_two_and_break_off_at_any_leave()
             ),
         ])
     };
+    let east = |p: Vec3, by: i64| Vec3::new(p.x + by, 0, p.z);
+    let none = BTreeMap::new;
 
-    // A two-role carry offered to Souls 3 and 4: the second accept makes a second pair, not a crew of three.
-    let offered = crew[0]
-        .act("activity:offer", Some(g), offer_to(CARRY, &[3, 4]))
-        .await
-        .expect("a carry offered to two");
-    let pair = Logged::read(&store).created(&offered, CARRY);
-    crew[2]
-        .act("activity:accept", Some(pair), BTreeMap::new())
-        .await
-        .expect("Soul 3 accepts");
-    let second = crew[3]
-        .act("activity:accept", Some(pair), BTreeMap::new())
-        .await
-        .expect("Soul 4 accepts");
-    let other = Logged::read(&store).created(&second, CARRY);
-    assert_ne!(
-        other, pair,
-        "today: a third Soul's accept makes a second pair"
-    );
-    // Each leaves both pairs, so Soul 1 is free for the crew.
-    for (s, activity) in [(2, pair), (0, pair), (3, other), (0, other)] {
-        crew[s]
-            .act("activity:leave", Some(activity), BTreeMap::new())
-            .await
-            .expect("a leave is always accepted");
+    // Souls 1 to 4 walk to their places, the front, the back and the first two sides; Soul 5 stays where it is.
+    let at = crew_places(&store);
+    for (s, p) in crew[..4].iter_mut().zip(&at) {
+        s.send("eden:walk", Some(g), point(*p)).await;
     }
-
-    // The first two walk to the crate's carrying places, at its ends along its length (its z).
-    let [back, front] = places(&crate_entry());
-    let end = |along: i64| Vec3::new(crate_at().x, 0, crate_at().z + along);
-    crew[0].send("eden:walk", Some(g), point(end(front))).await;
-    crew[1].send("eden:walk", Some(g), point(end(back))).await;
-    for s in &mut crew[..2] {
-        s.answer().await.expect("walks to the crate");
+    for s in &mut crew[..4] {
+        s.answer().await.expect("walks to its place");
     }
-
-    // A carry that takes six, offered to the other four: each accept joins the one carry.
+    // Soul 1 offers the carry to the other five: each accept joins the one carry, in join order.
     let offered = crew[0]
-        .act("activity:offer", Some(g), offer_to(CREW, &[2, 3, 4, 5]))
+        .act("activity:offer", Some(g), offer_to(&[2, 3, 4, 5, 6]))
         .await
-        .expect("a crew's carry offered to four");
+        .expect("a crew's carry offered to five");
     let carry = Logged::read(&store).created(&offered, CREW);
     for s in &mut crew[1..] {
-        s.act("activity:accept", Some(carry), BTreeMap::new())
+        s.act("activity:accept", Some(carry), none())
             .await
-            .expect("each of the four joins the carry");
+            .expect("each joins the one carry");
     }
-    // Today: the crate that takes three is lifted, though only the first two stand at its grips.
-    crew[0]
-        .act("carry:lift", Some(carry), lift(crate_(), None))
+    assert_eq!(
+        crew[0]
+            .act("carry:lift", Some(carry), lift(plank(), None))
+            .await,
+        Err("carry-crew-too-large".to_owned()),
+        "six for five grips"
+    );
+    crew[5]
+        .act("activity:leave", Some(carry), none())
         .await
-        .expect("today: a crate that takes three lifted by two at its grips");
-    // Today: the fifth, who holds nothing, leaves, and the crate is set down with four still in the carry.
+        .expect("a leave is always accepted");
+    assert_eq!(
+        crew[0]
+            .act("carry:lift", Some(carry), lift(plank(), None))
+            .await,
+        Err("carry-grip-out-of-reach".to_owned()),
+        "the fifth is not beside its grip"
+    );
     crew[4]
-        .act("activity:leave", Some(carry), BTreeMap::new())
+        .act("eden:walk", Some(g), point(at[4]))
+        .await
+        .expect("Soul 5 walks to its place");
+    crew[0]
+        .act("carry:lift", Some(carry), lift(plank(), None))
+        .await
+        .expect("five lift the plank, one at each grip");
+    assert_eq!(
+        crew[5].act("activity:accept", Some(carry), none()).await,
+        Err("carry-lifted".to_owned()),
+        "nobody joins mid-carry"
+    );
+    let mut steps = vec!["five lifted the plank"];
+
+    // All five carry it 25 m east, each walking its own way.
+    for (s, p) in crew[..5].iter_mut().zip(&at) {
+        s.send("eden:walk", Some(g), point(east(*p, CARRIED))).await;
+    }
+    for s in &mut crew[..5] {
+        s.answer().await.expect("carries the plank 25 m");
+    }
+    assert!(Logged::read(&store).set_downs().is_empty(), "carried 25 m");
+    steps.push("carried it 25 m");
+
+    // A side carrier leaves: four are what it takes, so the carry goes on, 3 m more.
+    crew[4]
+        .act("activity:leave", Some(carry), none())
+        .await
+        .expect("a leave is always accepted");
+    // It steps 3 m north, off the way of the side behind it.
+    let p = start_in(&store, soul(5), CREW_SOULS);
+    crew[4]
+        .act("eden:walk", Some(g), point(Vec3::new(p.x, 0, p.z + 3 * M)))
+        .await
+        .expect("the one who left steps aside");
+    let from: Vec<Vec3> = crew[..4]
+        .iter()
+        .map(|s| start_in(&store, s.id, CREW_SOULS))
+        .collect();
+    for (s, p) in crew[..4].iter_mut().zip(from) {
+        s.send("eden:walk", Some(g), point(east(p, 3 * M))).await;
+    }
+    for s in &mut crew[..4] {
+        s.answer().await.expect("carries the plank on");
+    }
+    let logged = Logged::read(&store);
+    let going_on: Vec<Value> = logged
+        .events("souls:carry-going-on")
+        .iter()
+        .filter_map(|f| f.get(&3).cloned())
+        .collect();
+    assert_eq!(
+        going_on,
+        vec![Value::Text(name("souls:carrier-left"))],
+        "a side's leave leaves the carry going on"
+    );
+    assert_eq!(logged.set_downs(), Vec::<String>::new(), "four carry it on");
+    steps.push("a side left and four carried it 3 m more");
+
+    // A second side leaves: three are fewer than it takes, and it is set down where it is.
+    crew[3]
+        .act("activity:leave", Some(carry), none())
         .await
         .expect("a leave is always accepted");
     tokio::time::sleep(Duration::from_millis(300)).await;
-    served.stop();
     assert_eq!(
         Logged::read(&store).set_downs(),
         vec!["souls:partner-left".to_owned()],
-        "today: any member's leave breaks a crew's carry off"
+        "below its crew, it is set down"
+    );
+    let (on, lay) = lies_in(&store, plank(), CREW_SOULS);
+    assert!(
+        on == Some(g) && (lay.position.x - (plank_at().x + CARRIED + 3 * M)).abs() < 600_000,
+        "set down 28 m east, where it was: {lay:?}"
+    );
+    for s in &mut crew[..3] {
+        s.act("activity:leave", Some(carry), none())
+            .await
+            .expect("a leave is always accepted");
+    }
+    steps.push("a second side left and it was set down");
+
+    // A new carry of four: a side who stays while the others walk on drifts from its place and breaks it off.
+    let at = crew_places(&store);
+    for (s, p) in crew[..4].iter_mut().zip(&at) {
+        s.send("eden:walk", Some(g), point(*p)).await;
+    }
+    for s in &mut crew[..4] {
+        s.answer().await.expect("walks to its place");
+    }
+    let offered = crew[0]
+        .act("activity:offer", Some(g), offer_to(&[2, 3, 4]))
+        .await
+        .expect("a crew's carry offered to three");
+    let again = Logged::read(&store).created(&offered, CREW);
+    for s in &mut crew[1..4] {
+        s.act("activity:accept", Some(again), none())
+            .await
+            .expect("each joins the new carry");
+    }
+    crew[0]
+        .act("carry:lift", Some(again), lift(plank(), None))
+        .await
+        .expect("four lift the plank");
+    let from: Vec<Vec3> = crew[..3]
+        .iter()
+        .map(|s| start_in(&store, s.id, CREW_SOULS))
+        .collect();
+    for (s, p) in crew[..3].iter_mut().zip(from) {
+        s.send("eden:walk", Some(g), point(east(p, 5 * M))).await;
+    }
+    for s in &mut crew[..3] {
+        s.answer().await.expect("walks on");
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        Logged::read(&store).set_downs(),
+        vec![
+            "souls:partner-left".to_owned(),
+            "souls:carriers-apart".to_owned()
+        ],
+        "a side who stays behind breaks the carry off"
+    );
+    for s in &mut crew[..4] {
+        s.act("activity:leave", Some(again), none())
+            .await
+            .expect("a leave is always accepted");
+    }
+    steps.push("a side stayed behind and it was set down");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    served.stop();
+
+    let logged = Logged::read(&store);
+    let drift = side_drift(&logged, soul(1), soul(2), &[soul(3), soul(4), soul(5)]);
+    assert!(
+        drift < sim::activity::carry::STRETCH,
+        "the sides keep their places by their own walks: {drift} µm"
+    );
+    let (replayed, hash, held) = logged.replay_of(CREW_SOULS);
+    assert_eq!(
+        nodes(&replayed),
+        nodes(&world_of(CREW_SOULS)),
+        "every id conserved, and no other"
+    );
+    assert_eq!(
+        hash.to_vec(),
+        held,
+        "the log replays to the state hash it holds"
     );
     println!(
-        "team gate: crews of up to six: not reached; a two-role carry makes a second pair at a third accept; five in \
-         one carry lift a crate that takes three with two at its grips; the fifth's leave sets it down \
-         (souls:partner-left) with four left"
+        "team gate: rung 3 reached ({}); six for five grips refused carry-crew-too-large; a side not at its grip \
+         refused carry-grip-out-of-reach; a join mid-carry refused carry-lifted; a side's leave went on \
+         (souls:carrier-left), a second set it down (souls:partner-left); a side left behind broke it off \
+         (souls:carriers-apart); the sides drifted at most {} mm from their places over 25 m; ids conserved; the log \
+         replays to its state hash",
+        steps.join(", "),
+        drift / 1000
     );
 }

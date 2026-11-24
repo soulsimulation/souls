@@ -10,8 +10,10 @@
 //! - **Rung 2 (C3):** a carry that breaks off. A decline and a lapsed offer move nothing. A partner who leaves, a
 //!   partner whose connection is gone, and a world restarted, each mid-carry, leave the load set down on the ground
 //!   where the carry had it, the world saying why (`souls:carry-set-down`); every leave after is answered at once.
-//! - **Crews of up to six (a measure, no rung yet):** five Souls meet today's limits, each by name. A two-role carry
-//!   makes a second pair at a third accept; five in one carry that takes six lift a crate that takes three with two at
-//!   its grips, and the fifth's leave sets it down (`souls:partner-left`) with four left.
+//! - **Rung 3 (C5):** carriers at every grip. Five Souls in one carry shaped as `mars:carry` is served (a front, a
+//!   back and up to four sides) lift a plank with five grips that takes four, each checked at its grip, and carry it
+//!   25 m by their own walks. A sixth is refused `carry-crew-too-large` and a join mid-carry `carry-lifted`; a side's
+//!   leave leaves it going on with four (`souls:carrier-left`), a second's sets it down (`souls:partner-left`), and a
+//!   side left behind breaks it off (`souls:carriers-apart`).
 //!
 //! `cargo test -p team-gate -- --nocapture`.
