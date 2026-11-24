@@ -2154,3 +2154,76 @@ fn g1_a_twenty_metre_walk_takes_its_gaits_time() {
         "{gait:?} refused by name"
     );
 }
+
+/// 0.133: a walk's target (for how far from it the walk ended) is kept only until the walk ends, however it ends: done
+/// (taken with its end), replaced by a new move, stopped, or refused as it starts.
+#[test]
+fn a_walks_target_is_kept_until_it_ends_however_it_ends() {
+    use worldd::bodies::{Ask, Asked};
+    fn walk(b: &mut Bodies, n: u64, to: Id) -> Vec<(Id, Result<(), replica::effects::Refusal>)> {
+        b.start(vec![(
+            soul(n),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+    }
+    /// Steps until `id` ends; its ending.
+    fn run(b: &mut Bodies, id: Id) -> Result<(), String> {
+        for _ in 0..2_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    }
+    let mut b = bodies().unwrap();
+    b.begin(0);
+
+    // done: kept to its end, then its end distance until the end is written (a walk to the ground's middle, a node
+    // in the tree, ends within a step of it)
+    let (_, ground) = town();
+    assert!(walk(&mut b, 1, ground).iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(b.walks_kept(), 1);
+    assert_eq!(run(&mut b, soul(1)), Ok(()));
+    let away = b.away(soul(1));
+    assert!(
+        away.is_some_and(|mm| mm < 500),
+        "a done walk says how far from its target it ended: {away:?}"
+    );
+    assert_eq!(b.walks_kept(), 0, "nothing kept once its end is written");
+
+    // replaced by a new move: the old walk's target goes with it
+    assert!(walk(&mut b, 2, body_id()).iter().all(|(_, r)| r.is_ok()) || b.walks_kept() == 0);
+    let _ = b.step(b.runner.now + b.runner.tick);
+    assert!(walk(&mut b, 3, thing()).iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(b.walks_kept(), 1, "only the new walk's");
+    let _ = run(&mut b, soul(3));
+    let _ = b.away(soul(2));
+    let _ = b.away(soul(3));
+    assert_eq!(b.walks_kept(), 0);
+
+    // stopped by its own Soul
+    let far = Id::new(Scope([7; 16]), 9_002).unwrap();
+    assert!(walk(&mut b, 4, far).iter().all(|(_, r)| r.is_ok()));
+    let _ = b.cancel(soul(4));
+    assert_eq!(b.walks_kept(), 0, "a stopped walk keeps nothing");
+
+    // refused as it starts: a target the world does not have
+    let none = Id::new(Scope([9; 16]), 1).unwrap();
+    let r = walk(&mut b, 5, none);
+    assert!(r.iter().all(|(_, r)| r.is_err()), "{r:?}");
+    assert_eq!(
+        b.walks_kept(),
+        0,
+        "a walk refused at its start keeps nothing"
+    );
+}

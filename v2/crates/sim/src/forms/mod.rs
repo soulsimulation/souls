@@ -493,6 +493,78 @@ pub struct Forms {
     /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
     /// writes it on the body ([`Forms::seat_posture`]).
     postures: BTreeMap<String, u64>,
+    /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
+    /// (E14, [`other_slots`]).
+    slots_of: BTreeMap<String, BTreeSet<u64>>,
+}
+
+/// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
+/// the form's own thing is, before anything starts: the form's entry takes that argument as a `slot` (`arg-type`
+/// otherwise); the thing is no body (`slot-of-a-body`: a form never puts into, or seats in, another Soul); it is not
+/// private to someone else (#3700's `object.private`, as a bare sit on it is refused); and its kind declares the slot
+/// (`slot-unknown`), or the world holds it as a seat.
+fn other_slots<G: Geometry, R: Reach>(
+    w: &World<'_, G, R>,
+    slots_of: &BTreeMap<String, BTreeSet<u64>>,
+    body: Id,
+    entry: &replica::rules::json::Value,
+    form: &str,
+    args: &form_runner::Args,
+) -> Result<(), Refusal> {
+    let refuse = |name, detail: String| Err(Refusal { name, detail });
+    let takes = entry
+        .get("forms")
+        .and_then(|fs| fs.get(form))
+        .and_then(|f| f.get("takes"));
+    let asker = w
+        .tree
+        .links_at(body)
+        .iter()
+        .find(|e| w.tree.ty(e).as_str() == BODY_OF)
+        .map_or(body, |e| e.other);
+    for (key, arg) in args {
+        let &form_runner::Arg::Slot(on, n) = arg else {
+            continue;
+        };
+        let ty = takes
+            .and_then(|t| t.get(key))
+            .and_then(|t| t.get("type"))
+            .and_then(replica::rules::json::Value::str);
+        if ty != Some("slot") {
+            return refuse(
+                "arg-type",
+                format!("{key}: the form takes no slot by this name"),
+            );
+        }
+        let a_body = w.controller.body(on).is_some()
+            || w.tree
+                .links_at(on)
+                .iter()
+                .any(|e| w.tree.ty(e).as_str() == BODY_OF);
+        if a_body {
+            return refuse("slot-of-a-body", format!("{key}: {} is a body", show(on)));
+        }
+        if let Some(words) = replica::who_may::private_to(w.tree, on, asker) {
+            return refuse("object.private", format!("{key}: who may: {words}"));
+        }
+        let held = w
+            .places
+            .as_ref()
+            .is_some_and(|p| p.slots.place_in(on, n).is_some());
+        let kind = w
+            .tree
+            .handle(on)
+            .and_then(|h| w.tree.node(h))
+            .map(|t| t.kind().as_str().to_owned());
+        let declared = kind
+            .as_deref()
+            .and_then(|k| slots_of.get(k))
+            .is_some_and(|s| s.contains(&n));
+        if !held && !declared {
+            return refuse("slot-unknown", format!("{key}: slot {n} of {}", show(on)));
+        }
+    }
+    Ok(())
 }
 
 /// The state field a body's kind keeps its posture in (`stand`, `sit`, `lie`, ...), by name.
@@ -693,14 +765,20 @@ impl Forms {
     }
 
     /// Each body's run whose step in progress is a walk to its node's own point right before a `sit` or `lie` into a
-    /// slot of that node: the step's number, the node and the slot. The world aims that walk at the seat's own stand
-    /// point, as its places hold it (moved clear when the entry's point is blocked), not the entry's point.
+    /// slot of that node, or a walk to another thing right before a `sit` or `lie` into that thing's slot (E14): the
+    /// step's number, the seat's thing and the slot. The world aims that walk at the seat's own stand point, as its
+    /// places hold it (moved clear when the entry's point is blocked), not the entry's point.
     pub fn seat_walks(&self) -> BTreeMap<Id, (usize, Id, u64)> {
         self.runs
             .values()
             .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
-                (Step::WalkTo { on: None, .. }, Step::Sit { slot, .. }) => {
-                    Some((fr.body, (fr.runner.at()?, fr.node, *slot)))
+                (
+                    Step::WalkTo { on, .. },
+                    Step::Sit {
+                        slot, on: place, ..
+                    },
+                ) if on == place => {
+                    Some((fr.body, (fr.runner.at()?, place.unwrap_or(fr.node), *slot)))
                 }
                 _ => None,
             })
@@ -1032,8 +1110,12 @@ impl Forms {
             form_runner::turn(&mut steps, p.orientation)?;
         }
         // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
-        // which a seated body's legs would refuse (`resource-held`, #4143).
-        if node == body {
+        // which a seated body's legs would refuse (`resource-held`, #4143). So is a move on the thing whose seat or
+        // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
+        // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
+        // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
+        let in_its_slot = w.places.as_ref().and_then(|p| p.slots.held_by(body)) == Some(node);
+        if node == body || in_its_slot {
             steps.retain(|s| {
                 !matches!(
                     s,
@@ -1207,6 +1289,7 @@ impl Forms {
             self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
         if !known {
             may(w.tree, audiences, names, body, node, entry, form)?;
+            other_slots(w, &self.slots_of, body, entry, form, args)?;
         }
         match bound {
             Ok((steps, effects)) => self.start(w, body, node, intent, steps, effects, limits, now),
@@ -1225,6 +1308,17 @@ impl Forms {
             .filter_map(|def| {
                 let (n, _) = def.state.iter().find(|(_, f)| f.name.as_str() == POSTURE)?;
                 Some((def.name.as_str().to_owned(), *n))
+            })
+            .collect();
+        self.slots_of = kinds
+            .admits()
+            .keys()
+            .filter_map(|k| kinds.get(k))
+            .map(|def| {
+                (
+                    def.name.as_str().to_owned(),
+                    def.slots.keys().copied().collect(),
+                )
             })
             .collect();
     }
@@ -1941,6 +2035,8 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
 
 /// The type of a body's link to its Soul (contract T2).
 const BODY_OF: &str = "souls:body-of";
+/// A Soul's body's kind (plain): a thing whose parent is one is in its hand.
+const BODY: &str = "souls:body";
 
 /// Who may, on the world's side (F6): whether `body` may do form `form` of `entry` at `node`, as the tree stands. The
 /// test is [`who_may::test`], the client's own. The actor's Soul is the far end of the body's `souls:body-of` link,
@@ -1950,7 +2046,7 @@ const BODY_OF: &str = "souls:body-of";
 /// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
 /// `who` outside the closed list), `object.private` (a private thing not the asker's, #3700), `not-permitted` with the
 /// sentence. For `who: holder`, the holder is a body with the thing in a hand, or a body seated in a vehicle's drive
-/// seat ([`drives`]): a rider steers, a passenger does not.
+/// seat ([`drives`]) while no body carries it: a rider steers, a passenger does not, and there is never a second holder.
 pub fn may(
     tree: &Tree,
     audiences: &BTreeMap<Id, BTreeSet<Id>>,
@@ -1978,8 +2074,14 @@ pub fn may(
         return refuse("object.private", format!("who may: {words}"));
     }
     let thing = tree.handle(node).and_then(|h| tree.node(h));
-    let holds =
-        thing.as_ref().and_then(|n| n.parent()) == Some(body) || drives(tree, body, node, entry);
+    // One holder (E10b): a thing whose parent is a body is in that body's hand and is its alone, so a body seated in
+    // its drive seat while someone carries it does not hold it too, and the carrier can always put it down.
+    let parent = thing.as_ref().and_then(|n| n.parent());
+    let carried = parent
+        .and_then(|p| tree.handle(p))
+        .and_then(|h| tree.node(h))
+        .is_some_and(|p| plain(p.kind().as_str()) == BODY);
+    let holds = parent == Some(body) || (!carried && drives(tree, body, node, entry));
     let (ends, seen) = match (&who, &thing) {
         (Who::Link(t), Some(n)) => {
             let ty = audience::link_type(n.kind().as_str(), t);

@@ -216,6 +216,16 @@ test('entry socket: an #approve link opens no world socket (a full boot opens it
   assert.equal(FakeWS.made.length, 1);
 });
 
+// release probe (24 Nov): a page the new engine runs never adopts the entry socket, so it opens none, phased or not
+test('entry socket: a page that reads a v2 stream opens no world socket', () => {
+  const loc = { pathname: '/w/eden/', protocol: 'https:', host: 'sim.test' }, __simConfig = { worldEngine: true, v2Stream: '/s/eden/' };
+  runEntryWithSocket(loc.pathname, anonymousHello(true), { location: loc, __simConfig });
+  assert.equal(FakeWS.made.length, 0);
+  const phased = runEntryWithSocket(loc.pathname, anonymousHello(true), { location: { ...loc, search: '?early=1' }, URLSearchParams, screen: { width: 390, height: 844 }, navigator: {}, __simConfig });
+  (phased.ctx[OPEN_SOCKET_GLOBAL] as (() => void) | undefined)?.(); assert.equal(FakeWS.made.length, 0, 'phased second phase too');
+  runEntryWithSocket(loc.pathname, anonymousHello(true), { location: loc, __simConfig: { worldEngine: true } });
+  assert.equal(FakeWS.made.length, 1, 'the same world on the old engine opens it');
+});
 
 test('renamed Eden uses its inline runtime kind for prefetch, while legacy Eden stays unchanged', () => {
   for (const worldEngine of [true, false]) {
