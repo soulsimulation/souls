@@ -43,6 +43,14 @@ the current version's two files answer `public, max-age=31536000, immutable`, so
 any other version, and the plain `/replica.js` and `/replica_bg.wasm` the Soul client's upgrade reads, answer `no-store`. God edits made on v2 after the switch are not in those files;
 the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
 made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
+The snapshot's wire forms the page asks first (`?defs=ref&cols=1`, `&v=<key>`) get the published plain snapshot. Once a
+routed world's views are published for its stream, the launcher never wakes its old process for its page: while that
+process is not awake (not running, or stopped in place), the launcher builds the page itself (the inline config with its
+stream, as for a world with no old twin), answers each view from the published files, and answers the page's other old
+reads as for a world with no old twin (its sign-in; the rest 404 `world.new-engine`). A world with no views published for
+its stream (a fresh move, or views held in memory before a restart) wakes its old process once for its page, which
+publishes them: drawn from its stream alone, an old world's buildings can lose their finish (a hall without its roof, in
+hello-hamlet), so the stream alone is not its picture. A running old process still serves its page.
 
 ### One world's old page, on and off (B3-1)
 
