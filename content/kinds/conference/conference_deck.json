@@ -55,6 +55,12 @@
       "starts": "act",
       "needs": [
         {
+          "need": "linked",
+          "link": "presenter",
+          "end": "actor",
+          "says": "join_presenter"
+        },
+        {
           "need": "state",
           "field": "enabled",
           "is": false,
@@ -95,6 +101,12 @@
       "starts": "act",
       "needs": [
         {
+          "need": "linked",
+          "link": "presenter",
+          "end": "actor",
+          "says": "join_presenter"
+        },
+        {
           "need": "state",
           "field": "enabled",
           "is": true,
@@ -134,6 +146,12 @@
       "who": "anyone",
       "starts": "act",
       "needs": [
+        {
+          "need": "linked",
+          "link": "presenter",
+          "end": "actor",
+          "says": "join_presenter"
+        },
         {
           "need": "state",
           "field": "enabled",
@@ -181,6 +199,12 @@
       "starts": "act",
       "needs": [
         {
+          "need": "linked",
+          "link": "presenter",
+          "end": "actor",
+          "says": "join_presenter"
+        },
+        {
           "need": "state",
           "field": "enabled",
           "is": true,
@@ -226,6 +250,12 @@
       "who": "anyone",
       "starts": "act",
       "needs": [
+        {
+          "need": "linked",
+          "link": "presenter",
+          "end": "actor",
+          "says": "join_presenter"
+        },
         {
           "need": "state",
           "field": "enabled",
@@ -487,17 +517,20 @@
     }
   },
   "text": {
-    "card": "A shared three-slide deck marker: open, next, previous or select a number.",
+    "card": "A three-position deck marker operated by its accepted presenter.",
     "deck": "deck",
     "slides": "slides",
-    "howto_deck": "Open the deck marker. Positions 1, 2 and 3 stand for opening, example and questions. Use next_slide, previous_slide or select_slide with number 1\u20133; three position marks show the selection and green means open. Closing preserves the selected position. This records shared deck state only: existing screen and television controls remain manually independent. It delivers no slide pictures and assigns no presenter rights.",
+    "howto_deck": "Offer an activity at this deck in the presenter role and invite a listener to accept. Only the presenter operates the buttons. Open the deck, then use next_slide, previous_slide or select_slide with number 1–3. Positions 1, 2 and 3 stand for opening, example and questions. Green means open; closing preserves the selection. Leave through the activity when finished. To change presenter, leave that role and offer or join the available presenter role. Screen and television controls remain separate.",
     "already_open": "The deck is open. Use next_slide, previous_slide or select_slide.",
     "open_first": "Use open_deck before changing or closing the deck.",
     "first_slide": "At slide 1. Use next_slide or select_slide with number 2 or 3.",
     "last_slide": "At slide 3. Use previous_slide or select_slide with number 1 or 2.",
     "already_selected": "That position is selected. Choose another number from 1 to 3.",
     "free_a_hand": "Free one hand before operating the deck buttons.",
-    "conference": "conference"
+    "conference": "conference",
+    "join_presenter": "Join the presenter role at this deck through an activity offer, acceptance or join before using its buttons.",
+    "presenter": "presenter",
+    "listener": "listener"
   },
   "card": {
     "text": "card",
@@ -530,6 +563,40 @@
           "form": "close_deck"
         }
       ]
+    }
+  },
+  "links": {
+    "presenter": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "listener": {
+      "n": 2,
+      "from": "body",
+      "most": 9,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "roles": {
+    "presenter": {
+      "need": "replaceable",
+      "places": {
+        "in": "here",
+        "within_mm": 12000
+      }
+    },
+    "listener": {
+      "need": "optional",
+      "places": {
+        "in": "here",
+        "within_mm": 12000
+      }
     }
   }
 }
