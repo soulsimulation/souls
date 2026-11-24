@@ -15,11 +15,12 @@ import { skyFields } from './sky-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { coursePlaces } from '../course-samples.ts';
+import { unreadFormat } from '../stream-format.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
 
-type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
+type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number };
 // This worker's own scope, taken once: a test harness that loads several workers in one process gives each its own.
 const scope = self as unknown as Worker;
 const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, transfer);
@@ -187,6 +188,12 @@ async function run(stream: URL) {
     if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
+  // #4535: a baseline in a format this page's bundle cannot read is never played: the page reloads for the new one
+  // (stream-format.ts) instead of sitting frozen.
+  const refuseFormat = (b: Uint8Array) => {
+    const unread = unreadFormat(b);
+    if (unread !== null) { post({ t: 'format', format: unread }); throw new Error(`stream-format ${unread}`); }
+  };
   const install = async (p: StreamPointer) => {
     const header = await get(new URL(`../../../headers/${p.header}`, stream));
     if (!header) throw new Error('no header');
@@ -194,6 +201,7 @@ async function run(stream: URL) {
     if (!/^[0-9a-f]{64}$/.test(p.generation) || p.baseline !== p.generation) throw new Error('stream-generation-record');
     const baseline = await get(new URL(path(p, 'baseline'), stream));
     if (!baseline || hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) !== p.baseline) throw new Error('stream-baseline-hash');
+    refuseFormat(baseline);
     const nextPlayer = StreamPlayer.fromBaseline(header, baseline);
     let nodes: NodeRec[], nextVersion: number;
     try {
@@ -303,9 +311,14 @@ async function run(stream: URL) {
           if (drained && (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash)) throw new Error('stream-handoff-state');
           if (!drained && active === undefined) return;
           // A live viewer on a generation holds the state the new baseline holds (the digest just checked): it goes on
-          // in the new generation without fetching that baseline, and nothing on the page moves.
-          if (drained && active !== undefined) { player.cross(latest.generation!, latest.legacyHash!); active = latest.generation; }
-          else await install(latest);
+          // in the new generation without fetching that baseline, and nothing on the page moves. #4535: but its format
+          // first, from the baseline's first bytes only (a release may raise it at a rollover); a head that cannot be
+          // had says nothing, and the crossing goes on.
+          if (drained && active !== undefined) {
+            const head = await fetch(new URL(path(latest, 'baseline'), stream), { headers: { Range: 'bytes=0-15' }, cache: 'no-store' }).then((r) => (r.ok ? r.arrayBuffer() : null), () => null);
+            if (head) refuseFormat(new Uint8Array(head));
+            player.cross(latest.generation!, latest.legacyHash!); active = latest.generation;
+          } else await install(latest);
         } else if (!latest.generation) throw new Error('stream-generation-gap');
         else await install(latest);
       }
