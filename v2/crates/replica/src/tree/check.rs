@@ -159,28 +159,48 @@ impl Rules {
     }
 
     /// The amounts moved in a part balance: for each field, the `by` of its sets sum to zero (T6 rule 3.4, SA-F2b).
-    /// One pour is two entries, the source's and then the destination's, in one part.
-    pub(super) fn balanced(&self, effects: &[Effect]) -> R<()> {
-        let mut sums: BTreeMap<u64, i128> = BTreeMap::new();
+    /// One pour is two entries, the source's and then the destination's, in one part. A field is known by its name on
+    /// the kind of the node set (its section 3), so a transfer between two kinds that number it differently balances
+    /// (E5b). When a set's node or field has no name the tree can read, the part balances by number, as before.
+    pub(super) fn balanced(&self, tree: &Tree, effects: &[Effect]) -> R<()> {
+        let mut sets: Vec<(Id, u64, i64)> = Vec::new();
         for e in effects {
             let Body::Changes(changes) = &e.body else {
                 continue;
             };
             for c in changes {
                 if let Change::Set {
+                    node,
                     field,
                     by: Some(by),
                     ..
                 } = c.change
                 {
-                    *sums.entry(field).or_default() += i128::from(by);
+                    sets.push((node, field, by));
                 }
             }
+        }
+        let named = |node: Id, field: u64| {
+            let kind = tree.kind_any(node)?;
+            self.kind(tree, node, kind.as_str())
+                .ok()?
+                .fields
+                .get(&field)
+                .cloned()
+        };
+        let names: Option<Vec<String>> = sets.iter().map(|(n, f, _)| named(*n, *f)).collect();
+        let mut sums: BTreeMap<String, i128> = BTreeMap::new();
+        for (i, (_, field, by)) in sets.iter().enumerate() {
+            let key = match &names {
+                Some(names) => names[i].clone(),
+                None => format!("field {field}"),
+            };
+            *sums.entry(key).or_default() += i128::from(*by);
         }
         match sums.iter().find(|(_, s)| **s != 0) {
             Some((field, sum)) => refuse(
                 "by-not-balanced",
-                format!("field {field}'s amounts moved sum to {sum}"),
+                format!("{field}'s amounts moved sum to {sum}"),
             ),
             None => Ok(()),
         }

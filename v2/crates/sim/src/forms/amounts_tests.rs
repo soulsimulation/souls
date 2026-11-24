@@ -1015,14 +1015,12 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
 
-/// E5: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's field 1)
-/// binds each end's field by its name on that end's own kind: the source's soap goes down and the target's soap up,
-/// and neither end's other field (dirt, numbered as the other kind's soap) is written.
-///
-/// Not here: committing that part onto a tree. T6 rule 3.4's balance (`replica::tree::check`) sums `by` per field
-/// number, so it refuses these two sets `by-not-balanced` until it sums per field name.
+/// E5, E5b: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's
+/// field 1) binds each end's field by its name on that end's own kind: the source's soap goes down and the target's
+/// soap up, and neither end's other field (dirt, numbered as the other kind's soap) is written. The part commits onto
+/// a tree whose kinds are the same K3 kinds: T6 rule 3.4's balance sums the two sets by the field's name.
 #[test]
-fn e5_a_transfer_between_kinds_that_number_the_field_differently_writes_each_ends_own_field() {
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amount() {
     const LINEN: &str = r#"{ "format": "souls-entry/1", "kind": "e5:linen", "owner": "thing",
       "state": {
         "dirt": { "n": 1, "type": "int", "unit": "count", "default": 5, "min": 0, "max": 9, "audience": { "rule": "everyone" } },
@@ -1048,20 +1046,23 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_writes_each_end
     assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
     let limits = super::amounts::limits(&kinds);
 
-    let kinds_diag = "{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}\n\
-                      {1: \"e5:linen\", 2: \"thing\"}\n\
-                      {1: \"e5:board\", 2: \"thing\"}";
+    // The tree's kinds are the same numbered kinds, so it knows each field's name (section 3).
+    let kinds_diag = format!(
+        "{{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}}\n{}\n{}",
+        linen_k.trim(),
+        board_k.trim()
+    );
     let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
                  {1: 101, 2: \"e5:board\", 3: 1}], 4: []}";
-    let (tree, _) =
-        Tree::load(&parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"))
+    let (mut tree, rules) =
+        Tree::load(&parse_world(&parse_kinds(&kinds_diag).expect("kinds"), world).expect("a world"))
             .expect("loads");
     let (linen, board) = (id(100), id(101));
 
     let args = BTreeMap::from([("other".to_owned(), board)]);
     let effects = bind_effects_with(&parse(LINEN).expect("JSON"), "wash", &args).expect("bound");
     let reserved: Vec<Id> = Vec::new();
-    let cx = super::amounts::Cx {
+    let made = super::amounts::Cx {
         view: View {
             tree: &tree,
             out: &[],
@@ -1074,24 +1075,27 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_writes_each_end
         node: linen,
         reserved: &reserved,
         now: 0,
-    };
-    let mut mint = Minter::new(Scope([0xe5; 16]));
-    let made = cx
-        .entries(&mut mint, &effects[0])
-        .expect("the transfer is not refused");
-    let sets: Vec<(Id, u64, Value, Option<i64>)> = made
-        .iter()
-        .flat_map(|(_, _, body)| match body {
-            Body::Changes(cs) => cs.clone(),
-            _ => Vec::new(),
+    }
+    .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
+    .expect("the transfer is not refused");
+    let mut entries: Vec<Effect> = made
+        .into_iter()
+        .map(|(node, _, body)| {
+            let mut e = world_set(node, 0);
+            e.body = body;
+            e
         })
-        .filter_map(|c| match c.change {
+        .collect();
+    let sets: Vec<(Id, u64, Value, Option<i64>)> = entries
+        .iter()
+        .flat_map(Effect::changes)
+        .filter_map(|c| match &c.change {
             Change::Set {
                 node,
                 field,
                 to,
                 by,
-            } => Some((node, field, to, by)),
+            } => Some((*node, *field, to.clone(), *by)),
             _ => None,
         })
         .collect();
@@ -1103,4 +1107,42 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_writes_each_end
         ],
         "each end's soap, by its own kind's number"
     );
+
+    // The part commits onto the tree (its balance sums soap to zero), and the amounts are there.
+    let pinned: Vec<&str> = rules.kinds.keys().map(String::as_str).collect();
+    let header = header(id(1), &pinned);
+    for (e, s) in entries.iter_mut().zip(tree.to_state().next..) {
+        e.envelope.sequence = s;
+    }
+    let part = |entries: &[Effect]| {
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(entries.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .expect("bytes");
+        Part::read(&bytes).expect("a part")
+    };
+    // Half a transfer is still refused, and leaves the tree as it was: the balance is by name, not waived.
+    let half = tree.commit(&header, &part(&entries[..1]), &rules);
+    assert_eq!(
+        half.err().map(|r| r.name),
+        Some("by-not-balanced"),
+        "a lone set with a by"
+    );
+    tree.commit(&header, &part(&entries), &rules)
+        .expect("the part commits");
+    let field = |n: Id, f: u64| {
+        tree.node(tree.handle(n).expect("there"))
+            .expect("a node")
+            .fields()
+            .get(&f)
+            .cloned()
+    };
+    assert_eq!(field(linen, 2), Some(Value::Uint(20)));
+    assert_eq!(field(board, 1), Some(Value::Uint(10)));
+    assert_eq!(field(linen, 1), None, "the linen's dirt is untouched");
+    assert_eq!(field(board, 2), None, "the board's dirt is untouched");
 }
