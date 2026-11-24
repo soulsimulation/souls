@@ -39,7 +39,8 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 // database (v2/tools/import-world/export/backup.ts) in place of the template's replay.
 const BACKUP = arg('--backup', '');
 const backup = await import('../../import-world/export/backup.ts');
-const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+// `--assets <dir>`: the world's asset store, where its footprint uploads' physics are kept (backup.ts).
+const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json'), arg('--assets', '')) : null;
 const text = live ? '' : readFileSync(TEMPLATE, 'utf8');
 const g = live ? { batches: [] } : JSON.parse(text);
 const t0 = performance.now();
@@ -137,7 +138,10 @@ for (const e of m.entities.values()) {
   }
   if (e.shape) rec.shape = { ...(e.shape.path ? { path: e.shape.path.map(pt) } : {}), ...(e.shape.area ? { area: e.shape.area.map(pt) } : {}), ...(e.shape.width !== undefined ? { width: mm(e.shape.width) } : {}) };
   const geo = isWorldShape ? ((v: number) => mm(v)) : S, G = isWorldShape ? pt : P;
-  if (b.colliders.length) rec.solids = b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
+  // Only a solid or surface thing's colliders block, as today's engine bridge takes them (engine-bridge.ts): scenery
+  // (decor) is walked through, so a decor mesh's bounds (verdelis-eden's dome glass) never fill the ground under it.
+  const layer = (d as { layer?: string }).layer;
+  if (b.colliders.length && (layer === 'solid' || layer === 'surface')) rec.solids =b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
   if (b.surfaces?.length) rec.floors = b.surfaces.map((f) => ({ level: f.level, y: geo(f.y), polygon: f.polygon.map(G), ...(f.tag ? { tag: f.tag } : {}), ...(f.abs ? { abs: true } : {}) }));
   if (b.rooms?.length) rec.rooms = b.rooms.map((r) => {
     const sl = b.slots.find((x) => x.kind === 'room' && x.id === r.id);
@@ -280,7 +284,9 @@ for (const e of m.entities.values()) {
   add('rooms', b.rooms?.length ?? 0);
   add('floors', new Set([...(b.rooms ?? []).map((r) => r.floor), ...(b.surfaces ?? []).map((s) => s.level), ...(b.links ?? []).flatMap((l) => [l.from, l.to])]).size);
   add('floor surfaces', b.surfaces?.length ?? 0);
-  add('solids', b.colliders.length);
+  // what blocks, as the things' records write it: a decor thing's colliders are none
+  const layer = (d as { layer?: string }).layer;
+  add('solids', layer === 'solid' || layer === 'surface' ? b.colliders.length : 0);
   add('slots', b.slots.filter((x) => x.kind !== 'room').length);
   for (const o of b.openings ?? []) add(o.kind === 'window' ? 'windows' : 'doorways');
   for (const l of b.links ?? []) add(`stairs:${l.kind}`);

@@ -439,3 +439,36 @@ fn a_birth_with_every_place_held_waits_by_name() {
     at.dedup();
     assert_eq!(at.len(), born.len(), "no two on one point");
 }
+
+/// verdelis-eden (24 Nov): an entry whose every spot the ground does not hold, and none held by a body, names the
+/// birth `birth-off-surface` after the whole search; withdrawn, it waits no more.
+#[test]
+fn a_birth_no_ground_holds_is_named_off_surface_and_withdrawn() {
+    let (floor, surface) = floor_of(40_000);
+    let entry = fixture(2);
+    // 500 m from a floor 80 m across: past every ring, near and further.
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (floor, Vec3::new(500_000_000, 0, 0)))]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    };
+    let floors = BTreeMap::from([(floor, surface)]);
+    let mut runner = Runner::new(TICK);
+    let mut life = Life::new(WORLD, 8);
+    let soul = soul(1);
+    life.ask(Birth {
+        soul,
+        entry,
+        asked: 0,
+    })
+    .expect("asked");
+    assert!(
+        life.tick(TICK, &mut runner, &floors, &ring, &family())
+            .is_empty()
+    );
+    assert_eq!(life.held_back(soul), Some(sim::life::OFF_SURFACE));
+    assert!(life.withdraw(soul), "it was waiting");
+    assert_eq!((life.waiting(), life.held_back(soul)), (0, None));
+    assert!(!life.withdraw(soul), "withdrawn once");
+}

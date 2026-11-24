@@ -105,3 +105,24 @@ fn a_walker_on_the_short_floor_aims_at_its_doorway_and_is_routed_out() {
         corner.err().map(|e| (e.name, e.detail))
     );
 }
+
+/// verdelis-eden (24 Nov): a world's entry under a roof is born on the floor that holds it, in that floor's frame; an
+/// entry on the open ground stays there.
+#[test]
+fn an_entry_under_a_roof_is_on_its_floor_and_one_outside_on_the_ground() {
+    let (t, nodes) = town_of(import_eden::load(&hall(3000)).expect("loads"), b"entry-at");
+    let floor = nodes["e_hall/floor-0"];
+    let (node, at) = t.entry_at(Vec3::new(500_000, 0, -500_000));
+    assert_eq!(node, floor, "in the hall");
+    assert_eq!(
+        (at.x, at.z),
+        (500_000, -500_000),
+        "the hall stands at the origin"
+    );
+    let out = Vec3::new(0, 0, 6_000_000);
+    assert_eq!(
+        t.entry_at(out),
+        (t.ground, out),
+        "outside, on the open ground"
+    );
+}
