@@ -105,7 +105,9 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   for (const path of ['/w/eden/v1/world/snapshot', '/w/eden-2026/v1/world/snapshot']) {
     const r = await fetch(base + path); assert.equal(r.headers.get('x-souls-static'), 'published', path); assert.equal(await r.text(), published, path);
   }
-  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot?defs=ref&cols=1')).headers.get('x-souls-static'), null, 'a wire form (other body and headers) passes through to the old world');
+  const wire = await fetch(base + '/w/eden/v1/world/snapshot?defs=ref&cols=1');   // 24 Nov: the page's first read
+  assert.equal(wire.headers.get('x-souls-static'), 'published', 'the wire form gets the plain published snapshot (no x-defs-ref: plain to the page)'); assert.equal(await wire.text(), published);
+  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot?other=1')).headers.get('x-souls-static'), null, 'any other query passes through to the old world');
   assert.equal((await fetch(base + '/w/eden/v1/scene')).headers.get('x-souls-static'), null, 'a view not published: the old world answers');
   assert.equal(JSON.parse(readFileSync(join(staticDir, 'config.json'))).worldKey, 'eden', 'the old config published beside the stream');
   const before = readFileSync(hits, 'utf8');
@@ -360,9 +362,10 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   assert.equal((await (await get('/__sim/worlds.json', { accept: 'application/json' })).json()).worlds.some(w => w.slug === 'fresh'), false);
 });
 
-test('a routed world whose old process is unloaded still gets its page with its inline config, never the bare web page', async t => {
+test('a routed world whose old process is unloaded and whose views are published gets its page and reads without it; with none published it wakes it once', async t => {
   // live, 24 Nov: with --unload-still the bare web page went out (no inline config); the page then read /v1/config, which
-  // a routed world answers with the new client's fields only, and said "There is no world at this address"
+  // a routed world answers with the new client's fields only, and said "There is no world at this address". #4561 then
+  // loaded the old world for its page (about 3 s); the page now is the launcher's own, and its views never wake it
   const dir = mkdtempSync(new URL('unloaded-routed-', scratch)), data = join(dir, 'data'), clientDir = join(dir, 'served'), routesFile = join(dir, 'routes.json'), webDir = join(dir, 'web');
   mkdirSync(data); mkdirSync(clientDir); mkdirSync(join(webDir, 'assets'), { recursive: true });
   writeFileSync(join(webDir, 'index.html'), '<!doctype html><html><head><title>Souls</title><link rel="canonical" href="https://x/"></head><body></body></html>');
@@ -381,13 +384,32 @@ test('a routed world whose old process is unloaded still gets its page with its 
     command: (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }) });
   t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
   const page = (slug) => fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } });
+  const view = (path, headers = {}) => fetch(`${base}/w/eden${path}`, { headers });
   assert.equal((await fetch(`${base}/w/eden/assets/app.js`)).status, 200, 'the build\'s files still come from here');
   assert.equal(launcher.pool.status('eden').status, 'stopped', 'and load nothing');
+  // views published before (as a page of the running old world publishes them; kept on disk across restarts)
+  const staticDir = join(dir, 'origin/s/eden/static'); mkdirSync(staticDir, { recursive: true });
+  writeFileSync(join(staticDir, 'snapshot.json'), '{"contract":"world/1","entities":[]}');
+  writeFileSync(join(staticDir, 'manifest.json'), JSON.stringify({ schema: 'souls/old-static/1', world: 'eden', oldWorldId: 'eden-original-1', stream: '/s/eden/', files: { 'snapshot.json': {} } }));
   const eden = await page('eden');
   assert.equal(eden.status, 200); assert.notEqual(eden.headers.get('x-sim-cache'), 'unloaded', 'not the bare web page');
+  assert.equal(eden.headers.get('x-souls-engine'), 'new', 'the launcher\'s page of a moved world');
   const config = JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await eden.text())?.[1] ?? 'null');
-  assert.equal(config?.worldKey, 'eden'); assert.equal(config?.v2Stream, '/s/eden/');
-  assert.equal(launcher.pool.status('eden').status, 'running', 'the page loaded its old world');
+  assert.deepEqual([config?.worldKey, config?.worldId, config?.worldPath, config?.v2Stream, config?.v2Gateway], ['eden', 'eden-original-1', '/w/eden', '/s/eden/', '/w/eden/v2/ws']);
+  const snap = await view('/v1/world/snapshot?defs=ref&cols=1&v=k1');
+  assert.equal(snap.status, 200); assert.equal(snap.headers.get('x-souls-static'), 'published'); assert.equal(snap.headers.get('x-defs-ref'), null, 'the plain snapshot, for the wire form');
+  assert.equal(await snap.text(), '{"contract":"world/1","entities":[]}');
+  // a view the old world did not publish, and the page's other old reads: answered here, not by waking it
+  for (const path of ['/v1/scene', '/v1/kernel', '/v1/world/visitors', '/v1/world/seq']) { const r = await view(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path); }
+  assert.equal((await view('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200, 'its sign-in, as a world\'s with no old twin');
+  assert.equal(launcher.pool.status('eden').status, 'stopped', 'the page and its reads loaded nothing');
+  // none published for its stream (a fresh move, or views held in memory before a restart): the page wakes the old world
+  // once, as #4561 did (drawn from its stream alone, an old world's buildings can lose their finish), and publishes them
+  rmSync(join(staticDir, 'manifest.json'));
+  const fresh = await page('eden');
+  assert.equal(fresh.status, 200); assert.equal(fresh.headers.get('x-souls-engine'), null, 'the old world\'s page');
+  assert.equal(JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await fresh.text())?.[1] ?? 'null')?.v2Stream, '/s/eden/');
+  assert.equal(launcher.pool.status('eden').status, 'running', 'it loaded its old world');
   // a world not routed keeps the unloaded page (#2304 A3)
   const other = await page('other');
   assert.equal(other.headers.get('x-sim-cache'), 'unloaded'); assert.equal(launcher.pool.status('other').status, 'stopped');
