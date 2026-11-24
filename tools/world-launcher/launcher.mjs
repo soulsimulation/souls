@@ -743,6 +743,22 @@ export async function openLauncher(cfg = {}) {
     basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
     templateName: templateList({ all: true }).find((x) => x.id === w.template)?.name ?? w.template, createdAt: w.createdAt, owner: null, god: w.god,
     entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
+  /** The page config of a world the new engine runs (routed, with or without an old twin), else null: every field an old
+   *  world's config gives (apps/server http.ts configOf), from the launcher's sign-in, the registry (or the directory's
+   *  row) and the route (cutover.mjs v2Fields), never from the old process. The page inlines it (routeOnlyPage) and the
+   *  world's `/v1/config` answers it beside the served client's `soulClient` (cutover.mjs handle), so a page that reads
+   *  the route gets what the inline config says. A moved world's old approvals and profile edits are refused (409, writes
+   *  go to the new engine), so it names none (`accountApproval`, `soulProfile`: null). */
+  function movedConfig(w) {
+    const stream = cutover?.v2Stream(w);
+    if (!stream) return null;
+    const p = auth?.public, base = `${publicOrigin}${wp(w.slug)}`;
+    return { authProvider: p ? 'clerk' : 'dev', authenticationOrigin: p ? publicOrigin : '', clerkPublishableKey: p?.clerkPublishableKey ?? '', clerkIssuer: p?.clerkIssuer ?? '',
+      ...(p?.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}), privyAppId: '',
+      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, accountAuthRequired: !!p, accountApproval: null, soulProfile: null,
+      worldId: w.routeOnly ? w.worldId : worldIdOf(w), worldKey: w.slug, worldEngine: true, worldName: w.name ?? w.slug,
+      worldPath: wp(w.slug), authReady: true, devAuth: !p, inviteRequired: false, build: BUILD, v2Stream: stream, ...(cutover.v2Fields(w) ?? {}) };
+  }
   /** D2: the page of a world with no old twin: the old page (the web build's index.html) with the world's own title and
    *  links, and the inline config an old world wrote (its name, path, sign-in) with the new engine's fields (cutover.mjs
    *  v2Fields). The page then reads the stream and draws from it alone (0.135 W2); there is no old view to read.
@@ -755,12 +771,8 @@ export async function openLauncher(cfg = {}) {
     const stream = cutover?.v2Stream(w);
     if (!stream) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
-    const p = auth?.public, base = `${publicOrigin}${wp(w.slug)}`;
-    const config = { authProvider: p ? 'clerk' : 'dev', authenticationOrigin: p ? publicOrigin : '', clerkPublishableKey: p?.clerkPublishableKey ?? '', clerkIssuer: p?.clerkIssuer ?? '',
-      ...(p?.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}), privyAppId: '',
-      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, worldId: w.routeOnly ? w.worldId : worldIdOf(w), worldKey: w.slug, worldEngine: true, worldName: w.name ?? w.slug,
-      worldPath: wp(w.slug), authReady: true, devAuth: !p, build: BUILD, v2Stream: stream, ...(cutover.v2Fields(w) ?? {}) };
-    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), config));
+    const base = `${publicOrigin}${wp(w.slug)}`;
+    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), movedConfig(w)));
     const head = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new' };
     res.writeHead(200, w.routeOnly ? { ...head, ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
     return true;
@@ -1277,7 +1289,7 @@ export async function openLauncher(cfg = {}) {
   }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
-    if (cutover?.handle(req, res, w, url, { cold: oldCold(w) })) return;
+    if (cutover?.handle(req, res, w, url, { cold: oldCold(w), config: () => movedConfig(w) })) return;
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
     const v2 = w ? null : routeOnlyWorld(slug);
     if (v2) {
@@ -1620,7 +1632,7 @@ export async function openLauncher(cfg = {}) {
       }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
       const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
-      if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld) })) return;
+      if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld), config: () => movedConfig(cutoverWorld) })) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
       }
