@@ -134,6 +134,7 @@ fn world_with(place: Place, point: Vec3, front: i32, at: i64) -> World {
             place,
             facing: Quat::IDENTITY,
             floor,
+            more: Vec::new(),
         })
         .expect("a place");
     World {
@@ -501,6 +502,7 @@ fn c19_three_bodies_share_a_thing_each_in_its_own_slot() {
                     place,
                     facing: Quat::IDENTITY,
                     floor: fixture(1),
+                    more: Vec::new(),
                 })
                 .expect("a place");
         }
@@ -809,4 +811,84 @@ fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
         assert_eq!(e.name, "place-out-of-reach", "a cabin {height} µm up");
         assert!(w.slots.is_empty());
     }
+}
+
+/// 0.135 E16: a slot that holds two bodies (a tent's `sleep`, `most: 2`) takes two, each at its own place in the slot,
+/// the slot's point and the other place 560 mm off, and refuses a third `place-taken`, naming both holders. A rise
+/// frees exactly that body's place: the other stays where it is, and the next body takes the freed place.
+#[test]
+fn e16_a_slot_of_two_holds_two_bodies_each_at_its_own_place() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = world(chair());
+    let mut two = w.slots.place(w.chair).expect("the chair").clone();
+    let other = Vec3::new(560_000, 0, 0);
+    two.more = vec![other];
+    assert_eq!(two.most(), 2);
+    w.slots.replace(w.chair, vec![two]).expect("unoccupied");
+    let id = w.mint.mint().expect("id");
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    let placed = w.floors[&fixture(1)]
+        .place(id, frame, Vec3::new(0, 0, 250_000), Quat::IDENTITY)
+        .expect("placed");
+    w.c.add(family(), placed).expect("added");
+    w.bodies.push(id);
+    let b = w.bodies.clone();
+    let out = w.sit(&[0, 1, 2], &sit);
+    assert!(out[0].1.is_ok() && out[1].1.is_ok(), "two fit: {out:?}");
+    let r = out[2].1.as_ref().expect_err("the third is refused");
+    assert_eq!(r.name, "place-taken");
+    assert!(
+        r.detail.contains(&show(b[0])) && r.detail.contains(&show(b[1])),
+        "names both holders: {r}"
+    );
+    w.run(i64::MAX);
+    let slot = Frame {
+        node: w.chair,
+        slot: Some(1),
+    };
+    let at = |w: &World, body| {
+        let p = w.c.body(body).expect("a body").pose;
+        assert_eq!((p.support, p.frame), (Support::Slot, slot));
+        p.position
+    };
+    assert_eq!(at(&w, b[0]), Vec3::ZERO, "the first at the slot's point");
+    assert_eq!(at(&w, b[1]), other, "the second at its own place");
+    assert_eq!(w.slots.spot_of(b[1]), Some((w.chair, 1, 1)));
+    assert_eq!(w.slots.holders_in(w.chair, 1), vec![b[0], b[1]]);
+    let geo = w.geo();
+    w.slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            b[0],
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    w.run(i64::MAX);
+    assert!(matches!(
+        w.c.body(b[0]).expect("a body").pose.support,
+        Support::Surface { .. }
+    ));
+    assert_eq!(
+        w.slots.holders_in(w.chair, 1),
+        vec![b[1]],
+        "only b0's place"
+    );
+    assert_eq!(at(&w, b[1]), other, "b1 never moved");
+    let out = w.sit(&[2], &sit);
+    out[0].1.as_ref().expect("the freed place");
+    w.run(i64::MAX);
+    assert_eq!(
+        at(&w, b[2]),
+        Vec3::ZERO,
+        "the freed place, the slot's point"
+    );
+    assert_eq!(w.slots.spot_of(b[2]), Some((w.chair, 1, 0)));
 }

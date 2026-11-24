@@ -143,6 +143,7 @@ pub fn bodies() -> Result<Bodies, Refusal> {
             point,
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })?;
     }
     Ok(b)

@@ -1405,6 +1405,7 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             point: Vec3::new(0, place.height, 0),
             facing: Quat::IDENTITY,
             floor: fixture(1),
+            more: Vec::new(),
         };
         let stand = at.stand().expect("a stand point");
         let mut slots = crate::slots::Slots::new();
@@ -1557,6 +1558,7 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
             point: Vec3::new(0, place.height, 0),
             facing: Quat::IDENTITY,
             floor: fixture(1),
+            more: Vec::new(),
         };
         let stand = at.stand().expect("a stand point");
         let mut slots = crate::slots::Slots::new();
@@ -1621,6 +1623,72 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
     }
 }
 
+/// 0.135 E17: a form's own `walk_to` while the body is in a slot of the thing. A form that leaves the body there (a
+/// phone box's `open` from inside: no rise, no sit) is done from inside: its own walk is dropped and the run ends
+/// `done` with the body still in the slot, never refused `resource-held`. A form that moves the actor starts with the
+/// rise its binding adds (`rises_out`): the rise move stands the body up at the seat's stand point, out of the slot,
+/// before anything walks.
+#[test]
+fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // The form's own walk to the doorway, 1 m off, then its move's time.
+    let walk = Step::WalkTo {
+        point: Name::new("doorway").expect("a name"),
+        at: Vec3::new(stand.x, stand.y, stand.z + 1_000_000),
+        on: None,
+        approach: false,
+    };
+    b.steps(
+        body,
+        chair,
+        vec![walk.clone(), Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done", "not resource-held");
+    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+    assert_eq!(held, Some(chair), "done from inside, still in the slot");
+    // A form that moves the actor rises first: out of the slot by the rise move, standing on the floor.
+    b.steps(
+        body,
+        chair,
+        vec![Step::Rise, Step::Wait(200_000)],
+        intent(body, 2),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done");
+    assert_eq!(b.slots.as_ref().and_then(|s| s.held_by(body)), None);
+    let p = b.c.body(body).expect("a body").pose;
+    assert!(
+        matches!(p.support, replica::pose::Support::Surface { .. }),
+        "on its feet"
+    );
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (stand.x, stand.z),
+        "at the stand point"
+    );
+}
+
 /// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand
 /// point: the bench, the body, the chair, its slot and its stand point.
 fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
@@ -1639,6 +1707,7 @@ fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
         point: Vec3::new(0, place.height, 0),
         facing: Quat::IDENTITY,
         floor: fixture(1),
+        more: Vec::new(),
     };
     let stand = at.stand().expect("a stand point");
     let mut slots = crate::slots::Slots::new();

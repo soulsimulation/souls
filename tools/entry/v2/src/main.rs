@@ -876,6 +876,7 @@ impl Stage {
                         point: x.point(s.at).ok()?,
                         facing: x.rot,
                         floor: ground_id(),
+                        more: s.more,
                     })
                 })
                 .collect()
