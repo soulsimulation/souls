@@ -3286,6 +3286,8 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                                                                                                                        
                                                      
                             
+                                                                               
+                                               
   
                     
                 
@@ -3903,7 +3905,8 @@ function crossing(def        , stored         , level                           
 
 // who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
 // test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
-// actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
+// actor's hands (holding is a parent), or the actor sits in the slot its `vehicle.drive` names while it is in nobody's
+// hand (E10b: one holder, the hand first); `world`, a form a timer starts, which no Soul's act may do; or
 // `{"link": <type>}`, the actor or the actor's Soul (the end of the body's `soul` link, T2) is an end of a link of that
 // type on the thing: its owner, a member, the Soul whose turn it is, a role in the activity, a relation its creator
 // set. The rule is the form's own data, so it is read before anyone tries; a refusal names it and, for a link, its ends.
@@ -4040,7 +4043,24 @@ function whoMay(input       )             {
     const h = actor.hands ?? {};
     if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return bad('too_many_hands');
     for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
-    return sorted(h).some((k) => h[k] === act.this) ? yes : refuse({});
+    if (sorted(h).some((k) => h[k] === act.this)) return yes;
+    // A vehicle's rider in its drive seat holds it (E10, world `sim::forms::may`); a passenger does not. A vehicle in
+    // someone's hand is that body's alone, so there is never a second holder and the carrier can always put it down.
+    const drive = entry.vehicle?.drive;
+    if (typeof drive !== 'string' || !has(entry.slots, drive)) return refuse({});
+    const seated = self.slots?.[drive];
+    const riders = Array.isArray(seated) ? seated : [];
+    read.push([`${act.this}/slot/${drive}/occupants`, riders]);
+    if (!riders.includes(state.actor)) return refuse({});
+    for (const holder of sorted(nodes)) {
+      // Only a plain object of hands holds anything: a missing node or a list of hands is no hand (as `who_may.rs`).
+      const hands = nodes[holder]?.hands;
+      const hand = hands && typeof hands === 'object' && !Array.isArray(hands) ? sorted(hands).find((k) => hands[k] === act.this) : undefined;
+      if (hand === undefined) continue;
+      read.push([`${holder}/hand/${hand}`, act.this]);
+      return refuse({});
+    }
+    return yes;
   }
   const type = who && typeof who === 'object' && Object.keys(who).length === 1 ? (who                      ).link : undefined;
   if (typeof type !== 'string') return bad('unknown_who', { who });
@@ -5063,7 +5083,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.36.4";
+const VERSION = "2.36.5";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";

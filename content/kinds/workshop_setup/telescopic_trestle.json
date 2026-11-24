@@ -1,0 +1,372 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:telescopic_trestle",
+  "owner": "thing",
+  "state": {
+    "collar_locked": {
+      "n": 28,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "extension": {
+      "n": 29,
+      "type": "int",
+      "unit": "mm",
+      "default": 0,
+      "min": 0,
+      "max": 300,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        570,
+        180
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1000,
+      1000,
+      650
+    ]
+  },
+  "forms": {
+    "unlock_collar": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "collar_locked",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "collar_locked",
+          "to": false,
+          "event": "unlock_collar"
+        }
+      ]
+    },
+    "set_extension": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "collar_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "extension",
+          "not": {
+            "arg": "extension"
+          }
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "extension",
+          "to": {
+            "arg": "extension"
+          },
+          "event": "set_extension"
+        }
+      ],
+      "takes": {
+        "extension": {
+          "type": "count"
+        }
+      }
+    },
+    "lock_collar": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "collar_locked",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "collar_locked",
+          "to": true,
+          "event": "lock_collar"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:telescopic_trestle",
+    "table": [
+      {
+        "part": "rail",
+        "field": "extension",
+        "do": "slide",
+        "axis": "y",
+        "range": [
+          0,
+          300
+        ],
+        "to": [
+          0,
+          300
+        ],
+        "over_us": 350000
+      },
+      {
+        "part": "collar",
+        "field": "collar_locked",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "false": 90000,
+          "true": 0
+        },
+        "over_us": 350000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -350,
+            325,
+            0
+          ],
+          "size": [
+            100,
+            650,
+            500
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            350,
+            325,
+            0
+          ],
+          "size": [
+            100,
+            650,
+            500
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            325,
+            0
+          ],
+          "size": [
+            800,
+            70,
+            70
+          ],
+          "tint": "steel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            650,
+            0
+          ],
+          "size": [
+            900,
+            80,
+            160
+          ],
+          "tint": "steel",
+          "role": "rail",
+          "pivot": [
+            0,
+            650,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            570,
+            180
+          ],
+          "size": [
+            180,
+            30,
+            30
+          ],
+          "tint": "handle",
+          "role": "collar",
+          "pivot": [
+            0,
+            570,
+            180
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -350,
+            450,
+            0
+          ],
+          "size": [
+            60,
+            400,
+            70
+          ],
+          "tint": "steel",
+          "role": "rail",
+          "pivot": [
+            0,
+            650,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            350,
+            450,
+            0
+          ],
+          "size": [
+            60,
+            400,
+            70
+          ],
+          "tint": "steel",
+          "role": "rail",
+          "pivot": [
+            0,
+            650,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#72583e",
+        "steel": "#7a8b98",
+        "handle": "#b54c35"
+      },
+      "tags": [
+        "workshop",
+        "fixture",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Unlock a trestle collar, choose its extension, then lock the collar.",
+    "workshop": "workshop",
+    "unlock_first": "Unlock the collar before changing the trestle extension.",
+    "trestle": "trestle",
+    "collar": "collar"
+  },
+  "card": {
+    "text": "card",
+    "category": "workshop",
+    "synonyms": [
+      "trestle",
+      "collar"
+    ]
+  }
+}

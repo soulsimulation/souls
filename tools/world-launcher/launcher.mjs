@@ -732,6 +732,12 @@ export async function openLauncher(cfg = {}) {
       unlisted: row?.unlisted === true, god: typeof row?.creator === 'string' };
   }
   const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
+  /** Whether a world's old process is not awake (not running, stopped in place or stopping) and need not be: a world with
+   *  no old twin, or a moved world whose old views are published for its stream. Its page and reads then never wake it
+   *  (cutover.mjs handle `cold`, routeOnlyPage). A moved world with none published wakes it once, as before: drawn from
+   *  its stream alone, an old world's buildings can lose their finish (24 Nov, hello-hamlet's hall drawn roofless), so
+   *  its first page publishes the old views and every later one is drawn from them. */
+  const oldCold = (w) => { if (!w) return false; if (w.routeOnly) return true; const k = pool.state(w.slug); return ((!k?.child && !k?.adopted) || sleeping(w.slug)) && !!cutover?.published(w); };
   /** A world with no old twin as the world list shows it (the fields `describe` gives an old world's row). */
   const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: w.unlisted, key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
     basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
@@ -739,7 +745,10 @@ export async function openLauncher(cfg = {}) {
     entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
   /** D2: the page of a world with no old twin: the old page (the web build's index.html) with the world's own title and
    *  links, and the inline config an old world wrote (its name, path, sign-in) with the new engine's fields (cutover.mjs
-   *  v2Fields). The page then reads the stream and draws from it alone (0.135 W2); there is no old view to read. */
+   *  v2Fields). The page then reads the stream and draws from it alone (0.135 W2); there is no old view to read.
+   *  24 Nov: also the page of a world routed to the new engine whose old process is not running (its registry id and
+   *  name), so a moved world's page never waits for, or wakes, its old process; its views are the published ones, else
+   *  the stream's (cutover.mjs handle, `cold`). */
   function routeOnlyPage(req, res, w, rest) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
@@ -749,11 +758,11 @@ export async function openLauncher(cfg = {}) {
     const p = auth?.public, base = `${publicOrigin}${wp(w.slug)}`;
     const config = { authProvider: p ? 'clerk' : 'dev', authenticationOrigin: p ? publicOrigin : '', clerkPublishableKey: p?.clerkPublishableKey ?? '', clerkIssuer: p?.clerkIssuer ?? '',
       ...(p?.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}), privyAppId: '',
-      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, worldId: w.worldId, worldKey: w.slug, worldEngine: true, worldName: w.name,
+      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, worldId: w.routeOnly ? w.worldId : worldIdOf(w), worldKey: w.slug, worldEngine: true, worldName: w.name ?? w.slug,
       worldPath: wp(w.slug), authReady: true, devAuth: !p, build: BUILD, v2Stream: stream, ...(cutover.v2Fields(w) ?? {}) };
-    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name, url: `${base}/` }), config));
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new', ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) })
-      .end(req.method === 'HEAD' ? undefined : body);
+    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), config));
+    const head = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new' };
+    res.writeHead(200, w.routeOnly ? { ...head, ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
     return true;
   }
   /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
@@ -1022,12 +1031,12 @@ export async function openLauncher(cfg = {}) {
   }
   /** #2304 A3: a world's page (the web build's, with the world's own title and links) and the build's files, served here
    *  for a world that is not up. False: not a page or a file of the build (the caller loads the world, or refuses). */
-  function worldPage(req, res, slug, w, rest) {
+  function worldPage(req, res, slug, w, rest, filesOnly = false) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     const head = { 'x-sim-cache': 'unloaded' };
     if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
     if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
-    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
+    if (filesOnly || !(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
     res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
@@ -1253,7 +1262,7 @@ export async function openLauncher(cfg = {}) {
   }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
-    if (cutover?.handle(req, res, w, url)) return;
+    if (cutover?.handle(req, res, w, url, { cold: oldCold(w) })) return;
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
     const v2 = w ? null : routeOnlyWorld(slug);
     if (v2) {
@@ -1309,9 +1318,24 @@ export async function openLauncher(cfg = {}) {
     // #2304 A3/A4: a world that is not up serves its page and the web build's files from here, without loading it: to a
     // declared crawler always (and nothing else: a crawler never loads a world, nor thaws one), to anyone with
     // --unload-still. The world loads when the page's live connection or its first data request arrives.
+    // 24 Nov: a visitor's page of a world routed to the new engine whose old process is not awake (oldCold) is the launcher's own
+    // (routeOnlyPage: the world's inline config with its stream), with the build's files, and loads nothing: the bare
+    // page said "There is no world at this address" (its /v1/config is the new client's), and loading the old world for
+    // its page cost about 3 s and made the page depend on it (#4561).
     const crawler = crawlerAgent(req.headers['user-agent']), k0 = pool.state(slug);
+    // Its other old reads are answered as a world's with no old twin (its sign-in here, the rest 404 world.new-engine), so
+    // none of them (the page's visitors, context, seq) wakes it either: the page draws the world from its stream.
+    if (!crawler && oldCold(w) && cutover?.v2Stream(w)) {
+      if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
+      if ((req.method === 'GET' || req.method === 'HEAD') && /^\/(?:v1|mcp)(?:\/|$)/.test(edgeRest)) {
+        if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
+        json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; its old process is not awake, and this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
+      }
+    }
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
-      if (worldPage(req, res, slug, w, edgeRest)) return;
+      // #4561: a visitor's page of a routed world is never the bare one (its /v1/config is the new client's: "There is no
+      // world at this address"); with no old views published it loads the world (above: published, the launcher's page)
+      if (worldPage(req, res, slug, w, edgeRest, !crawler && !!cutover?.v2Stream(w))) return;
       if (crawler) { json(res, 503, { ok: false, code: 'world.unloaded', slug, message: 'This world is not loaded; its page is served without it.' }, { 'retry-after': '3600', 'cache-control': 'no-store' }); return; }
     }
     const resident = residentRead(edgeRest, req.method);
@@ -1373,7 +1397,9 @@ export async function openLauncher(cfg = {}) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
       pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Fields(w) : null;   // B3-2b: v2Bodies, v2Gateway, v2Directory
       // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
-      if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; }).catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
+      if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; })
+        .then((m) => { if (m?.unwritable) log(`cutover: ${slug}'s static views held in memory, served as published: cutover.static-unwritable (${m.unwritable}); give the binding a staticDir under the unit's ReadWritePaths`); })
+        .catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
       if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
       if (kept) {
@@ -1577,7 +1603,8 @@ export async function openLauncher(cfg = {}) {
         return;
       }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
-      if (cutoverSlug && cutover?.handle(req, res, registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug), url)) return;
+      const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
+      if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld) })) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
       }

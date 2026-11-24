@@ -1,0 +1,699 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:zoetrope",
+  "owner": "thing",
+  "state": {
+    "strip": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "released": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "fit_horse_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": 1,
+          "event": "picture_strip_fitted"
+        }
+      ]
+    },
+    "fit_ball_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": 2,
+          "event": "picture_strip_fitted"
+        }
+      ]
+    },
+    "remove_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "no_strip",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": 0,
+          "event": "picture_strip_removed"
+        }
+      ]
+    },
+    "brake_drum": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "already_stopped",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": false,
+          "event": "picture_drum_braked"
+        }
+      ]
+    },
+    "turn_drum": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "no_strip",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": true,
+          "event": "picture_drum_turned"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:zoetrope",
+    "table": [
+      {
+        "part": "flip",
+        "field": "released",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": 360000,
+          "false": 0
+        },
+        "over_us": 8000000
+      },
+      {
+        "part": "lid",
+        "field": "released",
+        "do": "show",
+        "at": {
+          "true": 0,
+          "false": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            960,
+            0
+          ],
+          "r": 180,
+          "h": 20,
+          "segments": 24,
+          "tint": "gold",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            170
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 0,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            85,
+            1080,
+            147
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 30000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            147,
+            1080,
+            85
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 60000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            170,
+            1080,
+            0
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 90000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            147,
+            1080,
+            -85
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 120000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            85,
+            1080,
+            -147
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 150000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            -170
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 180000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -85,
+            1080,
+            -147
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 210000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -147,
+            1080,
+            -85
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 240000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -170,
+            1080,
+            0
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 270000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -147,
+            1080,
+            85
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 300000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -85,
+            1080,
+            147
+          ],
+          "size": [
+            65,
+            220,
+            12
+          ],
+          "yaw": 330000,
+          "tint": "dark",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1030,
+            -168
+          ],
+          "size": [
+            35,
+            60,
+            8
+          ],
+          "tint": "blue",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ],
+          "when": "@strip=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            1030,
+            -168
+          ],
+          "size": [
+            35,
+            60,
+            8
+          ],
+          "tint": "red",
+          "role": "flip",
+          "pivot": [
+            0,
+            1050,
+            0
+          ],
+          "when": "@strip=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            185,
+            1000,
+            -40
+          ],
+          "size": [
+            28,
+            55,
+            40
+          ],
+          "tint": "red",
+          "role": "lid"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A picture drum: fit a strip, turn it, then brake before changing the strip.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "brake_first": "Brake the released drum before changing strips or turning again.",
+    "remove_first": "Remove the fitted strip before choosing another.",
+    "no_strip": "Fit a picture strip in the stopped drum first.",
+    "already_stopped": "The picture drum is already stopped.",
+    "howto_play": "Fit a captive horse or ball strip, turn the drum once, brake it, then remove the strip. Released marks the unbraked latch, with one keyed turn rather than continuous animation. The strip field is 0 when empty, 1 for horse and 2 for ball.",
+    "toy": "optical toy"
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": [
+      "toy"
+    ]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "fit_horse_strip"
+        },
+        {
+          "form": "turn_drum"
+        },
+        {
+          "form": "brake_drum"
+        },
+        {
+          "form": "remove_strip"
+        }
+      ]
+    }
+  }
+}

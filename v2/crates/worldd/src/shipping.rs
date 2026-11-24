@@ -406,6 +406,14 @@ impl<S: Store, C: Clock> Shipper<S, C> {
         self.mark.clone()
     }
 
+    /// Keeps its marks in `mark`, one handed out before the shipper opened (R17: a world that listens before the
+    /// store answers gives its compactor the marks first; at nothing landed they hold the whole log).
+    pub fn sharing(mut self, mark: &Mark) -> Shipper<S, C> {
+        *mark.lock() = std::mem::take(&mut *self.mark.lock());
+        self.mark = mark.clone();
+        self
+    }
+
     /// The seal age: the loss bar less the slowest recent upload and the margin, never below [`SEAL_AGE_LEAST_US`].
     pub fn seal_age(&self) -> u64 {
         seal_age(self.mark.upload_us())
@@ -596,6 +604,11 @@ impl<S: Store + Send + 'static, C: Clock + 'static> Shipper<S, C> {
         let (tx, rx): (Sender<Item>, Receiver<Item>) = channel();
         let mark = self.mark();
         let h = std::thread::spawn(move || {
+            // R18: a test's forced panic on this thread, after the claim (`tests/serve.rs`); a debug build's only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("WORLDD_TEST_PANIC_SHIPPER").is_some() {
+                panic!("WORLDD_TEST_PANIC_SHIPPER");
+            }
             loop {
                 match rx.recv_timeout(POLL) {
                     Ok(item) => {

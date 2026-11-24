@@ -1,7 +1,7 @@
 // K4 (0.135): the places a worker posts for a node on a course, and the page's reading of them (course-samples.ts).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coursePlaces, keepPlaces, placeAt, type CourseAt } from './course-samples.ts';
+import { COURSE_MAX_PLACES, coursePlaces, keepPlaces, placeAt, type CourseAt } from './course-samples.ts';
 
 const up: CourseAt = (_f, t) => [0n, t / 1000n, 0n, 0n, 0n, 0n];   // rises 1 µm each ms of world time
 
@@ -11,6 +11,18 @@ test('a worker posts a node\'s places a step apart, both ends included; a node w
   const p = coursePlaces(read, nodes, 1_050_000, 1_300_000, 100_000);
   assert.deepEqual(Object.keys(p), ['a']);
   assert.deepEqual(p.a.filter((_, i) => i % 4 === 0), [1_000_000, 1_100_000, 1_200_000, 1_300_000]);
+});
+
+test('a part from world time 0 to now (a generation\'s first) posts only the newest places, and returns at once', () => {
+  const to = 1_795_509_648_850_000;   // live bench-eden's part 0, 24 Nov: from 0 to this
+  const t0 = performance.now();
+  const p = coursePlaces(up, [{ id: 'a', course: new Uint8Array([1]) }], 0, to);
+  const times = p.a.filter((_, i) => i % 4 === 0);
+  assert.ok(performance.now() - t0 < 2000);
+  assert.equal(times.length, COURSE_MAX_PLACES + 1);
+  assert.equal(times.at(-1), to);
+  assert.equal(times[0], 1_795_506_048_900_000, 'an hour of steps before the end');
+  assert.deepEqual(coursePlaces(up, [{ id: 'a', course: new Uint8Array([1]) }], -Infinity, to), {}, 'no end in time posts nothing');
 });
 
 test('the page reads a place between two posted ones, and the first or last outside them', () => {

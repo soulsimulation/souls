@@ -7,7 +7,11 @@ are `v2/tools/ops/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.sh`.
 (O10), the operator's restore command, the epoch raise and the restore gate (O12).
 
 **A real world** (O3b, #3458): `worldd serve --dir <world> --store <store> [--machine <name>]` (or `$WORLDD_STORE`,
-`$WORLDD_MACHINE`) claims its world in the store and ships each record and checkpoint under that claim; each
+`$WORLDD_MACHINE`) claims its world in the store and ships each record and checkpoint under that claim. It serves
+before the claim is held (R17): the claim is made on the shipping thread, tried with back-off while the store does not
+answer, and the records written meanwhile are shipped under it once it is held; the history archive writes nothing
+before then, and acts with stakes stay fenced, since the mark cannot move before it. A refusal of another kind
+(`restart-gap`, another writer's claim) ends the start by name. Each
 start claims again (`shipping::take_over`, as `ops world --restart`) and ships from the mark plus one, so the history
 read from record 0 holds every record once, in order (`crates/worldd/tests/serve.rs`, three SIGKILLs). It also
 archives its history (V3) under `h/<world>/<lineage>/`, which the page's history plays
@@ -26,6 +30,9 @@ AWS_ACCESS_KEY_ID=<key id>
 AWS_SECRET_ACCESS_KEY=<secret>
 AWS_DEFAULT_REGION=auto                                   # R2's; omit for the default
 ```
+
+No store setting goes in `directory.env`: secrets.env is the one place, and every unit and script reads it last
+([store-switch.md](store-switch.md), which also moves the bucket to another provider).
 
 `--store`, `$WORLDD_STORE` and `ops world <role> <dir> <store> ...` (the restore, `--restore`) take the same form, or
 `folder:<path>` (or a bare path) for O9's folder store on one machine, kept for tests. A start prints only

@@ -15,7 +15,9 @@
 //
 // Children are open same-repo PRs whose base is the merged head branch, or whose base is already the merged PR's base
 // (GitHub retargets them itself when it deletes the merged branch) and that share commits with the merged head that
-// the target lacks. Every GitHub call goes through `gh api` (GH_TOKEN); pushes go through `origin`.
+// the target lacks. A PR whose head is itself the fork point is not a child but part of the merged branch (an
+// integration branch merged it, and may have dropped it since): it has no commits of its own for the merge-forward to
+// keep, so it would come out empty. It is skipped, untouched, with the reason logged. Every GitHub call goes through `gh api` (GH_TOKEN); pushes go through `origin`.
 //
 // The merge train rebases a PR before it lands, so the merged head can share nothing with a child cut before that. The
 // PR's force-push history gives the heads it had before: a child is matched against the merged head, then those, newest
@@ -39,11 +41,16 @@ export function candidates({ merged, open }) {
 /**
  * What to do with one candidate. `sharesCommits`: merge-base(child, merged head) is not in the target, so the child
  * carries commits of the merged branch. `containsTarget`: the target is already an ancestor of the child head.
+ * `headInMerged`: the fork point is the child head itself, so the child has no commits of its own past the merged
+ * branch: the merged branch included it (an integration branch), not the other way round. The merge-forward keeps only
+ * a child's own commits, so it would reset such a child to the target whether or not its content landed in the squash
+ * (an integration branch can merge a head and later drop it). It is left untouched.
  * Returns { action: 'skip' | 'fork' | 'forward' | 'retarget', retarget, why }.
  */
-export function childAction({ pr, merged, sharesCommits, containsTarget }) {
+export function childAction({ pr, merged, sharesCommits, containsTarget, headInMerged = false }) {
   const onMergedBranch = pr.base.ref === merged.head.ref;
   if (!onMergedBranch && !sharesCommits) return { action: 'skip', retarget: false, why: `not stacked on #${merged.number}` };
+  if (headInMerged) return { action: 'skip', retarget: false, why: `head is in #${merged.number}'s branch history with no commits of its own, so #${merged.number} included it rather than being its base; a merge-forward would reset it to ${merged.base.ref} and empty it, so it is left untouched` };
   const retarget = onMergedBranch;
   if (pr.head.repo?.full_name !== pr.base.repo?.full_name) return { action: 'fork', retarget, why: 'head is in a fork; the workflow cannot push there' };
   if (containsTarget) return { action: retarget ? 'retarget' : 'skip', retarget, why: `already contains ${merged.base.ref}` };
@@ -176,9 +183,9 @@ export function run({ prNumber, dryRun = false, api, git, log = console.log }) {
     const child = git('rev-parse', `refs/restack/${pr.number}`);
     if (child !== pr.head.sha) { results.push({ pr: pr.number, result: `head moved (${short(pr.head.sha)} → ${short(child)}); skipped` }); continue; }
     const facts = ancestryOver(git, { child, heads: [mergedHead, ...older], target: targetSha });
-    const plan = childAction({ pr, merged, ...facts });
-    if (plan.action === 'skip') { if (pr.base.ref === target && !facts.sharesCommits) continue; results.push({ pr: pr.number, result: `skip: ${plan.why}` }); continue; }
+    const plan = childAction({ pr, merged, ...facts, headInMerged: facts.fork === child });
     const say = result => { results.push({ pr: pr.number, result }); log(`#${pr.number}: ${result}`); };
+    if (plan.action === 'skip') { if (pr.base.ref === target && !facts.sharesCommits) continue; say(`skip: ${plan.why}`); continue; }
     if (dryRun) {
       const f = plan.action === 'forward' ? forward(git, { child, target: targetSha, fork: facts.fork, message: 'dry run' }) : null;
       say(`would ${plan.retarget ? `retarget to ${target} and ` : ''}${plan.action}${f ? ` → ${f.status}${f.files ? `: ${f.files.join(', ')}` : ''}` : ''} (fork ${short(facts.fork)})`);

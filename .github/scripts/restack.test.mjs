@@ -230,6 +230,53 @@ test('run: when an old head or the history cannot be read, the merged PR says ch
   } finally { fx.cleanup(); }
 });
 
+// An integration branch merged a PR's head, then dropped its content (as #3981 did: the branch was rebuilt from main
+// and merged over its old history), and squash-merged without it. The PR's head is an ancestor of the merged head, so
+// the fork point is the head itself: the merge-forward would keep "its own commits" (none) and reset it to main.
+// main ─ … ─ S ─────────────────────────────── S2 (squash: int.txt only)
+//              ├ chess: k1 (chess.txt)          open PR #7, never landed
+//              └ integration: merge k1 ─ i2     (drops chess.txt, adds int.txt)
+test('run: a PR an integration branch included and then dropped is left untouched, not emptied', () => {
+  const fx = fixture();
+  try {
+    const { git, origin, work, squash } = fx, remote = gitIn(origin);
+    const commit = (msg, files, remove = []) => {
+      for (const [f, t] of Object.entries(files)) writeFileSync(join(work, f), t);
+      for (const f of remove) git('rm', '-q', f);
+      git('add', '-A'); git('commit', '-q', '-m', msg); return git('rev-parse', 'HEAD');
+    };
+    git('checkout', '-q', '-b', 'agent/7-chess', squash);
+    const k1 = commit('k1', { 'chess.txt': 'chess\n' });
+    git('checkout', '-q', '-b', 'agent/8-integration', squash);
+    git('merge', '-q', '--no-ff', '--no-edit', 'agent/7-chess');
+    const i2 = commit('i2: rebuilt without #7', { 'int.txt': 'integration\n' }, ['chess.txt']);
+    git('checkout', '-q', 'main');
+    git('merge', '-q', '--squash', 'agent/8-integration');
+    const s2 = commit('integration (#8)', {});
+    git('push', '-q', 'origin', 'main', 'agent/7-chess', `${i2}:refs/pull/8/head`, `${k1}:refs/pull/7/head`);
+    assert.equal(git('merge-base', k1, i2), k1, 'the PR head is an ancestor of the merged head');
+    assert.throws(() => git('cat-file', '-e', `${s2}:chess.txt`), 'its content is not in the squash');
+    // The defect: the 3-way merge against that fork point takes main's side for every file.
+    const emptied = forward(git, { child: k1, target: s2, fork: k1, message: 'restack' });
+    assert.equal(git('diff', '--name-only', s2, emptied.commit), '', 'forwarding it empties the PR');
+
+    const calls = [], logged = [];
+    const integration = { number: 8, merged_at: '2026-11-22T04:13:51Z', head: { ref: 'agent/8-integration', sha: i2 }, base: { ref: 'main' } };
+    const api = {
+      pr: () => integration, open: () => [onMain(7, 'agent/7-chess', k1)], priorHeads: () => [],
+      retarget: (n, base) => calls.push(['retarget', n, base]), label: (n, name) => calls.push(['label', n, name]), comment: (n, body) => calls.push(['comment', n, body]),
+    };
+    const dry = run({ prNumber: 8, dryRun: true, api, git, log: () => {} });
+    assert.match(dry[0].result, /^skip: head is in #8's branch history/, 'a dry run says it would skip, not forward');
+    const results = run({ prNumber: 8, api, git, log: line => logged.push(line) });
+    assert.deepEqual(results.map(r => r.pr), [7]);
+    assert.match(results[0].result, /^skip: head is in #8's branch history with no commits of its own/);
+    assert.match(logged.join('\n'), /#7: skip: .*left untouched/, 'the skip is logged with its reason');
+    assert.deepEqual(calls, [], 'no retarget, label or comment');
+    assert.equal(remote('rev-parse', 'refs/heads/agent/7-chess'), k1, 'nothing is pushed');
+  } finally { fx.cleanup(); }
+});
+
 test('run: an open (unmerged) PR does nothing unless it is a dry run', () => {
   const api = { pr: () => ({ ...merged, merged_at: null }), open: () => assert.fail('not reached') };
   assert.deepEqual(run({ prNumber: 1, api, git: () => assert.fail('no git') }), [{ pr: 1, result: 'not merged; nothing to do' }]);

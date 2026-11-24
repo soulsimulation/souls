@@ -873,6 +873,91 @@ fn e6_a_create_by_the_plain_name_commits_under_the_pinned_name() {
     assert_eq!((n.kind().as_str(), n.parent()), (full.as_str(), Some(body)));
 }
 
+/// 0.135 E14: a form's `put` and `reparent` into a slot of another thing (a collage's `mount` onto a patch of a board,
+/// the slot argument `{node, slot}` bound as [`Arg::Slot`]) moves the held thing into that thing's slot through the
+/// same commit path as a put into the form's own slot. A Soul that leaves mid-step keeps the thing in its hand and
+/// the slot stays free; a slot already holding a thing is refused by name (`slot-occupied`).
+#[test]
+fn e14_a_put_into_a_slot_of_another_thing_lands_there_and_a_leave_keeps_it_in_hand() {
+    let mut b = Bench::new(1, 3, &[0]);
+    let mount = r#""mount": { "who": "anyone", "takes": { "patch": { "type": "slot" } },
+      "steps": [{ "step": "put", "slot": { "arg": "patch" } }, { "step": "wait", "us": 4000000 }],
+      "effects": [{ "change": "reparent", "what": "this", "into": { "arg": "patch" }, "event": "mounted" }] },
+    "take": {"#;
+    let entry = parse(
+        &ENTRY
+            .replace("KIND", &b.full.clone())
+            .replace(r#""take": {"#, mount),
+    )
+    .expect("JSON");
+    let (body, paper, other, board) = (id(2), id(100), id(101), id(102));
+    let patch = [("patch", Arg::Slot(board, 1))];
+    let at = |b: &Bench, t: Id| {
+        let n = b
+            .tree
+            .node(b.tree.handle(t).expect("in the tree"))
+            .expect("a node");
+        (n.parent(), n.slot())
+    };
+    let finish = |b: &mut Bench| {
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        b.p.forms
+            .ended
+            .pop()
+            .expect("ended")
+            .how
+            .as_str()
+            .to_owned()
+    };
+    let take = |b: &mut Bench, t: Id, n: u64| {
+        assert!(matches!(
+            b.ask(&entry, body, t, "take", None, intent(body, n)),
+            Ok(Asked::Started(_))
+        ));
+        assert_eq!(finish(b), "done", "taken");
+    };
+    take(&mut b, paper, 1);
+    // Leave mid-step (in the mount's wait): the paper stays in the hand, the patch free.
+    start(&mut b, &entry, body, paper, "mount", board, &patch, 2).expect("binds");
+    for _ in 0..4 {
+        b.tick();
+        b.flush();
+    }
+    let now = b.now;
+    {
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, body, None, now).expect("left");
+    }
+    let how = finish(&mut b);
+    println!(
+        "E14 mount, left mid-step: {how}; paper at {:?}",
+        at(&b, paper)
+    );
+    assert_eq!(how, "left");
+    assert_eq!(at(&b, paper).0, Some(body), "still in the hand");
+    // Done: the paper is in the board's patch, not a slot of the paper's own.
+    start(&mut b, &entry, body, paper, "mount", board, &patch, 3).expect("binds");
+    let how = finish(&mut b);
+    println!("E14 mount: {how}; paper at {:?}", at(&b, paper));
+    assert_eq!(
+        (how.as_str(), at(&b, paper)),
+        ("done", (Some(board), Some(1)))
+    );
+    // The patch taken: another piece is refused by name and stays in the hand.
+    take(&mut b, other, 4);
+    start(&mut b, &entry, body, other, "mount", board, &patch, 5).expect("binds");
+    let how = finish(&mut b);
+    println!(
+        "E14 mount onto the taken patch: {how}; the other piece at {:?}",
+        at(&b, other)
+    );
+    assert_eq!(how, "slot-occupied");
+    assert_eq!(at(&b, other).0, Some(body));
+}
+
 /// Starts `form` of `entry` by `body` at `node` with thing argument `other` and value arguments `vals` (C24).
 #[allow(clippy::too_many_arguments)]
 fn start(

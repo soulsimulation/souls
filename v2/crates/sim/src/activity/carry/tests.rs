@@ -797,6 +797,20 @@ mod from_entry {
             }
         );
         assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
+        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four, at its four grips.
+        let tall = Load::of(&entry("rack_upright_6m.json")).expect("the 6.1 m upright");
+        assert_eq!(
+            tall,
+            Load {
+                half_length: 3_048_000,
+                half_width: 609_500,
+                grips: [-2_748_000, 2_748_000],
+                inner: [Some(-916_000), Some(916_000), None, None],
+                crew: 4,
+                ..tall
+            }
+        );
+        assert_eq!(tall.most(), 4);
     }
 
     /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to
@@ -947,6 +961,80 @@ mod from_entry {
             upright.lies_along(Quat::IDENTITY).unwrap(),
             None,
             "it stands"
+        );
+    }
+
+    /// 0.135 C5: a carrier at every grip. A plank with five grips takes five at most; its three sides stand beside
+    /// its middle grips, alternating sides, and each is checked at its grip by name. Turned the other way round its
+    /// middle grips are taken from its new back. A side's place is kept in the carry's frame.
+    #[test]
+    fn c5_one_carrier_at_each_grip_and_each_side_checked_by_name() {
+        use super::super::Carry;
+        use replica::ids::{Id, Scope};
+        use replica::pose::Vec3;
+        let plank = Load::of(
+            &parse(
+                r#"{"kind": "test:plank", "geometry": {"bounds_mm": [6000, 100, 300]},
+                "state": {"hold_crew": {"default": 4}},
+                "points": {"a": {"role": "grip", "at_mm": [-2800, 50, 0]}, "b": {"role": "grip", "at_mm": [-1400, 50, 0]},
+                    "c": {"role": "grip", "at_mm": [0, 50, 0]}, "d": {"role": "grip", "at_mm": [1400, 50, 0]},
+                    "e": {"role": "grip", "at_mm": [2800, 50, 0]}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plank.most(), 5);
+        assert_eq!(
+            plank.inner,
+            [Some(-1_400_000), Some(0), Some(1_400_000), None]
+        );
+        let off = 150_000 + REACH;
+        assert_eq!(
+            plank.side_places(),
+            vec![[-1_400_000, off], [0, -off], [1_400_000, off]]
+        );
+        let back = plank.reversed().unwrap();
+        assert_eq!(
+            back.inner,
+            [Some(-1_400_000), Some(0), Some(1_400_000), None]
+        );
+        let id = |n| Id::new(Scope([1; 16]), n).unwrap();
+        let [b, f] = plank.places();
+        let sides: Vec<(Id, [i64; 2])> = plank
+            .side_places()
+            .into_iter()
+            .enumerate()
+            .map(|(k, p)| (id(k as u64 + 3), p))
+            .collect();
+        let check = |s: &[(Id, [i64; 2])], crew| {
+            plank.check_sides(
+                crew,
+                [f, 0],
+                [b, 0],
+                [0, 0],
+                Some([plank.half_length, 0]),
+                s,
+            )
+        };
+        assert!(check(&sides, 5).is_ok(), "{:?}", check(&sides, 5));
+        let six = check(&sides, 6).unwrap_err();
+        assert_eq!(six.name, "carry-crew-too-large");
+        let mut far = sides.clone();
+        far[2].1 = [1_400_000, off + GRIP_REACH];
+        let r = check(&far, 5).unwrap_err();
+        assert_eq!(r.name, "carry-grip-out-of-reach");
+        assert!(
+            r.detail.contains(&replica::world_model::show(id(5))),
+            "{}",
+            r.detail
+        );
+        // The carry's frame: along from the back toward the front, across its +z.
+        let (fr, bk) = (Vec3::new(f, 0, 0), Vec3::new(b, 0, 0));
+        assert_eq!(Carry::place_of(fr, bk, Vec3::new(0, 0, off)), [0, off]);
+        let turned = |v: Vec3| Vec3::new(-v.z, 0, v.x);
+        assert_eq!(
+            Carry::place_of(turned(fr), turned(bk), turned(Vec3::new(1_400_000, 0, off))),
+            [1_400_000, off]
         );
     }
 }

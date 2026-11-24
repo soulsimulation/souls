@@ -95,7 +95,8 @@ checks() {
 bundle() {
   local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 pkg=${7:-$6/../target/wasm-load/pkg} a t lines=() served=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "bundle: the sha is the full 40 hex"
-  [ -f "$page/index.html" ] || die "bundle: no page build at $page"
+  # X2: the page folder is the body files (bodies.ts) or a page build
+  [ -f "$page/index.html" ] || [ -f "$page/assets/bodies/bodies.json" ] || die "bundle: no page folder at $page"
   [ -d "$client/src" ] && [ -d "$client/skill" ] || die "bundle: no client (src, skill) at $client"
   rm -rf "$out"
   mkdir -p "$out/artifacts" "$out/bin"
@@ -180,9 +181,16 @@ stage() {
 
 worlds() { find "$WORLDS_ROOT/worlds" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | sed 's|.*/||' | sort; }
 # The directory's store for deploy's pins: the one worldd@'s launcher reads (#1960 B6). The install's drop-in gives
-# worldd@ the secrets file, so its store settings (only those) come from there; a directory.env still wins after it.
+# worldd@ the secrets file after the unit's directory.env, so its store settings (only those) come from there and win,
+# as systemd reads them (0.133 ST2: the store is set in secrets.env only).
 directory_env() {
   local k v
+  if [ -f "$ETC/directory.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ETC/directory.env"
+    set +a
+  fi
   if [ -r "$ETC/secrets.env" ]; then
     while IFS='=' read -r k v; do
       k=${k#export }
@@ -193,12 +201,6 @@ directory_env() {
           ;;
       esac
     done < "$ETC/secrets.env"
-  fi
-  if [ -f "$ETC/directory.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    . "$ETC/directory.env"
-    set +a
   fi
 }
 

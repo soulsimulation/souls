@@ -39,7 +39,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -48,6 +48,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { request } from '../../src/daemon/client.mjs';
 import { runtimeOf } from '../../src/home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -120,9 +121,9 @@ const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '12
 after(async () => {
   timers.forEach(clearInterval);
   for (const d of daemons) await request(d.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill('SIGKILL');
-  if (process.env.SERVED_E2E_KEEP !== '1') rmSync(dir, { recursive: true, force: true });
-  else console.log(`kept: ${dir}`);
+  const keep = process.env.SERVED_E2E_KEEP === '1';
+  await stopThenRemove(procs, dir, { signal: 'SIGKILL', keep });
+  if (keep) console.log(`kept: ${dir}`);
 });
 
 /** The thin command, as a harness runs it. */
@@ -320,6 +321,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const key = ((await (await post('/v1/account/souls', {})).json()).souls ?? [])[0]?.soul;
   assert.equal((await post('/v1/account/souls/profile', { soul: key, name: 'Alder Quill' })).status, 200, "A's owner names A");
   await waitFor("A's body by its name in B's copy", async () => ((await B.cli('find', 'alder', 'quill')).found ?? []).find((r) => r.id === meA), 20_000);
+  // 24 Nov staged scene: `say --to "<name>"` addresses that Soul by its owner's name, any case, as `find` reads it
+  // (the 0.132.3 client named other bodies "body <n>" and refused `say-to-unknown`)
+  const toName = await B.cli('say', '--to', 'ALDER quill', 'morning, Alder');
+  assert.equal(toName.ok, true, `B's say --to A by A's name: ${JSON.stringify(toName)}`);
+  assert.deepEqual([toName.to?.id, toName.to?.name], [meA, 'Alder Quill'], `addressed to A's body by its name: ${JSON.stringify(toName.to)}`);
+  assert.ok(accepted(await answered(B, toName.sequence)), "B's words to A are accepted");
 
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);

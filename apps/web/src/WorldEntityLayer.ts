@@ -1,5 +1,5 @@
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
-import {lockPose} from './gen-mesh/vocab-look.ts';
+import {lockPose, paletteTint} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';
 // The entity world's picture (spec <eden4>/28 §8): terrain baked from the
 // same ground recipe the server uses, water, a horizon ring, and one mesh per
@@ -1394,7 +1394,8 @@ export class WorldEntityLayer {
     return c;
   }
 
-  /** A box worth looking at first: the placed things if any, else the middle of the world. */
+  /** A box worth looking at first: the placed things if any (each at least 10 m round its origin, and all of its
+   *  footprint: a 20 m box round RnA Studio's origin put the arrival eye against its wall), else the middle of the world. */
   viewBounds(): [number, number, number, number] {
     if (!this.model) return [-60, -60, 60, 60];
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -1403,6 +1404,7 @@ export class WorldEntityLayer {
       const d = this.model.resolvedDef(e.def); if (!d || d.components.landform || d.make.kind === 'gen' && (d.make.gen === 'landform/1' || d.make.gen === 'lake/1')) continue;
       if (e.shape && 'area' in e.shape) { for (const [x, z] of e.shape.area) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); } continue; }
       const wp = this.model.worldPose(e); x0 = Math.min(x0, wp.x - 10); z0 = Math.min(z0, wp.z - 10); x1 = Math.max(x1, wp.x + 10); z1 = Math.max(z1, wp.z + 10);
+      try { for (const b of this.model.footprint(e, d)) { const r = Math.hypot(b.half[0], b.half[1]); x0 = Math.min(x0, b.c[0] - r); z0 = Math.min(z0, b.c[1] - r); x1 = Math.max(x1, b.c[0] + r); z1 = Math.max(z1, b.c[1] + r); } } catch { /* no colliders: its origin box stands */ }
     }
     if (!Number.isFinite(x0)) { const h = Math.min(120, this.model.constants.extent / 4); return [-h, -h, h, h]; }
     return [x0, z0, x1, z1];
@@ -1747,7 +1749,8 @@ export class WorldEntityLayer {
     const ctx: MeshCtx = {
       canonicalContext: this.immutable, def, entity: e, params, args: def.make.kind === 'gen' ? ((def.make.args ?? {}) as Record<string, unknown>) : {},
       baked: m.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), model: m, materials: this.lib,
-      tint: (key, fallback) => { if (!key) return fallback; const v = params[key]; return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback; },
+      // R4: a creator's recolour of one of the def's palette keys (`souls-god recolor --part <key>`) is that part's colour
+      tint: paletteTint(def, params, e.state),
     };
     try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; obj.userData.entity ??= e.id; /* K4: a click on it names its entity (the camera follows one the takes carry) */ const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
   }

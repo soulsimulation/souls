@@ -901,7 +901,7 @@ fn w3d_checkpoint_motion_timers_privacy_and_pending_mapping_play_canonically() {
     ];
     tree.apply(&h, &part_of(&h, changes.clone())).unwrap();
     writer.frame(&frame(changes)).unwrap();
-    writer.idle_observed(real + 6_400_000).unwrap();
+    writer.idle_observed(real + 6_000_000).unwrap();
     assert_eq!(
         writer.written().parts,
         1,
@@ -910,7 +910,7 @@ fn w3d_checkpoint_motion_timers_privacy_and_pending_mapping_play_canonically() {
     assert_eq!(writer.quiet_until, None, "no old-mapping future quiet time");
     writer.idle_observed(real + 8_000_000).unwrap();
     assert_eq!(writer.written().parts, 2);
-    assert_eq!(writer.quiet_until, Some(6_250_000));
+    assert_eq!(writer.quiet_until, Some(6_500_000 - SETTLE_US));
     assert_eq!(writer.copy.tree().time(), tree.time());
 
     let hb = fs::read(d.join("views").join(stream::header_path(&writer.header))).unwrap();
@@ -2480,7 +2480,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
     actual.apply_bytes(&later).unwrap();
     out.push(1, &later).unwrap();
     let previous = fs::read(out.dir.join(POINTER)).unwrap();
-    out.idle(real + 6_400_000).unwrap();
+    out.idle(real + 6_000_000).unwrap();
     assert_eq!(
         out.public_player().next(),
         1,
@@ -2498,7 +2498,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
         &project(&h, &actual.tree().to_state()).unwrap()
     );
     let pointer = Pointer::read(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
-    assert_eq!(pointer.quiet_until, Some(6_250_000));
+    assert_eq!(pointer.quiet_until, Some(6_500_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
         reader

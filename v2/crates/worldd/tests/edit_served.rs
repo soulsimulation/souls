@@ -7,6 +7,9 @@
 //!   ground, 20 of them walking; the 21st walks to its place first, since no Soul stands until it acts (C3). A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
 //!   the same wall commits. Each edit's answer is timed through the gateway, beside the 20 walkers.
 //! - **#3923** (N2's test world, in CI): the same refusal for a Soul that has acted, standing where its walk ended.
+//! - **G1f A1, K18d** (N2's test world with one Eden chair, in CI; Eden with `EDEN_FACTS`, `--release`): a creator's
+//!   chair, and building, rooms, door and chair, are sat in; an occupied seat or the door to it is not removed, and
+//!   a wall over the seated Soul is refused.
 
 // A real process and a real gateway on the real clock: the waits and the times are real time.
 #![allow(clippy::disallowed_methods)]
@@ -1106,9 +1109,69 @@ async fn send(ws: &mut Ws, bytes: Vec<u8>) -> (Got, Duration) {
     (got, t.elapsed())
 }
 
+/// `bytes` sent, and its act's own answer: a Soul's act that starts a form or a move is first answered in progress
+/// (kind 3, C20) in the tick it starts (#4133, W11 #4087), and its receipt or refusal follows.
+async fn send_ended(ws: &mut Ws, bytes: Vec<u8>) -> Got {
+    put(ws, bytes).await;
+    loop {
+        let got = read_answer(&next(ws).await);
+        if got.kind != 3 {
+            return got;
+        }
+    }
+}
+
 fn creator(n: u8) -> (Id, Actor) {
     let id = Id::new(Scope([n; 16]), 1).unwrap();
     (id, Actor::Creator(id))
+}
+
+/// R17 (0.133): a world whose store does not answer at the start listens with no creator known. The record's own
+/// creator's edit is refused `edit.not-the-creator` meanwhile (closed, never open), and accepted once the store
+/// answers, with no restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn r17_an_edit_while_the_creator_waits_for_the_store_is_refused_then_accepted() {
+    let d = scratch("r17-creator");
+    let w = seed(
+        &d,
+        &testworld::generate(1, 0).expect("the test world").text,
+        1,
+        (-40, 30),
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    // Out of reach: a file where the folder store's folder was.
+    let away = d.join("bucket.away");
+    std::fs::rename(&bucket, &away).unwrap();
+    std::fs::write(&bucket, b"").unwrap();
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    assert_eq!(s.line("creator: ", 60), "creator: none");
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    println!("R17: the creator's edit while its record waits: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.not-the-creator"));
+    // The store answers: the creator's thread reads the record, and the same edit commits.
+    std::fs::remove_file(&bucket).unwrap();
+    std::fs::rename(&away, &bucket).unwrap();
+    assert_eq!(
+        s.line("creator: ", 120),
+        format!("creator: {}", principal_text(c))
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    println!("R17: the creator's edit once the store answers: {got:?}");
+    assert_eq!(got.kind, 1, "the creator's wall commits: {got:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1226,6 +1289,46 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
+/// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:
+/// Eden's (`EDEN_FACTS`, its cabin chair; run with `--release`, as a building's whole-ground rebuild of Eden takes
+/// about 15 s in a debug build, past an act's 10 s), else N2's test world with one Eden chair on the square, as the
+/// export writes it (`core:chair`, loaded as `eden:chair` to find its entry), so CI runs them without Eden.
+fn seat_world() -> (String, &'static str) {
+    if let Ok(path) = std::env::var("EDEN_FACTS") {
+        return (std::fs::read_to_string(path).unwrap(), "e_0fc49dc9");
+    }
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(
+                json::parse(&format!(
+                    r#"{{"ref": "core-chair@1", "hash": "{}", "name": "core:chair", "form": "point", "layer": "solid",
+                        "door": false, "mesh": false, "slots": 1}}"#,
+                    replica::encode::to_hex(&replica::ids::sha256(b"souls/testworld/core-chair@1"))
+                ))
+                .unwrap(),
+            ),
+            ("things", json::Value::Arr(a)) => a.push(
+                json::parse(
+                    r#"{"id": "fixture-chair", "def": "core-chair@1", "ref": "core-chair@1", "parent": null,
+                        "pose": [25000, 0, 25000, 0], "scale_ppm": 1000000, "name": "a chair on the square",
+                        "solids": [[-160, -150, 22, 22, 0, 0, 430, 0, 0], [160, -150, 22, 22, 0, 0, 430, 0, 0],
+                                   [-160, 150, 22, 22, 0, 0, 430, 0, 0], [160, 150, 22, 22, 0, 0, 430, 0, 0],
+                                   [-200, -190, 20, 20, 0, 465, 915, 0, 0], [200, -190, 20, 20, 0, 465, 915, 0, 0]],
+                        "slots": [{"n": 1, "id": "seat", "kind": "seat", "at": [0, 470, 20], "yaw": 0,
+                                   "capacity": 1}]}"#,
+                )
+                .unwrap(),
+            ),
+            _ => {}
+        }
+    }
+    (f.to_json(), "fixture-chair")
+}
+
 fn clear_row(text: &str) -> (i64, i64) {
     let im = import_eden::load(text).expect("Eden loads");
     let ground = im.nodes["ground"];
@@ -1403,13 +1506,12 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
 
 /// G1f A1: an actual creator edit registers the declared seat before its receipt, and removal is safe and complete.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs the exported static Eden facts file"]
 async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
-    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let (text, chair) = seat_world();
     let im = import_eden::load(&text).unwrap();
     let source = im
         .tree
-        .node(im.tree.handle(im.nodes["e_0fc49dc9"]).unwrap())
+        .node(im.tree.handle(im.nodes[chair]).unwrap())
         .unwrap();
     let kind = source.kind().clone();
     let fields = source.fields().clone();
@@ -1464,7 +1566,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         )
         .unwrap()
     };
-    let (sat, _) = send(&mut soul, ask(1, "eden:sit", Some(chair))).await;
+    let sat = send_ended(&mut soul, ask(1, "eden:sit", Some(chair))).await;
     println!(
         "G1f placed receipt {:?}; sat receipt {:?}",
         placed.entries, sat.entries
@@ -1521,7 +1623,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
     )
     .await;
     assert_eq!((blocked.kind, blocked.reason.as_str()), (2, "edit.in-use"));
-    let (rose, _) = send(&mut soul, ask(2, "eden:rise", None)).await;
+    let rose = send_ended(&mut soul, ask(2, "eden:rise", None)).await;
     assert_eq!(rose.kind, 1, "the Soul rises: {rose:?}");
     let (removed, _) = send(
         &mut creator,
@@ -1532,7 +1634,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         removed.kind, 1,
         "unoccupied seat removal commits: {removed:?}"
     );
-    let (gone, _) = send(&mut soul, ask(3, "eden:sit", Some(chair))).await;
+    let gone = send_ended(&mut soul, ask(3, "eden:sit", Some(chair))).await;
     assert_eq!(gone.kind, 2, "a retired seat cannot take a body: {gone:?}");
     println!(
         "G1f occupied removal: {}; rise receipt {:?}; removal receipt {:?}; retired seat: {}",
@@ -3997,5 +4099,1427 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     println!(
         "{} nodes as built, all still there; the log replays to here",
         built.len()
+    );
+}
+
+/// B10 (#4239): a two-sided turn game, the counter match's shape (#4391) cut to one form a side: its roles are its
+/// links.
+const B10_GAME: &str = r#"{
+  "format": "souls-entry/1",
+  "kind": "eden:turn_test",
+  "owner": "thing",
+  "state": {
+    "turn": {"n": 1, "type": "enum", "default": "first", "audience": {"rule": "everyone"}, "values": ["first", "second"]}
+  },
+  "links": {
+    "first": {"n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "second": {"n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"}}
+  },
+  "points": {"first_stand": {"role": "stand", "at_mm": [-550, 0, 450], "yaw_mdeg": 90000}},
+  "geometry": {"bounds_mm": [1500, 900, 1500]},
+  "forms": {
+    "take_first": {
+      "who": {"link": "first"},
+      "starts": "act",
+      "steps": [{"step": "walk_to", "point": "first_stand"}],
+      "effects": [{"change": "set", "field": "turn", "to": "second", "event": "turn_passed"}]
+    }
+  },
+  "roles": {
+    "first": {"need": "required", "places": {"in": "here", "within_mm": 3000}},
+    "second": {"need": "required", "places": {"in": "here", "within_mm": 3000}}
+  },
+  "motion": {"how": "fixed"},
+  "loose": {"ever": true},
+  "text": {"card": "A two-sided turn game."}
+}"#;
+/// Where the board stands, mm: 4 m north of where the Souls are born.
+const B10_BOARD: [i64; 2] = [44_000, -14_000];
+
+/// N2's test world with the board on the open ground, and the folder of entries: the game and the body.
+fn b10_world(d: &Path) -> String {
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    std::fs::write(entries.join("turn_test.json"), B10_GAME).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    let def = "core-turn_test@1";
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(
+                json::parse(&format!(
+                    r#"{{"ref":"{def}","hash":"{}","name":"core:turn_test","form":"point","layer":"solid","door":false,"mesh":false,"slots":1}}"#,
+                    "b10".repeat(21) + "b"
+                ))
+                .unwrap(),
+            ),
+            ("things", json::Value::Arr(a)) => {
+                let pose =
+                    json::Value::Arr([B10_BOARD[0], 0, B10_BOARD[1], 0].map(num).to_vec());
+                a.push(json::Value::Obj(vec![
+                    ("id".into(), json::Value::s("turn-board")),
+                    ("def".into(), json::Value::s(def)),
+                    ("ref".into(), json::Value::s(def)),
+                    ("parent".into(), json::Value::Null),
+                    ("pose".into(), pose.clone()),
+                    ("world".into(), pose),
+                    ("scale_ppm".into(), num(1_000_000)),
+                    ("name".into(), json::Value::s("a turn game")),
+                ]));
+            }
+            _ => {}
+        }
+    }
+    f.to_json()
+}
+
+/// The role links (`eden:first`, `eden:second`) at `board`, and the turn game's activity nodes, in the served world
+/// as its log stands.
+fn b10_game_left(w: &Seeded, board: Id) -> (usize, usize) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let links = t
+        .links_at(board)
+        .iter()
+        .filter(|e| ["eden:first", "eden:second"].contains(&t.ty(e).as_str()))
+        .count();
+    let games = t
+        .to_state()
+        .nodes
+        .values()
+        .filter(|n| n.kind.as_str().starts_with("eden:turn_test_activity@"))
+        .count();
+    (links, games)
+}
+
+/// B10 (#4239) review: through the creator's real edit path and BUILDSAFE, on a served world.
+/// - Two Souls start a turn game at its board: Soul 1 offers it there as the first side, Soul 2 accepts; each then
+///   holds its side's link on the board.
+/// - The creator removes the board mid-game: the tree takes the game's node and links with it, both players are told
+///   by name (`souls:activity-ended`, why `souls:thing-gone`) and let go at once: a new offer on the open ground is
+///   accepted and starts.
+/// - The creator undoes the removal: the board is back, with its fields, and no role link or game node with it (an
+///   undo restores things, never a game).
+#[test]
+fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_board_alone() {
+    let d = scratch("b10undo");
+    let facts = b10_world(&d);
+    let w = seed_entries(&d, &facts, 2, (44, -18), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xb1);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut sequence, mut planned) = (0, 0);
+    let mut creator_asks = |asked: Asked| loop {
+        sequence += 1;
+        let bytes = asked_intent(&w, creator_actor, sequence, planned, &asked);
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let board = import_eden::load(&facts).unwrap().nodes["turn-board"];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // Each walks up to the board: a body is born at its Soul's first intent.
+    for (k, dx) in [(0, -1_500_000), (1, 1_500_000)] {
+        hands[k].walk_to(
+            g,
+            v3(B10_BOARD[0] * 1000 + dx, 0, B10_BOARD[1] * 1000 + 1_000_000),
+        );
+        let got = socket_end(&mut hands[k].s);
+        assert_eq!(got.kind, 1, "walked to the board: {got:?}");
+    }
+    let bodies = [body_of(&w, w.souls[0]), body_of(&w, w.souls[1])];
+    let kind = pinned_activity(&w, "eden:turn_test_activity");
+    let start_at = |hands: &mut [Hand], place: Id| {
+        let got = hands[0].act(
+            "activity:offer",
+            place,
+            BTreeMap::from([
+                (1, kind.clone()),
+                (2, Value::Text(Name::new("eden:first").unwrap())),
+                (3, Value::Array(vec![bodies[1].to_value()])),
+            ]),
+        );
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let made = created_by(&w, &got.entries, "eden:turn_test_activity@");
+        let got = hands[1].act("activity:accept", made, BTreeMap::new());
+        assert_eq!(got.kind, 1, "accepted: {got:?}");
+        made
+    };
+    let game = start_at(&mut hands, board);
+    let got = hands[0].act("eden:take_first", board, BTreeMap::new());
+    assert_eq!(got.kind, 1, "the first side's move: {got:?}");
+    assert_eq!(
+        b10_game_left(&w, board),
+        (2, 1),
+        "both sides linked, one game"
+    );
+
+    // The creator removes the board mid-game.
+    let got = creator_asks(Asked::Batch(
+        vec![Op::Remove {
+            node: Ref::Node(board),
+        }],
+        None,
+    ));
+    assert_eq!(got.kind, 1, "the board removed: {got:?}");
+    // Both players are told, by name, within a few ticks.
+    let end = Instant::now() + Duration::from_secs(20);
+    let told = loop {
+        let told: Vec<Id> = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| {
+                e.events.iter().flatten().any(|ev| {
+                    ev.name.as_str() == "souls:activity-ended"
+                        && ev.fields.get(&1) == Some(&game.to_value())
+                        && ev.fields.get(&2)
+                            == Some(&Value::Text(Name::new("souls:thing-gone").unwrap()))
+                })
+            })
+            .map(|e| e.envelope.node)
+            .collect();
+        if told.len() == 2 || Instant::now() > end {
+            break told;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(told, bodies.to_vec(), "each player told at its body");
+    // Let go at once: the same two start a game on the open ground.
+    let again = start_at(&mut hands, g);
+    let got = hands[0].act("activity:leave", again, BTreeMap::new());
+    assert_eq!(got.kind, 1, "left: {got:?}");
+    let got = hands[1].act("activity:leave", again, BTreeMap::new());
+    assert_eq!(got.kind, 1, "left: {got:?}");
+
+    // The creator undoes the removal: the board alone comes back.
+    let got = creator_asks(Asked::Undo);
+    println!("b10: undo of the board's removal: {got:?}");
+    assert_eq!(got.kind, 1, "the undo commits: {got:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let n = t
+        .handle(board)
+        .and_then(|h| t.node(h))
+        .expect("the board is back");
+    assert_eq!(n.parent(), Some(g), "on the open ground");
+    assert_eq!(
+        b10_game_left(&w, board),
+        (0, 0),
+        "no role link and no game came back with it"
+    );
+    let got = hands[0].act("eden:take_first", board, BTreeMap::new());
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "not-permitted"),
+        "nobody holds the first side of the board that came back: {got:?}"
+    );
+    drop(s);
+    println!(
+        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone and \
+         playing again on the ground at once), and its undo brought the board back with no game or role link"
+    );
+}
+
+/// [`yard_world`] with three bays side by side at the build site and parts for each from two yards (0.135 A4): the
+/// site's bay (x 65 m) with a bay 4 m west of it and one 4 m east, each its own two frames and two low beams. The west
+/// yard is the test world's (two frames on its stand, four beams) and a second stand 6 m south with one frame; the east
+/// yard, 23 m east of the site, mirrors it: a stand with two frames, two beams beside it, a second stand with one.
+fn three_bays_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+    let (text, slots) = yard_world(d);
+    let mut f = json::parse(&text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let things = top
+        .iter_mut()
+        .find_map(|(k, v)| match (k.as_str(), v) {
+            ("things", json::Value::Arr(a)) => Some(a),
+            _ => None,
+        })
+        .unwrap();
+    let find = |things: &[json::Value], id: &str| {
+        things
+            .iter()
+            .find(|t| t.get("id").and_then(json::Value::str) == Some(id))
+            .unwrap_or_else(|| panic!("the world's {id}"))
+            .clone()
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    // `t` as a new thing: its id, name, parent, pose and (in a stand) its slot.
+    let like = |t: &json::Value,
+                id: &str,
+                name: &str,
+                parent: Option<&str>,
+                pose: [i64; 3],
+                slot: Option<i64>| {
+        let json::Value::Obj(mut o) = t.clone() else {
+            panic!("a thing")
+        };
+        for (k, v) in o.iter_mut() {
+            match k.as_str() {
+                "id" => *v = json::Value::s(id),
+                "name" => *v = json::Value::s(name),
+                "parent" => *v = parent.map_or(json::Value::Null, json::Value::s),
+                "pose" => *v = json::Value::Arr([pose[0], pose[1], pose[2], 0].map(num).to_vec()),
+                "slot" => *v = json::Value::Obj(vec![("n".into(), num(slot.unwrap()))]),
+                _ => {}
+            }
+        }
+        json::Value::Obj(o)
+    };
+    let (bay, stand, frame, beam) = (
+        find(things, "site-bay"),
+        find(things, "yard-stand"),
+        find(things, "yard-frame-1"),
+        find(things, "yard-beam-1"),
+    );
+    for (id, name, x) in [
+        ("site-bay-w", "the site's west rack bay", 61_000),
+        ("site-bay-e", "the site's east rack bay", 69_000),
+    ] {
+        things.push(like(&bay, id, name, None, [x, 0, -24_000], None));
+    }
+    for (id, name, x, z) in [
+        (
+            "yard-stand-w2",
+            "the west yard's second stand",
+            40_000,
+            -30_000,
+        ),
+        (
+            "yard-stand-e",
+            "the east yard's frame stand",
+            88_000,
+            -24_000,
+        ),
+        (
+            "yard-stand-e2",
+            "the east yard's second stand",
+            88_000,
+            -30_000,
+        ),
+    ] {
+        things.push(like(&stand, id, name, None, [x, 0, z], None));
+    }
+    for (id, name, parent, n) in [
+        ("yard-frame-w", "rack frame w", "yard-stand-w2", 1),
+        ("yard-frame-e1", "rack frame e1", "yard-stand-e", 1),
+        ("yard-frame-e2", "rack frame e2", "yard-stand-e", 2),
+        ("yard-frame-e3", "rack frame e3", "yard-stand-e2", 1),
+    ] {
+        let z = if n == 1 { -150 } else { 150 };
+        things.push(like(&frame, id, name, Some(parent), [0, 100, z], Some(n)));
+    }
+    for (id, name, x) in [
+        ("yard-beam-5", "rack beam 5", 86_000),
+        ("yard-beam-6", "rack beam 6", 85_700),
+    ] {
+        things.push(like(&beam, id, name, None, [x, 0, -24_000], None));
+    }
+    (f.to_json(), slots)
+}
+
+/// What A4's steps share: the served world, its open ground and the crew's kind.
+struct Site<'a> {
+    w: &'a Seeded,
+    g: Id,
+    crew: Value,
+}
+
+/// A part's carriers 2.2 m either side of it along z (as A3's): a frame's first carrier on its -z side, a beam's on +z.
+fn frame_ends(at: Vec3) -> (Vec3, Vec3) {
+    (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000))
+}
+
+fn beam_ends(at: Vec3) -> (Vec3, Vec3) {
+    (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000))
+}
+
+/// Where a holder and its helper stand to start a hold crew on a frame at `at` in a bay: the holder 1 m to the side
+/// `side` (+1 east, -1 west: away from where the beams come in), the helper 1.2 m to the other side and 0.8 m out
+/// from the bay (`out` -1 for `upright_a`, +1 for `upright_b`).
+fn hold_places(at: Vec3, side: i64, out: i64) -> (Vec3, Vec3) {
+    (
+        v3(at.x + side * 1_000_000, 0, at.z),
+        v3(at.x - side * 1_200_000, 0, at.z + out * 800_000),
+    )
+}
+
+async fn walk_two(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    (pa, pb): (Vec3, Vec3),
+    what: &str,
+) {
+    a.send("eden:walk", s.g, to_point(pa)).await;
+    b.send("eden:walk", s.g, to_point(pb)).await;
+    let (x, y) = (a.end().await, b.end().await);
+    assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+}
+
+/// A walk's parameters: to `at` on the ground.
+fn to_point(at: Vec3) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, Value::Array(vec![int(at.x), int(0), int(at.z)]))])
+}
+
+/// A crew on `place` (the ground, or a part it then holds): `a` offers in front, `b` accepts.
+async fn crew_of(s: &Site<'_>, a: &mut GwSoul, b: &mut GwSoul, place: Id) -> Id {
+    let body = body_of(s.w, b.soul);
+    let got = a
+        .act(
+            "activity:offer",
+            place,
+            BTreeMap::from([
+                (1, s.crew.clone()),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![body.to_value()])),
+            ]),
+        )
+        .await;
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let c = created_by(s.w, &got.entries, "mars:carry_activity@");
+    let got = b.act("activity:accept", c, BTreeMap::new()).await;
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    c
+}
+
+async fn leave_crew(a: &mut GwSoul, c: Id, what: &str) {
+    let got = a.act("activity:leave", c, BTreeMap::new()).await;
+    assert_eq!(got.kind, 1, "{what}: {got:?}");
+}
+
+fn part_of(p: Id) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, p.to_value())])
+}
+
+fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))])
+}
+
+/// `part:put` by `a` for crew `c`, asked again while it is refused at its commit because a walker moved while the
+/// walkers' maps were prepared (`edit.body-stale`: the part comes back to its crew, which may put again) or while it
+/// is still on its way back (`part.setting-in`). Six Souls walk at once here, so a commit can meet a moving body.
+async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
+    for _ in 0..10 {
+        let got = a.act("part:put", c, to.clone()).await;
+        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        {
+            return got;
+        }
+        println!("asked again after {}", got.reason);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("a put refused ten times while walkers moved");
+}
+
+/// Where a part's carriers stand for it: [`frame_ends`] or [`beam_ends`].
+type Ends = fn(Vec3) -> (Vec3, Vec3);
+
+/// Pair `a`, `b` takes `part` on a new crew (its carriers at `ends` of it) and carries it along `via` (the part's
+/// middle at each): the crew, the part riding it.
+#[allow(clippy::too_many_arguments)]
+async fn take_along(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    part: Id,
+    ends: Ends,
+    via: &[Vec3],
+    what: &str,
+) -> Id {
+    walk_two(s, a, b, ends(where_is(s.w, part).2), what).await;
+    let c = crew_of(s, a, b, s.g).await;
+    let got = a.act("part:take", c, part_of(part)).await;
+    assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
+    for at in via {
+        walk_two(s, a, b, ends(*at), what).await;
+    }
+    c
+}
+
+/// As [`take_along`], then the part put by `to`: the crew (holding it if it stands in a bay).
+#[allow(clippy::too_many_arguments)]
+async fn carry_in(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    part: Id,
+    ends: Ends,
+    via: &[Vec3],
+    to: BTreeMap<u64, Value>,
+    what: &str,
+) -> Id {
+    let c = take_along(s, a, b, part, ends, via, what).await;
+    let got = put_part(a, c, to).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}");
+    c
+}
+
+/// A beam into slot `k` of `bay` (at `at`) by its own crew of `a`, `b`, who then go: it bears on its joints to the
+/// bay's frames.
+#[allow(clippy::too_many_arguments)]
+async fn beam_in(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    beam: Id,
+    bay: Id,
+    k: u64,
+    at: Vec3,
+    what: &str,
+) {
+    let c = carry_in(s, a, b, beam, beam_ends, &[at], into_slot(bay, k), what).await;
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// Holder `h` takes frame `f` from `q`, who holds it alone in crew `c`, with `p`'s help (A3's change of crew): a hold
+/// crew of `h` and `p` on the frame, `p` goes, then `q` leaves `c`. The hold crew.
+#[allow(clippy::too_many_arguments)]
+async fn hand_over(
+    s: &Site<'_>,
+    h: &mut GwSoul,
+    p: &mut GwSoul,
+    q: &mut GwSoul,
+    c: Id,
+    f: Id,
+    places: (Vec3, Vec3),
+    what: &str,
+) -> Id {
+    walk_two(s, h, p, places, what).await;
+    let hold = crew_of(s, h, p, f).await;
+    leave_crew(p, hold, what).await;
+    leave_crew(q, c, what).await;
+    println!("{what}");
+    hold
+}
+
+/// Holder `h` takes frame `f`, standing in its bay on its joints, with `p`'s help: the hold crew.
+async fn hold_frame(
+    s: &Site<'_>,
+    h: &mut GwSoul,
+    p: &mut GwSoul,
+    f: Id,
+    places: (Vec3, Vec3),
+    what: &str,
+) -> Id {
+    walk_two(s, h, p, places, what).await;
+    let hold = crew_of(s, h, p, f).await;
+    leave_crew(p, hold, what).await;
+    println!("{what}");
+    hold
+}
+
+/// A beam out of its bay's slot at `at` by a new crew of `a`, `b`, laid where it lay in its yard (`home`); they go.
+#[allow(clippy::too_many_arguments)]
+async fn beam_out(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    beam: Id,
+    at: Vec3,
+    home: Vec3,
+    what: &str,
+) {
+    walk_two(s, a, b, beam_ends(at), what).await;
+    let c = crew_of(s, a, b, s.g).await;
+    let got = a.act("part:unseat", c, part_of(beam)).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}: out");
+    walk_two(s, a, b, beam_ends(home), what).await;
+    let on_ground = BTreeMap::from([
+        (1, s.g.to_value()),
+        (3, Value::Array(vec![int(home.x), int(home.y), int(home.z)])),
+    ]);
+    let got = put_part(a, c, on_ground).await;
+    assert_eq!(got.kind, 1, "{what}: laid in the yard: {got:?}");
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// A crew of `a`, `b` on frame `f` (standing at `at` in its bay, held by `h` in `hold`), then `h` goes: the crew.
+#[allow(clippy::too_many_arguments)]
+async fn frame_crew(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    h: &mut GwSoul,
+    hold: Id,
+    f: Id,
+    at: Vec3,
+    what: &str,
+) -> Id {
+    walk_two(s, a, b, frame_ends(at), what).await;
+    let c = crew_of(s, a, b, f).await;
+    leave_crew(h, hold, what).await;
+    c
+}
+
+/// Crew `c` of `a`, `b` takes frame `f` out of its bay, carries it along `via` and stands it in slot `k` of `stand`
+/// (at `home`); they go.
+#[allow(clippy::too_many_arguments)]
+async fn frame_home(
+    s: &Site<'_>,
+    a: &mut GwSoul,
+    b: &mut GwSoul,
+    c: Id,
+    f: Id,
+    via: &[Vec3],
+    (stand, k, home): (Id, u64, Vec3),
+    what: &str,
+) {
+    let got = a.act("part:unseat", c, part_of(f)).await;
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}: out");
+    for at in via.iter().chain([&home]) {
+        walk_two(s, a, b, frame_ends(*at), what).await;
+    }
+    let got = put_part(a, c, into_slot(stand, k)).await;
+    assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// How many parts are in `bay`, and how many crews hold them, as the served world has it.
+fn bay_holds(w: &Seeded, bay: Id) -> (usize, usize) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let kids: Vec<_> = t.children(t.handle(bay).unwrap()).unwrap().to_vec();
+    let held = kids
+        .iter()
+        .map(|h| t.children(*h).unwrap_or(&[]).len())
+        .sum();
+    (kids.len(), held)
+}
+
+/// 0.135 A4: six Souls in two teams of three, each a carry pair and a holder (as A3's), build three rack bays side by
+/// side from two yards and take them down again, each step its own intent on its own gateway connection, in a served
+/// world ([`three_bays_world`]). Each bay is its own two frames and two low beams.
+///
+/// A bay's frames are held while its beams go in (B18: a frame stands on beams on both its columns, or held), so a bay
+/// at its beams needs its two frames held and a pair at once: four Souls. The two holders hold whichever bay is at its
+/// beams; the two pairs work at once, each on its own part of the row:
+///
+/// - **The middle bay, both teams:** team 1 (Souls 1, 2; holder 3) carries a frame from the west yard into its
+///   `upright_a` while team 2 (Souls 4, 5; holder 6) carries one from the east yard. Team 2 asks for `upright_a` too:
+///   refused `slot.occupied`, and nothing moves. It brings its frame round to `upright_b`, where Soul 2 of team 1 stands:
+///   refused `site.occupied`, nothing moves. Soul 2 steps out to help holder 3 take frame A; team 2's frame goes in and
+///   holder 6 takes it. Team 1 seats the two beams from the west while team 2 seats the east bay's first frame.
+/// - **The east bay by team 2** (frames and beams from the east yard) and the holders, while team 1 seats the west
+///   bay's first frame. Then **the west bay by team 1** and the holders.
+/// - Every bay stands on its joints with nobody holding it.
+/// - **Take down**, in reverse: the west bay (team 1, the holders taking its frames again), then the east (team 2) while
+///   team 1 carries the west bay's last frame home, then the middle (team 1 its beams and frame A, team 2 its frame
+///   B). Every part goes back where it lay in its yard, under its id; every node of the world as built is still there;
+///   the checks read the world as its log replays from the start.
+#[tokio::test(flavor = "multi_thread")]
+async fn a4_two_teams_build_three_bays_and_take_them_down() {
+    let d = scratch("a4bays");
+    let (facts, slots) = three_bays_world(&d);
+    let w = seed_entries(&d, &facts, 6, (59, -34), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let n = |k: &str| im.nodes[k];
+    let (bw, bm, be) = (n("site-bay-w"), n("site-bay"), n("site-bay-e"));
+    let (stand, stand_w2, stand_e, stand_e2) = (
+        n("yard-stand"),
+        n("yard-stand-w2"),
+        n("yard-stand-e"),
+        n("yard-stand-e2"),
+    );
+    // Frames: the middle bay's A from the west stand, its B from the east stand; the west bay's from the west yard,
+    // the east bay's from the east yard. Beams 1, 2 to the middle bay, 3, 4 to the west, 5, 6 to the east.
+    let (ma, wa, wb) = (n("yard-frame-1"), n("yard-frame-2"), n("yard-frame-w"));
+    let (mb, ea, eb) = (n("yard-frame-e1"), n("yard-frame-e2"), n("yard-frame-e3"));
+    let beam: Vec<Id> = (1..=6).map(|k| n(&format!("yard-beam-{k}"))).collect();
+    let parts = [
+        ma, mb, wa, wb, ea, eb, beam[0], beam[1], beam[2], beam[3], beam[4], beam[5],
+    ];
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let s = Site {
+        w: &w,
+        g,
+        crew: pinned_activity(&w, "mars:carry_activity"),
+    };
+    // As built: every node, where each part rests, and the slots' places (the bays and stands never move).
+    let built: std::collections::BTreeSet<Id> = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let mut out = std::collections::BTreeSet::new();
+        let mut stack = vec![t.handle(w.root).unwrap()];
+        while let Some(h) = stack.pop() {
+            out.insert(t.node(h).unwrap().id());
+            stack.extend(t.children(h).unwrap_or(&[]).iter().copied());
+        }
+        out
+    };
+    let start: Vec<_> = parts.iter().map(|p| where_is(&w, *p)).collect();
+    let home = |k: usize| start[k].2;
+    let (ua, ub, ll, lr) = (
+        slots["upright_a"],
+        slots["upright_b"],
+        slots["beam_low_l"],
+        slots["beam_low_r"],
+    );
+    let places = |bay: Id| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let p = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+            .unwrap();
+        let at = |k: u64| p.iter().find(|(n, _)| *n == k).unwrap().1;
+        (at(ua), at(ub), at(ll), at(lr))
+    };
+    let (w_a, w_b, w_l, w_r) = places(bw);
+    let (m_a, m_b, m_l, m_r) = places(bm);
+    let (e_a, e_b, e_l, e_r) = places(be);
+    let refused = |got: &Got, name: &str, what: &str| {
+        println!("{what}: {got:?}");
+        assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
+    };
+    let [s1, s2, s3, s4, s5, s6] = &mut souls[..] else {
+        unreachable!()
+    };
+
+    // Build. The middle bay: team 1 carries frame A into `upright_a` while team 2 carries its frame from the east
+    // yard to wait 0.9 m north of it, inside the bay.
+    let wait_a = v3(m_a.x, 0, m_a.z + 900_000);
+    let (to_ma, to_wait, to_ea, to_wa) = ([m_a], [wait_a], [e_a], [w_a]);
+    let (crew_ma, crew_mb) = tokio::join!(
+        carry_in(
+            &s,
+            s1,
+            s2,
+            ma,
+            frame_ends,
+            &to_ma,
+            into_slot(bm, ua),
+            "team 1 seats frame A in the middle bay"
+        ),
+        take_along(
+            &s,
+            s4,
+            s5,
+            mb,
+            frame_ends,
+            &to_wait,
+            "team 2 brings frame B to the middle bay"
+        ),
+    );
+    leave_crew(s2, crew_ma, "Soul 2 lets go of frame A; Soul 1 holds it").await;
+    let was = where_is(&w, crew_mb);
+    let got = s4.act("part:put", crew_mb, into_slot(bm, ua)).await;
+    refused(
+        &got,
+        "slot.occupied",
+        "team 2 puts its frame in upright_a, where team 1's frame stands",
+    );
+    assert_eq!(
+        where_is(&w, ma).0,
+        Some(bm),
+        "frame A still in the middle bay"
+    );
+    assert_eq!(
+        where_is(&w, mb).0,
+        Some(crew_mb),
+        "team 2's frame still rides its crew"
+    );
+    assert_eq!(where_is(&w, crew_mb), was, "and nothing moved");
+    // Team 2 brings its frame round frame A (east, then north) to 0.9 m east of `upright_b`, while Soul 2 of team 1
+    // stands where frame B's west column would be.
+    let round = [
+        v3(m_a.x + 2_000_000, 0, wait_a.z),
+        v3(m_a.x + 2_000_000, 0, m_b.z),
+        v3(m_b.x + 900_000, 0, m_b.z),
+    ];
+    let column = v3(m_b.x - 572_000, 0, m_b.z);
+    let ((), got) = tokio::join!(
+        async {
+            for at in round {
+                walk_two(&s, s4, s5, frame_ends(at), "team 2 round frame A").await;
+            }
+        },
+        s2.act("eden:walk", g, to_point(column)),
+    );
+    assert_eq!(got.kind, 1, "Soul 2 to upright_b: {got:?}");
+    let was = where_is(&w, crew_mb);
+    let got = s4.act("part:put", crew_mb, into_slot(bm, ub)).await;
+    refused(
+        &got,
+        "site.occupied",
+        "team 2 puts its frame in upright_b, where Soul 2 of team 1 stands",
+    );
+    assert_eq!(
+        where_is(&w, mb).0,
+        Some(crew_mb),
+        "team 2's frame still rides its crew"
+    );
+    assert_eq!(where_is(&w, crew_mb), was, "and nothing moved");
+    // Soul 2 steps out to help holder 3 take frame A from Soul 1; then team 2's frame goes in and holder 6 takes it.
+    let hold_ma = hand_over(
+        &s,
+        s3,
+        s2,
+        s1,
+        crew_ma,
+        ma,
+        hold_places(m_a, 1, -1),
+        "holder 3 takes frame A from Soul 1",
+    )
+    .await;
+    let got = put_part(s4, crew_mb, into_slot(bm, ub)).await;
+    println!("team 2 seats frame B in the middle bay, Soul 2 gone: {got:?}");
+    assert_eq!(got.kind, 1, "frame B seated");
+    leave_crew(s4, crew_mb, "Soul 4 lets go of frame B; Soul 5 holds it").await;
+    let hold_mb = hand_over(
+        &s,
+        s6,
+        s4,
+        s5,
+        crew_mb,
+        mb,
+        hold_places(m_b, 1, 1),
+        "holder 6 takes frame B from Soul 5",
+    )
+    .await;
+    // Team 1 seats the middle bay's beams from the west while team 2 seats the east bay's frame A.
+    let ((), crew_ea) = tokio::join!(
+        async {
+            beam_in(
+                &s,
+                s1,
+                s2,
+                beam[0],
+                bm,
+                ll,
+                m_l,
+                "team 1 seats beam 1 in the middle bay",
+            )
+            .await;
+            beam_in(
+                &s,
+                s1,
+                s2,
+                beam[1],
+                bm,
+                lr,
+                m_r,
+                "team 1 seats beam 2 in the middle bay",
+            )
+            .await;
+        },
+        carry_in(
+            &s,
+            s4,
+            s5,
+            ea,
+            frame_ends,
+            &to_ea,
+            into_slot(be, ua),
+            "team 2 seats frame A in the east bay"
+        ),
+    );
+    leave_crew(
+        s4,
+        crew_ea,
+        "Soul 4 lets go of the east frame A; Soul 5 holds it",
+    )
+    .await;
+    leave_crew(s3, hold_ma, "holder 3 lets go").await;
+    leave_crew(s6, hold_mb, "holder 6 lets go").await;
+    let (parts_in, held) = bay_holds(&w, bm);
+    println!("the middle bay stands: {parts_in} parts in it, {held} crews holding them");
+    assert_eq!(
+        (parts_in, held),
+        (4, 0),
+        "the middle bay stands on its joints"
+    );
+
+    // The east bay by team 2 and the holders, while team 1 seats the west bay's frame A.
+    let (crew_wa, (hold_ea, hold_eb)) = tokio::join!(
+        carry_in(
+            &s,
+            s1,
+            s2,
+            wa,
+            frame_ends,
+            &to_wa,
+            into_slot(bw, ua),
+            "team 1 seats frame A in the west bay"
+        ),
+        async {
+            let hold_ea = hand_over(
+                &s,
+                s6,
+                s4,
+                s5,
+                crew_ea,
+                ea,
+                hold_places(e_a, -1, -1),
+                "holder 6 takes east frame A from Soul 5",
+            )
+            .await;
+            let via = [v3(e_b.x + 3_000_000, 0, e_b.z), e_b];
+            let crew_eb = carry_in(
+                &s,
+                s4,
+                s5,
+                eb,
+                frame_ends,
+                &via,
+                into_slot(be, ub),
+                "team 2 seats frame B in the east bay",
+            )
+            .await;
+            leave_crew(s4, crew_eb, "Soul 4 lets go of the east frame B").await;
+            let hold_eb = hand_over(
+                &s,
+                s3,
+                s4,
+                s5,
+                crew_eb,
+                eb,
+                hold_places(e_b, -1, 1),
+                "holder 3 takes east frame B from Soul 5",
+            )
+            .await;
+            beam_in(
+                &s,
+                s4,
+                s5,
+                beam[4],
+                be,
+                lr,
+                e_r,
+                "team 2 seats beam 5 in the east bay",
+            )
+            .await;
+            beam_in(
+                &s,
+                s4,
+                s5,
+                beam[5],
+                be,
+                ll,
+                e_l,
+                "team 2 seats beam 6 in the east bay",
+            )
+            .await;
+            (hold_ea, hold_eb)
+        },
+    );
+    leave_crew(s6, hold_ea, "holder 6 lets go").await;
+    leave_crew(s3, hold_eb, "holder 3 lets go").await;
+    let (parts_in, held) = bay_holds(&w, be);
+    println!("the east bay stands: {parts_in} parts in it, {held} crews holding them");
+    assert_eq!(
+        (parts_in, held),
+        (4, 0),
+        "the east bay stands on its joints"
+    );
+    // The west bay by team 1 and the holders.
+    leave_crew(
+        s1,
+        crew_wa,
+        "Soul 1 lets go of the west frame A; Soul 2 holds it",
+    )
+    .await;
+    let hold_wa = hand_over(
+        &s,
+        s3,
+        s1,
+        s2,
+        crew_wa,
+        wa,
+        hold_places(w_a, 1, -1),
+        "holder 3 takes west frame A from Soul 2",
+    )
+    .await;
+    let via = [v3(w_b.x - 3_000_000, 0, w_b.z), w_b];
+    let crew_wb = carry_in(
+        &s,
+        s1,
+        s2,
+        wb,
+        frame_ends,
+        &via,
+        into_slot(bw, ub),
+        "team 1 seats frame B in the west bay",
+    )
+    .await;
+    leave_crew(s1, crew_wb, "Soul 1 lets go of the west frame B").await;
+    let hold_wb = hand_over(
+        &s,
+        s6,
+        s1,
+        s2,
+        crew_wb,
+        wb,
+        hold_places(w_b, 1, 1),
+        "holder 6 takes west frame B from Soul 2",
+    )
+    .await;
+    beam_in(
+        &s,
+        s1,
+        s2,
+        beam[2],
+        bw,
+        ll,
+        w_l,
+        "team 1 seats beam 3 in the west bay",
+    )
+    .await;
+    beam_in(
+        &s,
+        s1,
+        s2,
+        beam[3],
+        bw,
+        lr,
+        w_r,
+        "team 1 seats beam 4 in the west bay",
+    )
+    .await;
+    leave_crew(s3, hold_wa, "holder 3 lets go").await;
+    leave_crew(s6, hold_wb, "holder 6 lets go").await;
+    for (bay, name) in [(bw, "west"), (bm, "middle"), (be, "east")] {
+        let (parts_in, held) = bay_holds(&w, bay);
+        println!("the {name} bay stands: {parts_in} parts in it, {held} crews holding them");
+        assert_eq!(
+            (parts_in, held),
+            (4, 0),
+            "the {name} bay stands, nobody holding it"
+        );
+    }
+
+    // Take down. The west bay: the holders take its frames again; team 1 takes its beams out and lays each where it
+    // lay; then frame B out and to its stand, then frame A out.
+    let hold_wa = hold_frame(
+        &s,
+        s3,
+        s1,
+        wa,
+        hold_places(w_a, 1, -1),
+        "holder 3 takes west frame A again",
+    )
+    .await;
+    let hold_wb = hold_frame(
+        &s,
+        s6,
+        s2,
+        wb,
+        hold_places(w_b, 1, 1),
+        "holder 6 takes west frame B again",
+    )
+    .await;
+    beam_out(
+        &s,
+        s1,
+        s2,
+        beam[3],
+        w_r,
+        home(9),
+        "team 1 takes beam 4 out of the west bay",
+    )
+    .await;
+    beam_out(
+        &s,
+        s1,
+        s2,
+        beam[2],
+        w_l,
+        home(8),
+        "team 1 takes beam 3 out of the west bay",
+    )
+    .await;
+    let out = frame_crew(&s, s1, s2, s6, hold_wb, wb, w_b, "team 1 on west frame B").await;
+    let via = [v3(w_b.x - 3_000_000, 0, w_b.z)];
+    frame_home(
+        &s,
+        s1,
+        s2,
+        out,
+        wb,
+        &via,
+        (stand_w2, 1, home(3)),
+        "team 1 takes west frame B home",
+    )
+    .await;
+    let out_wa = frame_crew(&s, s1, s2, s3, hold_wa, wa, w_a, "team 1 on west frame A").await;
+    // The east bay by team 2 and the holders, while team 1 carries west frame A home.
+    let ((), out_ea) = tokio::join!(
+        frame_home(
+            &s,
+            s1,
+            s2,
+            out_wa,
+            wa,
+            &[],
+            (stand, 2, home(2)),
+            "team 1 takes west frame A home"
+        ),
+        async {
+            let hold_ea = hold_frame(
+                &s,
+                s3,
+                s4,
+                ea,
+                hold_places(e_a, -1, -1),
+                "holder 3 takes east frame A again",
+            )
+            .await;
+            let hold_eb = hold_frame(
+                &s,
+                s6,
+                s5,
+                eb,
+                hold_places(e_b, -1, 1),
+                "holder 6 takes east frame B again",
+            )
+            .await;
+            beam_out(
+                &s,
+                s4,
+                s5,
+                beam[5],
+                e_l,
+                home(11),
+                "team 2 takes beam 6 out of the east bay",
+            )
+            .await;
+            beam_out(
+                &s,
+                s4,
+                s5,
+                beam[4],
+                e_r,
+                home(10),
+                "team 2 takes beam 5 out of the east bay",
+            )
+            .await;
+            let out = frame_crew(&s, s4, s5, s6, hold_eb, eb, e_b, "team 2 on east frame B").await;
+            let via = [v3(e_b.x + 3_000_000, 0, e_b.z)];
+            frame_home(
+                &s,
+                s4,
+                s5,
+                out,
+                eb,
+                &via,
+                (stand_e2, 1, home(5)),
+                "team 2 takes east frame B home",
+            )
+            .await;
+            frame_crew(&s, s4, s5, s3, hold_ea, ea, e_a, "team 2 on east frame A").await
+        },
+    );
+    // The middle bay: team 1 takes its beams out while team 2 carries east frame A home; then each team its frame.
+    let ((), (out_ma, hold_mb)) = tokio::join!(
+        frame_home(
+            &s,
+            s4,
+            s5,
+            out_ea,
+            ea,
+            &[],
+            (stand_e, 2, home(4)),
+            "team 2 takes east frame A home"
+        ),
+        async {
+            let hold_ma = hold_frame(
+                &s,
+                s3,
+                s1,
+                ma,
+                hold_places(m_a, 1, -1),
+                "holder 3 takes frame A again",
+            )
+            .await;
+            let hold_mb = hold_frame(
+                &s,
+                s6,
+                s2,
+                mb,
+                hold_places(m_b, 1, 1),
+                "holder 6 takes frame B again",
+            )
+            .await;
+            beam_out(
+                &s,
+                s1,
+                s2,
+                beam[1],
+                m_r,
+                home(7),
+                "team 1 takes beam 2 out of the middle bay",
+            )
+            .await;
+            beam_out(
+                &s,
+                s1,
+                s2,
+                beam[0],
+                m_l,
+                home(6),
+                "team 1 takes beam 1 out of the middle bay",
+            )
+            .await;
+            (
+                frame_crew(&s, s1, s2, s3, hold_ma, ma, m_a, "team 1 on frame A").await,
+                hold_mb,
+            )
+        },
+    );
+    let out_mb = frame_crew(&s, s4, s5, s6, hold_mb, mb, m_b, "team 2 on frame B").await;
+    // The holders stood east of the bay, where team 2 carries frame B home: they step out of its way first.
+    let aside = (
+        v3(m_a.x - 2_000_000, 0, -32_000_000),
+        v3(m_a.x + 2_000_000, 0, -32_000_000),
+    );
+    walk_two(&s, s3, s6, aside, "the holders step out of team 2's way").await;
+    // Each frame leaves the row between the bays and goes home with its carriers either side of the bays' middle line,
+    // as the beams do. Walkers still go round the west and east bays' frames where they stood before they went home
+    // (a take is not written to the walkers' map): a carrier walking 0.6 m from where one stood goes round it, its
+    // partner walks straight, and the carry breaks off `souls:carriers-apart` (seen in this test; its own fix, outside
+    // A4).
+    let a_out = [
+        v3(m_a.x - 2_000_000, 0, m_a.z),
+        v3(m_a.x - 2_000_000, 0, -24_000_000),
+        v3(m_a.x - 7_000_000, 0, -24_000_000),
+    ];
+    let b_out = [
+        v3(m_b.x + 2_000_000, 0, m_b.z),
+        v3(m_b.x + 2_000_000, 0, -24_000_000),
+        v3(m_b.x + 7_000_000, 0, -24_000_000),
+    ];
+    tokio::join!(
+        frame_home(
+            &s,
+            s1,
+            s2,
+            out_ma,
+            ma,
+            &a_out,
+            (stand, 1, home(0)),
+            "team 1 takes frame A home"
+        ),
+        frame_home(
+            &s,
+            s4,
+            s5,
+            out_mb,
+            mb,
+            &b_out,
+            (stand_e, 1, home(1)),
+            "team 2 takes frame B home"
+        ),
+    );
+
+    // Every part where it started, under its id; every node of the world as built still there; the log replays.
+    for (p, was) in parts.iter().zip(&start) {
+        let now = where_is(&w, *p);
+        println!(
+            "part {}: was in {:?} slot {:?} at ({}, {}) mm, now in {:?} slot {:?} at ({}, {}) mm",
+            p.counter(),
+            was.0.map(|i| i.counter()),
+            was.1,
+            was.2.x / 1000,
+            was.2.z / 1000,
+            now.0.map(|i| i.counter()),
+            now.1,
+            now.2.x / 1000,
+            now.2.z / 1000
+        );
+        assert_eq!((now.0, now.1), (was.0, was.1), "back where it started");
+        let off =
+            (i128::from(now.2.x - was.2.x).pow(2) + i128::from(now.2.z - was.2.z).pow(2)).isqrt();
+        assert!(off < 5_000, "within 5 mm of where it lay: {off} µm");
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let missing: Vec<Id> = built
+        .iter()
+        .filter(|id| t.handle(**id).is_none())
+        .copied()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "every node as built is still there: {missing:?}"
+    );
+    println!(
+        "{} nodes as built, all still there; the log replays to here",
+        built.len()
+    );
+}
+
+/// A crew of `a`, `b` lays the part it carries on the ground at `home` (its middle), walking there first (at
+/// [`beam_ends`] of it); they go.
+async fn lay_home(s: &Site<'_>, a: &mut GwSoul, b: &mut GwSoul, c: Id, home: Vec3, what: &str) {
+    walk_two(s, a, b, beam_ends(home), what).await;
+    let on_ground = BTreeMap::from([
+        (1, s.g.to_value()),
+        (3, Value::Array(vec![int(home.x), int(home.y), int(home.z)])),
+    ]);
+    let got = put_part(a, c, on_ground).await;
+    assert_eq!(got.kind, 1, "{what}: laid in the yard: {got:?}");
+    leave_crew(a, c, what).await;
+    leave_crew(b, c, what).await;
+}
+
+/// 0.135 A4: a team member who leaves mid-carry leaves nobody stuck. Both teams of [`three_bays_world`] carry a beam
+/// towards the bays at once (team 1 beam 1 from the west yard, team 2 beam 5 from the east). Soul 2, team 1's back
+/// carrier, leaves its crew on the way: beam 1 is set down where it is (`souls:partner-left`) and team 2's carry goes
+/// on, its beam still riding its crew. Soul 1 may leave the crew; Souls 1 and 2 each walk on by their own intents.
+/// Then Soul 3, team 1's holder, takes Soul 2's place: a new crew of Souls 1 and 3 takes beam 1 where it lies and lays
+/// it back in the yard, as team 2 does beam 5. Both beams end where they lay, under their ids; every node as built is
+/// still there; the checks read the world as its log replays.
+#[tokio::test(flavor = "multi_thread")]
+async fn a4_a_carrier_leaves_mid_carry_and_nobody_is_stuck() {
+    let d = scratch("a4leave");
+    let (facts, slots) = three_bays_world(&d);
+    let w = seed_entries(&d, &facts, 6, (59, -34), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let (b1, b5) = (im.nodes["yard-beam-1"], im.nodes["yard-beam-5"]);
+    let (bm, be) = (im.nodes["site-bay"], im.nodes["site-bay-e"]);
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let s = Site {
+        w: &w,
+        g,
+        crew: pinned_activity(&w, "mars:carry_activity"),
+    };
+    let built: std::collections::BTreeSet<Id> = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let mut out = std::collections::BTreeSet::new();
+        let mut stack = vec![t.handle(w.root).unwrap()];
+        while let Some(h) = stack.pop() {
+            out.insert(t.node(h).unwrap().id());
+            stack.extend(t.children(h).unwrap_or(&[]).iter().copied());
+        }
+        out
+    };
+    let start = [where_is(&w, b1), where_is(&w, b5)];
+    // Where each beam is carried to: the low left beam's place in the middle bay (beam 1) and in the east bay (beam 5).
+    let low_l = |bay: Id| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let p = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+            .unwrap();
+        p.iter().find(|(n, _)| *n == slots["beam_low_l"]).unwrap().1
+    };
+    let (to_m, to_e) = (low_l(bm), low_l(be));
+    let [s1, s2, s3, s4, s5, _] = &mut souls[..] else {
+        unreachable!()
+    };
+
+    let (c1, c5) = tokio::join!(
+        take_along(&s, s1, s2, b1, beam_ends, &[], "team 1 takes beam 1"),
+        take_along(&s, s4, s5, b5, beam_ends, &[], "team 2 takes beam 5"),
+    );
+    // Both carry towards the bays; 1.5 s into it, Soul 2 leaves team 1's crew.
+    let ((), (left, front)) = tokio::join!(
+        walk_two(&s, s4, s5, beam_ends(to_e), "team 2 carries beam 5 on"),
+        async {
+            let (p, q) = beam_ends(to_m);
+            s1.send("eden:walk", g, to_point(p)).await;
+            s2.send("eden:walk", g, to_point(q)).await;
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let left = s2.act("activity:leave", c1, BTreeMap::new()).await;
+            (left, s1.end().await)
+        },
+    );
+    println!("Soul 2 leaves team 1's crew mid-carry: {left:?}; Soul 1's walk: {front:?}");
+    assert_eq!(left.kind, 1, "Soul 2 may leave mid-carry");
+    let down = where_is(&w, b1);
+    assert_eq!(down.0, Some(g), "beam 1 set down when its carrier left");
+    let moved = (i128::from(down.2.x - start[0].2.x).pow(2)
+        + i128::from(down.2.z - start[0].2.z).pow(2))
+    .isqrt();
+    println!("beam 1 set down {} mm from where it lay", moved / 1000);
+    assert!(moved > 100_000, "beam 1 was carried before it was set down");
+    assert_eq!(
+        where_is(&w, b5).0,
+        Some(c5),
+        "team 2's beam still rides its crew"
+    );
+    // Nobody is stuck: Soul 1 may leave the crew, and Souls 1 and 2 walk on, each by its own intent.
+    leave_crew(s1, c1, "Soul 1 leaves the crew whose carry broke off").await;
+    let (p, q) = beam_ends(down.2);
+    walk_two(
+        &s,
+        s1,
+        s2,
+        (v3(p.x - 1_500_000, 0, p.z), v3(q.x - 1_500_000, 0, q.z)),
+        "Souls 1 and 2 walk on",
+    )
+    .await;
+    // Soul 3 takes Soul 2's place: a new crew of Souls 1 and 3 takes beam 1 where it lies and lays it back in the
+    // yard, while team 2 lays beam 5 back in its own.
+    tokio::join!(
+        async {
+            let what = "Souls 1 and 3 take beam 1 again and lay it home";
+            let c = take_along(&s, s1, s3, b1, beam_ends, &[], what).await;
+            lay_home(&s, s1, s3, c, start[0].2, what).await;
+        },
+        lay_home(&s, s4, s5, c5, start[1].2, "team 2 lays beam 5 home"),
+    );
+    for (p, was) in [b1, b5].iter().zip(&start) {
+        let now = where_is(&w, *p);
+        assert_eq!((now.0, now.1), (was.0, was.1), "back where it started");
+        let off =
+            (i128::from(now.2.x - was.2.x).pow(2) + i128::from(now.2.z - was.2.z).pow(2)).isqrt();
+        assert!(off < 5_000, "within 5 mm of where it lay: {off} µm");
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let missing: Vec<Id> = built
+        .iter()
+        .filter(|id| t.handle(**id).is_none())
+        .copied()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "every node as built is still there: {missing:?}"
     );
 }

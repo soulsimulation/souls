@@ -20,10 +20,11 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
 2. **Canary.** The pin in the world's directory record is set to the new build (one conditional write, W8) and the
    world is restarted (`systemctl restart --no-block worldd@<world>`). It must serve its socket within the world's start bound
    (a real world loads its facts and replays its log): `start_within_s` from `world-limits.json`, which the install
-   writes into the world's `limits.conf` as `WORLD_START_WITHIN_S` (Eden 600 s), else 30 s, `worldd@`'s start
-   timeout. A world that hangs fails at that bound as `canary.not-serving`. It must then
+   writes into the world's `limits.conf` as `WORLD_START_WITHIN_S` (Eden 600 s), else 120 s, room for a start whose
+   store is slow (R17). A world that hangs fails at that bound as `canary.not-serving`; one whose process ends while
+   the canary waits (systemd's `NRestarts` rises) fails at once as `canary.exited`. It must then
    answer the probe within 2 s, every 0.5 s, for `--window-s` (default 60). The first miss is the fault, by name:
-   `canary.not-serving` (it does not start, or dies), `canary.unanswered` (its clock does not tick),
+   `canary.not-serving` (it does not start, or dies), `canary.exited`, `canary.unanswered` (its clock does not tick),
    `canary.refused: <reason>` (it refuses the probe).
 3. **Roll back on a fault, by itself.** Code rolls back, data never. If the new build wrote any record, the old build
    must read every schema the new one writes (each build prints them: `worldd schemas`), or the rollback is refused
@@ -43,7 +44,10 @@ Every watch ends by retiring its body with ordinary `life:leave`, including fail
 the next watch recovers the same pending identity, confirms any uncertain birth through an idempotent join, and
 retires it before starting a new sample. An unavailable or refusing candidate leaves the receipt named
 `canary.probe-pending` until the rolled-back healthy endpoint can retire it. Do not delete a pending receipt to
-silence that failure. Scratch rehearsal uses its own operator receipt and body on the copied world.
+silence that failure. Scratch rehearsal uses its own operator receipt and body on the copied world. That body lives
+only in the scratch copy, so a scratch receipt left by a failed rehearsal whose copy is no longer served is dropped with
+the copy, `rehearsal.probe-dropped` in the deploy's record, and the build rehearses fresh; a copy still served retires
+its body first, as any watch does.
 
 Agents' sockets are the gateway's (I1): they stay open through every restart, intents sent while the world is away
 are answered `world.restarting`, and those the world had not answered are sent again when it is back. Every act the

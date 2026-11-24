@@ -1,0 +1,86 @@
+# soul.game while only some worlds have moved to the new engine (24 Nov 2026). Installed as
+# /etc/caddy/sites/soul-game.caddy by moved-install.sh beside this file, over the live 0.131 F0 file, which it keeps as
+# /etc/caddy/soul-game.caddy.before-moved. Undo: `sudo bash moved-install.sh undo`.
+#
+# It is the live file with the new engine's own addresses added. Everything the live file did, it still does in the
+# same way: the compression, the headers, the blobs snippet, /s/* to the viewers' origin, and every other path to
+# today's launcher with the same trusted proxies. The additions:
+# - A moved world's agent paths, /w/<slug>/v2/(ws|creator-token|entries|uploads/<hash>), straight to THAT world's own
+#   gatewayd, with /w/<slug> stripped: gatewayd answers /v2/ws, /v2/creator-token, /v2/entries and /v2/uploads/<hash>.
+# - Only for a moved world the routes file marks canonical: its bootstrap, /w/<slug>/v1/bootstrap, to the viewers'
+#   origin (7320), which the new Soul client reads to pair (`node eden.mjs pair https://soul.game/w/<slug>/`). The
+#   origin refuses the bootstrap of a world that is not canonical, so such a world's bootstrap stays on the launcher.
+# - Pairing, which names its world in the request: /v1/pair/* and /v1/agent/account[/*] to the directory (7310), and
+#   /pair, the owner's pairing card (pair.html from the live release's web build). Old-engine worlds never use these
+#   site-level paths: today's client pairs at /w/<slug>/v1/agent/pair, which stays with today's launcher.
+# A world that has not moved keeps every path on today's launcher, its bootstrap and v2 paths included; so does a
+# moved world's page, its client files and /v1/config (the launcher serves those for a moved world itself).
+#
+# THE MOVED WORLDS are the lines in the site below, one per world, and only there:
+#   import moved-world <slug> <port>     canonical in the routes file: its bootstrap and its agent paths move
+#   import moved-gateway <slug> <port>   not canonical: only its agent paths move
+# <port> is that world's gatewayd: the port of its `gateway` in /var/lib/souls/routes/worlds.json (the placement's
+# record). `moved-install.sh lines` prints the right line for every world in that file; install refuses a line whose
+# port or kind does not match it, or whose gatewayd does not answer.
+#
+# Placeholders, never real values in this repository; moved-install.sh takes both from the live file it replaces:
+# @@LAUNCHER_PORT@@ is today's launcher's loopback port and @@TRUSTED_PROXIES@@ the live file's trusted_proxies.
+(moved-gateway) {
+  @gateway-{args[0]} path_regexp ^/w/{args[0]}/v2/(ws|creator-token|entries|uploads/1220[0-9a-f]{64})$
+  handle @gateway-{args[0]} {
+    header X-Souls-System v2
+    header X-Robots-Tag "noindex, nofollow"
+    uri strip_prefix /w/{args[0]}
+    reverse_proxy localhost:{args[1]} {
+      trusted_proxies @@TRUSTED_PROXIES@@
+    }
+  }
+}
+(moved-world) {
+  import moved-gateway {args[0]} {args[1]}
+  @bootstrap-{args[0]} path /w/{args[0]}/v1/bootstrap
+  handle @bootstrap-{args[0]} {
+    header X-Souls-System v2
+    header X-Robots-Tag "noindex, nofollow"
+    reverse_proxy localhost:7320 {
+      trusted_proxies @@TRUSTED_PROXIES@@
+    }
+  }
+}
+https://soul.game {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    -Server
+  }
+  import blobs
+  handle_path /s/* {
+    header X-Souls-System v2
+    reverse_proxy localhost:7320
+  }
+  import moved-world eden 7330
+  import moved-gateway release-probe 7349
+  import moved-gateway follow-20261027-scratch 7350
+  import moved-gateway bench-hamlet 7348
+  @pairing path /v1/pair/* /v1/agent/account /v1/agent/account/*
+  handle @pairing {
+    header X-Souls-System v2
+    header X-Robots-Tag "noindex, nofollow"
+    reverse_proxy localhost:7310 {
+      trusted_proxies @@TRUSTED_PROXIES@@
+    }
+  }
+  @card path /pair /pair/
+  handle @card {
+    header X-Souls-System v2
+    header X-Robots-Tag "noindex, nofollow"
+    rewrite * /pair.html
+    root * /srv/sim-worlds/production/apps/web/dist
+    file_server
+  }
+  handle {
+    reverse_proxy 127.0.0.1:@@LAUNCHER_PORT@@ {
+      trusted_proxies @@TRUSTED_PROXIES@@
+    }
+  }
+}

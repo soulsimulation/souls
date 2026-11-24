@@ -553,12 +553,37 @@ fn connect(socket: &Path, within: Duration) -> Option<UnixStream> {
     }
 }
 
-/// How long a world has to serve when its limits name no bound: worldd@.service's `TimeoutStartSec`.
-pub const START_WITHIN: Duration = Duration::from_secs(30);
+/// [`connect`], ending early with `exited`'s fault (the world's process ended), asked at most each half second.
+fn connect_or_exit(
+    socket: &Path,
+    within: Duration,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<UnixStream, String> {
+    let until = Instant::now() + within;
+    loop {
+        if let Some(s) = connect(socket, Duration::from_millis(500).min(within)) {
+            return Ok(s);
+        }
+        if let Some(fault) = exited() {
+            return Err(fault);
+        }
+        if Instant::now() >= until {
+            return Err(format!(
+                "canary.not-serving: no socket within {} ms",
+                within.as_millis()
+            ));
+        }
+    }
+}
+
+/// How long a world has to serve when its limits name no bound (R17, 0.133): a start whose store is slow (one write in
+/// twenty stalls 30 to 60 s on production's) waits for it with back-off and must not be judged on 30 s. A real fault
+/// still fails at once: the process ending ([`Unit::exited`], `canary.exited`) or a refused probe.
+pub const START_WITHIN: Duration = Duration::from_secs(120);
 
 /// The start bound in a world's limits drop-in (`worldd@<world>.service.d/limits.conf`, written from
 /// `world-limits.json` by `v2/tools/ops/world-limits.mjs`): its `Environment=WORLD_START_WITHIN_S=<s>` line, else
-/// [`START_WITHIN`]. A world that loads longer than 30 s (Eden) is given its own bound; one that hangs still fails.
+/// [`START_WITHIN`]. A world that loads longer (Eden) is given its own bound; one that hangs still fails.
 pub fn start_within(limits: Option<&str>) -> Duration {
     limits
         .into_iter()
@@ -627,11 +652,23 @@ pub fn watch(
     probe: &mut Probe,
     until_healthy: bool,
 ) -> Result<(), String> {
+    watch_unit(socket, c, probe, until_healthy, &mut || None)
+}
+
+/// [`watch`], failing at once with `exited`'s fault while it waits for the socket: a world whose process ended is a
+/// real fault, never a slow start (R17).
+pub fn watch_unit(
+    socket: &Path,
+    c: &Canary,
+    probe: &mut Probe,
+    until_healthy: bool,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<(), String> {
     // A new watch resolves its interrupted predecessor before it can birth anything else. Failure preserves the
     // exact owned identity for the rollback's watch; neither an unknown body nor a lost ACK discards the receipt.
-    cleanup_operator(socket, c, probe)?;
-    let result = watch_inner(socket, c, probe, until_healthy);
-    let cleanup = cleanup_operator(socket, c, probe);
+    cleanup_operator(socket, c, probe, exited)?;
+    let result = watch_inner(socket, c, probe, until_healthy, exited);
+    let cleanup = cleanup_operator(socket, c, probe, exited);
     match (result, cleanup) {
         (Ok(()), r) => r,
         (Err(e), Ok(())) => Err(e),
@@ -639,15 +676,21 @@ pub fn watch(
     }
 }
 
-fn cleanup_operator(socket: &Path, c: &Canary, probe: &mut Probe) -> Result<(), String> {
+fn cleanup_operator(
+    socket: &Path,
+    c: &Canary,
+    probe: &mut Probe,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<(), String> {
     let Probe::Operator(p) = probe else {
         return Ok(());
     };
     if !p.pending {
         return Ok(());
     }
-    let mut s = connect(socket, c.start_within)
-        .ok_or("canary.probe-pending: retirement awaits the world serving again")?;
+    let mut s = connect_or_exit(socket, c.start_within, exited).map_err(|e| {
+        format!("canary.probe-pending: retirement awaits the world serving again ({e})")
+    })?;
     p.retire(&mut s, c.answer_within)
         .map_err(|e| format!("canary.probe-pending: {e}"))
 }
@@ -657,21 +700,14 @@ fn watch_inner(
     c: &Canary,
     probe: &mut Probe,
     until_healthy: bool,
+    exited: &mut dyn FnMut() -> Option<String>,
 ) -> Result<(), String> {
     let end = Instant::now() + c.window;
     let mut link: Option<UnixStream> = None;
     loop {
         let s = match link.as_mut() {
             Some(s) => s,
-            None => match connect(socket, c.start_within) {
-                Some(s) => link.insert(s),
-                None => {
-                    return Err(format!(
-                        "canary.not-serving: no socket within {} ms",
-                        c.start_within.as_millis()
-                    ));
-                }
-            },
+            None => link.insert(connect_or_exit(socket, c.start_within, exited)?),
         };
         match probe_once(s, probe, c.answer_within) {
             Ok(()) if until_healthy => return Ok(()),
@@ -706,6 +742,9 @@ pub struct Rehearsal {
     pub served_len: usize,
     pub served_sha: String,
     pub served_kept: bool,
+    /// An earlier rehearsal of this build left its scratch probe receipt and its copy is no longer served: the receipt
+    /// was dropped with the copy (`rehearsal.probe-dropped`).
+    pub dropped_probe: bool,
 }
 
 struct Killed(Child);
@@ -761,9 +800,19 @@ pub fn rehearse(
     }
     let total: usize = fed.iter().map(Vec::len).sum();
     let receipt = scratch.join("operator.probe");
+    let mut dropped_probe = false;
     if matches!(probe, Probe::Operator(_)) && receipt.exists() {
+        // Its lock first: a rehearsal of this build still running owns it (`canary.probe-busy`).
         let mut previous = Probe::operator(&receipt)?;
-        cleanup_operator(&socket_path(scratch), c, &mut previous)?;
+        // A scratch probe's body lives only in the scratch copy, emptied below. A copy still served (an interrupted
+        // deploy's build, left running) retires it as any watch does; one no longer served never can, and waiting on
+        // its socket refused every later rehearsal of this build (`canary.probe-pending`). Its receipt goes with the
+        // copy, by name in the deploy's record.
+        if UnixStream::connect(socket_path(scratch)).is_ok() {
+            cleanup_operator(&socket_path(scratch), c, &mut previous, &mut || None)?;
+        } else {
+            dropped_probe = true;
+        }
     }
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
@@ -849,7 +898,7 @@ pub fn rehearse(
     };
     let checking = own.as_mut().unwrap_or(probe);
     let checked = probe_once(&mut s, checking, c.answer_within);
-    let cleaned = cleanup_operator(&socket_path(scratch), c, checking);
+    let cleaned = cleanup_operator(&socket_path(scratch), c, checking, &mut || None);
     match (checked, cleaned) {
         (Ok(()), r) => r,
         (Err(e), Ok(())) => Err(e),
@@ -869,6 +918,7 @@ pub fn rehearse(
         served_len,
         served_sha,
         served_kept,
+        dropped_probe,
     })
 }
 
@@ -916,22 +966,69 @@ pub fn rollback_check(old: &Schemas, new: &Schemas, new_wrote: bool) -> Result<(
 /// How a world's process is restarted.
 pub trait Unit {
     fn restart(&mut self) -> Result<(), String>;
+
+    /// `canary.exited` with what it saw once the world's process has ended since [`Unit::restart`], so the canary
+    /// waiting for a slow start fails at once on an exit (R17); `None` while it runs, or where it cannot tell.
+    fn exited(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// `worldd@<world>.service` under systemd (O1). `--no-block`: a build that never says READY must not hold the deploy.
-pub struct Systemd(pub String);
+/// The second field is the lowest `NRestarts` seen since the restart ([`Unit::exited`]).
+pub struct Systemd(pub String, pub Option<u64>);
+
+impl Systemd {
+    pub fn new(world: String) -> Systemd {
+        Systemd(world, None)
+    }
+
+    fn unit(&self) -> String {
+        format!("worldd@{}.service", self.0)
+    }
+
+    /// systemd's count of the unit's automatic restarts (`Restart=always`): one more each time its process ends.
+    fn restarts(&self) -> Option<u64> {
+        let out = Command::new("systemctl")
+            .args(["show", "--property=NRestarts", "--value", &self.unit()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
 
 impl Unit for Systemd {
     fn restart(&mut self) -> Result<(), String> {
-        let unit = format!("worldd@{}.service", self.0);
+        let unit = self.unit();
         let st = Command::new("systemctl")
             .args(["restart", "--no-block", &unit])
             .status()
             .map_err(|e| format!("restart: {e}"))?;
+        self.1 = self.restarts();
         st.success()
             .then_some(())
             .ok_or_else(|| format!("restart: systemctl restart {unit}: {st}"))
     }
+
+    fn exited(&mut self) -> Option<String> {
+        let now = self.restarts()?;
+        let unit = self.unit();
+        exits_since(&mut self.1, now, &unit)
+    }
+}
+
+/// [`Systemd::exited`]'s rule on a reading `now` of `NRestarts`: the lowest count seen (`low`) is the start's, since a
+/// manual restart may reset the count after it was first read; a count above it means the process ended.
+fn exits_since(low: &mut Option<u64>, now: u64, unit: &str) -> Option<String> {
+    let least = *low.get_or_insert(now);
+    if now > least {
+        return Some(format!(
+            "canary.exited: {unit} ended while starting ({} automatic restarts since the deploy's)",
+            now - least
+        ));
+    }
+    *low = Some(least.min(now));
+    None
 }
 
 /// A deploy's timeline: milliseconds from its start, and what happened.
@@ -1005,6 +1102,12 @@ impl Deploy<'_> {
                 return (Ended::NotDeployed { why }, tl, None);
             }
         };
+        if r.dropped_probe {
+            note(
+                "rehearsal.probe-dropped: a probe receipt of an earlier rehearsal no longer served"
+                    .into(),
+            );
+        }
         note(format!(
             "rehearsed on a scratch copy: {} records copied, {} recorded intents fed, {} named ends",
             r.copied, r.fed, r.ended
@@ -1019,7 +1122,7 @@ impl Deploy<'_> {
         }
         note("restarted: the canary watch begins".into());
         let socket = served_socket(self.root, &self.world);
-        let fault = match watch(&socket, &self.canary, probe, false) {
+        let fault = match watch_unit(&socket, &self.canary, probe, false, &mut || unit.exited()) {
             Ok(()) => {
                 note(format!(
                     "healthy for {} ms: kept",
@@ -1090,13 +1193,14 @@ mod tests {
     }
 
     #[test]
-    fn a2_the_start_bound_is_the_worlds_own_else_the_units_30_s() {
+    fn a2_the_start_bound_is_the_worlds_own_else_120_s() {
         // What world-limits.mjs writes for Eden (world-limits.test.mjs checks the same text).
         let eden = "# Written by world-limits.mjs from world-limits.json (world eden); edit that file, not this one.\n\
                     [Service]\nMemoryMax=8G\nEnvironment=WORLD_START_WITHIN_S=600\n";
         assert_eq!(start_within(Some(eden)), Duration::from_secs(600));
         assert_eq!(start_within(None), START_WITHIN);
-        assert_eq!(START_WITHIN, Duration::from_secs(30));
+        // R17: a slow store's start, not the unit's 30 s.
+        assert_eq!(START_WITHIN, Duration::from_secs(120));
         assert_eq!(
             start_within(Some("[Service]\nMemoryMax=8G\n")),
             START_WITHIN
@@ -1106,6 +1210,67 @@ mod tests {
             let t = format!("[Service]\nEnvironment=WORLD_START_WITHIN_S={bad}\n");
             assert_eq!(start_within(Some(&t)), START_WITHIN, "{bad}");
         }
+    }
+
+    /// R17: `NRestarts` read after the deploy's restart is the start's count; one more is an exit. A count that drops
+    /// (systemd reset it at the manual restart, after it was first read) becomes the start's, and an exit after it still
+    /// shows. No reading at all is no answer.
+    #[test]
+    fn r17_an_exit_is_a_restart_count_above_the_lowest_seen() {
+        let u = "worldd@w.service";
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 5, u), None);
+        let e = exits_since(&mut low, 6, u).expect("an exit");
+        assert!(
+            e.starts_with("canary.exited: worldd@w.service ended"),
+            "{e}"
+        );
+        assert!(e.contains("(1 automatic restarts"), "{e}");
+        // Reset after the first reading: 0 is the start's, 0 again is no exit, 1 is one.
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert_eq!(low, Some(0));
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert!(exits_since(&mut low, 1, u).is_some());
+        // No reading at the restart: the first one is the start's.
+        let mut low = None;
+        assert_eq!(exits_since(&mut low, 3, u), None);
+        assert!(exits_since(&mut low, 4, u).is_some());
+    }
+
+    /// R17: the canary's wait for a slow start ends at once when the world's process ends, with that fault, and
+    /// otherwise reaches a world that serves late or fails at its bound.
+    #[test]
+    fn r17_the_start_wait_fails_at_once_on_an_exit_and_waits_out_a_slow_start() {
+        let dir = std::env::temp_dir().join(format!("r17-wait-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("w.sock");
+        let _ = std::fs::remove_file(&sock);
+        // An exit 1 s in: the fault within about half a second of it, far under the 120 s bound.
+        let t0 = Instant::now();
+        let mut exited = || {
+            (t0.elapsed() >= Duration::from_secs(1))
+                .then(|| "canary.exited: worldd@w ended".to_owned())
+        };
+        let e = connect_or_exit(&sock, START_WITHIN, &mut exited).unwrap_err();
+        assert!(e.starts_with("canary.exited"), "{e}");
+        assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+        // No exit, a socket 1.5 s in: reached.
+        let late = sock.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            std::os::unix::net::UnixListener::bind(&late).unwrap()
+        });
+        assert!(connect_or_exit(&sock, Duration::from_secs(5), &mut || None).is_ok());
+        drop(t.join().unwrap());
+        std::fs::remove_file(&sock).unwrap();
+        // No exit, no socket: not serving at the bound.
+        let e = connect_or_exit(&sock, Duration::from_millis(800), &mut || None).unwrap_err();
+        assert!(
+            e.starts_with("canary.not-serving: no socket within 800 ms"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

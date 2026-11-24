@@ -7,7 +7,7 @@ import { strict as assert } from 'node:assert';
 import { createConnection } from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { listen, requestOf, wakeOf } from './souls.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -79,8 +80,7 @@ before(async () => {
 
 after(async () => {
   await ask({ op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('the arguments: here is look; listen takes --follow', () => {
@@ -214,7 +214,7 @@ test('a reader that went away takes nothing: a message that comes after its wait
 
 test('I3: another Soul walking up and stopping wakes listen --follow\'s soul-arrives, from the world, 5 runs of 5', { timeout: 300_000 }, async () => {
   // A served test world with two Souls born near each other (`worldd seed --souls 2`), each its own home and daemon.
-  const d = mkdtempSync(join(tmpdir(), 'souls-i3-')), world = join(d, 'w'), wsock = join(d, 'w.sock');
+  const d = mkdtempSync(join(tmpdir(), 'souls-i3-')), world = join(d, 'w'), wsock = join(d, 'w.sock'), first = procs.length;
   const made = spawnSync(bin('testworld'), ['--seed', '1', '--things', '0', '--out', join(d, 'tw')], { encoding: 'utf8' });
   assert.equal(made.status, 0, made.stderr);
   const seeded = spawnSync(bin('worldd'), ['seed', '--facts', join(d, 'tw/testworld-s1-t0.facts.json'), '--dir', world, '--souls', '2', '--at', '38,-20'], { encoding: 'utf8' });
@@ -269,6 +269,6 @@ test('I3: another Soul walking up and stopping wakes listen --follow\'s soul-arr
     assert.ok(runs.every((ms) => ms !== null && ms <= 2000), `within 2 s in 5 of 5: ${JSON.stringify(runs)}`);
   } finally {
     for (const who of homes) await call(who.h, who.soul, { op: 'stop' }, { pkg: PKG }).catch(() => {});
-    rmSync(d, { recursive: true, force: true });
+    await stopThenRemove(procs.splice(first), d); // this test's world, gateway and reader, before its folder goes
   }
 });

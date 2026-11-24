@@ -12,6 +12,7 @@
 //!   the pair before it is left.
 //! - **A kind that takes more than two** (`most`, 0.134 T3: a dance offered to several): the first accept makes the
 //!   pair as above, and each later one joins that same activity, taking its role's claims at once if it has started.
+//!   A kind of three roles that takes more than three (0.135 C5, a crew's carry) has a role several take ([`several`]).
 //! - **Declining is an intent** ([`Activities::decline`]) and **a lapse is a timer** ([`Activities::lapse`]). Each
 //!   reaches the asker as a named outcome, `souls:offer-declined` or `souls:offer-lapsed`. An offer that every body
 //!   asked declined, or that nobody accepted in time, ends: its node goes. A pair that waited past its own expiry lapses
@@ -46,10 +47,17 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{Audience, End, show};
 
-use super::{Activities, Ask, Live, R, create, minted, name, refuse};
+use super::{Activities, Ask, Bound, Live, R, create, minted, name, refuse};
 use crate::controller::Controller;
 use crate::slots::hands::{free_hands, hands, occupies, transfer};
 use crate::timers::{DueList, Timer};
+
+/// The role several take in a kind of three roles that takes more members than that (0.135 C5: a crew's carry, its
+/// sides): its third. It is offered in one of the other two; each accept after the first takes it, and the activity
+/// starts without it.
+pub(super) fn several(k: &ActivityKind) -> Option<&Name> {
+    (k.roles.len() == 3 && k.most > 3).then(|| &k.roles[2].name)
+}
 
 /// The event of a give accepted: `{1: offer, 2: the thing, 3: the giver's body, 4: the taker's body}`.
 pub const GIVEN: &str = "souls:given";
@@ -71,7 +79,7 @@ fn ids<'a>(xs: impl IntoIterator<Item = &'a Id>) -> Value {
 
 /// An offer still open to answers.
 #[derive(Clone)]
-struct Open {
+pub(super) struct Open {
     kind: Name,
     /// The asker's body and Soul, and the intent that made the offer.
     asker: Id,
@@ -95,7 +103,7 @@ struct Open {
 }
 
 /// A pair accepted and not yet started.
-struct Pair {
+pub(super) struct Pair {
     offer: Id,
     asker: Id,
     body: Id,
@@ -109,13 +117,13 @@ struct Pair {
 /// Every open offer and waiting pair of a zone.
 #[derive(Default)]
 pub(super) struct Offers {
-    open: BTreeMap<Id, Open>,
+    pub(super) open: BTreeMap<Id, Open>,
     /// Pairs accepted and not started, by their activity.
-    pairs: BTreeMap<Id, Pair>,
+    pub(super) pairs: BTreeMap<Id, Pair>,
     /// Each asker's waiting pairs, in order of arrival.
-    queues: BTreeMap<Id, VecDeque<Id>>,
+    pub(super) queues: BTreeMap<Id, VecDeque<Id>>,
     /// What each timer is for: an offer or a pair, by its activity.
-    timers: BTreeMap<Id, Id>,
+    pub(super) timers: BTreeMap<Id, Id>,
 }
 
 /// The bodies in `room` at this instant: its children that the controller drives. An offer to a room asks these.
@@ -160,7 +168,7 @@ impl Activities {
         let Some(k) = self.kinds.get(kind) else {
             return refuse("activity-kind-unknown", kind.as_str());
         };
-        if k.roles.len() != 2 {
+        if (k.roles.len() != 2 && several(k).is_none()) || several(k) == Some(role) {
             return refuse("offer-kind-not-a-pair", kind.as_str());
         }
         if k.role(role).is_none() {
@@ -169,12 +177,21 @@ impl Activities {
         let other = k
             .roles
             .iter()
-            .find(|r| r.name != *role)
+            .find(|r| r.name != *role && Some(&r.name) != several(k))
             .map(|r| r.name.clone())
             .unwrap_or_else(|| unreachable!("two roles"));
         asked.remove(&body);
         if asked.is_empty() {
             return refuse("offer-to-nobody", show(body));
+        }
+        // B10: only a body is asked (a node of a kind of the `family` owner, as a Soul's body is).
+        if let Some(not) = asked.iter().find(|b| {
+            tree.handle(**b)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| self.rules.kinds.get(n.kind().as_str()))
+                .is_none_or(|k| k.owner != "family")
+        }) {
+            return refuse("offer-asked-not-a-body", show(*not));
         }
         let audience = tree
             .handle(place)
@@ -223,10 +240,19 @@ impl Activities {
         if let Some(thing) = given {
             fields.insert(6, thing.to_value());
         }
+        // B10: the asker's role link on the activity's thing, when it is offered at one.
+        let bound: Vec<Bound> = match given {
+            Some(_) => Vec::new(),
+            None => self
+                .role_link(tree, mint, kind, place, &node.members[0])?
+                .into_iter()
+                .collect(),
+        };
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(tree, place, audience, by, OFFER, fields, changes)?;
+        self.emit_with(tree, place, audience, by, OFFER, fields, changes, bound)?;
         if given.is_none() {
+            let bound = self.binds(tree, kind, place);
             self.live.insert(
                 id,
                 Live {
@@ -235,6 +261,8 @@ impl Activities {
                     node,
                     drivers: BTreeMap::new(),
                     moves: BTreeMap::new(),
+                    bound,
+                    under: place,
                 },
             );
         }
@@ -385,10 +413,15 @@ impl Activities {
             ];
             (pair, node, changes)
         };
+        // B10: the role links of the pair's members on the activity's thing (the asker's is there already).
+        let mut bound: Vec<Bound> = Vec::new();
+        for m in &node.members {
+            bound.extend(self.role_link(tree, mint, &o.kind, o.place, m)?);
+        }
         let fields = BTreeMap::from([(1, offer.to_value())]);
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(
+        self.emit_with(
             tree,
             if first { offer } else { o.place },
             o.audience,
@@ -396,7 +429,9 @@ impl Activities {
             "souls:activity-joined",
             fields,
             changes,
+            bound,
         )?;
+        let bound = self.binds(tree, &o.kind, o.place);
         self.live
             .entry(pair)
             .and_modify(|l| l.node = node.clone())
@@ -406,6 +441,8 @@ impl Activities {
                 node,
                 drivers: BTreeMap::new(),
                 moves: BTreeMap::new(),
+                bound,
+                under: o.place,
             });
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);
@@ -469,6 +506,21 @@ impl Activities {
         if l.node.members.iter().any(|m| m.body == body) {
             return refuse("already-member", show(body));
         }
+        let link = minted(mint)?;
+        // C5: the third and later joiners of a crew take its several role; others the offer's other role.
+        let role = several(k).unwrap_or(&o.other).clone();
+        let me = Member {
+            role,
+            body,
+            soul: ask.soul,
+            link,
+            intent: ask.intent,
+        };
+        // B10: its role link on the activity's thing, refused (`role-taken`) before anything is claimed.
+        let bound: Vec<Bound> = self
+            .role_link(tree, mint, &o.kind, o.place, &me)?
+            .into_iter()
+            .collect();
         let driver = match l.node.state {
             State::Started => {
                 if let Some(other) = self.holding.get(&body) {
@@ -477,20 +529,13 @@ impl Activities {
                         format!("{} is held by {}", show(body), show(*other)),
                     );
                 }
-                let role = k.role(&o.other).expect("the offer's other role");
-                Some(c.claim(body, &k.shape(role))?)
+                let role = k.role(&me.role).expect("the joiner's role");
+                Some(c.claim(body, &super::shape_of(k, role, l.bound))?)
             }
             State::Proposed => None,
         };
-        let link = minted(mint)?;
         let mut node = l.node.clone();
-        node.members.push(Member {
-            role: o.other.clone(),
-            body,
-            soul: ask.soul,
-            link,
-            intent: ask.intent,
-        });
+        node.members.push(me);
         let changes = vec![
             Change::Link {
                 link,
@@ -508,7 +553,7 @@ impl Activities {
         ];
         let fields = BTreeMap::from([(1, offer.to_value())]);
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        if let Err(r) = self.emit(
+        if let Err(r) = self.emit_with(
             tree,
             offer,
             o.audience,
@@ -516,6 +561,7 @@ impl Activities {
             "souls:activity-joined",
             fields,
             changes,
+            bound,
         ) {
             if let Some(d) = driver {
                 let _ = c.release(body, d);
@@ -641,9 +687,9 @@ impl Activities {
     ) -> R<()> {
         let o = self.answerable(offer, body, ask.at)?;
         let ended = !o.taken && o.answered.len() + 1 == o.asked.len();
-        let changes = match ended {
-            true => self.withdraw(offer),
-            false => Vec::new(),
+        let (changes, bound) = match ended {
+            true => (self.withdraw(offer), self.role_unlinks(tree, offer)),
+            false => (Vec::new(), Vec::new()),
         };
         let fields = BTreeMap::from([
             (1, offer.to_value()),
@@ -656,7 +702,16 @@ impl Activities {
             o.place
         };
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
-        self.emit(tree, node, o.audience, by, OFFER_DECLINED, fields, changes)?;
+        self.emit_with(
+            tree,
+            node,
+            o.audience,
+            by,
+            OFFER_DECLINED,
+            fields,
+            changes,
+            bound,
+        )?;
         if ended {
             self.live.remove(&offer);
             self.offers.open.remove(&offer);
@@ -713,9 +768,9 @@ impl Activities {
         };
         let unanswered: Vec<&Id> = o.asked.difference(&o.answered).collect();
         let ended = !o.taken && self.live.contains_key(&offer);
-        let changes = match ended {
-            true => self.withdraw(offer),
-            false => Vec::new(),
+        let (changes, bound) = match ended {
+            true => (self.withdraw(offer), self.role_unlinks(tree, offer)),
+            false => (Vec::new(), Vec::new()),
         };
         if unanswered.is_empty() && changes.is_empty() {
             return Ok(());
@@ -731,7 +786,16 @@ impl Activities {
             o.place
         };
         let by = (now, Actor::World, Cause::Effect(o.sequence));
-        self.emit(tree, node, o.audience, by, OFFER_LAPSED, fields, changes)?;
+        self.emit_with(
+            tree,
+            node,
+            o.audience,
+            by,
+            OFFER_LAPSED,
+            fields,
+            changes,
+            bound,
+        )?;
         if ended {
             self.live.remove(&offer);
         }
@@ -765,8 +829,18 @@ impl Activities {
                 (4, pair.to_value()),
             ]);
             let changes = self.withdraw(pair);
+            let bound = self.role_unlinks(tree, pair);
             let by = (now, Actor::World, Cause::Effect(p.sequence));
-            self.emit(tree, pair, audience, by, OFFER_LAPSED, fields, changes)?;
+            self.emit_with(
+                tree,
+                pair,
+                audience,
+                by,
+                OFFER_LAPSED,
+                fields,
+                changes,
+                bound,
+            )?;
             self.live.remove(&pair);
         }
         self.advance(tree, c, due, p.asker, now);

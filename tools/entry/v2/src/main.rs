@@ -14,8 +14,15 @@
 //! thing and restarting are the forms' own (F3): a restart drops the controller, the due list and the moves, and
 //! recovers the forms from the log alone, as a new process does; the tree is the store and stays.
 //!
+//! Seats (0.135 E9): each placed thing's body slots are registered in B3's places table as the served world registers
+//! them (C17, #3453): every slot its entry declares that admits a body (`import_eden::body_slots_of`, as `worldd`'s
+//! start and a god edit's placed thing read them), its point and facing carried up the tree onto the ground. A form's
+//! `sit`, `lie`, `rise` and standing-slot steps take them through the forms' own path (`World::places`). A case's body
+//! is stood back up on the ground at its seat's stand point when the case is cleared, and a restart seats it again as
+//! a served world's restart does (`Slots::restore`).
+//!
 //! Not here: a geometry beyond open ground (every point is reached in a straight line and every thing is within
-//! reach of a move, as in F3's stop table), the places a seat is taken through (B3), and the gateway (F7). The moves
+//! reach of a move, as in F3's stop table; no seat's stand point is blocked, so none is moved), and the gateway (F7). The moves
 //! are content's, every `content/moves` entry loaded at world start by hash (F13, #3383). No kind, form or move is
 //! named.
 
@@ -23,7 +30,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use body_script::{TICK, ground, ground_id, humanoid, place};
+use body_script::{TICK, ground_id, humanoid, place};
+use replica::activity::{ActivityKind, Role, RoleLink};
+use replica::bodies::{Class, Want};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
     TransferRec, schema_hash,
@@ -39,19 +48,43 @@ use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
+use sim::activity::{Activities, Ask as Asking};
 use sim::controller::Controller;
-use sim::forms::{Asked, Forms, Intent, World};
+use sim::forms::{Asked, Forms, Intent, Places, World};
 use sim::host::Geometry;
 use sim::mover::Surface;
-use sim::moves::{Moves, Reach, library};
+use sim::moves::{Moves, Reach, library, load};
 use sim::slots::hands::transfer;
+use sim::slots::{PlaceAt, Slots};
 use sim::timers::DueList;
 use skills::form_runner::{Arg, Args, Limits, check};
 
 /// How far from the body a thing is placed, µm: the body walks to it as the form asks.
 const AWAY: i64 = 3_000_000;
+/// Half the side of the runner's open ground, mm. A long run of cases walks the body a little further each time (a
+/// thing is placed beside it, its stand points are where they are), and a thing's points reach up to 60 m from it (a
+/// cable car's stations): on body-script's 40 m square both walked off its edge, and a walk to a point beyond it, or a
+/// restart that set the body down there, failed (`deadline-passed`, `off-surface`, `place-no-stand-point`).
+const HALF_SIDE: i32 = 1_000_000;
+
+/// Flat open ground, 2 km square, centred on the origin, at height 0: body-script's ground, wider.
+fn ground() -> Surface {
+    let (a, b) = (-HALF_SIDE, HALF_SIDE);
+    let corners = vec![[a, 0, a], [b, 0, a], [b, 0, b], [a, 0, b]];
+    Surface::new(
+        ground_id(),
+        vec![sim::ground::Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    )
+}
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
+/// How long a body left on its way down into a seat is given to finish sitting before its rise is refused (E11).
+const SETTLE: Micros = 10_000_000;
 /// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
 const PLACE: &str = "souls:place";
 const BODY: &str = "souls:body";
@@ -69,6 +102,9 @@ fn name(s: &str) -> Name {
 struct Snap {
     nodes: BTreeMap<Id, Vec3>,
     things: BTreeMap<Id, Vec3>,
+    /// Each body's walks before a sit into a seat of another thing (E14), by step: the seat's stand point on the
+    /// ground, where a served world aims that walk (`worldd`'s `sit_walks`, from `Forms::seat_walks`).
+    sit_walks: BTreeMap<Id, BTreeMap<usize, Vec3>>,
 }
 
 impl Geometry for Snap {
@@ -80,6 +116,12 @@ impl Geometry for Snap {
         }
     }
     /// A body where the controller has it. A thing is the tree's to answer (where it is, who holds it).
+    fn plan_walk(&self, body: Id, step: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+        match self.sit_walks.get(&body).and_then(|w| w.get(&step)) {
+            Some(&stand) => replica::host::WalkPlan::Legs(vec![(stand, None)]),
+            None => replica::host::WalkPlan::Unplanned,
+        }
+    }
     fn read(&self, node: Id) -> Option<Seen> {
         let position = *self.nodes.get(&node)?;
         Some(Seen {
@@ -170,6 +212,16 @@ struct Stage {
     refused_by: BTreeMap<Id, Vec<String>>,
     /// What of the current case's scene the tree would not hold, until the case is cleared.
     scene_refused: Vec<String>,
+    /// The activities the entries' roles make (B10, #4239), by their entry's kind, and the engine's writer of them
+    /// with its own due list: a case's role links are its members', taken by offer and accept as a world takes them.
+    roles: BTreeMap<String, ActivityKind>,
+    acts: Activities,
+    acts_due: DueList,
+    /// The seats the placed things' entries declare (B3's places table, C17), and who holds each.
+    slots: Slots,
+    /// Where each body a case seated (0.135 E10) stood before: it stands there again if its seat's stand point is
+    /// off the ground.
+    seated_from: BTreeMap<Id, Vec3>,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -261,6 +313,82 @@ fn header(kinds: &[String]) -> Header {
     Header::read(&encode(&v).expect("a header's bytes")).expect("a header")
 }
 
+/// The tree's role name of entry `kind`'s link `t`: `<namespace>:t`, as worldd names an entry's roles.
+fn role_of(kind: &str, t: &str) -> String {
+    format!("{}:{t}", kind.split_once(':').map_or("world", |(n, _)| n))
+}
+
+/// The activity kinds the entries' roles make (B10), as worldd serves them (`worldd::serve::activity_kinds`): one
+/// for each entry with two roles (an offer takes two), each role holding its entry's link of its name on the entry's
+/// own thing. Its pin here is the gate's own, not the served one.
+fn role_kinds(kinds: &J) -> BTreeMap<String, ActivityKind> {
+    let mut out = BTreeMap::new();
+    for (kind, entry) in kinds.obj().unwrap_or(&[]) {
+        let roles: Vec<&String> = entry
+            .get("roles")
+            .and_then(J::obj)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|(n, v)| n != "now" && v.obj().is_some())
+            .map(|(n, _)| n)
+            .collect();
+        // An offer takes two roles: a kind of more (a frisbee's three) keeps the case's links as written.
+        if roles.len() != 2 {
+            continue;
+        }
+        let mut most = 0usize;
+        let mut rs = Vec::new();
+        for role in roles {
+            let link = entry.get("links").and_then(|l| l.get(role));
+            most += match link.and_then(|l| l.get("most")) {
+                Some(J::Int(n)) => usize::try_from(*n).unwrap_or(1),
+                _ => 1,
+            };
+            let from = link.and_then(|l| l.get("from")).and_then(J::str);
+            rs.push(Role {
+                name: name(&role_of(kind, role)),
+                place: name("souls:here"),
+                claims: vec![Want::One(Class::Manipulator)],
+                mv: None,
+                stands: Vec::new(),
+                within: None,
+                link: matches!(from, Some("body" | "soul")).then(|| RoleLink {
+                    ty: name(&replica::audience::link_type(kind, role)),
+                    soul: from == Some("soul"),
+                    on: kind.clone(),
+                    most: match link.and_then(|l| l.get("most")) {
+                        Some(J::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
+                }),
+            });
+        }
+        let pin: String = Hash::of(
+            Purpose::Fixture,
+            format!("souls/entry-v2/activity/{kind}").as_bytes(),
+        )
+        .to_bytes()
+        .iter()
+        .skip(2)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+        out.insert(
+            kind.clone(),
+            ActivityKind {
+                name: name(&format!("{kind}_activity@1220{pin}")),
+                revision: 1,
+                roles: rs,
+                proposal_lasts: 60_000_000,
+                leave_within: 400_000,
+                most: most.max(2),
+                beat: false,
+                follows: None,
+            },
+        );
+    }
+    out
+}
+
 impl Stage {
     fn new() -> Stage {
         let g = ground();
@@ -274,6 +402,16 @@ impl Stage {
         for r in refused {
             eprintln!("a move refused: {r}");
         }
+        // The body's own moves into and out of a place, which content does not declare (B3's fixtures: sit, lie and
+        // rise), as the served world adds them (`worldd::moves`): each fixture move whose name content has not.
+        let mut moves = library.current();
+        let own =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../v2/crates/replica/fixtures/moves");
+        for m in load(&own).expect("B3's moves") {
+            if !moves.iter().any(|c| c.name == m.name) {
+                moves.push(m);
+            }
+        }
         let mut s = Stage {
             kinds: J::Obj(Vec::new()),
             k3: Kinds::default(),
@@ -286,7 +424,7 @@ impl Stage {
             due: DueList::new(),
             mint,
             moves: Moves::new(),
-            library: library.current(),
+            library: moves,
             snap: Snap::default(),
             forms: Forms::new(),
             now: 0,
@@ -305,6 +443,11 @@ impl Stage {
             unapplied: 0,
             refused_by: BTreeMap::new(),
             scene_refused: Vec::new(),
+            roles: BTreeMap::new(),
+            acts: Activities::new(header(&[]), Rules::default(), 0, Vec::new()),
+            acts_due: DueList::new(),
+            slots: Slots::new(),
+            seated_from: BTreeMap::new(),
         };
         s.look();
         s
@@ -326,7 +469,10 @@ impl Stage {
                 moves: &mut self.moves,
                 library: &self.library,
                 seed: 1,
-                places: None,
+                places: Some(Places {
+                    slots: &mut self.slots,
+                    floors: &self.surfaces,
+                }),
             },
             &mut self.forms,
         )
@@ -334,6 +480,12 @@ impl Stage {
 
     fn entry(&self, kind: &str) -> Option<&J> {
         self.kinds.get(kind)
+    }
+
+    /// Slot `slot` of the placed thing `id`, by its number in that thing's own entry.
+    fn slot_of(&self, id: Id, slot: &str) -> Option<u64> {
+        let t = self.things.values().find(|t| t.id == id)?;
+        slot_n(self.entry(&t.kind)?, slot)
     }
 
     /// The tree for the kinds just defined: the ground, the body on it (its hands its slots 1 and 2) and the body's
@@ -354,6 +506,23 @@ impl Stage {
         if let Some(root) = self.full.get(PLACE).and_then(|p| admits.get_mut(p)) {
             root.children.extend(every);
         }
+        // B10: each entry's activity is pinned, and its own thing takes it as a child, as worldd serves it.
+        self.roles = role_kinds(&self.kinds);
+        for (kind, a) in &self.roles {
+            admits.insert(
+                a.name.as_str().to_owned(),
+                replica::world_model::Kind {
+                    owner: "activity".into(),
+                    children: Default::default(),
+                    slots: Default::default(),
+                    hands: None,
+                    fields: Default::default(),
+                },
+            );
+            if let Some(t) = self.full.get(kind).and_then(|f| admits.get_mut(f)) {
+                t.children.insert(plain(a.name.as_str()).to_owned());
+            }
+        }
         let pinned: Vec<String> = admits.keys().cloned().collect();
         self.header = header(&pinned);
         self.rules = Rules {
@@ -361,8 +530,15 @@ impl Stage {
             souls: BTreeSet::from([self.soul]),
             audiences: BTreeMap::new(),
         };
+        self.acts = Activities::new(
+            self.header.clone(),
+            self.rules.clone(),
+            0,
+            self.roles.values().cloned().collect(),
+        );
         let place = self.full[PLACE].clone();
         self.tree = Tree::start(ground_id(), name(&place));
+        self.slots = Slots::new();
         self.forms.zone(self.header.clone());
         let at = self.body_at();
         let body = self.full[BODY].clone();
@@ -657,6 +833,38 @@ impl Stage {
         }
         self.now = at;
         self.flush();
+        self.follow_seats();
+    }
+
+    /// Each body's place in the tree follows its seat, as a served world writes a body's new frame from its motion
+    /// (`worldd`'s motion entries, #3799): a body a seat's hand-off put in a slot, or a rise set back on the ground, is
+    /// transferred there, so the rules and the reads see it where it sits.
+    fn follow_seats(&mut self) {
+        let moved: Vec<(Id, Frame)> = self
+            .souls_of
+            .keys()
+            .filter_map(|b| {
+                let to = self.c.body(*b)?.pose.frame;
+                let n = self.tree.node(self.tree.handle(*b)?)?;
+                let at = Frame {
+                    node: n.parent()?,
+                    slot: n.slot(),
+                };
+                (at != to).then_some((*b, to))
+            })
+            .collect();
+        for (b, to) in moved {
+            let Ok(t) = self.mint.mint() else { return };
+            let bodies = transfer(&self.header, b, Audience::Everyone, to, t)
+                .into_iter()
+                .collect();
+            if let Err(r) = self.write_bodies(bodies) {
+                eprintln!(
+                    "a body's seat could not be followed: {}: {}",
+                    r.name, r.detail
+                );
+            }
+        }
     }
 
     /// The name intent `id`'s run ended with, from the log.
@@ -712,12 +920,26 @@ impl Stage {
         let fields = self.defaults(kind);
         let b = self.body_at();
         // Beside the body, toward the middle of the ground on its farther axis, so a long run of cases never walks
-        // off it.
-        let toward = |v: i64| if v > 0 { -AWAY } else { AWAY };
+        // off it. A thing longer than that (a 14 m narrowboat) is set past its own half length, so the whole of it,
+        // and every point a body stands at on it, lies toward the middle: centred 3 m away, each seat case's rise put
+        // the body at a stand point 2.8 m farther out, until one lay off the ground (0.135 E11c).
+        let half = |axis: usize| {
+            self.entry(kind)
+                .and_then(|e| e.get("geometry"))
+                .and_then(|g| g.get("bounds_mm"))
+                .and_then(J::arr)
+                .and_then(|a| match a.get(axis) {
+                    Some(J::Int(mm)) => i64::try_from(*mm / 2).ok(),
+                    _ => None,
+                })
+                .map_or(0, |mm| mm.saturating_mul(1000))
+        };
+        let away = |axis: usize| AWAY.max(half(axis).saturating_add(500_000));
+        let toward = |v: i64, axis: usize| if v > 0 { -away(axis) } else { away(axis) };
         let at = if b.x.abs() >= b.z.abs() {
-            Vec3::new(b.x + toward(b.x), 0, b.z)
+            Vec3::new(b.x + toward(b.x, 0), 0, b.z)
         } else {
-            Vec3::new(b.x, 0, b.z + toward(b.z))
+            Vec3::new(b.x, 0, b.z + toward(b.z, 2))
         };
         let Ok(id) = self.mint.mint() else {
             return err("no id");
@@ -745,6 +967,7 @@ impl Stage {
         self.placed += 1;
         let key = format!("x{}", self.placed);
         self.snap.things.insert(id, at);
+        self.seat(id);
         // The create was read as a form's make: it is the gate's thing, by the gate's key.
         self.things.retain(|_, t| t.id != id);
         self.things.insert(
@@ -756,6 +979,100 @@ impl Stage {
             },
         );
         obj(vec![("id", J::Str(key))])
+    }
+
+    /// Thing `id`'s seats, where it stands now, registered as a served world registers them (C17, #3453; a god edit's
+    /// placed thing, `worldd::edit_places`): each slot admitting a body that its entry declares
+    /// ([`import_eden::body_slots_of`]: the entry it names, else its kind's), its point and facing carried up the tree
+    /// onto the ground ([`sim::ground::scene::xform_to`]), its stand point in the slot's frame. Open ground has no
+    /// solid, so no stand point is moved. A thing that is gone has none; one whose seat is held keeps its places.
+    fn seat(&mut self, id: Id) {
+        let tree = &self.tree;
+        let found = tree
+            .handle(id)
+            .zip(tree.handle(ground_id()))
+            .and_then(|(h, g)| {
+                let n = tree.node(h)?;
+                let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+                let x = sim::ground::scene::xform_to(tree, h, g).ok()?;
+                let slots = import_eden::body_slots_of(
+                    id,
+                    n.kind().as_str(),
+                    n.fields(),
+                    &[(entry.to_owned(), self.kinds.get(entry)?.clone())],
+                );
+                Some((slots, x))
+            });
+        let places = found.map_or_else(Vec::new, |(slots, x)| {
+            slots
+                .into_iter()
+                .filter_map(|s| {
+                    Some(PlaceAt {
+                        thing: id,
+                        place: replica::moves::Place {
+                            slot: s.slot,
+                            height: s.at.y.max(0),
+                            stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+                        },
+                        point: x.point(s.at).ok()?,
+                        facing: x.rot,
+                        floor: ground_id(),
+                        more: s.more,
+                    })
+                })
+                .collect()
+        });
+        let _ = self.slots.replace(id, places);
+    }
+
+    /// `body` out of the seat it holds (or is taking or leaving) and standing on the ground at that seat's stand point,
+    /// in the tree as on its feet: how a case leaves the body for the next, as a retirement releases a seat (K10).
+    fn stand_up(&mut self, body: Id) {
+        let stand = self.slots.held_place(body).and_then(|p| p.stand().ok());
+        let before = self.seated_from.remove(&body);
+        if let Some((_, under_way)) = self.slots.release_body(body) {
+            if let Some(i) = under_way {
+                let _ = self
+                    .moves
+                    .cancel(&mut self.c, &mut self.due, i, self.now, name("left"));
+            }
+            self.c.remove(body);
+            let g = &self.surfaces[&ground_id()];
+            let mut stood = Err(String::new());
+            for at in [stand.or(before), before].into_iter().flatten() {
+                stood = place(&mut self.c, g, body, humanoid(), at.x / 1000, at.z / 1000)
+                    .map_err(|e| e.to_string());
+                if stood.is_ok() {
+                    break;
+                }
+            }
+            if let Err(e) = stood {
+                eprintln!("a seated body could not stand: {e}");
+            }
+            self.look();
+        }
+        let on = self
+            .tree
+            .handle(body)
+            .and_then(|h| self.tree.node(h))
+            .and_then(|n| n.parent());
+        if on.is_some_and(|p| p != ground_id())
+            && let Ok(t) = self.mint.mint()
+        {
+            let ground = Frame {
+                node: ground_id(),
+                slot: None,
+            };
+            let bodies = transfer(&self.header, body, Audience::Everyone, ground, t)
+                .into_iter()
+                .collect();
+            if let Err(r) = self.write_bodies(bodies) {
+                eprintln!(
+                    "a seated body could not be set down: {}: {}",
+                    r.name, r.detail
+                );
+            }
+        }
     }
 
     /// The fields a placed thing starts with in the tree: K3's defaults, an enum's value in the kind's namespace (as
@@ -877,6 +1194,25 @@ impl Stage {
             return err(format!("no thing {key}"));
         };
         let now = self.now;
+        // Whoever sits on it stands first, so the body is not removed with it (T2 rule 3); its seats go with it.
+        let on_it: Vec<Id> = self
+            .souls_of
+            .keys()
+            .copied()
+            .filter(|b| {
+                self.slots.held_by(*b) == Some(t.id)
+                    || self
+                        .tree
+                        .handle(*b)
+                        .and_then(|h| self.tree.node(h))
+                        .and_then(|n| n.parent())
+                        == Some(t.id)
+            })
+            .collect();
+        for b in on_it {
+            self.stand_up(b);
+        }
+        let _ = self.slots.replace(t.id, Vec::new());
         // Gone already when a form took it (a removal, or under a thing removed): the log says so, the tree has it not.
         if self.tree.handle(t.id).is_some()
             && let Err(r) = self.write(vec![Change::Remove { node: t.id }])
@@ -900,11 +1236,23 @@ impl Stage {
     /// What a case leaves behind taken away, so the next starts as the first: what the body holds, the other
     /// bodies the case named (and what they hold), and the body's and its Soul's links but its own.
     fn reset(&mut self) -> J {
+        if let Err(why) = self.leave_activities() {
+            return err(format!("the case's activities could not be left: {why}"));
+        }
         let bodies: Vec<Id> = std::mem::take(&mut self.others)
             .into_iter()
             .filter(|(k, id)| k.starts_with("body:") && *id != self.body)
             .map(|(_, id)| id)
             .collect();
+        // The body stands up from any seat the case left it in; the other bodies give theirs up as they go.
+        self.stand_up(self.body);
+        for b in &bodies {
+            if let Some((_, Some(i))) = self.slots.release_body(*b) {
+                let _ = self
+                    .moves
+                    .cancel(&mut self.c, &mut self.due, i, self.now, name("left"));
+            }
+        }
         self.souls_of.retain(|b, _| *b == self.body);
         self.called.clear();
         self.scene_refused.clear();
@@ -941,6 +1289,187 @@ impl Stage {
         }
         self.look();
         obj(vec![])
+    }
+
+    /// The engine's activities given the world as it stands, then their entries logged.
+    fn with_acts<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, Refusal>,
+    ) -> Result<T, String> {
+        self.acts.next = self.tree.next();
+        self.acts.rules = self.rules.clone();
+        let r = f(self);
+        for e in std::mem::take(&mut self.acts.stream) {
+            self.commit(e);
+        }
+        r.map_err(|r| format!("{}: {}", r.name, r.detail))
+    }
+
+    fn asking(&mut self, body: Id) -> Asking {
+        Asking {
+            soul: self.souls_of.get(&body).copied().unwrap_or(self.soul),
+            intent: self.mint.mint().unwrap_or(self.soul),
+            at: self.now,
+        }
+    }
+
+    /// B10: the case's members of `thing`'s activity take their roles as a world's Souls do: the first role's first
+    /// end offers it at the thing to the other role's ends, and each accepts. A side the case leaves empty is filled
+    /// by a stand-in body that leaves once the others are in, so its link is gone again. The engine writes each
+    /// member's role link (`sim::activity`); none is written here.
+    fn take_roles(
+        &mut self,
+        thing: Id,
+        kind: &str,
+        seats: &[(String, Vec<Id>)],
+    ) -> Result<(), String> {
+        let Some(a) = self.roles.get(kind).cloned() else {
+            return Ok(());
+        };
+        if seats.iter().all(|(_, e)| e.is_empty()) {
+            return Ok(());
+        }
+        let [r1, r2] = &a.roles[..] else {
+            return Err(format!(
+                "{kind}: {} roles; an offer takes two",
+                a.roles.len()
+            ));
+        };
+        let ends = |r: &Role| {
+            seats
+                .iter()
+                .find(|(n, _)| *n == r.name.as_str())
+                .map_or_else(Vec::new, |(_, e)| e.clone())
+        };
+        let (first, second) = (ends(r1), ends(r2));
+        if first.len() > 1 {
+            return Err(format!(
+                "{} has {} members; the one who offers takes it alone",
+                r1.name.as_str(),
+                first.len()
+            ));
+        }
+        let mut stand_ins = Vec::new();
+        let asker = match first.first() {
+            Some(b) => *b,
+            None => {
+                let b = self.stand_in("stand-in-1");
+                stand_ins.push(b);
+                b
+            }
+        };
+        let asked: Vec<Id> = match second.is_empty() {
+            false => second,
+            true => {
+                let b = self.stand_in("stand-in-2");
+                stand_ins.push(b);
+                vec![b]
+            }
+        };
+        let ask = self.asking(asker);
+        let (kname, rname) = (a.name.clone(), r1.name.clone());
+        let to: BTreeSet<Id> = asked.iter().copied().collect();
+        let offer = self.with_acts(|s| {
+            s.acts.offer(
+                &mut s.tree,
+                &mut s.mint,
+                &mut s.acts_due,
+                ask,
+                asker,
+                &kname,
+                &rname,
+                thing,
+                to,
+                None,
+            )
+        })?;
+        for b in asked {
+            let ask = self.asking(b);
+            self.with_acts(|s| {
+                s.acts.accept(
+                    &mut s.tree,
+                    &mut s.mint,
+                    &mut s.c,
+                    &mut s.acts_due,
+                    ask,
+                    b,
+                    offer,
+                )
+            })?;
+        }
+        for b in stand_ins {
+            let ask = self.asking(b);
+            self.with_acts(|s| {
+                s.acts.leave(
+                    &mut s.tree,
+                    &mut s.c,
+                    &mut s.moves,
+                    &mut s.acts_due,
+                    &mut s.mint,
+                    ask,
+                    b,
+                    offer,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// A body of the gate's own standing beside this one, with its Soul: a role's stand-in (B10).
+    fn stand_in(&mut self, n: &str) -> Id {
+        let id = self.other(n, true);
+        if !self.souls_of.contains_key(&id) {
+            let sid = self.other(&format!("{n}'s soul"), false);
+            if let Ok(link) = self.mint.mint() {
+                let _ = self.write(vec![Change::Link {
+                    link,
+                    ty: name(BODY_OF),
+                    ends: [id, sid],
+                    owner: End::First,
+                    audience: Audience::Everyone,
+                }]);
+            }
+            self.souls_of.insert(id, sid);
+        }
+        id
+    }
+
+    /// Every member of every activity leaves it (B10): a case's roles end with the case.
+    fn leave_activities(&mut self) -> Result<(), String> {
+        for act in self.acts.ids() {
+            let members: Vec<(Id, Id)> = self
+                .acts
+                .members(act)
+                .unwrap_or(&[])
+                .iter()
+                .map(|m| (m.body, m.soul))
+                .collect();
+            for (body, soul) in members {
+                let ask = Asking {
+                    soul,
+                    intent: self.mint.mint().unwrap_or(soul),
+                    at: self.now,
+                };
+                self.with_acts(|s| {
+                    s.acts.leave(
+                        &mut s.tree,
+                        &mut s.c,
+                        &mut s.moves,
+                        &mut s.acts_due,
+                        &mut s.mint,
+                        ask,
+                        body,
+                        act,
+                    )
+                })?;
+            }
+        }
+        // A leave lets a body in a move go at the move's next phase end: let every one go now.
+        while let Some(t) = self.acts_due.fire(Micros::MAX) {
+            self.acts
+                .fire(&mut self.c, &mut self.moves, &mut self.acts_due, &t);
+        }
+        Ok(())
     }
 
     /// The things in `body`'s hands, by hand.
@@ -995,11 +1524,29 @@ impl Stage {
                     }
                 }
             };
-        let bodies: Vec<(String, String)> = nodes
+        let mut bodies: Vec<(String, String)> = nodes
             .iter()
             .filter(|(k, n)| *k == actor || (n.get("hands").is_some() && n.get("kind").is_none()))
             .map(|(k, n)| (k.clone(), soul_of(k, n)))
             .collect();
+        // B10: an end of a role's link is a member's body: it takes its role by an accept, so it is a body here.
+        for (_, n) in nodes {
+            let kind = n.get("kind").and_then(J::str).unwrap_or_default();
+            let Some(a) = self.roles.get(kind) else {
+                continue;
+            };
+            for (t, ends) in n.get("links").and_then(J::obj).unwrap_or(&[]) {
+                if !a.roles.iter().any(|r| role_of(kind, t) == r.name.as_str()) {
+                    continue;
+                }
+                for e in strs(Some(ends)) {
+                    if !nodes.iter().any(|(k, _)| *k == e) && !bodies.iter().any(|(b, _)| *b == e) {
+                        let s = soul_of(&e, &J::Null);
+                        bodies.push((e, s));
+                    }
+                }
+            }
+        }
         for (b, s) in bodies {
             let id = self.other(&b, true);
             out.add(&b, id);
@@ -1204,12 +1751,22 @@ impl Stage {
                 .map(|(_, v)| v.clone())
                 .unwrap_or(J::Null);
             let mut cs = Vec::new();
+            let mut seats: Vec<(String, Vec<Id>)> = Vec::new();
             for t in declared {
                 let ty = replica::audience::link_type(&kind, &t);
                 let want: Vec<Id> = strs(node.get("links").and_then(|l| l.get(&t)))
                     .iter()
                     .filter_map(|e| names.to_id.get(e).copied())
                     .collect();
+                // B10: a role's link is never written here: its ends take the role (below).
+                if self.roles.get(&kind).is_some_and(|a| {
+                    a.roles
+                        .iter()
+                        .any(|r| r.name.as_str() == role_of(&kind, &t))
+                }) {
+                    seats.push((role_of(&kind, &t), want));
+                    continue;
+                }
                 let have: Vec<(Id, Id)> = self
                     .tree
                     .links_at(*id)
@@ -1245,6 +1802,69 @@ impl Stage {
                     .push(format!("{n}'s links: {}: {}", r.name, r.detail));
                 unset.insert(*id);
             }
+            if let Err(why) = self.take_roles(*id, &kind, &seats) {
+                self.scene_refused.push(format!("{n}'s roles: {why}"));
+                unset.insert(*id);
+            }
+        }
+        // A body the case seats in a thing's body slot (a rider on its saddle, 0.135 E10) is seated there as a
+        // restart seats it (`Slots::restore`), and its place in the tree follows the seat (`follow_seats`).
+        let mut seats: Vec<(String, Id, u64, sim::controller::Stance)> = Vec::new();
+        for (holder, h) in &nodes {
+            let Some(thing) = names.to_id.get(holder).copied() else {
+                continue;
+            };
+            let Some(entry) = fresh
+                .iter()
+                .any(|(_, id)| *id == thing)
+                .then(|| self.entry(h.get("kind").and_then(J::str).unwrap_or_default()))
+                .flatten()
+            else {
+                continue;
+            };
+            for (slot, list) in h.get("slots").and_then(J::obj).unwrap_or(&[]) {
+                let posture = entry
+                    .get("slots")
+                    .and_then(|x| x.get(slot))
+                    .and_then(|d| d.get("posture"))
+                    .and_then(J::str);
+                let stance = match posture {
+                    Some("sit") => sim::controller::Stance::Sit,
+                    Some("lie") => sim::controller::Stance::Lie,
+                    _ => continue,
+                };
+                let Some(s) = slot_n(entry, slot) else {
+                    continue;
+                };
+                seats.extend(strs(Some(list)).into_iter().map(|b| (b, thing, s, stance)));
+            }
+        }
+        let mut seated = false;
+        for (b, thing, s, stance) in seats {
+            let Some(body) = names.to_id.get(&b).copied() else {
+                continue;
+            };
+            if !self.souls_of.contains_key(&body) || self.slots.held_by(body).is_some() {
+                continue;
+            }
+            let before = self.c.body(body).map(|b| b.pose.position);
+            match self
+                .slots
+                .restore(&mut self.c, body, (thing, Some(s)), None, stance, self.now)
+            {
+                Ok(()) => {
+                    seated = true;
+                    if let Some(p) = before {
+                        self.seated_from.insert(body, p);
+                    }
+                }
+                Err(r) => self
+                    .scene_refused
+                    .push(format!("{b} in slot {s}: {}: {}", r.name, r.detail)),
+            }
+        }
+        if seated {
+            self.follow_seats();
         }
         for (_, id) in fresh {
             if !unset.contains(&id) {
@@ -1468,6 +2088,11 @@ impl Stage {
             Ok(n) => n,
             Err(e) => return err(e),
         };
+        // The seats where the case's scene put their things.
+        let things: Vec<Id> = self.things.values().map(|t| t.id).collect();
+        for t in things {
+            self.seat(t);
+        }
         // The world's check at commit: R2's rules on the case's state as it stands, the world seeing all (I3).
         let state = self.state_of(case, ids, &names);
         let asker = obj(vec![("sees", J::s("all"))]);
@@ -1510,7 +2135,19 @@ impl Stage {
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
         // A thing argument the act leaves out goes to the form as the rules chose it, as worldd's `Acts` chooses it.
         let chosen = replica::rules::chosen_act(&self.kinds, act, &state, asker.get("sees"));
-        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names);
+        let args = match self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names) {
+            Ok(args) => args,
+            Err(detail) => {
+                return obj(vec![
+                    ("verdict", J::s("no")),
+                    ("reason", J::s("slot-unknown")),
+                    ("code", J::s("slot-unknown")),
+                    ("detail", J::Str(detail)),
+                    ("receipt", J::s("refused")),
+                    ("by", J::s("runner")),
+                ]);
+            }
+        };
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -1530,6 +2167,30 @@ impl Stage {
             digest,
         };
         let (now, from) = (self.now, self.log.len());
+        // A walk before a sit into a seat of another thing (E14) goes to that seat's own stand point, as a served
+        // world aims it (`Forms::seat_walks`); a seat of the act's own thing keeps the entry's point, as before.
+        let walks = skills::form_runner::bind_with(&entry, &form, &args)
+            .map(|steps| {
+                steps
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(|(i, w)| match w {
+                        [
+                            skills::form_runner::Step::WalkTo { on: Some(a), .. },
+                            skills::form_runner::Step::Sit {
+                                on: Some(b), slot, ..
+                            },
+                        ] if a == b => {
+                            let p = self.slots.place_in(*b, *slot)?;
+                            let stand = p.stand().ok()?;
+                            Some((i, Vec3::new(stand.x, p.point.y - p.place.height, stand.z)))
+                        }
+                        _ => None,
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        self.snap.sit_walks.insert(body, walks);
         let asked = {
             let (mut w, forms) = self.world();
             forms.commit_with(
@@ -1583,7 +2244,15 @@ impl Stage {
     /// name.
     /// The form's arguments from the case's act. A node argument is named as the case names it: a thing it placed
     /// (`ids`), else a body or Soul the case names (`names`), else a thing by the runner's own key.
-    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J, names: &Names) -> Args {
+    /// A slot of another thing that thing's entry does not declare is refused `slot-unknown` (the detail here).
+    fn args_of(
+        &mut self,
+        entry: &J,
+        form: &str,
+        act: &J,
+        ids: &J,
+        names: &Names,
+    ) -> Result<Args, String> {
         let takes = entry
             .get("forms")
             .and_then(|f| f.get(form))
@@ -1596,6 +2265,7 @@ impl Stage {
                 .or_else(|| names.to_id.get(n).copied())
                 .or_else(|| self.things.get(n).map(|t| t.id))
         };
+        let this = act.get("this").and_then(thing);
         let mut out = Args::new();
         for (k, v) in act.get("args").and_then(J::obj).unwrap_or(&[]) {
             let ty = takes
@@ -1615,9 +2285,21 @@ impl Stage {
                     Ok(n) => Arg::Int(n),
                     Err(_) => continue,
                 },
-                (_, J::Obj(_)) => match v.get("node").and_then(thing) {
-                    Some(id) => Arg::Node(id),
-                    None => continue,
+                // A slot of the act's own thing goes as the slot's name, as a served world hands a slot argument
+                // (`skills::form_runner::args_in`: slots of the node, by name); a slot of another thing as that
+                // thing and the slot's number in its own entry (a bench's seat for a lecture, E14); any other node
+                // as the thing.
+                (_, J::Obj(_)) => match (
+                    v.get("node").and_then(thing),
+                    v.get("slot").and_then(J::str),
+                ) {
+                    (Some(id), Some(slot)) if Some(id) == this => Arg::Name(slot.to_owned()),
+                    (Some(id), Some(slot)) => match self.slot_of(id, slot) {
+                        Some(n) => Arg::Slot(id, n),
+                        None => return Err(format!("{k}: {slot}")),
+                    },
+                    (Some(id), None) => Arg::Node(id),
+                    (None, _) => continue,
                 },
                 (Some("thing"), _) => match thing(v) {
                     Some(id) => Arg::Node(id),
@@ -1628,7 +2310,7 @@ impl Stage {
             };
             out.insert(k.clone(), arg);
         }
-        out
+        Ok(out)
     }
 
     fn progress_of(&self, rid: &str, moving: bool) -> J {
@@ -1750,9 +2432,15 @@ impl Stage {
         // The engine's own links (a run's hold on what it uses, BUILDSAFE) are not the kind's: not read back.
         let own = |ty: &Name| ty.as_str().starts_with("souls:") && ty.as_str() != "souls:owns";
         let mut out = Vec::new();
+        // The run's own entries, and its body's seat followed into or out of a slot while it ran (`follow_seats`): the
+        // form's `reparent` of the actor is its sit's or rise's hand-off.
+        let seat = |e: &Effect| {
+            e.envelope.cause == Cause::World
+                && matches!(e.body, Body::Transfer(TransferRec::Leave { node, .. }) if node == r.body)
+        };
         for e in self.log[r.from.min(self.log.len())..]
             .iter()
-            .filter(|e| e.envelope.cause == Cause::Intent(r.intent))
+            .filter(|e| e.envelope.cause == Cause::Intent(r.intent) || seat(e))
         {
             match &e.body {
                 Body::Transfer(TransferRec::Leave { node, pose, .. }) => out.push(obj(vec![
@@ -1839,10 +2527,108 @@ impl Stage {
         }
     }
 
+    /// The body up from the seat it holds by the forms' own `rise` step, as a one-step form on the seat's thing, and
+    /// run until it ends: what a Soul left seated by a leave (#4187: the seat outlives the run) does before it sits
+    /// again (0.135 E11). Answered as `wait` answers; a body in no seat has nothing to rise from. A body left on its
+    /// way down keeps its seat and finishes sitting first (`not-seated` until then), as the clock runs on.
+    fn rise(&mut self) -> J {
+        let end = self.now + SETTLE;
+        for k in 0.. {
+            let r = self.rise_once(k);
+            let lowering = r.get("code").and_then(J::str) == Some("not-seated")
+                && self.slots.held_by(self.body).is_some();
+            if !lowering || self.now >= end {
+                return r;
+            }
+            self.tick();
+        }
+        err("no rise")
+    }
+
+    /// One try at [`Self::rise`]; its intents are numbered apart from the acts' (`k` the try).
+    fn rise_once(&mut self, k: u64) -> J {
+        let Some(node) = self.slots.held_by(self.body) else {
+            return obj(vec![
+                ("verdict", J::s("yes")),
+                ("receipt", J::s("completed")),
+            ]);
+        };
+        let Ok(entry) = parse(r#"{"forms":{"rise":{"steps":[{"step":"rise"}]}}}"#) else {
+            return err("the rise form does not parse");
+        };
+        let n = self.runs.len() as u64 + 1;
+        let Some(id) = Id::new(Scope([0xe3; 16]), (2 << 40) + (k << 20) + n) else {
+            return err("no intent id");
+        };
+        let mut digest = [0u8; 32];
+        digest[..8].copy_from_slice(&n.to_le_bytes());
+        digest[8..16].copy_from_slice(&k.to_le_bytes());
+        digest[16] = 0xe1;
+        let intent = Intent {
+            id,
+            expiry: i64::MAX,
+            actor: Actor::Soul(self.soul),
+            digest,
+        };
+        let (body, now, from) = (self.body, self.now, self.log.len());
+        let asked = {
+            let (mut w, forms) = self.world();
+            forms.commit_with(
+                &mut w,
+                &BTreeMap::new(),
+                &|_| None,
+                body,
+                node,
+                &entry,
+                "rise",
+                &Args::default(),
+                intent,
+                Limits::default(),
+                now,
+            )
+        };
+        self.flush();
+        if let Err(r) = asked {
+            return obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::s(r.name)),
+                ("code", J::s(r.name)),
+                ("receipt", J::s("refused")),
+            ]);
+        }
+        let rid = format!("r{n}");
+        let last = self.forms.at(body);
+        self.runs.insert(
+            rid.clone(),
+            Run {
+                intent: id,
+                last,
+                from,
+                body,
+            },
+        );
+        self.wait(&rid)
+    }
+
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
     /// The tree is the store's, and stays.
     fn restart(&mut self) -> J {
-        let b = self.body_at();
+        // A body in a seat, or taking or leaving one, stands at the seat's stand point; the seated are seated again
+        // once the places are registered anew (K18c's restore, as a served world's restart seats them).
+        let at_seat = |s: &Slots, body: Id| s.held_place(body).and_then(|p| p.stand().ok());
+        // Each at its own place in its slot (E16): the place it held, kept across the restart.
+        type Seated = (Id, Id, Option<u64>, Option<Vec3>, sim::controller::Stance);
+        let seated: Vec<Seated> = self
+            .slots
+            .seated()
+            .into_iter()
+            .map(|(b, t, st)| {
+                let p = self.slots.held_place(b);
+                let was = p.zip(self.slots.spot_of(b)).map(|(p, s)| p.spot(s.2));
+                (b, t, p.map(|p| p.place.slot), was, st)
+            })
+            .collect();
+        let b = at_seat(&self.slots, self.body).unwrap_or_else(|| self.body_at());
         let g = ground();
         let mut c = Controller::new();
         if let Err(e) = place(&mut c, &g, self.body, humanoid(), b.x / 1000, b.z / 1000) {
@@ -1855,12 +2641,42 @@ impl Stage {
             .filter(|o| *o != self.body)
             .collect();
         for o in others {
-            let p = self.c.body(o).map_or(b, |m| m.pose.position);
+            let p = at_seat(&self.slots, o)
+                .or_else(|| self.c.body(o).map(|m| m.pose.position))
+                .unwrap_or(b);
             if let Err(e) = place(&mut c, &g, o, humanoid(), p.x / 1000, p.z / 1000) {
                 return err(e);
             }
         }
         self.c = c;
+        // A new process's activities: read back from their nodes and membership links (E26).
+        match Activities::restore(
+            self.header.clone(),
+            self.rules.clone(),
+            self.roles.values().cloned().collect(),
+            &self.tree,
+            &mut self.c,
+        ) {
+            Ok(a) => self.acts = a,
+            Err(r) => return err(format!("activities: {}: {}", r.name, r.detail)),
+        }
+        self.acts_due = DueList::new();
+        self.slots = Slots::new();
+        let things: Vec<Id> = self.things.values().map(|t| t.id).collect();
+        for t in things {
+            self.seat(t);
+        }
+        for (body, thing, slot, was, stance) in seated {
+            if let Err(r) =
+                self.slots
+                    .restore(&mut self.c, body, (thing, slot), was, stance, self.now)
+            {
+                eprintln!(
+                    "a seated body could not be seated again: {}: {}",
+                    r.name, r.detail
+                );
+            }
+        }
         self.surfaces = BTreeMap::from([(ground_id(), g)]);
         self.due = DueList::new();
         self.moves = Moves::new();
@@ -1968,6 +2784,17 @@ impl Stage {
         )
     }
 
+    /// The thing whose seat the body holds, by the gate's name for it; null when it holds none.
+    fn seat_held(&self) -> J {
+        let Some(t) = self.slots.held_by(self.body) else {
+            return J::Null;
+        };
+        self.things.iter().find(|(_, x)| x.id == t).map_or_else(
+            || J::Str(replica::world_model::show(t)),
+            |(k, _)| J::Str(k.clone()),
+        )
+    }
+
     fn handle(&mut self, q: &J) -> J {
         let s = |k: &str| q.get(k).and_then(J::str).unwrap_or_default().to_owned();
         let none = J::Obj(Vec::new());
@@ -2051,7 +2878,9 @@ impl Stage {
                     }),
                 ),
                 ("holding", self.holding()),
+                ("seat", self.seat_held()),
             ]),
+            "rise" => self.rise(),
             "restart" => self.restart(),
             "unapplied" => obj(vec![("entries", J::Int(i128::from(self.unapplied)))]),
             op => err(format!("unknown op {op}")),

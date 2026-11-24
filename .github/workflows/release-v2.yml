@@ -157,19 +157,20 @@ jobs:
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page and its pinned body assets
+      - name: The pinned body assets
         if: ${{ inputs.part != 'move' }}
+        # X2: the page folder holds only the body files; the pairing card is the old page's (soul-game.caddy). The new
+        # page is not built: its packages are installed for the preparation's renderer closure (three, zod) alone.
         run: |
-          node tools/changelog/compile.mjs --version "$VERSION" --date "$DATE" --out "$RUNNER_TEMP/CHANGELOG.md"
           npm --prefix v2/web ci
           node v2/tools/import-body/prepare.mjs --out "$RUNNER_TEMP/body-assets"
-          V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
+          node v2/tools/ops/release/bodies.ts --from "$RUNNER_TEMP/body-assets" --out "$RUNNER_TEMP/page"
       - name: Bundle and its manifest
         if: ${{ inputs.part != 'move' }}
         run: |
           # The land verbs' ground model (packages/ground) rides in the served client with its one dependency (#3695).
           npm install --no-save --no-package-lock --no-audit --no-fund --prefix packages/ground zod@4.6.7
-          bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release v2/web/dist v2/client | tee -a "$GITHUB_STEP_SUMMARY"
+          bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release "$RUNNER_TEMP/page" v2/client | tee -a "$GITHUB_STEP_SUMMARY"
           cp "$RUNNER_TEMP/bundle/manifest.json" "$RUNNER_TEMP/manifest.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ inputs.part != 'move' }}

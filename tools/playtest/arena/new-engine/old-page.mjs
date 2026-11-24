@@ -131,8 +131,9 @@ export async function localCreate({ directory, routesFile, slugs, template, from
   return { url: `http://127.0.0.1:${server.address().port}`, rows, close: () => server.close() };
 }
 
-/** Brings the old page up on a new-engine world of `template` (with `add`'s things placed). → {page, slug, world, stop()} */
-export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, log = () => {} } = {}) {
+/** Brings the old page up on a new-engine world of `template` (with `add`'s things placed), or of `facts` (the template's
+ *  facts, edited: the engine's world; the template stays the page's shell). → {page, slug, world, stop()} */
+export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, log = () => {} } = {}) {
   dir = resolve(dir);
   const genesis = genesisFor({ template, add, dir });
   for (const [f, what] of [[join(REPO_ROOT, 'apps/web/dist/index.html'), 'apps/web is not built (pnpm --filter web build)'],
@@ -147,7 +148,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   let creating = null;
   const stop = async () => { for (const p of procs.reverse()) kill(p); creating?.close(); if (world) await stopWorld(world); };
   try {
-    world = await startWorld({ template: genesis.template, dir: join(dir, 'world'), history });
+    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
     const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;
     const binding = join(dir, 'binding.json');

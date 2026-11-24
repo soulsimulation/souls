@@ -14,3 +14,5 @@ replica = { path = "../../../v2/crates/replica" }
 sim = { path = "../../../v2/crates/sim" }
 skills = { path = "../../../v2/crates/skills" }
 body-script = { path = "../../../v2/tools/body-script" }
+# The seats a placed thing's entry declares, read as the served world reads them (C17, #3453; 0.135 E9).
+import-eden = { path = "../../../v2/tools/import-eden" }
