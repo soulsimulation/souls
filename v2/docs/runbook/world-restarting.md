@@ -45,9 +45,11 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   it does not cut a part again at an address viewers may hold. If the store was behind, the parts it lacked are a gap
   in the stream's history. Every generation's baseline carries the epoch of the directory claim it was made under
   (R16), so even where the old machine's lost tail rolled over at the very cursor the new machine moves to, the two
-  generations have different addresses. A world that recovers from its spool under a new claim (every restart, and a
-  move with the spool copied, even while the old machine still runs) rolls its generation over at once, with the
-  hand-off, so its parts never go to an address the old instance cuts; a viewer on the stream crosses with no gap.
+  generations have different addresses. A world that recovers from its spool under a new claim (a restart after a
+  crash, a move with the spool copied, even while the old machine still runs) rolls its generation over at once, with
+  the hand-off, so its parts never go to an address the old instance cuts; a viewer on the stream crosses with no gap.
+  A clean stop (SIGTERM) or a sleep marks the spool (`head.clean`: the machine, the folder and the chain's head), and
+  the next start or wake on that machine, in that folder, at that head keeps its generation: no new seed and baseline.
 - **`"stream_backup":{"state":"fenced"}`** means the store's chain head is another writer's: an older instance of
   this world still running beside a newer one (on this machine or another). Before fencing, a backup reads the
   directory: the instance holding the world's newest claim writes over the other's head, so only the older one
