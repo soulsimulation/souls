@@ -21,8 +21,10 @@ sends to these programs once the owner places its site file. Routing between the
 | Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
-`souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
-Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 8 GB; the
+`souls` in `souls.slice`, whose `MemoryMax` is 14 GB: eleven worlds at their measured peaks (Eden 1.7 GB, the others
+0.85 GB) with a third to spare, inside what the production host has left beside today's system (its units' comment has
+the numbers), and `MemoryLow` 2 GB for Eden's.
+Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 4 GB; the
 install writes its `worldd@<world>.service.d/limits.conf`, [world-restarting](world-restarting.md#how-a-world-runs)),
 a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
 [viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight`

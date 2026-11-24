@@ -728,11 +728,9 @@ impl Engine {
                     [f, b, ..] => (f.body, b.body),
                     _ => return Err(refusal("carry-needs-two", show(activity))),
                 };
-                // 0.135 C5: the members after the first two carry beside the load, in join order.
-                let sides = members[2..]
-                    .iter()
-                    .map(|m| stands(c, m.body).map(|(_, at)| (m.body, at)))
-                    .collect::<R<Vec<_>>>()?;
+                // 0.135 C5: the members after the first two carry beside the load, in join order. Only a lift reads
+                // where they stand: a set-down never waits on a side whose body is gone.
+                let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
                     return Err(refusal("activity-not-started", show(activity)));
                 }
@@ -745,6 +743,10 @@ impl Engine {
                     if self.carries.contains_key(&activity) {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
+                    let sides = side_bodies
+                        .iter()
+                        .map(|b| stands(c, *b).map(|(_, at)| (*b, at)))
+                        .collect::<R<Vec<_>>>()?;
                     let board = param_id(&a.params, 1, "lift-needs-a-thing")?;
                     // 0.135 C2: a load whose kind has an entry is checked as it states, before anything is written.
                     let node = tree
@@ -874,6 +876,14 @@ impl Engine {
         now: Micros,
         by: (Id, Id),
     ) -> R<()> {
+        // One who is not a member of the carry leaves nothing it holds.
+        if !self
+            .activities
+            .members(activity)
+            .is_some_and(|m| m.iter().any(|m| m.body == body))
+        {
+            return Ok(());
+        }
         let Some(mut carry) = self.carries.remove(&activity) else {
             return Ok(());
         };
