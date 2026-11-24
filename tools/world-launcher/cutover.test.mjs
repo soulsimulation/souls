@@ -112,7 +112,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   assert.equal(readFileSync(hits, 'utf8'), before, 'no refused act/edit/gaze reached the old world');
   // D2b: Explore's place pictures are not refused as a write, nor asked of the old world: none is drawn (the place stays text)
   const views = await post('/w/eden/v1/world/context/views');
-  assert.equal(views.status, 404); assert.equal((await views.json()).code, 'world.new-engine');
+  assert.equal(views.status, 200); assert.deepEqual(await views.json(), { views: [] }, 'no refs asked: no pictures');
   assert.equal(readFileSync(hits, 'utf8'), before, 'nothing of the moved world reached its old process');
   assert.equal(await (await fetch(base + '/worlds/w/eden-2026/eden.mjs')).text(), 'actual served fixture bytes');
   assert.equal((await (await fetch(base + '/w/eden/v1/config')).json()).soulClient.version, '3.0.0');
@@ -476,7 +476,8 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   const seq = await get('/v1/world/seq'); assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 0, entities: 0 }, 'nothing published: seq 0');
   assert.equal((await get('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200);
   const views = await fetch(`${base}/w/eden/v1/world/context/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"refs":["r1"]}' });
-  assert.equal(views.status, 404, 'Explore\'s place pictures: none, and nothing asked of an old process');
+  assert.equal(views.status, 200, 'Explore\'s place pictures: never a 404, and nothing asked of an old process');
+  assert.deepEqual(await views.json(), { views: [{ ref: 'r1', status: 'unavailable' }] }, 'each asked place has no picture: the page keeps it as text and asks no more');
   const act = await fetch(`${base}/w/eden/v1/edge/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(act.status, 409);
   // its old live socket is never opened either

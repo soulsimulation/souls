@@ -54,8 +54,8 @@ for a world with no old twin), a crawler's too; each view from the published fil
 draws it from its stream); `/v1/me` with its sign-in; `/v1/world/visitors` as a world without travel (`available:
 false`); `/v1/world/seq` from the published snapshot (else seq 0); `/v1/world/context` (Explore's places) from the published snapshot
 too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search, paged as
-the old process pages them, and with nothing published a listing with no places; writes 409; the rest, its old socket and
-Explore's place pictures among them, 404 `world.new-engine` (a place stays text). Turned back (`--back`), the world is
+the old process pages them, and with nothing published a listing with no places; Explore's place pictures as each
+`unavailable` (a place stays text); writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
 an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)

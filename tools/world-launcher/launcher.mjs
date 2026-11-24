@@ -812,6 +812,16 @@ export async function openLauncher(cfg = {}) {
       targets: page, total: found.length, nextCursor: offset + page.length < found.length ? `${listing}:${offset + page.length}` : null }, { 'cache-control': 'no-store' });
     return true;
   }
+  /** D2b: Explore's place pictures of a world with no old process (POST /v1/world/context/views {refs}): every asked
+   *  ref `unavailable` (god/context-views.ts's shape), so the page keeps the place as text and neither asks again nor
+   *  logs a 404 (WorldContextViews.ts drain). At most 64 KB of body is read; anything unreadable is no refs. */
+  async function noPictures(req, res) {
+    let body = '';
+    try { for await (const c of req) { body += c; if (body.length > 65_536) break; } } catch { /* gone */ }
+    let refs = [];
+    try { const r = JSON.parse(body)?.refs; if (Array.isArray(r)) refs = r.filter((x) => typeof x === 'string' && x.length <= 256).slice(0, 64); } catch { /* no refs */ }
+    json(res, 200, { views: refs.map((ref) => ({ ref, status: 'unavailable' })) }, { 'cache-control': 'no-store' });
+  }
   /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
    *  (`me.userId`, `me.short`), so the page shows the visitor signed in. Their Souls there are the new engine's (the
    *  directory's My Souls), not listed here. Clerk: verified as the launcher's owner routes verify; locally, the dev
@@ -1331,6 +1341,7 @@ export async function openLauncher(cfg = {}) {
       if (routeOnlyPage(req, res, v2, rest) || worldPage(req, res, slug, v2, rest)) return;
       if (rest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
       if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, v2, rest, url)) return;
+      if (req.method === 'POST' && rest === '/v1/world/context/views') { await noPictures(req, res); return; }
       json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
     }
     if (!w) {
@@ -1391,6 +1402,7 @@ export async function openLauncher(cfg = {}) {
       if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
       if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
       if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, w, edgeRest, url)) return;
+      if (req.method === 'POST' && edgeRest === '/v1/world/context/views') { await noPictures(req, res); return; }
       json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
     }
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
