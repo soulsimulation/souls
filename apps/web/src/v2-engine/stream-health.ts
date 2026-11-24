@@ -22,6 +22,19 @@ export type StreamHealth = {
   catching?: boolean;
 };
 
+/** When the stream last showed life, as the page reads the bridge's view (use-v2-souls.ts): a new part, a later world
+ *  time (B2-3: a still world's pointer), or a catch-up's word (#4684). */
+export class StreamLife {
+  parts = 0; lastPartAt: number | null = null;
+  private to: number | null = null;
+  private said = 0;
+  see(v: { parts: number; newestTo: number | null; catching?: { said: number } }, now: number): void {
+    if (v.parts !== this.parts) { this.parts = v.parts; this.lastPartAt = now; }
+    if (v.newestTo !== this.to) { this.to = v.newestTo; if (this.to !== null) this.lastPartAt = now; }
+    if (v.catching && v.catching.said !== this.said) { this.said = v.catching.said; this.lastPartAt = now; }
+  }
+}
+
 /** The notice to show, or null: a failure, an error with no part since, no part 15 s after the start, or none for 15 s;
  *  a reader catching up says so. */
 export function streamNotice(h: StreamHealth): string | null {

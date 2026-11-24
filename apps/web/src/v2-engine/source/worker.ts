@@ -197,7 +197,11 @@ async function run(stream: URL) {
   // the records by their frame (kept whether or not the frame is known), and the nodes on a course.
   const under = new Map<string, Set<string>>();
   const coursed = new Set<string>();
-  const unhang = (n: NodeRec | undefined) => { if (n?.parent != null) under.get(n.parent)?.delete(n.id); };
+  const unhang = (n: NodeRec | undefined) => {
+    if (n?.parent == null) return;
+    const s = under.get(n.parent);
+    if (s?.delete(n.id) && !s.size) under.delete(n.parent);
+  };
   const onCourse = () => [...coursed].filter(id => drawn.has(id)).map(id => known.get(id)!);
   const observe = (nodes: NodeRec[], removed: string[], samples: PartRec['samples'], rest?: Omit<PartRec, 'nodes' | 'removed' | 'samples'>) => {
     for (const id of removed) { unhang(known.get(id)); known.delete(id); coursed.delete(id); }
@@ -269,18 +273,20 @@ async function run(stream: URL) {
   // #3822: a joiner far behind plays the parts the clock would cut past anyway (more than BEHIND_US + CUT_US before
   // the newest) deferred: no digest each, nothing read back or posted. The state they make is then checked against
   // the newest claimed digest once and shown as one snapshot; the parts after it play as before.
-  // #4684: it says how far behind it is as it goes (at most every CATCHING_MS), so a page whose reader is catching up
-  // says so rather than that the stream is not there.
+  // #4684: it says how far behind it is as it goes (at most every CATCHING_MS, across polls), so a page whose reader is
+  // catching up says so rather than that the stream is not there; only for a part it played, so a reader whose parts
+  // stop coming says nothing and the page's silence notice still shows.
+  let saidAt = -Infinity;
   const catchUp = async (p: StreamPointer, last: number): Promise<boolean> => {
-    let any = false, saidAt = -Infinity;
+    let any = false;
     while (Number(player.next()) <= last) {
       const n = Number(player.next());
-      if (performance.now() - saidAt >= CATCHING_MS) { saidAt = performance.now(); post({ t: 'catching', behind: (p.newest ?? n) - n + 1 }); }
       const [bytes, said] = await Promise.all([partFile(p, n, ''), partFile(p, n, '.text')]);
       if (!bytes) break;
       version = JSON.parse(player.playDeferred(bytes)).version;
       addWords(said);
       any = true;
+      if (performance.now() - saidAt >= CATCHING_MS) { saidAt = performance.now(); post({ t: 'catching', behind: (p.newest ?? n) - n }); }
     }
     if (!any) return false;
     player.verify();
