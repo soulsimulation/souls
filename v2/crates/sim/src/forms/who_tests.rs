@@ -734,7 +734,7 @@ fn e10_a_seated_rider_steers_and_a_passenger_or_a_bystander_is_refused() {
             "steer",
         )
     };
-    assert!(steer(rider).is_ok(), "the rider in the drive seat steers");
+    assert!(steer(rider).is_ok(), "the rider in the drive slot steers");
     for (who, body) in [("a passenger", passenger), ("someone beside it", beside)] {
         let r = steer(body).expect_err(who);
         assert_eq!(r.name, "not-permitted", "{who}: {}", r.detail);
