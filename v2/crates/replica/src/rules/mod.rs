@@ -583,11 +583,14 @@ pub fn decide_parts(
             none = Some(arg);
             act
         }
+        // A closed container the asker may not see into: the unknown names the container and its `closed` section
+        // only, as the TS rules do (#4360).
         select::Choice::Unknown(node) => {
             return Value::object([
                 ("verdict", Value::s("unknown")),
                 ("need", Value::Int(-1)),
                 ("node", Value::s(&node)),
+                ("field", Value::s("closed")),
                 ("read", Value::Arr(Vec::new())),
             ]);
         }

@@ -1,39 +1,50 @@
 //! The run gate's world on Engine v2 (#3314): `tools/entry/run.mjs --transport tools/entry/v2.mjs` drives this program
 //! the way the `today` transport drives a local world, one JSON request a line on stdin and one answer a line on stdout.
 //!
-//! One body on open ground and the things the gate places, each beside the body. An act is what the new engine does
-//! with a Soul's act: R2's rules decide it on the case's state with the things' fields as they stand (as I3's checkers
-//! decide it, the world seeing all), then the form is committed to the form runner (F1: bound into steps, F2: its
-//! effects bound, F6: who may), and the world ticks until the run ends with its name. Its effects are read back from
-//! what the forms wrote to the log. Leaving, removing the thing and restarting are the forms' own (F3): a restart drops
-//! the controller, the due list and the moves, and recovers the forms from the log alone, as a new process does.
+//! One body on open ground and the things the gate places, each beside the body, kept in a real T2 tree (0.135 E3):
+//! every thing is a node of its kind (K3's, as content defines it) with its fields, the body is a node whose hands
+//! are slots, linked to its Soul. A case's scene is set in that tree the first time the case acts on its things: a
+//! thing in a hand is in the body's hand slot, a thing in a slot is in its holder's slot, a thing's links are links
+//! to the bodies and Souls the case names (the actor's Soul is the case's `soul` link of the actor, else `s1` for
+//! `b1`, as the cases write it). After that the tree is the world as it stands: R2's rules decide an act on the case's
+//! state with its things' fields, hands, slots and links read from the tree (as I3's checkers decide it, the world
+//! seeing all), then the form is committed to the form runner (F1: bound into steps, F2: its effects bound, F6: who
+//! may, which reads the tree), and the world ticks until the run ends with its name. What the forms write is
+//! committed to the tree (T2's checks) and to the log, from which the effects are read back. Leaving, removing the
+//! thing and restarting are the forms' own (F3): a restart drops the controller, the due list and the moves, and
+//! recovers the forms from the log alone, as a new process does; the tree is the store and stays.
 //!
-//! Not here: a world's tree (who may reads none, so only a form anyone may do is let through), a geometry beyond open
-//! ground (every point is reached in a straight line and every thing is within reach of a move, as in F3's stop
-//! table), and the gateway (F7). The moves are content's, every `content/moves` entry loaded at world start by hash
-//! (F13, #3383). No kind, form or move is named.
+//! Not here: a geometry beyond open ground (every point is reached in a straight line and every thing is within
+//! reach of a move, as in F3's stop table), the places a seat is taken through (B3), and the gateway (F7). The moves
+//! are content's, every `content/moves` entry loaded at world start by hash (F13, #3383). No kind, form or move is
+//! named.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
 use body_script::{TICK, ground, ground_id, humanoid, place};
-use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Refusal, Rest};
-use replica::encode::{Name, Value as Cbor};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
+    TransferRec, schema_hash,
+};
+use replica::encode::{Name, Value as Cbor, encode};
 use replica::host::{Answer, Ask, Seen};
-use replica::ids::{Id, Minter, Scope};
+use replica::ids::{Hash, Id, Minter, Purpose, Scope};
+use replica::kinds::Kinds;
 use replica::moves::{Effector, Move};
-use replica::pose::{Vec3, fixture};
+use replica::pose::{Frame, Pose, Quat, Support, Vec3, fixture};
 use replica::rules::decide_parts;
 use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
-use replica::tree::Tree;
-use replica::world_model::{Audience, parse_kinds, parse_world};
+use replica::tree::{Rules, Tree};
+use replica::world_model::{Audience, End, parse_kinds, plain};
 use sim::controller::Controller;
 use sim::forms::{Asked, Forms, Intent, World};
 use sim::host::Geometry;
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, library};
+use sim::slots::hands::transfer;
 use sim::timers::DueList;
 use skills::form_runner::{Arg, Args, Limits, check};
 
@@ -41,6 +52,13 @@ use skills::form_runner::{Arg, Args, Limits, check};
 const AWAY: i64 = 3_000_000;
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
+/// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
+const PLACE: &str = "souls:place";
+const BODY: &str = "souls:body";
+/// The link from a body to its Soul (T2).
+const BODY_OF: &str = "souls:body-of";
+/// A body's hands by the case's names, in the humanoid's slot order.
+const HANDS: [(&str, u64); 2] = [("left", 1), ("right", 2)];
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
@@ -88,11 +106,34 @@ struct Thing {
 struct Run {
     intent: Id,
     last: Option<usize>,
+    /// Where the run's entries start in the log.
+    from: usize,
+    /// The body that does it.
+    body: Id,
+}
+
+/// A case's names for what the world holds: its things, its bodies and its Souls.
+#[derive(Default)]
+struct Names {
+    to_id: BTreeMap<String, Id>,
+    of: BTreeMap<Id, String>,
+}
+
+impl Names {
+    fn add(&mut self, n: &str, id: Id) {
+        self.to_id.insert(n.to_owned(), id);
+        self.of.entry(id).or_insert_with(|| n.to_owned());
+    }
 }
 
 struct Stage {
     kinds: J,
+    /// The kinds as K3 loaded them (forms left out), and each plain name's full `namespace:name@hash`.
+    k3: Kinds,
+    full: BTreeMap<String, String>,
     tree: Tree,
+    rules: Rules,
+    header: Header,
     surfaces: BTreeMap<Id, Surface>,
     c: Controller,
     due: DueList,
@@ -104,13 +145,25 @@ struct Stage {
     now: Micros,
     log: Vec<Effect>,
     body: Id,
+    /// The body's Soul.
+    soul: Id,
     things: BTreeMap<String, Thing>,
     placed: u64,
     runs: BTreeMap<String, Run>,
     /// Kinds refused at import, by name (F14).
     refused: BTreeMap<String, Refusal>,
-    /// Words kept for text arguments, by reference number (a stand-in for K16).
+    /// Words kept for text arguments and fields, by reference number (a stand-in for K16).
     words: BTreeMap<Id, String>,
+    /// Things whose case scene is set in the tree: from then on the tree is the world as it stands.
+    arranged: BTreeSet<Id>,
+    /// The other bodies and Souls the current case names, by its names.
+    others: BTreeMap<String, Id>,
+    /// Each body's Soul.
+    souls_of: BTreeMap<Id, Id>,
+    /// The case's names for what the world holds, as last set: a run's changes are read back by them.
+    called: BTreeMap<Id, String>,
+    /// Entries the tree refused (T2's checks), kept in the log alone, as this runner kept every entry before.
+    unapplied: u64,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -128,21 +181,87 @@ fn set_key(o: &mut Vec<(String, J)>, k: &str, v: J) {
     }
 }
 
+fn strs(v: Option<&J>) -> Vec<String> {
+    v.and_then(J::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|e| e.str().map(str::to_owned))
+        .collect()
+}
+
+/// Slot `slot` of an entry by number, as the form runner numbers them: 1 up, in the entry's order.
+fn slot_n(entry: &J, slot: &str) -> Option<u64> {
+    (1u64..)
+        .zip(entry.get("slots").and_then(J::obj).unwrap_or(&[]))
+        .find(|(_, (k, _))| k == slot)
+        .map(|(n, _)| n)
+}
+
+/// An enum value's bare name.
+fn plain_value(v: &str) -> &str {
+    v.split_once(':').map_or(v, |(_, b)| b)
+}
+
+fn pose_in(frame: Frame, at: Vec3) -> Pose {
+    Pose {
+        frame,
+        position: if frame.slot.is_some() { Vec3::ZERO } else { at },
+        orientation: Quat::IDENTITY,
+        support: match frame.slot {
+            Some(_) => Support::Slot,
+            None => Support::Surface {
+                surface: frame.node,
+                height: 0,
+            },
+        },
+    }
+}
+
+fn changes(cs: Vec<Change>) -> Body {
+    Body::Changes(
+        cs.into_iter()
+            .map(|change| ChangeRec {
+                change,
+                rest: Rest::new(),
+            })
+            .collect(),
+    )
+}
+
+/// The zone's header: its root is the ground, and it pins every kind the world defines.
+fn header(kinds: &[String]) -> Header {
+    let zone = ground_id();
+    let v = Cbor::Map(BTreeMap::from([
+        (
+            1,
+            Cbor::Bytes(Hash::of(Purpose::Fixture, b"souls/entry-v2/1").to_bytes()),
+        ),
+        (2, Cbor::Bytes(schema_hash().to_bytes())),
+        (3, Cbor::Bytes(zone.scope().0.to_vec())),
+        (4, zone.to_value()),
+        (5, Cbor::Uint(0)),
+        (
+            6,
+            Cbor::Array(
+                kinds
+                    .iter()
+                    .filter_map(|k| Name::new(k))
+                    .map(Cbor::Text)
+                    .collect(),
+            ),
+        ),
+        (7, Cbor::Array(Vec::new())),
+    ]));
+    Header::read(&encode(&v).expect("a header's bytes")).expect("a header")
+}
+
 impl Stage {
     fn new() -> Stage {
-        let kinds = parse_kinds(include_str!(
-            "../../../../v2/crates/replica/fixtures/world-model/kinds.diag"
-        ))
-        .expect("kinds");
-        let draft = parse_world(
-            &kinds,
-            "{1: [], 2: {}, 3: [{1: 1, 2: \"souls:place\"}], 4: []}",
-        )
-        .expect("a world");
         let g = ground();
         let mut c = Controller::new();
         let mut mint = Minter::new(Scope([0xe2; 16]));
         let body = mint.mint().expect("an id");
+        let soul = Id::new(Scope([0xe5; 16]), 1).expect("an id");
         place(&mut c, &g, body, humanoid(), 0, 0).expect("placed");
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/moves");
         let (library, refused) = library(&dir).expect("content/moves");
@@ -151,7 +270,11 @@ impl Stage {
         }
         let mut s = Stage {
             kinds: J::Obj(Vec::new()),
-            tree: Tree::load(&draft).expect("loads").0,
+            k3: Kinds::default(),
+            full: BTreeMap::new(),
+            tree: Tree::start(ground_id(), name(PLACE)),
+            rules: Rules::default(),
+            header: header(&[]),
             surfaces: BTreeMap::from([(ground_id(), g)]),
             c,
             due: DueList::new(),
@@ -163,11 +286,17 @@ impl Stage {
             now: 0,
             log: Vec::new(),
             body,
+            soul,
             things: BTreeMap::new(),
             placed: 0,
             runs: BTreeMap::new(),
             refused: BTreeMap::new(),
             words: BTreeMap::new(),
+            arranged: BTreeSet::new(),
+            others: BTreeMap::new(),
+            souls_of: BTreeMap::from([(body, soul)]),
+            called: BTreeMap::new(),
+            unapplied: 0,
         };
         s.look();
         s
@@ -199,67 +328,234 @@ impl Stage {
         self.kinds.get(kind)
     }
 
+    /// The tree for the kinds just defined: the ground, the body on it (its hands its slots 1 and 2) and the body's
+    /// link to its Soul. Every kind K3 loaded is pinned in the header and admitted as T2 reads it.
+    fn build(&mut self) {
+        let base = parse_kinds(include_str!(
+            "../../../../v2/crates/replica/fixtures/world-model/kinds.diag"
+        ))
+        .expect("the fixtures' kinds");
+        let mut admits = self.k3.admits();
+        self.full = admits
+            .keys()
+            .chain(base.keys())
+            .map(|k| (plain(k).to_owned(), k.clone()))
+            .collect();
+        admits.extend(base);
+        let every: Vec<String> = admits.keys().map(|k| plain(k).to_owned()).collect();
+        if let Some(root) = self.full.get(PLACE).and_then(|p| admits.get_mut(p)) {
+            root.children.extend(every);
+        }
+        let pinned: Vec<String> = admits.keys().cloned().collect();
+        self.header = header(&pinned);
+        self.rules = Rules {
+            kinds: admits,
+            souls: BTreeSet::from([self.soul]),
+            audiences: BTreeMap::new(),
+        };
+        let place = self.full[PLACE].clone();
+        self.tree = Tree::start(ground_id(), name(&place));
+        self.forms.zone(self.header.clone());
+        let at = self.body_at();
+        let body = self.full[BODY].clone();
+        let link = self.mint.mint().expect("an id");
+        let made = self.write(vec![
+            Change::Create {
+                node: self.body,
+                kind: name(&body),
+                pose: pose_in(
+                    Frame {
+                        node: ground_id(),
+                        slot: None,
+                    },
+                    at,
+                ),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            },
+            Change::Link {
+                link,
+                ty: name(BODY_OF),
+                ends: [self.body, self.soul],
+                owner: End::First,
+                audience: Audience::Everyone,
+            },
+        ]);
+        if let Err(r) = made {
+            eprintln!("the body could not be made: {}: {}", r.name, r.detail);
+        }
+    }
+
+    /// Entries committed to the tree as one part (T2's checks), numbered as the tree's sequence runs.
+    fn apply_to_tree(&mut self, es: &[Effect]) -> Result<(), Refusal> {
+        if es.is_empty() {
+            return Ok(());
+        }
+        let numbered: Vec<Cbor> = es
+            .iter()
+            .zip(self.tree.next()..)
+            .map(|(e, s)| {
+                let mut e = e.clone();
+                e.envelope.sequence = s;
+                e.to_value()
+            })
+            .collect();
+        let bytes = encode(&Cbor::Map(BTreeMap::from([
+            (1, Cbor::Bytes(self.header.hash().to_bytes())),
+            (2, Cbor::Array(numbered)),
+        ])))
+        .map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?;
+        let part = Part::read(&bytes)?;
+        self.tree.commit(&self.header, &part, &self.rules)
+    }
+
+    /// The world's own entries (a creator's: placing, setting, removing, the case's scene) at node `node`: to the
+    /// tree, then the log. Refused whole when the tree refuses them.
+    /// Each change is an entry of the node it changes (a create its parent's, a link its owning end's), as the
+    /// tree checks it.
+    fn write(&mut self, cs: Vec<Change>) -> Result<(), Refusal> {
+        let at = |c: &Change| match c {
+            Change::Create { pose, .. } => pose.frame.node,
+            Change::Remove { node } | Change::Set { node, .. } | Change::Reparent { node, .. } => {
+                *node
+            }
+            Change::Link { ends, owner, .. } => match owner {
+                End::First => ends[0],
+                End::Second => ends[1],
+            },
+            Change::Unlink { link } => {
+                self.tree
+                    .link(*link)
+                    .map_or(ground_id(), |(_, ends, owner, _)| match owner {
+                        End::First => ends[0],
+                        End::Second => ends[1],
+                    })
+            }
+            Change::Motion(_) => ground_id(),
+        };
+        let bodies = cs
+            .into_iter()
+            .map(|c| (at(&c), Audience::Everyone, changes(vec![c])))
+            .collect();
+        self.write_bodies(bodies)
+    }
+
+    fn write_bodies(&mut self, bodies: Vec<(Id, Audience, Body)>) -> Result<(), Refusal> {
+        let now = self.now;
+        let es: Vec<Effect> = bodies
+            .into_iter()
+            .map(|(node, audience, body)| Effect {
+                envelope: Envelope {
+                    sequence: 0,
+                    at: now,
+                    cause: Cause::World,
+                    actor: Actor::Creator(fixture(9)),
+                    audience,
+                    node,
+                },
+                body,
+                events: None,
+                rest: Rest::new(),
+            })
+            .collect();
+        self.apply_to_tree(&es)?;
+        for e in es {
+            self.commit(e);
+        }
+        Ok(())
+    }
+
     /// The commit point: an entry numbered, handed back to the forms as logged, its sets read into the things' fields.
     fn commit(&mut self, mut e: Effect) {
         e.envelope.sequence = self.log.len() as u64 + 1;
         self.forms.logged(&e);
         for rec in e.changes() {
-            let Change::Set {
-                node, field, to, ..
-            } = &rec.change
-            else {
-                continue;
-            };
-            let Some(t) = self.things.values().find(|t| t.id == *node) else {
-                continue;
-            };
-            let Some(state) = self
-                .kinds
-                .get(&t.kind)
-                .and_then(|e| e.get("state"))
-                .and_then(J::obj)
-            else {
-                continue;
-            };
-            let Some((fname, def)) = state
-                .iter()
-                .find(|(_, d)| matches!(d.get("n"), Some(J::Int(n)) if *n == i128::from(*field)))
-            else {
-                continue;
-            };
-            let v = match (def.get("type").and_then(J::str), to) {
-                (Some("bool"), Cbor::Uint(u)) => J::Bool(*u != 0),
-                (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
-                (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
-                // An enum's value by name (F14), and words by their reference, as the case gave them.
-                // An enum's value is logged in the kind's namespace (C24, `eden:level1`); the case names it bare.
-                (Some("enum"), Cbor::Text(n)) => J::Str(
-                    n.as_str()
-                        .split_once(':')
-                        .map_or(n.as_str(), |(_, b)| b)
-                        .to_owned(),
-                ),
-                (_, Cbor::Text(n)) => J::Str(n.as_str().to_owned()),
-                (Some("text"), r) => replica::audience::reference(r)
-                    .and_then(|id| self.words.get(&id))
-                    .map_or(J::Null, |w| J::Str(w.clone())),
-                _ => J::Null,
-            };
-            let fname = fname.clone();
-            let key = self
-                .things
-                .iter()
-                .find(|(_, t)| t.id == *node)
-                .map(|(k, _)| k.clone());
-            if let Some(t) = key.and_then(|k| self.things.get_mut(&k)) {
-                set_key(&mut t.fields, &fname, v);
+            match &rec.change {
+                Change::Set {
+                    node, field, to, ..
+                } => self.read_set(*node, *field, to),
+                // A thing a form made is kept by a name of its own, so the case's state can name it.
+                Change::Create { node, kind, .. } if plain(kind.as_str()) != BODY => {
+                    let kind = plain(kind.as_str()).to_owned();
+                    let fields = self.defaults(&kind);
+                    self.placed += 1;
+                    self.things.insert(
+                        format!("m{}", self.placed),
+                        Thing {
+                            id: *node,
+                            kind,
+                            fields,
+                        },
+                    );
+                }
+                _ => {}
             }
         }
         self.log.push(e);
     }
 
+    fn read_set(&mut self, node: Id, field: u64, to: &Cbor) {
+        let Some(t) = self.things.values().find(|t| t.id == node) else {
+            return;
+        };
+        let Some(state) = self
+            .kinds
+            .get(&t.kind)
+            .and_then(|e| e.get("state"))
+            .and_then(J::obj)
+        else {
+            return;
+        };
+        let Some((fname, def)) = state
+            .iter()
+            .find(|(_, d)| matches!(d.get("n"), Some(J::Int(n)) if *n == i128::from(field)))
+        else {
+            return;
+        };
+        let v = match (def.get("type").and_then(J::str), to) {
+            (Some("bool"), Cbor::Uint(u)) => J::Bool(*u != 0),
+            (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
+            (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
+            // An enum's value by name (F14), and words by their reference, as the case gave them.
+            // An enum's value is logged in the kind's namespace (C24, `eden:level1`); the case names it bare.
+            (Some("enum"), Cbor::Text(n)) => J::Str(
+                n.as_str()
+                    .split_once(':')
+                    .map_or(n.as_str(), |(_, b)| b)
+                    .to_owned(),
+            ),
+            (_, Cbor::Text(n)) => J::Str(n.as_str().to_owned()),
+            (Some("text"), r) => replica::audience::reference(r)
+                .and_then(|id| self.words.get(&id))
+                .map_or(J::Null, |w| J::Str(w.clone())),
+            _ => J::Null,
+        };
+        let fname = fname.clone();
+        let key = self
+            .things
+            .iter()
+            .find(|(_, t)| t.id == node)
+            .map(|(k, _)| k.clone());
+        if let Some(t) = key.and_then(|k| self.things.get_mut(&k)) {
+            set_key(&mut t.fields, &fname, v);
+        }
+    }
+
+    /// The forms' entries: to the tree as one part, then each to the log. An entry the tree refuses is still logged
+    /// (the forms count on it), and counted.
     fn flush(&mut self) {
-        for e in std::mem::take(&mut self.forms.out) {
+        let out = std::mem::take(&mut self.forms.out);
+        if let Err(r) = self.apply_to_tree(&out) {
+            self.unapplied += out.len() as u64;
+            eprintln!(
+                "the tree refused a form's entries: {}: {}",
+                r.name, r.detail
+            );
+        }
+        for e in out {
             self.commit(e);
         }
     }
@@ -284,7 +580,14 @@ impl Stage {
 
     /// The name intent `id`'s run ended with, from the log.
     fn ended(&self, id: Id) -> Option<String> {
-        self.log
+        // From the run's first entry on: the log of a long gate run is long.
+        let from = self
+            .runs
+            .values()
+            .find(|r| r.intent == id)
+            .map_or(0, |r| r.from)
+            .min(self.log.len());
+        self.log[from..]
             .iter()
             .filter(|e| e.envelope.cause == Cause::Intent(id))
             .flat_map(|e| e.events.iter().flatten())
@@ -307,17 +610,25 @@ impl Stage {
             .map_or(Vec3::ZERO, |b| b.pose.position)
     }
 
-    fn place(&mut self, kind: &str) -> J {
-        let Some(entry) = self.entry(kind) else {
-            return err(format!("{kind} is not defined"));
-        };
-        let fields: Vec<(String, J)> = entry
-            .get("state")
+    /// A kind's fields at their defaults, as the entry writes them.
+    fn defaults(&self, kind: &str) -> Vec<(String, J)> {
+        self.entry(kind)
+            .and_then(|e| e.get("state"))
             .and_then(J::obj)
             .unwrap_or(&[])
             .iter()
             .map(|(k, d)| (k.clone(), d.get("default").cloned().unwrap_or(J::Null)))
-            .collect();
+            .collect()
+    }
+
+    fn place(&mut self, kind: &str) -> J {
+        if self.entry(kind).is_none() {
+            return err(format!("{kind} is not defined"));
+        }
+        let Some(full) = self.full.get(kind).cloned() else {
+            return err(format!("{kind} was not loaded (K3 refused it)"));
+        };
+        let fields = self.defaults(kind);
         let b = self.body_at();
         // Beside the body, toward the middle of the ground on its farther axis, so a long run of cases never walks
         // off it.
@@ -330,9 +641,31 @@ impl Stage {
         let Ok(id) = self.mint.mint() else {
             return err("no id");
         };
+        let start = self.start_fields(&full);
+        let made = self.write(vec![Change::Create {
+            node: id,
+            kind: name(&full),
+            pose: pose_in(
+                Frame {
+                    node: ground_id(),
+                    slot: None,
+                },
+                at,
+            ),
+            audience: Audience::Everyone,
+            fields: start,
+        }]);
+        if let Err(r) = made {
+            return err(format!(
+                "{kind} could not be placed: {}: {}",
+                r.name, r.detail
+            ));
+        }
         self.placed += 1;
         let key = format!("x{}", self.placed);
         self.snap.things.insert(id, at);
+        // The create was read as a form's make: it is the gate's thing, by the gate's key.
+        self.things.retain(|_, t| t.id != id);
         self.things.insert(
             key.clone(),
             Thing {
@@ -344,37 +677,488 @@ impl Stage {
         obj(vec![("id", J::Str(key))])
     }
 
+    /// The fields a placed thing starts with in the tree: K3's defaults, an enum's value in the kind's namespace (as
+    /// the forms write it, C24), and no text, whose words this runner keeps itself.
+    fn start_fields(&self, full: &str) -> BTreeMap<u64, Cbor> {
+        let Some(def) = self.k3.get(full) else {
+            return BTreeMap::new();
+        };
+        let ns = plain(full).split(':').next().unwrap_or_default().to_owned();
+        fn named(ns: &str, v: Cbor) -> Cbor {
+            match v {
+                Cbor::Text(t) if !t.as_str().contains(':') => {
+                    Name::new(&format!("{ns}:{}", t.as_str())).map_or(Cbor::Text(t), Cbor::Text)
+                }
+                Cbor::Array(a) => Cbor::Array(a.into_iter().map(|x| named(ns, x)).collect()),
+                Cbor::Map(m) => Cbor::Map(m.into_iter().map(|(k, x)| (k, named(ns, x))).collect()),
+                v => v,
+            }
+        }
+        def.state
+            .iter()
+            .filter(|(_, f)| !matches!(f.ty, replica::kinds::Type::Text { .. }))
+            .map(|(n, f)| (*n, named(&ns, f.default.clone())))
+            .collect()
+    }
+
+    /// A field's value as the tree holds it, from the case's JSON: a bool as 0 or 1, an enum by its namespaced name,
+    /// words kept here by reference. A list or other field the case cannot write is left as it is.
+    fn cbor_of(&mut self, kind: &str, field: &str, v: &J) -> Option<(u64, Cbor)> {
+        let full = self.full.get(kind)?;
+        let def = self.k3.get(full)?;
+        let (n, f) = def.state.iter().find(|(_, f)| f.name.as_str() == field)?;
+        use replica::kinds::Type;
+        let value = match (&f.ty, v) {
+            (Type::Bool, J::Bool(b)) => Cbor::Uint(u64::from(*b)),
+            (Type::Bool | Type::Int | Type::Duration, J::Int(i)) if *i >= 0 => {
+                Cbor::Uint(u64::try_from(*i).ok()?)
+            }
+            (Type::Int, J::Int(i)) => Cbor::Nint(u64::try_from(-1 - *i).ok()?),
+            (Type::Enum(values), J::Str(s)) => {
+                let bare = s.split_once(':').map_or(s.as_str(), |(_, b)| b);
+                values.iter().find(|x| plain_value(x.as_str()) == bare)?;
+                let ns = full.split(':').next().unwrap_or_default();
+                Cbor::Text(Name::new(&format!("{ns}:{bare}"))?)
+            }
+            (Type::Text { .. }, J::Str(words)) => {
+                let id = Id::new(Scope([0xe4; 16]), self.words.len() as u64 + 1)?;
+                self.words.insert(id, words.clone());
+                Cbor::Map(BTreeMap::from([(
+                    replica::audience::REFERENCE,
+                    id.to_value(),
+                )]))
+            }
+            (Type::Text { .. }, J::Null) => Cbor::Map(BTreeMap::new()),
+            _ => return None,
+        };
+        Some((*n, value))
+    }
+
+    fn set(&mut self, key: &str, fields: &[(String, J)]) -> J {
+        let Some(t) = self.things.get(key) else {
+            return err("no such thing");
+        };
+        let (id, kind) = (t.id, t.kind.clone());
+        let mut sets = Vec::new();
+        for (k, v) in fields {
+            if let Some((field, to)) = self.cbor_of(&kind, k, v) {
+                sets.push(Change::Set {
+                    node: id,
+                    field,
+                    to,
+                    by: None,
+                });
+            }
+        }
+        if self.tree.handle(id).is_some()
+            && let Err(r) = self.write(sets)
+        {
+            return err(format!(
+                "the fields could not be set: {}: {}",
+                r.name, r.detail
+            ));
+        }
+        if let Some(t) = self.things.get_mut(key) {
+            for (k, v) in fields {
+                set_key(&mut t.fields, k, v.clone());
+            }
+        }
+        obj(vec![])
+    }
+
     fn remove(&mut self, key: &str) -> J {
         let Some(t) = self.things.remove(key) else {
             return err(format!("no thing {key}"));
         };
         let now = self.now;
-        self.commit(Effect {
-            envelope: Envelope {
-                sequence: 0,
-                at: now,
-                cause: Cause::World,
-                actor: Actor::Creator(fixture(9)),
-                audience: Audience::Everyone,
-                node: t.id,
-            },
-            body: Body::Changes(vec![ChangeRec {
-                change: Change::Remove { node: t.id },
-                rest: Rest::new(),
-            }]),
-            events: None,
-            rest: Rest::new(),
-        });
+        // Gone already when a form took it (a removal, or under a thing removed): the log says so, the tree has it not.
+        if self.tree.handle(t.id).is_some()
+            && let Err(r) = self.write(vec![Change::Remove { node: t.id }])
+        {
+            return err(format!(
+                "{key} could not be removed: {}: {}",
+                r.name, r.detail
+            ));
+        }
         self.snap.things.remove(&t.id);
+        self.arranged.remove(&t.id);
+        // What was in it went with it (T2 rule 3).
+        let tree = &self.tree;
+        self.things.retain(|_, x| tree.handle(x.id).is_some());
         let (mut w, forms) = self.world();
         forms.gone(&mut w, t.id, now);
         self.flush();
         obj(vec![])
     }
 
-    /// The rules' state for the case: its own nodes, the placed ones' fields as they stand now.
-    fn state_of(&self, case: &J, ids: &J) -> J {
+    /// What a case leaves behind taken away, so the next starts as the first: what the body holds, the other
+    /// bodies the case named (and what they hold), and the body's and its Soul's links but its own.
+    fn reset(&mut self) -> J {
+        let bodies: Vec<Id> = std::mem::take(&mut self.others)
+            .into_iter()
+            .filter(|(k, id)| k.starts_with("body:") && *id != self.body)
+            .map(|(_, id)| id)
+            .collect();
+        self.souls_of.retain(|b, _| *b == self.body);
+        self.called.clear();
+        let mut gone: Vec<Id> = self.held(self.body).into_iter().map(|(_, t)| t).collect();
+        for b in &bodies {
+            gone.extend(self.held(*b).into_iter().map(|(_, t)| t));
+            self.c.remove(*b);
+        }
+        gone.extend(bodies.iter().copied());
+        gone.retain(|id| self.tree.handle(*id).is_some());
+        let links: Vec<Id> = [self.body, self.soul]
+            .iter()
+            .flat_map(|e| self.tree.links_at(*e).iter())
+            .filter(|e| self.tree.ty(e).as_str() != BODY_OF)
+            .map(|e| e.link)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut cs: Vec<Change> = links
+            .into_iter()
+            .map(|link| Change::Unlink { link })
+            .collect();
+        cs.extend(gone.iter().map(|node| Change::Remove { node: *node }));
+        if let Err(r) = self.write(cs) {
+            return err(format!(
+                "the case could not be cleared: {}: {}",
+                r.name, r.detail
+            ));
+        }
+        self.things.retain(|_, t| !gone.contains(&t.id));
+        for id in gone {
+            self.snap.things.remove(&id);
+            self.arranged.remove(&id);
+        }
+        self.look();
+        obj(vec![])
+    }
+
+    /// The things in `body`'s hands, by hand.
+    fn held(&self, body: Id) -> Vec<(&'static str, Id)> {
+        HANDS
+            .iter()
+            .filter_map(|(h, s)| sim::slots::hands::in_slot(&self.tree, body, *s).map(|t| (*h, t)))
+            .collect()
+    }
+
+    /// The case's names for the world: its things as placed (`ids`), its bodies (the first actor it names is this
+    /// body; each other body is one of its own here, standing beside it, kept until the case is cleared) and their
+    /// Souls, and every other Soul a link names.
+    fn names(&mut self, case: &J, ids: &J) -> Names {
+        let mut out = Names::default();
+        let nodes = case
+            .get("state")
+            .and_then(|s| s.get("nodes"))
+            .and_then(J::obj)
+            .unwrap_or(&[]);
+        let actor = case
+            .get("state")
+            .and_then(|s| s.get("actor"))
+            .and_then(J::str)
+            .unwrap_or("b1")
+            .to_owned();
+        for (nid, key) in ids.obj().unwrap_or(&[]) {
+            if let Some(t) = key.str().and_then(|k| self.things.get(k)) {
+                out.add(nid, t.id);
+            }
+        }
+        // A node with neither kind nor hands (a room things stand loose in) is the ground.
+        if let Some((room, _)) = nodes
+            .iter()
+            .find(|(_, n)| n.get("kind").is_none() && n.get("hands").is_none())
+        {
+            out.add(room, ground_id());
+        }
+        if !self.others.values().any(|id| *id == self.body) {
+            self.others.insert(format!("body:{actor}"), self.body);
+        }
+        // A body's Soul: its `soul` link, else the cases' own naming (`s1` for `b1`, `sw` for `w`).
+        let soul_of =
+            |b: &str, n: &J| match strs(n.get("links").and_then(|l| l.get("soul"))).as_slice() {
+                [s] => s.clone(),
+                _ => {
+                    let s = format!("s{}", b.strip_prefix('b').unwrap_or(b));
+                    if nodes.iter().any(|(k, _)| *k == s) {
+                        format!("{b}'s soul")
+                    } else {
+                        s
+                    }
+                }
+            };
+        let bodies: Vec<(String, String)> = nodes
+            .iter()
+            .filter(|(k, n)| *k == actor || (n.get("hands").is_some() && n.get("kind").is_none()))
+            .map(|(k, n)| (k.clone(), soul_of(k, n)))
+            .collect();
+        for (b, s) in bodies {
+            let id = self.other(&b, true);
+            out.add(&b, id);
+            let sid = match self.souls_of.get(&id) {
+                Some(sid) => *sid,
+                None => {
+                    let sid = self.other(&s, false);
+                    if let Ok(link) = self.mint.mint() {
+                        let linked = self.write(vec![Change::Link {
+                            link,
+                            ty: name(BODY_OF),
+                            ends: [id, sid],
+                            owner: End::First,
+                            audience: Audience::Everyone,
+                        }]);
+                        if let Err(r) = linked {
+                            eprintln!(
+                                "a case's body could not be linked to its Soul: {}: {}",
+                                r.name, r.detail
+                            );
+                        }
+                    }
+                    self.souls_of.insert(id, sid);
+                    sid
+                }
+            };
+            self.others.insert(format!("soul:{s}"), sid);
+            out.add(&s, sid);
+        }
+        // Any other end a link names is a Soul.
+        for (_, n) in nodes {
+            for (_, ends) in n.get("links").and_then(J::obj).unwrap_or(&[]) {
+                for e in strs(Some(ends)) {
+                    if !out.to_id.contains_key(&e) && !nodes.iter().any(|(k, _)| *k == e) {
+                        let sid = self.other(&e, false);
+                        out.add(&e, sid);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The other body or Soul the case calls `n`: made the first time, kept until the case is cleared. A body
+    /// stands a metre beside this one.
+    fn other(&mut self, n: &str, body: bool) -> Id {
+        let key = format!("{}{n}", if body { "body:" } else { "soul:" });
+        if let Some(id) = self.others.get(&key) {
+            return *id;
+        }
+        let Ok(id) = self.mint.mint() else {
+            return self.soul;
+        };
+        if body {
+            let kind = self.full[BODY].clone();
+            let b = self.body_at();
+            let at = Vec3::new(b.x, 0, b.z + if b.z > 0 { -1_000_000 } else { 1_000_000 });
+            let g = ground();
+            if let Err(e) = place(&mut self.c, &g, id, humanoid(), at.x / 1000, at.z / 1000) {
+                eprintln!("a case's body could not stand: {e}");
+            }
+            let made = self.write(vec![Change::Create {
+                node: id,
+                kind: name(&kind),
+                pose: pose_in(
+                    Frame {
+                        node: ground_id(),
+                        slot: None,
+                    },
+                    at,
+                ),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            }]);
+            if let Err(r) = made {
+                eprintln!("a case's body could not be made: {}: {}", r.name, r.detail);
+            }
+            self.look();
+        } else {
+            self.rules.souls.insert(id);
+        }
+        self.others.insert(key, id);
+        id
+    }
+
+    /// The case's scene set in the tree, for each of its things not set yet: where it is (in a body's hand, a
+    /// holder's slot or as a holder's child, else on the ground), and its links, exactly the case's.
+    fn arrange(&mut self, case: &J, ids: &J) -> Result<Names, String> {
+        let names = self.names(case, ids);
+        let nodes: Vec<(String, J)> = case
+            .get("state")
+            .and_then(|s| s.get("nodes"))
+            .and_then(J::obj)
+            .unwrap_or(&[])
+            .to_vec();
+        let fresh: Vec<(String, Id)> = names
+            .to_id
+            .iter()
+            .filter(|(n, id)| {
+                nodes
+                    .iter()
+                    .any(|(k, nd)| k == *n && nd.get("kind").is_some())
+                    && self.things.values().any(|t| t.id == **id)
+                    && !self.arranged.contains(id)
+            })
+            .map(|(n, id)| (n.clone(), *id))
+            .collect();
+        // A thing the tree will not hold where the case has it (a slot that does not admit it: what the case tests)
+        // is left where it stands, and the rules decide on the case's own scene for it, as before the tree.
+        let mut unset: BTreeSet<Id> = BTreeSet::new();
+        for (n, id) in &fresh {
+            // Where the case puts it.
+            let mut frame = Frame {
+                node: ground_id(),
+                slot: None,
+            };
+            for (holder, h) in &nodes {
+                let Some(hid) = names.to_id.get(holder).copied() else {
+                    continue;
+                };
+                let body = self.souls_of.contains_key(&hid);
+                let thing = hid == ground_id() || self.things.values().any(|t| t.id == hid);
+                if body
+                    && let Some((_, s)) = HANDS.iter().find(|(hand, _)| {
+                        h.get("hands").and_then(|x| x.get(hand)).and_then(J::str) == Some(n)
+                    })
+                {
+                    frame = Frame {
+                        node: hid,
+                        slot: Some(*s),
+                    };
+                }
+                for (slot, list) in h
+                    .get("slots")
+                    .and_then(J::obj)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter(|_| thing)
+                {
+                    let inside = strs(Some(list)).contains(n) || list.str() == Some(n);
+                    let kind = h.get("kind").and_then(J::str).unwrap_or_default();
+                    if let (true, Some(s)) =
+                        (inside, self.entry(kind).and_then(|e| slot_n(e, slot)))
+                    {
+                        frame = Frame {
+                            node: hid,
+                            slot: Some(s),
+                        };
+                    }
+                }
+                if thing
+                    && (strs(h.get("children")).contains(n) || strs(h.get("loose")).contains(n))
+                {
+                    frame = Frame {
+                        node: hid,
+                        slot: None,
+                    };
+                }
+            }
+            let now = self
+                .tree
+                .handle(*id)
+                .and_then(|h| self.tree.node(h))
+                .map(|x| Frame {
+                    node: x.parent().unwrap_or(ground_id()),
+                    slot: x.slot(),
+                });
+            if now != Some(frame) {
+                let Ok(t) = self.mint.mint() else {
+                    return Err("no id".into());
+                };
+                let bodies = transfer(&self.header, *id, Audience::Everyone, frame, t)
+                    .into_iter()
+                    .collect();
+                if let Err(r) = self.write_bodies(bodies) {
+                    eprintln!("{n} is not where the case has it: {}: {}", r.name, r.detail);
+                    unset.insert(*id);
+                    continue;
+                }
+            }
+            // Its links: exactly the case's, of each type its kind declares.
+            let kind = self
+                .things
+                .values()
+                .find(|t| t.id == *id)
+                .map(|t| t.kind.clone())
+                .unwrap_or_default();
+            let declared: Vec<String> = self
+                .entry(&kind)
+                .and_then(|e| e.get("links"))
+                .and_then(J::obj)
+                .unwrap_or(&[])
+                .iter()
+                .map(|(t, _)| t.clone())
+                .collect();
+            let node = nodes
+                .iter()
+                .find(|(k, _)| k == n)
+                .map(|(_, v)| v.clone())
+                .unwrap_or(J::Null);
+            let mut cs = Vec::new();
+            for t in declared {
+                let ty = replica::audience::link_type(&kind, &t);
+                let want: Vec<Id> = strs(node.get("links").and_then(|l| l.get(&t)))
+                    .iter()
+                    .filter_map(|e| names.to_id.get(e).copied())
+                    .collect();
+                let have: Vec<(Id, Id)> = self
+                    .tree
+                    .links_at(*id)
+                    .iter()
+                    .filter(|e| self.tree.ty(e).as_str() == ty)
+                    .map(|e| (e.link, e.other))
+                    .collect();
+                for (link, other) in &have {
+                    if !want.contains(other) {
+                        cs.push(Change::Unlink { link: *link });
+                    }
+                }
+                for end in want {
+                    if have.iter().any(|(_, o)| *o == end) {
+                        continue;
+                    }
+                    let Ok(link) = self.mint.mint() else {
+                        return Err("no id".into());
+                    };
+                    cs.push(Change::Link {
+                        link,
+                        ty: name(&ty),
+                        ends: [end, *id],
+                        owner: End::Second,
+                        audience: Audience::Everyone,
+                    });
+                }
+            }
+            if !cs.is_empty()
+                && let Err(r) = self.write(cs)
+            {
+                eprintln!("{n}'s links are not the case's: {}: {}", r.name, r.detail);
+                unset.insert(*id);
+            }
+        }
+        for (_, id) in fresh {
+            if !unset.contains(&id) {
+                self.arranged.insert(id);
+            }
+        }
+        for (id, n) in &names.of {
+            self.called.insert(*id, n.clone());
+        }
+        Ok(names)
+    }
+
+    /// The rules' state for the case: its own nodes, the placed ones' fields as they stand now, and where each of
+    /// its things, bodies and links is in the tree as it stands.
+    fn state_of(&self, case: &J, ids: &J, names: &Names) -> J {
         let mut state = case.get("state").cloned().unwrap_or(J::Obj(Vec::new()));
+        let call = |id: Id| -> String {
+            names.of.get(&id).cloned().unwrap_or_else(|| {
+                self.things
+                    .iter()
+                    .find(|(_, t)| t.id == id)
+                    .map_or_else(|| replica::world_model::show(id), |(k, _)| k.clone())
+            })
+        };
+        let mut extra: Vec<(String, J)> = Vec::new();
         if let J::Obj(top) = &mut state
             && let Some((_, J::Obj(nodes))) = top.iter_mut().find(|(k, _)| k == "nodes")
         {
@@ -382,9 +1166,161 @@ impl Stage {
                 let Some(t) = key.str().and_then(|k| self.things.get(k)) else {
                     continue;
                 };
-                if let Some((_, J::Obj(n))) = nodes.iter_mut().find(|(k, _)| k == nid) {
-                    set_key(n, "kind", J::Str(t.kind.clone()));
-                    set_key(n, "fields", J::Obj(t.fields.clone()));
+                let Some((_, J::Obj(n))) = nodes.iter_mut().find(|(k, _)| k == nid) else {
+                    continue;
+                };
+                set_key(n, "kind", J::Str(t.kind.clone()));
+                set_key(n, "fields", J::Obj(t.fields.clone()));
+                if !self.arranged.contains(&t.id) {
+                    continue;
+                }
+                let entry = self.entry(&t.kind);
+                let Some(h) = self.tree.handle(t.id) else {
+                    continue;
+                };
+                let kids: Vec<(Option<u64>, Id)> = self
+                    .tree
+                    .children(h)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|c| self.tree.node(*c))
+                    .map(|c| (c.slot(), c.id()))
+                    .collect();
+                let was = n
+                    .iter()
+                    .find(|(k, _)| k == "slots")
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or(J::Null);
+                let is_thing = |x: &str| {
+                    names
+                        .to_id
+                        .get(x)
+                        .is_some_and(|id| self.arranged.contains(id))
+                };
+                let slots: Vec<(String, J)> = (1u64..)
+                    .zip(
+                        entry
+                            .and_then(|e| e.get("slots"))
+                            .and_then(J::obj)
+                            .unwrap_or(&[]),
+                    )
+                    .filter_map(|(s, (sname, _))| {
+                        let mut inside: Vec<J> = kids
+                            .iter()
+                            .filter(|(k, _)| *k == Some(s))
+                            .map(|(_, c)| J::Str(call(*c)))
+                            .collect();
+                        let listed = was.get(sname);
+                        let kept = strs(listed)
+                            .into_iter()
+                            .chain(listed.and_then(J::str).map(str::to_owned));
+                        inside.extend(kept.filter(|x| !is_thing(x)).map(J::Str));
+                        (!inside.is_empty()).then(|| (sname.clone(), J::Arr(inside)))
+                    })
+                    .collect();
+                set_key(n, "slots", J::Obj(slots));
+                let links: Vec<(String, J)> = entry
+                    .and_then(|e| e.get("links"))
+                    .and_then(J::obj)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|(lt, _)| {
+                        let ty = replica::audience::link_type(&t.kind, lt);
+                        let ends: Vec<J> = self
+                            .tree
+                            .links_at(t.id)
+                            .iter()
+                            .filter(|e| self.tree.ty(e).as_str() == ty)
+                            .map(|e| J::Str(call(e.other)))
+                            .collect();
+                        (!ends.is_empty()).then(|| (lt.clone(), J::Arr(ends)))
+                    })
+                    .collect();
+                set_key(n, "links", J::Obj(links));
+                for (_, c) in kids {
+                    let named = names.of.contains_key(&c);
+                    if let Some((k, x)) = self
+                        .things
+                        .iter()
+                        .find(|(_, x)| x.id == c)
+                        .filter(|_| !named)
+                    {
+                        extra.push((
+                            k.clone(),
+                            obj(vec![
+                                ("kind", J::Str(x.kind.clone())),
+                                ("fields", J::Obj(x.fields.clone())),
+                            ]),
+                        ));
+                    }
+                }
+            }
+            // The bodies' hands as they stand.
+            for (nid, n) in nodes.iter_mut() {
+                let J::Obj(n) = n else { continue };
+                if !n.iter().any(|(k, _)| k == "hands") {
+                    continue;
+                }
+                let Some(b) = names.to_id.get(nid).copied() else {
+                    continue;
+                };
+                // Its Soul, as the rules read an `end: "actor"` link (T2's `soul` link of a body).
+                if let Some(soul) = self.souls_of.get(&b).and_then(|s| names.of.get(s)) {
+                    let mut links = n
+                        .iter()
+                        .find(|(k, _)| k == "links")
+                        .and_then(|(_, l)| l.obj())
+                        .unwrap_or(&[])
+                        .to_vec();
+                    if !links.iter().any(|(k, _)| k == "soul") {
+                        links.push(("soul".into(), J::Arr(vec![J::Str(soul.clone())])));
+                        set_key(n, "links", J::Obj(links));
+                    }
+                }
+                let held = self.held(b);
+                // A hand the case holds a thing in that is not set in the tree yet is left as the case has it.
+                let unset = n
+                    .iter()
+                    .find(|(k, _)| k == "hands")
+                    .and_then(|(_, h)| h.obj())
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|(_, v)| v.str())
+                    .any(|t| {
+                        names
+                            .to_id
+                            .get(t)
+                            .is_some_and(|id| !self.arranged.contains(id))
+                    });
+                if unset {
+                    continue;
+                }
+                let hands = HANDS
+                    .iter()
+                    .map(|(h, _)| {
+                        let t = held.iter().find(|(x, _)| x == h).map(|(_, t)| *t);
+                        ((*h).to_owned(), t.map_or(J::Null, |t| J::Str(call(t))))
+                    })
+                    .collect();
+                set_key(n, "hands", J::Obj(hands));
+                for (_, t) in held {
+                    if names.of.contains_key(&t) {
+                        continue;
+                    }
+                    if let Some((k, x)) = self.things.iter().find(|(_, x)| x.id == t) {
+                        extra.push((
+                            k.clone(),
+                            obj(vec![
+                                ("kind", J::Str(x.kind.clone())),
+                                ("fields", J::Obj(x.fields.clone())),
+                            ]),
+                        ));
+                    }
+                }
+            }
+            for (k, v) in extra {
+                if !nodes.iter().any(|(x, _)| *x == k) {
+                    nodes.push((k, v));
                 }
             }
         }
@@ -404,8 +1340,12 @@ impl Stage {
             .and_then(J::str)
             .unwrap_or_default()
             .to_owned();
-        // The world's check at commit: R2's rules on the case's state, the world seeing all (I3).
-        let state = self.state_of(case, ids);
+        let names = match self.arrange(case, ids) {
+            Ok(n) => n,
+            Err(e) => return err(e),
+        };
+        // The world's check at commit: R2's rules on the case's state as it stands, the world seeing all (I3).
+        let state = self.state_of(case, ids, &names);
         let asker = obj(vec![("sees", J::s("all"))]);
         let v = decide_parts(Some(&self.kinds), Some(act), Some(&state), Some(&asker));
         match v.get("verdict").and_then(J::str) {
@@ -451,13 +1391,19 @@ impl Stage {
         };
         let mut digest = [0u8; 32];
         digest[..8].copy_from_slice(&n.to_le_bytes());
+        let actor = case
+            .get("state")
+            .and_then(|s| s.get("actor"))
+            .and_then(J::str)
+            .unwrap_or("b1");
+        let body = names.to_id.get(actor).copied().unwrap_or(self.body);
         let intent = Intent {
             id,
             expiry: i64::MAX,
-            actor: Actor::Soul(self.body),
+            actor: Actor::Soul(self.souls_of.get(&body).copied().unwrap_or(self.soul)),
             digest,
         };
-        let (body, now) = (self.body, self.now);
+        let (now, from) = (self.now, self.log.len());
         let asked = {
             let (mut w, forms) = self.world();
             forms.commit_with(
@@ -479,7 +1425,15 @@ impl Stage {
             Ok(Asked::Started(_) | Asked::Running(_)) => {
                 let rid = format!("r{n}");
                 let last = self.forms.at(body);
-                self.runs.insert(rid.clone(), Run { intent: id, last });
+                self.runs.insert(
+                    rid.clone(),
+                    Run {
+                        intent: id,
+                        last,
+                        from,
+                        body,
+                    },
+                );
                 obj(vec![
                     ("verdict", J::s("started")),
                     ("rid", J::Str(rid.clone())),
@@ -577,13 +1531,137 @@ impl Stage {
         if self.ended(intent).is_none() {
             self.tick();
         }
-        let at = self.forms.at(self.body);
+        let body = self.runs.get(rid).map_or(self.body, |r| r.body);
+        let at = self.forms.at(body);
         let r = self.runs.get_mut(rid).expect("the run");
         let moving = at.is_some() && at == r.last;
         if at.is_some() {
             r.last = at;
         }
         self.progress_of(rid, moving)
+    }
+
+    /// The changes run `rid` wrote that are not sets, in the case's terms: what it reparented (a transfer's arrive)
+    /// and where to, what it made, removed, linked and unlinked.
+    fn changes_of(&self, rid: &str) -> J {
+        let Some(r) = self.runs.get(rid) else {
+            return J::Arr(Vec::new());
+        };
+        // By the case's own names where it has one, else by the gate's key.
+        let key = |id: Id| -> J {
+            if let Some(n) = self.called.get(&id) {
+                return J::Str(n.clone());
+            }
+            self.things.iter().find(|(_, t)| t.id == id).map_or_else(
+                || J::Str(replica::world_model::show(id)),
+                |(k, _)| J::Str(k.clone()),
+            )
+        };
+        let bodies: BTreeSet<Id> = self.souls_of.keys().copied().collect();
+        let place = |f: &Frame| -> J {
+            let hand = bodies
+                .contains(&f.node)
+                .then(|| {
+                    HANDS
+                        .iter()
+                        .find(|(_, s)| Some(*s) == f.slot)
+                        .map(|(h, _)| *h)
+                })
+                .flatten();
+            let slot = f.slot.and_then(|s| {
+                let t = self.things.values().find(|t| t.id == f.node)?;
+                let slots = self.entry(&t.kind)?.get("slots")?.obj()?;
+                slots
+                    .get(usize::try_from(s).ok()?.checked_sub(1)?)
+                    .map(|(n, _)| n.clone())
+            });
+            match (hand, slot) {
+                (Some(h), _) => obj(vec![("node", key(f.node)), ("hand", J::s(h))]),
+                (_, Some(s)) => obj(vec![("node", key(f.node)), ("slot", J::Str(s))]),
+                _ => obj(vec![("node", key(f.node))]),
+            }
+        };
+        let bare = |ty: &Name| {
+            ty.as_str()
+                .split_once(':')
+                .map_or(ty.as_str(), |(_, b)| b)
+                .to_owned()
+        };
+        // A link by its id, as it was made (by a form or the case's scene).
+        let made = |id: Id| {
+            self.log
+                .iter()
+                .rev()
+                .flat_map(|e| e.changes())
+                .find_map(|c| match &c.change {
+                    Change::Link { link, ty, ends, .. } if *link == id => Some((ty.clone(), *ends)),
+                    _ => None,
+                })
+        };
+        // An end that is a body's Soul is named as the case names it, by its body.
+        let end = |id: Id| {
+            let body = self
+                .souls_of
+                .iter()
+                .find(|(_, s)| **s == id)
+                .map(|(b, _)| *b);
+            key(body.unwrap_or(id))
+        };
+        let link = |what: &str, ty: &Name, ends: [Id; 2]| {
+            obj(vec![
+                ("change", J::s(what)),
+                ("node", key(ends[1])),
+                ("link", J::Str(bare(ty))),
+                ("end", end(ends[0])),
+            ])
+        };
+        // The engine's own links (a run's hold on what it uses, BUILDSAFE) are not the kind's: not read back.
+        let own = |ty: &Name| ty.as_str().starts_with("souls:") && ty.as_str() != "souls:owns";
+        let mut out = Vec::new();
+        for e in self.log[r.from.min(self.log.len())..]
+            .iter()
+            .filter(|e| e.envelope.cause == Cause::Intent(r.intent))
+        {
+            match &e.body {
+                Body::Transfer(TransferRec::Leave { node, pose, .. }) => out.push(obj(vec![
+                    ("change", J::s("reparent")),
+                    ("node", key(*node)),
+                    ("to", place(&pose.frame)),
+                ])),
+                Body::Changes(cs) => {
+                    for c in cs {
+                        out.push(match &c.change {
+                            Change::Create {
+                                node, kind, pose, ..
+                            } => obj(vec![
+                                ("change", J::s("create")),
+                                ("node", key(*node)),
+                                ("kind", J::Str(plain(kind.as_str()).to_owned())),
+                                ("to", place(&pose.frame)),
+                            ]),
+                            Change::Remove { node } => {
+                                obj(vec![("change", J::s("remove")), ("node", key(*node))])
+                            }
+                            Change::Reparent { node, pose, .. } => obj(vec![
+                                ("change", J::s("reparent")),
+                                ("node", key(*node)),
+                                ("to", place(&pose.frame)),
+                            ]),
+                            Change::Link { ty, .. } if own(ty) => continue,
+                            Change::Link { ty, ends, .. } => link("link", ty, *ends),
+                            Change::Unlink { link: id } => match made(*id) {
+                                Some((ty, _)) if own(&ty) => continue,
+                                Some((ty, ends)) => link("unlink", &ty, ends),
+                                None => obj(vec![("change", J::s("unlink"))]),
+                            },
+                            _ => continue,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        J::Arr(out)
     }
 
     fn wait(&mut self, rid: &str) -> J {
@@ -600,6 +1678,7 @@ impl Stage {
                 ("receipt", J::s("completed")),
                 ("ended", J::Str(n)),
                 ("now_us", J::Int(i128::from(self.now))),
+                ("changes", self.changes_of(rid)),
             ]),
             Some(n) => obj(vec![
                 ("verdict", J::s("no")),
@@ -629,6 +1708,7 @@ impl Stage {
     }
 
     /// A new process's world: the body where it stood, no driver, timer or move, and the forms from the log alone.
+    /// The tree is the store's, and stays.
     fn restart(&mut self) -> J {
         let b = self.body_at();
         let g = ground();
@@ -636,30 +1716,105 @@ impl Stage {
         if let Err(e) = place(&mut c, &g, self.body, humanoid(), b.x / 1000, b.z / 1000) {
             return err(e);
         }
+        let others: Vec<Id> = self
+            .souls_of
+            .keys()
+            .copied()
+            .filter(|o| *o != self.body)
+            .collect();
+        for o in others {
+            let p = self.c.body(o).map_or(b, |m| m.pose.position);
+            if let Err(e) = place(&mut c, &g, o, humanoid(), p.x / 1000, p.z / 1000) {
+                return err(e);
+            }
+        }
         self.c = c;
         self.surfaces = BTreeMap::from([(ground_id(), g)]);
         self.due = DueList::new();
         self.moves = Moves::new();
         self.forms = Forms::recover(&self.log, self.now);
-        self.amounts();
+        self.forms.kinds(&self.k3);
+        self.forms.zone(self.header.clone());
         self.look();
         self.flush();
         obj(vec![])
     }
 
-    /// The kinds' amount fields for F4's `by` sets (`Forms::kinds`), as worldd's `Acts::new` loads them.
-    fn amounts(&mut self) {
-        let mut loaded = replica::kinds::Kinds::default();
+    /// The kinds as K3 loads them (`Forms::kinds` reads their amount fields for F4's `by` sets, as worldd's
+    /// `Acts::new` loads them; the tree admits and pins them).
+    fn load_kinds(&mut self) {
+        let mut loaded = Kinds::default();
         for (_, entry) in self.kinds.obj().unwrap_or(&[]) {
             let mut e = entry.clone();
             if let J::Obj(o) = &mut e {
-                o.retain(|(k, _)| k != "forms");
+                o.retain(|(k, _)| k != "forms" && k != "roles");
+                // A timed field (a kettle's heat) or a schedule is not a field the kind format holds yet: left out,
+                // as worldd's `Acts` leaves a timed one out (#3715).
+                if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                    state.retain(|(_, f)| {
+                        !matches!(f.get("type").and_then(J::str), Some("timed" | "schedule"))
+                    });
+                }
             }
-            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
-                loaded.load(&[("entry", text.as_str())]);
+            // A section K3 does not read (areas, a vehicle's), or a field it refuses (an audience it does not know), is
+            // left out, one at a time, so the rest loads.
+            for _ in 0..8 {
+                match replica::kinds::entry::entry_to_kind(&e.to_json()) {
+                    Ok(text) => {
+                        let before = loaded.refused().len();
+                        loaded.load(&[("entry", text.as_str())]);
+                        let field = loaded
+                            .refused()
+                            .get(before)
+                            .and_then(|r| (r.section == Some(3)).then_some(r.field).flatten());
+                        let Some(f) = field else { break };
+                        let Some((_, J::Obj(state))) = (match &mut e {
+                            J::Obj(o) => o.iter_mut().find(|(k, _)| k == "state"),
+                            _ => None,
+                        }) else {
+                            break;
+                        };
+                        let had = state.len();
+                        state.retain(
+                            |(_, d)| !matches!(d.get("n"), Some(J::Int(n)) if *n == i128::from(f)),
+                        );
+                        if state.len() == had {
+                            break;
+                        }
+                    }
+                    Err(why) => match (why.strip_prefix("entry-section-not-read: "), &mut e) {
+                        (Some(section), J::Obj(o)) => {
+                            let section = section.trim().to_owned();
+                            o.retain(|(k, _)| *k != section);
+                        }
+                        _ => {
+                            eprintln!("not converted to a kind: {why}");
+                            break;
+                        }
+                    },
+                }
             }
         }
+        for r in loaded.refused() {
+            eprintln!("a kind refused (loaded again without it where it is one field): {r}");
+        }
         self.forms.kinds(&loaded);
+        self.k3 = loaded;
+    }
+
+    /// What the body holds, by the gate's keys.
+    fn holding(&self) -> J {
+        J::Arr(
+            self.held(self.body)
+                .into_iter()
+                .map(|(_, t)| {
+                    self.things.iter().find(|(_, x)| x.id == t).map_or_else(
+                        || J::Str(replica::world_model::show(t)),
+                        |(k, _)| J::Str(k.clone()),
+                    )
+                })
+                .collect(),
+        )
     }
 
     fn handle(&mut self, q: &J) -> J {
@@ -679,18 +1834,14 @@ impl Stage {
                 for (k, r) in &self.refused {
                     eprintln!("refused at import: {k}: {} ({})", r.name, r.detail);
                 }
-                self.amounts();
+                self.load_kinds();
+                self.build();
                 obj(vec![])
             }
             "place" => self.place(&s("kind")),
             "set" => {
-                let Some(t) = self.things.get_mut(&s("id")) else {
-                    return err("no such thing");
-                };
-                for (k, v) in q.get("fields").and_then(J::obj).unwrap_or(&[]) {
-                    set_key(&mut t.fields, k, v.clone());
-                }
-                obj(vec![])
+                let fields = q.get("fields").and_then(J::obj).unwrap_or(&[]).to_vec();
+                self.set(&s("id"), &fields)
             }
             "fields" => match self.things.get(&s("id")) {
                 Some(t) => obj(vec![("fields", J::Obj(t.fields.clone()))]),
@@ -711,6 +1862,14 @@ impl Stage {
                 obj(vec![("forms", J::Arr(forms))])
             }
             "remove" => self.remove(&s("id")),
+            "reset" => self.reset(),
+            "arrange" => match self.arrange(
+                q.get("case").unwrap_or(&none),
+                q.get("ids").unwrap_or(&none),
+            ) {
+                Ok(_) => obj(vec![]),
+                Err(e) => err(e),
+            },
             "begin" | "act" => {
                 let b = self.begin(
                     &s("id"),
@@ -735,9 +1894,10 @@ impl Stage {
                         "standing"
                     }),
                 ),
-                ("holding", J::Arr(Vec::new())),
+                ("holding", self.holding()),
             ]),
             "restart" => self.restart(),
+            "unapplied" => obj(vec![("entries", J::Int(i128::from(self.unapplied)))]),
             op => err(format!("unknown op {op}")),
         }
     }
