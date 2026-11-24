@@ -1095,6 +1095,9 @@ struct Clock {
     walks: BTreeMap<Id, acts::Walk>,
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
+    /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
+    /// world opened: one whose hold a restart ended is cancelled.
+    besides_checked: bool,
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
@@ -4448,18 +4451,37 @@ impl Clock {
             .filter(|a| !ids.contains(a))
             .copied()
             .collect();
+        let mut cancel: Vec<sim::orders::Order> = Vec::new();
         for a in gone {
             let Some((follower, order)) = self.follows.remove(&a) else {
                 continue;
             };
-            let Some(o) = b
-                .orders
-                .open(follower)
-                .filter(|o| o.intent == order)
-                .cloned()
-            else {
-                continue;
-            };
+            if let Some(o) = b.orders.open(follower).filter(|o| o.intent == order) {
+                cancel.push(o.clone());
+            }
+        }
+        // 0.135 R1: a hold does not outlast a restart, so an order beside a leader that the log brought back with no
+        // hold walking for it is cancelled, once, at the first tick.
+        if !self.besides_checked {
+            self.besides_checked = true;
+            let followers: BTreeSet<Id> = running.iter().map(|f| f.2).collect();
+            cancel.extend(
+                b.orders
+                    .opened()
+                    .filter(|o| {
+                        matches!(
+                            o.what,
+                            sim::orders::What::Follow {
+                                beside: Some(_),
+                                ..
+                            }
+                        ) && !followers.contains(&o.body)
+                    })
+                    .cloned(),
+            );
+        }
+        for o in cancel {
+            let follower = o.body;
             let Some(id) = Id::new(self.lineage, self.next_intent) else {
                 continue;
             };
@@ -4480,9 +4502,9 @@ impl Clock {
             };
             let _ = crate::orders::accept(b, &cancel, follower, id, now);
         }
-        for (a, leader, follower, soul) in running {
+        for (a, leader, follower, soul, beside) in running {
             let open = b.orders.open(follower).cloned();
-            let follows_leader = |o: &sim::orders::Order| matches!(o.what, sim::orders::What::Follow { leader: l, .. } if l == leader);
+            let follows_leader = |o: &sim::orders::Order| matches!(o.what, sim::orders::What::Follow { leader: l, beside: w, .. } if l == leader && w == beside);
             match self.follows.get(&a) {
                 Some(&(_, order)) => {
                     if open.as_ref().is_none_or(|o| o.intent != order) {
@@ -4506,7 +4528,10 @@ impl Clock {
                         verb: Name::new(skills::orders::FOLLOW)
                             .unwrap_or_else(|| unreachable!("a name")),
                         target: Some(Target::Node(leader)),
-                        parameters: BTreeMap::new(),
+                        // 0.135 R1: walking hand in hand, a place this wide beside the leader.
+                        parameters: beside
+                            .map(|w| BTreeMap::from([(3, Value::Uint(w.unsigned_abs()))]))
+                            .unwrap_or_default(),
                         sequence: 0,
                         basis: basis.clone(),
                         expiry: now.saturating_add(sim::orders::LONGEST),
@@ -4550,6 +4575,17 @@ impl Clock {
                 asks.push((id, m));
             }
         }
+        // 0.135 R1: a sit or a lie taken lets go of a hold, by either member (`Engine::walked`); it never leads.
+        let seated: Vec<(Id, Id)> = asks
+            .iter()
+            .filter(|(_, a)| {
+                matches!(
+                    a.ask,
+                    replica::move_check::Ask::Sit { .. } | replica::move_check::Ask::Lie { .. }
+                )
+            })
+            .map(|(id, a)| (a.body, *id))
+            .collect();
         let started = b.start(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
@@ -4561,7 +4597,26 @@ impl Clock {
         // 0.134 T2: a Soul holding hands that walks lets go, as its leave would (`Engine::walked`).
         if let Some(e) = self.engine.as_mut() {
             for (body, id) in walked {
-                e.walked(self.replica.tree(), &mut b.runner.controller, body, id, now);
+                e.walked(
+                    self.replica.tree(),
+                    &mut b.runner.controller,
+                    body,
+                    id,
+                    now,
+                    true,
+                );
+            }
+            for (body, id) in seated {
+                if !started.iter().any(|(i, r)| *i == id && r.is_err()) {
+                    e.walked(
+                        self.replica.tree(),
+                        &mut b.runner.controller,
+                        body,
+                        id,
+                        now,
+                        false,
+                    );
+                }
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
@@ -5822,6 +5877,7 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
+        besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
         edits,

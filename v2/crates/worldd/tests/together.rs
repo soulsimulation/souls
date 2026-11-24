@@ -23,12 +23,13 @@ use replica::activity::{ActivityKind, Role};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, read_id,
-    schema_hash,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, fixture_bytes,
+    read_id, schema_hash,
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
+use replica::moves::Place;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
@@ -36,6 +37,7 @@ use replica::tree::Rules as TreeRules;
 use replica::world_model::{Audience, Kind};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use worldd::answers::{self, BODIES, Config};
 use worldd::bodies::{Bodies, read_row};
@@ -383,7 +385,24 @@ fn bodies_on(indoor: bool) -> Result<Bodies, replica::effects::Refusal> {
     for p in placed {
         b.add_body(humanoid(), p)?;
     }
+    // 0.135 R1: a chair north-west of the Souls, out of every other test's way, facing +z.
+    let place = Place::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
+    b.add_place(PlaceAt {
+        thing: chair(),
+        place,
+        point: Vec3::new(-44_000_000, 450_000, 34_000_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: Vec::new(),
+    })?;
     Ok(b)
+}
+
+/// The chair's fixture (0.135 R1: a sit lets go of a hold).
+const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
+
+fn chair() -> Id {
+    Id::new(Scope([0x7e; 16]), 1).unwrap()
 }
 
 /// A scripted Soul on the world's socket: its stream, its id and its last sequence.
@@ -730,7 +749,8 @@ fn t1_a_declined_or_lapsed_handshake_moves_nobody() {
 }
 
 /// 0.134 T2: two Souls hold hands, standing, for as long as both stay. One leaving frees both hands; so does a walk
-/// sent by either, which leaves the activity as `activity:leave` does.
+/// sent by the one who does not lead (0.135 R1: the first to walk leads, and the other walks beside it), which leaves
+/// the activity as `activity:leave` does.
 #[test]
 fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
     let run = serve("hold");
@@ -763,19 +783,31 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
     assert_eq!(run.lefts(), 2, "the hold is over: Soul 1 left it too");
     let after_leave = run.ended().len();
 
-    // Held again, then Soul 1 walks 2 m off: its walk leaves the activity, and both hands come free.
+    // Held again, then Soul 1 walks 2 m: it leads (0.135 R1), so Soul 2 walks beside it, still holding. Then Soul 2
+    // walks off on its own: its walk leaves the activity, and both hands come free.
     let again = run.created(&a.offer(HOLD, 2).expect("offered again"));
     b.act("activity:accept", Some(again), &[])
         .expect("accepted again");
     std::thread::sleep(Duration::from_millis(1_000));
     let lefts = run.lefts();
-    let to = Value::Array(vec![
-        Value::Nint(39_999_999),
-        Value::Uint(0),
-        Value::Uint(32_000_000),
-    ]);
-    a.act("eden:walk", Some(ground()), &[(1, to)])
-        .expect("Soul 1 walks off");
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-40_000_000, 32_000_000))],
+    )
+    .expect("Soul 1 walks, leading");
+    assert_eq!(
+        run.ended().len(),
+        after_leave,
+        "the leader's walk lets nobody go"
+    );
+    assert_eq!(run.lefts(), lefts, "the hold goes on");
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-43_000_000, 32_000_000))],
+    )
+    .expect("Soul 2 walks off");
     let walked: Vec<(Id, String)> = run.ended().split_off(after_leave);
     assert_eq!(
         walked.iter().map(|(b, _)| *b).collect::<BTreeSet<_>>(),
@@ -789,7 +821,7 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
         "the walk left the activity as a leave does, and the hold is over for both"
     );
     println!(
-        "t2: held 1.5 s; a leave freed both hands; held again, a walk freed both ({} released)",
+        "t2: held 1.5 s; a leave freed both hands; held again, the leader walked holding, the other's walk freed both ({} released)",
         walked.len()
     );
     run.stop();
@@ -1428,5 +1460,287 @@ fn g3_a_leave_while_taking_places_ends_the_walk() {
     let later = run.last(2).0;
     println!("g3: left on its way at {stopped:?}; 1.5 s on, at {later:?}");
     assert_eq!(stopped, later, "the walk to its place ended with the leave");
+    run.stop();
+}
+
+impl Run {
+    /// The node each event named `name` in the log is about (its field 1), in order.
+    fn named(&self, name: &str) -> Vec<Id> {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == name)
+            .filter_map(|ev| read_id(&ev.fields[&1]).ok())
+            .collect()
+    }
+}
+
+/// Where Soul 2 stands from Soul 1 on the last body rows, µm: along the way Soul 1 last walked (from where it stood
+/// half a metre back along its own track, since its route need not run straight) and across it.
+fn beside(run: &Run) -> (i64, i64) {
+    let (l, f) = (run.last(1).0, run.last(2).0);
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let back = run
+        .rows()
+        .into_iter()
+        .filter(|(b, p)| *b == soul(1) && len(*p, l) >= 500_000)
+        .map(|(_, p)| p)
+        .next_back()
+        .expect("Soul 1 walked");
+    let heading = (l.x - back.x, l.z - back.z);
+    let (dx, dz) = (f.x - l.x, f.z - l.z);
+    let n = ((i128::from(heading.0).pow(2) + i128::from(heading.1).pow(2)).isqrt()).max(1);
+    let along =
+        (i128::from(dx) * i128::from(heading.0) + i128::from(dz) * i128::from(heading.1)) / n;
+    let across =
+        (i128::from(dx) * i128::from(heading.1) - i128::from(dz) * i128::from(heading.0)) / n;
+    (along as i64, across as i64)
+}
+
+/// 0.135 R1, walking hand in hand: Souls 1 and 2 hold hands (taking their places shoulder to shoulder, G3), then
+/// Soul 1 walks 6 m one way and 6 m square to it. Soul 1 leads: its walk lets nobody go, and Soul 2 walks beside it
+/// by its own order, at every tick either moved within 1.2 m of Soul 1 and never more than 0.2 m in a tick (walked,
+/// never placed); when Soul 1 stops after each leg, Soul 2 stands 0.5 m to its side (within 0.15 m), no more than
+/// 0.2 m ahead or behind of the way Soul 1 last walked (its route bends round what is in its way), both still holding hands. Then Soul 2's own walk lets go for both. Held again, Soul 1 leads
+/// and then leaves: both hands come free, Soul 2's order ends, and Soul 1's next walk leaves Soul 2 where it stood.
+#[test]
+fn r1_two_souls_walk_hand_in_hand_until_either_lets_go() {
+    let run = serve("hand-in-hand");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let hold = run.created(&a.offer(HOLD_AT, 2).expect("Soul 1 offers to hold hands"));
+    b.act("activity:accept", Some(hold), &[])
+        .expect("Soul 2 accepts");
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert_eq!(run.touches().len(), 2, "both hold a hand");
+    let lefts = run.lefts();
+    let start = run.last(1).0;
+    let from = run.rows().len();
+    // One leg along where Soul 2 stands from Soul 1 turned square (the way they face, or its back), then one square
+    // to it.
+    let f = run.last(2).0;
+    let (sx, sz) = (f.x - start.x, f.z - start.z);
+    let s = ((i128::from(sx).pow(2) + i128::from(sz).pow(2)).isqrt()).max(1);
+    let six = |c: i64| (i128::from(c) * 6_000_000 / s) as i64;
+    let legs = [(six(-sz), six(sx)), (-six(sx), -six(sz))];
+    let mut at = start;
+    let mut placed = Vec::new();
+    for (dx, dz) in legs {
+        at = Vec3::new(at.x + dx, 0, at.z + dz);
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(at.x, at.z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to {at:?}: {e}"));
+        std::thread::sleep(Duration::from_millis(1_500));
+        placed.push(beside(&run));
+    }
+    let (mut l, mut f, mut far, mut step) = (start, f, 0_i64, 0_i64);
+    for (body, p) in run.rows().into_iter().skip(from) {
+        if body == soul(1) {
+            l = p;
+        } else if body == soul(2) {
+            step = step.max(len(p, f));
+            f = p;
+        } else {
+            continue;
+        }
+        far = far.max(len(f, l));
+    }
+    println!(
+        "r1: walking hand in hand, at most {} mm apart and {} mm a tick; stopped after each leg, Soul 2 stood (along, across) {:?} mm",
+        far / 1000,
+        step / 1000,
+        placed
+            .iter()
+            .map(|p| (p.0 / 1000, p.1 / 1000))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        len(run.last(1).0, start) >= 8_000_000,
+        "Soul 1 walked both legs"
+    );
+    assert!(far <= 1_200_000, "beside, never trailing far: {far} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    for (along, across) in &placed {
+        assert!(
+            along.abs() <= 200_000,
+            "beside, not ahead or behind: {along} µm"
+        );
+        assert!(
+            (across.abs() - 500_000).abs() <= 150_000,
+            "0.5 m to the side: {across} µm"
+        );
+    }
+    assert!(
+        placed[0].1.signum() == placed[1].1.signum(),
+        "on the same side of Soul 1 through the turn: {placed:?}"
+    );
+    assert!(run.ended().is_empty(), "both still hold hands");
+    assert_eq!(run.lefts(), lefts, "nobody left");
+
+    // Soul 2 steps off on its own, 0.3 m: it lets go, for both.
+    let here = run.last(2).0;
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(here.x + 300_000, here.z))],
+    )
+    .expect("Soul 2 walks off");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.ended().len(), 2, "both hands come free");
+    assert_eq!(run.lefts(), lefts + 2, "the hold is over for both");
+
+    // Back beside Soul 1 (a walk of a Soul in no hold), held again; Soul 1 leads, then leaves.
+    b.act("eden:walk", Some(ground()), &[(1, walk_to(here.x, here.z))])
+        .expect("Soul 2 steps back");
+    let again = run.created(&a.offer(HOLD_AT, 2).expect("offered again"));
+    b.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    std::thread::sleep(Duration::from_millis(1_500));
+    let ended = run.named("souls:order-ended").len();
+    let p = run.last(1).0;
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(p.x, p.z - 3_000_000))],
+    )
+    .expect("Soul 1 leads");
+    let orders = run.named("souls:order").len();
+    let lefts = run.lefts();
+    a.act("activity:leave", Some(again), &[])
+        .expect("Soul 1 lets go");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the hold is over for both");
+    assert_eq!(
+        run.named("souls:order-ended").len(),
+        ended + 1,
+        "Soul 2's order beside Soul 1 ended with it"
+    );
+    let stood = run.last(2).0;
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(p.x + 3_000_000, p.z - 3_000_000))],
+    )
+    .expect("Soul 1 walks alone");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        len(run.last(2).0, stood) <= 10_000,
+        "Soul 2 stays where it stood: {:?} then {:?}",
+        stood,
+        run.last(2).0
+    );
+    assert_eq!(
+        run.named("souls:order").len(),
+        orders,
+        "no order after the hold"
+    );
+    println!(
+        "r1: Soul 2's walk let go for both; held again, Soul 1's leave let go and ended Soul 2's order"
+    );
+    run.stop();
+}
+
+/// 0.135 R1: a hold walking hand in hand does not outlast a restart. After the leader's walk (an act is answered once
+/// its walk is done), with Soul 2's order beside it open, the world stops; after it starts again from its log, the
+/// hold ends for both at once (its hands came apart: moves are not stored), Soul 2's order beside Soul 1, which the
+/// log brought back, is cancelled, and the same two can hold hands again: neither is left stuck.
+#[test]
+fn r1_a_restart_ends_a_hold_hand_in_hand_for_both() {
+    let run = serve("hand-restart");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let hold = run.created(&a.offer(HOLD, 2).expect("offered"));
+    b.act("activity:accept", Some(hold), &[]).expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_000));
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-40_000_000, 32_000_000))],
+    )
+    .expect("Soul 1 leads");
+    std::thread::sleep(Duration::from_millis(300));
+    let orders = run.named("souls:order");
+    assert_eq!(orders.len(), 1, "Soul 2's own order beside Soul 1");
+    let lefts = run.lefts();
+    let Run { world, store, path } = run;
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let run = serve_on("hand-restart-2", store);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "the hold ended for both at the restart"
+    );
+    assert_eq!(
+        run.named("souls:order-ended"),
+        orders,
+        "the order beside Soul 1 was cancelled"
+    );
+    let touches = run.touches().len();
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    a.2 = 100;
+    b.2 = 100;
+    let again = run.created(&a.offer(HOLD, 2).expect("offered after the restart"));
+    b.act("activity:accept", Some(again), &[])
+        .expect("accepted after the restart");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        run.touches().len(),
+        touches + 2,
+        "the next hold plays both moves: neither was stuck"
+    );
+    println!("r1: a restart ended the hold for both and cancelled the order; the next hold played");
+    run.stop();
+}
+
+/// 0.135 R1: a sit (or a lie, the same path) by either Soul lets go of a hold, for both. Souls 1 and 2 hold hands and
+/// Soul 1 walks to the chair, leading, Soul 2 beside it; Soul 1's sit then frees both hands and both leave the hold.
+/// Soul 1 rises, Soul 2 comes back beside it, and they hold hands standing (nobody leads); Soul 1 sits again, and that
+/// lets go for both too.
+#[test]
+fn r1_a_sit_by_either_lets_go_of_a_hold() {
+    let run = serve("hand-sit");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let hold = run.created(&a.offer(HOLD, 2).expect("offered"));
+    b.act("activity:accept", Some(hold), &[]).expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let lefts = run.lefts();
+    a.act("eden:walk", Some(chair()), &[])
+        .expect("Soul 1 leads to the chair");
+    assert_eq!(run.lefts(), lefts, "walking hand in hand");
+    a.act("eden:sit", Some(chair()), &[]).expect("Soul 1 sits");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the leader's sit let go, for both");
+    assert_eq!(run.ended().len(), 2, "both hands came free");
+
+    a.act("eden:rise", None, &[]).expect("Soul 1 rises");
+    let p = run.last(1).0;
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(p.x - 500_000, p.z))],
+    )
+    .expect("Soul 2 comes back beside");
+    let again = run.created(&a.offer(HOLD, 2).expect("offered again"));
+    b.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let lefts = run.lefts();
+    a.act("eden:sit", Some(chair()), &[])
+        .expect("Soul 1 sits, standing hand in hand");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "a sit in a standing hold let go, for both"
+    );
+    assert_eq!(run.ended().len(), 4, "both hands came free again");
+    println!("r1: a sit by the leader, and a sit in a standing hold, each let go for both");
     run.stop();
 }

@@ -33,12 +33,9 @@ To see: `view` (your sight as words; `--out <file.jpg>` a picture, `--map` from 
 To speak: `say "<words>"` (heard near you), `shout "<words>"` (farther), `say --to <name> --gesture <g> "<words>"` (turns or gestures toward them), `whisper <body id> "<words>"` (them alone). To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which. Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
 
 To touch another Soul, offer it; it starts only if they accept (`wait` shows `offered` with the touch and its id):
-- `together offer handshake <their body id>`: you shake hands, standing about 0.6 m apart.
-- `together offer hug <their body id>`: you hug, standing about 0.6 m apart.
-- `together offer high-five <their body id>`: you high-five, standing about 0.6 m apart.
-- `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart, until either of you leaves or walks.
+- `together offer handshake <their body id>`, or the same with `hug`, `high-five` or `fist-bump`: you do it standing about 0.6 m apart.
+- `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart; whoever walks first leads, the other beside. It ends when either leaves, sits or lies, the other walks or acts alone, or the world restarts.
 - `together offer follow <their body id>`: once they accept, you follow along their way, 1 to 2.5 m behind. It ends after an hour, when either of you leaves, or when you do anything else.
-- `together offer fist-bump <their body id>`: you bump fists, standing about 0.6 m apart.
 - `together offer harvest <their body id>`: you pick into one basket together; then you `act eden:pick:<its id>`, they `eden:pick_too`.
 - `together offer dance <body id> [<body id> ...]`: up to seven dance with you, everyone starting on one beat, until each leaves or walks.
 Offered one, `together accept <id>` or `together decline <id>`.
