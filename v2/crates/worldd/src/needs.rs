@@ -331,7 +331,7 @@ pub fn check(
     for (name, a) in args {
         let v = match a {
             Arg::Name(n) => Value::s(n),
-            Arg::Node(id) => {
+            Arg::Node(id) | Arg::Slot(id, _) => {
                 s.add(*id);
                 Value::Str(key(*id))
             }
