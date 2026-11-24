@@ -28,6 +28,8 @@
 //! - **A thing placed new** ([`stand_as_kinds`]). A place of a boot kind carries no solids of its own (the old page
 //!   and `souls-god place` send none), so before the check it is given its kind's walk outline from its entry's
 //!   bounds: G2 then refuses it on a standing Soul (`edit.would-bury`), as it refuses an existing thing moved there.
+//!   It is given its kind's slot points too, as the import gives a seeded thing's, so a stand or a bay placed live
+//!   holds its parts at those points and a crew can take and seat them (`part-pose` otherwise).
 //!
 //! Not here: a body partway across a link on the tree (the tree holds no crossing), other body sizes, the stretch of
 //! a walker's path between it and its next corner (it walks round what is put there).
@@ -43,7 +45,7 @@ use replica::tree::Rules;
 use replica::world_model::{Kind, plain};
 use sim::edit::safety::Who;
 use sim::ground::Versions;
-use sim::ground::scene::{F_SOLIDS, GROUND};
+use sim::ground::scene::{F_SLOTS, F_SOLIDS, GROUND};
 use sim::links::Doors;
 use sim::routes::HANDS;
 use sim::walk::town::{Basis, Rebuilt, Town};
@@ -75,14 +77,35 @@ pub fn open_ground(copy: &Replica) -> Option<Id> {
 /// (N1's field 12), unless the batch gives its own. Without it a placed thing has no footprint when the edit is
 /// checked, so G2 would let it land on a standing Soul; with it, G2 judges what it would bury before it commits
 /// (`edit.would-bury`, naming the Soul) and walkers go round it, as `replica::edit::check` does for a creator's kind.
-pub fn stand_as_kinds(edit: &mut replica::edit::Edit, entries: &Json) {
+///
+/// Its slot points (field 13) too, unless the batch gives its own, as the import writes a seeded thing's
+/// ([`replica::kinds::defined::slots_of`]): without them a part on a stand or in a bay placed live has no point to
+/// stand from, so a crew's `part:take` of it is refused `part-pose` and a `part:put` into it `slot.unknown`. A bay
+/// (`structure`'s: its slots take standing and bearing parts) gets no walk box: it is the frame its seated parts make,
+/// and they cut the ground once seated, as in a bay seeded from a world's facts; a box would keep its builders out.
+pub fn stand_as_kinds(
+    edit: &mut replica::edit::Edit,
+    entries: &Json,
+    structure: &sim::structure::Structure,
+) {
     for op in &mut edit.ops {
-        if let replica::edit::Op::Place { kind, fields, .. } = op
-            && !fields.contains_key(&F_SOLIDS)
-            && let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields))
-            && let Some(solids) = replica::kinds::defined::solids_of(entry)
+        let replica::edit::Op::Place { kind, fields, .. } = op else {
+            continue;
+        };
+        let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields)) else {
+            continue;
+        };
+        let (solids, slots) = (
+            replica::kinds::defined::solids_of(entry),
+            replica::kinds::defined::slots_of(entry),
+        );
+        if let Some(s) = solids
+            && !structure.is_bay(kind.as_str())
         {
-            fields.insert(F_SOLIDS, solids);
+            fields.entry(F_SOLIDS).or_insert(s);
+        }
+        if let Some(s) = slots {
+            fields.entry(F_SLOTS).or_insert(s);
         }
     }
 }
