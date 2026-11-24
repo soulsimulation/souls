@@ -471,14 +471,17 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
 /// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
 /// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
 /// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
-/// (`held_by_actor`: a cup's sip, a kettle's pour) does not walk.
+/// (`held_by_actor` with no `thing`: a cup's sip, a kettle's pour) does not walk; one that needs a thing argument in
+/// the hand (a sink's `wash` of a held bowl) still walks to its own point (0.135 E20).
 fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
     let held = f
         .get("needs")
         .and_then(Value::arr)
         .unwrap_or(&[])
         .iter()
-        .any(|n| n.get("need").and_then(Value::str) == Some("held_by_actor"));
+        .any(|n| {
+            n.get("need").and_then(Value::str) == Some("held_by_actor") && n.get("thing").is_none()
+        });
     let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
         return Ok(());
     };
@@ -1897,11 +1900,13 @@ impl Runner {
                     }],
                 };
                 self.planning = false;
-                Next::Walk(Box::new(Route::new(
-                    legs,
-                    self.limits.speed,
-                    self.limits.tick,
-                )))
+                let mut walk = Route::new(legs, self.limits.speed, self.limits.tick);
+                // A walk right before a move ends on the point the move is reached from, as a walk to a granted
+                // standing spot does (0.135 E20): AT_GOAL short of it, the move's point can be out of its reach.
+                if matches!(self.steps.get(self.at + 1), Some(Step::Move { .. })) {
+                    walk.arrive = crate::route::AT_SPOT;
+                }
+                Next::Walk(Box::new(walk))
             }
             Step::Move { name: mv, at, on } => {
                 self.timer =

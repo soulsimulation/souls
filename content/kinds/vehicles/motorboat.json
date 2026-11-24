@@ -5,7 +5,8 @@
   "state": {"running":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "jetty": {"role":"stand","at_mm":[-1900,0,100],"yaw_mdeg":90000},
-    "key": {"role":"contact","at_mm":[350,800,650]}
+    "key": {"role":"contact","at_mm":[350,800,650]},
+    "wheel": {"role":"contact","at_mm":[450,900,400]}
   },
   "slots": {
     "helm": {"admits":"body","posture":"sit","most":1,"at_mm":[350,680,100],"stand":"jetty"},
@@ -53,7 +54,7 @@
         "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [{"need":"state","field":"running","is":true}],
-      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "steps": [{"step":"move","move":"steer","at":"wheel","toward":{"arg":"toward"}}],
       "effects": []
     }
   },

@@ -223,3 +223,37 @@ pub fn targets(entry: &Json, form: &str, args: &Args) -> Result<(Json, Option<Id
     }
     Ok((e, thing))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 0.135 E20: a steer whose `at` names the thing's control point keeps it, so the seat's reach to that point
+    /// decides ([`in_slot`]) and `toward` is only the heading; a move `toward` a thing argument with no `at` (a swing's
+    /// push toward the swinger) still reaches that thing ([`AT_ARG`]).
+    #[test]
+    fn e20_a_steer_at_its_control_keeps_the_point_and_a_push_toward_reaches_the_thing() {
+        let entry = replica::rules::json::parse(
+            r#"{"kind":"t:x","points":{"tiller":{"at_mm":[0,900,-1500]}},"forms":{
+              "push":{"steps":[{"step":"move","move":"press","toward":{"arg":"who"}}]},
+              "steer":{"steps":[{"step":"move","move":"steer","at":"tiller","toward":{"arg":"who"}}]}}}"#,
+        )
+        .expect("JSON");
+        let thing = Id::new(replica::ids::Scope([7; 16]), 9).expect("an id");
+        let args = Args::from([("who".to_owned(), Arg::Node(thing))]);
+        let at = |form: &str| {
+            let (e, t) = targets(&entry, form, &args).expect("resolves");
+            let at = e
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("steps"))
+                .and_then(Json::arr)
+                .and_then(|s| s.first()?.get("at"))
+                .and_then(Json::str)
+                .map(str::to_owned);
+            (at, t)
+        };
+        assert_eq!(at("push"), (Some(AT_ARG.to_owned()), Some(thing)));
+        assert_eq!(at("steer"), (Some("tiller".to_owned()), None));
+    }
+}

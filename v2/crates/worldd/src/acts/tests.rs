@@ -1317,7 +1317,7 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
     let reach = 600_000;
     let mut by_seat = BTreeMap::new();
-    for (body, thing, slot, point) in riders {
+    for &(body, thing, slot, point) in &riders {
         let d = sight
             .distance(
                 body,
@@ -1337,5 +1337,26 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
         if let Some(was) = by_seat.insert(slot, d) {
             assert_eq!(was, d, "{slot}: the same from another place");
         }
+    }
+    // 0.135 E20: a steer is at the thing's control point (the motorboat's wheel, the narrowboat's tiller), so the seat
+    // decides: the helm and the seat beside it reach the wheel, the back seats do not; only the stern reaches the
+    // tiller, not the berth or the galley 7 m off. The steer move's reach (content/moves/steer.json).
+    for &(body, thing, slot, point) in &riders {
+        let control = if point == "key" { "wheel" } else { "tiller" };
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(control).unwrap(),
+            )
+            .expect("measured");
+        println!("E20: seated in {slot}, {d} µm from the {control}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "front" | "stern"),
+            "{slot} to the {control}: {d} µm"
+        );
     }
 }

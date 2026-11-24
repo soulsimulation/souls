@@ -57,6 +57,8 @@ struct Fake {
     timers: BTreeMap<Id, (Micros, Name)>,
     /// The node is in the body's hand (C25): the body is its parent.
     held: bool,
+    /// Where the body stands, when a check walks it.
+    me: Option<Vec3>,
 }
 
 impl Host for Fake {
@@ -67,6 +69,15 @@ impl Host for Fake {
         body()
     }
     fn read(&self, n: Id) -> Option<Seen> {
+        if n == body() {
+            return self.me.map(|position| Seen {
+                id: body(),
+                kind: Name::new("test:body").expect("a name"),
+                parent: None,
+                position,
+                fields: BTreeMap::new(),
+            });
+        }
         (n == node()).then(|| Seen {
             id: node(),
             kind: Name::new("test:node").expect("a name"),
@@ -680,4 +691,57 @@ fn c34_a_move_after_a_walk_to_an_area_approaches_its_point_first() {
         2,
         "after a walk to a point: as before"
     );
+}
+
+/// 0.135 E20: a form's walk right before a move ends on its stand point, not `AT_GOAL` short of it, so the move's
+/// point is as far as the entry puts it; any other walk is done within `AT_GOAL`. A form that needs a thing argument
+/// in the hand (a sink's wash of a held bowl) still walks to its own point first; one whose own thing is held does not.
+#[test]
+fn e20_a_walk_before_a_move_ends_on_its_point_and_a_held_argument_still_approaches() {
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x",
+        "points":{"front":{"role":"stand","at_mm":[0,0,900]},"tap":{"role":"contact","at_mm":[0,1000,0]}},
+        "forms":{
+          "press":{"steps":[{"step":"walk_to","point":"front"},{"step":"move","move":"press","at":"tap"}],"effects":[]},
+          "stand":{"steps":[{"step":"walk_to","point":"front"},{"step":"wait","us":1000000}],"effects":[]},
+          "wash":{"needs":[{"need":"held_by_actor","thing":{"arg":"thing"}}],
+            "steps":[{"step":"move","move":"touch","at":"tap"}],"effects":[]},
+          "sip":{"needs":[{"need":"held_by_actor"}],"steps":[{"step":"move","move":"touch","at":"tap"}],"effects":[]}}}"#,
+    )
+    .expect("JSON");
+    // 200 mm short of the stand point, on the side the body came from.
+    let short = Vec3::new(0, 0, 1_100_000);
+    let first = |form: &str| {
+        let mut h = Fake {
+            me: Some(short),
+            ..Fake::default()
+        };
+        let mut r = Runner::new(
+            bind(&entry, form).expect("binds"),
+            node(),
+            Limits::default(),
+        );
+        match r.wake(&mut h, Woke::Start) {
+            Next::Walk(mut walk) => walk.step(&mut h),
+            _ => panic!("{form}: a walk first"),
+        }
+    };
+    assert_eq!(
+        first("stand"),
+        Progress::Done,
+        "any other walk: done within AT_GOAL"
+    );
+    assert_ne!(
+        first("press"),
+        Progress::Done,
+        "before a move: on to the stand point"
+    );
+    let walks = |form: &str| {
+        matches!(
+            bind(&entry, form).expect("binds")[0],
+            Step::WalkTo { approach: true, .. }
+        )
+    };
+    assert!(walks("wash"), "a held argument: the walk to its own point");
+    assert!(!walks("sip"), "its own thing held: no walk");
 }
