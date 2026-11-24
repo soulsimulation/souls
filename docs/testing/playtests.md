@@ -51,6 +51,56 @@ before for existing scenarios; a scripted direction entry with `seat: "*"` is no
 A frozen snapshot needs no genesis beside it. After boot the runner checks that the world is physically the
 snapshot it seeded, ignoring only Soul-body defs that no entity uses, because boot drops those.
 
+### On the new engine
+
+The parts above speak the old world. Their new-engine versions sit beside them (0.135 P1), and the old ones stay until
+each new one does the same job:
+
+- `tools/playtest/arena/new-engine/world.mjs`: a playtest world is a committed template (`worlds/templates/*.json`) exported
+  with `v2/tools/import-eden/export/export.ts --template` and served by `v2/tools/dev/run.sh --facts`. Nothing starts
+  `apps/server`.
+- `tools/playtest/arena/new-engine/seat.mjs`: a seat is paired as `v2/client/served/e2e` pairs one (the new client's
+  `pair.mjs`, approved by a test person), joins with `life:join`, and acts only through `v2/client/src/cli/souls.mjs`.
+- `tools/playtest/observer/new-engine/`: the observer plays the public stream with the old page's own stream worker, and reads
+  the gateway's answers to each seat's intents through `souls.mjs events`.
+
+`soul-eval.mjs run --battery <b> --seat scripted --engine v2` runs a battery there, each item on its own world
+(`arena/new-engine/battery.mjs`). An item's `board` places a notice board in its genesis, and its `calendar` is posted
+there by a second scripted Soul before the instruction; `calendarInterest` is judged by the notice's `interested`
+links in the public stream.
+
+`node tools/playtest/arena/new-engine/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
+`.local/playtest-v2/` and prints one line per check.
+
+`node tools/playtest/arena/new-engine/old-page.mjs [--template <file>]` brings up the old page (apps/web) on such a world
+(0.135 P5; the proof skill's section 1). To stage a scene and record it there, uncut and at real speed, from a camera
+the scene names (follow a Soul, a fixed pose, or a path of poses):
+
+```sh
+node tools/launch-video/scene.mjs tools/launch-video/scenes/hamlet-stroll.json [--size 1280x720] [--keep]
+```
+
+A scene file names its genesis and the things it places, its Souls (paired and joined as above), commands before the take
+and beats during it (the new client's words), and the camera; the head of `tools/launch-video/scene.mjs` has its format
+and known limits. `tools/launch-video/capture.mjs` records one take of any local world page (the canvas and its sound),
+including a past span of its history (`--shot` with a range). A scene's camera may also be `{"plan": {...}}`: the scene
+plays, `tools/launch-video/shoot.mjs` plans the best move with `@souls/camera`'s pathfinder (`packages/camera`) from the
+world's own folder (its solids from `facts.json`, its people from its history), and the take replays the span with that
+camera (`tools/launch-video/scenes/hamlet-planned.json`). `shoot.mjs --recording <scene dir> --describe` shows who moves
+when, for choosing a shot by hand.
+
+The same command records a past span of a world's history on its old page, at ×1 to ×8, from a fixed or path camera,
+or a follow or planned one. A planned camera reads the world's people from its public history and its solids from its
+public stream, over the network, as soul.game serves a world (0.135 P7), so it serves a live world's highlights;
+`--world-dir` reads a local world's folder instead:
+
+```sh
+node tools/launch-video/scene.mjs --span --page <old page url> --from '<old page url>#t=<µs>' --to '<…#t=<µs>>' \
+  --camera '{"follow":"<body id>"}' --speed 2
+```
+
+`--from first` (a local world's folder) starts at the first moment the world ran.
+
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds
 run from (it needs a built `apps/web/dist`). Pass it explicitly, and pass `--out` or `--runs-root` for where runs go.
 

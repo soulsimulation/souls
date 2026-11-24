@@ -432,3 +432,251 @@ fn a_walker_never_steps_into_a_standing_body() {
         "it goes around and arrives"
     );
 }
+
+impl Walk {
+    /// A body standing at `at` on `node`, with no walk.
+    fn stand(&mut self, who: Id, node: Id, at: Vec3) {
+        let body: Body = self.town.surfaces[&node]
+            .place(who, Frame { node, slot: None }, at, Quat::IDENTITY)
+            .unwrap();
+        self.runner.add_body(common::humanoid(), body).unwrap();
+    }
+}
+
+/// A2-2: five bodies standing in a row across a walker's line on the open square, 0.35 m apart, so no body fits
+/// between them: the walker finds a way round the row, never steps into a body's space, and arrives.
+#[test]
+fn a_walker_goes_round_a_row_of_standing_bodies() {
+    let (t, nodes) = town();
+    let ground = nodes["ground"];
+    let mut w = Walk::new(t);
+    let (west, mid, east) = (
+        Vec3::new(-40_000_000, 0, 30_000_000),
+        Vec3::new(-35_000_000, 0, 30_000_000),
+        Vec3::new(-30_000_000, 0, 30_000_000),
+    );
+    for k in -2..=2i64 {
+        w.stand(
+            id((12 + k) as u64),
+            ground,
+            Vec3::new(mid.x, 0, mid.z + k * 350_000),
+        );
+    }
+    w.add(id(1), ground, west, ground, east);
+    w.run(600);
+    let ended = w.ended();
+    println!("ended: {ended:?}; nearest {} mm", w.nearest / 1000);
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+    let (at, how) = ended.get(&id(1)).cloned().expect("the walk ends");
+    assert_eq!(how, "Done", "it goes round the row and arrives");
+    assert!(
+        at <= 12_000_000,
+        "within 12 s (10 m at 1.4 m/s is 7 s): {at} µs"
+    );
+}
+
+/// A2-2: bodies standing in a row beside a doorway's mouth, across the line a walker takes to it from the open ground:
+/// the walker goes round them, crosses, never steps into their space, and arrives in the room.
+#[test]
+fn a_walker_goes_round_a_body_standing_beside_a_doorway() {
+    let (t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let h = t.tree.handle(nodes["door-building-front"]).unwrap();
+    let door = replica::effects::read_id(
+        t.tree
+            .node(h)
+            .unwrap()
+            .fields()
+            .get(&import_eden::F_DOORWAY)
+            .unwrap(),
+    )
+    .unwrap();
+    let b = t.buildings.iter().find(|b| b.link(door).is_some()).unwrap();
+    let l = b.link(door).unwrap();
+    let (out, inn, lo, li) = match (l.ends[0], l.ends[1]) {
+        (Some(e0), Some(e1)) if e0.floor == t.ground => (e0, e1, l.line[0], l.line[1]),
+        (Some(e0), Some(e1)) => (e1, e0, l.line[1], l.line[0]),
+        _ => panic!("two ends"),
+    };
+    // Outwards on the ground, and inwards on the floor, along the doorway's line.
+    let (wo, wi) = (b.place.point(lo).unwrap(), b.place.point(li).unwrap());
+    let unit = |a: Vec3, b: Vec3| {
+        let l = common::dist(Vec3::new(a.x, 0, a.z), Vec3::new(b.x, 0, b.z));
+        [(b.x - a.x) * 1000 / l, (b.z - a.z) * 1000 / l]
+    };
+    let o = unit(wi, wo);
+    let mouth = out.middle();
+    let from = Vec3::new(mouth.x + o[0] * 4_000, mouth.y, mouth.z + o[1] * 4_000);
+    let i = unit(lo, li);
+    let inside = inn.middle();
+    let goal = Vec3::new(inside.x + i[0] * 3_000, inside.y, inside.z + i[1] * 3_000);
+    // Three standing in a row across the walker's line, 0.6 m out from the mouth, 0.35 m apart, the middle one
+    // 0.15 m to one side of the line.
+    let mut w = Walk::new(t);
+    for k in -1..=1i64 {
+        let side = 150 + k * 350;
+        let at = Vec3::new(
+            mouth.x + o[0] * 600 - o[1] * side,
+            mouth.y,
+            mouth.z + o[1] * 600 + o[0] * side,
+        );
+        w.stand(id((21 + k) as u64), ground, at);
+    }
+    let legs = w.add(id(1), ground, from, f0, goal);
+    assert_eq!(
+        legs[0].link,
+        Some(door),
+        "its first leg crosses the front doorway"
+    );
+    w.run(800);
+    let ended = w.ended();
+    let me = *w.runner.controller.body(id(1)).unwrap();
+    println!(
+        "ended: {ended:?}; nearest {} mm; on {}",
+        w.nearest / 1000,
+        show(node_of(&me))
+    );
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+    let (at, how) = ended.get(&id(1)).cloned().expect("the walk ends");
+    assert_eq!(how, "Done", "it goes round them, crosses and arrives");
+    assert_eq!(node_of(&me), f0, "in the building");
+    assert!(at <= 15_000_000, "within 15 s: {at} µs");
+}
+
+/// 0.133 A2-4: a crowded wide doorway is taken in turns. Six walkers go in through the front doorway (2.4 m, not
+/// narrow) while six come out: its mouth crowds, so each walker marks itself waiting for it and its owner lets them
+/// through a direction at a time. All twelve arrive, none ever in another's space.
+#[test]
+fn a_crowded_wide_doorway_is_taken_in_turns() {
+    let (t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let h = t.tree.handle(nodes["door-building-front"]).unwrap();
+    let door = replica::effects::read_id(
+        t.tree
+            .node(h)
+            .unwrap()
+            .fields()
+            .get(&import_eden::F_DOORWAY)
+            .unwrap(),
+    )
+    .unwrap();
+    let b = t.buildings.iter().find(|b| b.link(door).is_some()).unwrap();
+    let l = b.link(door).unwrap().clone();
+    assert!(!sim::links::turns::narrow(&l), "a wide doorway");
+    let (out, inn, lo, li) = match (l.ends[0], l.ends[1]) {
+        (Some(e0), Some(e1)) if e0.floor == t.ground => (e0, e1, l.line[0], l.line[1]),
+        (Some(e0), Some(e1)) => (e1, e0, l.line[1], l.line[0]),
+        _ => panic!("two ends"),
+    };
+    let (wo, wi) = (b.place.point(lo).unwrap(), b.place.point(li).unwrap());
+    let unit = |a: Vec3, b: Vec3| {
+        let l = common::dist(Vec3::new(a.x, 0, a.z), Vec3::new(b.x, 0, b.z));
+        [(b.x - a.x) * 1000 / l, (b.z - a.z) * 1000 / l]
+    };
+    let (o, i) = (unit(wi, wo), unit(lo, li));
+    // Two rows of three, 0.7 m apart, 1.5 m and 2.2 m out from each mouth.
+    let spot = |m: Vec3, d: [i64; 2], k: i64| {
+        let (along, across) = (1_500 + (k / 3) * 700, (k % 3 - 1) * 700);
+        Vec3::new(
+            m.x + d[0] * along - d[1] * across,
+            m.y,
+            m.z + d[1] * along + d[0] * across,
+        )
+    };
+    let (mo, mi) = (out.middle(), inn.middle());
+    let mut w = Walk::new(t);
+    for k in 0..6i64 {
+        w.add(
+            id(30 + k as u64),
+            ground,
+            spot(mo, o, k),
+            f0,
+            spot(mi, i, (k + 3) % 6),
+        );
+        w.add(
+            id(40 + k as u64),
+            f0,
+            spot(mi, i, k),
+            ground,
+            spot(mo, o, (k + 3) % 6),
+        );
+    }
+    // Each tick: the grants its owner made while it was taken in turns, and the walkers carried through it, each with
+    // whether its crossing began while the doorway was taken in turns.
+    let into = |who: Id| u8::from(who >= id(40));
+    let mut grants = std::collections::BTreeSet::new();
+    let mut began: BTreeMap<Id, bool> = BTreeMap::new();
+    let mut both = 0;
+    for _ in 0..1_200 {
+        if w.runner.runs.is_empty() {
+            break;
+        }
+        w.tick();
+        let st = w.town.turns.as_ref().and_then(|x| x.state(&l)).cloned();
+        if let Some(st) = &st {
+            for e in &st.timeline {
+                if let sim::links::turns::Turn::Grant { at, who, end } = *e {
+                    grants.insert((at, who, end));
+                }
+            }
+        }
+        let crossing: Vec<Id> = w
+            .runner
+            .controller
+            .bodies()
+            .filter(|b| w.runner.controller.carrying(b.id) == Some(door))
+            .map(|b| b.id)
+            .collect();
+        began.retain(|k, _| crossing.contains(k));
+        for &k in &crossing {
+            began.entry(k).or_insert(st.is_some());
+        }
+        // One direction at a time: never two let in on its turns going opposite ways inside it together.
+        let dirs: std::collections::BTreeSet<u8> = began
+            .iter()
+            .filter(|(_, turns)| **turns)
+            .map(|(k, _)| into(*k))
+            .collect();
+        if dirs.len() > 1 {
+            both += 1;
+        }
+    }
+    let ended = w.ended();
+    let done = ended.values().filter(|(_, h)| h == "Done").count();
+    let ends: std::collections::BTreeSet<u8> = grants.iter().map(|g| g.2).collect();
+    println!(
+        "A2-4 doorway: {} grants, from ends {ends:?}; ticks with both directions inside on its turns {both}",
+        grants.len()
+    );
+    assert!(grants.len() >= 2, "turns were granted: {grants:?}");
+    assert_eq!(ends.len(), 2, "each way had its turn");
+    assert_eq!(both, 0, "one direction held at a time");
+    let marked = w.marked.iter().any(|(_, v)| match v {
+        Value::Array(a) => a.first().and_then(|x| replica::effects::read_id(x).ok()) == Some(door),
+        _ => false,
+    });
+    let last = ended.values().map(|(at, _)| *at).max().unwrap_or(0);
+    println!(
+        "A2-4 doorway: {done} of 12 done by {} ms; marked waiting for it {marked}; nearest {} mm",
+        last / 1000,
+        w.nearest / 1000
+    );
+    assert!(
+        marked,
+        "a walker marked itself waiting for the crowded wide doorway"
+    );
+    assert_eq!(done, 12, "all twelve arrive");
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+}

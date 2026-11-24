@@ -1,0 +1,1078 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:semaphore_station",
+  "owner": "thing",
+  "state": {
+    "signal": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 26,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        900,
+        290
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1600,
+      2050,
+      600
+    ]
+  },
+  "forms": {
+    "select": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": {
+            "arg": "letter"
+          },
+          "event": "signal_selected"
+        }
+      ],
+      "takes": {
+        "letter": {
+          "type": "count"
+        }
+      }
+    }
+  },
+  "looks": {
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            45,
+            0
+          ],
+          "size": [
+            750,
+            90,
+            500
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            720,
+            -80
+          ],
+          "size": [
+            100,
+            1350,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            0
+          ],
+          "size": [
+            420,
+            70,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            250
+          ],
+          "size": [
+            220,
+            110,
+            80
+          ],
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            650,
+            80
+          ],
+          "size": [
+            360,
+            200,
+            30
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -70,
+            650,
+            102
+          ],
+          "size": [
+            20,
+            130,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            710,
+            102
+          ],
+          "size": [
+            110,
+            20,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            655,
+            102
+          ],
+          "size": [
+            100,
+            20,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            650,
+            102
+          ],
+          "size": [
+            18,
+            110,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            710,
+            102
+          ],
+          "size": [
+            65,
+            18,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1330,
+            62
+          ],
+          "size": [
+            90,
+            100,
+            15
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            135,
+            1330,
+            75
+          ],
+          "size": [
+            12,
+            65,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1303,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1330,
+            62
+          ],
+          "size": [
+            90,
+            100,
+            15
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -185,
+            1330,
+            75
+          ],
+          "size": [
+            12,
+            65,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1357,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1330,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -135,
+            1344,
+            75
+          ],
+          "size": [
+            12,
+            28,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -153,
+            1315,
+            75
+          ],
+          "size": [
+            12,
+            42,
+            8
+          ],
+          "tint": "ink",
+          "roll": 35000
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1625,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 0,
+          "when": "@signal=11|16|20"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1880,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 0,
+          "when": "@signal=11|16|20"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1925,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 0,
+          "when": "@signal=11|16|20"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1,
+            1559,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 45000,
+          "when": "@signal=15"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -179,
+            1739,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 45000,
+          "when": "@signal=15"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -211,
+            1771,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 45000,
+          "when": "@signal=15"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1,
+            1241,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 135000,
+          "when": "@signal=8|9"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -179,
+            1061,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 135000,
+          "when": "@signal=8|9"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -211,
+            1029,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 135000,
+          "when": "@signal=8|9"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1175,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 180000,
+          "when": "@signal=0|1|2|3|4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            920,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 180000,
+          "when": "@signal=0|1|2|3|4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            875,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 180000,
+          "when": "@signal=0|1|2|3|4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            319,
+            1241,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 225000,
+          "when": "@signal=7|14|19|22|24"
+        },
+        {
+          "kind": "box",
+          "at": [
+            499,
+            1061,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 225000,
+          "when": "@signal=7|14|19|22|24"
+        },
+        {
+          "kind": "box",
+          "at": [
+            531,
+            1029,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 225000,
+          "when": "@signal=7|14|19|22|24"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            1400,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 270000,
+          "when": "@signal=6|10|13|18|23|25|26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            640,
+            1400,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 270000,
+          "when": "@signal=6|10|13|18|23|25|26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            685,
+            1400,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 270000,
+          "when": "@signal=6|10|13|18|23|25|26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            319,
+            1559,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "roll": 315000,
+          "when": "@signal=5|12|17|21"
+        },
+        {
+          "kind": "box",
+          "at": [
+            499,
+            1739,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "roll": 315000,
+          "when": "@signal=5|12|17|21"
+        },
+        {
+          "kind": "box",
+          "at": [
+            531,
+            1771,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 315000,
+          "when": "@signal=5|12|17|21"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1625,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 0,
+          "when": "@signal=4|10|22"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1880,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 0,
+          "when": "@signal=4|10|22"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1925,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 0,
+          "when": "@signal=4|10|22"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -319,
+            1559,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 45000,
+          "when": "@signal=3|9|20|21|25"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -499,
+            1739,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 45000,
+          "when": "@signal=3|9|20|21|25"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -531,
+            1771,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 45000,
+          "when": "@signal=3|9|20|21|25"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -385,
+            1400,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 90000,
+          "when": "@signal=2|8|15|16|17|18|19"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -640,
+            1400,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 90000,
+          "when": "@signal=2|8|15|16|17|18|19"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -685,
+            1400,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 90000,
+          "when": "@signal=2|8|15|16|17|18|19"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -319,
+            1241,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 135000,
+          "when": "@signal=1|11|12|13|14"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -499,
+            1061,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 135000,
+          "when": "@signal=1|11|12|13|14"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -531,
+            1029,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 135000,
+          "when": "@signal=1|11|12|13|14"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1175,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 180000,
+          "when": "@signal=0|5|6|7"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            920,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 180000,
+          "when": "@signal=0|5|6|7"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            875,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 180000,
+          "when": "@signal=0|5|6|7"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1,
+            1241,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 225000,
+          "when": "@signal=26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            179,
+            1061,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 225000,
+          "when": "@signal=26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            211,
+            1029,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 225000,
+          "when": "@signal=26"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1,
+            1559,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "roll": 315000,
+          "when": "@signal=23|24"
+        },
+        {
+          "kind": "box",
+          "at": [
+            179,
+            1739,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "roll": 315000,
+          "when": "@signal=23|24"
+        },
+        {
+          "kind": "box",
+          "at": [
+            211,
+            1771,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "roll": 315000,
+          "when": "@signal=23|24"
+        }
+      ],
+      "round": 0,
+      "palette": {
+        "wood": "#77543b",
+        "paper": "#f1e5c5",
+        "ink": "#1c2834",
+        "control": "#d6b36d",
+        "left_arm": "#167c88",
+        "right_arm": "#b95324",
+        "left_flag": "#e94142",
+        "right_flag": "#edc72f"
+      },
+      "tags": [
+        "semaphore",
+        "alphabet",
+        "display",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "display": "display",
+    "card": "Semaphore display: select a letter (1=A to 26=Z), or 0 to rest.",
+    "semaphore": "semaphore alphabet station",
+    "flags": "paired flag display",
+    "alphabet": "semaphore learning display",
+    "hands_empty": "Put down what you hold before selecting a signal.",
+    "begin": "Stand on the F-marked front/receiver side. L marks the signaler left shoulder at your right; R marks the signaler right shoulder at your left. Red and yellow flags stay attached to their distinct arm assemblies, which have a small fixed depth separation for crossed positions. Select H, Rest, E, Rest, L, Rest, P, Rest to display HELP. Select Rest between letters, including repeated letters. Each choice is independent and repeating the same choice leaves the same signal.",
+    "limits": "One indexed value selects both rigid arm positions at native hand contact. This is a fixed alphabet learning display: no bodily gesture, handheld flag custody, recipient, delivered message, stored word, numeral mode or attention/error protocol. Read only from the marked front; the rear view mirrors the reference. Positions change discretely without a continuous path, physical arm collision, precise contact or smooth-transition claim."
+  },
+  "card": {
+    "text": "card",
+    "category": "display",
+    "synonyms": [
+      "semaphore",
+      "flags",
+      "alphabet"
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  }
+}

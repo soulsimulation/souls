@@ -71,7 +71,19 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
    ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
    world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
-   granted spot. Ending a walk by name is the world's: it ends the run.
+   granted spot. Ending a walk by name is the world's: it ends the run. Field 48 is the queue spot the world assigns
+   a body (B7, `[x, y, z]` in its floor's frame). **Crowds (0.133 A2-4).** A wide link is taken in turns too while
+   its mouth is crowded: a walker near it that sees three bodies within 1.5 m of its end marks itself waiting
+   (field 41), and the link shows field 42 until none waits and none is inside on its turn. Grants are fair, at any link
+   taken in turns: a waiter passed over by later ones twice (six times at a narrow link) goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
+   on its own body and is done short of it; the world writes its `souls:move-ended` as
+   `done.as-near-as-the-crowd-allows` and takes the field off. A walk to its own granted spot ends so only when a
+   body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released. A
+   place whose own standing spots its walk reaches are all held overflows (A2-5): the next sent there is granted the
+   nearest free standing point round it on the open ground (never in a room), out to 15 m, a body's room from every
+   other and joined to the place on foot; it walks there, holds it like any spot (kept across a change of the ground
+   while it is still one), and its walk ends `done.as-near-as-the-crowd-allows`. A place the walker cannot reach at
+   all, or with no such point within 15 m, is refused `spot-none-free`.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -149,12 +161,22 @@ slot) with the stance the request named. Postures are the controller's stance in
 `v2/crates/worldd/src/bodies.rs` (I4b #3156) lets an intent from the gateway drive a body. A form's verb named `walk`,
 `sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
 already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
-(parameter 1, `[x, y, z]` µm) or a seat's stand point; a sit is B3's `Slots::commit`, one tick's sits together; a
+(parameter 1, `[x, y, z]` µm) or a seat's stand point, at the gait parameter 2 names (`gait:walk`, `gait:jog` or
+`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks); a sit is B3's `Slots::commit`, one tick's sits together; a
 rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
 Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
 by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended
 (`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
 sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
+
+A form's run on the same body yields to its Soul's own walk (intents rule 10). A run whose walk is running when the
+Soul's walk takes the claim on its legs ends `claim-taken` in the next tick, as one waiting for its plan does; a run
+in a hand move is left (`left`) at the move's phase end. Only a running walk holds a route claim: a run that awaited
+its plan with one and then goes straight to a move (an approach with no way) gives it back (S11, 0.133).
+
+A form walker asks the planner for its line once while it is on the same floor (S11): pushed along by the bodies
+round it while it waits, it keeps its question, and the line that comes back is followed from where it now is, or
+asked again when it is pushed off it. A walk's place and legs are still asked for the body exactly as it stands.
 
 C14 (#3442): a walk to a node that is neither a point nor a seat (a room, the square, an area) goes to a free standing
 spot in it: its middle by E2's shared library (`replica::select`), granted by N9's table, the same every run. A walk,

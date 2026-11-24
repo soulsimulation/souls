@@ -164,11 +164,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([(id, body)]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([(id, body)])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: BTreeMap::from([(id, Build::STANDARD)]),
+        builds: Arc::new(BTreeMap::from([(id, Build::STANDARD)])),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -317,6 +317,225 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     );
 }
 
+/// S8: a form's walk question ("where to stand near this thing", C7's 95 % of the planner at 750 agents) is queued
+/// by its form every tick until answered, and sent to the planner once while that request is out: counted over ten
+/// ticks with the batches not taken, once more after its batch was taken without the answer; a new generation (the
+/// body nudged while it waits) waits for the one out, then goes.
+#[test]
+fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = |x| FormQuery::Walk {
+        node: ground,
+        at: Vec3::new(x, 0, 0),
+        reach: 0,
+        door: None,
+        ring: None,
+    };
+    let mut planning = Planning::default();
+    let mut out = BTreeMap::new();
+    // One tick: the form asks (its question queued until answered), the queue goes in batch `next`.
+    let mut tick = |planning: &mut Planning, x: i64, taken: u64, next: u64| {
+        planning.ask(key, body, walk(x), &map);
+        crate::bodies::fresh_forms(
+            &mut out,
+            std::mem::take(&mut planning.queued),
+            &BTreeMap::new(),
+            taken,
+            next,
+        )
+        .len()
+    };
+    let sent: usize = (0..10).map(|k| tick(&mut planning, 0, 0, k)).sum();
+    assert_eq!(sent, 1, "sent once in ten ticks while out, not once a tick");
+    assert_eq!(
+        tick(&mut planning, 0, 1, 10),
+        1,
+        "its batch taken without the answer: sent again"
+    );
+    assert_eq!(tick(&mut planning, 0, 1, 11), 0);
+    // Nudged while batch 10 is out: a new generation every tick, none sent until batch 10 is taken; then the
+    // current one goes, once.
+    let sent: usize = (12..17).map(|k| tick(&mut planning, k as i64, 1, k)).sum();
+    assert_eq!(sent, 0, "a new generation waits for the question out");
+    assert_eq!(
+        tick(&mut planning, 17, 11, 17),
+        1,
+        "then the current generation goes"
+    );
+    assert_eq!(tick(&mut planning, 18, 11, 18), 0);
+}
+
+/// S8 review: in a tick the answers are taken first, then the questions the forms queued last tick are sent, and only
+/// then do the forms read the answers. A question whose answer has just come back is not sent again: one search
+/// per question when the planner keeps up, not two.
+#[test]
+fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = FormQuery::Walk {
+        node: ground,
+        at: Vec3::ZERO,
+        reach: 0,
+        door: None,
+        ring: None,
+    };
+    let mut planning = Planning::default();
+    let (mut out, mut answers, mut sent) = (BTreeMap::new(), BTreeMap::new(), 0);
+    // Tick 0: the form asks; its question goes in batch 0.
+    planning.ask(key, body, walk.clone(), &map);
+    let first = crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        0,
+        0,
+    );
+    sent += first.len();
+    // Tick 1: batch 0 is taken with the answer (`Bodies::take`), then last tick's queue is sent, then the form reads.
+    answers.insert(
+        key,
+        FormAnswer {
+            generation: first[0].generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Vec::new()),
+        },
+    );
+    planning.ask(key, body, walk.clone(), &map);
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        1,
+        1,
+    )
+    .len();
+    planning.receive(std::mem::take(&mut answers));
+    assert!(
+        planning.ask(key, body, walk, &map).is_some(),
+        "the form has its answer"
+    );
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        2,
+        2,
+    )
+    .len();
+    assert_eq!(sent, 1, "one search for the question");
+}
+
+/// S11: a form walker waiting for its line is pushed along by the crowd round it. Its question stands while it is on
+/// the same floor: asked once, not once a tick, and the line that comes back is its own, read from where it now is.
+/// Before, each new pose was a new question, and the answer never matched the question current when it came.
+#[test]
+fn s11_a_jostled_walkers_line_question_stands_and_its_answer_is_read() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let at = |x: i64| {
+        town.surfaces[&ground]
+            .place(
+                id,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, 40_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap()
+    };
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Line,
+    };
+    let map = Arc::new(town.versions.clone());
+    let to = Vec3::new(5_000_000, 0, 40_000_000);
+    let mut planning = Planning::default();
+    // Pushed 90 mm a tick for ten ticks while it waits: one question, one generation.
+    let mut asked = Vec::new();
+    for k in 0..10 {
+        planning.ask(key, at(k * 90_000), FormQuery::Line { to }, &map);
+        asked.extend(
+            std::mem::take(&mut planning.queued)
+                .into_values()
+                .map(|q| q.generation),
+        );
+    }
+    asked.dedup();
+    assert_eq!(asked.len(), 1, "one question while jostled: {asked:?}");
+    // Its answer comes back and is read, the walker 900 mm from where it was asked.
+    planning.receive(BTreeMap::from([(
+        key,
+        FormAnswer {
+            generation: asked[0],
+            map: Arc::clone(&map),
+            result: FormResult::Line(Err(Refusal {
+                name: "test.answer",
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert!(
+        planning.line(key, at(900_000), to, &map).is_some(),
+        "the answer is the walker's own"
+    );
+}
+
 /// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area
 /// named as an upstairs room (`r1a`) resolves onto that room's floor at the room's height, whatever height the point
 /// gives; an area that names no room of a building with more than one floor has no way there; a point its entry does
@@ -358,11 +577,11 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -435,11 +654,11 @@ fn a_point_upstairs_is_on_the_upper_floor() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -625,11 +844,11 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |thing: Id, point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -862,14 +1081,16 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([below, on, outside]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([below, on, outside])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: [below.0, on.0, outside.0]
-            .into_iter()
-            .map(|b| (b, Build::STANDARD))
-            .collect(),
+        builds: Arc::new(
+            [below.0, on.0, outside.0]
+                .into_iter()
+                .map(|b| (b, Build::STANDARD))
+                .collect(),
+        ),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -936,11 +1157,11 @@ fn an_aimed_move_names_a_visible_thing_and_never_a_hidden_one() {
     let aimed = |entry: &Json, body: Id, point: &str| {
         let kinds = Json::Obj(vec![(plain(b.kind()).to_owned(), entry.clone())]);
         Sight {
-            bodies: BTreeMap::new(),
-            carrying: BTreeSet::new(),
+            bodies: Arc::new(BTreeMap::new()),
+            carrying: Arc::new(BTreeSet::new()),
             tree,
             split: None,
-            builds: BTreeMap::new(),
+            builds: Arc::new(BTreeMap::new()),
             kind: Name::new("souls:body").unwrap(),
             kinds: &kinds,
             toward: &toward,

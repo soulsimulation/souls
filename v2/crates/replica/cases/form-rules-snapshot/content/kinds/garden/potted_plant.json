@@ -4,12 +4,12 @@
   "owner": "thing",
   "state": {
     "water": {
-      "n": 1,
+      "n": 28,
       "type": "timed",
       "unit": "mg",
       "default": {
         "value": 4000000,
-        "per_s": -5,
+        "per_s": -15,
         "set_us": 0
       },
       "min": 0,
@@ -19,7 +19,7 @@
       }
     },
     "stage": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "bare",
@@ -34,7 +34,7 @@
       }
     },
     "ripening": {
-      "n": 3,
+      "n": 30,
       "type": "timed",
       "unit": "count",
       "default": {
@@ -138,7 +138,7 @@
           "change": "set",
           "field": "water",
           "to": 4000000,
-          "rate": -5,
+          "rate": -15,
           "event": "watered"
         },
         {

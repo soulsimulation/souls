@@ -1,0 +1,241 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:oral_story_circle",
+  "owner": "thing",
+  "links": {
+    "teller": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "listener": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_teller": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -1000
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_l1": {
+      "role": "stand",
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 180000
+    },
+    "by_l2": {
+      "role": "stand",
+      "at_mm": [
+        707,
+        0,
+        707
+      ],
+      "yaw_mdeg": 135000
+    },
+    "by_l3": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1000
+      ],
+      "yaw_mdeg": 90000
+    },
+    "by_l4": {
+      "role": "stand",
+      "at_mm": [
+        -707,
+        0,
+        707
+      ],
+      "yaw_mdeg": 45000
+    },
+    "by_l5": {
+      "role": "stand",
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_l6": {
+      "role": "stand",
+      "at_mm": [
+        -707,
+        0,
+        -707
+      ],
+      "yaw_mdeg": 315000
+    },
+    "by_l7": {
+      "role": "stand",
+      "at_mm": [
+        707,
+        0,
+        -707
+      ],
+      "yaw_mdeg": 225000
+    }
+  },
+  "slots": {
+    "teller": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        -1000
+      ],
+      "stand": "by_teller"
+    },
+    "l1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "stand": "by_l1"
+    },
+    "l2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        707,
+        0,
+        707
+      ],
+      "stand": "by_l2"
+    },
+    "l3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        1000
+      ],
+      "stand": "by_l3"
+    },
+    "l4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -707,
+        0,
+        707
+      ],
+      "stand": "by_l4"
+    },
+    "l5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "stand": "by_l5"
+    },
+    "l6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -707,
+        0,
+        -707
+      ],
+      "stand": "by_l6"
+    },
+    "l7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        707,
+        0,
+        -707
+      ],
+      "stand": "by_l7"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      3000
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "teller": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "teller"
+        ],
+        "within_mm": 3000
+      },
+      "move": "tell_story",
+      "on_beat": true
+    },
+    "listener": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "l1",
+          "l2",
+          "l3",
+          "l4",
+          "l5",
+          "l6",
+          "l7"
+        ],
+        "within_mm": 3000
+      },
+      "move": "listen",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "An oral story circle: one teller, up to seven listeners; accept or leave.",
+    "story": "story",
+    "circle": "circle",
+    "oral_story_circle": "oral story circle",
+    "rules": "Offer the circle, then nearby accepted members are asked to walk to their standing places through ordinary movement admission. The teller repeats the story gesture and listeners repeat the listen move. Speak your own story through ordinary public speech; this activity generates no words. Each person may leave. It has no book, automatic floor handoff, enforced silence or retained conversation.",
+    "listener_pose": "The current listener drawing is a generic idle or folded-arms pose."
+  },
+  "card": {
+    "text": "card",
+    "category": "story",
+    "synonyms": [
+      "circle",
+      "oral_story_circle"
+    ]
+  }
+}

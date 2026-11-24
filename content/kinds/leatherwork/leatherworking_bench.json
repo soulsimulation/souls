@@ -1,0 +1,844 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:leatherworking_bench",
+  "owner": "thing",
+  "state": {
+    "leather_blanks": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "lace_lengths": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 4,
+      "default": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cut": {
+      "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "punched": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "laced": {
+      "n": 32,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "cutting": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        940,
+        200
+      ]
+    },
+    "punch": {
+      "role": "contact",
+      "at_mm": [
+        -315,
+        1028,
+        120
+      ]
+    },
+    "seam": {
+      "role": "contact",
+      "at_mm": [
+        -250,
+        940,
+        200
+      ]
+    },
+    "finishing": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        940,
+        200
+      ]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:open_leather_pouch"
+      ],
+      "most": 1,
+      "at_mm": [
+        350,
+        925,
+        160
+      ],
+      "fits_mm": [
+        220,
+        180,
+        180
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      1050,
+      760
+    ]
+  },
+  "forms": {
+    "cut_panels": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cut",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "leather_blanks",
+          "at_least": 1,
+          "says": "no_blanks"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "cutting"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "cutting"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "leather_blanks",
+          "by": -1,
+          "event": "blank_cut"
+        },
+        {
+          "change": "set",
+          "field": "cut",
+          "to": true,
+          "event": "panels_cut"
+        }
+      ]
+    },
+    "punch_seam": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cut",
+          "says": "cut_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "punched",
+          "says": "already_punched",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "punch"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "punch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "punched",
+          "to": true,
+          "event": "seam_punched"
+        }
+      ]
+    },
+    "lace_side": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cut",
+          "says": "cut_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "punched",
+          "says": "punch_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "laced",
+          "at_most": 1,
+          "says": "lacing_complete"
+        },
+        {
+          "need": "state",
+          "field": "lace_lengths",
+          "at_least": 1,
+          "says": "no_lace"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "seam"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "seam"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lace_lengths",
+          "by": -1,
+          "event": "lace_used"
+        },
+        {
+          "change": "set",
+          "field": "laced",
+          "by": 1,
+          "event": "side_laced"
+        }
+      ]
+    },
+    "finish_pouch": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cut",
+          "says": "cut_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "punched",
+          "says": "punch_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "laced",
+          "at_least": 2,
+          "says": "lace_first"
+        },
+        {
+          "need": "slot_free",
+          "slot": "out",
+          "says": "clear_output"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "finishing"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "finishing"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cut",
+          "to": false,
+          "event": "panels_cleared"
+        },
+        {
+          "change": "set",
+          "field": "punched",
+          "to": false,
+          "event": "punching_cleared"
+        },
+        {
+          "change": "set",
+          "field": "laced",
+          "to": 0,
+          "event": "lacing_cleared"
+        },
+        {
+          "change": "create",
+          "kind": "eden:open_leather_pouch",
+          "into": "out",
+          "event": "pouch_finished"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:leatherworking_bench",
+    "table": [
+      {
+        "part": "lace_supply",
+        "field": "lace_lengths",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "palette": {
+        "wood": "#694c37",
+        "leather": "#b47c4b",
+        "edge": "#805532",
+        "lace": "#e0be80",
+        "hole": "#242018",
+        "metal": "#869093",
+        "handle": "#9c4938"
+      },
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            1100,
+            40,
+            760
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            440,
+            -310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            440,
+            310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            440,
+            -310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            440,
+            310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            925,
+            200
+          ],
+          "size": [
+            260,
+            10,
+            200
+          ],
+          "tint": "leather",
+          "when": "@cut=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            937,
+            200
+          ],
+          "size": [
+            240,
+            10,
+            180
+          ],
+          "tint": "leather",
+          "when": "@cut=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            926,
+            -240
+          ],
+          "size": [
+            270,
+            12,
+            190
+          ],
+          "tint": "leather",
+          "when": "@leather_blanks>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            942,
+            -240
+          ],
+          "size": [
+            270,
+            12,
+            190
+          ],
+          "tint": "leather",
+          "when": "@leather_blanks>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            90,
+            950,
+            -230
+          ],
+          "size": [
+            65,
+            60,
+            65
+          ],
+          "tint": "lace",
+          "role": "lace_supply",
+          "pivot": [
+            90,
+            920,
+            -230
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -365,
+            931,
+            200
+          ],
+          "size": [
+            70,
+            22,
+            220
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -365,
+            983,
+            120
+          ],
+          "size": [
+            25,
+            105,
+            25
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -315,
+            1028,
+            120
+          ],
+          "size": [
+            125,
+            18,
+            22
+          ],
+          "tint": "handle"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -155,
+            927,
+            -50
+          ],
+          "size": [
+            130,
+            12,
+            18
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -245,
+            927,
+            -50
+          ],
+          "size": [
+            60,
+            18,
+            25
+          ],
+          "tint": "handle"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -250,
+            945,
+            135
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -250,
+            945,
+            200
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -250,
+            945,
+            265
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -50,
+            945,
+            135
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -50,
+            945,
+            200
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -50,
+            945,
+            265
+          ],
+          "r": 6,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@punched=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -250,
+            949,
+            135
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -250,
+            949,
+            200
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -250,
+            949,
+            265
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            949,
+            135
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            949,
+            200
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            949,
+            265
+          ],
+          "size": [
+            15,
+            5,
+            28
+          ],
+          "tint": "lace",
+          "when": "@laced>=2"
+        }
+      ],
+      "tags": [
+        "leatherwork",
+        "craft",
+        "workbench",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Cut, punch and lace supplied leather into two portable open pouches.",
+    "work": "work",
+    "leather": "leather",
+    "pouch": "pouch",
+    "sew": "sew",
+    "no_blanks": "All supplied leather blanks have been cut.",
+    "cut_first": "Cut a supplied leather blank into panels first.",
+    "already_punched": "This seam is already punched.",
+    "punch_first": "Punch the cut panels before lacing them.",
+    "lacing_complete": "Both sides are laced; finish this pouch.",
+    "no_lace": "There is no supplied lace left for this pass.",
+    "lace_first": "Lace both sides before finishing the pouch.",
+    "clear_output": "Take the finished pouch from the output place first.",
+    "empty_hands": "Put down held things before working the leather.",
+    "howto_make": "Cut one of two supplied blanks into panels, punch the seam, lace each of its two sides using one supplied lace length, then finish one open pouch. Take the actual pouch before finishing another. Work commits at hand contact and persists if interrupted after contact; there is no refill. Set the pouch down before stowing a small compatible thing in it."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "leather",
+      "pouch",
+      "sew"
+    ]
+  },
+  "howtos": {
+    "make": {
+      "text": "howto_make",
+      "steps": [
+        {
+          "form": "cut_panels"
+        },
+        {
+          "form": "punch_seam"
+        },
+        {
+          "form": "lace_side"
+        },
+        {
+          "form": "lace_side"
+        },
+        {
+          "form": "finish_pouch"
+        }
+      ]
+    }
+  }
+}

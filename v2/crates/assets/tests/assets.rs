@@ -601,6 +601,7 @@ fn a4_upload_then_place_through_g1s_gate() {
                     children: BTreeSet::from(["thing".to_owned()]),
                     slots: BTreeMap::new(),
                     hands: None,
+                    fields: Default::default(),
                 },
             ),
             (
@@ -610,6 +611,7 @@ fn a4_upload_then_place_through_g1s_gate() {
                     children: BTreeSet::new(),
                     slots: BTreeMap::new(),
                     hands: None,
+                    fields: Default::default(),
                 },
             ),
         ]),

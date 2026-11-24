@@ -160,6 +160,7 @@ fn eden(souls: &[Id]) -> (Tree, Rules, Id, Id) {
             children: Default::default(),
             slots,
             hands,
+            fields: Default::default(),
         };
     rules.kinds.insert(
         ACTIVITY.to_owned(),
@@ -755,4 +756,197 @@ fn trace(out: &str, fixed: &Fixed, path: &[Xz], carry: &Carry, walkers: &[(Xz, X
         file.write_all(&row).unwrap();
     }
     file.flush().unwrap();
+}
+
+/// 0.135 C2: a load read from its kind's entry, and its checks before the lift.
+mod from_entry {
+    use replica::rules::json::parse;
+
+    use super::super::{Fixed, GRIP_REACH, Load, REACH};
+
+    const M: i64 = 1_000_000;
+
+    fn entry(path: &str) -> replica::rules::json::Value {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction");
+        parse(&std::fs::read_to_string(root.join(path)).expect("the entry")).expect("json")
+    }
+
+    #[test]
+    fn c2_the_beam_and_the_upright_as_their_entries_state() {
+        let beam = Load::of(&entry("rack_beam.json")).expect("the beam");
+        assert_eq!(
+            beam,
+            Load {
+                half_length: 1_371_500,
+                half_width: 51_000,
+                grips: [-1_097_000, 1_097_000],
+                crew: 2,
+                ..beam
+            }
+        );
+        let upright = Load::of(&entry("rack_upright.json")).expect("the upright");
+        assert_eq!(
+            upright,
+            Load {
+                half_length: 1_219_000,
+                half_width: 609_500,
+                grips: [-780_000, 780_000],
+                crew: 1,
+                ..upright
+            }
+        );
+        assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
+    }
+
+    /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to
+    /// the front (the beam's z, the upright's y), the beam on its edge and the upright flat, its middle at the slot's origin;
+    /// set down between carriers facing +z, it lies the same way, its middle between them and its lowest side on the
+    /// floor. B9's board is held as before.
+    #[test]
+    fn c4_a_load_is_held_and_set_down_lengthwise_between_its_carriers() {
+        use replica::pose::{Quat, Vec3};
+        let near = |a: Vec3, b: Vec3| {
+            (a.x - b.x).abs() <= 2 && (a.y - b.y).abs() <= 2 && (a.z - b.z).abs() <= 2
+        };
+        // Each load's long axis, the side that lies across, and the side that stands up, from its middle, µm: the
+        // beam stays on its edge, the upright is laid flat.
+        for (name, file, long, wide, thin) in [
+            (
+                "beam",
+                "rack_beam.json",
+                Vec3::new(0, 0, 1_371_500),
+                Vec3::new(25_500, 0, 0),
+                Vec3::new(0, 51_000, 0),
+            ),
+            (
+                "upright",
+                "rack_upright.json",
+                Vec3::new(0, 1_219_000, 0),
+                Vec3::new(609_500, 0, 0),
+                Vec3::new(0, 0, 38_000),
+            ),
+        ] {
+            let load = Load::of(&entry(file)).unwrap();
+            let (at, q) = load.held().unwrap();
+            // Its long axis's end, from its middle, turned: along the carry's +x, by half its length.
+            let end = q.rotate(long).unwrap();
+            assert!(
+                near(end, Vec3::new(load.half_length, 0, 0)),
+                "{name}: its length runs between the carriers: {end:?}"
+            );
+            let across = q.rotate(wide).unwrap();
+            assert!(
+                across.y.abs() <= 2 && across.x.abs() <= 2,
+                "{name}: its wider side lies across: {across:?}"
+            );
+            let up = q.rotate(thin).unwrap();
+            assert!(
+                up.x.abs() <= 2 && up.z.abs() <= 2,
+                "{name}: its thinnest side stands up: {up:?}"
+            );
+            let middle = q.rotate(load.middle).unwrap();
+            assert!(
+                near(
+                    Vec3::new(at.x + middle.x, at.y + middle.y, at.z + middle.z),
+                    Vec3::ZERO
+                ),
+                "{name}: its middle at the slot's origin"
+            );
+            // Set down between carriers that face +z (the carry's +x turned a quarter turn).
+            let facing = Quat::from_yaw_mdeg(-90_000).unwrap();
+            assert!(near(
+                facing.rotate(Vec3::new(1_000_000, 0, 0)).unwrap(),
+                Vec3::new(0, 0, 1_000_000)
+            ));
+            let c = Vec3::new(5 * M, 0, -3 * M);
+            let (p, o) = load.resting(c, facing).unwrap();
+            let m = o.rotate(load.middle).unwrap();
+            assert!(
+                near(
+                    Vec3::new(p.x + m.x, p.y + m.y, p.z + m.z),
+                    Vec3::new(c.x, up.y.abs(), c.z)
+                ),
+                "{name}: its middle between the carriers, its lowest side on the floor"
+            );
+            let end = o.rotate(long).unwrap();
+            assert!(
+                near(end, Vec3::new(0, 0, load.half_length)),
+                "{name}: set down lengthwise along the way they faced: {end:?}"
+            );
+        }
+        let board = Load::board();
+        assert_eq!(board.held().unwrap(), (Vec3::ZERO, Quat::IDENTITY));
+        let q = Quat::from_yaw_mdeg(30_000).unwrap();
+        assert_eq!(
+            board.resting(Vec3::new(1, 2, 3), q).unwrap(),
+            (Vec3::new(1, 2, 3), q)
+        );
+    }
+
+    /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused
+    /// `carry-board-clips` before the lift and the beam (0.1 m) is not; a crew of one and a carrier off its grip are
+    /// refused by name.
+    #[test]
+    fn c2_a_passage_a_crew_and_a_grip_refused_before_the_lift() {
+        let wall = |z0: i64, z1: i64| {
+            [
+                [10 * M, z0],
+                [10 * M + 200_000, z0],
+                [10 * M + 200_000, z1],
+                [10 * M, z1],
+            ]
+        };
+        let fixed = Fixed::new(vec![wall(450_000, 3 * M), wall(-3 * M, -450_000)]);
+        for (name, load, ok) in [
+            (
+                "upright",
+                Load::of(&entry("rack_upright.json")).unwrap(),
+                false,
+            ),
+            ("beam", Load::of(&entry("rack_beam.json")).unwrap(), true),
+        ] {
+            let [b, f] = load.places();
+            let r = load.check(2, [f, 0], [b, 0], [0, 0], None, Some(([20 * M, 0], &fixed)));
+            match ok {
+                true => assert!(r.is_ok(), "{name}: {r:?}"),
+                false => assert_eq!(r.map_err(|e| e.name), Err("carry-board-clips"), "{name}"),
+            }
+        }
+        let beam = Load::of(&entry("rack_beam.json")).unwrap();
+        let [b, f] = beam.places();
+        let crew = beam.check(1, [f, 0], [b, 0], [0, 0], None, None);
+        assert_eq!(crew.map_err(|e| e.name), Err("carry-crew-too-small"));
+        let off = beam.check(2, [f + GRIP_REACH + 400_000, 0], [b, 0], [0, 0], None, None);
+        assert_eq!(off.map_err(|e| e.name), Err("carry-grip-out-of-reach"));
+    }
+
+    /// 0.135 C4: the grips lie along the load's own long axis. A beam lying with its length along z is taken by
+    /// carriers at its ends (either way round), not by carriers standing beside it; a standing upright is taken along
+    /// the line its carriers stand on.
+    #[test]
+    fn c4_carriers_stand_at_the_ends_of_the_load_as_it_lies() {
+        use replica::pose::Quat;
+        let beam = Load::of(&entry("rack_beam.json")).unwrap();
+        let axis = beam
+            .lies_along(Quat::IDENTITY)
+            .unwrap()
+            .expect("it lies flat");
+        assert_eq!(axis, [0, beam.half_length]);
+        let [b, f] = beam.places();
+        let ends = beam.check(2, [0, f], [0, b], [0, 0], Some(axis), None);
+        assert!(ends.is_ok(), "at its ends: {ends:?}");
+        let beside = beam.check(2, [f, 0], [b, 0], [0, 0], Some(axis), None);
+        assert_eq!(beside.map_err(|e| e.name), Err("carry-grip-out-of-reach"));
+        let back = beam.reversed().unwrap();
+        let [b, f] = back.places();
+        let other = back.check(2, [0, -f], [0, -b], [0, 0], Some([0, -axis[1]]), None);
+        assert!(other.is_ok(), "the other way round: {other:?}");
+        let upright = Load::of(&entry("rack_upright.json")).unwrap();
+        assert_eq!(
+            upright.lies_along(Quat::IDENTITY).unwrap(),
+            None,
+            "it stands"
+        );
+    }
 }

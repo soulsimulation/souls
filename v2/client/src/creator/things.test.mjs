@@ -52,3 +52,16 @@ test('clone copies a thing and all in it, with its doorway, one step away, as an
   assert.equal(cloneFile(nodes, 'b', { count: 101 }).code, 'clone.count');
   assert.equal(cloneFile(nodes, 'w').code, 'clone.where');
 });
+
+test('select by kind, name, parent, area and distance; a removal leaves out what goes with its parent', async () => {
+  const { selectOf, removeOps, spotsOf } = await import('./things.mjs');
+  const spots = spotsOf(nodes);
+  assert.deepEqual([spots.get('c').x, spots.get('c').z], [41, 0], 'the chair is 1 m along its house at 40 m');
+  assert.deepEqual([spots.get('p').x, spots.get('p').z].map((v) => Math.round(v * 1000)), [667, 333], 'a shape at its points\' middle');
+  assert.deepEqual(selectOf(nodes, { kind: 'chair' }).map((r) => r.id), ['c']);
+  assert.deepEqual(selectOf(nodes, { name: 'BB' }).map((r) => r.id), ['b']);
+  assert.deepEqual(selectOf(nodes, { in: 'h' }).map((r) => r.id), ['c'], 'rooms and floors are a building\'s own parts');
+  assert.deepEqual(selectOf(nodes, { area: [30, -5, 50, 5] }).map((r) => r.id), ['h', 'c']);
+  assert.deepEqual(selectOf(nodes, { near: [10, 5], radius: 1 }).map((r) => r.id), ['b']);
+  assert.deepEqual(removeOps(nodes, ['h', 'c', 'b']), [{ op: 'remove', node: 'h' }, { op: 'remove', node: 'b' }]);
+});

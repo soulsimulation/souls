@@ -35,7 +35,9 @@ export const RULES = Object.freeze({
 });
 
 /** What "cheap" means, counted at the maximum. A kind over any of these is refused before it runs. */
-export const BUDGET = Object.freeze({stateBytes: 9216, linkEdges: 1024, forms: 32, parts: 64, perForm: 16, hatches: 4});
+// A body's family (owner `family`) holds every move a Soul can make anywhere, and cannot be split (a body has one family:
+// replica's kinds::entry::family_forms), so it may hold more forms than a thing (0.134 B2).
+export const BUDGET = Object.freeze({stateBytes: 9216, linkEdges: 1024, forms: 32, familyForms: 48, parts: 64, perForm: 16, hatches: 4});
 const BYTES = {bool: 1, enum: 1, int: 8, duration: 8, text: 8};
 const LINK_EDGE_BYTES = 8;
 
@@ -118,7 +120,8 @@ function rules(entry) {
   if (edges > BUDGET.linkEdges) add('bounded', 'links', `links at their maximum hold ${edges} edges, over ${BUDGET.linkEdges}`, 'lower a link\'s most');
   const bytes = stateBytes(entry);
   if (bytes > BUDGET.stateBytes) add('bounded', 'state', `state at its maximum is ${bytes} bytes, over ${BUDGET.stateBytes}`, 'drop a field or make a field smaller');
-  if (Object.keys(forms).length > BUDGET.forms) add('bounded', 'forms', `${Object.keys(forms).length} forms, over ${BUDGET.forms}`, 'split the kind');
+  const formsMost = entry.owner === 'family' ? BUDGET.familyForms : BUDGET.forms;
+  if (Object.keys(forms).length > formsMost) add('bounded', 'forms', `${Object.keys(forms).length} forms, over ${formsMost}`, 'split the kind');
   const parts = Object.keys(entry.points ?? {}).length + Object.keys(entry.slots ?? {}).length;
   if (parts > BUDGET.parts) add('bounded', 'points', `${parts} points and slots, over ${BUDGET.parts}`, 'drop some, or split the kind');
 

@@ -1,0 +1,239 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cheer_together",
+  "owner": "thing",
+  "links": {
+    "one": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "other": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3500,
+      100,
+      1800
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "one": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000,
+        "slots": [
+          "lead"
+        ]
+      },
+      "move": "cheer",
+      "on_beat": true
+    },
+    "other": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000,
+        "slots": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d5",
+          "d6",
+          "d7"
+        ]
+      },
+      "move": "cheer",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A cheer for two to eight nearby standing Souls, with two rows of places.",
+    "celebration": "celebration",
+    "cheer_together": "cheer together",
+    "group_cheer": "group cheer"
+  },
+  "card": {
+    "text": "card",
+    "category": "celebration",
+    "synonyms": [
+      "cheer_together",
+      "group_cheer"
+    ]
+  },
+  "points": {
+    "by_lead": {
+      "role": "stand",
+      "at_mm": [
+        -1350,
+        0,
+        450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d1": {
+      "role": "stand",
+      "at_mm": [
+        -450,
+        0,
+        450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d2": {
+      "role": "stand",
+      "at_mm": [
+        450,
+        0,
+        450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d3": {
+      "role": "stand",
+      "at_mm": [
+        1350,
+        0,
+        450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d4": {
+      "role": "stand",
+      "at_mm": [
+        -1350,
+        0,
+        -450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d5": {
+      "role": "stand",
+      "at_mm": [
+        -450,
+        0,
+        -450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d6": {
+      "role": "stand",
+      "at_mm": [
+        450,
+        0,
+        -450
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d7": {
+      "role": "stand",
+      "at_mm": [
+        1350,
+        0,
+        -450
+      ],
+      "yaw_mdeg": 0
+    }
+  },
+  "slots": {
+    "lead": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1350,
+        0,
+        450
+      ],
+      "stand": "by_lead"
+    },
+    "d1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -450,
+        0,
+        450
+      ],
+      "stand": "by_d1"
+    },
+    "d2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        450,
+        0,
+        450
+      ],
+      "stand": "by_d2"
+    },
+    "d3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1350,
+        0,
+        450
+      ],
+      "stand": "by_d3"
+    },
+    "d4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1350,
+        0,
+        -450
+      ],
+      "stand": "by_d4"
+    },
+    "d5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -450,
+        0,
+        -450
+      ],
+      "stand": "by_d5"
+    },
+    "d6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        450,
+        0,
+        -450
+      ],
+      "stand": "by_d6"
+    },
+    "d7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1350,
+        0,
+        -450
+      ],
+      "stand": "by_d7"
+    }
+  }
+}

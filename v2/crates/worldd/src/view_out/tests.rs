@@ -901,7 +901,7 @@ fn w3d_checkpoint_motion_timers_privacy_and_pending_mapping_play_canonically() {
     ];
     tree.apply(&h, &part_of(&h, changes.clone())).unwrap();
     writer.frame(&frame(changes)).unwrap();
-    writer.idle_observed(real + 6_400_000).unwrap();
+    writer.idle_observed(real + 6_000_000).unwrap();
     assert_eq!(
         writer.written().parts,
         1,
@@ -910,7 +910,7 @@ fn w3d_checkpoint_motion_timers_privacy_and_pending_mapping_play_canonically() {
     assert_eq!(writer.quiet_until, None, "no old-mapping future quiet time");
     writer.idle_observed(real + 8_000_000).unwrap();
     assert_eq!(writer.written().parts, 2);
-    assert_eq!(writer.quiet_until, Some(6_250_000));
+    assert_eq!(writer.quiet_until, Some(6_500_000 - SETTLE_US));
     assert_eq!(writer.copy.tree().time(), tree.time());
 
     let hb = fs::read(d.join("views").join(stream::header_path(&writer.header))).unwrap();
@@ -2480,7 +2480,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
     actual.apply_bytes(&later).unwrap();
     out.push(1, &later).unwrap();
     let previous = fs::read(out.dir.join(POINTER)).unwrap();
-    out.idle(real + 6_400_000).unwrap();
+    out.idle(real + 6_000_000).unwrap();
     assert_eq!(
         out.public_player().next(),
         1,
@@ -2498,7 +2498,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
         &project(&h, &actual.tree().to_state()).unwrap()
     );
     let pointer = Pointer::read(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
-    assert_eq!(pointer.quiet_until, Some(6_250_000));
+    assert_eq!(pointer.quiet_until, Some(6_500_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
         reader
@@ -3938,6 +3938,96 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
     (all, out.whole_cuts - whole)
 }
 
+/// T-late (0.132): a node made (a take that makes the thing it takes, a Soul arriving) is published from its row, not
+/// as a whole cut (679 ms of the writer's time on the A5000 with 100 Souls, which put the take on the page 2.5 s after
+/// its receipt): first, last and between the rows there, one made inside another, one made with a field set, and one
+/// made private beside them (never public). The parts and the reader's state are the same bytes as when every cut is
+/// whole.
+#[test]
+fn t_late_a_node_made_is_a_cut_by_rows_with_the_same_bytes_as_a_whole_cut() {
+    let (rows, rows_whole) = t_late_run(true);
+    let (whole, whole_whole) = t_late_run(false);
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+    assert_eq!(whole_whole, 2, "every reference cut is whole");
+    assert_eq!(rows_whole, 0, "a node made is a cut by rows");
+}
+
+fn t_late_run(incremental: bool) -> (Vec<u8>, u64) {
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch(&format!("t-late-rows-{incremental}"));
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let n = |s: u8| Id::new(Scope([s; 16]), 1).unwrap();
+    let (carrier, first, last, between, inner, private) =
+        (n(0x90), n(0x01), n(0xf0), n(0x91), n(0x92), n(0x93));
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let everyone = Audience::Everyone;
+    let log = vec![
+        vec![w3e_create(&h, 0, carrier, h.zone, everyone)],
+        vec![
+            w3e_create(&h, 1, last, carrier, everyone),
+            w3e_create(&h, 2, first, h.zone, everyone),
+        ],
+        vec![
+            w3e_create(&h, 3, between, carrier, everyone),
+            w3e_create(&h, 4, inner, between, everyone),
+            w3e_effect(
+                5,
+                inner,
+                everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(inner, 1, Value::Uint(7)),
+                    rest: Rest::new(),
+                }]),
+            ),
+            w3e_create(&h, 6, private, h.zone, Audience::Of(private)),
+        ],
+    ];
+    let mut whole = 0;
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes).unwrap();
+        out.flush().unwrap();
+        if i == 0 {
+            whole = out.whole_cuts;
+        }
+    }
+    // The reader holds the source's public state.
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    (all, out.whole_cuts - whole)
+}
+
 /// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
 /// says the world is quiet up to now and still until its next due change (field 11: `[t]`, or `[]` when nothing is
 /// due); once it is awake again its pointer has no field 11.
@@ -4173,4 +4263,181 @@ fn write_whole_leaves_the_whole_file_and_no_temporary() {
     assert_eq!(fs::read(&path).unwrap(), new);
     assert!(!dir.join("world.json.tmp").exists());
     fs::remove_dir_all(&dir).unwrap();
+}
+
+fn t_late_made_end(incremental: bool) -> (Vec<u8>, Value, Value) {
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch(&format!("t-late-elsewhere-{incremental}"));
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let n = |s: u8| Id::new(Scope([s; 16]), 1).unwrap();
+    let (carrier, x, l) = (n(0x90), n(0x95), n(0xa0));
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let everyone = Audience::Everyone;
+    let log = vec![
+        vec![w3e_create(&h, 0, carrier, h.zone, everyone)],
+        vec![w3e_effect(
+            1,
+            carrier,
+            everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Link {
+                    link: l,
+                    ty: h.kinds[0].clone(),
+                    ends: [carrier, x],
+                    owner: replica::world_model::End::First,
+                    audience: everyone,
+                },
+                rest: Rest::new(),
+            }]),
+        )],
+        // The link's far end, not a node until now, is made here, private.
+        vec![
+            w3e_create(&h, 2, x, h.zone, Audience::Of(x)),
+            w3e_effect(
+                3,
+                carrier,
+                everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(carrier, 1, Value::Uint(7)),
+                    rest: Rest::new(),
+                }]),
+            ),
+        ],
+    ];
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes).unwrap();
+        out.flush().unwrap();
+    }
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    (
+        all,
+        out.public_player().state().clone(),
+        project(&h, &actual.tree().to_state()).unwrap(),
+    )
+}
+
+/// T-late review: a public link made to an id that is not a node yet is attached to it when it is made; made private,
+/// the link is no longer public. The cut that makes it is whole, so the link leaves the public state as it should.
+#[test]
+fn t_late_a_node_made_at_the_end_of_a_link_already_made_is_a_whole_cut() {
+    let (rows, rows_state, truth) = t_late_made_end(true);
+    let (whole, whole_state, _) = t_late_made_end(false);
+    assert_eq!(whole_state, truth, "the whole cuts hold the public state");
+    assert_eq!(rows_state, truth, "the cuts by rows hold the public state");
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+}
+
+fn t_late_taken_out(incremental: bool) -> (Vec<u8>, Value, u64) {
+    let h = header();
+    let d = scratch(&format!("t-late-closed-{incremental}"));
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let id = |n| Id::new(Scope([0x39; 16]), n).unwrap();
+    let (crate_, hidden, beside, l) = (id(1), id(2), id(3), id(4));
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let built = w3e_packet(
+        &h,
+        vec![
+            i3948_create(&h, 0, crate_, h.zone, 5),
+            i3948_create(&h, 1, hidden, crate_, 3),
+            i3948_create(&h, 2, beside, h.zone, 3),
+            w3e_effect(
+                3,
+                beside,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: Change::Link {
+                        link: l,
+                        ty: h.kinds[0].clone(),
+                        ends: [beside, hidden],
+                        owner: replica::world_model::End::First,
+                        audience: Audience::Everyone,
+                    },
+                    rest: Rest::new(),
+                }]),
+            ),
+        ],
+    );
+    actual.apply_bytes(&built).unwrap();
+    let mut out = PublicWriter::open_hiding(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+        i3948_closed(&h),
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let p = w3e_packet(&h, vec![i3948_set(4, beside, 7)]);
+    actual.apply_bytes(&p).unwrap();
+    out.push(0, &p).unwrap();
+    out.flush().unwrap();
+    let before = out.whole_cuts;
+    let x1 = Id::new(Scope([0x3a; 16]), 1).unwrap();
+    let p = w3e_packet(&h, i3948_move(&h, 5, hidden, h.zone, x1));
+    actual.apply_bytes(&p).unwrap();
+    out.push(1, &p).unwrap();
+    out.flush().unwrap();
+    assert!(
+        i3948_holds(out.public_player(), hidden),
+        "taken out, it is public"
+    );
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    (
+        all,
+        out.public_player().state().clone(),
+        out.whole_cuts - before,
+    )
+}
+
+/// T-late review (#3948): a thing taken out of a closed container comes back with its links; its row is not a node
+/// made, so the cut is whole and the link is published with it.
+#[test]
+fn t_late_a_thing_taken_out_of_a_closed_container_is_still_a_whole_cut() {
+    let (rows, rows_state, rows_whole) = t_late_taken_out(true);
+    let (whole, whole_state, _) = t_late_taken_out(false);
+    assert_eq!(rows_state, whole_state);
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+    assert_eq!(rows_whole, 1, "taking out is a whole cut");
 }

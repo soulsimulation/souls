@@ -354,6 +354,8 @@ impl Measures {
         STALLS.json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
+        STREAM.json("stream", &mut o);
+        BACKUP.json("stream_backup", &mut o);
         o.push_str("}\n");
         o
     }
@@ -460,6 +462,103 @@ impl Syncs {
             l(&self.big_ms)
         );
     }
+}
+
+/// The public stream's state (R12), set by `worldd serve`'s stream thread: `recovering` until its first flush,
+/// `serving` after it, and `degraded` while its recovery is refused, with the fault, the tries refused so far and the
+/// wait before the next; `stopped` with its fault if it ends after serving. A degraded world stays up with no viewers;
+/// a crash loop would hide the fault. Unset (no
+/// field in `health.json`) where no public stream runs.
+pub struct Stream(Mutex<String>);
+
+/// This process's public stream.
+pub static STREAM: Stream = Stream(Mutex::new(String::new()));
+
+/// R15: the stream's recovery chain, backed up to the store behind it (`stream_backup` in `health.json`). Viewers read
+/// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
+pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
+
+impl Stream {
+    pub fn recovering(&self) {
+        self.set("{\"state\":\"recovering\"}".to_owned());
+    }
+
+    pub fn serving(&self) {
+        self.set("{\"state\":\"serving\"}".to_owned());
+    }
+
+    /// Its recovery refused `fault` for the `tries`th time; the next try in `next_try_ms`.
+    pub fn degraded(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        self.set(format!(
+            "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
+            quoted(fault)
+        ));
+    }
+
+    /// It stopped on `fault` after serving; the world goes on without it.
+    pub fn stopped(&self, fault: &str) {
+        self.set(format!(
+            "{{\"state\":\"stopped\",\"fault\":\"{}\"}}",
+            quoted(fault)
+        ));
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"degraded\"")
+    }
+
+    fn set(&self, json: String) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = json;
+    }
+
+    /// How the stream's backup stands ([`BACKUP`]).
+    pub fn backup(&self, state: &crate::view_out::BackupState) {
+        self.set(match state {
+            crate::view_out::BackupState::Current => "{\"state\":\"current\"}".to_owned(),
+            crate::view_out::BackupState::Degraded {
+                fault,
+                tries,
+                next_try_ms,
+                behind,
+                behind_bytes,
+            } => format!(
+                "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms},\"behind\":{behind},\"behind_bytes\":{behind_bytes}}}",
+                quoted(fault)
+            ),
+            crate::view_out::BackupState::Fenced { fault } => format!(
+                "{{\"state\":\"fenced\",\"fault\":\"{}\"}}",
+                quoted(fault)
+            ),
+        });
+    }
+
+    /// `,"<name>":{...}`, or nothing while unset.
+    fn json(&self, name: &str, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !s.is_empty() {
+            o.push_str(&format!(",\"{name}\":"));
+            o.push_str(&s);
+        }
+    }
+}
+
+/// `text` as the inside of a JSON string.
+fn quoted(text: &str) -> String {
+    let mut q = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '"' => q.push_str("\\\""),
+            '\\' => q.push_str("\\\\"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(q, "\\u{:04x}", c as u32);
+            }
+            c => q.push(c),
+        }
+    }
+    q
 }
 
 /// Writes `health.json` at `path` every `every`, by a temporary file and a rename, until the process ends. It

@@ -10,6 +10,7 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --world-root  the world's folder's parent (default /dev/shm on Linux, else the out folder)
 //   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
@@ -23,9 +24,9 @@
 // 4. A browser smoke: home, sign-in, sound, music, the camera.
 // Prints a pass/fail table and writes report.json (and the clip) to the out folder. Exit 0 when every line passes.
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -73,7 +74,14 @@ const json = async (url, init) => { const r = await fetch(url, init); return { s
 // ---- the stack ----
 const facts = opt('facts') ? resolve(opt('facts')) : join(OUT, 'eden-2026.facts.json');
 if (!opt('facts')) { log('exporting Eden\'s facts'); execFileSync(process.execPath, ['v2/tools/import-eden/export/export.ts'], { cwd: repo, stdio: 'ignore' }); copyFileSync(join(repo, '.local/import-eden/eden-2026.facts.json'), facts); }
-const W = join(OUT, 'world'), E = join(OUT, 'entries');
+// The world's folder on a disk of its own where there is one (/dev/shm on Linux, as v2/tools/bench/stage2a/rung.sh's
+// WORLD_ROOT): on a shared build machine the log's syncs otherwise wait on CI's disk (B3-7: log.sync p99 1.31 s), which
+// is the machine's, not the world's. `--world-root` names another; it and its socket are removed at the end.
+const ROOT = opt('world-root', process.platform === 'linux' && existsSync('/dev/shm') ? '/dev/shm' : OUT);
+const W = join(ROOT, ROOT === OUT ? 'world' : `check-0132-${process.pid}-${randomBytes(4).toString('hex')}`), E = join(OUT, 'entries');
+if (ROOT !== OUT && !KEEP) process.on('exit', () => { for (const f of readdirSync(ROOT)) if (f === basename(W) || f.startsWith(`${basename(W)}.`)) try { rmSync(join(ROOT, f), { recursive: true, force: true }); } catch { /* gone */ } });
+/** The world's own log-sync times (its health.json, O4's `parts`), or null. */
+const logSync = () => { try { return JSON.parse(readFileSync(join(W, 'health.json'), 'utf8')).parts?.['log.sync'] ?? null; } catch { return null; } };
 cpSync(join(repo, 'content/kinds'), E, { recursive: true });
 log(`seeding Eden with ${AGENTS} test Souls`);
 execFileSync(join(BIN, 'worldd'), ['seed', '--facts', facts, '--dir', W, '--entries', E, '--souls', String(AGENTS)], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -161,11 +169,31 @@ async function worldPage(video) {
   // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
   // an act ended at its deadline): counted from the reader worker's messages, read-only
   await page.addInitScript(() => {
-    const W = window.Worker, seen = (window.__happened = {});
+    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
+    // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
+    // (it is written only after its end) and each pointer's quiet time plus the writer's 100 ms settle (worldd view_out
+    // `SETTLE_US`, rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
+    // came soonest after its world time; the least over the last minute maps one to the other, early by that sample's
+    // own lag (tens to a few hundred ms). It never assumes the last part ended "now", which a quiet spell breaks.
+    window.__worldAt = (pt) => { const xs = clock.filter((c) => c.at <= pt && c.at > pt - 60_000); return xs.length ? (pt - Math.min(...xs.map((c) => c.at - c.world / 1000))) * 1000 : null; };
+    // B3-7: when the page's newest whole chunk moved on (its serverTick), by the page's clock
+    const poll = () => { const t = window.__soulsV2?.takes; if (t && t.serverTick !== pub.at(-1)?.tick) { pub.push({ tick: t.serverTick, at: performance.now() }); if (pub.length > 400) pub.shift(); } requestAnimationFrame(poll); };
+    requestAnimationFrame(poll);
     window.Worker = class extends W {
       constructor(...a) {
         super(...a);
-        this.addEventListener('message', (e) => { for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1; });
+        this.addEventListener('message', (e) => {
+          for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1;
+          // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
+          const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
+          if (p) clock.push({ at: now, world: p.to });
+          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 100_000 });
+          if (clock.length > 600) clock.shift();
+          if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+            framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })),
+            // G-late: every body and node the part touches (a sample, a changed node, a move), for when a step's first part came
+            touched: [...new Set([...(p.samples ?? []).map((x) => x[0]), ...(p.nodes ?? []).map((n) => n.id), ...(p.moves ?? []).map((m) => m.body)])] }), parts.length > 400 && parts.shift();
+        });
       }
     };
   });
@@ -174,10 +202,10 @@ async function worldPage(video) {
   return { ctx, page };
 }
 /** What the page's v2 reader shows of one Soul now: its activity and held prop in the newest chunk, and its speech. */
-/** What the page draws of one Soul now: the moment LiveWorld plays (serverTick and the time since it came, less the
+/** What the page draws of one Soul now: the moment LiveWorld plays (`since`: acts begun at or after that tick only) (serverTick and the time since it came, less the
  *  source's play delay, at most the newest chunk's end), not the newest chunk's end. Its activity, held prop and walking
  *  from the chunk changes up to that tick, and its words said by then. */
-const probe = (page, soul) => page.evaluate((soul) => {
+const probe = (page, soul, since = 0) => page.evaluate(({ soul, since }) => {
   const v = window.__soulsV2; if (!v) return null;
   const s = v.souls.get(soul), t = v.takes, chunks = t.chunks; if (!s || !chunks.length) return { doing: s?.doing ?? null, activity: null, acts: [], prop: null, said: 0, p: null };
   const tick = Math.min(chunks.at(-1).toTick, t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30));
@@ -187,13 +215,37 @@ const probe = (page, soul) => page.evaluate((soul) => {
     const e = c.take.finalState.entities[s.entityId];
     if (c.toTick <= tick) { activity = e?.human?.activity ?? activity; prop = e?.human?.prop ?? null; p = e?.pose?.p ?? p; }
     for (const ch of c.take.changes ?? []) if (ch[1] === s.entityId && c.fromTick + ch[0] <= tick) {
-      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick) acts.add(ch[3]); }
+      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick && c.fromTick + ch[0] >= since) acts.add(ch[3]); }
       if (ch[2] === 'prop') prop = ch[3] ?? null;
     }
     for (const ev of c.take.events ?? []) if (ev.data?.from === soul && c.fromTick + ev.t <= tick) said++;
   }
   return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
-}, soul);
+}, { soul, since });
+
+/** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (window.__worldAt, mapped from
+ *  the stream's own timestamps), and for this Soul's first move started and first thing put in its frame after that, the
+ *  world time it happened (ms after the send), when the page had the part saying so, and when the chunk holding it was
+ *  whole on the page (each ms after the send). The page then plays it `playDelay` ticks behind that chunk's end. */
+const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
+  const v = window.__soulsV2, parts = window.__parts ?? [], pub = window.__published ?? [];
+  const ent = v?.souls.get(soul)?.entityId; if (!ent) return null;
+  const mine = (id) => { const e = `v2_${String(id).replace(/[^0-9a-z]/gi, '_')}`; return ent === e || ent.startsWith(`${e}_`); };
+  const worldAt = window.__worldAt?.(pt0) ?? null, pageAt = (us) => (worldAt === null ? null : pt0 + (us - worldAt) / 1000);
+  const ms = (us) => (worldAt === null ? null : Math.round((us - worldAt) / 1000));
+  const shown = (us) => { const end = Math.ceil(us / 50_000 / 10) * 10; const q = pub.find((x) => x.tick >= end && x.at >= pt0); return q ? Math.round(q.at - pt0) : null; };
+  const after = parts.filter((p) => p.at >= pt0);
+  const of = (pick) => { for (const p of after) { const x = pick(p); if (x !== undefined) return { worldMs: ms(x.at), part: [ms(p.from), ms(p.to)], hadMs: Math.round(p.at - pt0), chunkWholeMs: shown(x.at), what: x.what }; } return null; };
+  return {
+    move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
+    framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
+    playDelayTicks: v.takes.playDelay,
+    // G-late: when the first part after the send that touches this Soul reached the page, on the machine's wall clock (ms)
+    arrivedAt: after.find((p) => (p.touched ?? []).some(mine))?.at ?? null,
+    // how long after its end each part of the step came, on the same mapping (worldd writes a quiet stretch's part 100 ms after its end)
+    partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
+  };
+}, { soul, pt0 });
 
 // ---- 2: a freshly paired agent ----
 if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
@@ -257,11 +309,25 @@ else if (ONLY.has('2')) {
    *  long walk that keeps closing on its goal is waited for (D11: a 233 s walk to a bed was cut at 120 s here, by the
    *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
   const walked = (seq) => ended(seq, 20 * 60_000);
-  /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
+  /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s). G-late: it passes when the
+   *  act's first drawn sign (`first`, the step's own early sign such as a take's approach walk, or `shown` itself) is
+   *  on the page within 2 s of the client command's start; when `shown` (labelled `what`, such as the thing in hand)
+   *  held is a second, informational time. */
   let soul = null, arrivalT0 = null;
-  const step = async (name, send, shown) => {
-    const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
-    let seenMs = null;
+  const step = async (name, send, shown, what = 'shown done', first = () => false) => {
+    const b = soul ? await probe(page, soul) : null;
+    // G-late: every time below is on one clock, this machine's, from the moment the client command starts (what an
+    // agent waits through): the client's sentAt and the world's answers as the client stamped them, and the page's
+    // moments placed by the page's own clock read just before the send (pt0, at the middle of that read).
+    const before = Date.now(), pt0 = await page.evaluate(() => performance.now()), pageAt = (before + Date.now()) / 2;
+    // The world's tick at the send: a step counts as drawn only when the page draws a moment at or after it, never one
+    // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once). The
+    // world's clock is this machine's (worldd's `answers::now`, µs from the epoch), so the send's own tick is exact; the
+    // page's mapping (window.__worldAt, early by its soonest sample's lag) is the floor where they differ.
+    const t0 = Date.now(), mapped = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
+    const since = Math.max(mapped, Math.floor(Date.now() / 50) - 1);
+    const sent = send(), back = Date.now();
+    let seenMs = null, firstMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
         soul = (await page.evaluate((id) => (window.__soulsV2?.souls.has(id) ? id : null), agent.soul)) ?? null;
@@ -269,24 +335,40 @@ else if (ONLY.has('2')) {
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
       }
-      const s = soul ? await probe(page, soul) : null;
-      if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      const s = soul ? await probe(page, soul, since) : null;
+      const done = s && s.tick >= since && shown(s, b ?? s);
+      if (s && s.tick >= since && firstMs === null && (done || first(s, b ?? s))) firstMs = Date.now() - t0;
+      if (done) { seenMs = Date.now() - t0; break; }
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
-    // what the world answered so far (its receipt's phases or refusal, by name), each with how long after the send it
-    // came (the client's own receipt: sentAt and each answer's at), and what the page showed last
+    // what the world answered so far (its receipt's phases or refusal, by name), each with how long after the command
+    // started the client had it (the client's own receipt: each answer's at), and what the page showed last
     const rc = sent?.sequence ? cli('receipt', String(sent.sequence)).receipt : null;
-    const timed = (rc?.answers ?? []).map((a) => ({ name: a.reason ?? a.answer, ms: rc.sentAt && a.at ? Date.parse(a.at) - Date.parse(rc.sentAt) : null }));
+    const timed = (rc?.answers ?? []).map((a) => ({ name: a.reason ?? a.answer, ms: a.at ? Date.parse(a.at) - t0 : null }));
+    // how long the client held the act before it went to the world (its own copy check), and how long the command took
+    const sentMs = rc?.sentAt ? Date.parse(rc.sentAt) - t0 : null, commandMs = back - t0;
+    const status = soul ? cli('status') : null, syncs = (status?.syncs ?? []).slice(-4).map((x) => `${x.kind} ${x.ms} ms`).join(', ');
     const answers = timed.map((a) => `${a.name}${a.ms !== null ? ` at ${a.ms} ms` : ''}`).join(' > ');
     // the answer the page shows (a receipt ends a sit, a take, a set-down, a say; a walk shows from its acceptance), and
     // the line's bar: on the page within 2 s of it
     const shownBy = [...timed].reverse().find((a) => a.ms !== null && seenMs !== null && a.ms <= seenMs) ?? null;
     const afterAnswer = seenMs !== null && shownBy ? seenMs - shownBy.ms : null;
-    const pass = sent?.ok !== false && afterAnswer !== null && afterAnswer <= 2000;
+    const pass = sent?.ok !== false && firstMs !== null && firstMs <= 2000;
     const last = soul ? await probe(page, soul) : null;
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last });
-    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
+    const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
+    if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
+    // this step's own form check, by the daemon log's time (none for an act that is not a form's)
+    const daemonLog = (() => { try { return readFileSync(join(OUT, 'agent', '.souls', 'souls', agent.soul, 'runtime', 'daemon.log'), 'utf8').split('\n').filter((l) => l.includes(' act check: ') && Date.parse(l.split(' ')[0]) >= t0).at(0)?.replace(/^\S+ /, '') ?? 'none'; } catch { return 'none'; } })();
+    log(`client ${name}: its form check: ${daemonLog}`);
+    log(`client ${name}: sent ${sentMs ?? '?'} ms after the command started, the command answered at ${commandMs} ms; the daemon has ${status?.entries ?? '?'} entries, ${status?.follows ?? '?'} follows, last syncs ${syncs || 'none'}`);
+    // the first part touching the Soul after the send, on the same clock: the page's own delay is drawn less arrived
+    const partMs = typeof trace?.arrivedAt === 'number' ? Math.round(pageAt + (trace.arrivedAt - pt0) - t0) : null;
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, sentMs, commandMs, partMs, firstMs, seenMs, afterAnswer, page: last, trace });
+    const shows = last ? `it shows ${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul';
+    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `from the command's start: sent at ${sentMs ?? '?'} ms; world: ${answers || 'no answer yet'}`}; `
+      + `first drawn ${firstMs === null ? `not within 6 s (${shows})` : `at ${firstMs} ms`}; its first part on the page at ${partMs ?? '?'} ms${partMs !== null && firstMs !== null ? ` (drawn ${firstMs - partMs} ms after it came)` : ''}; `
+      + `${what} ${seenMs === null ? 'not within 6 s' : `at ${seenMs} ms`}`);
     return sent;
   };
   const walking = (s) => s.activity === 'walk'; // drawn walking at the moment the page plays
@@ -300,7 +382,7 @@ else if (ONLY.has('2')) {
     report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
     row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
     if (r?.sequence) await walked(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
@@ -310,7 +392,7 @@ else if (ONLY.has('2')) {
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
     if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
-    r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
+    r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop, 'the thing in hand', (s) => s.acts.includes('walk'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
     if (r?.sequence) await walked(r.sequence);
@@ -327,6 +409,7 @@ else if (ONLY.has('2')) {
     await step('gesture', () => body ? cli('act', `wave:${body}`, `clap:${body}`) : { ok: false, detail: 'own body not known' }, (s) => s.acts.some((a) => /wave|clap|gesture/.test(a)) || /wave|clap/.test(s.activity ?? ''));
     await sleep(3000);
   }
+  report.lines[2].logSync = logSync();
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
   report.clip = 'clip/';
@@ -414,13 +497,13 @@ if (ONLY.has('3')) {
   row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0 && samples > 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
   row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0].split(' ')[0]}` : ''}`);
   row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${(slow[0][1] / 1000).toFixed(1)} s, agent ${slow[0][0].split(' ')[0]}` : 'none'}), ${ignored.length} never`);
-  report.lines[3] = { happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
+  report.lines[3] = { logSync: logSync(), happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
 }
 
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, '', '| line | check | result | detail |', '|---|---|---|---|',
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, `World folder: ${ROOT === OUT ? 'the out folder' : ROOT}; its log.sync (health.json, µs): ${JSON.stringify(logSync())}`, '', '| line | check | result | detail |', '|---|---|---|---|',
   ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
 writeFileSync(join(OUT, 'table.md'), table + '\n');
 console.log(`\n${table}`);

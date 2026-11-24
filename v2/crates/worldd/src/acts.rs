@@ -52,8 +52,12 @@
 //!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
 //!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
 //!
+//! - **A restart** (N2, 0.133). The forms are read back from the log ([`Acts::recover`]): a run open at the kill is
+//!   ended `restart` in the first tick, so its reservation is freed and the log holds its end. Its intent, never
+//!   answered, is taken afresh when the gateway sends it again: a walk is planned again from where the body stands.
+//!
 //! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
-//! nodes); resuming a run after a restart.
+//! nodes); resuming a run mid-way after a restart.
 
 use replica::host::WalkPlan;
 use sim::ground::Versions;
@@ -254,10 +258,9 @@ impl Planning {
         to: Vec3,
         map: &Arc<Versions>,
     ) -> Option<Result<sim::walk::town::Line, Refusal>> {
-        let matches = self
-            .current
-            .get(&key)
-            .is_some_and(|(q, _)| q.body == body && q.query == (FormQuery::Line { to }));
+        let matches = self.current.get(&key).is_some_and(|(q, _)| {
+            same_asker(&q.query, &q.body, &body) && q.query == (FormQuery::Line { to })
+        });
         let answer = self.answer(&key, map).cloned();
         if answer.is_some() {
             self.current.remove(&key);
@@ -277,10 +280,9 @@ impl Planning {
         query: FormQuery,
         map: &Arc<Versions>,
     ) -> Option<FormResult> {
-        let unchanged = self
-            .current
-            .get(&key)
-            .is_some_and(|(q, m)| q.body == body && q.query == query && Arc::ptr_eq(m, map));
+        let unchanged = self.current.get(&key).is_some_and(|(q, m)| {
+            same_asker(&q.query, &q.body, &body) && q.query == query && Arc::ptr_eq(m, map)
+        });
         if !unchanged {
             self.generation += 1;
             let q = FormQuestion {
@@ -300,13 +302,26 @@ impl Planning {
     }
 }
 
+/// Whether a question asked for `asked` still stands for the body as it is now (S11). A walk's place and legs are
+/// asked for the body exactly as it stood. A line is asked for a walker on its way, and a walker waiting for one is
+/// still pushed along by those round it: its line stands while it is on the same floor, and the line it gets is the
+/// planner's from where it was, which it follows from where it is, or asks again when pushed off it
+/// (`Town::corner_planned`). Asked again for each new pose, a jostled walker's line was never the current one when it
+/// came back, and the walker waited for it, standing, for as long as the crowd round it moved.
+fn same_asker(query: &FormQuery, asked: &Moved, now: &Moved) -> bool {
+    match query {
+        FormQuery::Line { .. } => sim::walk::node_of(asked) == sim::walk::node_of(now),
+        FormQuery::Walk { .. } => asked == now,
+    }
+}
+
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
-    bodies: BTreeMap<Id, Moved>,
+    bodies: Arc<BTreeMap<Id, Moved>>,
     /// The bodies carried across a link now.
-    carrying: BTreeSet<Id>,
+    carrying: Arc<BTreeSet<Id>>,
     split: Option<RefCell<Split<'a>>>,
-    builds: BTreeMap<Id, Build>,
+    builds: Arc<BTreeMap<Id, Build>>,
     tree: &'a Tree,
     kind: Name,
     /// The world's entries by kind, for a thing's points and bounds.
@@ -1463,6 +1478,44 @@ pub struct Args {
     pub values: skills::form_runner::Args,
 }
 
+/// The bodies as a [`Sight`] sees them: each body as the controller has it, those carried across a link now, and
+/// each body's build. Built once for a batch of form starts in which no body moves ([`Acts::hold_sight`], S10).
+type Held = (
+    Arc<BTreeMap<Id, Moved>>,
+    Arc<BTreeSet<Id>>,
+    Arc<BTreeMap<Id, Build>>,
+);
+
+trait HeldOf {
+    fn of(controller: &Controller) -> Held;
+}
+
+impl HeldOf for Held {
+    fn of(controller: &Controller) -> Held {
+        (
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.body(id).map(|b| (id, *b)))
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .bodies()
+                    .filter(|b| controller.carrying(b.id).is_some())
+                    .map(|b| b.id)
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.build(id).map(|build| (id, build)))
+                    .collect(),
+            ),
+        )
+    }
+}
+
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
     pub forms: Forms,
@@ -1491,6 +1544,31 @@ pub struct Acts {
     planning: RefCell<Planning>,
     /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
+    /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
+    zone: replica::effects::Header,
+    /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
+    /// at its first use.
+    held: Option<Option<Held>>,
+}
+
+/// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
+fn loaded(kinds: &Json) -> replica::kinds::Kinds {
+    let mut loaded = replica::kinds::Kinds::default();
+    for (_, entry) in kinds.obj().unwrap_or(&[]) {
+        let mut e = entry.clone();
+        if let Json::Obj(o) = &mut e {
+            o.retain(|(k, _)| k != "forms");
+            // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+            // left out, so the entry's amounts load (#3715).
+            if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+            }
+        }
+        if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
+            loaded.load(&[("entry", text.as_str())]);
+        }
+    }
+    loaded
 }
 
 /// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
@@ -1797,23 +1875,8 @@ impl Acts {
         // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
         let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
-        let mut loaded = replica::kinds::Kinds::default();
-        for (_, entry) in kinds.obj().unwrap_or(&[]) {
-            let mut e = entry.clone();
-            if let Json::Obj(o) = &mut e {
-                o.retain(|(k, _)| k != "forms");
-                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
-                // left out, so the entry's amounts load (#3715).
-                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
-                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
-                }
-            }
-            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
-                loaded.load(&[("entry", text.as_str())]);
-            }
-        }
-        forms.kinds(&loaded);
-        forms.zone(header);
+        forms.kinds(&loaded(&kinds));
+        forms.zone(header.clone());
         Acts {
             forms,
             kinds,
@@ -1831,7 +1894,20 @@ impl Acts {
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
+            zone: header,
+            held: None,
         }
+    }
+
+    /// N2 (0.133): the forms read back from the log at a restart at `now` (`Forms::recover`): every run the log shows
+    /// started and not ended is ended `restart` now, its ending entry (which frees what it reserved) written with the
+    /// first tick. Its intent is not answered here: the gateway sends it again and it starts afresh from where the
+    /// body stands. `log` is the restart's replayed entries of the Souls' acts, in order.
+    pub fn recover(&mut self, log: &[Effect], now: Micros) {
+        let mut forms = Forms::recover(log, now);
+        forms.kinds(&loaded(&self.kinds));
+        forms.zone(self.zone.clone());
+        self.forms = forms;
     }
 
     /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
@@ -1933,20 +2009,22 @@ impl Acts {
             (Some(slots), Some(floors)) => Some(Places { slots, floors }),
             _ => None,
         };
+        // Held for a batch of starts: built at the first of them and read by the rest, none of which moves a body.
+        let (bodies, carrying, builds) = match &mut self.held {
+            Some(Some(h)) => {
+                debug_assert!(
+                    *h == Held::of(controller),
+                    "a start moved a body while the bodies were held"
+                );
+                h.clone()
+            }
+            Some(slot) => slot.insert(Held::of(controller)).clone(),
+            None => Held::of(controller),
+        };
         let sight = Sight {
-            bodies: controller
-                .ids()
-                .filter_map(|id| controller.body(id).map(|b| (id, *b)))
-                .collect(),
-            carrying: controller
-                .bodies()
-                .filter(|b| controller.carrying(b.id).is_some())
-                .map(|b| b.id)
-                .collect(),
-            builds: controller
-                .ids()
-                .filter_map(|id| controller.build(id).map(|build| (id, build)))
-                .collect(),
+            bodies,
+            carrying,
+            builds,
             split: split.map(RefCell::new),
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
@@ -2034,6 +2112,19 @@ impl Acts {
                         .is_some_and(text)
                     && e.get("field").and_then(Json::str).is_some_and(everyone)
             })
+    }
+
+    /// Holds one snapshot of the bodies for every [`Sight`] until [`Acts::release_sight`] (S10): for the tick's form
+    /// starts, between which no body moves (a start claims legs and sets timers; the controller steps them in a later
+    /// tick). Each start otherwise rebuilt it whole: every body, every build, at about 0.4 ms each at 750 bodies.
+    /// The snapshot is built at the first start that needs it, so a tick with no starts builds none.
+    pub fn hold_sight(&mut self) {
+        self.held = Some(None);
+    }
+
+    /// Lets each [`Sight`] read the bodies afresh again.
+    pub fn release_sight(&mut self) {
+        self.held = None;
     }
 
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or

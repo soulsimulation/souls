@@ -39,7 +39,8 @@ import {installClassroomTv} from './classroom-tv.ts';   // #2302
 import {readFileSync} from 'node:fs';
 import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
-import { rehearseRestore, standby } from './standby.ts';
+import { prebakeGround, rehearseRestore, standby } from './standby.ts';
+import { dropPrebakedTiles } from '@souls/ground';
 import { coreLibrary } from '@souls/world-compiler';
 import { faultExit, faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, stoppedByFault, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
@@ -88,7 +89,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     if (config.engine === 'mars') await import('@souls/engine-mars');
     await import('./edge/body/migrate-looks.ts');
     if (config.worldEngine) coreLibrary();   // the god's shared core library (built once per process, ~0.1 s)
-    if (!edenCoreRequested(config, config.env)) { warmFactory = await plainFactory(); rehearseRestore(join(config.dataDir, 'sim.db'), config.worldId, warmFactory as never, (ro) => { if (config.worldEngine && ro.prepare("SELECT 1 FROM sqlite_master WHERE name='world_ground_recipes_v1'").get()) registerGroundRecipes(ro, config.worldId); }); }
+    if (!edenCoreRequested(config, config.env)) { warmFactory = await plainFactory(); rehearseRestore(join(config.dataDir, 'sim.db'), config.worldId, warmFactory as never, (ro) => { if (config.worldEngine && ro.prepare("SELECT 1 FROM sqlite_master WHERE name='world_ground_recipes_v1'").get()) registerGroundRecipes(ro, config.worldId); if (config.worldEngine) prebakeGround(ro, config.worldId); }); }
   });
   bootAt.go = performance.now();
   // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
@@ -487,7 +488,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
   server.listen(config.port, config.host, () => {
-    load.boot.phase('serving', host.engine.world.tick); uninstallFaults = installFaultGuard(faults, process, o.mine); monitor.start(); stallLog?.start(); servingWarm('boot');
+    load.boot.phase('serving', host.engine.world.tick); dropPrebakedTiles(); uninstallFaults = installFaultGuard(faults, process, o.mine); monitor.start(); stallLog?.start(); servingWarm('boot');
     console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
     const s = (ms: number) => (ms / 1000).toFixed(2);
     console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);

@@ -767,7 +767,10 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
             .and_then(|n| n.get("held"));
         let kind = kind_of(&w.kinds, case, node).unwrap();
         let sees = case.get("asker").unwrap().get("sees").unwrap();
-        let audience = if let Some(field) = client.get("field").and_then(Value::str) {
+        let audience = if client.get("field") == Some(&s("closed")) {
+            // A closed container's contents (#4360): its `closed` section's audience.
+            kind.get("closed").and_then(|c| c.get("audience"))
+        } else if let Some(field) = client.get("field").and_then(Value::str) {
             let closed = kind.get("closed").filter(|c| {
                 c.get("fields")
                     .and_then(Value::arr)
@@ -892,4 +895,34 @@ fn drift_against_the_live_form_rules_cases() {
         "drift: {drift} of {} live Soul Actions cases disagree with this library (the snapshot's commit is in cases/form-rules-snapshot/SOURCE)",
         cases.len()
     );
+}
+
+/// #4360: a closed container the asker may not see into is unknown by its `closed` section, as the TS rules answer,
+/// never by a slot, a thing in it or a count. The kind is written here, a made-up `test:` one.
+#[test]
+fn a_closed_container_is_unknown_by_its_closed_section() {
+    let kinds = parse(
+        r#"{"test:stump": {"kind": "test:stump", "owner": "thing",
+            "closed": {"audience": {"rule": "creator"}, "fields": []},
+            "slots": {"inside": {"admits": "thing", "most": 1}},
+            "forms": {"search": {"who": "anyone", "starts": "act",
+              "takes": {"thing": {"type": "thing", "select": {"of": "things", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}},
+              "needs": [], "steps": [], "effects": []}}}}"#,
+    )
+    .expect("kinds");
+    let act = parse(r#"{"this": "st", "form": "search"}"#).expect("act");
+    let state = parse(
+        r#"{"actor": "b1", "nodes": {"st": {"kind": "test:stump", "slots": {"inside": []}}, "b1": {"hands": {"right": null}}}}"#,
+    )
+    .expect("state");
+    let asker = parse(r#"{"sees": ["public"]}"#).expect("asker");
+    let v = decide_parts(Some(&kinds), Some(&act), Some(&state), Some(&asker));
+    assert_eq!(
+        v.get("verdict").and_then(Value::str),
+        Some("unknown"),
+        "{}",
+        v.to_json()
+    );
+    assert_eq!(v.get("node").and_then(Value::str), Some("st"));
+    assert_eq!(v.get("field").and_then(Value::str), Some("closed"));
 }

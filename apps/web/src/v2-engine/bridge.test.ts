@@ -106,3 +106,42 @@ test('B3-4: a walker\'s chunks are made 0.3 s behind the newest part and played 
   const steps = pos.slice(1).map((p, i) => Math.hypot(p[0] - pos[i][0], p[2] - pos[i][2]));
   assert.ok(steps.length > 100 && Math.max(...steps) <= speed * DT * 1.5 && Math.min(...steps) >= speed * DT * 0.5, `steps ${Math.min(...steps)}..${Math.max(...steps)} m`);
 });
+
+/** LiveWorld's live clock (LiveWorld.tsx's frame loop) at 60 frames a second over the bridge's takes, `delay` ticks
+ *  behind: the frames whose played tick is held at the newest chunk's end (nothing on the page moves). */
+function heldFrames(arrivals: { at: number; m: Parameters<V2Bridge['receive']>[0] }[], delay: number): number {
+  let clock = 0, liveTick: number | null = null, last: number | null = null, held = 0, i = 0;
+  const b = new V2Bridge({ rulesVersion: 'test/1' }), now = performance.now;
+  performance.now = () => clock;
+  try {
+    for (clock = arrivals[0].at; clock <= arrivals.at(-1)!.at; clock += 1000 / 60) {
+      while (i < arrivals.length && arrivals[i].at <= clock) b.receive(arrivals[i++].m);
+      const t = b.view.takes;
+      if (!t.chunks.length) continue;
+      const step = last === null ? 0 : Math.min(0.1, (clock - last) / 1000), before = liveTick;
+      last = clock;
+      const target = t.serverTick + Math.min(2, Math.max(0, (clock - t.receivedAt) / 1000)) * 20 - delay;
+      liveTick = liveTick === null || Math.abs(target - liveTick) > 80 ? target : liveTick + step * 20 + (target - liveTick) * Math.min(1, step * 1.5);
+      liveTick = Math.max(t.chunks[0].fromTick, Math.min(t.chunks.at(-1)!.toTick, liveTick));
+      if (before !== null && clock > arrivals[0].at + 5000 && liveTick - before < step * 10 && liveTick === t.chunks.at(-1)!.toTick) held++;
+    }
+  } finally { performance.now = now; }
+  return held;
+}
+
+test('PL: on the stream\'s own cadence the page never plays up to the newest chunk; two ticks less play delay would', () => {
+  // a part every half second, give or take 30 ms (PL, a local Eden with 16 and 20 Souls
+  // walking: gaps p10 0.49 s, p90 0.51 s; the few parts later than that, about 4 %, hold the page at any delay under 1 s)
+  const lag = [180, 190, 175, 185, 200, 170, 180, 195];
+  const arrivals: { at: number; m: Parameters<V2Bridge['receive']>[0] }[] = [{ at: 0, m: { t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } } }];
+  for (let n = 0; n < 60; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = [];
+    for (let at = T0 + n * 500_000; at < T0 + (n + 1) * 500_000; at += 200_000) samples.push(['b.7', 'w.2', null, at, 1_000_000 + Math.round((at - T0) * 1.4), 0, 0]);
+    arrivals.push({ at: (n + 1) * 500 + lag[n % lag.length], m: part(n, samples) });
+  }
+  assert.equal(heldFrames(arrivals, PLAY_DELAY), 0);
+  assert.ok(heldFrames(arrivals, PLAY_DELAY - 2) > 0, 'the play delay is the least that holds no frame');
+  // BEHIND_US: a part ends on the half-second grid the chunks are on, so up to one chunk it costs nothing more; it must
+  // cover a walker's next sample (every 0.2 s, p99 0.25 s)
+  assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
+});

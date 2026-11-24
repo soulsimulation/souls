@@ -136,22 +136,31 @@ struct Built {
 fn built(serve_header: bool) -> Built {
     let mut im = import_eden::load(&facts()).expect("loads");
     if serve_header {
-        // C30's served header always pins the conversation kind and admits it on open ground.
-        let bytes = fixture_bytes(include_str!(
-            "../../replica/fixtures/activities/conversation.diag"
-        ))
-        .expect("the conversation fixture encodes");
-        let activity = ActivityKind::from_value(&decode(&bytes).expect("a kind").value)
-            .expect("the conversation kind");
-        im.rules.kinds.insert(
-            activity.name.as_str().to_owned(),
-            Kind {
-                owner: "activity".into(),
-                children: Default::default(),
-                slots: Default::default(),
-                hands: None,
-            },
-        );
+        // C30's served header always pins the conversation kind and the give's (0.133 R4) and admits them on open
+        // ground.
+        let activities: Vec<ActivityKind> = [
+            include_str!("../../replica/fixtures/activities/conversation.diag"),
+            include_str!("../../replica/fixtures/activities/give.diag"),
+        ]
+        .into_iter()
+        .map(|text| {
+            let bytes = fixture_bytes(text).expect("the activity fixture encodes");
+            ActivityKind::from_value(&decode(&bytes).expect("a kind").value)
+                .expect("the activity kind")
+        })
+        .collect();
+        for activity in &activities {
+            im.rules.kinds.insert(
+                activity.name.as_str().to_owned(),
+                Kind {
+                    owner: "activity".into(),
+                    children: Default::default(),
+                    slots: Default::default(),
+                    hands: None,
+                    fields: Default::default(),
+                },
+            );
+        }
         // `worldd serve`'s header: the root's kind admitted as R1's replica starts it (serve.rs `build`).
         im.rules.kinds.extend(
             parse_kinds(&format!(
@@ -168,7 +177,9 @@ fn built(serve_header: bool) -> Built {
         for (k, kind) in im.rules.kinds.iter_mut() {
             if plain(k) == import_eden::GROUND {
                 kind.children.insert("body".into());
-                kind.children.insert(plain(activity.name.as_str()).into());
+                for activity in &activities {
+                    kind.children.insert(plain(activity.name.as_str()).into());
+                }
             }
         }
     }

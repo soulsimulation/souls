@@ -49,7 +49,9 @@ blocks as they are, so two PRs that change form rules never collide on eden.mjs.
 - **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
   opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
   checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
-- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+- **Stamp**: the same sync pull request stamps the client when it changed since the last release
+  (`release-client.mjs stamp`), and release.yml refuses a head whose copy is stale or unstamped (`release-client.mjs
+  check`), so the client a world serves
   (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
 
 Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
@@ -428,8 +430,13 @@ sign-off; T4 is the release head. "Done" means walked on the real URL with real 
 
 When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
 `tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
-`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
-push it to an `agent/` branch, then dispatch the timed run from that branch:
+`{"sim.dev": "admin"}`, and `steps.mjs`), push it to an `agent/` branch, then dispatch the timed run from that branch.
+The runner brings up the ref's old page on a new-engine world of the template
+(`tools/playtest/arena/new-engine/old-page.mjs`, built in the job); `_shared/cast.mjs` pairs the kit's Souls through
+the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. The
+ride kits board by the ride's `board` form, waiting while it is away on its course (`_shared/ride.mjs`). A kit whose
+verbs have no new-engine form yet (the television, the core ferris wheel) carries `skip` in its kit.json, saying why
+and what is missing, and the runner refuses it by name:
 
 ```bash
 gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'

@@ -161,3 +161,66 @@ export function cloneFile(nodes, ref, { at, count = 1, step, yaw, ground, lift, 
 }
 
 const depth = (byId, id) => { let d = 0; for (let p = byId.get(id); p && p.parent !== null; p = byId.get(p.parent)) d++; return d; };
+
+// --- select (today's `eden-god select`) ------------------------------------------------------------------------------
+
+const yawOf = (o) => (Array.isArray(o) ? 2 * Math.atan2(Number(o[2]), Number(o[0])) : 0);
+const textOf = (v) => (v && typeof v === 'object' && v.hex !== undefined ? Buffer.from(v.hex, 'hex').toString() : typeof v === 'string' ? v : '');
+
+/** Each node's spot on the open ground, metres: its pose carried up through its parents' (a shape: its outline's or
+ *  line's middle). */
+export function spotsOf(nodes) {
+  const byId = new Map(nodes.map((n) => [n.id, n])), out = new Map();
+  const at = (n) => {
+    if (out.has(n.id)) return out.get(n.id);
+    const p = n.parent === null ? null : byId.get(n.parent);
+    const base = p ? at(p) : { x: 0, z: 0, yaw: 0 };
+    let s;
+    if (n.pose) {
+      const [x, , z] = n.pose.at.map((v) => Number(v) / 1e6), c = Math.cos(base.yaw), si = Math.sin(base.yaw);
+      s = { x: base.x + x * c + z * si, z: base.z - x * si + z * c, yaw: base.yaw + yawOf(n.pose.orientation) };
+    } else s = base;
+    // A shape stands at its parent's origin and draws its points: its spot is their middle.
+    const pts = n.fields?.[F.OUTLINE] ?? n.fields?.[F.LINE];
+    if (Array.isArray(pts) && pts.length && n.parent !== null) {
+      s = { ...s, x: pts.reduce((a, q) => a + Number(q[0]), 0) / pts.length / 1000, z: pts.reduce((a, q) => a + Number(q[1]), 0) / pts.length / 1000 };
+    }
+    out.set(n.id, s);
+    return s;
+  };
+  for (const n of nodes) at(n);
+  return out;
+}
+
+/**
+ * The things on `nodes` (an export of the copy) that match every filter given: `kind` (a part of the kind's name),
+ * `name` (words in its name, field 1), `in` (an id it is under), `area` ([x0, z0, x1, z1] metres) and `near`
+ * ([x, z] metres, within `radius` m, default 10). The world's root, the open ground and rooms and floors (a
+ * building's own parts) are never selected. Gives [{ id, kind, name, at: [x, z] }], at most `most`.
+ */
+export function selectOf(nodes, { kind, name, in: under, area, near, radius = 10 } = {}, most = 1000) {
+  const byId = new Map(nodes.map((n) => [n.id, n])), spots = spotsOf(nodes);
+  const isUnder = (n, id) => { for (let p = byId.get(n.parent); p; p = byId.get(p.parent)) if (p.id === id) return true; return false; };
+  const out = [];
+  for (const n of nodes) {
+    const k = String(n.kind).split('@')[0];
+    if (n.parent === null || n.fields?.[25] !== undefined || /^eden:(room|floor|place|extent)$/.test(k)) continue;
+    if (kind !== undefined && !k.includes(String(kind))) continue;
+    const nm = textOf(n.fields?.[1]);
+    if (name !== undefined && !nm.toLowerCase().includes(String(name).toLowerCase())) continue;
+    if (under !== undefined && !isUnder(n, under)) continue;
+    const s = spots.get(n.id);
+    if (area && !(s.x >= Math.min(area[0], area[2]) && s.x <= Math.max(area[0], area[2]) && s.z >= Math.min(area[1], area[3]) && s.z <= Math.max(area[1], area[3]))) continue;
+    if (near && Math.hypot(s.x - near[0], s.z - near[1]) > radius) continue;
+    out.push({ id: n.id, kind: k, ...(nm ? { name: nm } : {}), at: [Math.round(s.x * 100) / 100, Math.round(s.z * 100) / 100] });
+    if (out.length >= most) break;
+  }
+  return out;
+}
+
+/** The batch that removes `ids` (one under another goes with it). */
+export function removeOps(nodes, ids) {
+  const byId = new Map(nodes.map((n) => [n.id, n])), chosen = new Set(ids);
+  const under = (n) => { for (let p = byId.get(n.parent); p; p = byId.get(p.parent)) if (chosen.has(p.id)) return true; return false; };
+  return ids.filter((id) => byId.has(id) && !under(byId.get(id))).map((id) => ({ op: 'remove', node: id }));
+}

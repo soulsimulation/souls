@@ -13,9 +13,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { UploadRejected, validateUpload } from '../../apps/server/src/moderation/validate.ts';
-import { classify } from '../../apps/server/src/moderation/classifier.ts';
-import { ModerationStore } from '../../apps/server/src/moderation/store.ts';
+import { UploadRejected, validateUpload } from './moderation/validate.ts';
+import { classify } from './moderation/classifier.ts';
+import { ModerationStore } from './moderation/store.ts';
 import { DatabaseSync } from 'node:sqlite';
 
 export const THUMB = Object.freeze({ maxBytes: 512 * 1024, minWidth: 640, maxWidth: 1920, aspect: 16 / 9, aspectTolerance: 0.02, writesPerWindow: 6, windowMs: 10 * 60_000 });

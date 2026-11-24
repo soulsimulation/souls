@@ -3,7 +3,7 @@
   "kind": "eden:hall_board",
   "owner": "thing",
   "state": {
-    "page": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "page": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
     "presenter": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } }

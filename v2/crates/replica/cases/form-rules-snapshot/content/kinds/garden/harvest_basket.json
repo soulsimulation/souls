@@ -3,7 +3,7 @@
   "kind": "eden:harvest_basket",
   "owner": "thing",
   "state": {
-    "fruit": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+    "fruit": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 700] },

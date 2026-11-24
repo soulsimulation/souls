@@ -44,9 +44,12 @@ world is exported once while v1 still exists, and only the exporters' outputs ar
   `models/<hash>.glb` for `eden` (`worlds/templates/eden-2026.json`), `godmode-lab` (`hello-hamlet`) and
   `little-martians-arium` (`littlemartians-two`). Import them with no v1 in the path, from `v2/`:
   `cargo run --release -p import-world -- tools/import-world/kept/*/facts.json`. The rows match today's importer:
-  godmode-lab `7a13102a2bfb…` clean with 0 differences, Little Martians `6a8cb4c5e1c3…` clean with 5 differences, all
-  explained, and Eden `bf878f5b0e7b…` clean with 0 differences. Eden's facts are byte for byte the ones it was
-  imported from in 0.131.
+  godmode-lab `fe5c8323496d…` clean with 0 differences, Little Martians `230209a2232e…` clean with 5 differences, all
+  explained, and Eden `ac207c47678a…` clean with 0 differences. Since 0.135 W3 each file also carries every thing's
+  def params (`params`, the tree's field 19). Apart from those params, Eden's facts are byte for byte the ones it was
+  imported from in 0.131 (its template as of then), and godmode-lab's and Little Martians' are byte for byte their earlier
+  ones, except for the hash of the backup they were rebuilt from. The files without params stay on the CDN under their
+  own keys.
 - **Live worlds** (Mars College, and any world holding people's things or edits) are not published. Their facts and
   models are exported at the production switch (0.133 W4), from fresh backups, while v1 still exists, and the release
   owner keeps the outputs privately, beside the backups they came from. After 0.134 a live world is imported only from

@@ -305,6 +305,7 @@ fn fixture() -> (NamedRun, Client) {
                 children: BTreeSet::new(),
                 slots: BTreeMap::new(),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }
@@ -362,7 +363,7 @@ fn fixture() -> (NamedRun, Client) {
             text,
             path,
         },
-        Client(socket, w1(), 0),
+        Client(socket, w1(), 0, Vec::new()),
     )
 }
 fn pair(key: &str, value: Value) -> Value {

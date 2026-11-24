@@ -600,6 +600,14 @@ impl Bucket {
         Ok(Bucket::Folder(Folder::new(PathBuf::from(spec))))
     }
 
+    /// This bucket as a world's store ([`S3::for_world`]): whole objects past ureq's 10 MiB cap. A folder has no cap.
+    pub fn for_world(self) -> Bucket {
+        match self {
+            Bucket::S3(s) => Bucket::S3(s.for_world()),
+            f => f,
+        }
+    }
+
     /// What kind of store this is, for a line a person reads; never its address or its keys.
     pub fn what(&self) -> &'static str {
         match self {

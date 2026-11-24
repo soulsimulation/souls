@@ -34,9 +34,12 @@ and `v2Bodies` when the binding names it: the same-origin directory serving the 
 removes both. With an optional absolute `staticDir` (the directory the v2 origin serves as `<stream>static/`), the first
 routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
 `platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
-files. `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
-the launcher serves from `clientDir` for the routed world. Known limit: god edits made on v2 after the switch are not in
-those files until a converter from v2 facts exists. The launcher's user must be able to write `staticDir`.
+files. So is the page's read of that scene's capture (`/v1/scenes/<the published scene's hash>`): the old world keeps a
+scene's capture only once one of its takes carried it, so a world nobody watched since its scene last changed would
+answer 404, and the page would stop at "World layout could not be prepared". `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
+the launcher serves from `clientDir` for the routed world. God edits made on v2 after the switch are not in those files;
+the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
+made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
 
 ### One world's old page, on and off (B3-1)
 
@@ -76,6 +79,15 @@ there: Clerk on the stages, the same provider the directory verifies with its `-
 
 Run with only `--binding` (or nothing), it switches the bound world on again. `--back` clears only the flag: the next page
 names neither field, the published files are removed, the body folder is no longer served and the old world answers.
+
+A world with no old twin (D2, 0.134): every world the first binding's routes file routes to the new engine (`canonical`,
+not `archived`) that no binding binds and the launcher's registry does not hold. The launcher starts no process for it.
+It serves its page at `/w/<world>/` itself (the old page with the same v2 fields, its stream and history from its route,
+its body path and gateway as above), its client and bodies from the first binding's folders, refuses its old writes
+(409 `world.new-engine`), and answers its other old routes 404 `world.new-engine` (the page draws from the stream alone).
+`/__sim/worlds.json` lists it under its directory label (`GET /v1/worlds`, asked at most every 10 s; its name until the
+directory answers), not when the directory marks it unlisted. `/__sim/op/cutover` names these worlds in `routeOnly`; read
+it before a release, since a routed test world would be listed.
 
 Locally (fake minds; never against production): a launcher started with `SOULS_CUTOVER_BINDING=<abs file>`, a v2 world
 from `worldd seed` and `worldd serve`, `v2/tools/origin/origin.mjs` serving its stream, and Caddy on one port sending
@@ -146,10 +158,14 @@ LAUNCHER_PORT=<today's launcher port>
 
 | Step | Command | Rehearsed |
 |---|---|---:|
+| 0a. List every live Soul in the old worlds, and the candidates for Gene's own accounts (W5) | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs list` | fake host |
+| 0b. Confirm Gene's accounts, once he has checked 0a's candidates (`--drop <account>` for one that is not his) | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs confirm` | fake host |
+| 0c. Save every other person's Soul to one private file | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs save` | fake host |
 | 1. Stop the directory (it holds its stores) | `systemctl stop souls-directory` | 0.0 s |
 | 2. Save who owns what to one file | `node $P/v2/tools/ops/cutover/souls-state.mjs save --world /var/lib/souls/worlds/worlds/$WORLD --out /var/lib/souls/saved/eden-owners-$(date -u +%Y%m%dT%H%MZ).tar` | 0.1 s |
 | 3. Wipe them (refused unless step 2's file holds them as they are) | `node $P/v2/tools/ops/cutover/souls-state.mjs wipe --saved /var/lib/souls/saved/eden-owners-<that time>.tar` | 0.1 s |
 | 4. Start the directory on fresh stores | `systemctl start souls-directory` | 0.1 s |
+| 4a. Copy 0c's Souls into the fresh stores, unpaired, with the directory stopped again; prints the list to reconcile | `systemctl stop souls-directory && node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs copy; systemctl start souls-directory` | fake host |
 | 5. Switch Eden's old page | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --slug eden --stream $STREAM --routes /var/lib/souls/routes/worlds.json --client /usr/local/lib/souls/client --static $STATIC --port $LAUNCHER_PORT` | 1.4 s |
 | 6. Look in a real browser | open `https://soul.game/w/eden/`: the page draws Eden and reads `$STREAM` (the toolbar shows "Link to this moment") | 6.8 s |
 | 7. Switch back, on a stop condition | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --back --slug eden --port $LAUNCHER_PORT` | 1.5 s |
@@ -166,6 +182,18 @@ committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-
   each aside (`<file>.wiped-<time>`) and leaves an empty tokens file; the directory makes fresh stores when it starts
   and writes the tokens file again from them. Nothing is deleted, and the world is not touched: its Souls' bodies stay.
   Undoing it is renaming the files back with the directory stopped.
+- **Real people's Souls** (W5, `v2/tools/ops/cutover/keep-souls.mjs`): Gene's own Souls are tests and may go; every other
+  person's live Soul is kept. 0a to 0c only read the old worlds (`/srv/sim-worlds-data/production` and `legacy`) and
+  write to `/srv/sim-worlds-data/kept-souls/` (mode 0700): `gene-accounts.json` (the candidates shown, the drops and
+  the data folders; `save` refuses if the candidates have changed since), and `save-<time>.tar` with its `.sha256`.
+  The save holds each Soul's identity, body, memories and relationships, from an allowlist of tables and columns;
+  sign-in, pairing, webhook and idempotency records are never read. 4a checks the save's checksums. It then brings
+  the Souls in with `import-accounts`, using one staging folder per save (`new-<save time>`, so a rerun keeps the
+  same new ids), and adds them to the directory's account store under each owner's account, found by sign-in. They
+  carry no token and no pairing, so owners pair again. A rerun changes nothing. 4a prints, and keeps as
+  `reconcile-<time>.txt`, a plain list per person for Gene to reconcile. Run 4a after step 4, so the Souls land in
+  the fresh stores. Nothing in the old worlds is deleted. Tested on a fake host (`keep-souls.test.mjs`); not part of
+  the rehearsal.
 - **Several worlds** (W1): step 5 with another `--slug`, `--stream` and its own `--static` adds that world to the same
   binding; step 7's `--back --slug` turns back only that world.
 
@@ -174,6 +202,23 @@ committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-
 (`soul-game.caddy`, as `tools/release/check-0132.mjs` places it), with fake owners (two accounts and a paired Soul) and
 a real browser, and prints the table above. Its last run: every step passed, and the old page was back 7 s after
 the switch back.
+
+### A fresh Eden on a new build (0.132)
+
+A build whose header differs from the one Eden's log was written under cannot read that log (`worldd serve:
+header-mismatch`), so release-v2's rehearsal refuses it. Pre-release, Eden starts fresh instead, under the same world
+name, so its name, routes, gateway and pairing stay as they are. From 0.133 it is a release step: `release.yml -f
+reseed=fresh` (or `release-v2.yml -f reseed=fresh`) runs it on the host after the stage and before the move, its
+pre-check first (a dry run runs only that), and `rollback-v2.yml -f reseed=<label>` undoes it; by hand, `bash
+v2/tools/ops/cutover/reseed-eden.sh <sha> check`, then `run` (root on the host, before release-v2;
+`reseed-eden-undo.sh <label> check|run` undoes it). A release staged from 0.133 carries the scripts, its own
+`world-aside` and the kinds at its commit. Every store call retries a dropped connection or a 5xx with back-off before
+it refuses. It sets the world's
+folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
+each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
+with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step
+the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
+it and `switch-eden.sh` after release-v2.
 
 ## One writer
 

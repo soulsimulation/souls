@@ -22,12 +22,14 @@
           "expect": {
             "verdict": "yes",
             "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"p1","slot":"bench"}},
               {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"p1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
-              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
-              {"event":"eden:played_calm","node":"p1","changes":[1]}
+              {"event":"eden:sat_to_play","node":"p1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"p1","changes":[1]},
+              {"event":"eden:played_calm","node":"p1","changes":[2]}
             ],
             "timers": []
           }
@@ -50,12 +52,14 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
-              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
             "events": [
               {"event":"eden:stopped_playing","node":"p1","changes":[0]},
-              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+              {"event":"eden:stepped_away","node":"p1","changes":[1]},
+              {"event":"eden:rose","node":"p1","changes":[2]}
             ],
             "timers": []
           }
@@ -66,12 +70,14 @@
           "expect": {
             "verdict": "yes",
             "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"p1","slot":"bench"}},
               {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"p1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
-              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
-              {"event":"eden:played_happy","node":"p1","changes":[1]}
+              {"event":"eden:sat_to_play","node":"p1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"p1","changes":[1]},
+              {"event":"eden:played_happy","node":"p1","changes":[2]}
             ],
             "timers": []
           }
@@ -82,12 +88,14 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
-              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
             "events": [
               {"event":"eden:stopped_playing","node":"p1","changes":[0]},
-              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+              {"event":"eden:stepped_away","node":"p1","changes":[1]},
+              {"event":"eden:rose","node":"p1","changes":[2]}
             ],
             "timers": []
           }
@@ -98,12 +106,14 @@
           "expect": {
             "verdict": "yes",
             "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"p1","slot":"bench"}},
               {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"p1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
-              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
-              {"event":"eden:played_sad","node":"p1","changes":[1]}
+              {"event":"eden:sat_to_play","node":"p1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"p1","changes":[1]},
+              {"event":"eden:played_sad","node":"p1","changes":[2]}
             ],
             "timers": []
           }
@@ -114,20 +124,22 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
-              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+              {"change":"set","node":"p1","field":"music","n":28,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
             "events": [
               {"event":"eden:stopped_playing","node":"p1","changes":[0]},
-              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+              {"event":"eden:stepped_away","node":"p1","changes":[1]},
+              {"event":"eden:rose","node":"p1","changes":[2]}
             ],
             "timers": []
           }
         }
       ],
       "after": {
-        "room": {"loose":["b1","b2","p1"]},
-        "p1": {"kind":"eden:piano","links":{"player":[]},"fields":{"music":"silent"}},
+        "room": {"loose":["b2","p1","b1"]},
+        "p1": {"kind":"eden:piano","slots":{"bench":[]},"links":{"player":[]},"fields":{"music":"silent"}},
         "b1": {"hands":{"left":null,"right":null}},
         "b2": {"hands":{"left":null,"right":null}}
       }
@@ -153,7 +165,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"k1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"k1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"k1","changes":[0]},
@@ -180,7 +192,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"k1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -197,7 +209,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"k1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"k1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"k1","changes":[0]},
@@ -212,7 +224,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"k1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -229,7 +241,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"k1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"k1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"k1","changes":[0]},
@@ -244,7 +256,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"k1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -283,7 +295,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"v1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"v1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"v1","changes":[0]},
@@ -310,7 +322,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"v1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -327,7 +339,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"v1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"v1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"v1","changes":[0]},
@@ -342,7 +354,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"v1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -359,7 +371,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"v1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"v1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"v1","changes":[0]},
@@ -374,7 +386,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"v1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -413,7 +425,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"c1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"c1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"c1","changes":[0]},
@@ -440,7 +452,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"c1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -457,7 +469,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"c1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"c1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"c1","changes":[0]},
@@ -472,7 +484,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"c1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -489,7 +501,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"c1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"c1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"c1","changes":[0]},
@@ -504,7 +516,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"c1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -543,7 +555,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"a1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"a1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"a1","changes":[0]},
@@ -570,7 +582,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"a1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -587,7 +599,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"a1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"a1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"a1","changes":[0]},
@@ -602,7 +614,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"a1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -619,7 +631,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"a1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"a1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:took_up_playing","node":"a1","changes":[0]},
@@ -634,7 +646,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"a1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
             ],
             "events": [
@@ -674,7 +686,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
               {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"d1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"d1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"d1","changes":[0]},
@@ -702,7 +714,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"d1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -722,7 +734,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
               {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"d1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"d1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"d1","changes":[0]},
@@ -738,7 +750,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"d1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -758,7 +770,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
               {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"d1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"d1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"d1","changes":[0]},
@@ -774,7 +786,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"d1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -816,7 +828,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
               {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"s1","field":"music","n":1,"to":"calm"}
+              {"change":"set","node":"s1","field":"music","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"s1","changes":[0]},
@@ -844,7 +856,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"s1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -864,7 +876,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
               {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"s1","field":"music","n":1,"to":"happy"}
+              {"change":"set","node":"s1","field":"music","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"s1","changes":[0]},
@@ -880,7 +892,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"s1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -900,7 +912,7 @@
             "changes": [
               {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
               {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
-              {"change":"set","node":"s1","field":"music","n":1,"to":"sad"}
+              {"change":"set","node":"s1","field":"music","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:sat_to_play","node":"s1","changes":[0]},
@@ -916,7 +928,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"set","node":"s1","field":"music","n":28,"to":"silent"},
               {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
               {"change":"reparent","node":"b1","to":{"node":"room"}}
             ],
@@ -957,7 +969,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"calm"}
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"calm"}
             ],
             "events": [
               {"event":"eden:took_up_singing","node":"m1","changes":[0]},
@@ -984,7 +996,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"silent"},
               {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
             ],
             "events": [
@@ -1001,7 +1013,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"happy"}
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"happy"}
             ],
             "events": [
               {"event":"eden:took_up_singing","node":"m1","changes":[0]},
@@ -1016,7 +1028,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"silent"},
               {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
             ],
             "events": [
@@ -1033,7 +1045,7 @@
             "verdict": "yes",
             "changes": [
               {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"sad"}
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"sad"}
             ],
             "events": [
               {"event":"eden:took_up_singing","node":"m1","changes":[0]},
@@ -1048,7 +1060,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"set","node":"m1","field":"voice","n":28,"to":"silent"},
               {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
             ],
             "events": [
@@ -1084,7 +1096,7 @@
           "receipt": "speaker_on_off-0",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"sp1","field":"playing","n":1,"to":1}],
+            "changes": [{"change":"set","node":"sp1","field":"playing","n":28,"to":1}],
             "events": [{"event":"eden:music_started","node":"sp1","changes":[0]}],
             "timers": []
           }
@@ -1099,7 +1111,7 @@
           "receipt": "speaker_on_off-2",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"sp1","field":"playing","n":1,"to":0}],
+            "changes": [{"change":"set","node":"sp1","field":"playing","n":28,"to":0}],
             "events": [{"event":"eden:music_stopped","node":"sp1","changes":[0]}],
             "timers": []
           }
@@ -1139,7 +1151,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-1",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"calm"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"calm"}],
             "events": [{"event":"eden:played_calm","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1149,7 +1161,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-2",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1159,7 +1171,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-3",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"happy"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"happy"}],
             "events": [{"event":"eden:played_happy","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1169,7 +1181,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-4",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1179,7 +1191,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-5",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"sad"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"sad"}],
             "events": [{"event":"eden:played_sad","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1189,7 +1201,7 @@
           "receipt": "guitar_from_the_stand_played_and_put_back-6",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1240,7 +1252,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-1",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"calm"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"calm"}],
             "events": [{"event":"eden:played_calm","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1250,7 +1262,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-2",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1260,7 +1272,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-3",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"happy"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"happy"}],
             "events": [{"event":"eden:played_happy","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1270,7 +1282,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-4",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1280,7 +1292,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-5",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"sad"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"sad"}],
             "events": [{"event":"eden:played_sad","node":"i1","changes":[0]}],
             "timers": []
           }
@@ -1290,7 +1302,7 @@
           "receipt": "bass_from_the_stand_played_and_put_back-6",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "changes": [{"change":"set","node":"i1","field":"music","n":28,"to":"silent"}],
             "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
             "timers": []
           }

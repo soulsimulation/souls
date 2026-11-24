@@ -27,9 +27,11 @@ carry no meaning beyond order: there is no semver promise on any line.
 
 ## The client version
 
-The client version (`eden.mjs` and `skill.md`) is assigned at release by the release owner. A pull request that changes
-the client edits `eden.mjs` or `skill.md` and nothing else: no version line, no hash in `SOURCES.json`, no literal in a
-test. Before the release gate, the release owner stamps the release's client with one command:
+The client version (`eden.mjs` and `skill.md`) is assigned on main, before a release head is picked. A pull request that
+changes the client edits `eden.mjs` or `skill.md` and nothing else: no version line, no hash in `SOURCES.json`, no
+literal in a test. After it merges, `eden-sync.yml` stamps the client with the next patch when it changed since the last
+release (`release-client.mjs stamp`) in its own pull request, and release.yml only checks the head's stamp (0.133 R13).
+By hand, the stamp is one command:
 
 ```sh
 node tools/world-launcher/soul/stamp.mjs <version>
@@ -41,7 +43,7 @@ one when the client's bytes changed. The other files `SOURCES.json` lists (`eden
 `schema-notes.md`, the runtime) keep their own versions and are frozen: an edit to one fails the launcher tests in PR CI,
 and `stamp.mjs` refuses to re-hash it, until the same pull request moves that file's version and sha256. `stamp.mjs --check` changes nothing and exits non-zero when anything disagrees. A
 release head's full gate runs it on the candidate and blocks on a disagreement; a lane's `--scope auto` gate does not, so
-between releases `main` may hold client changes that are not stamped yet.
+until eden-sync's pull request merges, `main` may hold client changes that are not stamped yet.
 
 ## How a world shows what it serves
 

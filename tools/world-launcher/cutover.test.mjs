@@ -102,6 +102,9 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   }
   for (const method of ['GET', 'HEAD']) assert.equal((await fetch(base + '/w/eden/v1/edge/view?gaze=1', { method })).status, 409);
   assert.equal(readFileSync(hits, 'utf8'), before, 'no refused act/edit/gaze reached the old world');
+  // V4: Explore's place pictures (a POST that changes nothing) are the old world's to render
+  assert.notEqual((await post('/w/eden/v1/world/context/views')).status, 409, 'place pictures are not refused');
+  assert.match(readFileSync(hits, 'utf8').slice(before.length), /\/v1\/world\/context\/views/, 'and reach the old world');
   assert.equal(await (await fetch(base + '/worlds/w/eden-2026/eden.mjs')).text(), 'actual served fixture bytes');
   assert.equal((await (await fetch(base + '/w/eden/v1/config')).json()).soulClient.version, '3.0.0');
   assert.equal((await fetch(base + '/w/eden/v1/world/snapshot')).status, 200, 'read-only views remain live');
@@ -177,6 +180,28 @@ test('#4177: a rollback removes the published views, and a re-route whose snapsh
   assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
   assert.equal(served(), null, 'the snapshot falls through to the live old view');
 });
+test('W4 prep: a routed page\'s scenery is answered from the published scene, which the page verifies; any other hash passes through', async t => {
+  const { captureRenderScene } = await import('../../packages/engine-contract/src/scene-capture.ts');
+  const { decodeSceneCapturePublication } = await import('../../packages/protocol/src/scene-capture.ts');
+  const dir = mkdtempSync(new URL('w4-scene-', scratch)), routesFile = join(dir, 'routes.json'), staticDir = join(dir, 'static');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { lab: { gateway: 'http://127.0.0.1:7312', stream: '/s/lab/', canonical: true } } }));
+  const fence = cutoverFence({ binding: { oldWorldId: 'lab-1', canonicalSlug: 'lab', routesFile, clientDir: join(dir, 'client'), staticDir } }), w = { slug: 'lab', worldId: 'lab-1' };
+  // the old world's /v1/scene answer: its render scene and that scene's reference (apps/server/src/http.ts)
+  const scene = { scene: { name: 'lab' }, buildings: [{ file: 'hall.glb', p: [1, 0, 2] }], clock: { origin: 0, dayTicks: 72000 } };
+  const ref = captureRenderScene('rules/1', scene).ref;
+  const old = (path) => ({ status: path === '/v1/scene' || path === '/v1/world/snapshot' ? 200 : 404, body: Buffer.from(JSON.stringify(path === '/v1/scene' ? { ...scene, renderSceneRef: ref } : {})) });
+  await fence.publish(w, old);
+  const ask = (path) => { let out = null; const res = { writeHead: (status, headers) => ({ end: (b) => { out = { status, headers, body: String(b) }; } }) };
+    return fence.handle({ method: 'GET' }, res, w, new URL(`http://x/w/lab${path}`)) ? out : null; };
+  const got = ask(`/v1/scenes/${ref.hash}?world=lab-1`);
+  assert.equal(got.status, 200); assert.equal(got.headers['x-souls-static'], 'published');
+  const decoded = decodeSceneCapturePublication(JSON.parse(got.body));
+  assert.equal(decoded.worldId, 'lab-1'); assert.deepEqual(decoded.ref, ref, 'the page re-hashes the body and finds the scene it was named');
+  assert.equal(ask(`/v1/scenes/${ref.hash}`).status, 200, 'without the world: as the old world answers');
+  assert.equal(ask(`/v1/scenes/${'0'.repeat(64)}?world=lab-1`), null, 'another scene: the old world answers');
+  assert.equal(ask(`/v1/scenes/${ref.hash}?world=other-1`), null, 'another world named: the old world answers');
+});
 
 test('W1: one binding file, two worlds: each switches and turns back alone, its page names its own stream and static folder', async t => {
   const dir = mkdtempSync(new URL('w1-two-worlds-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
@@ -233,4 +258,61 @@ test('W1: one binding file, two worlds: each switches and turns back alone, its 
   assert.equal((await act('mars')).status, 409);
   const table = JSON.parse(readFileSync(routes, 'utf8')).worlds;
   assert.deepEqual([table.eden.canonical, table.mars.canonical], [false, true]);
+});
+
+test('D2: a world with only a new-engine route is served at /w/<slug>/ by the old page, with no old process, and listed', async t => {
+  const dir = mkdtempSync(new URL('d2-route-only-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
+  const client = join(dir, 'client'), bodies = join(dir, 'bodies'), web = join(dir, 'web');
+  for (const d of [data, client, bodies, web]) mkdirSync(d, { recursive: true });
+  const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(client, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
+  const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
+  writeFileSync(join(client, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
+  writeFileSync(join(bodies, 'bodies.json'), '{"format":"souls/bodies/1","bodies":[]}');
+  writeFileSync(join(web, 'index.html'), '<!doctype html><html><head><title>Souls</title><link rel="canonical" href="https://example.test/"></head><body><div id="root"></div></body></html>');
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: [], worlds: [{ slug: 'eden', name: 'Eden', template: 'empty', createdAt: 1, owner: 'synthetic-owner' }] }));
+  const { v2Switch } = await import('./v2-switch.mjs');
+  v2Switch({ binding: file, slug: 'eden', stream: '/s/eden/', routes, client, staticDir: join(dir, 'static-eden'), bodies });
+  // four more routes, none bound and none in the registry: two routed to the new engine, one only previewed, one archived
+  const table = JSON.parse(readFileSync(routes, 'utf8'));
+  const route = (stream, more = {}) => ({ gateway: 'http://127.0.0.1:1', stream, history: stream.replace('/s/', '/s/h-'), ...more });
+  table.worlds.fresh = route('/s/fresh/', { canonical: true }); table.worlds.quiet = route('/s/quiet/', { canonical: true });
+  table.worlds.draft = route('/s/draft/', { canonical: false }); table.worlds.gone = route('/s/gone/', { canonical: true, archived: true });
+  writeFileSync(routes, JSON.stringify(table));
+  // the directory's world list names them; quiet is unlisted
+  const { createServer } = await import('node:http');
+  const directory = createServer((req, res) => res.writeHead(req.url === '/v1/worlds' ? 200 : 404, { 'content-type': 'application/json' })
+    .end(JSON.stringify({ worlds: [{ name: 'fresh', label: 'Fresh Fields', template: 'empty', creator: 'abc:1', made: 1700000000 }, { name: 'quiet', label: 'Quiet', unlisted: true }] })));
+  const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
+  const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, started = [];
+  const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file, webDir: web, v2DirectoryUrl: `http://127.0.0.1:${D}`,
+    command: (w, port) => { started.push(w.slug); return { cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }; } });
+  t.after(async () => { await launcher.close(); directory.close(); rmSync(dir, { recursive: true, force: true }); });
+  const get = (path, headers = {}) => fetch(`${base}${path}`, { headers: { accept: 'text/html', ...headers } });
+  const config = (html) => JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(html)[1]);
+
+  const list = await (await get('/__sim/worlds.json', { accept: 'application/json' })).json();
+  const fresh = list.worlds.find(w => w.slug === 'fresh');
+  assert.equal(fresh?.name, 'Fresh Fields', 'listed under its directory label'); assert.equal(fresh.engine, 'new'); assert.equal(fresh.url, '/w/fresh/?dev=1');
+  assert.deepEqual(list.worlds.map(w => w.slug).sort(), ['eden', 'fresh'], 'the unlisted, previewed and archived routes are not listed');
+
+  const page = await get('/w/fresh/');
+  assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
+  const html = await page.text(), c = config(html);
+  assert.match(html, /<title>Fresh Fields · Souls<\/title>/); assert.match(html, /<link rel="canonical" href="http:\/\/127\.0\.0\.1:\d+\/w\/fresh\/">/);
+  assert.deepEqual([c.worldKey, c.worldPath, c.worldId, c.worldName, c.worldEngine, c.authProvider, c.devAuth], ['fresh', '/w/fresh', 'v2:fresh', 'Fresh Fields', true, 'dev', true]);
+  assert.deepEqual([c.v2Stream, c.v2History, c.v2Bodies, c.v2Gateway, c.v2Directory], ['/s/fresh/', '/s/h-fresh/', '/w/fresh/v2/bodies/', '/w/fresh/v2/ws', '/']);
+  assert.equal((await get('/w/fresh/eden.mjs')).status, 200, 'its client is the binding\'s');
+  assert.equal(await (await get('/w/fresh/v2/bodies/bodies.json')).text(), '{"format":"souls/bodies/1","bodies":[]}', 'its bodies are the binding\'s');
+  const act = await fetch(`${base}/w/fresh/v1/edge/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(act.status, 409); assert.equal((await act.json()).code, 'world.new-engine');
+  const scene = await get('/w/fresh/v1/scene', { accept: 'application/json' });
+  assert.equal(scene.status, 404); assert.equal((await scene.json()).code, 'world.new-engine', 'an old view is not here: the page draws from the stream');
+  assert.equal((await get('/w/quiet/')).headers.get('x-robots-tag')?.includes('noindex'), true, 'an unlisted world is served, not indexed');
+  for (const slug of ['draft', 'gone', 'nowhere']) assert.equal((await get(`/w/${slug}/`)).status, 404, `${slug}: not routed to the new engine`);
+  assert.deepEqual(started, [], 'no old world process was started');
+
+  // the route turned back off: the world leaves the page and the list at once
+  table.worlds.fresh.canonical = false; writeFileSync(routes, JSON.stringify(table));
+  assert.equal((await get('/w/fresh/')).status, 404);
+  assert.equal((await (await get('/__sim/worlds.json', { accept: 'application/json' })).json()).worlds.some(w => w.slug === 'fresh'), false);
 });

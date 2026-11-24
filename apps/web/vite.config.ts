@@ -242,6 +242,27 @@ function vendorGroups() {
   ];
 }
 
+/** W2 (0.135): fills `src/v2-engine/source/kind-bounds.ts` with the size of each content kind that is a thing
+ *  (`content/kinds`; not an activity), by its name: the old page draws a placed thing no library def draws as a box that
+ *  size (v2-engine/source/stream-scene.ts). Outside the build the table is empty. */
+function kindBounds(): Plugin {
+  const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
+  return {
+    name: 'souls-kind-bounds',
+    transform(_code, id) {
+      if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
+      const out: Record<string, number[]> = {};
+      for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
+        if (!f.endsWith('.json')) continue;
+        const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; geometry?: { bounds_mm?: unknown } };
+        this.addWatchFile(file);
+        if (typeof e.kind === 'string' && e.owner === 'thing' && !e.roles && Array.isArray(e.geometry?.bounds_mm)) out[e.kind] = e.geometry.bounds_mm as number[];
+      }
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};`, map: null };
+    },
+  };
+}
+
 // PERF-EDEN: with SIM_DEV_API set, a world page carries the live world's inline config (apps/server/src/inline-config.ts
 // writes `window.__simConfig` into <head>; without it the page takes `eden` for an old-engine world and never mounts the
 // entity layer). The page is read from Vite (dev) or dist (preview) and the remote /v1/config is inlined the same way.
@@ -282,14 +303,14 @@ function devProxy() {
 }
 
 export default defineConfig({
-  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig()],
+  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig(), kindBounds()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',
     __SIM_V2_REPLICA_SERVED__: !process.env.V2_REPLICA_PKG,   // #4177: the replica is the front door's (replica-served.ts)
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
-  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM)
+  // #4153: the v2 stream reader's worker (src/v2-engine/source, copied from v2/web/src/source by X1) imports `replica` (the new engine's WASM)
   // and `cborg` (ours). #4177: the default build loads the replica the front door serves for a world routed to v2
   // (replica-served.ts), so no Rust build is needed and its bytes match the deployed v2; V2_REPLICA_PKG bundles a package.
   resolve: { alias: [

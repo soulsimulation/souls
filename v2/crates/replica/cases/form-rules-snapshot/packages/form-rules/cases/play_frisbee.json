@@ -1,0 +1,2436 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:frisbee (today's play-frisbee spots at a pitch's two ends and a third corner, apps/server/src/god/activity-spots.ts and the frisbee courts). Up to three players each take an end; the frisbee is with one end; its holder throws it to another player's end. A throw with nobody to catch is refused, as today's game waits for a second player. A frisbee left at an end nobody holds is fetched by a player.",
+ "cases": [
+  {
+   "name": "play_at_end_a_when_free",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_at_end_a_when_someone_plays_there",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_a"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0
+   }
+  },
+  {
+   "name": "play_at_end_a_when_the_place_is_taken",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_a"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "slots": {
+       "end_a": [
+        "b3"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1
+   }
+  },
+  {
+   "name": "leave_end_a",
+   "act": {
+    "this": "f1",
+    "form": "leave_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      },
+      "slots": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_at_end_b_when_free",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_at_end_b_when_someone_plays_there",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_b"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0
+   }
+  },
+  {
+   "name": "play_at_end_b_when_the_place_is_taken",
+   "act": {
+    "this": "f1",
+    "form": "play_at_end_b"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "slots": {
+       "end_b": [
+        "b3"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1
+   }
+  },
+  {
+   "name": "leave_end_b",
+   "act": {
+    "this": "f1",
+    "form": "leave_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      },
+      "slots": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_at_corner_when_free",
+   "act": {
+    "this": "f1",
+    "form": "play_at_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_at_corner_when_someone_plays_there",
+   "act": {
+    "this": "f1",
+    "form": "play_at_corner"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0
+   }
+  },
+  {
+   "name": "play_at_corner_when_the_place_is_taken",
+   "act": {
+    "this": "f1",
+    "form": "play_at_corner"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "slots": {
+       "corner": [
+        "b3"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1
+   }
+  },
+  {
+   "name": "leave_corner",
+   "act": {
+    "this": "f1",
+    "form": "leave_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      },
+      "slots": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_end_b_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_end_b_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_end_b_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_end_b_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_end_b_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_end_b_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_corner_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_corner_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_end_a_to_corner_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_a_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_corner_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_corner_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_end_a_from_corner_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_a_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_a": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_end_a_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_end_a_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_end_a_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_end_a_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_end_a_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_end_a_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_corner_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_corner_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_end_b_to_corner_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_end_b_to_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_corner_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_corner_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_end_b_from_corner_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_end_b_from_corner"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "end_b": [
+        "b1"
+       ],
+       "corner": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_a_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_a_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_a_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_a_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_a_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_a_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_a"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_a"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_a": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_b_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_b_without_the_frisbee",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "throw_from_corner_to_end_b_with_nobody_there",
+   "act": {
+    "this": "f1",
+    "form": "throw_from_corner_to_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 1
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_b_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_b_when_it_is_not_there",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "corner"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "fetch_at_corner_from_end_b_when_a_player_has_it",
+   "act": {
+    "this": "f1",
+    "form": "fetch_at_corner_from_end_b"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:frisbee",
+      "fields": {
+       "disc": "end_b"
+      },
+      "links": {
+       "corner": [
+        "b1"
+       ],
+       "end_b": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1
+   }
+  }
+ ]
+}

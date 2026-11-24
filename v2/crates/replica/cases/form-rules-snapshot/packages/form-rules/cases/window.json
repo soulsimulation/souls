@@ -1,0 +1,12 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:window (0.135 E2): open it with a hand free, and close it again.",
+ "cases": [
+  {"name": "open_every_need_met", "act": {"this": "w1", "form": "open"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "open_when_open_names_close", "act": {"this": "w1", "form": "open"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window", "fields": {"open": true}}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "open", "found": true, "wanted": {"is": false}}, "fix": {"form": "close"}, "says": "already_open"}},
+  {"name": "open_hands_full", "act": {"this": "w1", "form": "open"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:kindling_bundle"}, "x2": {"kind": "eden:kindling_bundle"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}},
+  {"name": "close_every_need_met", "act": {"this": "w1", "form": "close"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window", "fields": {"open": true}}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+  {"name": "close_when_closed_names_open", "act": {"this": "w1", "form": "close"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window"}, "b1": {"hands": {"left": null, "right": null}}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "open", "found": false, "wanted": {"is": true}}, "fix": {"form": "open"}, "says": "already_closed"}},
+  {"name": "close_hands_full", "act": {"this": "w1", "form": "close"}, "state": {"actor": "b1", "nodes": {"w1": {"kind": "eden:window", "fields": {"open": true}}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:kindling_bundle"}, "x2": {"kind": "eden:kindling_bundle"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}}
+ ]
+}

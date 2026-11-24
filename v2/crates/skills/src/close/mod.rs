@@ -9,8 +9,8 @@
 //! - **Go near** (target, distance): walks straight toward the target until it is that far from it, then stands, and
 //!   closes again when the target moves off.
 //! - **Follow** (leader, band): walks the leader's trail, the points the leader stood on as read each tick (a node
-//!   other than the body is read as of the previous tick, T1), keeping the distance along the trail inside the band.
-//!   The leader walked it, so it is legal ground, and the follower does not aim at the leader through a wall. When the
+//!   other than the body is read as of the previous tick, T1), keeping the distance along the trail inside the band,
+//!   at the leader's gait (its pace, up to [`FASTEST`]). The leader walked it, so it is legal ground, and the follower does not aim at the leader through a wall. When the
 //!   follower stops making way on the trail (it lacks an ability the trail needs), it asks for one route toward the
 //!   leader (N5, through the host's `Toward`), walks to the point it is given, says so in an event
 //!   ([`FELL_BACK`]), and goes back to the trail. Once per follow.
@@ -37,6 +37,8 @@ use std::collections::BTreeMap;
 pub const SPEED: i64 = 1_400_000;
 /// The most a follower or a body going near walks at while it closes, µm a second.
 pub const FAST: i64 = 2_400_000;
+/// The fastest gait on dry ground (`sim::gaits`' run), µm a second: a follower keeps up with a leader who runs.
+pub const FASTEST: i64 = 4_000_000;
 /// The tick a step assumes before it has seen two (µs); after that it measures them by world time.
 pub const TICK: Micros = 50_000;
 /// How near the stated distance counts as done, µm.
@@ -439,11 +441,12 @@ impl Skill for Follow {
         let behind = self.behind(me, them);
         let (near, far) = self.band;
         let mid = (near + far) / 2;
-        // The leader's pace, plus the gap to the band's middle closed in a second and a half.
+        // The leader's pace, plus the gap to the band's middle closed in a second and a half; at most the leader's
+        // gait (its pace, to the fastest gait), and never under FAST while it closes (0.135 G2: the leader's gait).
         let speed = if behind <= near {
             0
         } else {
-            (pace + (behind - mid) * 2 / 3).clamp(0, FAST)
+            (pace + (behind - mid) * 2 / 3).clamp(0, pace.clamp(FAST, FASTEST))
         };
         let aim = self
             .route

@@ -76,7 +76,7 @@
         "change": "set",
         "node": "t1",
         "field": "words",
-        "n": 1,
+        "n": 28,
         "to": {
          "text": "w_noon"
         }
@@ -154,7 +154,7 @@
         "change": "set",
         "node": "t1",
         "field": "words",
-        "n": 1
+        "n": 28
        }
       ],
       "events": [

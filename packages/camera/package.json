@@ -1,0 +1,10 @@
+{
+  "name": "@souls/camera",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "node --test src/*.test.ts" },
+  "devDependencies": { "@types/node": "^22.19.19" }
+}

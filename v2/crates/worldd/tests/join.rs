@@ -198,6 +198,7 @@ fn tree_rules() -> TreeRules {
             .map(|s| (*s, BTreeSet::from(["thing".to_owned()])))
             .collect(),
         hands,
+        fields: Default::default(),
     };
     TreeRules {
         kinds: BTreeMap::from([
@@ -1121,9 +1122,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// a third history (867 records, 2,653 motion samples). Re-pinned by 0.133 N1: the never-stuck ladder climbs the
 /// gateway walks that make no progress (routed again, a still body stepped aside, a shoulder turn, ended by name) and
 /// writes its rungs as the world's entries (953 records, 3,150 motion samples); with N1's commit taken out the run
-/// writes the previous pin (dcf33b73...), so the ladder is the whole difference.
+/// writes the previous pin (dcf33b73...), so the ladder is the whole difference. Re-pinned by A2-2: a walker finds a
+/// way round bodies standing in its way (905 records, 2,342 motion samples); with main's walk skill put back the run
+/// writes the previous pin (06e9e816...), so the walk skill is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "06e9e8160f9944eb50a9469a6f9b808576fede8246c46e9982eebf55712fb42f";
+    "26cdac832ea50b51a929389b954dd7f428cf84c92f3e819c9dedc4ae3481431b";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

@@ -30,7 +30,7 @@ the log (K4), the in-memory tree (K2), applying and querying at speed (R1) and v
       same parent, the pose's frame. A new parent is a crossing, a leave and an arrive (rule 14), refused here as
       `crosses-nodes`. A reparent clears the node's motion; a node still moving writes a motion sample after it.
    4. set a field `{2: node, 3: field number, 4: value, 5: by}`. `by`, when the value is an amount moved, is the
-      signed amount (SA-F2b): kept, never needed to apply. That amounts moved sum to zero is a commit's check (K2 or
+      signed amount (SA-F2b): kept, never needed to apply. That amounts moved sum to zero, by the field's name on each node's kind, is a commit's check (K2 or
       the F lane), not apply's: one pour is two effects (rule 6), each with its own `by`.
    5. link `{2: link, 3: type, 4: [end, end], 5: owning end (0 or 1), 6: audience}` (world-model.md rule 7).
    6. unlink `{2: link}`.
