@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use body_script::{TICK, ground, ground_id, humanoid, place};
+use body_script::{TICK, ground_id, humanoid, place};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
     TransferRec, schema_hash,
@@ -58,6 +58,26 @@ use skills::form_runner::{Arg, Args, Limits, check};
 
 /// How far from the body a thing is placed, µm: the body walks to it as the form asks.
 const AWAY: i64 = 3_000_000;
+/// Half the side of the runner's open ground, mm. A long run of cases walks the body a little further each time (a
+/// thing is placed beside it, its stand points are where they are), and a thing's points reach up to 60 m from it (a
+/// cable car's stations): on body-script's 40 m square both walked off its edge, and a walk to a point beyond it, or a
+/// restart that set the body down there, failed (`deadline-passed`, `off-surface`, `place-no-stand-point`).
+const HALF_SIDE: i32 = 1_000_000;
+
+/// Flat open ground, 2 km square, centred on the origin, at height 0: body-script's ground, wider.
+fn ground() -> Surface {
+    let (a, b) = (-HALF_SIDE, HALF_SIDE);
+    let corners = vec![[a, 0, a], [b, 0, a], [b, 0, b], [a, 0, b]];
+    Surface::new(
+        ground_id(),
+        vec![sim::ground::Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    )
+}
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
 /// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
@@ -77,6 +97,9 @@ fn name(s: &str) -> Name {
 struct Snap {
     nodes: BTreeMap<Id, Vec3>,
     things: BTreeMap<Id, Vec3>,
+    /// Each body's walks before a sit into a seat of another thing (E14), by step: the seat's stand point on the
+    /// ground, where a served world aims that walk (`worldd`'s `sit_walks`, from `Forms::seat_walks`).
+    sit_walks: BTreeMap<Id, BTreeMap<usize, Vec3>>,
 }
 
 impl Geometry for Snap {
@@ -88,6 +111,12 @@ impl Geometry for Snap {
         }
     }
     /// A body where the controller has it. A thing is the tree's to answer (where it is, who holds it).
+    fn plan_walk(&self, body: Id, step: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+        match self.sit_walks.get(&body).and_then(|w| w.get(&step)) {
+            Some(&stand) => replica::host::WalkPlan::Legs(vec![(stand, None)]),
+            None => replica::host::WalkPlan::Unplanned,
+        }
+    }
     fn read(&self, node: Id) -> Option<Seen> {
         let position = *self.nodes.get(&node)?;
         Some(Seen {
@@ -362,6 +391,12 @@ impl Stage {
 
     fn entry(&self, kind: &str) -> Option<&J> {
         self.kinds.get(kind)
+    }
+
+    /// Slot `slot` of the placed thing `id`, by its number in that thing's own entry.
+    fn slot_of(&self, id: Id, slot: &str) -> Option<u64> {
+        let t = self.things.values().find(|t| t.id == id)?;
+        slot_n(self.entry(&t.kind)?, slot)
     }
 
     /// The tree for the kinds just defined: the ground, the body on it (its hands its slots 1 and 2) and the body's
@@ -1757,7 +1792,19 @@ impl Stage {
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
         // A thing argument the act leaves out goes to the form as the rules chose it, as worldd's `Acts` chooses it.
         let chosen = replica::rules::chosen_act(&self.kinds, act, &state, asker.get("sees"));
-        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names);
+        let args = match self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names) {
+            Ok(args) => args,
+            Err(detail) => {
+                return obj(vec![
+                    ("verdict", J::s("no")),
+                    ("reason", J::s("slot-unknown")),
+                    ("code", J::s("slot-unknown")),
+                    ("detail", J::Str(detail)),
+                    ("receipt", J::s("refused")),
+                    ("by", J::s("runner")),
+                ]);
+            }
+        };
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -1777,6 +1824,30 @@ impl Stage {
             digest,
         };
         let (now, from) = (self.now, self.log.len());
+        // A walk before a sit into a seat of another thing (E14) goes to that seat's own stand point, as a served
+        // world aims it (`Forms::seat_walks`); a seat of the act's own thing keeps the entry's point, as before.
+        let walks = skills::form_runner::bind_with(&entry, &form, &args)
+            .map(|steps| {
+                steps
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(|(i, w)| match w {
+                        [
+                            skills::form_runner::Step::WalkTo { on: Some(a), .. },
+                            skills::form_runner::Step::Sit {
+                                on: Some(b), slot, ..
+                            },
+                        ] if a == b => {
+                            let p = self.slots.place_in(*b, *slot)?;
+                            let stand = p.stand().ok()?;
+                            Some((i, Vec3::new(stand.x, p.point.y - p.place.height, stand.z)))
+                        }
+                        _ => None,
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        self.snap.sit_walks.insert(body, walks);
         let asked = {
             let (mut w, forms) = self.world();
             forms.commit_with(
@@ -1830,7 +1901,15 @@ impl Stage {
     /// name.
     /// The form's arguments from the case's act. A node argument is named as the case names it: a thing it placed
     /// (`ids`), else a body or Soul the case names (`names`), else a thing by the runner's own key.
-    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J, names: &Names) -> Args {
+    /// A slot of another thing that thing's entry does not declare is refused `slot-unknown` (the detail here).
+    fn args_of(
+        &mut self,
+        entry: &J,
+        form: &str,
+        act: &J,
+        ids: &J,
+        names: &Names,
+    ) -> Result<Args, String> {
         let takes = entry
             .get("forms")
             .and_then(|f| f.get(form))
@@ -1843,6 +1922,7 @@ impl Stage {
                 .or_else(|| names.to_id.get(n).copied())
                 .or_else(|| self.things.get(n).map(|t| t.id))
         };
+        let this = act.get("this").and_then(thing);
         let mut out = Args::new();
         for (k, v) in act.get("args").and_then(J::obj).unwrap_or(&[]) {
             let ty = takes
@@ -1862,9 +1942,21 @@ impl Stage {
                     Ok(n) => Arg::Int(n),
                     Err(_) => continue,
                 },
-                (_, J::Obj(_)) => match v.get("node").and_then(thing) {
-                    Some(id) => Arg::Node(id),
-                    None => continue,
+                // A slot of the act's own thing goes as the slot's name, as a served world hands a slot argument
+                // (`skills::form_runner::args_in`: slots of the node, by name); a slot of another thing as that
+                // thing and the slot's number in its own entry (a bench's seat for a lecture, E14); any other node
+                // as the thing.
+                (_, J::Obj(_)) => match (
+                    v.get("node").and_then(thing),
+                    v.get("slot").and_then(J::str),
+                ) {
+                    (Some(id), Some(slot)) if Some(id) == this => Arg::Name(slot.to_owned()),
+                    (Some(id), Some(slot)) => match self.slot_of(id, slot) {
+                        Some(n) => Arg::Slot(id, n),
+                        None => return Err(format!("{k}: {slot}")),
+                    },
+                    (Some(id), None) => Arg::Node(id),
+                    (None, _) => continue,
                 },
                 (Some("thing"), _) => match thing(v) {
                     Some(id) => Arg::Node(id),
@@ -1875,7 +1967,7 @@ impl Stage {
             };
             out.insert(k.clone(), arg);
         }
-        out
+        Ok(out)
     }
 
     fn progress_of(&self, rid: &str, moving: bool) -> J {

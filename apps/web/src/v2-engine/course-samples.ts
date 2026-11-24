@@ -12,14 +12,20 @@ export type CourseAt = (field: Uint8Array, t: bigint) => ArrayLike<bigint>;
 /** Places by node id, flat `[t µs, x, y, z µm, ...]`, in time order. */
 export type CoursePlaces = Record<string, number[]>;
 
-/** The places of every node with a course from `from` to `to` (world µs, both ends), `step` apart. A node whose course
- *  the replica refuses is left out (the page then draws it where it was placed). */
+/** At most this many places a node, the newest (an hour at COURSE_STEP_US). A generation's first part runs from world
+ *  time 0 to now (live bench-eden, 24 Nov: from 0 to 1.8e15 µs): stepping all of it pushed past the largest array and
+ *  the part was never shown, so the page said "Catching up" for good. */
+export const COURSE_MAX_PLACES = 36_000;
+
+/** The places of every node with a course from `from` to `to` (world µs, both ends), `step` apart, the newest
+ *  COURSE_MAX_PLACES of them. A node whose course the replica refuses is left out (the page then draws it where it was
+ *  placed). */
 export function coursePlaces(courseAt: CourseAt, nodes: Iterable<{ id: string; course?: Uint8Array }>, from: number, to: number,
   step = COURSE_STEP_US): CoursePlaces {
   const out: CoursePlaces = {};
-  if (!(to >= from)) return out;
+  if (!(to >= from) || !Number.isFinite(from) || !Number.isFinite(to) || !(step > 0)) return out;
   const times: number[] = [];
-  for (let t = Math.floor(from / step) * step; t < to; t += step) times.push(t);
+  for (let t = Math.max(Math.floor(from / step), Math.ceil(to / step) - COURSE_MAX_PLACES) * step; t < to; t += step) times.push(t);
   times.push(to);
   for (const n of nodes) {
     if (!n.course) continue;

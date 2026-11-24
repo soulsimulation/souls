@@ -196,5 +196,5 @@ export function newEngineModules({ log = () => {} } = {}) {
     },
   });
 
-  return { provision, seat, owner, swarmTruth, truth: null, browser: null };
+  return { provision, seat, owner, swarmTruth, truth: null, browser: null, world: () => world, track: (soul, body) => bodies.set(soul, body) };
 }

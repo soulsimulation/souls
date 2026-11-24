@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { HEADER, apply, changes, parseConfig, render } from './world-limits.mjs';
+import { HEADER, apply, changes, parseConfig, props, render } from './world-limits.mjs';
 
 const script = fileURLToPath(new URL('./world-limits.mjs', import.meta.url));
 const repoConfig = fileURLToPath(new URL('./units/world-limits.json', import.meta.url));
@@ -24,16 +24,17 @@ function machine() {
   return { root, authority };
 }
 
-test("the repo's config gives Eden 8G and a 600 s start bound, and no other world anything", () => {
+test("the repo's config gives Eden 4G, 2G kept from reclaim and a 600 s start bound, and no other world anything", () => {
   const worlds = parseConfig(readFileSync(repoConfig, 'utf8'));
   assert.deepEqual(Object.keys(worlds), ['eden']);
-  assert.equal(render('eden', worlds.eden), `${HEADER} (world eden); edit that file, not this one.\n[Service]\nMemoryMax=8G\nEnvironment=WORLD_START_WITHIN_S=600\n`);
+  assert.equal(render('eden', worlds.eden), `${HEADER} (world eden); edit that file, not this one.\n[Service]\nMemoryMax=4G\nMemoryLow=2G\nEnvironment=WORLD_START_WITHIN_S=600\n`);
 });
 
 test('bad limits are refused by name', () => {
   const c = (w) => JSON.stringify({ format: 'souls/world-limits/1', worlds: w });
   assert.throws(() => parseConfig(c({ eden: { memory_max: '8 G' } })), /memory_max/);
   assert.throws(() => parseConfig(c({ eden: { memory_max: '8G;x' } })), /memory_max/);
+  assert.throws(() => parseConfig(c({ eden: { memory_low: '2 G' } })), /memory_low/);
   assert.throws(() => parseConfig(c({ eden: { start_within_s: 0 } })), /start_within_s/);
   assert.throws(() => parseConfig(c({ eden: { CPUQuota: '50%' } })), /unknown limit CPUQuota/);
   assert.throws(() => parseConfig(c({ 'Eden!': {} })), /not a slug/);
@@ -47,7 +48,7 @@ test("apply writes the listed, placed world's drop-in, then has nothing to do; a
     const first = changes(worlds, authority, root);
     assert.deepEqual(first.map((c) => [c.op, c.path]), [['file', dropin(EDEN)]]);
     apply(first, root);
-    assert.match(readFileSync(join(root, dropin(EDEN)), 'utf8'), /^MemoryMax=8G$/m);
+    assert.match(readFileSync(join(root, dropin(EDEN)), 'utf8'), /^MemoryMax=4G$/m);
     assert.equal(existsSync(join(root, dropin(SMALL))), false);
     assert.deepEqual(changes(worlds, authority, root), []);
     // A world registered but not placed here gets nothing.
@@ -76,12 +77,24 @@ test('the command plans without writing and applies once', () => {
   const { root } = machine();
   try {
     const run = (mode) => execFileSync(process.execPath, [script, mode, '--config', repoConfig, '--root', root], { encoding: 'utf8' });
-    assert.equal(run('plan'), `file ${dropin(EDEN)} (eden: MemoryMax=8G Environment=WORLD_START_WITHIN_S=600)\n`);
+    assert.equal(run('plan'), `file ${dropin(EDEN)} (eden: MemoryMax=4G MemoryLow=2G Environment=WORLD_START_WITHIN_S=600)\n`);
     assert.equal(existsSync(join(root, dropin(EDEN))), false);
-    assert.equal(run('apply'), `file ${dropin(EDEN)} (eden: MemoryMax=8G Environment=WORLD_START_WITHIN_S=600)\n`);
+    assert.equal(run('apply'), `file ${dropin(EDEN)} (eden: MemoryMax=4G MemoryLow=2G Environment=WORLD_START_WITHIN_S=600)\n`);
     assert.equal(run('plan'), '');
     // A machine with no authority map yet (a fresh install's plan) has nothing to do.
     rmSync(join(root, 'etc/souls'), { recursive: true });
     assert.equal(run('plan'), '');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('props names the placed listed worlds and their memory properties, for memory-bounds.sh to set live', () => {
+  const { root, authority } = machine();
+  try {
+    const worlds = { eden: { memory_max: '4G', memory_low: '2G', start_within_s: 600 }, small: { start_within_s: 60 }, away: { memory_max: '1G' } };
+    assert.deepEqual(props(worlds, authority, root), [{ unit: `worldd@${EDEN}.service`, props: ['MemoryMax=4G', 'MemoryLow=2G'] }]);
+    const out = execFileSync(process.execPath, [script, 'props', '--config', repoConfig, '--root', root], { encoding: 'utf8' });
+    assert.equal(out, `worldd@${EDEN}.service MemoryMax=4G MemoryLow=2G\n`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -21,8 +21,10 @@ sends to these programs once the owner places its site file. Routing between the
 | Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
-`souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
-Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 8 GB; the
+`souls` in `souls.slice`, whose `MemoryMax` is 14 GB: eleven worlds at their measured peaks (Eden 1.7 GB, the others
+0.85 GB) with a third to spare, inside what the production host has left beside today's system (its units' comment has
+the numbers), and `MemoryLow` 2 GB for Eden's.
+Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 4 GB; the
 install writes its `worldd@<world>.service.d/limits.conf`, [world-restarting](world-restarting.md#how-a-world-runs)),
 a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
 [viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight`
@@ -48,7 +50,8 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
   [sleep-and-wake.md](sleep-and-wake.md)): it enables and starts it, and restarts it when its unit or drop-in
   changed. With no world asleep it only waits. Its drop-in (`souls-alarms.service.d/10-install.conf`) keeps it root,
   since it starts worlds, in the group souls with a group-writable socket, so worlds and gateways (the user souls)
-  reach it. Uninstall stops and disables it. Otherwise the one systemd call is `daemon-reload` when a unit file
+  reach it, and gives it `/etc/souls/secrets.env`, where the store is set (0.133 ST2). Uninstall stops and disables
+  it. Otherwise the one systemd call is `daemon-reload` when a unit file
   changed.
 - It never reads or writes today's units, users, data, proxy, DNS or firewall. `install.sh check` (run by CI in
   `v2/tools/ci.sh` and by the workflow) plans into an empty folder and compares every path it would write, and every

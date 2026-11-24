@@ -25,6 +25,12 @@ path = "src/world_aside.rs"
 name = "store-probe"
 path = "src/store_probe.rs"
 
+# `store-copy copy|probe ...`: one store setting's objects copied to another provider's bucket and checked by count
+# and size; or a probe write, read and delete (0.133 ST2, for store-switch.sh).
+[[bin]]
+name = "store-copy"
+path = "src/store_copy.rs"
+
 # The planted bad builds' world: dies at start, stalls, or refuses every act, only when served.
 [[bin]]
 name = "o7-plant"
