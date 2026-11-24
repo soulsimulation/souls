@@ -1298,12 +1298,65 @@ mod each_step {
             }
         }
         assert_eq!(
-            super::super::rest_top(&fixed, &load, at(x)).unwrap(),
+            super::super::rest_top(&fixed, &load, at(x), &[]).unwrap(),
             450_000
         );
         assert_eq!(
-            super::super::rest_top(&fixed, &load, at(10 * M)).unwrap(),
+            super::super::rest_top(&fixed, &load, at(10 * M), &[]).unwrap(),
             0
+        );
+    }
+
+    /// Every set-down rests the load on a low box under it, not inside it: where a carry broken off last had it (a
+    /// partner left, its carriers drifted apart, the world restarted, a step was blocked: `Carry::set_down_here`) and
+    /// where the crew sets it down (`Carry::set_down`), both through `Carry::rests_on`. On N2's test world with one
+    /// box (0.3 m high) on the open ground: over it, 300 mm up; 12 m off it, on the ground.
+    #[test]
+    fn c7_every_set_down_rests_on_a_low_box_not_in_it() {
+        use replica::pose::{Quat, Vec3};
+        use replica::world_model::Audience;
+
+        use super::super::{Carry, HEIGHT};
+        let w = testworld::generate(1, 40).unwrap();
+        let im = import_eden::load(&w.text).unwrap();
+        let (tree, ground) = (&im.tree, im.nodes["ground"]);
+        // A box on the open ground (the others stand in rooms and the hall).
+        let bx = (1..=40)
+            .map(|n| im.nodes[&format!("box-{n:05}")])
+            .find(|b| tree.node(tree.handle(*b).unwrap()).unwrap().parent() == Some(ground))
+            .expect("a box on the open ground");
+        let gh = tree.handle(ground).unwrap();
+        let at = crate::ground::scene::xform_to(tree, tree.handle(bx).unwrap(), gh)
+            .unwrap()
+            .pos;
+        // Its load a node not in the world's tree: one carried has no boxes there.
+        let load = replica::ids::Id::new(im.nodes["world"].scope(), 999_999).unwrap();
+        let mut carry = Carry::new(
+            im.nodes["world"],
+            load,
+            ground,
+            Audience::Everyone,
+            super::header(im.nodes["world"]),
+            im.rules.clone(),
+        );
+        carry.load = frame();
+        let q = Quat::IDENTITY;
+        // Broken off: its last sample, at carrying height over the box, lowered to the floor.
+        carry.track.push((0, Vec3::new(at.x, HEIGHT, at.z), q));
+        let (c, q) = (carry.track[0].1, carry.track[0].2);
+        let floor = Vec3::new(c.x, c.y - HEIGHT, c.z);
+        assert_eq!(carry.rests_on(tree, ground, floor, q).unwrap(), 300_000);
+        // The crew's set-down between its carriers, 12 m off the box: on the ground.
+        let off = Vec3::new(at.x, 0, at.z + 12 * M);
+        assert_eq!(carry.rests_on(tree, ground, off, q).unwrap(), 0);
+        // A part laid down from where it is seated is not set on its own boxes.
+        carry.board = bx;
+        assert_eq!(carry.rests_on(tree, ground, floor, q).unwrap(), 0);
+        // On another node, what the last step found.
+        carry.raise = 7;
+        assert_eq!(
+            carry.rests_on(tree, im.nodes["world"], floor, q).unwrap(),
+            7
         );
     }
 }

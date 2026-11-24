@@ -848,14 +848,16 @@ pub fn step_way(
 
 /// How far above its carriers' floor `load` comes to rest when set down between carriers at `ends` (`(front, back)`
 /// on the plan, µm), turned as it is held (0.135 C7): on the top of the highest fixed box under its outline that lies
-/// below it as it is carried (one it was carried over), else on the floor.
-pub fn rest_top(fixed: &Fixed, load: &Load, ends: (Xz, Xz)) -> R<i64> {
+/// below it as it is carried (one it was carried over) and is not one of `own` (the load's own boxes, when it is not
+/// carried but seated), else on the floor.
+pub fn rest_top(fixed: &Fixed, load: &Load, ends: (Xz, Xz), own: &[Quad]) -> R<i64> {
     let (plan, band) = load.as_held()?;
     let q = outline(ends.0, ends.1, &plan);
     let mut top = 0;
     for k in fixed.near(bounds(&q)) {
         let [lo, hi] = fixed.heights[k];
-        if hi > top && hi <= band[0] && lo < hi && overlap(&q, &fixed.quads[k]) {
+        let f = &fixed.quads[k];
+        if hi > top && hi <= band[0] && lo < hi && !own.contains(f) && overlap(&q, f) {
             top = hi;
         }
     }
@@ -1041,7 +1043,7 @@ impl Carry {
         let Some((mut c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
             return refuse("carry-set-down-nowhere", "no sample of the carry");
         };
-        c.y -= HEIGHT - self.raise;
+        c.y -= HEIGHT;
         self.put(tree, at, node, c, q, transfer)
     }
 
@@ -1143,7 +1145,7 @@ impl Carry {
             .get_or_insert_with(|| fixed.hits(&outline(from.0, from.1, &plan)));
         if let Err(r) = step_way(fixed, &self.load, from, to, but) {
             // Set down where it stopped, it rests on what it was carried over (0.135 C7).
-            self.raise = rest_top(fixed, &self.load, from)?;
+            self.raise = rest_top(fixed, &self.load, from, &[])?;
             return Err(r);
         }
         let (c, q) = Carry::pose(front, back)?;
@@ -1176,6 +1178,35 @@ impl Carry {
         self.put(tree, at, node, c, q, transfer)
     }
 
+    /// How far above the floor at `c` its load comes to rest, set down there turned `q` on `node` (0.135 C7, every
+    /// set-down: the crew's, and a carry broken off as its partner leaves, its carriers drift apart, the world
+    /// restarts or a step is blocked): on the top of a low box under it ([`rest_top`], the fixed geometry of its open
+    /// ground read now), else on the floor. On another node, or when that geometry cannot be read, what the carry's
+    /// last step found ([`Carry::raise`]).
+    pub fn rests_on(&self, tree: &Tree, node: Id, c: Vec3, q: Quat) -> R<i64> {
+        if node != self.ground {
+            return Ok(self.raise);
+        }
+        let Ok(fixed) = Fixed::of(tree, node) else {
+            return Ok(self.raise);
+        };
+        // A part laid down from its bay's slot is fixed geometry itself until it is moved: its own boxes do not count.
+        let own: Vec<Quad> = match (tree.handle(self.board), tree.handle(node)) {
+            (Some(b), Some(g)) => crate::ground::scene::solids_under(tree, b, g)
+                .map(|v| v.into_iter().map(|s| s.ring).collect())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let d = q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose_refusal)?;
+        let h = scale([d.x, d.z], 1_000_000, len([d.x, d.z]));
+        rest_top(
+            &fixed,
+            &self.load,
+            ([c.x + h[0], c.z + h[1]], [c.x - h[0], c.z - h[1]]),
+            &own,
+        )
+    }
+
     /// The board, at rest at `c` turned `q`, on `node`: its leave and its arrival under `transfer`.
     fn put(
         &mut self,
@@ -1186,6 +1217,7 @@ impl Carry {
         q: Quat,
         transfer: Id,
     ) -> R<()> {
+        let c = Vec3::new(c.x, c.y + self.rests_on(tree, node, c, q)?, c.z);
         let (position, orientation) = self.load.resting(c, q)?;
         let leave = TransferRec::Leave {
             transfer,
