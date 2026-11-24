@@ -597,8 +597,9 @@ fn v13b_a1_a_session_exchanges_for_a_view_token_of_what_the_account_owns() {
     assert!(head.contains("cache-control: no-store"));
     assert!(head.contains("access-control-allow-origin: http://127.0.0.1:8080"));
     assert_eq!(
-        (none, nothing["refused"].as_str()),
-        (404, Some("nothing-owned"))
+        (none, &nothing),
+        (200, &json!({"owned": []})),
+        "signed in, owning nothing: no token and no error"
     );
     assert_eq!(pre, 204);
     assert!(pre_head.contains("access-control-allow-headers: authorization, content-type"));
@@ -698,7 +699,7 @@ fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
     // Before: Ada owns nothing, so her session gets no view.
     let ada = json!({"name": "Ada"}).to_string();
     let (s0, _, b0) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
-    assert_eq!((s0, b0["refused"].as_str()), (404, Some("nothing-owned")));
+    assert_eq!((s0, &b0), (200, &json!({"owned": []})));
     // A daemon asks for a new Soul; Ada approves once on the card.
     let ask =
         json!({"secret_hash": "ab".repeat(32), "device": "laptop", "label": "agent", "new": true});

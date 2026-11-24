@@ -6,7 +6,7 @@
 //!
 //! - `POST /v1/account/view-token` (V13b), signed in either way: `{"token", "expires", "owned": [{"grant", "follow"}]}`,
 //!   a short-lived view token for the gateways ([`super::view`]) scoped to what the account owns. A signed-out
-//!   session, or one whose token has expired, gets none.
+//!   session, or one whose token has expired, gets none; an account that owns nothing gets `{"owned": []}`, no token.
 //! - `POST /v1/account/sign-out` with the provider's session: that session gets no view token again.
 //!
 //! The first two answer `{"account", "principal"}`. The mailbox's (R13, #2753; [`super::mailbox`]):
@@ -685,11 +685,13 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
                     || creator_worlds_of(grant, app).is_some_and(|worlds| !worlds.is_empty())
             })
             .collect::<Vec<_>>(),
-        Ok(_) => return refuse(404, "nothing-owned"),
+        Ok(_) => Vec::new(),
         Err(_) => return refuse(500, "store"),
     };
+    // Signed in and owning nothing yet is a normal state (a new person, or one whose Souls stayed behind): no token,
+    // and no error for the page to show or retry on.
     if owned.is_empty() {
-        return refuse(404, "nothing-owned");
+        return (200, json!({"owned": []}), format!("{note} nothing-owned"));
     }
     let expires = now() + VIEW_TTL_S;
     let grants: Vec<String> = owned.iter().map(|(g, _)| g.clone()).collect();

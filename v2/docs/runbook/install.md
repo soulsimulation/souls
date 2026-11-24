@@ -16,6 +16,7 @@ sends to these programs once the owner places its site file. Routing between the
 | The world route file, which today's launcher's cut-over fence also reads (the parent `/var/lib/souls` is 751) | `/var/lib/souls/routes/worlds.json` | souls, 755 |
 | The settings folder, which today's launcher enters (not lists) to read its cut-over binding, `cutover-binding.json` | `/etc/souls/` | root:souls, 751 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
+| The view key (64 hex digits), written once, never overwritten: the directory (`--view-key` in `directory.args`) signs a signed-in page's view tokens with it and every world's gateway (`--view-key` in its `gateway-<world>.env`, from `place-world.sh`) checks them. An install made before 24 Nov 2026 has none: add the flag to both by hand, as soul.game was | `/etc/souls/view.key` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
 | Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
