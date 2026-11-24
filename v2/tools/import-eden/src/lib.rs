@@ -13,7 +13,9 @@
 //!   the open ground; one with no rooms (a wall's gate) joins its thing to the open ground. The door thing standing in
 //!   it keeps the link's id and its open state. A stair, ramp or ladder is a link between two floor nodes; one between
 //!   two pieces of one storey is that floor's surfaces (`flight_surfaces`). Links carry no fields, so each doorway's and
-//!   stair's geometry is a field of the node at its owning end. A window in no room's wall is the nearest room's.
+//!   stair's geometry is a field of the node at its owning end. A window in no room's wall is the nearest room's. A
+//!   storey today's mesh floors found has its narrow seams closed and, lowest and more than a step up, an entrance
+//!   tread along its open edges (`mesh_fill`).
 //! - each named place that is not a room is a node under the open ground with its name, kind and outline. Nobody is
 //!   its child: a place is found by its outline.
 //! - the terrain (N1b, #3197) is two fields of the open ground: its tile side and every tile's heights and classes,
@@ -106,6 +108,9 @@ pub struct Import {
     /// Flights between two pieces of one storey, walked as that floor (0.133, Chiba's upper deck): how many, and the
     /// floor surfaces they became ([`count`] counts each as the flight it is).
     pub floor_flights: (i64, i64),
+    /// Surfaces a modelled storey was given (0.133, Chiba's ground storey: [`mesh_fill`]): how many close a seam
+    /// between two of its surfaces, and how many are an entrance tread. [`count`] counts neither, as the bake has none.
+    pub mesh_fills: (i64, i64),
     /// Things today's facts put in a slot another thing already holds: each stays a plain child of the same parent
     /// at its own place, out of the slot (one occupant per slot), with what holds the slot.
     pub left_out: Vec<String>,
@@ -454,6 +459,211 @@ fn flight_surfaces(st: &Json) -> R<Option<Vec<Value>>> {
     Ok(Some(vec![rect(a, m, n, y0), rect(m, b, n, y1)]))
 }
 
+/// The widest seam between two of a modelled storey's surfaces at one height that is floor, mm: narrower than a
+/// standing body's clearance ([`STAND_CLEAR`]). Today's mesh floors are found on a 150 mm grid, which leaves a seam of
+/// two cells under a partition all along it, its doorways too (Chiba's ground storey: 300 mm).
+const SEAM_MOST: i64 = STAND_CLEAR;
+/// How deep an entrance tread is, mm: room for a body's centre between the clearance N3 keeps at its two steps.
+const TREAD_DEPTH: i64 = 2 * STAND_CLEAR + 300;
+
+/// A modelled storey's seams and entrance (0.133, Chiba): the surfaces to add to floor `level` of thing `t`, `[y, ring]`
+/// rows (mm, the thing's frame), with how many close a seam and how many are a tread. Only a storey whose every surface
+/// today's mesh floors found (a `mesh-floor:` tag) is touched; it is walked as today's page walked it:
+///
+/// - **Seams.** Where two of its surfaces at one height face each other across a seam no wider than [`SEAM_MOST`],
+///   the seam is floor. A partition's solids still stand on it, so only its doorways join the two.
+/// - **Entrance.** Today's page stepped up onto a mesh floor from the terrain by as much as 450 mm (`tools/mesh-floors`:
+///   "terrain-step"); N3 steps by [`FLIGHT_RISE_MOST`]. So the lowest storey of a thing on the open ground, standing
+///   above a step but no more than two, gets a tread at half its height along each stretch of its edges with nothing
+///   of the thing in front of it for [`TREAD_DEPTH`]: no surface of the storey, no floor or flight of the thing lower
+///   than a head over the tread, and no solid that meets a body standing on it (a wall, a rail, a flight's understair).
+///   That is an entrance flight of two risers: N3 steps from the tread down to the ground where the terrain there is
+///   within a step, and up onto the storey.
+fn mesh_fill(t: &Json, level: i64, lowest: bool) -> R<(Vec<Value>, i64, i64)> {
+    let ring_of = |j: &Json| -> R<Vec<[i64; 2]>> {
+        j.arr()
+            .iter()
+            .map(|p| match p.arr() {
+                [x, z, ..] => Ok([x.int().ok_or("a point")?, z.int().ok_or("a point")?]),
+                _ => Err("a point is [x, z]".to_owned()),
+            })
+            .collect()
+    };
+    let floors = need(t, "floors").map(Json::arr).unwrap_or(&[]);
+    let mut own: Vec<(i64, Vec<[i64; 2]>)> = Vec::new();
+    for fl in floors {
+        if int(fl, "level")? != level {
+            continue;
+        }
+        if !fl
+            .get("tag")
+            .and_then(Json::str)
+            .is_some_and(|g| g.starts_with("mesh-floor:"))
+        {
+            return Ok((Vec::new(), 0, 0));
+        }
+        let mut ring = ring_of(need(fl, "polygon")?)?;
+        if area2(&ring) < 0 {
+            ring.reverse();
+        }
+        own.push((int(fl, "y")?, ring));
+    }
+    let entrance = lowest
+        && t.get("parent").and_then(Json::str).is_none()
+        && own
+            .iter()
+            .all(|(y, _)| *y > FLIGHT_RISE_MOST && *y <= 2 * FLIGHT_RISE_MOST);
+    // What else of the thing may stand in front of an edge, each as points (the edge faces their box in its own
+    // axes): its other floors and its flights lower than a head over the tread, and the solids that meet a body on it.
+    let mut others: Vec<Vec<[i64; 2]>> = Vec::new();
+    if entrance {
+        let ty = own.iter().map(|(y, _)| y / 2).min().unwrap_or(0);
+        for fl in floors {
+            if int(fl, "level")? != level && int(fl, "y")? - ty < BODY_SPAN.1 {
+                others.push(ring_of(need(fl, "polygon")?)?);
+            }
+        }
+        for st in need(t, "stairs").map(Json::arr).unwrap_or(&[]) {
+            if int(st, "y0")?.min(int(st, "y1")?) - ty >= BODY_SPAN.1 {
+                continue;
+            }
+            let half = i128::from(int(st, "width")? / 2);
+            let path = ring_of(need(st, "path")?)?;
+            for w in path.windows(2) {
+                let (dx, dz) = (i128::from(w[1][0] - w[0][0]), i128::from(w[1][1] - w[0][1]));
+                let l = (dx * dx + dz * dz).isqrt().max(1);
+                let (nx, nz) = ((-dz * half / l) as i64, (dx * half / l) as i64);
+                others.push(
+                    [w[0], w[1]]
+                        .iter()
+                        .flat_map(|p| [[p[0] + nx, p[1] + nz], [p[0] - nx, p[1] - nz]])
+                        .collect(),
+                );
+            }
+        }
+        for sd in need(t, "solids").map(Json::arr).unwrap_or(&[]) {
+            let n: Vec<i64> = sd.arr().iter().filter_map(Json::int).collect();
+            let [cx, cz, hx, hz, yaw, y0, y1, ..] = n[..] else {
+                return Err("a solid is [cx, cz, hx, hz, yaw, y0, y1, …]".into());
+            };
+            if y1 <= ty + BODY_SPAN.0 || y0 >= ty + BODY_SPAN.1 {
+                continue;
+            }
+            let q = Quat::from_yaw_mdeg(yaw.rem_euclid(360_000)).map_err(|e| format!("{e:?}"))?;
+            let mut corners = Vec::new();
+            for (u, v) in [(-hx, -hz), (hx, -hz), (hx, hz), (-hx, hz)] {
+                let r = q
+                    .rotate(Vec3::new(u * 1000, 0, v * 1000))
+                    .map_err(|e| format!("{e:?}"))?;
+                corners.push([cx + r.x / 1000, cz + r.z / 1000]);
+            }
+            others.push(corners);
+        }
+    }
+    let (mut rows, mut seams, mut treads) = (Vec::new(), 0, 0);
+    for (p, (y, ring)) in own.iter().enumerate() {
+        for k in 0..ring.len() {
+            let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+            let e = [i128::from(b[0] - a[0]), i128::from(b[1] - a[1])];
+            let len = (e[0] * e[0] + e[1] * e[1]).isqrt();
+            if len == 0 {
+                continue;
+            }
+            // Along the edge from a, and out of the surface (its outward side, the ring counter-clockwise), mm.
+            let along = |q: [i64; 2]| {
+                (e[0] * i128::from(q[0] - a[0]) + e[1] * i128::from(q[1] - a[1])) / len
+            };
+            let out = |q: [i64; 2]| {
+                (e[1] * i128::from(q[0] - a[0]) - e[0] * i128::from(q[1] - a[1])) / len
+            };
+            let at = |u: i128, d: i128| {
+                [
+                    a[0] + ((e[0] * u + e[1] * d) / len) as i64,
+                    a[1] + ((e[1] * u - e[0] * d) / len) as i64,
+                ]
+            };
+            // A seam: another surface at its height facing the edge across no more than [`SEAM_MOST`], closed once,
+            // from the first of the two.
+            for (yq, other) in own.iter().skip(p + 1) {
+                if yq != y {
+                    continue;
+                }
+                for m in 0..other.len() {
+                    let (c, d) = (other[m], other[(m + 1) % other.len()]);
+                    let f = [i128::from(d[0] - c[0]), i128::from(d[1] - c[1])];
+                    if e[0] * f[1] - e[1] * f[0] != 0 || e[0] * f[0] + e[1] * f[1] >= 0 {
+                        continue;
+                    }
+                    let gap = out(c);
+                    let (lo, hi) = (along(c).min(along(d)).max(0), along(c).max(along(d)).min(len));
+                    if gap > 0 && gap <= i128::from(SEAM_MOST) && hi > lo {
+                        rows.push(ring_row(*y, vec![at(lo, 0), at(hi, 0), at(hi, gap), at(lo, gap)]));
+                        seams += 1;
+                    }
+                }
+            }
+            if !entrance {
+                continue;
+            }
+            // The stretches of the edge that something stands in front of within a tread's depth; a tread along each
+            // stretch left.
+            let depth = i128::from(TREAD_DEPTH);
+            let mut faced: Vec<(i128, i128)> = own
+                .iter()
+                .enumerate()
+                .filter(|(q, _)| *q != p)
+                .map(|(_, (_, r))| r)
+                .chain(others.iter())
+                .filter_map(|pts| {
+                    let (u, o): (Vec<i128>, Vec<i128>) =
+                        pts.iter().map(|&q| (along(q), out(q))).unzip();
+                    let (u0, u1) = (*u.iter().min()?, *u.iter().max()?);
+                    let (o0, o1) = (*o.iter().min()?, *o.iter().max()?);
+                    (o1 > 0 && o0 < depth && u1 > 0 && u0 < len).then_some((u0.max(0), u1.min(len)))
+                })
+                .collect();
+            faced.sort_unstable();
+            let mut from = 0;
+            for (lo, hi) in faced.into_iter().chain([(len, len)]) {
+                if lo > from {
+                    rows.push(ring_row(
+                        y / 2,
+                        vec![at(from, 0), at(lo, 0), at(lo, depth), at(from, depth)],
+                    ));
+                    treads += 1;
+                }
+                from = from.max(hi);
+            }
+        }
+    }
+    Ok((rows, seams, treads))
+}
+
+/// Twice a ring's area in x and z, mm² (positive counter-clockwise, as the facts' surfaces are wound).
+fn area2(ring: &[[i64; 2]]) -> i128 {
+    (0..ring.len())
+        .map(|k| {
+            let (u, v) = (ring[k], ring[(k + 1) % ring.len()]);
+            i128::from(u[0]) * i128::from(v[1]) - i128::from(v[0]) * i128::from(u[1])
+        })
+        .sum()
+}
+
+/// A floor surface's row, `[y, [[x, z] …]]` mm, its ring wound as the facts' are.
+fn ring_row(y: i64, mut ring: Vec<[i64; 2]>) -> Value {
+    if area2(&ring) < 0 {
+        ring.reverse();
+    }
+    Value::Array(vec![
+        i(y),
+        Value::Array(
+            ring.iter()
+                .map(|q| Value::Array(vec![i(q[0]), i(q[1])]))
+                .collect(),
+        ),
+    ])
+}
+
 /// The room of thing `t` nearest the opening `o`: on its level, or the nearest level to it, then by its point's
 /// distance to the room's outline (0 inside), the first of equals; and the opening's pose in that room's frame (mm,
 /// mdeg), as the exporter writes a window's `inRoom`. `None` for a thing with no rooms.
@@ -764,6 +974,8 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
     // Each floor's flights within itself, as surfaces ([`flight_surfaces`]), and how many flights and surfaces.
     let mut flight_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
     let mut floor_flights = (0, 0);
+    // Each modelled storey's seams closed and entrance treads ([`mesh_fill`]).
+    let mut mesh_fills = (0, 0);
     // A slot's point in its thing's frame: today's pose of a thing in a slot is from its parent's origin, and K2's is
     // from the slot's point (T4's carry adds the point), so the point is taken off once here.
     let mut slot_at: HashMap<(&str, i64), [i64; 3]> = HashMap::new();
@@ -951,7 +1163,12 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             levels.entry(int(st, "from")?).or_default();
             levels.entry(int(st, "to")?).or_default();
         }
-        for (lv, surfaces) in levels {
+        let lowest = levels.keys().next().copied();
+        for (lv, mut surfaces) in levels {
+            let (rows, seams, treads) = mesh_fill(t, lv, Some(lv) == lowest)?;
+            surfaces.extend(rows);
+            mesh_fills.0 += seams;
+            mesh_fills.1 += treads;
             let mut ff = BTreeMap::new();
             ff.insert(F_LEVEL, i(lv));
             if !surfaces.is_empty() {
@@ -1374,6 +1591,7 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         by_ref,
         notes: b.notes,
         floor_flights,
+        mesh_fills,
         left_out: b.left_out,
         forms,
         kind_lines,
@@ -1616,7 +1834,7 @@ pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, 
     let get = |m: &BTreeMap<String, i64>, k: &str| m.get(k).copied().unwrap_or(0);
     // A flight within one storey is walked as its floor's surfaces, and counted as the flight it is.
     let (flights, flight_surfaces) = im.floor_flights;
-    *c.entry("floor surfaces").or_default() -= flight_surfaces;
+    *c.entry("floor surfaces").or_default() -= flight_surfaces + im.mesh_fills.0 + im.mesh_fills.1;
     let rows = [
         ("things", c.get("things"), "things"),
         ("doors", c.get("doors"), "doors"),
