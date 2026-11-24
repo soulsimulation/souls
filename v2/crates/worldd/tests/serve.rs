@@ -1390,6 +1390,190 @@ fn r17_a_start_behind_its_directory_mark_ends_restart_gap() {
     let _ = std::fs::remove_dir_all(&behind);
 }
 
+/// R18 (0.133): a rate-limited store (HTTP 429) at the start was `store-error`, which ended the world, so a deploy's
+/// canary rolled back. On the S3 stand-in, whose 429s carry `Retry-After: 3`: the first four reads are refused 429, the
+/// world listens, the refused reads are tried again after the store's 3 s (not the patient read's own 2 s), the claim
+/// is held and the world never exits.
+// A real process on the real clock: the store's wait is real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r18_a_rate_limited_store_at_start_is_retried_and_the_world_listens() {
+    use directoryd::directory::stand_in::{KEY_ID, RETRY_AFTER_S, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r18-429");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r18", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    s.refuse_reads(4, 429, "");
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let retried = w.line("store: out of reach (");
+    println!("429: {retried}");
+    assert!(
+        retried.contains(&format!("HTTP 429, retry after {RETRY_AFTER_S} s)"))
+            && retried.ends_with(&format!("trying again in {RETRY_AFTER_S} s")),
+        "{retried}"
+    );
+    // A gauge says `degraded` with the 429 from the patient read's first wait (written every 2 s; the wait is 3 s).
+    let health = dir.join("health.json");
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let h = std::fs::read_to_string(&health).unwrap_or_default();
+        if h.contains("{\"state\":\"degraded\",\"fault\":\"") && h.contains("HTTP 429") {
+            println!("health: {h}");
+            break;
+        }
+        assert!(Instant::now() < end, "no degraded 429 in health.json: {h}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    w.line("shipping: epoch ");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+    let said = w.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+    assert!(!said.contains("store-error"), "{said}");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R16 after R17: the public stream's generations carry the claim's epoch, and while the store does not answer the
+/// claim is not held. A fresh world (no `views/world.json`) on such a store still listens, its stream `degraded`
+/// naming the wait (`stream-unclaimed`), and opens once the store answers. A restart with its pointer names the same
+/// fault, and a restart after a degraded stream (its pointer gone, so fresh again) listens the same way.
+// A real process on the real clock: the stall, the back-off and the health file's writes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r16_a_fresh_world_on_a_store_that_does_not_answer_listens_degraded_and_its_stream_opens_once_it_answers()
+ {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r16-unclaimed");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r16u", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let (health, pointer) = (dir.join("health.json"), dir.join("views/world.json"));
+    // Reads `health.json` until the stream's state starts `want`; the deadline only stops a hung test.
+    let until = |want: &str, within: Duration| -> String {
+        let want = format!("\"stream\":{{\"state\":\"{want}");
+        let end = Instant::now() + within;
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(Instant::now() < end, "no {want} in health.json: {h}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // Every read held 6 s, past the client's 5 s: the claim waits, so the stream has no epoch.
+    let unanswered = |restart: &str, fresh: bool| {
+        assert_eq!(!pointer.exists(), fresh, "{restart}: a pointer as expected");
+        let _ = std::fs::remove_file(&health);
+        s.stall_reads(usize::MAX, Duration::from_secs(6), "");
+        let begun = Instant::now();
+        let w = serve_env(&dir, &socket, &args, &env);
+        w.line("listening");
+        println!("{restart}: listening {:?} into the stall", begun.elapsed());
+        assert!(
+            begun.elapsed() < Duration::from_secs(30),
+            "{restart}: listens"
+        );
+        let h = until("degraded", Duration::from_secs(30));
+        assert!(
+            h.contains("\"fault\":\"stream-unclaimed: "),
+            "{restart}: {h}"
+        );
+        assert!(!pointer.exists(), "{restart}: no viewers while degraded");
+        w
+    };
+    let answers = |restart: &str, w: &mut Served| {
+        s.stall_reads(0, Duration::ZERO, "");
+        w.line("shipping: epoch ");
+        let h = until("serving", Duration::from_secs(90));
+        assert!(pointer.exists(), "{restart}: the pointer is back: {h}");
+        assert!(
+            w.child.try_wait().expect("its state").is_none(),
+            "{restart}: never exits"
+        );
+    };
+    // A fresh world, never claimed.
+    let mut w = unanswered("fresh", true);
+    answers("fresh", &mut w);
+    w.kill();
+    // A restart with its pointer: degraded by name, not `recovering` behind the last run's pointer.
+    let w = unanswered("with its pointer", false);
+    w.kill();
+    // A restart after that degraded run: its pointer was taken away, so it starts fresh.
+    let mut w = unanswered("after degraded", true);
+    answers("after degraded", &mut w);
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R18 (0.133): a panic on the shipping thread, before its claim, left the world serving unclaimed with its archive
+/// waiting for ever (`the world goes on`). A debug build's forced panic there (`WORLDD_TEST_PANIC_SHIPPING`) ends the
+/// process by name, `worldd serve: shipping-panicked: …`, exit 1.
+#[cfg(debug_assertions)]
+#[test]
+fn r18_a_panic_on_the_shipping_thread_ends_the_process() {
+    panic_on_the_shipping_path_ends_the_process("r18-panic", "WORLDD_TEST_PANIC_SHIPPING", false);
+}
+
+/// R18 (0.133): a panic on the shipper's own thread, after the claim, printed `the world goes on`, and the world served
+/// on with its marks frozen. A debug build's forced panic there (`WORLDD_TEST_PANIC_SHIPPER`) ends the process by
+/// name, after `shipping: epoch …`.
+#[cfg(debug_assertions)]
+#[test]
+fn r18_a_panic_on_the_shipper_thread_after_the_claim_ends_the_process() {
+    panic_on_the_shipping_path_ends_the_process("r18-shipper", "WORLDD_TEST_PANIC_SHIPPER", true);
+}
+
+/// A world on a folder store started with the debug hook `hook` set ends `worldd serve: shipping-panicked: <hook>`,
+/// exit 1; `claimed`: after its `shipping: epoch` line.
+#[cfg(debug_assertions)]
+fn panic_on_the_shipping_path_ends_the_process(tag: &str, hook: &str, claimed: bool) {
+    use std::ffi::OsStr;
+    let d = scratch(tag);
+    let (dir, ..) = seeded(&d);
+    let spec = d.join("bucket").display().to_string();
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let mut w = serve_env(&dir, &d.join("s"), &args, &[(hook, "1")]);
+    if claimed {
+        w.line("shipping: epoch ");
+    }
+    let ended = w.line("worldd serve: ");
+    let status = w.child.wait().expect("it ends");
+    println!("{ended}; {status}");
+    assert_eq!(ended, format!("worldd serve: shipping-panicked: {hook}"));
+    assert_eq!(status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R12 (0.133): a world whose public stream cannot recover from its store (as production's did on 23 Nov, a read past
 /// the client's cap) never ends for it, which systemd would only repeat: it listens degraded, with no public pointer
 /// (no viewers) and `health.json` naming the fault, and tries again with back-off. Once the store answers, the stream
