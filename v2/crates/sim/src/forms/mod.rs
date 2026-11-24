@@ -1738,7 +1738,7 @@ impl Forms {
         // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
         if let Some(n) = fr.mv.take() {
             let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
-            let seat = w.places.as_mut().and_then(|p| {
+            let held = w.places.as_mut().and_then(|p| {
                 p.slots.cancel(
                     w.controller,
                     w.due,
@@ -1750,7 +1750,7 @@ impl Forms {
                     name("form-ended"),
                 )
             });
-            match seat {
+            match held {
                 Some(true) if sitting => self.seat_posture(w.tree, run, now),
                 Some(_) => {}
                 None => {
