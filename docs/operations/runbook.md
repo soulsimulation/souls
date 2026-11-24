@@ -68,6 +68,13 @@ one folder the launcher unit lets it write; the switch refuses any other system 
 The log line `cutover: <slug>'s static views held in memory ... cutover.static-unwritable` means a binding names a folder
 the launcher cannot write: the page still works from memory; switch again with the right `--static`.
 
+### New worlds on the new engine
+
+Where the launcher has a cutover binding (`/etc/souls/cutover-binding.json`, as on soul.game), the home page's **New
+world** is made on the new engine for the signed-in person (0.135 W1, on since Gene's yes of 24 Nov): the directory's
+create, then placement (`souls-place`) registers its route. `--no-create-on-new-engine` (or `SOULS_V2_CREATE=0`) in the
+launcher's arguments turns it back to the old create; `--creation off` below pauses new worlds altogether.
+
 ### Pausing uploads or new worlds
 
 Two site switches stop the two things that can fill the machine, at once and without a release (#2540). They are kept
