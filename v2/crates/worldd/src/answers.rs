@@ -4560,6 +4560,9 @@ impl Clock {
             g.1 += 1;
             if g.1 % 200 == 0 {
                 let names = ["acts", "edits", "set-downs", "start_forms", "start_moves", "follow_orders", "write_forms", "set_loose", "offer_map"];
+                use std::sync::atomic::Ordering::Relaxed;
+                let (wu, fu, wn) = (crate::acts::WITH_US.load(Relaxed), crate::acts::F_US.load(Relaxed), crate::acts::WITH_N.load(Relaxed).max(1));
+                eprintln!("s10-diag with: {wn} calls, sight build {:.3} ms each, closure {:.3} ms each, {:.2} calls/tick", wu as f64 / wn as f64 / 1000.0, fu as f64 / wn as f64 / 1000.0, wn as f64 / g.1 as f64);
                 let line: Vec<String> = names.iter().zip(g.0).map(|(n, t)| format!("{n} {:.2}", t as f64 / g.1 as f64 / 1000.0)).collect();
                 eprintln!("s10-diag commit ms/tick over {} ticks: {}", g.1, line.join(", "));
             }

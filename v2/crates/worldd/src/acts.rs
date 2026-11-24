@@ -1467,6 +1467,13 @@ pub struct Args {
     pub values: skills::form_runner::Args,
 }
 
+/// S10 diagnostic only: time building a Sight, time in the closure, and calls.
+pub static WITH_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static F_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static WITH_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static START_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static START_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
     pub forms: Forms,
@@ -1917,6 +1924,7 @@ impl Acts {
         seed: u64,
         f: impl FnOnce(&mut Forms, &mut World<'_, Sight<'_>, Sight<'_>>) -> T,
     ) -> T {
+        let t0 = crate::measures::steady_us();
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
         let approaches = self.forms.approaches();
@@ -2002,7 +2010,12 @@ impl Acts {
             seed,
             places,
         };
+        let t1 = crate::measures::steady_us();
         let result = f(&mut self.forms, &mut w);
+        let t2 = crate::measures::steady_us();
+        WITH_US.fetch_add(t1 - t0, std::sync::atomic::Ordering::Relaxed);
+        F_US.fetch_add(t2 - t1, std::sync::atomic::Ordering::Relaxed);
+        WITH_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let context = self.forms.planning_context();
         self.planning.borrow_mut().keep(&context);
         if let Some(out) = questions {
