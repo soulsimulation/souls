@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use directoryd::directory::s3::S3;
-use directoryd::directory::store::{R, Store, When, refuse};
+use directoryd::directory::store::{R, Store, refuse};
 use replica::encode::to_hex;
 use replica::ids::sha256;
 use supervisor::World;
@@ -325,6 +325,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use directoryd::directory::store::When;
 
     const WORLD: &str = "cd5ce79e0e0cf90b312c5ba60b941f58-cd5ce79e0e0cf90b312c5ba60b941f58-0";
     const OTHER: &str = "aa5ce79e0e0cf90b312c5ba60b941f58-aa5ce79e0e0cf90b312c5ba60b941f58-0";
