@@ -130,7 +130,7 @@ fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, p
         }
         let mut parts = line.split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-        if method == "GET" {
+        if method == "GET" || method == "HEAD" {
             let hold = stalls.lock().ok().and_then(|mut s| {
                 (s.0 > 0 && target.contains(s.2.as_str())).then(|| {
                     s.0 -= 1;
@@ -158,7 +158,9 @@ fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, p
             res.push_str(&format!("etag: \"{e}\"\r\n"));
         }
         res.push_str("\r\n");
-        if out.write_all(res.as_bytes()).is_err() || out.write_all(&answer).is_err() {
+        // A HEAD answers a GET's length and ETag, with no body.
+        let sent: &[u8] = if method == "HEAD" { &[] } else { &answer };
+        if out.write_all(res.as_bytes()).is_err() || out.write_all(sent).is_err() {
             return;
         }
     }
@@ -218,10 +220,23 @@ fn answer(
             xml.push_str("</ListBucketResult>");
             (200, None, xml.into_bytes())
         }
-        "GET" => match objects.get(&path) {
+        "GET" | "HEAD" => match objects.get(&path) {
             Some((e, b)) => (200, Some(e.clone()), b.clone()),
             None => (404, None, Vec::new()),
         },
+        // CopyObject: the object at `x-amz-copy-source` copied to the key, its ETag with it.
+        "PUT" if head.contains_key("x-amz-copy-source") => {
+            let from = decode(head["x-amz-copy-source"].trim_start_matches('/'));
+            let Some(o) = objects.get(&from).cloned() else {
+                return (404, None, b"<Error><Code>NoSuchKey</Code></Error>".to_vec());
+            };
+            let xml = format!(
+                "<CopyObjectResult><ETag>&quot;{}&quot;</ETag></CopyObjectResult>",
+                o.0
+            );
+            objects.insert(path, o);
+            (200, None, xml.into_bytes())
+        }
         "PUT" => {
             let now = objects.get(&path).map(|o| o.0.clone());
             let ok = match (head.get("if-none-match"), head.get("if-match")) {
