@@ -1,4 +1,4 @@
 ---
-type: fix
+type: internal
 ---
-Washing, dyeing, ladling, posting and other actions that move an amount between two different things now work when the two things number that amount differently.
+A form's transfer between two kinds finds the field by name on each end's own kind, so it no longer writes the wrong field where the kinds number it differently.
