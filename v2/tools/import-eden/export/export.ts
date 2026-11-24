@@ -74,6 +74,10 @@ const isDoorDef = (d: { components: Record<string, unknown>; form: string; name:
 const WATER_KINDS = /^core-(lake|river|pond)$/;
 
 const kinds = new Map<string, { ref: string; hash: string; name: string; form: string; layer: string | null; door: boolean; mesh: boolean; slots: number }>();
+/** The defs the world defines itself (a template's `define`), which no page carries: each kept once, by ref, on the open
+ *  ground (`ground.defs`, the tree's field 102), so removing any thing of one never loses it. */
+const CORE = coreLibrary(), ownDefs = new Map<string, string>();
+const keepOwn = (d: { ref: string }) => { if (!CORE.get(d.ref) && !ownDefs.has(d.ref)) ownDefs.set(d.ref, JSON.stringify(d)); };
 const defOf = (e: Entity) => { const d = m.resolvedDef(e.def); if (!d) throw new Error(`${e.id}: def ${e.def} unresolved`); return d; };
 const bakeOf = (e: Entity) => m.bake(defOf(e), e.params ?? {}, e.seed ?? 0, e.shape);
 
@@ -103,6 +107,7 @@ const doorThings: { id: string; x: number; y: number; z: number }[] = [];
 for (const e of m.entities.values()) {
   const d = defOf(e), b = bakeOf(e), s = scale.get(e.id)!, wp = world.get(e.id)!;
   const ref = d.ref;
+  keepOwn(d);
   if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
   // Its tree parent: the room it sits in (a room slot), else its parent thing (with the slot, if any), else the ground.
   const parent = e.in.parent === 'world' ? null : e.in.parent;
@@ -312,7 +317,8 @@ const file = {
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
   things, doors: doorPairs,
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.
-  ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles },
+  ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles,
+    defs: [...ownDefs].sort(([a], [b]) => (a < b ? -1 : 1)).map(([ref, body]) => ({ ref, body })) },
   places: places.map((p) => ({ ...p, ...(p.polygon ? { polygon: p.polygon.map(pt) } : {}), ...(p.line ? { line: p.line.map(pt), width: mm(p.width ?? 0) } : {}) })),
 };
 mkdirSync(dirname(OUT), { recursive: true });

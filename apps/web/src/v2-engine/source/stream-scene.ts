@@ -9,14 +9,15 @@
 // - things, buildings, paths and areas: every node that is an imported thing (its `origin`, today's id, with no `/` or
 //   `.`: a building's floors, rooms and windows and a place derived from a thing are drawn by the thing), at its world
 //   pose, with its shape (an area's outline, a path's line and width) and the def it was imported from (field 2) out of
-//   the core library the page already carries (`coreLibrary`), with its def's params (field 19, W3); from a world imported
-//   before W3, a building's size and storeys from its floors' surfaces.
+//   the core library the page already carries (`coreLibrary`), or, for a def the world defines itself, the def the open
+//   ground keeps (field 102), with its def's params (field 19, W3); from a world imported before W3, a building's size
+//   and storeys from its floors' surfaces. A thing on a course no def draws (a punt) is the takes' (takes.ts).
 //
 // What the stream does not carry is drawn plain and named in `plain` (the hatch): a def the library does not have is
 // drawn from the thing's own solids (field 12) as boxes; from a world imported before W3, a def's other params (colours,
 // roof, a door's size) are the def's defaults. Things a creator places later are not here: creator-kinds.ts sends them as the stream shows them.
 // The snapshot reaches the layer through scene-offer.ts.
-import { coreLibrary, type Entity, type StoredDef } from '@souls/world-compiler';
+import { coreLibrary, defSchema, type Entity, type StoredDef } from '@souls/world-compiler';
 import { TILE_M, TILE_N, tileKey, type Ground } from '@souls/ground';
 import { placedOf } from '../world-state.ts';
 import { kindDef } from '../creator-kinds.ts';
@@ -49,6 +50,26 @@ export function libraryDef(kind: string, ref?: string, lib: Lib = coreLibrary())
   }
   const name = (plainKind(kind).split(':').pop() ?? '').replace(/_/g, '-');
   return ix.get(`core-${name}`) ?? ix.get(name);
+}
+
+/** The defs the world defines itself (a template's `define`, which no page's library has), as the stream carries them:
+ *  once each, on the open ground (import-eden's field 102, `NodeRec.defBodies`), so removing a thing of one never loses
+ *  it; by the ref it is kept under and by its own `name@version` (a thing may name it either way). A body that is not a
+ *  def is left out. */
+export function worldDefs(nodes: readonly NodeRec[]): Map<string, StoredDef> {
+  const out = new Map<string, StoredDef>();
+  for (const n of nodes) {
+    for (const [ref, body] of n.defBodies ?? []) {
+      try {
+        const d = JSON.parse(body) as Partial<StoredDef>, def = defSchema.parse(d);
+        if (typeof d.hash !== 'string') continue;
+        const stored: StoredDef = { ...def, ref: typeof d.ref === 'string' ? d.ref : ref, hash: d.hash, by: typeof d.by === 'string' ? d.by : 'v2', born: 0 };
+        out.set(ref, stored);
+        out.set(`${def.name}@${def.version}`, stored);
+      } catch { /* drawn from its solids */ }
+    }
+  }
+  return out;
 }
 
 /** The library def a thing placed while the world runs draws by (creator-kinds.ts): a point thing's only, since such
@@ -119,6 +140,7 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
   const hundreds = covered.map(toward0);
   const ext = (hundreds[2] > hundreds[0] && hundreds[3] > hundreds[1] ? hundreds : covered) as [number, number, number, number];
   const defs = new Map<string, StoredDef>(), entities: Entity[] = [], waters: Ground['waters'] = [], plain = new Set<string>();
+  const own = worldDefs(nodes);
   for (const n of nodes) {
     const o = n.origin;
     if (!o || o.includes('/') || o.includes('.') || isBody(n) || NOT_THINGS.has(plainKind(n.kind).split(':').pop() ?? '')) continue;
@@ -126,7 +148,9 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
     // water: the recipe's, as the old world kept it (an area or a path, its level)
     if (n.waterLevel !== undefined && n.outline && n.outline.length >= 3) waters.push({ id: o, area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]), level: m(n.waterLevel) });
     else if (n.waterLevel !== undefined && n.line && n.line.length >= 2) waters.push({ id: o, path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), w: m(n.lineWidth ?? 4000), level: m(n.waterLevel) });
-    let def = libraryDef(n.kind, n.def, lib) ?? null;
+    let def = (n.def ? own.get(n.def) : undefined) ?? libraryDef(n.kind, n.def, lib) ?? null;
+    // a thing on a course no library def draws (a punt) is drawn by the takes, where its course has it (takes.ts)
+    if (!def && n.course) continue;
     if (!def) { def = solidsDef(n.kind, n.solids); plain.add(`${plainKind(n.kind)}: ${def ? 'its solids as boxes' : 'not drawn (no def, no solids)'}`); }
     if (!def) continue;
     defs.set(def.ref, def);
