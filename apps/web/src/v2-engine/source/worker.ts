@@ -99,6 +99,10 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.get(33) instanceof Uint8Array) (rec as NodeRec & { look?: string }).look = new TextDecoder().decode(f.get(33) as Uint8Array); // V3: a Soul's own look's params (G2)
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
+  // R4 (0.134): a creator's tint, `[part, rgb]` rows (field 145)
+  const tint = f.get(145);
+  const text = (t: unknown) => (typeof t === 'string' ? t : t instanceof Uint8Array ? new TextDecoder().decode(t) : null);
+  if (Array.isArray(tint)) rec.tint = tint.flatMap((r) => (Array.isArray(r) && r.length === 2 && text(r[0]) !== null ? [[text(r[0])!, num(r[1])] as [string, number]] : []));
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
