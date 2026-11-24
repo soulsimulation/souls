@@ -12,10 +12,16 @@
 // test world: `yard-frame-1`, not `e_…`) has an origin the entity layer holds no entity for, so neither the layer nor
 // CreatorKinds drew it: it is handed to CreatorKinds without its origin, as a placed part is. A part is a kind whose
 // entry names its joining points (a beam, an upright); a holder (a bay, a stand, a crew's carry) is not one.
+//
+// W4 (0.135): a holder its parts stand inside (a bay: its uprights are as tall as it is) draws as its frame, the twelve
+// edges of its bounds, not as one box of them: a bay a creator places while the world runs has no origin, so CreatorKinds
+// draws it from its entry, whose only look is its bounds (`holderFrame`), and a box would hide the parts seated in it.
+// Such a bay's record carries no slot points either (an imported bay's does), so the parts in it would all stand at its
+// origin: it is handed to CreatorKinds with its kind's slot points (`slotPoints`: the entry's slots in order, from 1).
 
 /** A node record, the fields read here (the reader's NodeRec). */
 export type PartNode = { id: string; kind: string; parent: string | null; slot?: number | null; pos?: [number, number, number];
-  rot?: [number, number, number, number]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array };
+  rot?: [number, number, number, number]; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array };
 /** A motion sample as the reader posts it: id, frame, slot, world time µs, x, y, z (µm). */
 type SampleRec = [string, string, number | null, number, number, number, number];
 type Msg = { t: 'part'; p: { nodes: PartNode[]; removed: string[]; samples: SampleRec[] } } | { t: 'snapshot'; s: { nodes: PartNode[]; removed: string[] } } | { t: string };
@@ -33,6 +39,40 @@ const isPart = (entry: Uint8Array | undefined) => {
   if (!entry) return false;
   try { return !!(JSON.parse(new TextDecoder().decode(entry)) as { points?: unknown }).points; } catch { return false; }
 };
+
+/** An entry's JSON, or null. */
+const read = (entry: Uint8Array) => { try { return JSON.parse(new TextDecoder().decode(entry)) as Record<string, unknown>; } catch { return null; } };
+/** An edge of a frame, in mm (kitShape's box). */
+const FRAME_MM = 30;
+
+/** A holder's entry with its frame as its look: `geometry.parts`, the twelve edges of its bounds, when it has no parts of
+ *  its own and a part it admits (`partBounds`, by plain kind) is no taller than it is (it stands inside); else null. */
+export function holderFrame(entry: Uint8Array, partBounds: ReadonlyMap<string, number[]>): Uint8Array | null {
+  const e = read(entry), g = e?.geometry as { bounds_mm?: unknown; parts?: unknown } | undefined;
+  const b = g?.bounds_mm;
+  if (!e || !g || g.parts || !Array.isArray(b) || b.length !== 3 || !b.every((v) => typeof v === 'number' && v > 0)) return null;
+  const admits = Object.values((e.slots ?? {}) as Record<string, { kinds?: unknown }>).flatMap((s) => (Array.isArray(s?.kinds) ? s.kinds : []));
+  if (!admits.some((k) => typeof k === 'string' && (partBounds.get(k)?.[1] ?? Infinity) <= b[1])) return null;
+  const [w, h, d] = b as number[], t = FRAME_MM, x = w / 2 - t / 2, z = d / 2 - t / 2, low = t / 2, high = h - t / 2;
+  const edge = (at: number[], size: number[]) => ({ kind: 'box', at, size, color: '#8a8f96' });
+  const parts = [
+    ...[[-x, -z], [x, -z], [-x, z], [x, z]].map(([ex, ez]) => edge([ex, h / 2, ez], [t, h, t])),
+    ...[low, high].flatMap((y) => [edge([0, y, -z], [w, t, t]), edge([0, y, z], [w, t, t]), edge([-x, y, 0], [t, t, d]), edge([x, y, 0], [t, t, d])]),
+  ];
+  return new TextEncoder().encode(JSON.stringify({ ...e, geometry: { ...g, parts } }));
+}
+
+/** A holder's slot points as a node record carries them (`[slot, x, y, z]`, mm), from its entry's slots in the order
+ *  the entry gives them, numbered from 1 as the world numbers them; null without any. */
+export function slotPoints(entry: Uint8Array): number[][] | null {
+  const slots = read(entry)?.slots;
+  if (!slots || typeof slots !== 'object') return null;
+  const out = Object.values(slots as Record<string, { at_mm?: unknown }>).flatMap((s, i) => {
+    const at = s?.at_mm;
+    return Array.isArray(at) && at.length === 3 && at.every((v) => typeof v === 'number') ? [[i + 1, ...(at as number[])]] : [];
+  });
+  return out.length ? out : null;
+}
 
 /** The place at world time `at` along `s` (sorted by time): between the two around it, else the nearest end. */
 export function sampleAt(s: readonly Sample[], at: number): Sample | null {
@@ -73,6 +113,10 @@ export class CarriedParts {
   /** The parts' entries, by plain name (read over every entry: the map answers `get` only for kinds the library does
    *  not draw, stream-scene.ts UnlessLibrary, and the library has rack defs). */
   private readonly partKinds = new Map<string, Uint8Array>();
+  /** W4: the holders its parts stand inside, their entries with their frame as their look, by plain name. */
+  private readonly holders = new Map<string, Uint8Array>();
+  /** W4: each holder kind's slot points (`slotPoints`), by plain name. */
+  private readonly points = new Map<string, number[][]>();
   /** Each moving frame's heading when its record last changed (its record's turn is the turn at that heading). */
   private readonly base = new Map<string, number>();
   private readonly kinds: { apply(nodes: PartNode[], removed: string[]): void };
@@ -81,6 +125,13 @@ export class CarriedParts {
   constructor(kinds: { apply(nodes: PartNode[], removed: string[]): void }, entries: ReadonlyMap<string, Uint8Array> = new Map()) {
     this.kinds = kinds; this.entries = entries;
     for (const [k, v] of entries) if (isPart(v)) this.partKinds.set(k, v);
+    const partBounds = new Map([...this.partKinds].map(([k, v]) => [k, (read(v)?.geometry as { bounds_mm?: number[] } | undefined)?.bounds_mm ?? []]));
+    for (const [k, v] of entries) {
+      if (isPart(v)) continue;
+      const f = holderFrame(v, partBounds), at = slotPoints(v);
+      if (f) this.holders.set(k, f);
+      if (at) this.points.set(k, at);
+    }
   }
 
   receive(m: Msg): void {
@@ -96,7 +147,7 @@ export class CarriedParts {
       // is its look before the library's (`part:`, kept with the kinds' own defs): the library's rack defs are another
       // frame (core-rack-upright lies flat along x, 3.66 m; the kind's upright stands 2.44 m along y).
       if (n.origin && !this.unheld.has(n.id)) continue;
-      const own = this.partKinds.get(k), entry = own ?? this.entries.get(k);
+      const own = this.partKinds.get(k), seen = own ? undefined : this.entries.get(k), entry = own ?? (seen && (this.holders.get(k) ?? seen));
       if (entry && !this.defined.has(n.kind)) {
         this.defined.add(n.kind);
         this.kinds.apply([{ id: `${own ? 'part' : 'entry'}:${n.kind}`, kind: 'souls:kind', parent: null, defines: n.kind, entry }], []);
@@ -121,10 +172,15 @@ export class CarriedParts {
 
   /** The records of the moving frames that carry something, as they stand at world time `at` (µs): each its samples'
    *  place there and its record's turn, turned as its way has turned since that record. Then the parts the layer holds
-   *  no entity for, without their origin, wherever the stream has them (on a stand, in a crew's slot, in a bay's). */
+   *  no entity for, without their origin, wherever the stream has them (on a stand, in a crew's slot, in a bay's). Then
+   *  W4: each holder whose record has no slot points (placed live), with its kind's. */
   frames(at: number): PartNode[] {
     const out: PartNode[] = [], carrying = new Set<string>();
     for (const id of this.unheld) { const n = this.nodes.get(id); if (n) out.push({ ...n, origin: undefined }); }
+    for (const n of this.nodes.values()) {
+      const p = n.slots?.length ? undefined : this.points.get(plain(n.kind));
+      if (p) out.push({ ...n, slots: p });
+    }
     for (const n of this.nodes.values()) if (n.parent && this.tracks.has(n.parent)) carrying.add(n.parent);
     for (const id of carrying) {
       const n = this.nodes.get(id), s = this.tracks.get(id)!, here = sampleAt(s, at);
