@@ -53,6 +53,20 @@ export function tilesTouched(l: Landform): TileKey[] {
 /** peek's tile-local grounds, per Ground object (a Ground is replaced, not edited, by an edit; invalidate drops them too). */
 const LOCAL_GROUNDS = new WeakMap<Ground, Map<TileKey, Ground>>();
 
+/** R14: every tile of one Ground's extent, baked ahead (a release handover's standby process, before its go:
+ *  apps/server/src/standby.ts), given to each Terrain made from a Ground with the same content until dropped. The boot
+ *  after the go otherwise bakes them inside the world's pause (Eden 2026: ~0.23 s of its first reconcile). Baked tiles
+ *  are immutable and shared (as clone()); the same bake of the same content, so bit-identical. None unless prebaked. */
+let prebaked: { key: string; tiles: Map<TileKey, Float32Array> } | null = null;
+const contentOf = (g: Ground) => JSON.stringify(g, (k, v) => (k === '_ordered' ? undefined : v));
+export function prebakeTiles(g: Ground): number {
+  const t = new Terrain(g), [a, b] = tileOf(g.extent[0], g.extent[1]), [c, d] = tileOf(g.extent[2], g.extent[3]);
+  for (let tz = b; tz <= d; tz++) for (let tx = a; tx <= c; tx++) t.tile(tx, tz);
+  prebaked = { key: contentOf(g), tiles: t.baked() };
+  return prebaked.tiles.size;
+}
+export function dropPrebakedTiles(): void { prebaked = null; }
+
 /** A Ground plus a lazily baked tile cache. `sample` is the authoritative height for physics and picture alike. */
 export class Terrain {
   private tiles = new Map<TileKey, Float32Array>();
@@ -60,7 +74,9 @@ export class Terrain {
   // the tile asked for last: a viewer's terrain mesh samples it hundreds of times in a row (no key string, no lookup)
   private lastTx = NaN; private lastTz = NaN; private last: Float32Array | null = null;
   ground: Ground;
-  constructor(ground: Ground) { this.ground = ground; }
+  constructor(ground: Ground) { this.ground = ground; if (prebaked && prebaked.key === contentOf(ground)) this.tiles = new Map(prebaked.tiles); }
+  /** The tiles baked so far (prebakeTiles keeps them). */
+  baked(): Map<TileKey, Float32Array> { return this.tiles; }
 
   tile(tx: number, tz: number): Float32Array {
     if (tx === this.lastTx && tz === this.lastTz && this.last) return this.last;
