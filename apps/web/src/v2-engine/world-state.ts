@@ -12,7 +12,7 @@ import { TICK_US } from './takes.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; origin?: string; sky?: Record<number, unknown>; fields?: Record<number, unknown>;
-  slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
+  tint?: [string, number][]; slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 
 /** Doors and lamps: a kind's state fields (`content/kinds`, by `n`) and the entity state key the old page draws them by
@@ -34,9 +34,25 @@ const KINDS = new Set(['clear', 'cloudy', 'rain', 'wind', 'fog', 'storm']);
 const whole = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'bigint' ? Number(v) : typeof v === 'boolean' ? (v ? 1 : 0) : null);
 const plainName = (k: string) => k.split('@')[0].split(':').pop() ?? '';
 
-/** A door's or lamp's state as the old page's entity holds it, from its v2 fields; null for any other thing, or one
- *  that holds none of its fields yet (it is drawn as the layer has it). */
+/** R4 (0.134): a creator's tint as the entity's `state.tint` (gen-mesh/vocab-look.ts draws it): `#rrggbb` for the whole
+ *  thing, then `<part>=#rrggbb` for each part, space-separated; '' once undone (no tint); undefined when the thing was
+ *  never recoloured, so its state is left as the layer has it. */
+export function tintState(rows: [string, number][] | undefined): string | undefined {
+  if (!rows) return undefined;
+  const hex = (c: number) => '#' + (c >>> 0).toString(16).padStart(6, '0').slice(-6);
+  const whole = rows.filter(([p]) => p === 'tint:whole').map(([, c]) => hex(c));
+  const parts = rows.filter(([p]) => p.startsWith('part:')).map(([p, c]) => `${p.slice(5)}=${hex(c)}`);
+  return [...whole, ...parts].join(' ');
+}
+
+/** A door's or lamp's state as the old page's entity holds it, from its v2 fields, and a creator's tint on any thing;
+ *  null for a thing with neither, or one that holds none of its fields yet (it is drawn as the layer has it). */
 export function thingState(n: NodeLike): Record<string, boolean | number | string> | null {
+  const tint = tintState(n.tint), out = doorOrLamp(n);
+  return tint === undefined ? out : { ...out, tint };
+}
+
+function doorOrLamp(n: NodeLike): Record<string, boolean | number | string> | null {
   const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
   // a door by its kind or entry (`eden:door`, or a `…_door` kind); field 6 alone is not one: another kind may use it
   const name = plainName(entry), defs = STATE[name] ?? (name.endsWith('_door') ? STATE.door : undefined);

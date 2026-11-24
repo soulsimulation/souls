@@ -19,7 +19,34 @@ const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite
 const declared = (ctx: MeshCtx, k: string) => Object.hasOwn(ctx.def.params ?? {}, k);
 const STATE_LOOKS = ['open', 'lit', 'on', 'level', 'moisture', 'locked', 'station'] as const;
 
-export type Look = { sx: number; sy: number; sz: number; taper: number; bend: number; skew: number; tint: string | null; vary: number; condition: string; state: Record<string, unknown> };
+export type Look = { sx: number; sy: number; sz: number; taper: number; bend: number; skew: number; tint: string | null; vary: number; condition: string; state: Record<string, unknown>;
+  /** R4 (0.134): a creator's recolour (the entity's `state.tint`, v2-engine/world-state.ts tintState): the whole thing's
+   *  colour and each named part's, a part found by its `role` or its object's name. */
+  recolour?: Recolour };
+export type Recolour = { all: string | null; parts: Record<string, string> };
+/** The entity layer's `MeshCtx.tint` (WorldEntityLayer build): a creator's recolour of a palette key (`state.tint`'s
+ *  `<key>=#rrggbb`, R4) sets that part's colour exactly; else the instance's param, the def's palette, the fallback. */
+export function paletteTint(def: { palette?: Record<string, string> }, params: Record<string, unknown>, state: Record<string, unknown> | undefined): (key: string | undefined, fallback: string) => string {
+  const recoloured = recolourOf(state?.tint)?.parts ?? {};
+  return (key, fallback) => {
+    if (!key) return fallback;
+    const r = recoloured[key.toLowerCase()];
+    if (r) return r;
+    const v = params[key];
+    return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback;
+  };
+}
+/** `state.tint` read: `#rrggbb` for the whole thing and `<part>=#rrggbb` for a part, space-separated; null when none. */
+export function recolourOf(t: unknown): Recolour | null {
+  if (typeof t !== 'string' || !t.trim()) return null;
+  const out: Recolour = { all: null, parts: {} }, hex = /^#[0-9a-f]{6}$/i;
+  for (const w of t.trim().split(/\s+/)) {
+    const [part, c] = w.includes('=') ? w.split('=') : ['', w];
+    if (!hex.test(c)) continue;
+    if (part) out.parts[part.toLowerCase()] = c; else out.all = c;
+  }
+  return out.all || Object.keys(out.parts).length ? out : null;
+}
 export function lookOf(ctx: MeshCtx): Look | null {
   const p = ctx.params, st = (ctx.entity.state ?? {}) as Record<string, unknown>, defState = ctx.def.state ?? {};
   const g = (k: string, d: number) => (declared(ctx, k) ? num(p[k], d) : d);
@@ -28,7 +55,9 @@ export function lookOf(ctx: MeshCtx): Look | null {
   const look: Look = { sx: g('sx', 1), sy: g('sy', 1), sz: g('sz', 1), taper: g('taper', 0), bend: g('bend', 0), skew: g('skew', 0),
     tint: declared(ctx, 'tint') && typeof p.tint === 'string' && /^#[0-9a-f]{6}$/i.test(p.tint) ? p.tint : null, vary: g('vary', 0),
     condition: declared(ctx, 'condition') && typeof p.condition === 'string' ? p.condition : 'new', state };
-  const active = look.sx !== 1 || look.sy !== 1 || look.sz !== 1 || look.taper || look.bend || look.skew || look.tint || look.vary > 0 || look.condition !== 'new' || stateMatters(look.state, ctx) || tableOf(ctx).length > 0;
+  const recolour = recolourOf(st.tint);
+  if (recolour) look.recolour = recolour;
+  const active = !!recolour || look.sx !== 1 || look.sy !== 1 || look.sz !== 1 || look.taper || look.bend || look.skew || look.tint || look.vary > 0 || look.condition !== 'new' || stateMatters(look.state, ctx) || tableOf(ctx).length > 0;
   return active ? look : null;
 }
 /** SA-D1a: a kind's looks table rides in the def's make.args (`looks_table`); a def without one is drawn exactly as before. */
@@ -93,22 +122,38 @@ function paintSubtree(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const seed = ctx.entity.seed ?? hashSeed(ctx.entity.id) * 1e9, r = hashSeed(String(seed));
   const mul = new THREE.Color(1, 1, 1);
   if (look.tint) mul.multiply(new THREE.Color(look.tint));
+  if (look.recolour?.all) mul.multiply(new THREE.Color(look.recolour.all));
+  // a part named by a palette key was coloured exactly by the layer's tint (paletteTint): never multiplied again here
+  const palette = new Set(Object.keys(ctx.def.palette ?? {}).map((k) => k.toLowerCase()));
+  const parts = Object.fromEntries(Object.entries(look.recolour?.parts ?? {}).filter(([k]) => !palette.has(k))), partNames = Object.keys(parts);
+  // a named part's colour: the nearest object at or above the mesh, inside the picture, whose role or name is the part
+  const partOf = (o: THREE.Object3D | null): string | null => {
+    for (let x = o; x; x = x === root ? null : x.parent) {
+      const role = typeof x.userData.role === 'string' ? x.userData.role.toLowerCase() : '', name = x.name.toLowerCase();
+      if (parts[role]) return parts[role];
+      if (parts[name]) return parts[name];
+    }
+    return null;
+  };
   if (look.condition === 'worn') mul.multiply(new THREE.Color(0.86, 0.83, 0.78));
   if (look.condition === 'damaged') mul.multiply(new THREE.Color(0.64, 0.6, 0.56));
   if (look.condition === 'construction') mul.multiply(new THREE.Color(0.93, 0.9, 0.86));
   const dh = look.vary ? (r - 0.5) * 0.08 * look.vary : 0, dl = look.vary ? (hashSeed(String(seed) + 'l') - 0.5) * 0.24 * look.vary : 0;
   const glowOff = look.state.on === false && !ctx.def.components.light;
   const key = `${mul.getHexString()}|${dh.toFixed(3)}|${dl.toFixed(3)}|${look.condition}|${glowOff}`;
-  if (key === `ffffff|0.000|0.000|new|false`) return;
+  if (key === `ffffff|0.000|0.000|new|false` && !partNames.length) return;
   root.traverse((o) => {
-    const mesh = o as THREE.Mesh; if (!mesh.isMesh || mesh.userData.vocabPainted === key || mesh.name === 'asset frame hook' || mesh.userData.shadowProxy) return;   // (a shadow proxy draws no colour)
+    const mesh = o as THREE.Mesh; if (!mesh.isMesh || mesh.name === 'asset frame hook' || mesh.userData.shadowProxy) return;   // (a shadow proxy draws no colour)
+    const part = partNames.length ? partOf(mesh) : null, own = part ? mul.clone().multiply(new THREE.Color(part)) : mul;
+    const meshKey = part ? `${key}|${own.getHexString()}` : key;
+    if (mesh.userData.vocabPainted === meshKey || meshKey === `ffffff|0.000|0.000|new|false`) return;
     const edit = (m: THREE.MeshStandardMaterial) => {
-      if (m.color) { m.color.multiply(mul); if (dh || dl) m.color.offsetHSL(dh, 0, dl); }
+      if (m.color) { m.color.multiply(own); if (dh || dl) m.color.offsetHSL(dh, 0, dl); }
       if (look.condition === 'worn' || look.condition === 'damaged') { if (typeof m.roughness === 'number') m.roughness = Math.min(1, m.roughness + 0.15); }
       if (glowOff && m.emissive) m.emissiveIntensity = 0;
     };
-    mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => lookMaterial(m, key, edit)) : lookMaterial(mesh.material, key, edit);
-    mesh.userData.vocabPainted = key;
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => lookMaterial(m, meshKey, edit)) : lookMaterial(mesh.material, meshKey, edit);
+    mesh.userData.vocabPainted = meshKey;
   });
 }
 

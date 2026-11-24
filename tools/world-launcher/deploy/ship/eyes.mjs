@@ -170,7 +170,7 @@ const rc = await probeExit; post.push(`probe ${rc}`);
 // the bar alone (counts, page paths, build ids): what failed, readable without the workstation's files
 let bar = null; try { bar = JSON.parse(readFileSync(join(PDIR, 'report.json'), 'utf8')).bar; writeFileSync(join(OUT, 'probe-bar.json'), JSON.stringify(bar, null, 1) + '\n'); } catch {}
 const missed = !bar ? ['no-report'] : [['errorPages', bar.errorPages], ['notLoaded', bar.notLoaded?.length], ['noBuild', bar.noBuild?.length], ['arrivalsNotLoaded', bar.arrivalsNotLoaded?.length],
-  ['lost', bar.lost], ['unclean', bar.unclean], ['notResumed', bar.notResumed], ['reloaded', bar.reloaded?.length], ['rolledBack', bar.rolledBack?.length]].filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`)
+  ['lost', bar.lost], ['unclean', bar.unclean], ['notResumed', bar.notResumed], ['streamStuck', bar.streamStuck?.length], ['reloaded', bar.reloaded?.length], ['rolledBack', bar.rolledBack?.length]].filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`)
   .concat(bar.reconnectMaxMs > (bar.reconnectBarMs ?? 5000) ? [`reconnectMaxMs=${bar.reconnectMaxMs}`] : []);
 if (rc !== 0) failed.push(`probe(${missed.join(',') || `exit=${rc}`})`);
 }
