@@ -757,7 +757,7 @@ jobs:
     needs: [preflight, ship, v2-move]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (needs.ship.result == 'success' && (needs.v2-move.result == 'success' || (!inputs.v2 && needs.v2-move.result == 'skipped')))) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45   # 2 worlds at a time, about 4 min each on a hosted runner
     permissions:
       contents: read
     steps:

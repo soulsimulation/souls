@@ -4,7 +4,7 @@
 // have. It only clicks: it never submits a form, never signs in and never changes a world, so it is safe against production.
 //
 //   node tools/test-harness/e2e-controls/controls.mjs [--origin https://soul.game] [--slugs eden,rna-studio]
-//        [--out .local/e2e-controls/<time>] [--concurrency 3]
+//        [--out .local/e2e-controls/<time>] [--concurrency 2]
 //
 // Without --slugs it walks every listed world whose page config carries `v2Stream` (moved to the new engine).
 // A world fails on any failed step, any console error on the page's own origin, or any 4xx/5xx answered by the page's own
@@ -236,7 +236,7 @@ async function walkWorld(browser, origin, slug, dir) {
 export async function main(argv = process.argv.slice(2)) {
   const origin = arg(argv, 'origin', 'https://soul.game').replace(/\/$/, '');
   const out = resolve(arg(argv, 'out', join(ROOT, '.local/e2e-controls', new Date().toISOString().replace(/[:.]/g, '-'))));
-  const concurrency = Math.max(1, Number(arg(argv, 'concurrency', 3)));
+  const concurrency = Math.max(1, Number(arg(argv, 'concurrency', 2)));
   const slugs = arg(argv, 'slugs', null)?.split(',').filter(Boolean) ?? await movedSlugs(origin);
   if (!slugs.length) { console.error('controls: no moved worlds found (--slugs a,b)'); return 2; }
   mkdirSync(out, { recursive: true });
