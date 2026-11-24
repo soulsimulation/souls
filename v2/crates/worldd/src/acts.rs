@@ -1074,13 +1074,20 @@ impl Geometry for Sight<'_> {
             ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
         };
         match planning.ask(key, *me, query, &self.map) {
-            Some(FormResult::Walk(legs)) => {
+            Some(FormResult::Walk(walk)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
                 planning.current.remove(&key);
                 planning.answers.remove(&key);
                 planning.queued.remove(&key);
-                WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect())
+                match walk {
+                    Ok(legs) => WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect()),
+                    // The planner's refusal reaches the form by its own name (S13d); a name the profile does not
+                    // allow (none does today) is no way.
+                    Err(r) => {
+                        Name::new(r.name).map_or(WalkPlan::Legs(Vec::new()), WalkPlan::Refused)
+                    }
+                }
             }
             _ => WalkPlan::Pending,
         }
@@ -2239,10 +2246,10 @@ impl Acts {
                     }
                     if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
                         let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
-                        if slot
-                            .and_then(|s| b.slots.holder_in(*node, s))
-                            .is_some_and(|h| h != body)
-                        {
+                        // Taken when every place of it is held, by others (a tent's two sleepers, E16).
+                        if slot.is_some_and(|s| {
+                            b.slots.full(*node, s) && !b.slots.holders_in(*node, s).contains(&body)
+                        }) {
                             taken = Some(n.clone());
                         }
                         continue;

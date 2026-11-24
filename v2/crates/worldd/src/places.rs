@@ -41,6 +41,7 @@ pub fn register(
             point,
             facing,
             floor,
+            more: s.more.clone(),
         };
         // The stand point on the floor, at the floor's height under the seat.
         let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));

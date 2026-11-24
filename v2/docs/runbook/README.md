@@ -21,6 +21,7 @@ Never run a drill (each page's last section) on a machine that serves worlds.
 | 6 | Move a world to another machine | a pause under half a second; the directory's epoch names the new machine | the drill only, so far: `bash v2/tools/ops/o9-move.sh` on a machine with no worlds | [move-a-world.md](move-a-world.md) |
 | 7 | Read what a world costs | dollars per world per day, by part, then "unused" and the machine | `bash v2/tools/ops/world-cost.sh <world>` | [read-the-cost.md](read-the-cost.md#read-the-page) |
 | 8 | A machine lost: bring back what is not in the log | accounts sign in, agents reconnect, words read, removals hold, uploads serve; at most five minutes lost, counted | the drill only, so far: `bash v2/tools/ops/backup/o20-drill.sh` on a machine with no worlds | [restore-stores.md](restore-stores.md) |
+| 9 | Move the worlds' bucket to another provider (after Gene's yes) | per setting `count and size match`, then each world `up on the store it moves to` | `bash v2/tools/ops/store-switch.sh plan`, then `bash v2/tools/ops/store-switch.sh apply`; undo: `bash v2/tools/ops/store-switch.sh undo` | [store-switch.md](store-switch.md) |
 
 ## Background, read once
 

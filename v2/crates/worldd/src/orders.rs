@@ -38,7 +38,7 @@ impl Where for World<'_> {
 fn available(slots: &Slots, thing: Id) -> bool {
     slots
         .places_of(thing)
-        .any(|p| slots.holder_in(thing, p.place.slot).is_none())
+        .any(|p| !slots.full(thing, p.place.slot))
 }
 
 /// `body` is resolved by the authenticated actor's world membership, never taken from the submitted field.
