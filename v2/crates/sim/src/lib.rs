@@ -27,6 +27,7 @@ pub mod orders;
 pub mod par;
 pub mod planner;
 pub mod random;
+pub mod reach;
 pub mod recorder;
 pub mod refresh;
 pub mod routes;

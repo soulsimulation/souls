@@ -21,8 +21,12 @@
 //! is stood back up on the ground at its seat's stand point when the case is cleared, and a restart seats it again as
 //! a served world's restart does (`Slots::restore`).
 //!
-//! Not here: a geometry beyond open ground (every point is reached in a straight line and every thing is within
-//! reach of a move, as in F3's stop table; no seat's stand point is blocked, so none is moved), and the gateway (F7). The moves
+//! Reach (0.135 E19): a move's reach is measured as the served world measures it, by the same code (`sim::reach`):
+//! from the body's edge to the thing's point or nearest surface on the ground, or from its seat when it is in a slot of
+//! the thing it acts on, so a row the world refuses `out-of-reach` is refused here.
+//!
+//! Not here: a geometry beyond open ground (every point is reached in a straight line; no seat's stand point is
+//! blocked, so none is moved), and the gateway (F7). The moves
 //! are content's, every `content/moves` entry loaded at world start by hash (F13, #3383). No kind, form or move is
 //! named.
 
@@ -46,7 +50,7 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3, fixture};
 use replica::rules::decide_parts;
 use replica::rules::json::{Value as J, parse};
 use replica::time::Micros;
-use replica::tree::{Rules, Tree};
+use replica::tree::{Place, Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
 use sim::activity::{Activities, Ask as Asking};
 use sim::controller::Controller;
@@ -97,14 +101,65 @@ fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
 }
 
-/// Bodies where the controller has them, things where they were placed (for reach); every thing is within reach.
+/// Bodies where the controller has them; and what reach reads, as the served world reads it (0.135 E19): each body's
+/// pose, each node's parent and place in the tree, each node's entry name, and the entries.
 #[derive(Default)]
 struct Snap {
     nodes: BTreeMap<Id, Vec3>,
-    things: BTreeMap<Id, Vec3>,
+    poses: BTreeMap<Id, Pose>,
+    up: BTreeMap<Id, (Option<Id>, Option<Place>)>,
+    entry_of: BTreeMap<Id, String>,
+    /// The thing argument each body's run moves at or toward (`sim::reach::AT_ARG`).
+    toward: BTreeMap<Id, Id>,
+    kinds: Option<J>,
     /// Each body's walks before a sit into a seat of another thing (E14), by step: the seat's stand point on the
     /// ground, where a served world aims that walk (`worldd`'s `sit_walks`, from `Forms::seat_walks`).
     sit_walks: BTreeMap<Id, BTreeMap<usize, Vec3>>,
+}
+
+impl Snap {
+    fn entry(&self, node: Id) -> Option<&J> {
+        self.kinds.as_ref()?.get(self.entry_of.get(&node)?)
+    }
+
+    /// A node's place in the tree, its parents' positions added (their turns are not), as `worldd`'s `Sight::place`.
+    fn place(&self, node: Id) -> Option<Vec3> {
+        let (mut at, mut id) = (Vec3::ZERO, node);
+        for _ in 0..64 {
+            let (parent, place) = *self.up.get(&id)?;
+            if let Some(p) = place {
+                at = Vec3::new(
+                    at.x + p.position.x,
+                    at.y + p.position.y,
+                    at.z + p.position.z,
+                );
+            }
+            match parent {
+                Some(p) => id = p,
+                None => return Some(at),
+            }
+        }
+        None
+    }
+
+    /// Point `at` of node `node`'s frame carried up the tree onto the ground, as the served world's view carries it
+    /// onto a floor (`View::on_floor`); the open ground is this world's one floor.
+    fn on_ground(&self, node: Id, at: Vec3) -> Option<Vec3> {
+        let (mut on, mut at) = (node, at);
+        for _ in 0..64 {
+            if on == ground_id() {
+                return Some(at);
+            }
+            let (parent, place) = *self.up.get(&on)?;
+            let place = place?;
+            at = place
+                .position
+                .plus(place.orientation.rotate(at).ok()?)
+                .ok()?;
+            on = parent?;
+        }
+        None
+    }
 }
 
 impl Geometry for Snap {
@@ -135,8 +190,67 @@ impl Geometry for Snap {
 }
 
 impl Reach for Snap {
-    fn distance(&self, _: Id, _: &Effector, _: Option<&Name>, t: Id, _: &Name) -> Option<i64> {
-        self.things.contains_key(&t).then_some(0)
+    /// As the served world measures it (`worldd`'s `Sight`), by the same code (`sim::reach`, 0.135 E19): a thing in the
+    /// body's own hand is within reach; a body in a slot of the thing it acts on reaches from its seat
+    /// (`sim::reach::in_slot`); else from the body's edge to the thing's point or its nearest surface, carried onto the
+    /// ground (`sim::reach::to_thing`), else to its place in the tree, across x and z and in height. Every body is of
+    /// the standard build, as the places table takes it here.
+    fn distance(
+        &self,
+        body: Id,
+        _: &Effector,
+        _: Option<&Name>,
+        target: Id,
+        point: &Name,
+    ) -> Option<i64> {
+        let me = self.poses.get(&body)?;
+        let a = me.position;
+        // C23: a move at the body itself, or at the thing argument its run named (`sim::reach::targets`).
+        let target = match point.as_str() {
+            sim::reach::AT_SELF => return Some(0),
+            sim::reach::AT_ARG => *self.toward.get(&body)?,
+            _ => target,
+        };
+        let build = sim::slots::STANDARD_BUILD;
+        if self.up.get(&target).and_then(|u| u.0) == Some(body) {
+            return Some(0);
+        }
+        if me.support == Support::Slot && me.frame.node == target {
+            return sim::reach::in_slot(self.entry(target)?, build, me.frame.slot?, point.as_str());
+        }
+        let node_of = |p: &Pose| match p.support {
+            Support::Surface { surface, .. } => surface,
+            _ => p.frame.node,
+        };
+        let floor = node_of(me);
+        let on = |p: Vec3| {
+            (floor == ground_id())
+                .then(|| self.on_ground(target, p))
+                .flatten()
+        };
+        if let Some(d) = self
+            .entry(target)
+            .and_then(|e| sim::reach::to_thing(e, build, a, point.as_str(), on))
+        {
+            return Some(d);
+        }
+        let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
+        let (b, top) = match self.poses.get(&target) {
+            Some(t) => (t.position, height(node_of(t), t.position.y)),
+            None => {
+                let b = self.place(target)?;
+                (b, Some(b.y))
+            }
+        };
+        let reach = sim::slots::standing_reach(build);
+        let v = match (height(floor, a.y), top) {
+            (Some(feet), Some(y)) => sim::reach::off_height(feet, reach, y, y),
+            _ => 0,
+        };
+        Some(sim::reach::with_height(
+            sim::reach::flat([a.x, a.z], [b.x, b.z]),
+            v,
+        ))
     }
 }
 
@@ -457,7 +571,40 @@ impl Stage {
         self.snap.nodes = self.c.bodies().map(|b| (b.id, b.pose.position)).collect();
     }
 
+    /// What reach reads, as it stands at the call (0.135 E19): the bodies' poses and the tree's nodes, so a thing just
+    /// placed is measured.
+    fn see(&mut self) {
+        self.snap.poses = self.c.bodies().map(|b| (b.id, b.pose)).collect();
+        self.snap.up.clear();
+        self.snap.entry_of.clear();
+        let mut todo = vec![self.tree.root()];
+        while let Some(h) = todo.pop() {
+            let Some(n) = self.tree.node(h) else {
+                continue;
+            };
+            self.snap.up.insert(n.id(), (n.parent(), n.place()));
+            // A body the controller does not move now (one carried by what it rides) is where the tree has it.
+            if self.souls_of.contains_key(&n.id())
+                && let (Some(node), Some(p)) = (n.parent(), n.place())
+            {
+                self.snap.poses.entry(n.id()).or_insert(Pose {
+                    frame: Frame {
+                        node,
+                        slot: n.slot(),
+                    },
+                    position: p.position,
+                    orientation: p.orientation,
+                    support: p.support,
+                });
+            }
+            let e = import_eden::entry_name(n.kind().as_str(), n.fields());
+            self.snap.entry_of.insert(n.id(), e.to_owned());
+            todo.extend(self.tree.children(h).unwrap_or(&[]));
+        }
+    }
+
     fn world(&mut self) -> (World<'_, Snap, Snap>, &mut Forms) {
+        self.see();
         (
             World {
                 tree: &self.tree,
@@ -966,7 +1113,6 @@ impl Stage {
         }
         self.placed += 1;
         let key = format!("x{}", self.placed);
-        self.snap.things.insert(id, at);
         self.seat(id);
         // The create was read as a form's make: it is the gate's thing, by the gate's key.
         self.things.retain(|_, t| t.id != id);
@@ -1222,7 +1368,6 @@ impl Stage {
                 r.name, r.detail
             ));
         }
-        self.snap.things.remove(&t.id);
         self.arranged.remove(&t.id);
         // What was in it went with it (T2 rule 3).
         let tree = &self.tree;
@@ -1284,7 +1429,6 @@ impl Stage {
         }
         self.things.retain(|_, t| !gone.contains(&t.id));
         for id in gone {
-            self.snap.things.remove(&id);
             self.arranged.remove(&id);
         }
         self.look();
@@ -2163,6 +2307,24 @@ impl Stage {
             .and_then(J::str)
             .unwrap_or("b1");
         let body = names.to_id.get(actor).copied().unwrap_or(self.body);
+        // Each move's target from the form's arguments, as the served world binds it (C23, `sim::reach::targets`).
+        let (entry, thing) = match sim::reach::targets(&entry, &form, &args) {
+            Ok(t) => t,
+            Err(r) => {
+                return obj(vec![
+                    ("verdict", J::s("no")),
+                    ("reason", J::s(r.name)),
+                    ("code", J::s(r.name)),
+                    ("detail", J::Str(r.detail)),
+                    ("receipt", J::s("refused")),
+                    ("by", J::s("runner")),
+                ]);
+            }
+        };
+        match thing {
+            Some(t) => self.snap.toward.insert(body, t),
+            None => self.snap.toward.remove(&body),
+        };
         let intent = Intent {
             id,
             expiry: i64::MAX,
@@ -2910,6 +3072,7 @@ impl Stage {
         match s("op").as_str() {
             "define" => {
                 self.kinds = q.get("kinds").cloned().unwrap_or(none);
+                self.snap.kinds = Some(self.kinds.clone());
                 // The import check (F14): a kind whose form names a point it does not declare is refused here.
                 self.refused = self
                     .kinds
