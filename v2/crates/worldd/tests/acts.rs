@@ -2080,12 +2080,17 @@ struct Lifted {
     state: [u8; 32],
     over: u64,
     longest_us: u64,
+    /// What the engine still keeps for lifts' ways after the run: lifts waiting, ways back not yet read.
+    kept: (usize, usize),
 }
 
 /// In lockstep, every crew's carry is proposed (tick 1), joined (2) and started (3), then every crew lifts its plank
 /// in tick 4, its front sent into the sealed room east of them: the straight way there clips the room's walls, so each
-/// lift's way is searched off the clock, and no way gets in (the costliest search: its whole budget, or its band). `deadline`, when given, is how long each act stays open.
-fn crews_lift(deadline: Option<replica::time::Micros>) -> Lifted {
+/// lift's way is searched off the clock, and no way gets in (the costliest search: its whole budget, or its band).
+/// `deadline`, when given, is how long each act stays open. With `both`, each crew's two carriers lift in tick 4, each
+/// to 5 m east of its front on clear ground: the front's lift lands when its way comes back, the back's is refused
+/// `carry-lifted`.
+fn crews_lift(deadline: Option<replica::time::Micros>, both: bool) -> Lifted {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.lockstep = true;
@@ -2171,20 +2176,24 @@ fn crews_lift(deadline: Option<replica::time::Micros>) -> Lifted {
         a.unwrap_or_else(|r| panic!("tick {tick}: {r}"));
     }
     let (over_before, _) = health();
-    let to = point(sealed()).remove(&1).unwrap();
-    let lifts: Vec<_> = carries
-        .iter()
-        .enumerate()
-        .map(|(k, &c)| {
-            let (f, _, plank) = crew(k as u64);
-            let lift = p(&[(1, plank.to_value()), (2, to.clone())]);
-            ask(4, f, "carry:lift", c, lift)
-        })
-        .collect();
+    let mut lifts = Vec::new();
+    for (k, &c) in carries.iter().enumerate() {
+        let ((f, b, plank), (at_f, _)) = (crew(k as u64), crew_at(k as u64));
+        let to = match both {
+            true => Vec3::new(at_f.x + 5_000_000, 0, at_f.z),
+            false => sealed(),
+        };
+        let lift = p(&[(1, plank.to_value()), (2, point(to).remove(&1).unwrap())]);
+        lifts.push(ask(4, f, "carry:lift", c, lift.clone()));
+        if both {
+            lifts.push(ask(4, b, "carry:lift", c, lift));
+        }
+    }
     let mut answers: Vec<Option<Lift>> = vec![None; lifts.len()];
-    let (mut state, mut longest_us) = ([0; 32], 0);
+    let (mut state, mut longest_us, mut kept) = ([0; 32], 0, (0, 0));
     for tick in 4..=8 {
-        state = run_to(tick).state;
+        let ran = run_to(tick);
+        (state, kept) = (ran.state, ran.ways_kept);
         longest_us = longest_us.max(health().1);
         for (a, rx) in answers.iter_mut().zip(&lifts) {
             if a.is_none() {
@@ -2202,6 +2211,7 @@ fn crews_lift(deadline: Option<replica::time::Micros>) -> Lifted {
         state,
         over: over_after - over_before,
         longest_us,
+        kept,
     }
 }
 
@@ -2214,7 +2224,7 @@ fn crews_lift(deadline: Option<replica::time::Micros>) -> Lifted {
 #[test]
 fn r2_twenty_crews_lift_in_one_tick_and_every_tick_is_on_time() {
     let on_clock = sim::commit::checks_on_clock();
-    let first = crews_lift(None);
+    let first = crews_lift(None, false);
     println!(
         "R2 off the clock: {} lifts answered {:?}; ticks 4 to 8 over budget {}, the longest of them {} µs",
         first.answers.len(),
@@ -2244,8 +2254,16 @@ fn r2_twenty_crews_lift_in_one_tick_and_every_tick_is_on_time() {
         "each searched, and no way into the sealed room: {:?}",
         first.answers
     );
-    assert_eq!(first.over, 0, "no tick over its budget");
-    let again = crews_lift(None);
+    // The time bound holds a release build to the 50 ms tick; a debug build on a loaded runner is only reported.
+    if !cfg!(debug_assertions) {
+        assert_eq!(first.over, 0, "no tick over its budget");
+    }
+    assert_eq!(
+        first.kept,
+        (0, 0),
+        "nothing kept for the lifts once answered"
+    );
+    let again = crews_lift(None, false);
     assert_eq!(
         again.answers, first.answers,
         "the same answers at the same ticks"
@@ -2258,7 +2276,7 @@ fn r2_twenty_crews_lift_in_one_tick_and_every_tick_is_on_time() {
 /// deadlines pass at its start).
 #[test]
 fn r2_a_lift_whose_way_is_late_is_refused_by_name() {
-    let late = crews_lift(Some(1));
+    let late = crews_lift(Some(1), false);
     assert!(
         late.answers
             .iter()
@@ -2266,4 +2284,26 @@ fn r2_a_lift_whose_way_is_late_is_refused_by_name() {
         "{:?}",
         late.answers
     );
+    assert_eq!(late.kept, (0, 0), "nothing kept for the late lifts");
+}
+
+/// 0.135 R2 off the clock (review of #4593): both carriers of each crew lift their carry in one tick. Both wait for
+/// their ways; when the ways come back the front's lift lands and the back's is refused `carry-lifted` before it reads
+/// its way. Nothing is kept for either afterwards: no lift waiting, no way (and no ground's geometry) held.
+#[test]
+fn r2_two_carriers_lift_one_carry_in_one_tick_and_nothing_is_kept() {
+    let both = crews_lift(None, true);
+    for (k, pair) in both.answers.chunks(2).enumerate() {
+        assert!(
+            matches!(&pair[0], (5, Ok(_))),
+            "crew {k}'s front lifts: {:?}",
+            pair[0]
+        );
+        assert_eq!(
+            pair[1],
+            (5, Err("carry-lifted".to_owned())),
+            "crew {k}'s back"
+        );
+    }
+    assert_eq!(both.kept, (0, 0), "nothing kept for the lifts");
 }

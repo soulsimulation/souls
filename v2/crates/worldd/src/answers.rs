@@ -398,6 +398,8 @@ pub enum Event {
     Part(Box<PartChecked>),
     /// A lift's way that turns its load, searched off the clock by the way thread (0.135 R2), or its refusal.
     Way(Box<(engine::WayAsk, engine::Way)>),
+    /// The way thread ended, however it ended: the ways it held never come back (0.135 R2).
+    WaysGone,
     /// An undo or a redo checked off the clock thread (G4 served, #3694), or its refusal.
     Undone(Box<(Id, Result<crate::undo::Checked, Refused>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
@@ -457,6 +459,8 @@ pub struct Ran {
     pub seated: Vec<(Id, Id)>,
     /// Route searches the bodies' planner ran, off the clock (K18b).
     pub searched: u64,
+    /// What the engine keeps for lifts' ways (0.135 R2): lifts waiting for one, and ways back not yet read.
+    pub ways_kept: (usize, usize),
 }
 
 /// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
@@ -1119,6 +1123,10 @@ struct Clock {
     ways: Option<Sender<engine::WayAsk>>,
     /// Ways back since the last tick, in the order they were asked: their lifts run again at the next (0.135 R2).
     ways_back: Vec<(engine::WayAsk, engine::Way)>,
+    /// Ways sent to the way thread and not yet back: each is outstanding.
+    ways_out: usize,
+    /// The way thread ended (`Event::WaysGone`): the lifts still waiting are refused `carry-way-off` at the next tick.
+    ways_gone: bool,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// The creator's edit history (G4, #3694): each committed edit's before-values, for undo and redo.
@@ -4241,11 +4249,32 @@ impl Clock {
         }
         self.forms.release_sight();
         // Lifts whose ways came back run again first, in the order they were asked (0.135 R2); a lift whose deadline
-        // passed waits no longer, and its way is dropped.
+        // passed waits no longer, and its way is dropped, as is the way of a lift ended any other way since.
         let mut acts = Vec::new();
         if let Some(e) = self.engine.as_mut() {
             for (ask, way) in std::mem::take(&mut self.ways_back) {
+                if !self.open.contains_key(&ask.intent) {
+                    e.way_late(ask.intent);
+                    continue;
+                }
                 acts.extend(e.way_back(ask, way));
+            }
+        }
+        // The way thread ended: every lift still waiting for a way is refused by name, and none waits again.
+        if std::mem::take(&mut self.ways_gone) {
+            let waiting = self
+                .engine
+                .as_ref()
+                .map(Engine::waiting_ids)
+                .unwrap_or_default();
+            for id in waiting {
+                if let Some(e) = self.engine.as_mut() {
+                    e.way_late(id);
+                }
+                if let Some(o) = self.open.get(&id) {
+                    let (actor, sequence) = (o.actor, o.sequence);
+                    self.end(id, |c| c.refusal(actor, sequence, "carry-way-off"));
+                }
             }
         }
         acts.append(&mut self.engine_acts);
@@ -4287,6 +4316,7 @@ impl Clock {
             let id = ask.intent;
             if self.ways.as_ref().is_some_and(|tx| tx.send(ask).is_ok()) {
                 self.outstanding += 1;
+                self.ways_out += 1;
                 continue;
             }
             if let Some(e) = self.engine.as_mut() {
@@ -5126,6 +5156,7 @@ impl Clock {
             panicked,
             seated,
             searched: self.bodies.as_ref().map_or(0, Bodies::searched),
+            ways_kept: self.engine.as_ref().map_or((0, 0), Engine::ways_kept),
         }
     }
 }
@@ -5936,6 +5967,8 @@ pub fn start<S: Storage + 'static>(
         seated: Vec::new(),
         ways,
         ways_back: Vec::new(),
+        ways_out: 0,
+        ways_gone: false,
         edited: Vec::new(),
         history: sim::edit::undo::History::default(),
         steps: BTreeMap::new(),
@@ -6114,7 +6147,15 @@ pub fn start<S: Storage + 'static>(
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.seated.push(*k);
                     }
+                    // The way thread ended: the ways it had are never coming back, so lockstep waits no longer.
+                    Event::WaysGone => {
+                        c.outstanding = c.outstanding.saturating_sub(c.ways_out);
+                        c.ways_out = 0;
+                        c.ways = None;
+                        c.ways_gone = true;
+                    }
                     Event::Way(k) => {
+                        c.ways_out = c.ways_out.saturating_sub(1);
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.ways_back.push(*k);
                     }
@@ -6290,12 +6331,21 @@ fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
 }
 
 /// The way thread (0.135 R2): each lift's way search ([`engine::WayAsk::search`]), off the clock, in the order asked;
-/// each answer goes back to the clock as [`Event::Way`].
+/// each answer goes back to the clock as [`Event::Way`]. However the thread ends, the clock is told
+/// ([`Event::WaysGone`]), so no lift waits for a way that never comes.
 fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>> {
+    /// Says [`Event::WaysGone`] when the thread ends, by a return or by a panic.
+    struct Gone(Sender<Event>);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let _ = self.0.send(Event::WaysGone);
+        }
+    }
     let (tx, rx) = channel::<engine::WayAsk>();
     thread::Builder::new()
         .name("carry-way".into())
         .spawn(move || {
+            let _gone = Gone(events.clone());
             for ask in rx {
                 // A panic in one search refuses that lift; the thread goes on.
                 let way = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ask.search()))

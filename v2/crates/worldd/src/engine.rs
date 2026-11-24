@@ -407,6 +407,16 @@ impl Engine {
         self.waiting.contains_key(&id)
     }
 
+    /// The lifts waiting for their ways, by intent.
+    pub fn waiting_ids(&self) -> Vec<Id> {
+        self.waiting.keys().copied().collect()
+    }
+
+    /// Lifts waiting for ways and ways back not yet read: what the engine keeps between ticks for them (0.135 R2).
+    pub fn ways_kept(&self) -> (usize, usize) {
+        (self.waiting.len(), self.found.len())
+    }
+
     /// The way searches asked since the last call, in order, to be searched off the clock.
     pub fn ways_asked(&mut self) -> Vec<WayAsk> {
         std::mem::take(&mut self.asked)
@@ -507,6 +517,9 @@ impl Engine {
         a: &Act,
         now: Micros,
     ) -> R<()> {
+        // A way this act asked for, come back (a lift run again, [`Engine::way_back`]): taken here, so however the act
+        // ends (refused before its way is read, say `carry-lifted`) nothing of it is kept.
+        let found = self.found.remove(&a.id);
         if let Some(ask) = match a.verb {
             Verb::Steer => Some(crate::carrier::Ask::Steer),
             Verb::Land => Some(crate::carrier::Ask::Land),
@@ -876,8 +889,6 @@ impl Engine {
                         None => None,
                     };
                     let xz = |v: Vec3| [v.x, v.z];
-                    // A way this lift asked for, come back (its act run again, [`Engine::way_back`]).
-                    let found = self.found.remove(&a.id);
                     load.check_lift(crew, xz(f), xz(k), xz(middle), axis)?;
                     let on_plan: Vec<(Id, [i64; 2])> =
                         sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
