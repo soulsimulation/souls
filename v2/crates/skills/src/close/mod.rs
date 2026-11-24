@@ -18,8 +18,11 @@
 //!   A follow may instead keep a place **beside** the leader (0.135 R1, walking hand in hand,
 //!   `v2/docs/moving-group.md` rule 3): a point the given width to the side of the leader's heading, the heading
 //!   being the way the leader last walked, the side being the one the follower stood on when the leader first moved.
-//!   The place is a target the follower walks to, never a constraint; a follower farther than [`LET_GO`] from it for
-//!   [`LET_GO_TICKS`] ends, by name ([`LOST_PLACE`]): it could not keep its place, so it lets go.
+//!   The place is a target the follower walks to, never a constraint; a follower farther than [`LET_GO`] from it, or
+//!   whose leader it cannot see (another frame: through a door, onto a deck), for [`LET_GO_TICKS`] ends, by name
+//!   ([`LOST_PLACE`]): it could not keep its place, so it lets go. When the leader turns back (its heading more than
+//!   90° from the last), the side is taken again from where the follower stands, and a way to the place that would
+//!   pass within [`KEEP_APART`] of the leader goes round it: the follower never walks through the leader.
 //!
 //! Circle, go near and follow end only when replaced (another skill claims the legs; they are `cancelled_by`
 //! locomotion), cancelled (the body releases them) or expired (`until`, world time). None of them ever picks a new
@@ -63,6 +66,8 @@ pub const STALL: u32 = 10;
 pub const LET_GO: i64 = 1_500_000;
 /// Ticks a follower beside its leader may be farther than [`LET_GO`] from its place before it lets go (2 s).
 pub const LET_GO_TICKS: u32 = 40;
+/// A follower beside its leader never walks nearer the leader's middle than this, µm: two body radii's room.
+pub const KEEP_APART: i64 = 350_000;
 /// A follower beside its leader that could not keep its place ends with this name.
 pub const LOST_PLACE: &str = "souls:follow-lost-place";
 
@@ -92,6 +97,23 @@ fn isqrt(n: i128) -> i128 {
 pub(crate) fn apart(a: Vec3, b: Vec3) -> i64 {
     let (dx, dz) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
     i64::try_from(isqrt(dx * dx + dz * dz)).unwrap_or(i64::MAX)
+}
+
+/// How near the straight way from `a` to `b` passes `c`, on the ground, µm.
+fn passes(a: Vec3, b: Vec3, c: Vec3) -> i64 {
+    let (dx, dz) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
+    let (cx, cz) = (i128::from(c.x - a.x), i128::from(c.z - a.z));
+    let len = dx * dx + dz * dz;
+    if len == 0 {
+        return apart(a, c);
+    }
+    let t = ((cx * dx + cz * dz) * 1_000_000 / len).clamp(0, 1_000_000);
+    let near = Vec3::new(
+        a.x + i64::try_from(dx * t / 1_000_000).unwrap_or(0),
+        a.y,
+        a.z + i64::try_from(dz * t / 1_000_000).unwrap_or(0),
+    );
+    apart(near, c)
 }
 
 /// A velocity along (`dx`, `dz`) at `speed` µm a second; still when the direction is none.
@@ -382,7 +404,12 @@ impl Follow {
         let (from, _) = *self.heading.get_or_insert((them, None));
         if apart(from, them) >= TRAIL_GAP {
             let h = (them.x - from.x, them.z - from.z);
-            if self.side == 0 {
+            // A heading turned back (more than 90°) takes the side again from where the follower stands, so the
+            // follower keeps its own side of the leader and never crosses through it.
+            let back = self.heading.and_then(|h| h.1).is_some_and(|(px, pz)| {
+                i128::from(px) * i128::from(h.0) + i128::from(pz) * i128::from(h.1) < 0
+            });
+            if self.side == 0 || back {
                 // The side the follower stands on: the sign of the heading crossed with leader to follower.
                 let cross = i128::from(h.0) * i128::from(me.z - them.z)
                     - i128::from(h.1) * i128::from(me.x - them.x);
@@ -411,9 +438,7 @@ impl Follow {
             return Progress::Going;
         };
         let gap = apart(me, place);
-        self.far = if gap > LET_GO { self.far + 1 } else { 0 };
-        if self.far >= LET_GO_TICKS {
-            go(host, Vec3::ZERO);
+        if self.lost(host, gap > LET_GO) {
             return Progress::Failed(name(LOST_PLACE));
         }
         let speed = if gap <= THERE && pace == 0 {
@@ -421,8 +446,33 @@ impl Follow {
         } else {
             (pace + gap * 2 / 3).clamp(0, pace.clamp(FAST, FASTEST))
         };
-        go(host, along(place.x - me.x, place.z - me.z, speed));
+        // Never through the leader's body: a way to the place that passes nearer its middle than [`KEEP_APART`]
+        // goes round it instead, by a point on the circle of the place's width halfway to the place.
+        let aim = if passes(me, place, them) < KEEP_APART {
+            let to = |p: Vec3| along(p.x - them.x, p.z - them.z, width);
+            let (u, w) = (to(me), to(place));
+            let mid = if u.x + w.x == 0 && u.z + w.z == 0 {
+                along(u.z, -u.x, width)
+            } else {
+                along(u.x + w.x, u.z + w.z, width)
+            };
+            Vec3::new(them.x + mid.x, me.y, them.z + mid.z)
+        } else {
+            place
+        };
+        go(host, along(aim.x - me.x, aim.z - me.z, speed));
         Progress::Going
+    }
+
+    /// Beside (0.135 R1): counts a tick in which the follower is not keeping its place (`off`: too far from it, or
+    /// its leader unseen); true, standing still, once it has been off for [`LET_GO_TICKS`] in a row.
+    fn lost(&mut self, host: &mut dyn Host, off: bool) -> bool {
+        self.far = if off { self.far + 1 } else { 0 };
+        if self.far >= LET_GO_TICKS {
+            go(host, Vec3::ZERO);
+            return true;
+        }
+        false
     }
 
     /// The distance along the trail from `me` to the leader at `them`, µm.
@@ -475,6 +525,10 @@ impl Skill for Follow {
         let now = host.now();
         let Some(them) = locate(host, Target::Node(self.leader), parent) else {
             go(host, Vec3::ZERO);
+            // Beside (0.135 R1): a leader gone from sight (through a door, onto a deck) is a place not kept.
+            if self.beside.is_some() && self.lost(host, true) {
+                return Progress::Failed(name(LOST_PLACE));
+            }
             return Progress::Going;
         };
         // The leader's pace, from where it was read last.

@@ -37,9 +37,13 @@
 //!   (`v2/docs/moving-group.md`, a walker steering to its place), by its own `souls:follow` order, as a follower
 //!   does ([`Activities::following`]). The other's own walk lets go, as before; so does its order ending (its own
 //!   act, or a place it could not keep). When the leader stops, both stand holding hands.
-//! - **A touch or a hold does not outlast a restart.** Its moves are not stored, so a started activity whose roles
-//!   name moves (not a dance) is ended at the first tick after a restart, each member leaving as its own leave
-//!   would ([`Activities::restore`], [`Activities::finish`]): nobody is kept in a hold whose hands came apart.
+//! - **An activity whose roles name moves does not outlast a restart (0.135 R1).** Its moves are not stored, so a
+//!   started one (not a dance) is ended at the first tick after a restart, each member leaving as its own leave
+//!   would ([`Activities::restore`], [`Activities::finish`]): nobody is kept in a hold whose hands came apart. This is
+//!   every such kind, not only touches and holds, because the engine treats them all as touches: each ends when its
+//!   moves end, or, if they hold, when a member leaves ([`Activities::begin_moves`]). After a restart no move comes
+//!   back to end, so without this its members would keep its role claims with nothing playing, and every later
+//!   activity of theirs would be refused `body-in-activity` until each left by hand.
 //! - **Dancing together on one beat (0.134 T3).** A kind whose moves go on the beat (`beat`) takes up to its `most`
 //!   members, offered to several at once; each later accept joins the offer's own activity ([`offer`]). Its first
 //!   beat is fixed when it starts: the last whole beat of the world's clock at most 2 s ahead (`v2/docs/time.md`
@@ -49,8 +53,8 @@
 //! - **A leave completes within the time the kind states.** Membership ends at once, in the log. A body with no move
 //!   in progress is let go at once; a body in a move is let go at the move's next phase end, or at the kind's
 //!   `leave_within`, whichever is first, by a timer in K9's due list ([`Activities::fire`]).
-//! - **A restart does not end an activity.** Its node and its membership links are in the log; [`Activities::restore`]
-//!   reads them back and takes each started activity's claims again. A move in progress is not stored, so after a
+//! - **A restart does not end an activity**, except one whose roles name moves (above). Its node and its membership
+//!   links are in the log; [`Activities::restore`] reads them back and takes each started activity's claims again. A move in progress is not stored, so after a
 //!   restart no claim is held by a move that did not come back, and a member can leave at once.
 //!
 //! Not here: contact rules (B6), the beat (B8), activities that keep members while empty, the gateway path (I7), a new
@@ -704,6 +708,7 @@ impl Activities {
         self.placing.remove(&activity);
         self.frames.remove(&activity);
         self.stands.remove(&activity);
+        self.leaders.remove(&activity);
     }
 
     /// The world's word `event` about `load`, held by `activity`, and `why`: `{1: activity, 2: load, 3: why}`, as
@@ -1493,7 +1498,8 @@ impl Activities {
             let mut drivers = BTreeMap::new();
             if node.state == State::Started {
                 let kind = &a.kinds[&n.kind];
-                // 0.135 R1: a touch or a hold whose moves did not come back is over; the first tick ends it.
+                // 0.135 R1: an activity whose roles' moves did not come back is over (a touch, a hold, and any kind
+                // the engine plays as one); the first tick ends it.
                 if !kind.beat && kind.roles.iter().any(|r| r.mv.is_some()) {
                     a.ending.insert(*id);
                 }

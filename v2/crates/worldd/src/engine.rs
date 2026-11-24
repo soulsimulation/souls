@@ -2229,8 +2229,17 @@ impl Engine {
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
-    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
-        if self.activities.lead(&self.moves, body) {
+    /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    pub fn walked(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        body: Id,
+        intent: Id,
+        now: Micros,
+        walk: bool,
+    ) {
+        if walk && self.activities.lead(&self.moves, body) {
             return;
         }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {

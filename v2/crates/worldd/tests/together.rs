@@ -23,12 +23,13 @@ use replica::activity::{ActivityKind, Role};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, read_id,
-    schema_hash,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, fixture_bytes,
+    read_id, schema_hash,
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
+use replica::moves::Place;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
@@ -36,6 +37,7 @@ use replica::tree::Rules as TreeRules;
 use replica::world_model::{Audience, Kind};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use worldd::answers::{self, BODIES, Config};
 use worldd::bodies::{Bodies, read_row};
@@ -382,7 +384,23 @@ fn bodies_on(indoor: bool) -> Result<Bodies, replica::effects::Refusal> {
     for p in placed {
         b.add_body(humanoid(), p)?;
     }
+    // 0.135 R1: a chair north-west of the Souls, out of every other test's way, facing +z.
+    let place = Place::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
+    b.add_place(PlaceAt {
+        thing: chair(),
+        place,
+        point: Vec3::new(-44_000_000, 450_000, 34_000_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })?;
     Ok(b)
+}
+
+/// The chair's fixture (0.135 R1: a sit lets go of a hold).
+const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
+
+fn chair() -> Id {
+    Id::new(Scope([0x7e; 16]), 1).unwrap()
 }
 
 /// A scripted Soul on the world's socket: its stream, its id and its last sequence.
@@ -1626,9 +1644,10 @@ fn r1_two_souls_walk_hand_in_hand_until_either_lets_go() {
     run.stop();
 }
 
-/// 0.135 R1: a hold walking hand in hand does not outlast a restart. Mid-walk the world stops; after it starts again
-/// from its log, the hold ends for both at once (its hands came apart: moves are not stored), Soul 2's order beside
-/// Soul 1, which the log brought back, is cancelled, and the same two can hold hands again: neither is left stuck.
+/// 0.135 R1: a hold walking hand in hand does not outlast a restart. After the leader's walk (an act is answered once
+/// its walk is done), with Soul 2's order beside it open, the world stops; after it starts again from its log, the
+/// hold ends for both at once (its hands came apart: moves are not stored), Soul 2's order beside Soul 1, which the
+/// log brought back, is cancelled, and the same two can hold hands again: neither is left stuck.
 #[test]
 fn r1_a_restart_ends_a_hold_hand_in_hand_for_both() {
     let run = serve("hand-restart");
@@ -1675,5 +1694,51 @@ fn r1_a_restart_ends_a_hold_hand_in_hand_for_both() {
         "the next hold plays both moves: neither was stuck"
     );
     println!("r1: a restart ended the hold for both and cancelled the order; the next hold played");
+    run.stop();
+}
+
+/// 0.135 R1: a sit (or a lie, the same path) by either Soul lets go of a hold, for both. Souls 1 and 2 hold hands and
+/// Soul 1 walks to the chair, leading, Soul 2 beside it; Soul 1's sit then frees both hands and both leave the hold.
+/// Soul 1 rises, Soul 2 comes back beside it, and they hold hands standing (nobody leads); Soul 1 sits again, and that
+/// lets go for both too.
+#[test]
+fn r1_a_sit_by_either_lets_go_of_a_hold() {
+    let run = serve("hand-sit");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let hold = run.created(&a.offer(HOLD, 2).expect("offered"));
+    b.act("activity:accept", Some(hold), &[]).expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let lefts = run.lefts();
+    a.act("eden:walk", Some(chair()), &[])
+        .expect("Soul 1 leads to the chair");
+    assert_eq!(run.lefts(), lefts, "walking hand in hand");
+    a.act("eden:sit", Some(chair()), &[]).expect("Soul 1 sits");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the leader's sit let go, for both");
+    assert_eq!(run.ended().len(), 2, "both hands came free");
+
+    a.act("eden:rise", None, &[]).expect("Soul 1 rises");
+    let p = run.last(1).0;
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(p.x - 500_000, p.z))],
+    )
+    .expect("Soul 2 comes back beside");
+    let again = run.created(&a.offer(HOLD, 2).expect("offered again"));
+    b.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let lefts = run.lefts();
+    a.act("eden:sit", Some(chair()), &[])
+        .expect("Soul 1 sits, standing hand in hand");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "a sit in a standing hold let go, for both"
+    );
+    assert_eq!(run.ended().len(), 4, "both hands came free again");
+    println!("r1: a sit by the leader, and a sit in a standing hold, each let go for both");
     run.stop();
 }

@@ -4447,6 +4447,17 @@ impl Clock {
                 asks.push((id, m));
             }
         }
+        // 0.135 R1: a sit or a lie taken lets go of a hold, by either member (`Engine::walked`); it never leads.
+        let seated: Vec<(Id, Id)> = asks
+            .iter()
+            .filter(|(_, a)| {
+                matches!(
+                    a.ask,
+                    replica::move_check::Ask::Sit { .. } | replica::move_check::Ask::Lie { .. }
+                )
+            })
+            .map(|(id, a)| (a.body, *id))
+            .collect();
         let started = b.start(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
@@ -4458,7 +4469,26 @@ impl Clock {
         // 0.134 T2: a Soul holding hands that walks lets go, as its leave would (`Engine::walked`).
         if let Some(e) = self.engine.as_mut() {
             for (body, id) in walked {
-                e.walked(self.replica.tree(), &mut b.runner.controller, body, id, now);
+                e.walked(
+                    self.replica.tree(),
+                    &mut b.runner.controller,
+                    body,
+                    id,
+                    now,
+                    true,
+                );
+            }
+            for (body, id) in seated {
+                if !started.iter().any(|(i, r)| *i == id && r.is_err()) {
+                    e.walked(
+                        self.replica.tree(),
+                        &mut b.runner.controller,
+                        body,
+                        id,
+                        now,
+                        false,
+                    );
+                }
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.

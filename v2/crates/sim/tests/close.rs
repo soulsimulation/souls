@@ -559,6 +559,8 @@ struct Fake {
     held: bool,
     asks: u32,
     events: Vec<Name>,
+    /// The leader is in another frame (0.135 R1: through a door): it is read on another parent.
+    unseen: bool,
 }
 
 impl Host for Fake {
@@ -573,7 +575,11 @@ impl Host for Fake {
         Some(Seen {
             id: node,
             kind: name("souls:body"),
-            parent: Some(id(0)),
+            parent: Some(if node != id(1) && self.unseen {
+                id(9)
+            } else {
+                id(0)
+            }),
             position,
             fields: BTreeMap::new(),
         })
@@ -622,6 +628,7 @@ fn a4_no_input_searches_a_route_but_follows_one_fall_back_which_is_recorded() {
         held: false,
         asks: 0,
         events: Vec::new(),
+        unseen: false,
     };
     let mut log = Vec::new();
     for n in 0..600u32 {
@@ -665,13 +672,16 @@ fn fake(me: Vec3, leader: Vec3) -> Fake {
         held: false,
         asks: 0,
         events: Vec::new(),
+        unseen: false,
     }
 }
 
 /// 0.135 R1, walking hand in hand: a follower beside its leader keeps its place 0.5 m to the side it stood on, square
-/// to the way the leader walks: the leader walks 5 s north, then turns and walks 5 s east. Each time it has settled
-/// (a second into each leg) the follower is within 0.15 m of its place, and it never moves more than a run's tick (it
-/// walks, never placed). Standing first, it waits: the leader has no heading yet.
+/// to the way the leader walks: the leader walks 5 s north, turns and walks 5 s east, then turns back and walks 5 s
+/// west. Each time it has settled (a second into each leg) the follower is within 0.15 m of its place, and it never
+/// moves more than a run's tick (it walks, never placed). Turned back, it keeps its own side (south), so it never
+/// comes nearer the leader's middle than 0.3 m: it never walks through the leader. Standing first, it waits: the
+/// leader has no heading yet.
 #[test]
 fn r1_a_follower_beside_keeps_its_place_through_a_turn() {
     let mut f = Follow::beside(id(2), 500_000, None);
@@ -689,39 +699,73 @@ fn r1_a_follower_beside_keeps_its_place_through_a_turn() {
         Vec3::new(500_000, 0, 10_000_000),
         "it waits for a heading"
     );
-    let (mut worst, mut most) = ([0_i64; 2], 0_i64);
-    for n in 0..200u32 {
+    let (mut worst, mut most, mut nearest) = ([0_i64; 3], 0_i64, i64::MAX);
+    for n in 0..300u32 {
         let t = i64::from(n) * TICK;
-        let north = (SPEED * t / 1_000_000).min(7_000_000);
-        let east = (SPEED * t / 1_000_000 - 7_000_000).max(0);
+        let d = SPEED * t / 1_000_000;
+        let north = d.min(7_000_000);
+        let east = (d - 7_000_000).clamp(0, 7_000_000) - (d - 14_000_000).max(0);
         h.leader = Vec3::new(east, 0, 10_000_000 + north);
         let was = h.me;
         assert_eq!(f.step(&mut h), Progress::Going);
         most = most.max(apart(was, h.me));
+        nearest = nearest.min(apart(h.me, h.leader));
         h.now += TICK;
-        // Its place: east of a leader walking north, south of a leader walking east.
-        let (leg, place) = if east == 0 {
-            (0, Vec3::new(h.leader.x + 500_000, 0, h.leader.z))
+        // Its place: east of a leader walking north, south of a leader walking east, and still south walking west.
+        let leg = usize::from(d > 7_000_000) + usize::from(d > 14_000_000);
+        let place = if leg == 0 {
+            Vec3::new(h.leader.x + 500_000, 0, h.leader.z)
         } else {
-            (1, Vec3::new(h.leader.x, 0, h.leader.z - 500_000))
+            Vec3::new(h.leader.x, 0, h.leader.z - 500_000)
         };
-        let settled = if leg == 0 {
-            t >= 1_000_000
-        } else {
-            t >= 6_000_000
-        };
-        if settled {
+        if t >= [1_000_000, 6_000_000, 11_000_000][leg] {
             worst[leg] = worst[leg].max(apart(h.me, place));
         }
     }
     println!(
-        "r1: walking north, within {} mm of its place; walking east, within {} mm; at most {} mm a tick",
+        "r1: walking north, within {} mm of its place; east, within {} mm; turned back west, within {} mm; \
+         at most {} mm a tick; never nearer the leader than {} mm",
         worst[0] / 1000,
         worst[1] / 1000,
-        most / 1000
+        worst[2] / 1000,
+        most / 1000,
+        nearest / 1000
     );
     assert!(worst.iter().all(|w| *w <= 150_000), "{worst:?}");
     assert!(most <= 200_000, "walked: {most} µm in a tick");
+    assert!(nearest >= 300_000, "never through the leader: {nearest} µm");
+}
+
+/// 0.135 R1: a follower beside a leader it cannot see (gone into another frame: through a doorway, onto a deck) lets
+/// go after 2 s, by name, instead of holding hands with a leader any distance away.
+#[test]
+fn r1_a_follower_beside_an_unseen_leader_lets_go() {
+    let mut f = Follow::beside(id(2), 500_000, None);
+    let mut h = fake(
+        Vec3::new(500_000, 0, 10_000_000),
+        Vec3::new(0, 0, 10_000_000),
+    );
+    for n in 0..20u32 {
+        h.leader = Vec3::new(0, 0, 10_000_000 + SPEED * i64::from(n) * TICK / 1_000_000);
+        assert_eq!(f.step(&mut h), Progress::Going);
+        h.now += TICK;
+    }
+    h.unseen = true;
+    let mut ended = None;
+    for n in 0..200u32 {
+        match f.step(&mut h) {
+            Progress::Going => {}
+            other => {
+                ended = Some((n, other));
+                break;
+            }
+        }
+        h.now += TICK;
+    }
+    println!("r1: the leader unseen: {ended:?} ticks later");
+    let (n, how) = ended.expect("it let go");
+    assert_eq!(how, Progress::Failed(name(LOST_PLACE)));
+    assert!(n < 41, "within 2 s: {n} ticks");
 }
 
 /// 0.135 R1: a follower beside its leader that cannot keep its place (held where it stands, as by the fake's gap)
