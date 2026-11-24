@@ -47,7 +47,9 @@ The snapshot's wire forms the page asks first (`?defs=ref&cols=1`, `&v=<key>`) g
 routed world's views are published for its stream, the launcher never wakes its old process for its page: while that
 process is not awake (not running, or stopped in place), the launcher builds the page itself (the inline config with its
 stream, as for a world with no old twin), answers each view from the published files, and answers the page's other old
-reads as for a world with no old twin (its sign-in; the rest 404 `world.new-engine`). A world with no views published for
+reads in the old process's shapes: `/v1/me` with its sign-in, `/v1/world/visitors` as a world without travel
+(`available: false`), `/v1/world/seq` from the published snapshot, `/v1/world/context` as a listing with no places; the
+rest 404 `world.new-engine`. A world with no views published for
 its stream (a fresh move, or views held in memory before a restart) wakes its old process once for its page, which
 publishes them: drawn from its stream alone, an old world's buildings can lose their finish (a hall without its roof, in
 hello-hamlet), so the stream alone is not its picture. A running old process still serves its page.

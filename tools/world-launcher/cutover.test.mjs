@@ -389,7 +389,8 @@ test('a routed world whose old process is unloaded and whose views are published
   assert.equal(launcher.pool.status('eden').status, 'stopped', 'and load nothing');
   // views published before (as a page of the running old world publishes them; kept on disk across restarts)
   const staticDir = join(dir, 'origin/s/eden/static'); mkdirSync(staticDir, { recursive: true });
-  writeFileSync(join(staticDir, 'snapshot.json'), '{"contract":"world/1","entities":[]}');
+  const published = '{"contract":"world/1","seq":490,"entities":[{"id":"e_1"},{"id":"e_2"}],"buildsRev":3}';
+  writeFileSync(join(staticDir, 'snapshot.json'), published);
   writeFileSync(join(staticDir, 'manifest.json'), JSON.stringify({ schema: 'souls/old-static/1', world: 'eden', oldWorldId: 'eden-original-1', stream: '/s/eden/', files: { 'snapshot.json': {} } }));
   const eden = await page('eden');
   assert.equal(eden.status, 200); assert.notEqual(eden.headers.get('x-sim-cache'), 'unloaded', 'not the bare web page');
@@ -398,10 +399,21 @@ test('a routed world whose old process is unloaded and whose views are published
   assert.deepEqual([config?.worldKey, config?.worldId, config?.worldPath, config?.v2Stream, config?.v2Gateway], ['eden', 'eden-original-1', '/w/eden', '/s/eden/', '/w/eden/v2/ws']);
   const snap = await view('/v1/world/snapshot?defs=ref&cols=1&v=k1');
   assert.equal(snap.status, 200); assert.equal(snap.headers.get('x-souls-static'), 'published'); assert.equal(snap.headers.get('x-defs-ref'), null, 'the plain snapshot, for the wire form');
-  assert.equal(await snap.text(), '{"contract":"world/1","entities":[]}');
-  // a view the old world did not publish, and the page's other old reads: answered here, not by waking it
-  for (const path of ['/v1/scene', '/v1/kernel', '/v1/world/visitors', '/v1/world/seq']) { const r = await view(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path); }
-  assert.equal((await view('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200, 'its sign-in, as a world\'s with no old twin');
+  assert.equal(await snap.text(), published);
+  // a view the old world did not publish: answered here, not by waking it
+  for (const path of ['/v1/scene', '/v1/kernel']) { const r = await view(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path); }
+  // live, 24 Nov: the page's polled old reads answered 404 (Mars); they answer here in the old process's shapes
+  const visitors = await view('/v1/world/visitors');   // apps/server http.ts: a world without travel; SoulTravel.tsx stops asking
+  assert.equal(visitors.status, 200); assert.deepEqual(await visitors.json(), { contract: 'travel/1', world: 'eden-original-1', available: false, open: false, visitors: [], recent: [] });
+  const seq = await view('/v1/world/seq');   // god/routes.ts, from the published snapshot: the page's heartbeat never resyncs for nothing
+  assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 490, entities: 2, builds: 3 });
+  const context = await view('/v1/world/context');   // god/context-views.ts: a listing with no places (Explore shows none, not an error)
+  assert.equal(context.status, 200); const c = await context.json();
+  assert.deepEqual([c.contract, c.revision, c.source, c.scope, c.targets, c.total, c.nextCursor], ['world-context/1', 490, 'authored-meaning', 'semantic', [], 0, null]); assert.match(c.listingRevision, /^[0-9a-f]{64}$/);
+  assert.equal((await view('/v1/world/context?q=pond')).status, 200, 'a search is a listing too');
+  const me = await view('/v1/me', { authorization: 'Bearer dev:ada' });   // its sign-in, as a world's with no old twin
+  assert.equal(me.status, 200); assert.equal((await me.json()).me?.userId, 'dev:ada');
+  const anon = await view('/v1/me'); assert.equal(anon.status, 401); assert.equal((await anon.json()).code, 'signin-required');
   assert.equal(launcher.pool.status('eden').status, 'stopped', 'the page and its reads loaded nothing');
   // none published for its stream (a fresh move, or views held in memory before a restart): the page wakes the old world
   // once, as #4561 did (drawn from its stream alone, an old world's buildings can lose their finish), and publishes them

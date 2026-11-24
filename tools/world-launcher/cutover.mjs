@@ -101,6 +101,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
     published: (w) => load()?.published(w) ?? false,
+    publishedSeq: (w) => load()?.publishedSeq(w) ?? null,
     handle: (req, res, w, url, o) => load()?.handle(req, res, w, url, o) ?? false,
   };
 }
@@ -142,6 +143,7 @@ function withRouteOnly(fence, bindings) {
     v2Fields: (w) => (of(w) ?? fence).v2Fields(w),
     publish: (w, read) => (of(w) ? Promise.resolve(null) : fence.publish(w, read)),
     published: (w) => (of(w) ? false : fence.published(w)),
+    publishedSeq: (w) => (of(w) ? null : fence.publishedSeq(w)),
     handle: (req, res, w, url, o) => (of(w) ?? fence).handle(req, res, w, url, o),
   };
 }
@@ -162,6 +164,7 @@ function fenceOf(binding) {
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
     published: (w) => of(w)?.published(w) ?? false,
+    publishedSeq: (w) => of(w)?.publishedSeq(w) ?? null,
     handle: (req, res, w, url, o) => of(w)?.handle(req, res, w, url, o) ?? false,
   }, binding.worlds);
 }
@@ -178,7 +181,7 @@ function oneFence(binding) {
   let publishing = null, published = null; // the flight, and the stream the files in staticDir were published for
   // 24 Nov: a static folder the launcher cannot write (its unit's ProtectSystem=strict sandbox) never leaves a routed page
   // without its views: they are held here instead, for the stream they were read for, and served as the files would be
-  let held = null;
+  let held = null, seqOf = null; // seqOf: the published snapshot's seq answer, by its sha256 (publishedSeq)
   // The manifest goes first: without it nothing here is served, so a reader never mixes one routing's files with another's
   // while they are removed or rewritten. Then the six files (and any `.tmp` a stopped publish left).
   const clear = () => {
@@ -309,6 +312,20 @@ function oneFence(binding) {
       if (!stream || !staticDir) return false;
       const m = manifest();
       return (m?.stream === stream && !!m.files?.['snapshot.json']) || (held?.m.stream === stream && !!held.m.files['snapshot.json']);
+    },
+    /** 24 Nov: the published snapshot's `/v1/world/seq` answer ({seq, entities, builds}, as apps/server god/routes.ts
+     *  gives it), for the page's heartbeat while the old process sleeps (launcher.mjs oldCold); null when none is
+     *  published. Parsed once per published snapshot (its sha256), not once per poll. */
+    publishedSeq(w) {
+      const stream = this.v2Stream(w);
+      if (!stream || !staticDir) return null;
+      const m = manifest(), f = m?.stream === stream ? m.files?.['snapshot.json'] : held?.m.stream === stream ? held.m.files['snapshot.json'] : null;
+      if (!f) return null;
+      if (seqOf && seqOf.stream === stream && f.sha256 && seqOf.sha === f.sha256) return seqOf.v;
+      let s; try { s = JSON.parse(view(stream, 'snapshot.json')); } catch { return null; }
+      const v = { seq: Number.isFinite(s?.seq) ? s.seq : 0, entities: Array.isArray(s?.entities) ? s.entities.length : 0, ...(Number.isFinite(s?.buildsRev) ? { builds: s.buildsRev } : {}) };
+      seqOf = { stream, sha: f.sha256 ?? null, v };
+      return v;
     },
     handle(req, res, w, url, o) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
