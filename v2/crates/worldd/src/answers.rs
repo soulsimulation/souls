@@ -800,6 +800,9 @@ struct Lives {
     life: Life,
     ring: Ring,
     entry: Id,
+    /// The entry as configured ([`Join::entry`]): when the ring round it on the open ground holds no free place, births
+    /// try the floor that holds it ([`sim::walk::town::Town::entry_floor`]).
+    at: (Id, Vec3),
     family: Family,
     kind: Name,
     /// The ids of a leave's set-downs (their transfers).
@@ -1092,6 +1095,9 @@ struct Clock {
     walks: BTreeMap<Id, acts::Walk>,
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
+    /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
+    /// world opened: one whose hold a restart ended is cancelled.
+    besides_checked: bool,
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
@@ -1099,7 +1105,7 @@ struct Clock {
     away_next: Option<u64>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
-    edits: Option<Sender<CheckJob>>,
+    edits: Option<EditQueue>,
     editing: bool,
     /// Set-downs checked since the last tick, committed (or refused) at the next (#3604).
     set_down: Vec<(Id, R<SetDownChecked>)>,
@@ -1170,6 +1176,49 @@ struct Clock {
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
+}
+
+/// The edit checker's queue (S10): each job goes with the tick whose bodies it is checked against, the newest tick
+/// whose snapshot point has passed ([`EditQueue::offered`]), so the checker never checks it on older bodies, and waits
+/// only when the snapshot it has is older than that. In lockstep (S10c) it is the tick running as the job is sent
+/// ([`EditQueue::running`]): a job sent before that tick's snapshot point waits for it, so it reads that tick's bodies
+/// in every run, never the last tick's or this one's by how far the clock has got.
+///
+/// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
+struct EditQueue {
+    tx: Sender<(u64, CheckJob)>,
+    walkers: Arc<buildsafe::Moving>,
+    /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
+    offered: std::cell::Cell<u64>,
+    /// Lockstep, in a world with bodies: the tick running (or last run, between ticks). `None` otherwise.
+    running: Option<std::cell::Cell<u64>>,
+}
+
+impl Drop for EditQueue {
+    fn drop(&mut self) {
+        self.walkers.close();
+    }
+}
+
+impl EditQueue {
+    // The job comes back whole when the checker is gone, as `Sender::send` gives it.
+    #[allow(clippy::result_large_err)]
+    fn send(&self, job: CheckJob) -> Result<(), std::sync::mpsc::SendError<CheckJob>> {
+        // A job that reads the bodies: the next snapshot point builds them.
+        if matches!(
+            job,
+            CheckJob::Edit(..) | CheckJob::Undo(_) | CheckJob::SetDown(_) | CheckJob::Part(_)
+        ) {
+            self.walkers.want();
+        }
+        let need = self
+            .running
+            .as_ref()
+            .map_or(self.offered.get(), std::cell::Cell::get);
+        self.tx
+            .send((need, job))
+            .map_err(|e| std::sync::mpsc::SendError(e.0.1))
+    }
 }
 
 enum CheckJob {
@@ -1370,7 +1419,8 @@ pub struct PartMaps {
 }
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
-/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
+/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12), or a slot of another thing as
+/// `[id, slot number]` (E14b).
 fn keep_arg_names(intent: &mut Value) {
     let Value::Map(intent) = intent else { return };
     let Some(Value::Map(parameters)) = intent.get_mut(&4) else {
@@ -1438,6 +1488,19 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
                     .ok_or("arg-malformed")
                     .and_then(|v| replica::effects::read_id(v).map_err(|_| "arg-malformed"))?;
                 args.values.insert(k, Arg::Text(id));
+            }
+            // E14b: a slot of another thing, `[id, slot number]` (a seat on a bench of the hall): that thing and its
+            // slot, numbered in its own entry, as the form runner reads the pair (`form_runner::args_in`).
+            Value::Array(a) if matches!(a.as_slice(), [Value::Array(_), Value::Uint(_)]) => {
+                let [id, Value::Uint(n)] = a.as_slice() else {
+                    unreachable!("matched above")
+                };
+                let id = replica::effects::read_id(id).map_err(|_| "arg-malformed")?;
+                if *n == 0 {
+                    return Err("arg-malformed");
+                }
+                args.things.insert(k.clone(), id);
+                args.slots.insert(k, *n);
             }
             _ => {
                 args.things.insert(
@@ -1552,6 +1615,12 @@ fn has_words(v: &Value) -> bool {
         _ => false,
     }
 }
+
+/// The longest the edit checker waits for the bodies at a job's tick (S10, [`buildsafe::Moving::fresh`]) on a
+/// free-running clock: 100 ms of the machine's time, whatever the world's tick length. Past that the job is refused
+/// `edit.stale`, which its sender may try again, never checked on older bodies. Lockstep has no such bound: its
+/// checker waits for the snapshot however long the tick takes, so the same inputs write the same log (S10c).
+const FRESH_WAIT: Duration = Duration::from_millis(100);
 
 /// The body an intent drives: the Soul's own, or the one a creator names.
 fn body_of(intent: &Intent) -> Result<Id, &'static str> {
@@ -1996,6 +2065,14 @@ impl Clock {
                 .find(|(_, o)| o.actor == actor && Some(o.sequence) == intent.replaces)
         {
             let (stopped, body) = (o.sequence, o.body);
+            // E14b: stopped after its form sat the body on another thing's seat and linked it, it is still seated.
+            let how = match self
+                .forms
+                .still_seated(self.replica.tree(), self.bodies.as_ref(), body)
+            {
+                true => acts::STILL_SEATED,
+                false => STOPPED,
+            };
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(open));
             self.forms.leave(
                 self.replica.tree(),
@@ -2008,7 +2085,7 @@ impl Clock {
                 self.note(open, MOVE_ENDED, Some(STOPPED), now);
             }
             if cut != Some(Cut::Finishing) {
-                self.end(open, |c| c.refusal(actor, stopped, STOPPED));
+                self.end(open, |c| c.refusal(actor, stopped, how));
             }
             self.next_intent += 1;
             self.inputs.push(Input::Intent {
@@ -3275,7 +3352,19 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        let mut born = b.births_built(&mut l.life, now, &l.ring, &l.family, &|soul| {
+        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
+        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
+        let floor = (l.at.0 == b.town.ground)
+            .then(|| b.town.entry_floor(l.at.1))
+            .flatten()
+            .map(|e| Ring {
+                entries: BTreeMap::from([(l.entry, e)]),
+                radius: l.ring.radius,
+                gap: l.ring.gap,
+                rings: l.ring.rings,
+            });
+        let standing = sim::life::Then(&l.ring, floor.as_ref());
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
             self.birth_builds
                 .get(&soul)
                 .copied()
@@ -3302,6 +3391,35 @@ impl Clock {
                 .partition(|h| h.0 == x.soul);
             l.unborn = rest;
             taken.push((x.clone(), mine));
+        }
+        // A birth that found no place after the whole search is withdrawn, and its Soul's waiting intents are refused
+        // by its name (`birth-no-free-place`, `birth-off-surface`): never left with no answer.
+        let mut refused = Vec::new();
+        let held: Vec<(Id, &'static str)> = l
+            .unborn
+            .iter()
+            .map(|h| h.0)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|s| Some((s, l.life.held_back(s)?)))
+            .collect();
+        for (soul, why) in held {
+            l.life.withdraw(soul);
+            let (mine, rest) = std::mem::take(&mut l.unborn)
+                .into_iter()
+                .partition::<Vec<_>, _>(|h| h.0 == soul);
+            l.unborn = rest;
+            refused.extend(
+                mine.into_iter()
+                    .map(|(_, bytes, reply, stamps)| (why, bytes, reply, stamps)),
+            );
+        }
+        for (why, bytes, reply, stamps) in refused {
+            let (Ok(intent), Some(key)) = (Intent::read(&bytes), actor_key(&bytes)) else {
+                continue;
+            };
+            let a = self.refusal(intent.actor, intent.sequence, why);
+            self.answered(key, intent.sequence, None, None, &a, (vec![reply], stamps));
         }
         for (x, mine) in taken {
             let mut later: Vec<(Vec<u8>, Reply, Stamps)> = Vec::new();
@@ -3949,6 +4067,38 @@ impl Clock {
         }
     }
 
+    /// E14b: the links [`acts::Acts::untie`] ends, one world entry at each link's node, in this tick.
+    fn untie(&mut self, now: Micros) {
+        let ends = self.forms.untie(self.replica.tree(), self.bodies.as_ref());
+        if ends.is_empty() {
+            return;
+        }
+        let tree = self.replica.tree();
+        let effects = ends
+            .into_iter()
+            .filter_map(|(node, link)| {
+                let (_, _, _, audience) = tree.link(link)?;
+                Some(Effect {
+                    envelope: Envelope {
+                        sequence: 0,
+                        at: now,
+                        cause: Cause::World,
+                        actor: Actor::World,
+                        audience,
+                        node,
+                    },
+                    body: Body::Changes(vec![ChangeRec {
+                        change: Change::Unlink { link },
+                        rest: Rest::new(),
+                    }]),
+                    events: None,
+                    rest: Rest::new(),
+                })
+            })
+            .collect();
+        self.write_own(effects, "links left with their place");
+    }
+
     /// After step 4 (F10b, #3476): each thing the tick's acts made loose gets its end, each made kept loses it.
     fn set_loose(&mut self, now: Micros) {
         if self.loose.idle() {
@@ -4033,6 +4183,7 @@ impl Clock {
                 self.replica.tree(),
                 &mut b.runner.controller,
                 &mut b.slots,
+                &b.town.versions,
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
@@ -4300,18 +4451,37 @@ impl Clock {
             .filter(|a| !ids.contains(a))
             .copied()
             .collect();
+        let mut cancel: Vec<sim::orders::Order> = Vec::new();
         for a in gone {
             let Some((follower, order)) = self.follows.remove(&a) else {
                 continue;
             };
-            let Some(o) = b
-                .orders
-                .open(follower)
-                .filter(|o| o.intent == order)
-                .cloned()
-            else {
-                continue;
-            };
+            if let Some(o) = b.orders.open(follower).filter(|o| o.intent == order) {
+                cancel.push(o.clone());
+            }
+        }
+        // 0.135 R1: a hold does not outlast a restart, so an order beside a leader that the log brought back with no
+        // hold walking for it is cancelled, once, at the first tick.
+        if !self.besides_checked {
+            self.besides_checked = true;
+            let followers: BTreeSet<Id> = running.iter().map(|f| f.2).collect();
+            cancel.extend(
+                b.orders
+                    .opened()
+                    .filter(|o| {
+                        matches!(
+                            o.what,
+                            sim::orders::What::Follow {
+                                beside: Some(_),
+                                ..
+                            }
+                        ) && !followers.contains(&o.body)
+                    })
+                    .cloned(),
+            );
+        }
+        for o in cancel {
+            let follower = o.body;
             let Some(id) = Id::new(self.lineage, self.next_intent) else {
                 continue;
             };
@@ -4332,9 +4502,9 @@ impl Clock {
             };
             let _ = crate::orders::accept(b, &cancel, follower, id, now);
         }
-        for (a, leader, follower, soul) in running {
+        for (a, leader, follower, soul, beside) in running {
             let open = b.orders.open(follower).cloned();
-            let follows_leader = |o: &sim::orders::Order| matches!(o.what, sim::orders::What::Follow { leader: l, .. } if l == leader);
+            let follows_leader = |o: &sim::orders::Order| matches!(o.what, sim::orders::What::Follow { leader: l, beside: w, .. } if l == leader && w == beside);
             match self.follows.get(&a) {
                 Some(&(_, order)) => {
                     if open.as_ref().is_none_or(|o| o.intent != order) {
@@ -4358,7 +4528,10 @@ impl Clock {
                         verb: Name::new(skills::orders::FOLLOW)
                             .unwrap_or_else(|| unreachable!("a name")),
                         target: Some(Target::Node(leader)),
-                        parameters: BTreeMap::new(),
+                        // 0.135 R1: walking hand in hand, a place this wide beside the leader.
+                        parameters: beside
+                            .map(|w| BTreeMap::from([(3, Value::Uint(w.unsigned_abs()))]))
+                            .unwrap_or_default(),
                         sequence: 0,
                         basis: basis.clone(),
                         expiry: now.saturating_add(sim::orders::LONGEST),
@@ -4402,6 +4575,17 @@ impl Clock {
                 asks.push((id, m));
             }
         }
+        // 0.135 R1: a sit or a lie taken lets go of a hold, by either member (`Engine::walked`); it never leads.
+        let seated: Vec<(Id, Id)> = asks
+            .iter()
+            .filter(|(_, a)| {
+                matches!(
+                    a.ask,
+                    replica::move_check::Ask::Sit { .. } | replica::move_check::Ask::Lie { .. }
+                )
+            })
+            .map(|(id, a)| (a.body, *id))
+            .collect();
         let started = b.start(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
@@ -4413,7 +4597,26 @@ impl Clock {
         // 0.134 T2: a Soul holding hands that walks lets go, as its leave would (`Engine::walked`).
         if let Some(e) = self.engine.as_mut() {
             for (body, id) in walked {
-                e.walked(self.replica.tree(), &mut b.runner.controller, body, id, now);
+                e.walked(
+                    self.replica.tree(),
+                    &mut b.runner.controller,
+                    body,
+                    id,
+                    now,
+                    true,
+                );
+            }
+            for (body, id) in seated {
+                if !started.iter().any(|(i, r)| *i == id && r.is_err()) {
+                    e.walked(
+                        self.replica.tree(),
+                        &mut b.runner.controller,
+                        body,
+                        id,
+                        now,
+                        false,
+                    );
+                }
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
@@ -4492,6 +4695,17 @@ impl Clock {
 
     /// One tick, `n`, at world time `now` (its start), in the trunk's order (the module's list). With measures on,
     /// each phase is timed on the machine's steady clock ([`measures::PHASES`]; O4, K18c).
+    /// Lockstep, between ticks: when the edit checker asked for the bodies and the last snapshot point passed unasked,
+    /// they are built now as that tick left them, labelled with it (S10). Nothing moves a body between ticks.
+    fn offer_asked(&mut self) {
+        if let (Some(c), Some(b)) = (&self.edits, &self.bodies)
+            && c.walkers.asked()
+        {
+            c.walkers
+                .offer_map(b, self.replica.version(), c.offered.get());
+        }
+    }
+
     fn tick(&mut self, n: i64, now: Micros) {
         let on = self.measures.is_some();
         let mark = || on.then(measures::steady_us);
@@ -4502,6 +4716,9 @@ impl Clock {
         self.checkpoint();
         at[1] = mark();
         self.tick = n;
+        if let Some(r) = self.edits.as_ref().and_then(|c| c.running.as_ref()) {
+            r.set(u64::try_from(n).unwrap_or(0));
+        }
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
         // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
         // directory's notices read by (#4134): in lockstep that is every word queued before it.
@@ -4642,10 +4859,17 @@ impl Clock {
         self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
+        // E14b: a body that left the seat of another thing its form sat it in, by any way but a form, leaves that
+        // form's links too (a listener who rises is no longer in the lecture's audience).
+        self.untie(now);
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
-            w.offer_map(b, self.replica.version());
+            let tick = u64::try_from(n).unwrap_or(0);
+            w.offer_map(b, self.replica.version(), tick);
+            if let Some(c) = &self.edits {
+                c.offered.set(tick);
+            }
         }
         at[5] = mark();
         remember_orders(&mut self.order_records, &self.effects);
@@ -5493,6 +5717,7 @@ pub fn start<S: Storage + 'static>(
                 rings: 8,
             },
             entry,
+            at: j.entry,
             family: j.family,
             kind: j.kind,
             mint: Minter::new(scope("leave")),
@@ -5536,10 +5761,20 @@ pub fn start<S: Storage + 'static>(
                 set_downs,
                 creator,
                 Arc::clone(&publisher),
-                m,
+                Arc::clone(&m),
                 events.clone(),
                 rules.kinds.clone(),
+                // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
+                (!cfg.lockstep).then_some(FRESH_WAIT),
             )
+            .map(|tx| EditQueue {
+                tx,
+                walkers: m,
+                offered: std::cell::Cell::new(0),
+                // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
+                running: (cfg.lockstep && (make.is_some() || make_built.is_some()))
+                    .then(|| std::cell::Cell::new(0)),
+            })
         })
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
@@ -5642,6 +5877,7 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
+        besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
         edits,
@@ -5760,7 +5996,7 @@ pub fn start<S: Storage + 'static>(
                             &births,
                         );
                         if let Some(w) = &c.walkers {
-                            w.offer_map(&b, c.replica.version());
+                            w.offer_map(&b, c.replica.version(), 0);
                         }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
@@ -5863,14 +6099,18 @@ pub fn start<S: Storage + 'static>(
                     while ticker.next_tick() <= to && !stop {
                         // Every check back before the tick, so the same inputs commit at the same ticks.
                         while c.outstanding > 0 {
-                            match rx.recv() {
-                                Ok(Event::Stop) | Err(_) => {
+                            // The edit checker waits on the bodies of a tick whose snapshot point passed unasked:
+                            // built now, as they stood there (nothing has moved a body since), S10.
+                            c.offer_asked();
+                            match rx.recv_timeout(Duration::from_millis(2)) {
+                                Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => {
                                     stop = true;
                                     break;
                                 }
                                 Ok(e) => {
                                     take(&mut c, e);
                                 }
+                                Err(RecvTimeoutError::Timeout) => {}
                             }
                         }
                         // And the checkers' copy caught up with the live tree: it is published on its own thread, and
@@ -6005,6 +6245,10 @@ fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
 ///
 /// The same thread checks a Soul's set-down (#3604, [`crate::setdown::check`]) on the same town, with the engine's
 /// rules: a world with the engine and no creator has the thread for set-downs alone, and refuses every edit.
+///
+/// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
+/// lockstep (S10c).
+#[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
     mut set_downs: Option<(replica::tree::Rules, Minter)>,
@@ -6013,8 +6257,9 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     entries: replica::rules::json::Value,
-) -> R<Sender<CheckJob>> {
-    let (tx, rx) = channel::<CheckJob>();
+    fresh_wait: Option<Duration>,
+) -> R<Sender<(u64, CheckJob)>> {
+    let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
     let kinds = match (&world, &set_downs) {
         (Some(w), _) => w.kinds.clone(),
@@ -6026,7 +6271,12 @@ fn edit_checker(
         .spawn(move || {
             let mut town = buildsafe::TownCopy::new(kinds.clone());
             loop {
-                let next = match rx.recv_timeout(EDIT_IDLE) {
+                // The tick whose bodies the job is checked against (S10).
+                let (need, next) = match rx.recv_timeout(EDIT_IDLE) {
+                    Ok((need, job)) => (need, Ok(job)),
+                    Err(e) => (0, Err(e)),
+                };
+                let next = match next {
                     Err(RecvTimeoutError::Disconnected) => break,
                     Ok(CheckJob::Release(kept)) => {
                         drop(kept);
@@ -6067,7 +6317,10 @@ fn edit_checker(
                     // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
                     CheckJob::Undo(job) => {
                         let (id, actor, redo, effects) = *job;
-                        let snapshot = walkers.current();
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6077,11 +6330,15 @@ fn edit_checker(
                             (None, _) => None,
                             (Some(w), c) => c.as_ref().map_or(Some(w.creator), |c| c.get()),
                         };
-                        let checked = if copy.version() < needed {
+                        let checked = if late || copy.version() < needed {
                             Err(Refused {
                                 op: None,
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             })
                         } else {
                             crate::undo::check(
@@ -6108,7 +6365,10 @@ fn edit_checker(
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {
-                        let snapshot = walkers.current();
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6117,9 +6377,13 @@ fn edit_checker(
                         let copy = publisher.wait_for(needed, Duration::from_secs(1));
                         let ground = buildsafe::open_ground(&copy);
                         let checked = match &mut set_downs {
-                            _ if copy.version() < needed => Err(Refusal {
+                            _ if late || copy.version() < needed => Err(Refusal {
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             }),
                             Some((rules, mint)) => {
                                 let souls = buildsafe::souls(&copy, &kinds);
@@ -6170,7 +6434,10 @@ fn edit_checker(
                     // A crew's take or seating (0.135 A2): the walkers' maps from its part, as a set-down's.
                     CheckJob::Part(job) => {
                         let (r, planned) = *job;
-                        let snapshot = walkers.current();
+                        let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
+                            Ok(s) => (s, false),
+                            Err(s) => (s, true),
+                        };
                         let needed = snapshot
                             .map
                             .as_ref()
@@ -6178,9 +6445,13 @@ fn edit_checker(
                             .max(planned);
                         let copy = publisher.wait_for(needed, Duration::from_secs(1));
                         let checked = match &snapshot.map {
-                            _ if copy.version() < needed => Err(Refusal {
+                            _ if late || copy.version() < needed => Err(Refusal {
                                 name: "edit.stale",
-                                detail: "the published copy has not reached the map basis".into(),
+                                detail: if late {
+                                    "the bodies at the job's tick were not built in time".into()
+                                } else {
+                                    "the published copy has not reached the map basis".into()
+                                },
                             }),
                             Some(source) => {
                                 let mut effects = r.town_part();
@@ -6247,7 +6518,10 @@ fn edit_checker(
                         continue;
                     }
                 };
-                let snapshot = walkers.current();
+                let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
+                    Ok(s) => (s, false),
+                    Err(s) => (s, true),
+                };
                 let source = snapshot.map.as_ref();
                 let needed = source
                     .as_ref()
@@ -6271,10 +6545,14 @@ fn edit_checker(
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let checked = match who {
-                        _ if copy.version() < needed => Err(Refused {
+                        _ if late || copy.version() < needed => Err(Refused {
                             op: None,
                             name: "edit.stale",
-                            detail: "the published copy has not reached the map basis".into(),
+                            detail: if late {
+                                "the bodies at the job's tick were not built in time".into()
+                            } else {
+                                "the published copy has not reached the map basis".into()
+                            },
                         }),
                         Some(c) => {
                             world.creator = c;
@@ -7324,6 +7602,27 @@ mod tests {
             Some(sky::EV_WEATHER),
             "E6's weather event follows the creator's record"
         );
+    }
+
+    /// S10c: the clock thread's queue to the edit checker dropped (the clock ended, for any reason, `run_due`'s error
+    /// among them) wakes a checker waiting for bodies with no deadline, as in lockstep: refused, never blocked.
+    #[test]
+    fn s10c_a_checker_waiting_with_no_deadline_wakes_when_the_clocks_queue_drops() {
+        let walkers = Arc::new(buildsafe::Moving::default());
+        let waiting = {
+            let w = Arc::clone(&walkers);
+            thread::spawn(move || w.fresh(5, None).is_err())
+        };
+        let (tx, _rx) = channel();
+        let queue = EditQueue {
+            tx,
+            walkers,
+            offered: std::cell::Cell::new(0),
+            running: Some(std::cell::Cell::new(5)),
+        };
+        thread::sleep(Duration::from_millis(20));
+        drop(queue);
+        assert!(waiting.join().unwrap(), "woken and refused");
     }
 
     #[test]

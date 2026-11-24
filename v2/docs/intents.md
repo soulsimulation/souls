@@ -44,7 +44,7 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 ## Orders, and what the engine never holds
 
 5. **The orders are a closed list of four:** ranked fallbacks (any act's field 9), a held stance (`souls:hold`, its
-   stance a parameter), follow (`souls:follow`, its target) and standing in a queue (`souls:queue`, its target, and
+   stance a parameter), follow (`souls:follow`, its target; a band behind it, or a place beside it, as parameters) and standing in a queue (`souls:queue`, its target, and
    the act taken at its head as a parameter: "queue for this seat and sit"). Each expires, can be cancelled, and is
    recorded as the agent's; an order is in the log, so it survives a restart.
 6. **Fallbacks are ranked and bounded:** at most 4, each another act `{2: verb, 3: target, 4: parameters, 8:
@@ -182,8 +182,12 @@ slot number, a declared part name as UTF-8 bytes, or T8 text by reference. Bare 
 alongside existing `item=<id>` arguments. Its numbered JSON surface also accepts name/value pairs, for example
 `{"1":[["drawer","top"]]}`; string keys become the same UTF-8 byte keys. A text value may use the existing
 `{"23":"private words"}` input wrapper or `{"21":"<id>"}` reference wrapper. The authority stores words and
-replaces input text with its reference; another argument's text remains private to its sender. Arbitrary JSON
-objects are refused. Duplicate argument names and incompatible physical move targets are refused rather than
+replaces input text with its reference; another argument's text remains private to its sender. A slot of another
+thing (0.135 E14b: a lecture's attendee on a hall's bench) is `[id, slot number]`, the slot numbered 1, 2, ... in
+that thing's own entry; the numbered JSON surface writes it `{"node":"<id>","slot":2}`. A seat the act leaves out
+that its form selects from the free slots `in` its `parent` or `here` is chosen by the world in the selector's
+order; two seats it cannot tell apart (as far from the anchor and from the body) are refused `arg-ambiguous`.
+Arbitrary JSON objects are refused. Duplicate argument names and incompatible physical move targets are refused rather than
 selecting the last value. Signed whole-number parameters keep their exact canonical T0 values, including nested
 coordinate arrays; floating-point parameters remain unsupported. Named room/floor movement uses its separate
 existing target contract.

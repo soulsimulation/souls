@@ -31,7 +31,7 @@ use replica::intents::{Hello, Intent, PROTOCOL, Target};
 use replica::pose::{Pose, Vec3};
 use replica::rules::json;
 use replica::world_model::plain;
-use sim::activity::carry::Load;
+use sim::activity::carry::{Load, REACH};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -136,14 +136,15 @@ impl Drop for Served {
     }
 }
 
-/// `worldd seed` of `facts` with the entries in `d`, two Souls born at (x m, z m); then `worldd serve` on `socket`.
-/// The world's folder, its two Souls and the process.
+/// `worldd seed` of `facts` with the entries in `d`, `souls` Souls born at (x m, z m); then `worldd serve` on
+/// `socket`. The world's folder, its Souls and the process.
 fn seed_and_serve(
     d: &Path,
     facts: &str,
     at: (i64, i64),
     socket: &Path,
-) -> (PathBuf, [Id; 2], Served) {
+    souls: u64,
+) -> (PathBuf, Vec<Id>, Served) {
     let path = d.join("facts.json");
     std::fs::write(&path, facts).unwrap();
     let dir = d.join("w");
@@ -152,7 +153,8 @@ fn seed_and_serve(
         .arg(&path)
         .arg("--dir")
         .arg(&dir)
-        .args(["--souls", "2", "--at", &format!("{},{}", at.0, at.1)])
+        .args(["--souls", &souls.to_string()])
+        .args(["--at", &format!("{},{}", at.0, at.1)])
         .arg("--entries")
         .arg(d.join("entries"))
         .output()
@@ -167,7 +169,9 @@ fn seed_and_serve(
         .unwrap()
         .try_into()
         .unwrap();
-    let souls = [1, 2].map(|c| Id::new(Scope(scope), c).unwrap());
+    let souls = (1..=souls)
+        .map(|c| Id::new(Scope(scope), c).unwrap())
+        .collect();
     let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
         .args(["serve", "--dir"])
         .arg(&dir)
@@ -349,11 +353,16 @@ impl Soul {
     }
 
     async fn send(&mut self, verb: &str, target: Id, parameters: BTreeMap<u64, Value>) {
+        self.send_on(verb, Some(target), parameters).await;
+    }
+
+    /// [`Soul::send`] with a target or none (a leave of the world, `life:leave`).
+    async fn send_on(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
         self.sequence += 1;
         let i = Intent {
             actor: Actor::Soul(self.id),
             verb: Name::new(verb).unwrap(),
-            target: Some(Target::Node(target)),
+            target: target.map(Target::Node),
             parameters,
             sequence: self.sequence,
             basis: Version {
@@ -415,6 +424,17 @@ impl Soul {
         parameters: BTreeMap<u64, Value>,
     ) -> Result<Vec<u64>, String> {
         self.send(verb, target, parameters).await;
+        self.answer().await
+    }
+
+    /// [`Soul::act`] with a target or none.
+    async fn act_on(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        parameters: BTreeMap<u64, Value>,
+    ) -> Result<Vec<u64>, String> {
+        self.send_on(verb, target, parameters).await;
         self.answer().await
     }
 }
@@ -536,6 +556,7 @@ async fn carry_east(
 /// The load's lift and its set-down, from the log: held in the carry's slot with its `long` axis (its own frame,
 /// µm from its middle) along the carry's +x, and set down with its middle 25 m east of `at` and its long axis still
 /// between where its carriers stood (north to south, or east to west).
+#[allow(clippy::too_many_arguments)]
 fn held_and_set_down(
     dir: &Path,
     name: &str,
@@ -544,6 +565,7 @@ fn held_and_set_down(
     long: Vec3,
     at: Vec3,
     north: bool,
+    carriers: [Id; 2],
 ) {
     let l = Load::of(entry).unwrap();
     let moved = moves_of(dir, load);
@@ -574,14 +596,59 @@ fn held_and_set_down(
         (middle.x - at.x - CARRIED).abs() < 600_000 && (middle.z - at.z).abs() < 600_000,
         "{name}: set down 25 m east: {middle:?}"
     );
-    let (along, across) = match north {
-        true => (end.z, end.x),
-        false => (end.x, end.z),
+    // Its yaw follows where its front and back carriers' walks ended, which is within a walk's reach of their places:
+    // its long axis is checked against the line between where they stood, and that line against the nominal one.
+    let (f, k) = stood_at_set_down(dir, load, carriers);
+    let (dx, dz) = ((f.x - k.x) as f64, (f.z - k.z) as f64);
+    let gap = dx.hypot(dz);
+    let across = (end.x as f64 * dz - end.z as f64 * dx) / gap;
+    let along = (end.x as f64).hypot(end.z as f64);
+    println!(
+        "{name}: its carriers stood {gap:.0} µm apart, its long axis {across:.0} µm off their line"
+    );
+    let nominal = match north {
+        true => dx.abs() / gap,
+        false => dz.abs() / gap,
     };
     assert!(
-        (along.abs() - l.half_length).abs() < 20_000 && across.abs() < 20_000,
-        "{name}: set down lengthwise between where its carriers stood: {end:?}"
+        nominal < 0.05,
+        "{name}: its carriers stood {} its length: {f:?} {k:?}",
+        if north {
+            "north to south"
+        } else {
+            "east to west"
+        }
     );
+    assert!(
+        (along - l.half_length as f64).abs() < 20_000.0 && across.abs() < 20_000.0,
+        "{name}: set down lengthwise between where its carriers stood: {end:?}, {f:?} {k:?}"
+    );
+}
+
+/// Where the bodies `carriers` (front, back) stood when `load` was set down: the log's body rows up to the part that
+/// holds the load's second move.
+fn stood_at_set_down(dir: &Path, load: Id, carriers: [Id; 2]) -> (Vec3, Vec3) {
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    let mut at = BTreeMap::new();
+    let mut moved = 0;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        let Ok(p) = Part::read(&r) else { continue };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                at.insert(b, pose.position);
+            }
+        }
+        moved += p
+            .effects
+            .iter()
+            .filter(|e| matches!(e.body, Body::Transfer(TransferRec::Leave { node, .. }) if node == load))
+            .count();
+        if moved >= 2 {
+            break;
+        }
+    }
+    let [f, k] = carriers.map(|b| *at.get(&b).expect("a carrier's body row"));
+    (f, k)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -589,7 +656,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
     let d = scratch("c4");
     let facts = world(&d);
     let socket = d.join("s");
-    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket);
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
     let activities = served.line("activities: ", 180);
     println!("{activities}");
     assert!(activities.contains(CARRY), "the carry is an activity kind");
@@ -667,6 +734,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
     drop(served);
 
     // The beam's length is its z, the upright's its y (from its foot; its middle is half its height up).
+    let carriers = [body_of(&dir, souls[0]), body_of(&dir, souls[1])];
     held_and_set_down(
         &dir,
         "the beam",
@@ -675,6 +743,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         Vec3::new(0, 0, Load::of(&beam_entry).unwrap().half_length),
         beam_at(),
         true,
+        carriers,
     );
     let up = Load::of(&upright_entry).unwrap();
     held_and_set_down(
@@ -685,10 +754,544 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         Vec3::new(0, up.half_length, 0),
         upright_at(),
         false,
+        carriers,
     );
     println!(
         "C4: a served world carried the beam and the upright 25 m by two Souls' intents through the gateway (walk, \
          offer, a Soul alone refused carry-needs-two, accept, a thing not a load refused lift-not-a-load, lift, \
          carry, set down, leave), each held and set down lengthwise between its carriers"
+    );
+}
+
+/// 0.135 C7: the beam carried with no destination named, its two carriers walking east either side of a post that
+/// stands on the line between them. Each walks clear of the post, but the beam would sweep through it: the carry
+/// stops where the beam meets it, the beam set down at its last sample (`souls:carry-set-down`, why
+/// `souls:carry-blocked`), never past the post and never through it. The carriers are not held: their walks arrive,
+/// the beam is no longer carried, and both may leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carriers() {
+    use sim::activity::carry::{Fixed, outline};
+    let d = scratch("c7");
+    // The post: 0.2 m square and 1.5 m high, on the beam's middle line 7 m east of it.
+    let post = (beam_at().x + 7 * M, beam_at().z);
+    let mut f = json::parse(&world(&d)).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("things", json::Value::Arr(a)) = (k.as_str(), v) {
+            a.push(json::Value::Obj(vec![
+                ("id".into(), json::Value::s("post")),
+                ("def".into(), json::Value::s("testworld-box@1")),
+                ("ref".into(), json::Value::s("testworld-box@1")),
+                ("parent".into(), json::Value::Null),
+                (
+                    "pose".into(),
+                    json::Value::Arr([post.0 / 1000, 0, post.1 / 1000, 0].map(num).to_vec()),
+                ),
+                ("scale_ppm".into(), num(1_000_000)),
+                (
+                    "solids".into(),
+                    json::Value::Arr(vec![json::Value::Arr(
+                        [0, 0, 100, 100, 0, 0, 1500, 5, 0].map(num).to_vec(),
+                    )]),
+                ),
+                ("name".into(), json::Value::s("a post")),
+            ]));
+        }
+    }
+    let facts = f.to_json();
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+    let entry = construction("rack_beam.json");
+    let load = Load::of(&entry).unwrap();
+    let [back, front] = load.places();
+    let carry = gather(&mut a, &mut b, &dir, ground, beam, &entry, beam_at(), true).await;
+    a.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("lifted, with no destination named");
+    let east = |p: Vec3| Vec3::new(p.x + 12 * M, 0, p.z);
+    a.send(
+        "eden:walk",
+        ground,
+        point(east(spot(beam_at(), front, true))),
+    )
+    .await;
+    b.send(
+        "eden:walk",
+        ground,
+        point(east(spot(beam_at(), back, true))),
+    )
+    .await;
+    let (wa, wb) = (a.answer().await, b.answer().await);
+    wa.expect("the front walks on past the post");
+    wb.expect("the back walks on past the post");
+    let down = b.act("carry:set-down", carry, BTreeMap::new()).await;
+    assert_eq!(down, Err("not-carried".to_owned()), "the carry had stopped");
+    for s in [&mut a, &mut b] {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("each carrier leaves");
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+
+    let es = effects(&dir);
+    let why: Vec<String> = es
+        .iter()
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .filter_map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        why,
+        vec!["souls:carry-blocked".to_owned()],
+        "set down once, blocked"
+    );
+    // Every sample of the carry: the beam's outline on the plan, clear of the post.
+    let fixed = Fixed::new(vec![[
+        [post.0 - 100_000, post.1 - 100_000],
+        [post.0 + 100_000, post.1 - 100_000],
+        [post.0 + 100_000, post.1 + 100_000],
+        [post.0 - 100_000, post.1 + 100_000],
+    ]]);
+    // The beam as it is held: on its edge, 51 mm across.
+    let (held, _) = load.as_held().unwrap();
+    let mut samples = 0;
+    let mut east_most = i64::MIN;
+    for e in &es {
+        let Body::Changes(cs) = &e.body else { continue };
+        for c in cs {
+            let Change::Motion(h) = &c.change else {
+                continue;
+            };
+            if h.node != carry {
+                continue;
+            }
+            let p = h.pose.position;
+            let u = h
+                .pose
+                .orientation
+                .rotate(Vec3::new(1_000_000, 0, 0))
+                .unwrap();
+            let q = outline([p.x + u.x, p.z + u.z], [p.x - u.x, p.z - u.z], &held);
+            assert!(fixed.hit(&q).is_none(), "a sample through the post: {p:?}");
+            samples += 1;
+            east_most = east_most.max(p.x);
+        }
+    }
+    let moved = moves_of(&dir, beam);
+    let [lift, set] = moved[..] else {
+        panic!("lifted once and set down once: {moved:?}")
+    };
+    assert!(lift.frame.slot.is_some(), "held in the carry's slot");
+    let m = set.orientation.rotate(load.middle).unwrap();
+    let middle = set.position.x + m.x;
+    println!(
+        "C7: {samples} samples of the carry, none through the post; it stopped with the beam's middle at x {} mm, \
+         {} mm short of the post's west face; set down there, its middle at x {} mm (souls:carry-blocked); the \
+         carriers walked on and left",
+        east_most / 1000,
+        (post.0 - 100_000 - east_most) / 1000,
+        middle / 1000
+    );
+    assert!(samples > 10, "the carry moved before it stopped");
+    assert!(
+        east_most < post.0 - 100_000 && post.0 - 100_000 - east_most < 400_000,
+        "stopped at the post, not before it: {east_most}"
+    );
+    assert!(
+        (middle - east_most).abs() < 2_000,
+        "set down where its last sample had it, not moved: {middle} against {east_most}"
+    );
+}
+
+/// N2's test world with the 6.1 m upright (0.135 C6) standing loose where C4's upright stands, in its place, its kind
+/// given to the facts as the yard's are; the construction entries (its own among them) in `d`.
+fn tall_world(d: &Path) -> String {
+    let mut f = json::parse(&world(d)).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(json::Value::Obj(vec![
+                ("ref".into(), json::Value::s("c6-rack-upright-6m@1")),
+                ("hash".into(), json::Value::s(&"c6".repeat(32))),
+                ("name".into(), json::Value::s("mars:rack_upright_6m")),
+                ("form".into(), json::Value::s("point")),
+            ])),
+            ("things", json::Value::Arr(a)) => {
+                for t in a.iter_mut() {
+                    let json::Value::Obj(kv) = t else { continue };
+                    if !kv
+                        .iter()
+                        .any(|(k, v)| k == "id" && v.str() == Some("loose-upright"))
+                    {
+                        continue;
+                    }
+                    for (k, v) in kv.iter_mut() {
+                        match k.as_str() {
+                            "id" => *v = json::Value::s("tall-upright"),
+                            "def" | "ref" => *v = json::Value::s("c6-rack-upright-6m@1"),
+                            "name" => *v = json::Value::s("a loose 6 m rack frame"),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    f.to_json()
+}
+
+/// 0.135 C6: a load that four carry. A 6.1 m upright one holds standing (`hold_crew` 1) takes four to carry
+/// (`carry_crew` 4, `content/kinds/construction/rack_upright_6m.json`). In a served world four Souls walk to its four
+/// grips (the front and the back at its ends, two sides beside its middle grips), and Soul 1 offers the carry to the
+/// other three. With three in it the lift is refused `carry-crew-too-small` and nothing moves; the fourth accepts, and
+/// the four carry it 25 m east laid flat, each by its own walk, and set it down. Then the served carry as a crew of
+/// three (0.135 C5): the beam, which two carry, taken at its three grips; its side leaves the world (a retire) once it
+/// is lifted, and the two carry it on 25 m (`souls:carry-going-on`, `souls:carrier-left`).
+#[tokio::test(flavor = "multi_thread")]
+async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
+    let d = scratch("c6");
+    let facts = tall_world(&d);
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 4);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, tall) = (im.nodes["ground"], im.nodes["tall-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut crew = Vec::new();
+    for (s, t) in souls.iter().zip(&tokens) {
+        crew.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    hold("C6_WAIT").await;
+    let at = upright_at();
+    let (places, bodies) = carry_tall(&mut crew, &souls, &dir, ground, tall, at, "eden").await;
+
+    // 0.135 C5 on the served carry: the beam, crew two, three grips. Souls 1 and 2 at its ends and Soul 3 beside its
+    // middle grip lift it; Soul 3 leaves the world (a retire), and the carry goes on with two, 25 m east.
+    let beam = im.nodes["yard-beam-4"];
+    let beam_entry = construction("rack_beam.json");
+    let bl = Load::of(&beam_entry).unwrap();
+    let [back, front] = bl.places();
+    let beside = Vec3::new(beam_at().x + bl.half_width + REACH, 0, beam_at().z);
+    let spots = [
+        spot(beam_at(), front, true),
+        spot(beam_at(), back, true),
+        beside,
+    ];
+    for (s, p) in crew.iter_mut().zip(&spots) {
+        s.send("eden:walk", ground, point(*p)).await;
+    }
+    for s in &mut crew[..3] {
+        s.answer().await.expect("walks to its place at the beam");
+    }
+    // Soul 4 steps 3 m north, off the beam's way.
+    let p = places[3];
+    crew[3]
+        .act(
+            "eden:walk",
+            ground,
+            point(Vec3::new(p.x + CARRIED, 0, p.z + 3 * M)),
+        )
+        .await
+        .expect("Soul 4 steps aside");
+    let offered = crew[0]
+        .act(
+            "activity:offer",
+            ground,
+            BTreeMap::from([
+                (1, carry_kind(&dir)),
+                (2, Value::Text(Name::new(FRONT).unwrap())),
+                (3, Value::Array(bodies[..2].to_vec())),
+            ]),
+        )
+        .await
+        .expect("the carry offered to two");
+    let three = carry_made(&dir, &offered);
+    for s in &mut crew[1..3] {
+        s.act("activity:accept", three, BTreeMap::new())
+            .await
+            .expect("accepts");
+    }
+    crew[0]
+        .act("carry:lift", three, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("three lift the beam");
+    // Soul 4 is not in this carry: its leave of it sets nothing down (the beam's moves below are its lift and its
+    // set-down only, and no souls:carry-set-down is said).
+    let _ = crew[3].act("activity:leave", three, BTreeMap::new()).await;
+    crew[2]
+        .act_on("life:leave", None, BTreeMap::new())
+        .await
+        .expect("Soul 3 leaves the world");
+    for (s, p) in crew.iter_mut().zip(&spots[..2]) {
+        s.send("eden:walk", ground, point(Vec3::new(p.x + CARRIED, 0, p.z)))
+            .await;
+    }
+    for s in &mut crew[..2] {
+        s.answer().await.expect("the two carry it on 25 m");
+    }
+    crew[1]
+        .act("carry:set-down", three, BTreeMap::new())
+        .await
+        .expect("the beam set down");
+    for s in &mut crew[..2] {
+        s.act("activity:leave", three, BTreeMap::new())
+            .await
+            .expect("a leave is always accepted");
+    }
+
+    hold("C6_HOLD").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+    let words = |name: &str| -> Vec<Value> {
+        effects(&dir)
+            .iter()
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == name)
+            .filter_map(|ev| ev.fields.get(&3).cloned())
+            .collect()
+    };
+    assert!(
+        words("souls:carry-set-down").is_empty(),
+        "neither broke off, nor did a stranger's leave"
+    );
+    let carriers = [body_of(&dir, souls[0]), body_of(&dir, souls[1])];
+    assert_eq!(
+        words("souls:carry-going-on"),
+        vec![Value::Text(Name::new("souls:carrier-left").unwrap())],
+        "a side's retire leaves the carry going on"
+    );
+    held_and_set_down(
+        &dir,
+        "the beam",
+        beam,
+        &beam_entry,
+        Vec3::new(0, 0, bl.half_length),
+        beam_at(),
+        true,
+        carriers,
+    );
+    // Its length is its y, from its foot: laid flat when lifted, and set down so, 25 m east.
+    let entry = construction("rack_upright_6m.json");
+    let load = Load::of(&entry).unwrap();
+    held_and_set_down(
+        &dir,
+        "the 6.1 m upright",
+        tall,
+        &entry,
+        Vec3::new(0, load.half_length, 0),
+        at,
+        false,
+        carriers,
+    );
+    println!(
+        "C6: a served world carried the 6.1 m upright 25 m laid flat by four Souls' intents through the gateway, one \
+         at each grip; three were refused carry-crew-too-small and nothing moved; a crew of three carried the beam, \
+         its side retired and the two carried it on 25 m (souls:carrier-left)"
+    );
+}
+
+/// Waits until each of `souls`' bodies stands within 0.3 m of its place in `to` (the log's body rows), at most 120 s: a
+/// world whose gateway answers a walk once it starts (the clip's) is waited on as one that answers when it ends.
+async fn arrived(dir: &Path, souls: &[Id], to: &[Vec3]) {
+    let bodies: Vec<Id> = souls.iter().map(|s| body_of(dir, *s)).collect();
+    let end = Instant::now() + Duration::from_secs(120);
+    loop {
+        let mut at = BTreeMap::new();
+        let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+        for r in sim::log::recover(&bytes)
+            .map(|r| r.records)
+            .unwrap_or_default()
+        {
+            let Ok(p) = Part::read(&r) else { continue };
+            if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+                for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                    at.insert(b, pose.position);
+                }
+            }
+        }
+        let near = bodies.iter().zip(to).all(|(b, p)| {
+            at.get(b)
+                .is_some_and(|q| (q.x - p.x).abs() < 300_000 && (q.z - p.z).abs() < 300_000)
+        });
+        if near {
+            return;
+        }
+        assert!(Instant::now() < end, "not at their places in 120 s");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// The 6.1 m upright (0.135 C6) at `at`, standing, carried 25 m east by the four Souls `crew` (their Ids `souls`) in the
+/// world folder `dir`: each walks to its grip, three are refused `carry-crew-too-small` and nothing moves, the fourth
+/// joins, the four lift it, carry it and set it down, and all leave. Their places at it and the bodies asked.
+async fn carry_tall(
+    crew: &mut [Soul],
+    souls: &[Id],
+    dir: &Path,
+    ground: Id,
+    tall: Id,
+    at: Vec3,
+    ns: &str,
+) -> (Vec<Vec3>, Vec<Value>) {
+    let walk = format!("{ns}:walk");
+    let entry = construction("rack_upright_6m.json");
+    let load = Load::of(&entry).unwrap();
+    assert_eq!(
+        (load.crew, load.most()),
+        (4, 4),
+        "four carry it, one at each grip"
+    );
+
+    // It stands: its carriers take it along the line they stand on, Soul 1 at the east end, the sides beside it.
+    let [back, front] = load.places();
+    let mut places = vec![spot(at, front, false), spot(at, back, false)];
+    places.extend(
+        load.side_places()
+            .into_iter()
+            .map(|[along, across]| Vec3::new(at.x + along, 0, at.z + across)),
+    );
+    for (s, p) in crew.iter_mut().zip(&places) {
+        s.send(&walk, ground, point(*p)).await;
+    }
+    for s in crew.iter_mut() {
+        s.answer().await.expect("walks to its place");
+    }
+    arrived(dir, souls, &places).await;
+    let bodies: Vec<Value> = souls[1..]
+        .iter()
+        .map(|s| body_of(dir, *s).to_value())
+        .collect();
+    let offered = crew[0]
+        .act(
+            "activity:offer",
+            ground,
+            BTreeMap::from([
+                (1, carry_kind(dir)),
+                (2, Value::Text(Name::new(FRONT).unwrap())),
+                (3, Value::Array(bodies.clone())),
+            ]),
+        )
+        .await
+        .expect("the carry offered to three");
+    let carry = carry_made(dir, &offered);
+    let lift = || BTreeMap::from([(1, tall.to_value())]);
+    for s in &mut crew[1..3] {
+        s.act("activity:accept", carry, BTreeMap::new())
+            .await
+            .expect("accepts");
+    }
+    let three = crew[0].act("carry:lift", carry, lift()).await;
+    assert_eq!(
+        three,
+        Err("carry-crew-too-small".to_owned()),
+        "three are too few"
+    );
+    assert!(moves_of(dir, tall).is_empty(), "nothing moved");
+    crew[3]
+        .act("activity:accept", carry, BTreeMap::new())
+        .await
+        .expect("the fourth accepts");
+    crew[0]
+        .act("carry:lift", carry, lift())
+        .await
+        .expect("four lift it");
+    for (s, p) in crew.iter_mut().zip(&places) {
+        s.send(&walk, ground, point(Vec3::new(p.x + CARRIED, 0, p.z)))
+            .await;
+    }
+    for s in crew.iter_mut() {
+        s.answer().await.expect("carries it 25 m");
+    }
+    let ahead: Vec<Vec3> = places
+        .iter()
+        .map(|p| Vec3::new(p.x + CARRIED, 0, p.z))
+        .collect();
+    arrived(dir, souls, &ahead).await;
+    crew[1]
+        .act("carry:set-down", carry, BTreeMap::new())
+        .await
+        .expect("set down");
+    for s in crew.iter_mut() {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("a leave is always accepted");
+    }
+    (places, bodies)
+}
+
+/// `C6_WAIT=<s>` seconds after the Souls sign in (a page opens on the world) and `C6_HOLD=<s>` after the scene, to
+/// watch it; else none.
+async fn hold(var: &str) {
+    if let Some(s) = std::env::var(var).ok().and_then(|v| v.parse::<u64>().ok()) {
+        tokio::time::sleep(Duration::from_secs(s)).await;
+    }
+}
+
+/// The C6 clip's driver (0.135 C6; run by hand, never in CI): the tall carry on a world another process runs, while the
+/// old page watches it. `C6_WORLD=<file>` names `{"gateway": its ws URL, "dir": the world's folder, "facts": its facts
+/// file, "souls": [["s_<hex>-<n>", "<token>"], ...four], "at": [x m, z m]}`, the 6.1 m upright's place, and
+/// `"ns"`, its Souls' verbs' namespace (default `dev`, run.sh's world).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "drives a world another process runs: the C6 clip"]
+async fn c6_clip_four_souls_carry_the_6_m_upright_on_a_running_world() {
+    let Ok(file) = std::env::var("C6_WORLD") else {
+        return;
+    };
+    let w = json::parse(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let text = |k: &str| w.get(k).and_then(json::Value::str).unwrap().to_owned();
+    let facts = std::fs::read_to_string(text("facts")).unwrap();
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, tall) = (im.nodes["ground"], im.nodes["tall-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let dir = PathBuf::from(text("dir"));
+    let (mut souls, mut crew) = (Vec::new(), Vec::new());
+    for s in w.get("souls").and_then(json::Value::arr).unwrap() {
+        let pair = s.arr().unwrap();
+        let (scope, n) = pair[0]
+            .str()
+            .and_then(|s| s.strip_prefix("s_"))
+            .and_then(|s| s.split_once('-'))
+            .unwrap();
+        let scope: [u8; 16] = from_hex(scope).unwrap().try_into().unwrap();
+        let id = Id::new(Scope(scope), n.parse().unwrap()).unwrap();
+        let token = Token::parse(pair[1].str().unwrap()).unwrap();
+        let mut soul = Soul::connect(&text("gateway"), id, lineage, &token).await;
+        // Past every sequence its own client sent: a sequence the gateway has answered gets that answer again.
+        soul.sequence = 1 << 40;
+        crew.push(soul);
+        souls.push(id);
+    }
+    let metres = |v: &json::Value| match v {
+        json::Value::Int(n) => i64::try_from(*n).unwrap() * M,
+        _ => panic!("metres"),
+    };
+    let at = w.get("at").and_then(json::Value::arr).unwrap();
+    let at = Vec3::new(metres(&at[0]), 0, metres(&at[1]));
+    hold("C6_WAIT").await;
+    let ns = w.get("ns").and_then(json::Value::str).unwrap_or("dev");
+    let from = answers::now();
+    carry_tall(&mut crew, &souls, &dir, ground, tall, at, ns).await;
+    // The span a recorder plays back on the old page (`scene.mjs --span --from .. --to ..`), world µs.
+    println!(
+        "C6 clip: four Souls carried the 6.1 m upright 25 m, from {from} to {}",
+        answers::now()
     );
 }

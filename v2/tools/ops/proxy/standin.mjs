@@ -8,7 +8,8 @@
 // BACK script, and again (must fail).
 // Production's names, paths and ports are swapped for the scratch host's; the scripts run as written otherwise, with a
 // systemctl that reloads the scratch Caddy and runs the unit's ExecStart.
-//   BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <v2/web build> --today-web <apps/web build> [--keep]
+//   BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <the install's page folder> --today-web <apps/web build> [--keep]
+// (the page folder: the body files, v2/tools/ops/release/bodies.ts; the pairing card is the --today-web build's pair.html)
 // Exit 0 when every step comes out as it should.
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -94,7 +95,7 @@ const names = (text) => text
   .replace(/^https:\/\/souls\.game \{/m, `http://127.0.0.1:${port.old} {`)
   .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`).replaceAll('localhost:7330', `localhost:${port.agents}`)
   .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls/models', join(dir, 'models')).replaceAll('/var/lib/souls-routes', routes).replaceAll('/usr/bin/node', process.execPath)
-  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release)
+  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production/apps/web/dist', todayWeb).replaceAll('/srv/sim-worlds/production', release)
   .replaceAll('/run/souls-routes-input/worlds.json', worldRoutes);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(here, f), 'utf8')));
 writeFileSync(join(src, 'routes.mjs'), readFileSync(join(here, 'routes.mjs')));

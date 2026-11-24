@@ -10,6 +10,9 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 | `routes.mjs` | run by `souls-routes.timer` | the active map from the directory and trusted placement metadata: `/var/lib/souls-routes/slugs/<slug>` and `sitemap.xml` |
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |
+| `soul-game-moved.caddy` | `/etc/caddy/sites/soul-game.caddy` | `soul.game` while only some worlds have moved: the live file plus each moved world's paths to its own gatewayd (below) |
+| `moved-install.sh` | not installed | installs `soul-game-moved.caddy` over the live file, or undoes it |
+| `moved-standin.mjs` | not installed | proves `soul-game-moved.caddy` and `moved-install.sh` on this machine |
 
 Since 0.132 Core (F4) the front door keeps the old home: today's launcher serves `/`, sign-in and account, the site's
 own pages and every world's page and client files, a switched world's included (the launcher writes the v2 stream into
@@ -22,14 +25,65 @@ sign-in bridge); `cdn-trust.snippet` stays in the global options.
 
 ## Prove it locally
 
-Needs `caddy` on the path, a built `v2/web` (`npx vite build` in `v2/web`) and a built `apps/web`:
+Needs `caddy` on the path, a built `apps/web` (it holds the pairing card, `pair.html`) and the install's page folder
+(the body files, `node v2/tools/ops/release/bodies.ts --from <prepared body assets> --out <folder>`):
 
 ```sh
-BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web v2/web/dist --today-web apps/web/dist
+BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <folder> --today-web apps/web/dist
 ```
 
 It runs `front-check.mjs` with everything up (every point), then with today's launcher stopped (the poster, the stream,
 the gateway and pairing), then once with the two systems' worlds swapped, which must fail. Exit 0 when all three come out as they should.
+
+## While only some worlds have moved (24 Nov 2026)
+
+Production's front door was the live 0.131 F0 file (`/s/*` to the viewers' origin, everything else to today's
+launcher), so a Soul could not pair with a world that had moved: `node eden.mjs pair https://soul.game/w/eden/` failed
+`pair-world-routing`. [`soul-game-moved.caddy`](soul-game-moved.caddy) is that live file plus, for each moved world, the
+agent paths (`v2/ws`, `creator-token`, `entries`, uploads) straight to **that world's own gatewayd** with `/w/<slug>`
+stripped, the bootstrap (to 7320) only for a world the routes file marks canonical (the origin refuses any other's), and, for everyone, the site-level pairing paths (`/pair`, `/v1/pair/*`,
+`/v1/agent/account[/*]`, to the directory and the release's card); today's client pairs at `/w/<slug>/v1/agent/pair`,
+which stays with the launcher. The agents' relay (`souls-agents`) is not used: production runs none, and 7330 is
+Eden's gatewayd.
+
+The moved worlds are the lines in its site block, one per world: `import moved-world <slug> <port>` for a world
+`canonical: true` in `/var/lib/souls/routes/worlds.json` (bootstrap and agent paths move), `import moved-gateway <slug>
+<port>` for any other (only the agent paths move; its bootstrap stays on the launcher, so `eden.mjs pair
+https://soul.game/w/<slug>/` pairs only once the world is canonical). `<port>` is the port of the world's `gateway` there.
+`bash moved-install.sh lines` prints the right line for every world in that file, with the reason.
+
+The release owner, on the production host, from a copy of this folder (a checkout, or the live release once it
+carries it):
+
+```bash
+sudo bash moved-install.sh install   # back up, write, caddy validate, reload, check from loopback; undoes itself on a failure
+sudo bash moved-install.sh undo      # the original /etc/caddy/soul-game.caddy.before-moved back, validated, reloaded
+```
+
+It reads the launcher's port and `trusted_proxies` from the original file, and stops with nothing changed unless the
+directory answers its pairing card, and for each line worlds.json names that port as the world's gateway, the line's
+kind matches the world's `canonical`, the gatewayd there opens `/v2/ws` (101) and, for a canonical world, the bootstrap
+comes from the viewers' origin, and the release's `pair.html` is there. It loads each world's page config
+(`window.__simConfig` in `/w/<slug>/`) before and after. After the reload it checks through the front door each
+world's `/w/<slug>/v2/ws` (101, over HTTP/1.1), each bootstrap on the right side, and that every page that loaded
+before still loads its own world's config; on any failure it puts the replaced file back. Each install also keeps the file it replaced as `/etc/caddy/soul-game.caddy.before-last-install`.
+The undo in one line, without the script: `sudo cp -a /etc/caddy/soul-game.caddy.before-moved /etc/caddy/sites/soul-game.caddy && sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+
+Prove it locally (fake minds; caddy on the path; `cargo build -p directoryd -p gatewayd -p worldd -p testworld` and
+replica's package in `target/wasm-load/pkg`, or `DIRECTORYD=...` and `SOULS_REPLICA_PKG=...`):
+
+```sh
+node v2/tools/ops/proxy/moved-standin.mjs
+```
+
+It runs a scratch Caddy with a live-shaped file in front of two real new-engine worlds, `eden` and `hamlet`, each with
+its own gatewayd, and a stand-in for today's launcher; the install's front-door checks go over HTTPS with HTTP/2, as against soul.game. It shows production's two faults (`pair-world-routing`, then
+#4520's file answering `/w/eden/v2/ws` 404), that a line sending hamlet to Eden's gatewayd is refused, and then, after
+`install`: for each world a fresh pairing approved through the front door (`eden.mjs pair` for the canonical eden; hamlet, not
+canonical, through `pair.mjs`, its bootstrap staying on the launcher), its socket opening (101), and
+`act life:join` answered with its receipt, recorded by that world's gatewayd and not the other's; an old world's page,
+pairing, bootstrap and v2 paths, and Eden's page and `/v1/config`, still on the launcher; `undo` putting the live
+file back; and a file that fails `caddy validate` never installed.
 
 ## Switch (the release owner, on the production host, as root)
 

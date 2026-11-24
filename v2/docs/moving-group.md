@@ -68,6 +68,12 @@ The check (`Scene::check`) refuses, group by group: `group-no-leave-rule`, `grou
 | `rowed-with-passenger` | rower (drive slot), passenger | none | driver | rigid 3 × 1.2 m | at a stop | **E12**: the group is the vehicle; its mover runs on its own kind of region (water, or ground without stairs) |
 | `ride-on-track` | one body | none | track | rigid 2 × 1.5 m | at a stop | **N12**: the track is a formula of world time; riders' stored poses never change while it moves; boarding waits for the stop |
 
+**Walking hand in hand (0.135 R1)** is `pair-side-by-side` for a hold of two: the first member to walk leads, and the
+other walks to its place, the width of the kind's two stands to the side it stood on, square to the way the leader
+last walked, by its own `souls:follow` order with a place beside (`skills::close::Follow::beside`). The place is a
+target: a walker more than 1.5 m from it for 2 s lets go (`souls:follow-lost-place`). Its leave rule is the hold's:
+either member's leave, the other's own walk or act, or a restart (moves are not stored) ends it for both.
+
 No task needs a seventh idea: each is one of these with its own data (places, outline, speed, region, stops).
 
 ## What would quietly break this

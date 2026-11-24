@@ -40,8 +40,8 @@ fn loaded() -> Kinds {
         .collect();
     let names = kinds.load(&sources);
     assert!(kinds.refused().is_empty(), "refused: {:?}", kinds.refused());
-    // The rack's four kinds and the carry its crews are (0.135 C4).
-    assert_eq!(names.len(), 5);
+    // The rack's four kinds and the carry its crews are (0.135 C4), and the 6.1 m upright four carry (C6).
+    assert_eq!(names.len(), 6);
     kinds
 }
 

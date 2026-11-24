@@ -120,10 +120,10 @@ and a `systemctl` that plays systemd's part), and is release.sh's transport for 
 ```sh
 cd v2 && cargo build --release -p worldd -p gatewayd -p supervisor -p directoryd
 cargo build --release -p ops --bin deploy --bin gateway-upgrade
-bash tools/ops/install.sh bundle <install> target/release <page dist>
+bash tools/ops/install.sh bundle <install> target/release <page folder>  # the body files: tools/ops/release/bodies.ts
 bash tools/ops/release/scratch.sh up <dir> <install> <eden facts.json> ../content/kinds
 export RELEASE_SSH="bash tools/ops/release/scratch.sh ssh" RELEASE_TARGET=<dir>
-bash tools/ops/release/release.sh bundle <out> <sha> <version> <bins> <page dist> client
+bash tools/ops/release/release.sh bundle <out> <sha> <version> <bins> <page folder> client
 bash tools/ops/release/release.sh remote stage <out>
 bash tools/ops/release/release.sh remote move <sha>
 bash tools/ops/release/scratch.sh down <dir>

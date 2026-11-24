@@ -145,7 +145,10 @@ branch's commits, so a plain `git merge main` diffs from the old `main` fork poi
 never changed. The restack merge is 3-way against the child's fork point from the old base instead: files the child's
 own diff doesn't touch take the squashed content. The result is an ordinary merge commit, pushed as a fast-forward with
 `MERGE_TRAIN_TOKEN` (never forced), so CI runs on it. A real conflict pushes nothing; the child gets `needs:rebase`
-and a comment naming the files. To redo one by hand, run `gh workflow run restack.yml -f pr=<merged PR>`.
+and a comment naming the files. A PR whose head is in the merged branch's history with no commits of its own (an
+integration branch merged it, perhaps then dropped it) is not stacked on the merged PR: restack leaves it untouched
+and logs why, since a merge-forward would empty it. To redo one by hand, run
+`gh workflow run restack.yml -f pr=<merged PR>`.
 
 ## PR body
 

@@ -26,17 +26,21 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   The differences are against the backup itself: a thing row with no node, a count unlike today's bake, a loader note,
   or an upload no thing names (kept by hash). A backup that does not export is a row that is not clean, with the reason.
 
-A world whose own backup is not at hand (W2, 0.133): `node v2/tools/import-world/template-world.ts <dir> <slug> <template>`
-builds it from its repository template with today's server code and backs it up with today's tool, and prints the
-backup's path. It carries none of the creator's edits, so its row is the template's, not the world's.
+A world whose own backup is not at hand imports from its template's kept outputs on the asset CDN (#4281); the
+template builder that ran today's server code (`template-world.ts`) was removed with v1 (0.134 D3).
 
-Steps, if run apart: `node v2/tools/import-eden/export/export.ts --backup <file> --out <facts.json> [--map …]`, then
+A world whose meshes carry a footprint (walls, rooms and openings, as verdelis-eden's dome does) needs its asset store:
+`--assets <dir>` names the folder that holds its uploads' `<sha>.meta.json` (v1's `worlds/assets`), read-only. Without
+it such a backup is refused `footprint-missing`, never exported with each such mesh as one box over its bounds (which
+blocked the whole dome, entry and all, on 24 Nov). Only a solid or surface thing's colliders are written as solids, as
+v1's engine took them; scenery (decor) is walked through.
+
+Steps, if run apart: `node v2/tools/import-eden/export/export.ts --backup <file> [--assets <dir>] --out <facts.json> [--map …]`, then
 `cargo run -p import-world --release -- <facts.json>… [--json]` from `v2/`.
 
 ## Kept outputs: importing without v1 (0.133 R9a)
 
-The exporters (`v2/tools/import-eden/export/export.ts`, `bake/bake.ts`, `export/backup.ts` and `template-world.ts`
-here) read worlds through v1's packages: the world compiler, its core library, the mesh generators and the old server.
+The exporters (`v2/tools/import-eden/export/export.ts`, `bake/bake.ts` and `export/backup.ts`) read worlds through v1's packages: the world compiler, its core library, the mesh generators and the old server.
 0.134 deletes them. The Rust importers (`cargo run -p import-world` and `-p import-eden`) need only replica, so each
 world is exported once while v1 still exists, and only the exporters' outputs are kept.
 

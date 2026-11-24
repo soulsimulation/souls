@@ -1,0 +1,430 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stereoscope",
+  "owner": "thing",
+  "state": {
+    "card": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "focus": {
+      "n": 29,
+      "type": "int",
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      },
+      "unit": "count",
+      "min": 0,
+      "max": 4
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "fit_mountain_card": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "card",
+          "to": 1,
+          "event": "stereo_card_fitted"
+        }
+      ]
+    },
+    "fit_garden_card": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "card",
+          "to": 2,
+          "event": "stereo_card_fitted"
+        }
+      ]
+    },
+    "remove_card": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "no_card",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "card",
+          "to": 0,
+          "event": "stereo_card_removed"
+        }
+      ]
+    },
+    "focus_nearer": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "no_card",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "focus",
+          "at_most": 3,
+          "says": "near_stop"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "focus",
+          "by": 1,
+          "event": "stereo_focus_nearer"
+        }
+      ]
+    },
+    "focus_farther": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "no_card",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "focus",
+          "at_least": 1,
+          "says": "far_stop"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "focus",
+          "by": -1,
+          "event": "stereo_focus_farther"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:stereoscope",
+    "table": [
+      {
+        "part": "drawer",
+        "field": "focus",
+        "do": "slide",
+        "axis": "z",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          -120
+        ],
+        "over_us": 600000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            -100
+          ],
+          "size": [
+            300,
+            160,
+            50
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            980,
+            50
+          ],
+          "size": [
+            80,
+            30,
+            300
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1100,
+            120
+          ],
+          "size": [
+            260,
+            150,
+            12
+          ],
+          "tint": "paper",
+          "role": "drawer",
+          "when": "@card>0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -60,
+            1050,
+            -130
+          ],
+          "size": [
+            70,
+            70,
+            12
+          ],
+          "tint": "blue"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            1050,
+            -130
+          ],
+          "size": [
+            70,
+            70,
+            12
+          ],
+          "tint": "blue"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A stereo viewer: fit a paired picture card and slide its focusing rail.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "remove_first": "Remove the paired picture card before fitting another.",
+    "no_card": "Fit a paired picture card before moving its focus or removing it.",
+    "near_stop": "The focus rail is at its near stop; slide it farther.",
+    "far_stop": "The focus rail is at its far stop; slide it nearer.",
+    "howto_play": "Fit a captive mountain or garden picture card, slide the focus nearer and farther, then remove the card. The card field is 0 when empty, 1 for mountain and 2 for garden.",
+    "toy": "optical toy"
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": [
+      "toy"
+    ]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "fit_mountain_card"
+        },
+        {
+          "form": "focus_nearer"
+        },
+        {
+          "form": "focus_farther"
+        },
+        {
+          "form": "remove_card"
+        }
+      ]
+    }
+  }
+}

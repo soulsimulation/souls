@@ -8,7 +8,8 @@
 //
 //   --bin    worldd, gatewayd, directoryd and driver, release builds of the head under check
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
-//   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
+//   --card   the install's page folder (the body files, v2/tools/ops/release/bodies.ts); the pairing card (/pair) is the
+//            old page's pair.html (apps/web/dist, X2)
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
 //   --world-root  the world's folder's parent (default /dev/shm on Linux, else the out folder)
 //   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
@@ -42,7 +43,7 @@ const log = (s) => console.log(`check-0132: ${s}`);
 const need = (ok, what) => { if (!ok) { console.error(`check-0132: ${what}`); process.exit(2); } };
 for (const b of ['worldd', 'gatewayd', 'directoryd', 'driver']) need(existsSync(join(BIN, b)), `--bin has no ${b}`);
 need(existsSync(join(PKG, 'replica.js')), '--pkg has no replica.js');
-need(existsSync(join(CARD, 'src/pairing/card.html')), '--card has no src/pairing/card.html (build v2/web)');
+need(existsSync(join(repo, 'apps/web/dist/pair.html')), 'apps/web/dist has no pair.html (the pairing card: pnpm --filter @souls/web build)');
 need(existsSync(join(repo, 'apps/web/dist/index.html')), 'apps/web/dist is not built');
 need(existsSync(join(MARS_WEB, 'modular/humanoid/kit.json')), `--mars-web ${MARS_WEB} has no people's character set (pnpm build:viewer)`);
 need(existsSync(join(repo, 'tools/world-launcher/v2-switch.mjs')), 'tools/world-launcher/v2-switch.mjs is missing (#4210)');
@@ -131,7 +132,8 @@ writeFileSync(join(OUT, 'Caddyfile'), `{\n\tadmin off\n\tauto_https off\n\tpersi
   .replaceAll('https://soul.game', BASE).replaceAll('localhost:@@PRODUCTION_PORT@@', `127.0.0.1:${port.launcher}`)
   .replaceAll('localhost:7310', `127.0.0.1:${port.directory}`).replaceAll('localhost:7320', `127.0.0.1:${port.origin}`).replaceAll('localhost:7330', `127.0.0.1:${port.agents}`)
   .replaceAll('/usr/local/lib/souls/web', CARD).replaceAll('/var/lib/souls-routes/slugs', slugs)
-  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', join(repo, 'tools/world-launcher/deploy/caddy')));
+  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', join(repo, 'tools/world-launcher/deploy/caddy'))
+  .replaceAll('/srv/sim-worlds/production/apps/web/dist', join(repo, 'apps/web/dist')));
 await start('caddy', 'caddy', ['run', '--adapter', 'caddyfile', '--config', join(OUT, 'Caddyfile')], /serving initial configuration|server running/i, { env: { ...process.env, XDG_CONFIG_HOME: caddyDir, XDG_DATA_HOME: caddyDir } });
 
 // the switch (#4210's one command)
@@ -171,8 +173,8 @@ async function worldPage(video) {
   await page.addInitScript(() => {
     const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
     // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
-    // (it is written only after its end) and each pointer's quiet time plus the writer's 250 ms settle (worldd view_out
-    // rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
+    // (it is written only after its end) and each pointer's quiet time plus the writer's 100 ms settle (worldd view_out
+    // `SETTLE_US`, rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
     // came soonest after its world time; the least over the last minute maps one to the other, early by that sample's
     // own lag (tens to a few hundred ms). It never assumes the last part ended "now", which a quiet spell breaks.
     window.__worldAt = (pt) => { const xs = clock.filter((c) => c.at <= pt && c.at > pt - 60_000); return xs.length ? (pt - Math.min(...xs.map((c) => c.at - c.world / 1000))) * 1000 : null; };
@@ -187,7 +189,7 @@ async function worldPage(video) {
           // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
           const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
           if (p) clock.push({ at: now, world: p.to });
-          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 250_000 });
+          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 100_000 });
           if (clock.length > 600) clock.shift();
           if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
             framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })),
@@ -242,7 +244,7 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
     playDelayTicks: v.takes.playDelay,
     // G-late: when the first part after the send that touches this Soul reached the page, on the machine's wall clock (ms)
     arrivedAt: after.find((p) => (p.touched ?? []).some(mine))?.at ?? null,
-    // how long after its end each part of the step came, on the same mapping (worldd writes a part 250 ms after its end)
+    // how long after its end each part of the step came, on the same mapping (worldd writes a quiet stretch's part 100 ms after its end)
     partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
   };
 }, { soul, pt0 });
@@ -509,4 +511,11 @@ writeFileSync(join(OUT, 'table.md'), table + '\n');
 console.log(`\n${table}`);
 console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
+// The world's folder is removed on exit, so its worldd (which backs up its stream when stopped, R15) has ended first:
+// v2/tools/teardown/stop.mjs's rule, here because nothing outside v2/ imports from it (K14).
+await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? null : new Promise((ok) => {
+  const hard = setTimeout(() => p.kill('SIGKILL'), 15_000);
+  p.once('exit', () => { clearTimeout(hard); ok(); });
+  p.kill();
+})));
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

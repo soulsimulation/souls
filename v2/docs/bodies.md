@@ -279,11 +279,14 @@ it never substitutes another preset. Materials, maps and UV seams remain model-s
 
 The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
 files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
+Install and release publish them without building the page: `node v2/tools/ops/release/bodies.ts --from <prepared>
+--out <page folder>` runs the same check and writes the install's page folder (`assets/bodies/`), which the front
+door serves at `/assets/bodies/` (X2).
 Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
 comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
 and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.
 
-The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` records choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. A look the catalogue cannot carry (a custom humanoid look, an unknown definition, another URL form) is born in the default body, counted by reason in the import's row, and kept whole in the private account store for a later migration; it never silently becomes the default and never drops the Soul.
+The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` (removed in 0.134 D3) recorded choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. A look the catalogue cannot carry (a custom humanoid look, an unknown definition, another URL form) is born in the default body, counted by reason in the import's row, and kept whole in the private account store for a later migration; it never silently becomes the default and never drops the Soul.
 
 A humanoid look made in today's editor (core/humanoid@2 params: hair, skin, top, ...) rides on the default body as the
 body node's field 33 (`skills::wear::LOOK`, engine-reserved on bodies in `replica::fields`), the params as UTF-8 JSON.

@@ -1,0 +1,176 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cloth_bound_volume",
+  "owner": "thing",
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        25,
+        0
+      ]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        450
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      260,
+      52,
+      190
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "grip"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "grip"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:cloth_bound_volume",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            5,
+            0
+          ],
+          "size": [
+            260,
+            10,
+            190
+          ],
+          "tint": "cloth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            0
+          ],
+          "size": [
+            242,
+            30,
+            178
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            45,
+            0
+          ],
+          "size": [
+            260,
+            10,
+            190
+          ],
+          "tint": "cloth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -126,
+            25,
+            0
+          ],
+          "size": [
+            8,
+            50,
+            190
+          ],
+          "tint": "spine"
+        },
+        {
+          "kind": "box",
+          "at": [
+            12,
+            51,
+            0
+          ],
+          "size": [
+            85,
+            2,
+            60
+          ],
+          "tint": "label"
+        }
+      ],
+      "palette": {
+        "cloth": "#365f76",
+        "spine": "#244454",
+        "paper": "#eddfbd",
+        "label": "#d1ba80"
+      },
+      "tags": [
+        "bookbinding",
+        "book",
+        "item",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A portable blank cloth-bound book made at a binding bench.",
+    "bookbinding": "bookbinding",
+    "bound_book": "bound book",
+    "blank_book": "blank book"
+  },
+  "card": {
+    "text": "card",
+    "category": "bookbinding",
+    "synonyms": [
+      "bound_book",
+      "blank_book"
+    ]
+  }
+}

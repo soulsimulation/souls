@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-24 0.135 R1 (PR #4532) walking hand in hand. A new revision of the Engine v2 entry eden:hold_hands (content/kinds/together/hold_hands.json): only its card text changes, from 'leaving or walking lets go' to the new behaviour (the first to walk leads, the other walks beside; a leave, a sit or the other's walk lets go), so agents who read the card are told what the world does. An entry's reference is the hash of its bytes, so the old revision keeps its bytes. The world's pin of the activity kind (serve::activity_kinds) hashes its roles and stands only, so it does not change, and neither does the client's pin in v2/client/src/together/together.mjs. The pinned Soul Actions snapshot (v2/crates/replica/cases/form-rules-snapshot) keeps the old bytes until its next refresh; the card is not a rule, so no case changes. No findings: no budgets, samples or gap checks were relaxed.",
+  "findings": []
+}

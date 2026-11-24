@@ -8,7 +8,8 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
-//!   activity's first two members, the first in front. Only a load is lifted, a kind whose entry states its grips
+//!   activity's first two members, the first in front; each member after them carries beside it, at a grip between
+//!   (0.135 C5: one at each grip, `carry-crew-too-large`; nobody joins while it is lifted, `carry-lifted`). Only a load is lifted, a kind whose entry states its grips
 //!   (`lift-not-a-load`), and only in a carry, an activity whose kind has a slot 1 for a thing (`not-a-carry`, 0.135
 //!   C4). `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
@@ -155,6 +156,8 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
+    /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
+    fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
 }
 
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
@@ -313,7 +316,11 @@ impl Engine {
 
     /// The earliest due time of the activities and the boats on their loops (O2: when a sleeping world must be up).
     pub fn next_due(&self) -> Option<Micros> {
-        self.due.next_due()
+        // B10: an unstarted activity's expiry is due too, so a sleeping world wakes to end it.
+        match (self.due.next_due(), self.activities.next_expiry()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// The systems for a zone under `header`, checked by `rules`, with activities of `kinds`, minting ids of `scope`.
@@ -345,6 +352,7 @@ impl Engine {
             loads: BTreeMap::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
+            fixed: BTreeMap::new(),
         }
     }
 
@@ -511,6 +519,12 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
+                // 0.135 C5: nobody joins a crew's carry while its load is lifted; a replacement joins at a set-down.
+                if self.carries.contains_key(&offer)
+                    && e.offered(offer).is_some_and(|(k, _)| k.most > 2)
+                {
+                    return Err(refusal("carry-lifted", show(offer)));
+                }
                 // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
@@ -560,22 +574,10 @@ impl Engine {
                 {
                     return Err(refusal("crew.setting-in", show(activity)));
                 }
-                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is.
-                if let Some(mut carry) = self.carries.remove(&activity) {
-                    break_off(
-                        &mut carry,
-                        e,
-                        &mut self.mint,
-                        &mut tree,
-                        now,
-                        None,
-                        "souls:partner-left",
-                        Some((a.id, a.soul)),
-                    )?;
-                    if let Some(s) = self.asm.as_mut() {
-                        s.ended(activity);
-                    }
-                }
+                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is. A side carrier's
+                // with the load's crew left does not (C5).
+                self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
+                let e = &mut self.activities;
                 e.next = tree.next();
                 e.leave(
                     &mut tree,
@@ -733,6 +735,9 @@ impl Engine {
                     [f, b, ..] => (f.body, b.body),
                     _ => return Err(refusal("carry-needs-two", show(activity))),
                 };
+                // 0.135 C5: the members after the first two carry beside the load, in join order. Only a lift reads
+                // where they stand: a set-down never waits on a side whose body is gone.
+                let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
                     return Err(refusal("activity-not-started", show(activity)));
                 }
@@ -745,6 +750,10 @@ impl Engine {
                     if self.carries.contains_key(&activity) {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
+                    let sides = side_bodies
+                        .iter()
+                        .map(|b| stands(c, *b).map(|(_, at)| (*b, at)))
+                        .collect::<R<Vec<_>>>()?;
                     let board = param_id(&a.params, 1, "lift-needs-a-thing")?;
                     // 0.135 C2: a load whose kind has an entry is checked as it states, before anything is written.
                     let node = tree
@@ -805,6 +814,9 @@ impl Engine {
                         axis,
                         to.map(xz).zip(fixed.as_ref()),
                     )?;
+                    let on_plan: Vec<(Id, [i64; 2])> =
+                        sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
+                    load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
@@ -820,6 +832,10 @@ impl Engine {
                     );
                     carry.load = load;
                     carry.lift(&mut tree, now, f, k, transfer)?;
+                    carry.sides = sides
+                        .iter()
+                        .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
+                        .collect();
                     self.carries.insert(activity, carry);
                 } else {
                     let mut carry = self
@@ -855,6 +871,62 @@ impl Engine {
         Ok(())
     }
 
+    /// Carrier `body` leaves `activity` (a leave, or its retire), for `by`'s intent and Soul, before the leave is
+    /// written: a carry it is in breaks off, its load set down where it is (`souls:partner-left`, 0.135 C3), unless
+    /// it is a side carrier and the load's crew is left without it (0.135 C5), when the carry goes on with its place
+    /// empty and the world says so (`souls:carry-going-on`, `souls:carrier-left`).
+    fn carrier_leaves(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        body: Id,
+        now: Micros,
+        by: (Id, Id),
+    ) -> R<()> {
+        // One who is not a member of the carry leaves nothing it holds.
+        if !self
+            .activities
+            .members(activity)
+            .is_some_and(|m| m.iter().any(|m| m.body == body))
+        {
+            return Ok(());
+        }
+        let Some(mut carry) = self.carries.remove(&activity) else {
+            return Ok(());
+        };
+        if let Some(i) = carry.sides.iter().position(|(b, _)| *b == body)
+            && (carry.sides.len() + 1) as u64 >= carry.load.crew
+        {
+            carry.sides.remove(i);
+            let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+            let (load, e) = (carry.board, &mut self.activities);
+            self.carries.insert(activity, carry);
+            e.next = tree.next();
+            return e.load_word(
+                tree,
+                activity,
+                load,
+                "souls:carry-going-on",
+                "souls:carrier-left",
+                word,
+            );
+        }
+        break_off(
+            &mut carry,
+            &mut self.activities,
+            &mut self.mint,
+            tree,
+            now,
+            None,
+            "souls:partner-left",
+            Some(by),
+        )?;
+        if let Some(s) = self.asm.as_mut() {
+            s.ended(activity);
+        }
+        Ok(())
+    }
+
     fn take(&mut self, carry: &mut Carry, by: Option<(Id, Id)>) {
         let effects: Vec<Effect> = carry.log.parts.drain(..).flatten().collect();
         self.push(effects, by);
@@ -880,8 +952,16 @@ impl Engine {
     }
 
     /// The engine's part of a tick at `now`: its due timers (a leave let go, an offer or a pair lapsed), then one
-    /// sample of each carry between its carriers.
-    pub fn tick(&mut self, live: &Tree, c: &mut Controller, slots: &mut Slots, now: Micros) {
+    /// sample of each carry between its carriers, checked against the fixed geometry of its ground as the walkers'
+    /// ground `versions` have it (0.135 C7).
+    pub fn tick(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        slots: &mut Slots,
+        versions: &sim::ground::Versions,
+        now: Micros,
+    ) {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
@@ -910,6 +990,21 @@ impl Engine {
         }
         if let Some(tr) = tree.as_mut() {
             self.begin_moves(tr, c, now);
+        }
+        // B10: a creator's edit that removed a thing took the activity bound to it: its members are let go at once.
+        if self.activities.stranded(live) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for a in self.activities.release_gone(tr, c, now) {
+                self.carries.remove(&a);
+            }
+        }
+        // B10: an unstarted activity past its expiry that no offer or pair waits on (a proposal, or an offer a restart
+        // did not keep) ends, with its role links.
+        if self.activities.expiring(now) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            self.activities.expire(tr, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
         // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
@@ -992,8 +1087,20 @@ impl Engine {
                     gone.push(*activity);
                     continue;
                 };
-                // 0.135 C3: one stopped (or its connection is gone) while the other walked on.
-                if carry.stretched(f, k) {
+                // 0.135 C5: a side carrier with no body has left, as its ends.
+                let mut sides = BTreeMap::new();
+                for (b, _) in &carry.sides {
+                    if let Ok((_, at)) = stands(c, *b) {
+                        sides.insert(*b, at);
+                    }
+                }
+                if sides.len() < carry.sides.len() {
+                    gone.push(*activity);
+                    continue;
+                }
+                // 0.135 C3: one stopped (or its connection is gone) while the other walked on; C5, a side carrier
+                // drifted from its place.
+                if carry.stretched(f, k) || carry.side_apart(f, k, &sides).is_some() {
                     apart.push(*activity);
                 } else {
                     step.push((*activity, f, k));
@@ -1027,11 +1134,65 @@ impl Engine {
                     }
                 }
             }
+            // 0.135 C7: every step is checked against its ground's fixed geometry, read again only when the walkers'
+            // ground has changed since (`versions`, G3's); a step into it stops the carry, its load set down where its
+            // last sample had it.
+            let mut blocked = Vec::new();
             for (activity, f, k) in step {
-                if let Some(carry) = self.carries.get_mut(&activity)
-                    && let Err(r) = carry.step(tr, now, f, k)
-                {
-                    eprintln!("worldd: a carry's sample was not written: {r}");
+                let Some(carry) = self.carries.get_mut(&activity) else {
+                    continue;
+                };
+                let fresh = self
+                    .fixed
+                    .get(&carry.ground)
+                    .is_some_and(|(v, _)| v == versions);
+                if !fresh {
+                    match Fixed::of(tr, carry.ground) {
+                        Ok(g) => {
+                            self.fixed.insert(carry.ground, (versions.clone(), g));
+                        }
+                        Err(e) => {
+                            self.fixed.remove(&carry.ground);
+                            eprintln!("worldd: the carry {} stopped: {e}", show(activity));
+                            blocked.push(activity);
+                            continue;
+                        }
+                    }
+                }
+                let done = match self.fixed.get(&carry.ground) {
+                    Some((_, g)) => carry.step(tr, now, f, k, g),
+                    None => Err(refusal("carry-geometry", show(carry.ground))),
+                };
+                match done {
+                    Ok(()) => {}
+                    Err(r) if r.name == "carry-load-blocked" || r.name == "carry-geometry" => {
+                        eprintln!("worldd: the carry {} stopped: {r}", show(activity));
+                        blocked.push(activity);
+                    }
+                    Err(r) => eprintln!("worldd: a carry's sample was not written: {r}"),
+                }
+            }
+            for a in blocked {
+                let Some(mut carry) = self.carries.remove(&a) else {
+                    continue;
+                };
+                match break_off(
+                    &mut carry,
+                    &mut self.activities,
+                    &mut self.mint,
+                    tr,
+                    now,
+                    None,
+                    "souls:carry-blocked",
+                    None,
+                ) {
+                    // A crew's part set down is no longer its own (0.135 A2).
+                    Ok(()) => {
+                        if let Some(s) = self.asm.as_mut() {
+                            s.ended(a);
+                        }
+                    }
+                    Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
                 }
             }
         }
@@ -1163,25 +1324,8 @@ impl Engine {
             if !member {
                 continue;
             }
-            if let Some(mut carry) = self.carries.remove(&activity) {
-                let r = break_off(
-                    &mut carry,
-                    &mut self.activities,
-                    &mut self.mint,
-                    &mut tree,
-                    now,
-                    None,
-                    "souls:partner-left",
-                    Some((intent, soul)),
-                );
-                match r {
-                    Ok(()) => {
-                        if let Some(s) = self.asm.as_mut() {
-                            s.ended(activity);
-                        }
-                    }
-                    Err(r) => eprintln!("worldd: a carry was not set down at a retire: {r}"),
-                }
+            if let Err(r) = self.carrier_leaves(&mut tree, activity, body, now, (intent, soul)) {
+                eprintln!("worldd: a carry was not set down at a retire: {r}");
             }
             self.activities.next = tree.next();
             let left = self.activities.leave(
@@ -2139,7 +2283,7 @@ impl Engine {
     /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
     /// [`Engine::out`].
     pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
-        let Some((_, _, follower, _)) = self
+        let Some((_, _, follower, _, _)) = self
             .activities
             .following()
             .into_iter()
@@ -2178,7 +2322,20 @@ impl Engine {
 
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
-    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+    /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
+    /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    pub fn walked(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        body: Id,
+        intent: Id,
+        now: Micros,
+        walk: bool,
+    ) {
+        if walk && self.activities.lead(&self.moves, body) {
+            return;
+        }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
@@ -2239,8 +2396,9 @@ impl Engine {
         self.collect(None);
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and the width
+    /// of a place beside the leader (R1, hand in hand).
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
     }
 

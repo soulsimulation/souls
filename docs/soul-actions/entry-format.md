@@ -82,9 +82,13 @@ by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answ
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
-hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
+hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
+`state.hold_crew`'s, how many hold it standing: 0.135 C6, so a part one holds standing can take four to carry). Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
 too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
+load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
+(`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
 Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
 a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
 `content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and
@@ -149,6 +153,10 @@ On the new engine (0.135 G3), a role's `slots` (`in: "here"` may list them too) 
 activity starts: each slot's `stand` point, else the slot, in the activity's own frame. If all members stand on one
 floor, each walks to its stand and turns to its facing before the moves begin; a member farther than `within_mm`
 from their middle, or anyone when they stand on different floors or one is seated, stays where it is.
+On the new engine (0.135 B10), an activity offered or proposed at the entry's own thing (the offer's target is the thing)
+is that thing's: a Soul that offers in a role, or accepts or joins one, holds the role's link on the thing while it is a
+member, so the kind's forms that ask for it (`who: {"link": "<role>"}`, `"need": "linked"`) pass for it and refuse others
+by name. Its leave, or the offer's lapse or decline, takes the link down. Offered on the open ground, it links nothing.
 A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
 at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
 A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.

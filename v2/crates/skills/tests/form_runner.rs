@@ -292,7 +292,8 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
         Step::Sit {
             slot: 2,
             lie: true,
-            stand: false
+            stand: false,
+            on: None,
         }
     );
     assert_eq!(
@@ -300,7 +301,8 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
         Step::Sit {
             slot: 1,
             lie: false,
-            stand: false
+            stand: false,
+            on: None,
         }
     );
     assert_eq!(
@@ -308,7 +310,8 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
         vec![Step::Sit {
             slot: 1,
             lie: false,
-            stand: false
+            stand: false,
+            on: None,
         }]
     );
     assert_eq!(
@@ -316,7 +319,8 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
         vec![Step::Sit {
             slot: 1,
             lie: true,
-            stand: false
+            stand: false,
+            on: None,
         }]
     );
     let effects = skills::form_runner::bind_effects_in(&entry, "s", &BTreeMap::new(), &slots(1))
@@ -507,6 +511,7 @@ fn c24_link_timer_timed_set_and_reparent_bind_or_are_refused_by_name() {
     let put = Effect::Put {
         what: Of::This,
         slot: 1,
+        on: None,
     };
     assert_eq!(
         bind_effects_args(&entry, "a", &args).expect("binds"),
@@ -584,11 +589,15 @@ fn c33_a_standing_slot_binds_to_the_hand_off_and_a_seat_stays_refused() {
         slot,
         lie: false,
         stand: true,
+        on: None,
     };
+    // Into a standing slot the run rises first (0.135 E17): done at once for a body standing, the rise move for one in a
+    // slot of the thing, so its own walk is never walked by legs a slot holds.
     let steps = bind(&entry, "step_in").expect("binds");
-    assert_eq!(steps.len(), 2);
-    assert!(matches!(steps[0], Step::WalkTo { .. }));
-    assert_eq!(steps[1], stand(1));
+    assert_eq!(steps.len(), 3);
+    assert_eq!(steps[0], Step::Rise);
+    assert!(matches!(steps[1], Step::WalkTo { .. }));
+    assert_eq!(steps[2], stand(1));
     assert!(
         bind_effects(&entry, "step_in").expect("binds").is_empty(),
         "the reparent is the hand-off's"

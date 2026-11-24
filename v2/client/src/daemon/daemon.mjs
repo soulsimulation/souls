@@ -146,6 +146,7 @@ import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
+import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
@@ -1157,6 +1158,9 @@ function actsOf(words) {
       if (arg) {
         kinds ??= heldKinds();
         rows ??= rowsOf(copy);
+        // E14b: `<name>=<thing id>/<slot>` is a slot of another thing (a seat on a bench of the hall).
+        const other = otherSlot(arg[2], kinds, rows);
+        if (other) { args[arg[1]] = other; continue; }
         const take = kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
@@ -1197,10 +1201,11 @@ const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(
  * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
  */
 function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false, replaces }) {
-  state.sequence++;
-  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
+  // Encoded first: an intent that does not encode throws by name and takes no sequence.
+  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence + 1),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
     params ? JSON.stringify(params) : undefined, reflex, replaces === undefined ? undefined : BigInt(replaces));
+  state.sequence++;
   receiptSent(state.sequence, ranked, { target, replaces, words });
   if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
@@ -1559,9 +1564,7 @@ async function answer(req, conn = null) {
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
-      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
-      const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-      const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
+      const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
@@ -2150,12 +2153,17 @@ async function fireEntry(e, now, late, moment = false) {
     // Marked with its reserved sequence in the same write that takes it (sendIntent saves before it sends).
     state.schedule.marks[e.key] = { at: now, sequence: state.sequence + 1, late };
     const target = keep.map((c) => c.this ?? '').join(' ');
-    const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-    const { sequence } = sendIntent(keep.map((c) => c.verb), { target, args, basis: state.cursor });
+    // Its arguments as the act path sends them: a number, words or a slot of another thing as parameter 1 (E14b).
+    const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy));
+    const { sequence } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis: state.cursor });
     trace.write({ k: 'scheduled', id: e.id, seq: sequence, late });
     log(`schedule: ${e.id} sent as ${sequence} (${late} ms after its moment)`);
   } catch (err) {
-    state.schedule.marks[e.key] ??= { at: now, failed: err.code ?? 'refused' };
+    // A mark whose reserved sequence never went (its intent did not encode) is this failure's, by name.
+    const mark = state.schedule.marks[e.key];
+    if (!mark || (mark.sequence !== undefined && mark.sequence > state.sequence)) {
+      state.schedule.marks[e.key] = { at: now, failed: err.code ?? (/^[a-z][a-z.-]*$/.test(err.message) ? err.message : 'refused') };
+    }
     save();
     log(`schedule: ${e.id} not sent (${err.code ?? err.message})`);
   } finally {

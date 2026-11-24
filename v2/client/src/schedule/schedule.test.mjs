@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -15,6 +15,7 @@ import { promisify } from 'node:util';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { addEntry, due, onEvent, readSchedule, removeEntry } from './schedule.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -94,9 +95,8 @@ before(async () => {
 
 after(async () => {
   await ask({ op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
   if (process.env.R15_REPORT) console.log(JSON.stringify(report));
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('the file: entries added, listed and removed; a line that does not parse is named and inert', () => {
@@ -211,4 +211,24 @@ test('A3: after two hours off, the next answer lists what was missed', async () 
   assert.equal((await ask({ op: 'status' })).missed, undefined, 'listed once');
   const list = await souls('schedule', 'list');
   assert.deepEqual(['s90', 's91', 's92'].map((id) => list.entries.find((e) => e.id === id).status), ['missed', 'missed', 'sent']);
+});
+
+test('E14b: a scheduled act sends a slot of another thing as the act path does; one that cannot encode is failed by name', async () => {
+  await connected();
+  const seat = `${WORLD_SCOPE}-5`;
+  const good = await souls('schedule', 'add', 'in 2s', `r2:switch_on:${LAMP}`, `seat=${seat}/1`);
+  const bad = await souls('schedule', 'add', 'in 2s', `r2:switch_on:${LAMP}`, `seat=${seat}/99999999999999999999999`);
+  assert.equal(good.ok && bad.ok, true, JSON.stringify([good, bad]));
+  const before = JSON.parse(readFileSync(rt.state, 'utf8')).sequence;
+  const { mark } = await answeredAt(good.added.id);
+  const failed = await waitFor(() => Object.entries(marks()).find(([k]) => k.startsWith(`${bad.added.id}@`))?.[1]);
+  assert.equal(failed.sequence, undefined, 'the failed one holds no sequence');
+  assert.match(String(failed.failed), /^param/, JSON.stringify(failed));
+  assert.equal(JSON.parse(readFileSync(rt.state, 'utf8')).sequence, before + 1, 'only the sent one took a sequence');
+  const list = await souls('schedule', 'list');
+  const of = (id) => list.entries.find((e) => e.id === id);
+  assert.equal(of(good.added.id).status, 'sent');
+  assert.equal(of(good.added.id).sequence, mark.sequence);
+  assert.equal(of(bad.added.id).status, 'failed');
+  assert.equal(of(bad.added.id).failed, failed.failed);
 });

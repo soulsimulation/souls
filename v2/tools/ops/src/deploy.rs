@@ -87,7 +87,7 @@ fn main() {
         canary: Canary {
             window: Duration::from_secs(num("--window-s", 60)),
             // A real world loads its facts and replays its log (O18b, #3498): the world's own bound from its limits
-            // drop-in (world-limits.json, Eden's 600 s), else worldd@.service's TimeoutStartSec, 30 s.
+            // drop-in (world-limits.json, Eden's 600 s), else START_WITHIN, 120 s: a slow store's start (R17).
             start_within: supervisor::deploy::start_within(
                 std::fs::read_to_string(format!(
                     "/etc/systemd/system/worldd@{}.service.d/limits.conf",
@@ -101,7 +101,7 @@ fn main() {
         },
         window: num("--records", 200) as usize,
     };
-    let mut unit = Systemd(world.name());
+    let mut unit = Systemd::new(world.name());
     if rollback {
         let from = from_hex(get("--from").unwrap_or_else(|| fail("no --from build")))
             .unwrap_or_else(|e| fail(e));

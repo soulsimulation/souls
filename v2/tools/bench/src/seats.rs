@@ -116,6 +116,7 @@ fn hall(place: &Place, per: usize) -> Hall {
                     point,
                     facing: Quat::IDENTITY,
                     floor: floor_id(),
+                    more: Vec::new(),
                 })
                 .expect("a place");
             chairs.push(thing);

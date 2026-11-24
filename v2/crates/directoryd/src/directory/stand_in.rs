@@ -17,6 +17,10 @@ use ring::digest;
 /// The stand-in's key id; its secret is never checked, as only the real store holds one.
 pub const KEY_ID: &str = "stand-in-key";
 
+/// The `Retry-After` a refused 429 carries, s (R18): past the first of a patient read's own waits (2 s), so a test
+/// sees it honoured.
+pub const RETRY_AFTER_S: u64 = 3;
+
 type Objects = Arc<Mutex<BTreeMap<String, (String, Vec<u8>)>>>;
 
 /// How many reads are still to be held, for how long each, and what their target holds ([`StandIn::stall_reads`]).
@@ -34,8 +38,9 @@ pub enum Fail {
 /// How many write answers are still to be failed, and how ([`StandIn::fail_writes`]).
 type Fails = Arc<Mutex<(usize, Option<Fail>)>>;
 
-/// How many reads are still to be refused, with what status, and what their target holds ([`StandIn::refuse_reads`]).
-type Refused = Arc<Mutex<(usize, u16, String)>>;
+/// How many reads (or writes) are still to be refused, with what status, what their target holds, and the method
+/// refused ([`StandIn::refuse_reads`], [`StandIn::refuse_writes`]).
+type Refused = Arc<Mutex<(usize, u16, String, &'static str)>>;
 
 /// A running stand-in. Its address is [`StandIn::url`]; its threads end with the test process.
 pub struct StandIn {
@@ -84,10 +89,19 @@ impl StandIn {
     }
 
     /// Answers the next `n` reads (GETs: an object or a listing page) whose target contains `matching` with `status`
-    /// and no body, as a store refusing them does (R12); `n` 0 ends it.
+    /// and no body, as a store refusing them does (R12); `n` 0 ends it. A 429 carries `Retry-After: `[`RETRY_AFTER_S`],
+    /// as a rate-limited store's does (R18).
     pub fn refuse_reads(&self, n: usize, status: u16, matching: &str) {
         if let Ok(mut r) = self.refused.lock() {
-            *r = (n, status, matching.to_owned());
+            *r = (n, status, matching.to_owned(), "GET");
+        }
+    }
+
+    /// Answers the next `n` PUTs whose target contains `matching` with `status`, not applying them, as a store
+    /// refusing writes does (R15); `n` 0 ends it. It replaces any refusal of reads.
+    pub fn refuse_writes(&self, n: usize, status: u16, matching: &str) {
+        if let Ok(mut r) = self.refused.lock() {
+            *r = (n, status, matching.to_owned(), "PUT");
         }
     }
 
@@ -176,7 +190,7 @@ fn serve(
             }
         }
         let refuse = refused.lock().ok().and_then(|mut r| {
-            (method == "GET" && r.0 > 0 && target.contains(r.2.as_str())).then(|| {
+            (method == r.3 && r.0 > 0 && target.contains(r.2.as_str())).then(|| {
                 r.0 -= 1;
                 r.1
             })
@@ -197,6 +211,9 @@ fn serve(
             None => {}
         }
         let mut res = format!("HTTP/1.1 {code} X\r\ncontent-length: {}\r\n", answer.len());
+        if refuse == Some(429) {
+            res.push_str(&format!("retry-after: {RETRY_AFTER_S}\r\n"));
+        }
         if let Some(e) = etag {
             res.push_str(&format!("etag: \"{e}\"\r\n"));
         }
