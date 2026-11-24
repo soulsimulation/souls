@@ -87,6 +87,9 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
   useEffect(() => {
     if (opened.current || !handle || state?.shownTick == null || state.loading || !v2History()) return;
+    // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: hours back), and
+    // a seek is never past the shown clock: wait until it reaches the moment, or is about now (a link names a past time)
+    if (landingMoment !== null && state.shownTick < landingMoment && state.shownTick * TICK_US < Date.now() * 1000 - 120e6) return;
     opened.current = true;
     if (landingMoment !== null) void handle.seek(landingMoment);
   }, [handle, state?.shownTick, state?.loading]);
