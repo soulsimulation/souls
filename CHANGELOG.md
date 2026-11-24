@@ -6,6 +6,51 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.133.2 (2026-11-24)
+
+### Features
+
+- A Soul that takes a side in a game or a role in an activity offered at a thing can use that thing's forms for its role, and loses them when it leaves.
+- On the new engine a 6.1 m rack frame that one person holds standing takes four Souls to carry, laid flat, one at each grip.
+- A world's creator can recolour a thing, or one part of it, with `souls-god recolor`, and undo it; visitors see the new colour.
+- A world's creator can place a whole row or grid of things in one all-or-none edit, and run a build as a named session whose steps every edit carries.
+
+### Fixes
+
+- A world that opens on what was built now frames a large building whole, instead of starting with the camera against its wall.
+- A load carried together can no longer pass through walls or posts: when the next step would take it into one, the carry stops and the load is set down where it was, and the carriers are free to go another way.
+- A Soul riding a bicycle or sitting at the helm of a boat can steer it; passengers and people standing beside it still cannot.
+- A Soul's own client now agrees with the world that the rider at a bicycle's saddle or a boat's helm may steer it; a bicycle someone is carrying counts as the carrier's, not the rider's.
+- On the new engine, a Soul that leaves a sitting activity in the middle of sitting down is no longer stuck half sat: it ends up seated and can stand up again, and a Soul that leaves before reaching the seat leaves the seat free for others.
+- On the new engine, a Soul whose stand-up is refused (no floor to stand on beside its seat) gets the reason at once, instead of waiting out the action's time limit.
+- A Soul sitting in or standing inside a thing can use that thing from where it is: start a motorboat from its helm, move a chess piece from its seat, close a narrowboat's hatch from inside. Before, the Soul tried to walk to the control first and was refused because it was seated.
+- A Soul can attend a lecture on a bench in the hall and mount a collage piece on a board: forms that use a seat or a slot of another thing now work, and a Soul that walks away halfway is never left sitting on someone else's bench.
+- In a running world a Soul can now attend a lecture on a bench of the hall: it names the seat (`seat=<bench id>/left`) or lets the world pick a free one; one that stops before it sits is never left on the bench, one that stops after it has sat is told it is still seated, and getting up leaves the audience.
+- Two Souls can sleep in one tent, and up to six stand in a petanque circle: a slot that holds several bodies now takes as many as it declares, each in its own place in it, and refuses the next one by name. A Soul inside a phone box opens its door from inside, and a Soul on the stage asked to step up again gets the stage's own answer, instead of both being refused because the Soul's legs were held by its spot.
+- The new engine's content check sits a Soul back in a vehicle's drive seat, through the vehicle's own ride action, before it steers again after leaving mid-steer and standing up, so those checks test the vehicle rather than fail on a Soul that no longer holds it.
+- A Soul can pair with and join a world that has moved to the new engine, such as Eden, from its soul.game address, while every other world keeps working as before.
+- A Soul paired with a world on the new engine, such as Eden, can now join it from its soul.game address, and each world's Souls reach that world.
+- On a world on the new engine, a thing Souls carry together moves with them on the page, laid flat when they carry it so, and is lifted and set down when they do it.
+- A moved world whose old copy had gone to sleep no longer opens on "There is no world at this address".
+- A world that runs out of memory is restarted on its own; it can no longer take Eden or any other world down with it.
+- Agents driving a Soul get far fewer refusals: gestures and hand acts by name (`act wave`, `act pick_up <thing>`), a ranked list of places, an errand of several steps, other Souls found by their names, and a walk to a pond ending on its bank, with how far from its target it stood.
+- A world whose store is rate-limited at start waits and goes on, and a fault in its history shipping restarts it instead of leaving it unrecorded.
+- A Soul walking when the ground changes under it (a creator's edit on the open ground or in a building) gets its walk answered from where it stands, instead of standing unanswered.
+- A Soul's walk always gets an answer: when the world cannot plan it, the walk ends with the real reason (the ground changed, the planner failed for that Soul alone) instead of waiting forever or saying there is no way.
+- A moved world's page keeps working when its server cannot save the world's views to disk.
+- A quiet world with a moving thing, such as a balloon, now says Live on its page instead of staying on "Catching up".
+- A page left open on a new-engine world reloads itself when a release changes the world's stream to a format it cannot read, instead of freezing.
+- A Soul joining a world whose entry lies under a roof, like verdelis-eden's dome, is born on the floor there; a join that can find no place is refused by name instead of waiting forever.
+- A moved world's page opens without waking its sleeping old copy once that copy's views are published, and goes Live sooner.
+
+### Performance
+
+- A world page on the new engine no longer opens an unused connection to the old world, so arriving costs that world nothing.
+- A large world like Eden starts in about 3 to 5 seconds instead of about 15 to 20, so a restart or a release leaves it unanswered for far less time.
+- A creator placing, moving or removing a building in a big world no longer rebuilds the whole walking ground for ordinary-sized Souls: on Eden that part of the edit takes about 30 ms instead of 1.6 s.
+- A creator's building edit in a world with large or giant Souls no longer rebuilds their whole walking ground: on Eden any building, wall or path edit now takes under 0.1 s there instead of about 4.5 s.
+- A world page on the new engine loads its 2 MB engine file once and keeps it, instead of downloading it again on every visit.
+
 ## 0.133.1 (2026-11-24)
 
 ### Features
