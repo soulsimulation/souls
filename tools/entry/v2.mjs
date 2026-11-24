@@ -35,16 +35,10 @@ export default function v2Transport({build = true} = {}) {
     // and it defines every kind it is started with, a case's things from outside the family too.
     scene: ['hands', 'links', 'slots'], defines: true,
     // Its world keeps a T2 tree of the placed things (the runner's own doc): the case's hands, links and slots are
-    // set there as the case first acts, and from then on it decides on the world as it stands (`tree`). The one
-    // thing it lacks is the places a seat is taken through (B3), so a form that sits or lies cannot run here.
+    // set there as the case first acts, and from then on it decides on the world as it stands (`tree`). It keeps the
+    // places a seat is taken through (B3), registered as a served world registers them (0.135 E9), so a form that
+    // sits, lies or stands in a slot runs here.
     tree: true,
-    treeGap(entry, form) {
-      const f = entry?.forms?.[form];
-      const step = (f?.steps ?? []).find(s => ['sit', 'lie'].includes(s.step));
-      if (step) return `${form}'s ${step.step} step takes a seat through the world's places, which this world does not keep`;
-      // a vehicle's holder is its rider, seated through the same places
-      return entry?.vehicle && f?.who === 'holder' ? `${form} is for the vehicle's rider, seated through the world's places, which this world does not keep` : null;
-    },
     async start(loaded) {
       if (build !== 'no') {
         const r = spawnSync('cargo', ['build', '--release', '--quiet', '--manifest-path', '../tools/entry/v2/Cargo.toml', '--target-dir', 'target'], {cwd: V2, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe']});
