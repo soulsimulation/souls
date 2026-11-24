@@ -11,19 +11,27 @@
 //      that world's page to the launcher and its stream, agents and pairing to run.sh's programs.
 //   4. `v2-switch.mjs` binds the world to the new engine's stream (run.sh's routes file gains its entry).
 //
-//   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>]
+//   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>] [--create]
+//
+// --create (0.135 W1): no old world at all. The launcher makes worlds on the new engine (--create-on-new-engine): the
+// home page's New world goes to the directory's create as the signed-in person, and the world is served at /w/<slug>/
+// and listed once its route is registered. Locally the create and its placement are `localCreate` (below): the
+// directory's create contract (`POST /v1/worlds`, `world-starting` until placed), the creator the person the directory
+// signs in, and the world placed by routing its name like run.sh's world (its gateway and stream), as placement's
+// route does on soul.game (v2/tools/ops/place-created-world.mjs). It prints `ready <url>`: the home page.
 //
 // It prints `ready <url>` (the old page of the world), and runs until stopped (Ctrl-C or SIGTERM), which stops everything
 // it started. A recorder sets its picture's time of day with `?hour=HH:MM` on that address (the light only; the world's
 // clock is the engine's). Needs a built apps/web (`pnpm --filter web build`), the people's character set
 // (`pnpm build:viewer`, or --mars-web), caddy and what run.sh needs. Loopback only, fake minds, never a production world.
 import { spawn, execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { isMain } from '../../../lib/is-main.mjs';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { sleep } from '../../lib/clock.mjs';
-import { freePorts, startWorld, stopWorld } from './world.mjs';
+import { WORLD, freePorts, startWorld, stopWorld } from './world.mjs';
 import { REPLICA_PKG } from './seat.mjs';
 
 export const FRONT_FILE = join(REPO_ROOT, 'v2/tools/ops/proxy/soul-game.caddy');
@@ -82,8 +90,49 @@ export function genesisFor({ template, add = [], dir }) {
   return { template: join(templatesDir, `${name}.json`), name, templatesDir };
 }
 
+/** W1 locally: the directory's create (`POST /v1/worlds`, v2/crates/directoryd/src/worlds/list/http.rs) and placement in
+ *  one stand-in in front of run.sh's directory. A create is answered `world-starting` once for its key (placement under
+ *  way), then placed: its name routed like run.sh's world in the routes file (canonical) and activated in the front
+ *  door's `slugs` folder, the row's creator the principal run.sh's directory signs that test person in as. `GET
+ *  /v1/worlds` lists what was made; every other ask goes to run.sh's directory as it is. Only `template` is offered.
+ *  → {url, rows, close()} */
+export async function localCreate({ directory, routesFile, slugs, template, from = WORLD }) {
+  const rows = new Map(), placing = new Set();
+  const answer = (res, status, body) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+  const server = createServer(async (req, res) => {
+    const chunks = []; for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    if (req.url === '/v1/worlds' && req.method === 'GET') return answer(res, 200, { worlds: [...rows.values()].map((m) => m.row), templates: [template] });
+    if (req.url !== '/v1/worlds' || req.method !== 'POST') {
+      const r = await fetch(`${directory}${req.url}`, { method: req.method, headers: { ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}), 'content-type': req.headers['content-type'] ?? 'application/json' },
+        ...(body.length ? { body } : {}) }).catch(() => null);
+      if (!r) return answer(res, 502, { refused: 'directory-unreachable' });
+      return res.writeHead(r.status, { 'content-type': r.headers.get('content-type') ?? 'application/json' }).end(Buffer.from(await r.arrayBuffer()));
+    }
+    const person = /^Bearer test:(\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+    if (!person) return answer(res, 401, { refused: 'token-missing' });
+    let ask; try { ask = JSON.parse(body.toString('utf8')); } catch { return answer(res, 400, { refused: 'bad-json' }); }
+    if (ask.template !== template) return answer(res, 409, { refused: 'template-missing', detail: ask.template });
+    if (!/^(?!-)[a-z0-9-]{1,40}(?<!-)$/.test(ask.name ?? '')) return answer(res, 409, { refused: 'name-not-allowed', detail: String(ask.name) });
+    const made = rows.get(ask.name);
+    if (made) return made.key === ask.key ? answer(res, 200, { world: made.row, epoch: 1 }) : answer(res, 409, { refused: 'name-taken', detail: ask.name });
+    if (!placing.has(ask.key)) { placing.add(ask.key); return answer(res, 503, { refused: 'world-starting', detail: '' }); }
+    const who = await fetch(`${directory}/v1/account/test-sign-in`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: person }) }).then((r) => r.json(), () => null);
+    if (!who?.principal) return answer(res, 503, { refused: 'store-unreachable', detail: '' });
+    const routes = JSON.parse(readFileSync(routesFile, 'utf8'));
+    const next = { ...routes, worlds: { ...routes.worlds, [ask.name]: { ...routes.worlds[from], canonical: true } } };
+    writeFileSync(`${routesFile}.tmp`, JSON.stringify(next)); renameSync(`${routesFile}.tmp`, routesFile);
+    writeFileSync(join(slugs, ask.name), '');
+    const row = { name: ask.name, label: ask.label, template, creator: who.principal, made: Math.floor(Date.now() / 1000), ready: true };
+    rows.set(ask.name, { key: ask.key, row });
+    return answer(res, 200, { world: row, epoch: 1 });
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  return { url: `http://127.0.0.1:${server.address().port}`, rows, close: () => server.close() };
+}
+
 /** Brings the old page up on a new-engine world of `template` (with `add`'s things placed). → {page, slug, world, stop()} */
-export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, log = () => {} } = {}) {
+export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, log = () => {} } = {}) {
   dir = resolve(dir);
   const genesis = genesisFor({ template, add, dir });
   for (const [f, what] of [[join(REPO_ROOT, 'apps/web/dist/index.html'), 'apps/web is not built (pnpm --filter web build)'],
@@ -95,12 +144,14 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   mkdirSync(join(dir, 'logs'), { recursive: true });
   const procs = [];
   let world = null;
-  const stop = async () => { for (const p of procs.reverse()) kill(p); if (world) await stopWorld(world); };
+  let creating = null;
+  const stop = async () => { for (const p of procs.reverse()) kill(p); creating?.close(); if (world) await stopWorld(world); };
   try {
     world = await startWorld({ template: genesis.template, dir: join(dir, 'world'), history });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
     const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;
     const binding = join(dir, 'binding.json');
+    if (create) return await withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPort, binding, front, procs, stop, setMade: (m) => { creating = m; }, log });
     procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
       '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: world.directory } }));   // MS: My Souls reads a moved world's Souls there
     const made = await fetch(`http://127.0.0.1:${launcher}/__sim/worlds`, { method: 'POST', headers: { authorization: 'Bearer dev:Ada', 'content-type': 'application/json' },
@@ -137,10 +188,36 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   } catch (e) { await stop(); throw e; }
 }
 
+/** W1 (--create): the launcher with no old world, making worlds on the new engine through `localCreate`. Its binding
+ *  binds run.sh's own world (so the launcher has the routes file and client a world with no old twin is served with);
+ *  that world is not listed. → {page: the home page, slug: null, base, world, made, stop} */
+async function withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPort, binding, front, procs, stop, setMade, log }) {
+  const routesFile = join(world.dir, 'routes.json'), slugs = join(dir, 'slugs'), caddyDir = join(dir, 'caddy');
+  mkdirSync(slugs, { recursive: true }); mkdirSync(caddyDir, { recursive: true });
+  const made = await localCreate({ directory: world.directory, routesFile, slugs, template: genesis.name });
+  setMade(made);
+  const client = join(dir, 'client');
+  execFileSync(process.execPath, [CLIENT_BUILD, '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: REPO_ROOT, stdio: 'ignore' });
+  const routes = JSON.parse(readFileSync(routesFile, 'utf8'));
+  execFileSync(process.execPath, [SWITCH, '--binding', binding, '--slug', WORLD, '--stream', routes.worlds[WORLD].stream, '--routes', routesFile, '--client', client,
+    '--static', join(dir, 'static')], { cwd: REPO_ROOT, stdio: 'ignore' });
+  procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth', '--create-on-new-engine',
+    '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/,
+    { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: made.url } }));
+  const base = `http://127.0.0.1:${frontPort}`;
+  writeFileSync(join(dir, 'Caddyfile'), frontDoor(front, { base, launcher, directory: world.directory.replace('http://', ''), origin: world.origin.replace('http://', ''),
+    web: join(REPO_ROOT, 'v2/web/dist'), slugs, caddyDir }));
+  procs.push(await start('caddy', process.env.CADDY ?? 'caddy', ['run', '--adapter', 'caddyfile', '--config', join(dir, 'Caddyfile')], null,
+    { dir, env: { XDG_CONFIG_HOME: caddyDir, XDG_DATA_HOME: caddyDir } }));
+  for (let i = 0; i < 100; i++) { if (await fetch(`${base}/__sim/healthz`).then((r) => r.ok, () => false)) break; await sleep(100); }
+  log(`new worlds on the new engine: ${base}/ (New world, template ${genesis.name})`);
+  return { page: `${base}/`, slug: null, base, world, made, stop };
+}
+
 if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
-  const run = await startOldPage({ template: opt('template'), dir: opt('dir', join(REPO_ROOT, '.local/old-page', stamp)), marsWeb: opt('mars-web', MARS_WEB), log: (s) => console.error(`old-page: ${s}`) })
+  const run = await startOldPage({ template: opt('template'), dir: opt('dir', join(REPO_ROOT, '.local/old-page', stamp)), marsWeb: opt('mars-web', MARS_WEB), create: argv.includes('--create'), log: (s) => console.error(`old-page: ${s}`) })
     .catch((e) => { console.error(`old-page: ${e.message}`); process.exit(1); });
   const quit = async () => { await run.stop(); process.exit(0); };
   process.on('SIGINT', quit); process.on('SIGTERM', quit);
