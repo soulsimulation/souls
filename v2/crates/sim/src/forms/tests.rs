@@ -2175,6 +2175,7 @@ fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
         slot,
         lie: false,
         stand: false,
+        on: None,
     };
     b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
         .expect("started");
@@ -2266,6 +2267,7 @@ fn e11c_a_sit_refused_into_its_slot_ends_by_name_and_frees_the_seat() {
         slot,
         lie: false,
         stand: false,
+        on: None,
     };
     b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
         .expect("started");
