@@ -60,6 +60,17 @@ const TOUR_VIEWS: readonly TourView[] = [
   ...Object.entries(WORLD_PLACE_VIEWS).filter(([id]) => !['libraryroom', 'homecourtyard', 'roofseating', 'presentation', 'classroom'].includes(id)).map(([id, v]) => ({ id, label: v.label, p: v.p, target: v.target })),
   ...Object.entries(REGION_PLACE_VIEWS).map(([id, v]) => ({ id, label: v.label, p: v.p, target: v.target })),
 ];
+/** 0.135: the scene a world drawn from its stream gives the director when it has no old scene (every world made on the new
+ *  engine): the open ground's rectangle at ground level, with no solids of its own. What blocks or hides a shot there is
+ *  the drawn scenery (the terrain, buildings and things the entity layer draws: WorldRenderedVisibility). The same
+ *  object for the same rectangle, so the director sees one scene, not a new one each frame. */
+let openGround: { key: string; scene: SpatialScene } | null = null;
+export function openGroundScene(extent: readonly [number, number, number, number] | null): SpatialScene | null {
+  if (!extent || !(extent[0] < extent[2] && extent[1] < extent[3])) return null;
+  const key = extent.join(',');
+  if (openGround?.key !== key) openGround = { key, scene: { bounds: [extent[0], extent[1], extent[2], extent[3]], levels: [{ id: 0, y: 0, label: 'ground' }], surfaces: [], obstacles: [], links: [] } };
+  return openGround.scene;
+}
 /** A subject drawn smaller than this fraction of the frame height is "lost in the scenery". */
 const MIN_SUBJECT_FRACTION = .045;
 const EMPTY_SECONDS = 1.5;

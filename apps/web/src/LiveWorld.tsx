@@ -133,7 +133,7 @@ import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
 import { buildTakesClicks } from './v2-engine/creator-build.ts';
-import { WorldBroadcast, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
 let oldKit:OldSceneKit|null=null,oldKitLoad:Promise<OldSceneKit>|null=null;
@@ -1137,7 +1137,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // showed hollow ground)
       // P7f: nor before it knows whether Souls live here (a world without them stays on its arrival view; the welcome decides)
       if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !(arrivalPending && !s.conn.replica.souls.size)) {
-        const shot = broadcast.sample(at.entities, records, base, at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
+        const shot = broadcast.sample(at.entities, records, base ?? (entityLayer.active ? openGroundScene(entityLayer.groundExtent()) : null), at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
         if (shot?.pose) {
           camera.position.fromArray(shot.pose.position);
           controls.target.fromArray(shot.pose.target);
