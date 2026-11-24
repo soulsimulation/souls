@@ -671,6 +671,12 @@ pub trait Floors {
         &self,
         build: replica::kinds::sizes::Build,
     ) -> Option<&std::collections::BTreeMap<Id, Surface>>;
+
+    /// Whether `at` (µm, `node`'s frame) lies over water or wading ground on `node` (E11d: what a body climbing out of
+    /// a seat may pass over). None known here: never.
+    fn wet(&self, _node: Id, _at: Vec3) -> bool {
+        false
+    }
 }
 impl Floors for std::collections::BTreeMap<Id, Surface> {
     fn for_build(

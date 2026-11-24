@@ -158,6 +158,24 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
   then handed back onto the floor at the stand point, under the new claim's driver, and the seat is released. Left in
   the slot, it would be stuck, because a tick never steps a body in a slot.
+- **Climbing out** (E11d). A rise whose stand point, and the short search out from it (the body's own radius), are
+  all off the floor (a boat moored with its stand point's side away from the bank, the floor changed under a seat)
+  climbs out instead (`slots::climb_point`): to the thing's other stand points first, then the nearest floor within
+  3 m of the seat (`CLIMB_BOUND`). A target is a dry floor point within a step's height (220 mm) of the seat's own
+  floor, with no body standing within the landing room (315 mm). The straight line from the seat to it may pass off
+  the floor only over water or wading ground (`Floors::wet`, the map's wet pieces) or over the seat's thing's own
+  boxes (`Slots::footprint`, given by `worldd` from the tree), and once on the floor it stays on it. So it never
+  crosses a wall, a fence, a box or another hull. At the rise's contact the body is handed onto the floor's frame at
+  the seat's point, and the world carries it along that line at walking speed, as N10's walk-out does, waiting at the
+  end while someone stands there (#4215). It never appears there. The climb is named `climb-out`
+  (`slots::ClimbOut`), and the rise's run goes on once the body stands on the floor. With no such floor the rise ends
+  `off-surface` at contact. The body is not stuck: it stays seated with its seat held, does what a seated body does,
+  leaves the world as one does, and rises once there is floor near again. A restart that finds a body off its floor (killed mid-climb) places it where it was and
+  never refuses it, so one body never stops the others starting (`Slots::resume`). It climbs on by the climb's own
+  rule from where it is, over water or the boxes of the thing it is over (`climb-out`); else to the floor's nearest
+  legal point when that line is as clean (`resume-nearest`); else it is never carried through a cut
+  (`resume-held`): it is seated again in the seat it was climbing out of, so its next rise climbs out or is refused by
+  name, or, with no such seat free, left where it was, as a seat gone at a restart leaves a body. A thing's boxes are refreshed when an edit changes anything under it.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
