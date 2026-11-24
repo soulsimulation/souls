@@ -1598,6 +1598,8 @@ pub struct Acts {
     /// Each body seated by a form on a seat of another thing, with the links that form made from it (E14b): held
     /// with the seat, so a body that leaves the seat by any way but a form ([`Acts::untie`]) leaves them too.
     ties: BTreeMap<Id, Tie>,
+    /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
+    tied: bool,
 }
 
 /// A form's links from a body that sat it on a seat of another thing (E14b: a lecture's listener on the hall's
@@ -1654,6 +1656,20 @@ fn tie_of(entry: &Json, form: &str, all: &skills::form_runner::Args, node: Id) -
         links,
         seated: false,
     })
+}
+
+/// Every slot argument form `form` takes, as slot `slot` of `on`: what [`tie_of`] reads a restart's seat by.
+fn seat_args(entry: &Json, form: &str, on: Id, slot: u64) -> skills::form_runner::Args {
+    entry
+        .get("forms")
+        .and_then(|f| f.get(form))
+        .and_then(|f| f.get("takes"))
+        .and_then(Json::obj)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|(_, t)| t.get("type").and_then(Json::str) == Some("slot"))
+        .map(|(k, _)| (k.clone(), skills::form_runner::Arg::Slot(on, slot)))
+        .collect()
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -2142,6 +2158,59 @@ impl Acts {
             zone: header,
             held: None,
             ties: BTreeMap::new(),
+            tied: false,
+        }
+    }
+
+    /// The ties of the world as it stands, read once at the first tick (a restart's seated bodies, K18c): each body
+    /// seated in a seat of another thing that a link from it to a node holds, where that node's entry has a form that
+    /// sits the actor on a slot argument and makes that link from it. A tie a form made since is kept.
+    fn tie_from_state(&mut self, tree: &Tree, b: &Bodies) {
+        for (body, on, _) in b.slots.seated() {
+            if self.ties.contains_key(&body) {
+                continue;
+            }
+            let Some(slot) = b.slots.held_place(body).map(|p| p.place.slot) else {
+                continue;
+            };
+            for l in tree.links_at(body) {
+                let Some((ty, ..)) = tree.link(l.link) else {
+                    continue;
+                };
+                let node = l.other;
+                let Some(n) = tree.handle(node).and_then(|h| tree.node(h)) else {
+                    continue;
+                };
+                if node == on {
+                    continue;
+                }
+                let Some(entry) = entry_in(&self.kinds, tree, &n) else {
+                    continue;
+                };
+                let seats_with = entry
+                    .get("forms")
+                    .and_then(Json::obj)
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|(form, _)| {
+                        let all = seat_args(&entry, form, on, slot);
+                        tie_of(&entry, form, &all, node)
+                            .is_some_and(|t| t.links.iter().any(|x| x == ty.as_str()))
+                    });
+                if !seats_with {
+                    continue;
+                }
+                let t = self.ties.entry(body).or_insert(Tie {
+                    node,
+                    on,
+                    slot,
+                    links: Vec::new(),
+                    seated: true,
+                });
+                if t.node == node && !t.links.iter().any(|x| x == ty.as_str()) {
+                    t.links.push(ty.as_str().to_owned());
+                }
+            }
         }
     }
 
@@ -2154,6 +2223,10 @@ impl Acts {
             self.ties.clear();
             return Vec::new();
         };
+        if !self.tied {
+            self.tied = true;
+            self.tie_from_state(tree, b);
+        }
         let mut out = Vec::new();
         let forms = &self.forms;
         self.ties.retain(|body, t| {

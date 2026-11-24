@@ -221,6 +221,15 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
 
 /// The hall world started, served on a socket unless `lockstep` (then driven by [`answers::Event`]s).
 fn hall(tag: &str, lockstep: bool) -> (answers::World, Mem, Replica, std::path::PathBuf) {
+    hall_on(tag, lockstep, Mem::default())
+}
+
+/// [`hall`] on the log `store` holds: a world started again after a stop reads it back.
+fn hall_on(
+    tag: &str,
+    lockstep: bool,
+    store: Mem,
+) -> (answers::World, Mem, Replica, std::path::PathBuf) {
     let old = world();
     let header = hall_header(&old);
     let mut initial = Replica::restored(header.clone(), old.tree().frozen(), old.version());
@@ -248,7 +257,6 @@ fn hall(tag: &str, lockstep: bool) -> (answers::World, Mem, Replica, std::path::
             },
         );
     }
-    let store = Mem::default();
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.lockstep = lockstep;
     cfg.bodies = Some(Box::new(|_| hall_bodies()));
@@ -572,4 +580,81 @@ fn e14b_a_soul_that_leaves_mid_sit_is_free() {
         0,
         "walked off: not in the audience"
     );
+}
+
+/// A final answer, the tick a run stands at, and the bodies seated.
+type Ran = (Option<Result<Vec<u64>, String>>, i64, Vec<(Id, Id)>);
+
+/// Lockstep `world` run to `tick`, with `bytes` arriving at `at` first when given: its final answer, and the bodies
+/// seated at the end.
+fn run_to(world: &answers::World, tick: i64, arrive: Option<(i64, Vec<u8>)>) -> Ran {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some((at, bytes)) = arrive {
+        world
+            .events
+            .send(answers::Event::ArrivalAt {
+                tick: at,
+                bytes,
+                reply: tx,
+            })
+            .unwrap();
+    }
+    let (done, ran) = std::sync::mpsc::channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick, done })
+        .unwrap();
+    let ran = ran.recv().unwrap();
+    let answer = rx
+        .try_iter()
+        .filter(|f| answers::progress_of(f).is_none())
+        .map(|f| answer_in(&f).1)
+        .next();
+    (answer, ran.tick, ran.seated)
+}
+
+/// A listener seated on the hall's bench when the world restarts, then rising, leaves the lecture's audience: the
+/// world reads the seat's links back from the restarted world, so the lecture's `lapse` (which needs no listener)
+/// can still happen.
+#[test]
+fn e14b_a_listener_who_rises_after_a_restart_leaves_the_audience() {
+    let (world, store, initial, _) = hall("restart", true);
+    let attend = intent_bytes(
+        w1(),
+        1,
+        "eden:attend",
+        Some(hall_lecture()),
+        seat(east_bench(), 1),
+    );
+    let (done, last, seated) = run_to(&world, 300, Some((1, attend)));
+    println!("E14b before the restart: attend {done:?}, tick {last}, seated {seated:?}");
+    assert!(matches!(done, Some(Ok(_))), "attended: {done:?}");
+    assert_eq!(seated, vec![(w1(), east_bench())]);
+    world.stop();
+
+    let (world, store, _, _) = hall_on("restart", true, store);
+    let (_, now, seated) = run_to(&world, 0, None);
+    println!("E14b after the restart: tick {now}, seated {seated:?}");
+    assert_eq!(
+        seated,
+        vec![(w1(), east_bench())],
+        "seated again after the restart"
+    );
+    assert_eq!(listeners(&replay(&initial, &store), hall_lecture()), 1);
+    let rise = intent_bytes(w1(), 2, "eden:rise", None, BTreeMap::new());
+    let (risen, _, seated) = run_to(&world, now + 300, Some((now + 5, rise)));
+    let r = replay(&initial, &store);
+    println!(
+        "E14b rise after the restart: {risen:?}, seated {seated:?}, listeners {}",
+        listeners(&r, hall_lecture())
+    );
+    assert!(matches!(risen, Some(Ok(_))), "risen: {risen:?}");
+    assert!(seated.is_empty());
+    assert_eq!(parent(&r, w1()).0, Some(ground()), "standing");
+    assert_eq!(
+        listeners(&r, hall_lecture()),
+        0,
+        "no listener: the lecture's lapse needs none"
+    );
+    world.stop();
 }
