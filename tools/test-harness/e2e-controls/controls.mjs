@@ -37,9 +37,20 @@ export const siteProbes = (slugs) => [
   ...slugs.map((s) => ({ name: `${s} /v1/me unauthenticated`, method: 'GET', path: `/w/${s}/v1/me`, want: 401 })),
 ];
 
+/** Errors as printed: numbered paths collapsed (`/bundles/N/index` once, with a count), and a console "Failed to load
+ *  resource" dropped where its response is already listed. verdict.json keeps every error as seen. */
+export function brief(errors) {
+  const counts = new Map();
+  for (const e of errors) {
+    if (/^console: Failed to load resource/.test(e)) continue;
+    const k = e.replace(/\/\d+(?=\/|\s|$)/g, '/N'); counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts].map(([k, n]) => (n > 1 ? `${k} (x${n})` : k));
+}
+
 /** A world's verdict from its steps and the errors seen on its own origin. */
 export function verdict(slug, steps) {
-  const failures = steps.filter((s) => !s.ok).map((s) => `${s.name}: ${[s.detail, ...s.errors].filter(Boolean).join(' | ')}`);
+  const failures = steps.filter((s) => !s.ok).map((s) => `${s.name}: ${[s.detail, ...brief(s.errors)].filter(Boolean).join(' | ')}`);
   return { slug, ok: failures.length === 0, failures, steps };
 }
 
@@ -95,10 +106,13 @@ async function walkWorld(browser, origin, slug, dir) {
     const shot = `${String(steps.length + 1).padStart(2, '0')}-${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
     await page.screenshot({ path: join(dir, shot) }).catch(() => {});
     const s = { name, ok: ok && errs.length === 0, ms: Date.now() - t0, detail, errors: [...new Set(errs)], shot };
-    steps.push(s); console.log(`[${slug}] ${s.ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}${s.errors.length ? ` [${s.errors.join(' | ')}]` : ''}`);
+    steps.push(s); const shown = brief(s.errors);
+    console.log(`[${slug}] ${s.ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}${shown.length ? ` [${shown.join(' | ')}]` : ''}`);
     return s;
   };
   const fail = (m) => { throw Error(m); };
+  // Header buttons are clicked with `force`: the bar re-renders every tick, so Playwright's "stable" wait can time out
+  // on a working button. Each step then waits for its result (a menu, a moment, a form), so a dead button still fails.
   const escape = async () => { await page.keyboard.press('Escape'); await sleep(300); };
   const back = async (label) => {
     const before = await view();
@@ -117,7 +131,7 @@ async function walkWorld(browser, origin, slug, dir) {
     return `presentation ${(await view()).pres}`;
   });
   await step('Live', async () => {
-    await page.click('.live-pill', { timeout: 10000, force: true });   // the pill re-renders each tick: never "stable"
+    await page.click('.live-pill', { timeout: 10000, force: true });
     await page.locator('input[aria-label="Preview hour"]').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
@@ -152,12 +166,12 @@ async function walkWorld(browser, origin, slug, dir) {
     if (!await until(async () => (await view()).pres === 'live', 20000)) fail('never back to live');
   });
   await step('Broadcast menu', async () => {
-    await page.click('button[aria-label="Camera modes and help"]', { timeout: 10000 });
+    await page.click('button[aria-label="Camera modes and help"]', { timeout: 10000, force: true });
     await page.locator('[role=dialog][aria-label="Camera modes and help"]').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
   await step('Sound toggle', async () => {
-    await page.click('button[aria-label="Audio"]', { timeout: 10000 });
+    await page.click('button[aria-label="Audio"]', { timeout: 10000, force: true });
     const sw = page.locator('[role=dialog][aria-label="Audio"] [role=switch]').first();
     await sw.waitFor({ state: 'visible', timeout: 5000 });
     const a = (await sw.textContent())?.trim();
@@ -169,7 +183,7 @@ async function walkWorld(browser, origin, slug, dir) {
     return `${a} -> ${b} -> back`;
   });
   await step('Search (Explore)', async () => {
-    await page.click('.explore-open', { timeout: 10000 });
+    await page.click('.explore-open', { timeout: 10000, force: true });
     await page.locator('input.explore-search').waitFor({ state: 'visible', timeout: 5000 });
     return `${await page.locator('.explore-soul').count()} Souls listed`;
   });
@@ -179,11 +193,11 @@ async function walkWorld(browser, origin, slug, dir) {
     const places = page.locator('.explore-locations button');
     const n = await places.count();
     if (!n) return 'no places listed';
-    await places.first().click({ timeout: 10000 });
+    await places.first().click({ timeout: 10000, force: true });
     return `${n} places; clicked the first`;
   });
   await step('Follow a Soul', async () => {
-    if (!await page.locator('input.explore-search').isVisible()) await page.click('.explore-open', { timeout: 10000 });
+    if (!await page.locator('input.explore-search').isVisible()) await page.click('.explore-open', { timeout: 10000, force: true });
     const soul = page.locator('.explore-soul').first();
     await soul.waitFor({ state: 'visible', timeout: 10000 });
     const name = (await soul.textContent())?.trim();
@@ -193,7 +207,7 @@ async function walkWorld(browser, origin, slug, dir) {
   });
   await escape();
   await step('New Soul', async () => {
-    await page.click('.bring-agent-open', { timeout: 10000 });
+    await page.click('.bring-agent-open', { timeout: 10000, force: true });
     await page.locator('section.bring-agent').waitFor({ state: 'visible', timeout: 5000 });
     await escape();
   });
@@ -205,7 +219,7 @@ async function walkWorld(browser, origin, slug, dir) {
       }
       return false;
     }, 15000, 500);
-    await page.click('.account-sign-in', { timeout: 10000 });
+    await page.click('.account-sign-in', { timeout: 10000, force: true });
     if (await form()) { const u = new URL(page.url()); return `sign-in form at ${u.host}${u.pathname}`; }
     // the click may open the account panel first, with its own Sign in
     const again = page.locator('[role=dialog] button:has-text("Sign in"), dialog button:has-text("Sign in")').first();

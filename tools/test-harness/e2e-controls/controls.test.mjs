@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ALLOW, badResponse, siteProbes, verdict } from './controls.mjs';
+import { ALLOW, badResponse, brief, siteProbes, verdict } from './controls.mjs';
 
 test('the allow-list is empty: every same-origin 4xx/5xx fails', () => {
   assert.deepEqual(ALLOW, []);
@@ -21,6 +21,11 @@ test('a world fails on any failed step and names it', () => {
   assert.equal(v.ok, false);
   assert.deepEqual(v.failures, ['Back 1 min: never landed | 404 GET /s/x']);
   assert.equal(verdict('eden', [{ name: 'Live', ok: true, errors: [] }]).ok, true);
+});
+
+test('printed errors collapse numbered paths and drop the console copy of a listed response', () => {
+  assert.deepEqual(brief(['404 GET /s/w/dev/history/bundles/00020780/index', 'console: Failed to load resource: 404 ()', '404 GET /s/w/dev/history/bundles/00020779/index', '404 GET /w/eden/v1/world/seq']),
+    ['404 GET /s/w/dev/history/bundles/N/index (x2)', '404 GET /w/eden/v1/world/seq']);
 });
 
 test('release.yml: publish needs the controls job, which runs after the engine move', () => {
