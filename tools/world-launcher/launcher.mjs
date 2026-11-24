@@ -123,7 +123,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence, withV2Stream } from './cutover.mjs';
+import { cutoverFence, routeOnlyId, withV2Stream } from './cutover.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -132,9 +132,8 @@ import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
-import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
-import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
-import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
+import { defaultSiteLog, withInlineConfig, withWorldMeta } from './page-meta.mjs';
+import { addressKey, forwardedAddress } from './address-key.mjs';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -435,8 +434,8 @@ export async function openLauncher(cfg = {}) {
     return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0 };   // #2233 A3: state; status kept for old readers
   };
   async function worldsJson() {
-    await Promise.all(registry.worlds.map(refreshStats));
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(registry.worlds, (w) => stats.get(w.slug)?.souls ?? w.souls).map(describe), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    await Promise.all([...registry.worlds.map(refreshStats), cutover ? directoryWorlds() : null]);
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], (w) => stats.get(w.slug)?.souls ?? w.souls).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */
@@ -705,6 +704,52 @@ export async function openLauncher(cfg = {}) {
         headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${tok}` }) }, body: JSON.stringify(dev ? { test_person: tok.slice(4, 40) } : {}) });
       return r.ok ? directorySouls((await r.json())?.souls, moved, (w) => describe(w).url) : [];
     } catch { return []; }   // the directory unreachable: the moved world's Souls are not listed, every other world's are
+  }
+  // D2 (0.134): a world with no old twin, one the routes file routes to the new engine and no binding binds (cutover.mjs
+  // withRouteOnly). It has no registry row and no old process: the launcher serves its page (routeOnlyPage) and lists it.
+  // Its name, template and unlisted flag come from the directory's world list (`GET /v1/worlds`, asked at most every
+  // 10 s); while the directory has not answered, its slug names it.
+  const directory = { at: 0, rows: new Map(), asking: null };
+  function directoryWorlds() {
+    if (Date.now() - directory.at > 10_000 && !directory.asking) {
+      directory.asking = fetch(`${directoryUrl}/v1/worlds`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (Array.isArray(j?.worlds)) directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x])); }, () => {})
+        .finally(() => { directory.at = Date.now(); directory.asking = null; });
+    }
+    return directory.asking ?? Promise.resolve();
+  }
+  function routeOnlyWorld(slug) {
+    if (!slug || !SLUG_RE.test(slug) || registry.resolveSlug(slug) || !cutover?.routeOnly().includes(slug)) return null;
+    void directoryWorlds();   // (at most every 10 s; this answer uses what the directory last said)
+    const row = directory.rows.get(slug), made = Number(row?.made);
+    return { slug, worldId: routeOnlyId(slug), routeOnly: true, name: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : slug,
+      template: typeof row?.template === 'string' ? row.template : null, createdAt: Number.isFinite(made) && made > 0 ? (made < 1e12 ? made * 1000 : made) : 0,
+      unlisted: row?.unlisted === true, god: typeof row?.creator === 'string' };
+  }
+  const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
+  /** A world with no old twin as the world list shows it (the fields `describe` gives an old world's row). */
+  const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: w.unlisted, key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
+    basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
+    templateName: templateList({ all: true }).find((x) => x.id === w.template)?.name ?? w.template, createdAt: w.createdAt, owner: null, god: w.god,
+    entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
+  /** D2: the page of a world with no old twin: the old page (the web build's index.html) with the world's own title and
+   *  links, and the inline config an old world wrote (its name, path, sign-in) with the new engine's fields (cutover.mjs
+   *  v2Fields). The page then reads the stream and draws from it alone (0.135 W2); there is no old view to read. */
+  function routeOnlyPage(req, res, w, rest) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
+    const stream = cutover?.v2Stream(w);
+    if (!stream) return false;
+    let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
+    const p = auth?.public, base = `${publicOrigin}${wp(w.slug)}`;
+    const config = { authProvider: p ? 'clerk' : 'dev', authenticationOrigin: p ? publicOrigin : '', clerkPublishableKey: p?.clerkPublishableKey ?? '', clerkIssuer: p?.clerkIssuer ?? '',
+      ...(p?.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}), privyAppId: '',
+      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, worldId: w.worldId, worldKey: w.slug, worldEngine: true, worldName: w.name,
+      worldPath: wp(w.slug), authReady: true, devAuth: !p, build: BUILD, v2Stream: stream, ...(cutover.v2Fields(w) ?? {}) };
+    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name, url: `${base}/` }), config));
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new', ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) })
+      .end(req.method === 'HEAD' ? undefined : body);
+    return true;
   }
   /** `readBody` runs only once the owner is known (null: over the size limit). Every await is followed by a check that
    *  the world was not archived meanwhile, so nothing is written into a folder that has moved (the restore would refuse). */
@@ -1119,6 +1164,14 @@ export async function openLauncher(cfg = {}) {
     const w = registry.get(slug);
     if (cutover?.handle(req, res, w, url)) return;
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
+    const v2 = w ? null : routeOnlyWorld(slug);
+    if (v2) {
+      // D2: a world with no old twin: its page and the web build's files here; its client, bodies and refused writes
+      // answered by the fence above; anything else an old world would have answered is not here
+      const rest = url.pathname.slice(wp(slug).length) || '/';
+      if (routeOnlyPage(req, res, v2, rest) || worldPage(req, res, slug, v2, rest)) return;
+      json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
+    }
     if (!w) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
@@ -1432,7 +1485,7 @@ export async function openLauncher(cfg = {}) {
         return;
       }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
-      if (cutoverSlug && cutover?.handle(req, res, registry.get(registry.resolveSlug(cutoverSlug)), url)) return;
+      if (cutoverSlug && cutover?.handle(req, res, registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug), url)) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
       }
