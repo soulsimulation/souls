@@ -269,8 +269,11 @@ sleeps on, and one wandering or walking out starts its hour again.
 `node v2/tools/import-body/presets.ts --out <prepared> --media <checkout>` prepares every released Little Martian,
 Pip, monster, ghost, centaur and procedural duck, snail and dog. Ordinary uploads keep their existing size, texture
 and validation limits. Released scans require their exact manifest pin; authored examples require their existing
-normalized revision pin. Procedural models sample the released source into shared model bakes, rather than creating
-a rig for each Soul. Meshes and sampled clips determine the admitted Small, Standard, Large or Giant class.
+normalized revision pin. Procedural models were sampled once from the released source into shared model bakes, rather
+than creating a rig for each Soul. The released bakes and their simple meshes are installed byte for byte from their
+manifest pins (`v2/tools/import-body/released/`), never baked again: the rig's sines and exponentials differ in the
+last bit between machines, and a changed byte would change the preset's hash. A changed creature is a new preset.
+Meshes and sampled clips determine the admitted Small, Standard, Large or Giant class.
 
 A Soul uses `wear <preset-or-hash>`. Successful native admission records field32's content hash; refused fit keeps
 the previous body. Both live and history workers carry that field to the same crowd renderer. Only an absent hash
