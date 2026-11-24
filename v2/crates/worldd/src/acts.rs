@@ -1256,6 +1256,42 @@ impl Sight<'_> {
     }
 }
 
+impl Sight<'_> {
+    /// How far a body in slot `slot` of `thing` (numbered from 1 in its entry's order, as the places register them) is
+    /// from the thing's point `point`, µm: from the body's edge at the seat to the point across x and z, and in height
+    /// how far the point lies outside the body's reach above and below its feet, at the seat's stand point's height
+    /// (the floor it took the seat from), both in the thing's own frame, so where the thing is placed and how it is
+    /// turned change nothing. A point the entry does not declare is the thing itself, which the body is in: 0.
+    fn from_seat(&self, body: Id, thing: Id, slot: u64, point: &Name) -> Option<i64> {
+        let build = *self.builds.get(&body)?;
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        let entry = entry_in(self.kinds, self.tree, &n)?;
+        let points = entry.get("points");
+        let (_, seat) = entry
+            .get("slots")?
+            .obj()?
+            .get(usize::try_from(slot).ok()?.checked_sub(1)?)?;
+        let at = um(seat.get("at_mm"))?;
+        let feet = seat
+            .get("stand")
+            .and_then(Json::str)
+            .and_then(|s| um(points?.get(s)?.get("at_mm")))
+            .map_or(at.y, |p| p.y);
+        let Some(to) = um(points
+            .and_then(|ps| ps.get(point.as_str()))
+            .and_then(|p| p.get("at_mm")))
+        else {
+            return Some(0);
+        };
+        let radius = build.size.radius_mm() * 1000;
+        let h = flat([at.x, at.z], [to.x, to.z])
+            .saturating_sub(radius)
+            .max(0);
+        let reach = sim::slots::standing_reach(build);
+        Some(with_height(h, off_height(feet, reach, to.y, to.y)))
+    }
+}
+
 impl Reach for Sight<'_> {
     /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
     /// ([`Sight::to_thing`]), else to its place in the tree; across x and z, and in height beyond the body's reach
@@ -1283,6 +1319,11 @@ impl Reach for Sight<'_> {
             .and_then(|h| self.tree.node(h)?.parent());
         if parent == Some(body) {
             return Some(0);
+        }
+        // A body in a slot of the thing it acts on (a helm and its key, a chess seat and the board) reaches from its
+        // seat (0.135 E13): its controller pose is the seat's frame at zero, which measures nothing on any floor.
+        if me.pose.support == replica::pose::Support::Slot && me.pose.frame.node == target {
+            return self.from_seat(body, target, me.pose.frame.slot?, point);
         }
         let floor = sim::walk::node_of(me);
         if let Some(d) = self.to_thing(body, floor, a, target, point) {
