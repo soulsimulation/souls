@@ -26,8 +26,11 @@ export const mailboxSoul = (soul) => String(soul).replace(/^s_/, 'soul-');
 export const NO_NEW_FORM = { 'sit-ground': 'sitting on the ground', plan: 'a multi-step plan (out of 0.135)', 'walk-to': 'a walk to a point' };
 
 /** An old-client step in the new client's words: `act "walk to <words>"` or `act walk:<id>` → `act ?<words>` (found in
- *  the Soul's copy); `--wait <n>` → `--wait`; `{{prev.found[i].act}}` → the found thing's id (the new client's `find`
- *  names things, not acts: an id alone is a walk there). A verb with no new-engine form → `{ skip }`. */
+ *  the Soul's copy); `--wait <n>` → `--wait`; `{{prev.found[i].act}}` → `!` and the found thing's id, read as that
+ *  thing's own offer (`offerOf`: the new client's `find` names things, not acts, and an id alone is a walk there). Every
+ *  act waits for its ending: the old client's `act` answered with the world's verdict, the new one's only sends it
+ *  unless it waits, and a scripted seat closes its owner's message by that answer. A verb with no new-engine form →
+ *  `{ skip }`. */
 export function newWords(step) {
   const w = [...step];
   const verb = w[0] === 'act' ? String(w[1] ?? '').split(':')[0] : w[0];
@@ -38,8 +41,19 @@ export function newWords(step) {
   }
   const i = w.indexOf('--wait');
   if (i >= 0 && /^\d+$/.test(w[i + 1] ?? '')) w.splice(i + 1, 1);
-  return w.map((x) => String(x).replace(/\{\{prev\.found\[(\d+)\]\.act\}\}/g, '{{prev.found[$1].id}}'));
+  if (w[0] === 'act' && !w.includes('--wait')) w.push('--wait');
+  return w.map((x) => String(x).replace(/\{\{prev\.found\[(\d+)\]\.act\}\}/g, '!{{prev.found[$1].id}}'));
 }
+
+/** The act a thing offers of its own, as the old `find` gave it (`sit:<id>` for a bench): the first of `inspect`'s
+ *  offers that is not a plain walk there; the id alone (a walk) when it offers nothing else. */
+export async function offerOf(v2, id) {
+  const offers = (await v2.cli('inspect', id)).offers ?? [];
+  return offers.find((o) => o.name !== 'walk' && o.act)?.act ?? id;
+}
+
+/** A calendar entry's kind (`eden:calendar_entry@…`, content/kinds/calendar/entry.json). */
+export const calendarKind = (k) => /:calendar_entry(@|$)/.test(String(k ?? ''));
 
 /** A place path from a node's frames: the place names of its parents, innermost first. */
 export function placePathOf(nodes, id) {
@@ -64,8 +78,9 @@ export function newEngineModules({ log = () => {} } = {}) {
   const bodies = new Map(); // soul → its body's client id, as its own copy has it
 
   const provision = {
-    async startWorld({ genesis, dataDir, log: logFile, onSpawn }) {
-      world = await startV2({ template: genesis, dir: join(dataDir, 'v2'), log: logFile });
+    /** `facts`: an already exported genesis (the template's facts with things added), seeded instead of `genesis`. */
+    async startWorld({ genesis, facts = null, dataDir, log: logFile, onSpawn }) {
+      world = await startV2({ template: genesis, facts, dir: join(dataDir, 'v2'), log: logFile });
       onSpawn?.({ pid: world.pid });
       viewer = await streamViewer({ world });
       log(`new engine: ${world.page}`);
@@ -118,7 +133,7 @@ export function newEngineModules({ log = () => {} } = {}) {
           words = words.map((x) => x.replaceAll('{id}', m.id));
           const bound = bindPrev(words, prev);
           if (bound.error) { ok = false; note({ message: m.id, step: words, error: bound.error }); break; }
-          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w)));
+          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w.startsWith('!') ? offerOf(v2, w.slice(1)) : w)));
           const r = await v2.cli(...words);
           prev = r;
           const refused = r?.ok === false || r?.phase === 'refused';
@@ -129,6 +144,8 @@ export function newEngineModules({ log = () => {} } = {}) {
       }
       const self = {
         info, dir, rails: null, budgetRefused: null, skipped, commands: () => join(dir, s.id, 'commands.jsonl'),
+        /** The thin command with this seat's Soul, outside its script (another Soul's own step in an item). */
+        cli: (...words) => v2.cli(...words),
         async onboard() {
           v2 = await pairSeat({ world, dir, label: s.id, owner: s.id, name: info.soulName });
           info.body = (await v2.join()).body; info.soulId = v2.soul; bodies.set(v2.soul, info.body);
@@ -165,6 +182,17 @@ export function newEngineModules({ log = () => {} } = {}) {
       const speech = viewer.said().filter((x) => x.speaker === bodies.get(soulId) && !x.private && x.words)
         .map((x) => ({ atMs: Math.round(x.at / 1000), tick: null, text: x.words, channel: 'say', pos: null, posSource: null }));
       return { soulId, ok: true, place: placePath[0] ?? null, placePath, posture: body.slot != null ? 'seated' : 'standing', activity: null, speech, pos: [body.pos[0] / 1e6, body.pos[2] / 1e6], posSource: 'stream' };
+    },
+    /** The calendar as the public stream shows it: each posted notice (a calendar entry with a poster) and who is
+     *  coming (its `interested` links), each end named by the seat's Soul id when it is a seat's Soul or body. */
+    calendar() {
+      if (!viewer) return [];
+      const soulOf = (end) => [...bodies].find(([soul, body]) => body === end || mailboxSoul(soul) === `soul-${end}`)?.[0] ?? end;
+      return [...viewer.nodes.values()].filter((x) => calendarKind(x.kind)).map((x) => {
+        const id = x.id.replace(/\.(\d+)$/, '-$1'), links = viewer.links(id);
+        return { id, poster: links.filter((l) => l.type.endsWith(':poster')).map((l) => soulOf(l.end))[0] ?? null,
+          interested: links.filter((l) => l.type.endsWith(':interested')).map((l) => ({ soulId: soulOf(l.end) })) };
+      }).filter((it) => it.poster);
     },
   });
 

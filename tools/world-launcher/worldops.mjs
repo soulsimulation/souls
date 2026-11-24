@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { SNAPSHOT_EPOCH_FILE } from '../../apps/server/src/edge-snapshot.ts';
+/** An old world's snapshot key file (apps/server/src/edge-snapshot.ts): removed on restore, so it boots with a new key. */
+const SNAPSHOT_EPOCH_FILE = 'snapshot-epoch';
 
 export const ARCHIVE_SCHEMA = 'world-archive/1';
 const ID_RE = /^[a-z][a-z0-9-]{0,31}-\d{8}T\d{6}Z(-\d+)?$/;
