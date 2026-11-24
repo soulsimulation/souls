@@ -205,6 +205,8 @@ pub struct Bodies {
     pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
+    /// Each started walk's target, kept to its end: how far from it the walk ended is named there (0.133).
+    walked_to: BTreeMap<Id, Id>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
     /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
@@ -407,6 +409,7 @@ impl Bodies {
             ended: Vec::new(),
             short: BTreeSet::new(),
             took: BTreeMap::new(),
+            walked_to: BTreeMap::new(),
             logged: BTreeMap::new(),
             shown: BTreeMap::new(),
             hearing: Hearing::new(),
@@ -1033,6 +1036,21 @@ impl Bodies {
     }
 
     /// The candidate intent `id` took when it started, its rank in its ranked list and its target, read once.
+    /// How far from its target walk `id` ended, mm, once (0.133): the gap from where its body stands to the target's
+    /// shape (0 inside its area), or to a body it walked to; none for a walk to a point or one not known.
+    pub fn away(&mut self, id: Id, body: Id) -> Option<u64> {
+        let target = self.walked_to.remove(&id)?;
+        let (frame, at) = self.pose(body)?;
+        let gap = match self.pose(target) {
+            Some((f, p)) if f == frame => {
+                ((i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt()) as i64
+            }
+            Some(_) => return None,
+            None => select::gap(&self.town.tree, target, frame, at).ok()?,
+        };
+        u64::try_from(gap / 1000).ok()
+    }
+
     pub fn took(&mut self, id: Id) -> Option<(usize, Option<Id>)> {
         self.took.remove(&id)
     }
@@ -1061,6 +1079,9 @@ impl Bodies {
                 continue;
             }
             self.took.insert(id, (rank, ask.target()));
+            if let (Ask::Walk { .. }, Some(t)) = (&ask, ask.target()) {
+                self.walked_to.insert(id, t);
+            }
             match ask {
                 Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);

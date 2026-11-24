@@ -1,7 +1,8 @@
 //! Standing spots, approach, and a crowd around a point (Engine v2 N9, #2678): each body sent to a point gets its
 //! own legal place to stand near it, so thirty sent to one point form a crowd, not a knot.
 //!
-//! - **Places.** Round a target, on rings [`PITCH`] apart out to [`RINGS`] of them, `⌊2πk⌋` places on ring `k` (so
+//! - **Places.** Round a target, on rings [`PITCH`] apart out to [`RINGS`] of them (on out to [`OVERFLOW`], to the first
+//!   ring with one, when those have none: a pond's bank), `⌊2πk⌋` places on ring `k` (so
 //!   neighbours on a ring are at least about a pitch apart), the target itself ring 0. A place is kept only where the
 //!   target's node has walkable ground ([`Ground::stand`]), and never in a doorway or on a stair
 //!   ([`Ground::passage`]). That rule is about the engine's choice only: a body whose own order is to stay in a

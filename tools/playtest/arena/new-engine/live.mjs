@@ -49,8 +49,8 @@ export const kickoffText = (name) => `Your Soul ${name} lives in this folder; it
 /** An owner's message as `listen --follow` prints it, handed over as a finished background task's output. */
 export const messageText = (m) => `[background task] node eden.mjs listen --follow printed:\n${JSON.stringify({ kind: 'owner-message', id: m.id, text: m.text })}`;
 
-/** The commands that ask the world for something (a write), by their first words. */
-const WRITES = new Set(['act', 'say', 'shout', 'whisper', 'converse', 'together', 'give', 'set-down', 'stop', 'pray', 'now']);
+/** The commands that write: to the world (an act, words, a touch, a give, a calendar entry) or to the owner (`ack`). */
+const WRITES = new Set(['act', 'say', 'shout', 'whisper', 'converse', 'together', 'give', 'set-down', 'stop', 'pray', 'now', 'ack']);
 export function isIntent(words) {
   const [w0, w1] = words;
   if (WRITES.has(w0)) return !(w0 === 'converse' && ['list'].includes(w1));
@@ -59,6 +59,8 @@ export function isIntent(words) {
 }
 /** How one intent ended: `done` (the world's end), `sent` (taken, not waited for), or `refused` with its cause. */
 export function outcomeOf(answer) {
+  // a reply a client said it sent to a message already closed never reached the owner (0.133 Q1 review): refused
+  if (answer?.already === true) return { end: 'refused', cause: 'mail-closed' };
   if (!answer || answer.ok === false || answer.phase === 'refused' || answer.phase === 'failed') {
     let code = answer?.code ?? answer?.receipt?.code ?? answer?.refused ?? (answer?.raw ? 'no-answer' : 'unknown');
     // the world's own word for a refusal the client passes on as `refused` (`intent.text-not-a-name: wave`)
