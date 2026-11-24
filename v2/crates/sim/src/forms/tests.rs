@@ -1638,6 +1638,7 @@ fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
         slot,
         lie: false,
         stand: false,
+        on: None,
     };
     b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
         .expect("started");
@@ -2168,6 +2169,7 @@ fn e11b_a_leave_mid_sit_leaves_the_body_seated_or_the_seat_free() {
             slot,
             lie: false,
             stand: false,
+            on: None,
         };
         let limits = match when {
             "in-slot" => Limits::default(),
