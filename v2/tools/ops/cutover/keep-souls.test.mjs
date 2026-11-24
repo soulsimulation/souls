@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { main, readSave } from './keep-souls.mjs';
+import { classify, main, readSave } from './keep-souls.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
 const V2 = join(ROOT, 'v2');
@@ -38,7 +38,14 @@ test('setup: a fake host with three people\'s Souls, memories and relationships'
   hamlet.prepare('INSERT INTO edge_comms_turns VALUES (?, ?, ?, ?, 11, 2, ?)').run('x11-hamlet', 'c_1', 1, oriel, 'Lovely song.');
   hamlet.prepare('INSERT INTO edge_comms_turns VALUES (?, ?, ?, ?, 12, 3, ?)').run('x11-hamlet', 'c_1', 2, wren, 'Thank you, Oriel.');
   hamlet.prepare('INSERT INTO edge_follows_v1 VALUES (?, ?, ?)').run('x11-hamlet', 'r_2', JSON.stringify({ follower: wren, followed: oriel }));
-  hamlet.prepare('INSERT INTO edge_comms_subscriptions VALUES (?, ?, ?, ?, 0, 0, 0)').run('x11-hamlet', wren, 'https://hook.test/', 'webhook-secret-not-to-copy');
+  hamlet.prepare('INSERT INTO edge_comms_subscriptions VALUES (?, ?, ?, ?, 0, 0, 0)').run('x11-hamlet', wren, 'https://hook.test/bearer-url-not-to-copy', 'webhook-secret-not-to-copy');
+  // Sign-in, pairing and replay records that name the Soul: none of it is saved.
+  hamlet.exec(`CREATE TABLE account_approvals_v1 (id TEXT PRIMARY KEY, world_id TEXT, soul_id TEXT, request_nonce TEXT, poll_hash TEXT);
+    CREATE TABLE edge_idempotency_v1 (world_id TEXT NOT NULL, soul_id TEXT NOT NULL, route TEXT NOT NULL, key TEXT NOT NULL, hash TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE TABLE edge_receipts_v1 (world_id TEXT NOT NULL, receipt_id TEXT NOT NULL, soul_id TEXT NOT NULL, capability TEXT NOT NULL, phase TEXT NOT NULL, accepted_tick INTEGER NOT NULL, client_ref TEXT, device_id TEXT, created_at INTEGER NOT NULL);`);
+  hamlet.prepare('INSERT INTO account_approvals_v1 VALUES (?, ?, ?, ?, ?)').run('ap_1', 'x11-hamlet', wren, 'nonce-not-to-copy', 'poll-not-to-copy');
+  hamlet.prepare('INSERT INTO edge_idempotency_v1 VALUES (?, ?, ?, ?, ?, 200, ?, 0)').run('x11-hamlet', wren, '/v1/edge/act', 'idem-key-not-to-copy', 'idem-hash-not-to-copy', 'idem-body-not-to-copy');
+  hamlet.prepare('INSERT INTO edge_receipts_v1 VALUES (?, ?, ?, ?, ?, 10, ?, ?, 1)').run('x11-hamlet', 'r_1', wren, 'sing', 'done', 'client-ref-not-to-copy', 'device-not-to-copy');
   hamlet.prepare('UPDATE souls SET token_hash = ? WHERE id = ?').run('token-hash-not-to-copy', wren);
   hamlet.close();
   // The new system's account store as the directory keeps it (W1's schema, made by import-accounts from an empty set),
@@ -61,6 +68,16 @@ test('1: list names every live Soul by world, name and owner, and Gene\'s candid
   for (const [slug, w] of Object.entries(fx.worlds)) for (const s of w.live) assert.match(text, new RegExp(`${s.name}  ${s.id}  owner ${s.owner}`), `${slug} ${s.name}`);
   assert.doesNotMatch(text, new RegExp(fx.worlds['x11-hamlet'].retired[0]));
   assert.equal(run('save').code, 1, 'save refuses until Gene confirms');
+  const w = run('confirm', '--drop', 'acct_not_a_candidate', '--add', 'acct_nobody');
+  assert.match(w.text, /candidates for Gene's accounts:\n.*user_alice/, 'the candidates are printed before anything is written');
+  assert.match(w.text, /warning: --drop acct_not_a_candidate is not a candidate/);
+  assert.match(w.text, /warning: --add acct_nobody is no account/);
+  // The confirmation holds only for what was shown: another data folder, or a changed candidate list, is refused.
+  mkdirSync(join(DIR, 'other'), { recursive: true });
+  assert.match(run('save', '--data', join(DIR, 'other')).text, /refused: confirmed for the data folders/);
+  writeFileSync(join(ETC, 'data.conf'), `SIM_SITE_OWNERS=${fx.stage.alice},${fx.stage.dana}\n`);
+  assert.match(run('save').text, /refused: the candidates for Gene's accounts changed/);
+  writeFileSync(join(ETC, 'data.conf'), `SIM_SITE_OWNERS=${fx.stage.alice}\n`);
   const c = run('confirm');
   assert.equal(c.code, 0);
   assert.match(c.text, /2 real people's Souls/);
@@ -87,7 +104,8 @@ test('2: one private, checksummed save of each real person\'s Soul: identity, bo
   assert.deepEqual(wren.relationships.edge_comms_turns.map((t) => t.text), ['Lovely song.', 'Thank you, Oriel.']);
   assert.deepEqual(wren.relationships.people.map((p) => [p.name, p.turns, p.follows]), [['Oriel', 1, 1]]);
   const all = readFileSync(tar, 'utf8');
-  assert.doesNotMatch(all, /token-hash-not-to-copy|webhook-secret-not-to-copy/);
+  assert.doesNotMatch(all, /not-to-copy|hook\.test/, 'no token, secret, webhook URL, nonce, idempotency key, client ref or device id');
+  assert.equal(wren.memories.edge_receipts_v1[0].capability, 'sing', 'the receipt itself is kept');
   assert.ok(!Object.keys(files).some((f) => /Oriel|Bram/.test(JSON.stringify(files[f].identity?.soul?.name ?? ''))), 'no Soul of Gene\'s');
   // A changed byte is refused.
   const bad = join(DIR, 'bad.tar');
@@ -139,7 +157,21 @@ test('3 and 4: each copied into the new system unpaired, under its owner\'s acco
   const again = run('copy', '--store', STORE, '--import-accounts', IMPORT); // the newest save, as the host paste runs it
   assert.equal(again.code, 0, again.text);
   assert.match(again.text, /0 Souls copied .* 2 already there/);
+  // One staging folder per save, read back on the rerun (the same new ids), private.
+  const staged = readdirSync(OUT).filter((f) => f.startsWith('new-'));
+  assert.equal(staged.length, 1);
+  for (const f of ['', ...readdirSync(join(OUT, staged[0]), { recursive: true }).map(String)]) { const s = statSync(join(OUT, staged[0], f)); assert.equal(s.mode & 0o777, s.isDirectory() ? 0o700 : 0o600, f); }
+  // A missing import program is refused, not a crash.
+  const none = run('copy', '--store', STORE, '--import-accounts', join(DIR, 'no-such-program'));
+  assert.equal(none.code, 1); assert.match(none.text, /refused, nothing copied: no import-accounts program/);
   assert.deepEqual(rows(), once);
+});
+
+test('a Soul on the operator\'s list of Gene\'s Souls is always his, whoever the confirmed accounts are', () => {
+  const stages = { accounts: new Map([['acct_x', { issuer: 'i', subject: 'x' }]]), site: [],
+    worlds: [{ slug: 'w', file: 'f', souls: [{ id: 's_1', world_id: 'w', owner: 'acct_x', name: 'Kwyjibo', denied: true }, { id: 's_2', world_id: 'w', owner: 'acct_x', name: 'Other', denied: false }] }] };
+  assert.deepEqual(classify(stages, new Set()).map((r) => [r.name, r.who]), [['Kwyjibo', 'Gene'], ['Other', 'real']]);
+  assert.deepEqual(classify(stages, null).map((r) => r.who), ['Gene', '?']);
 });
 
 test('nothing in the old worlds was changed or deleted', () => {

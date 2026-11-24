@@ -8,10 +8,12 @@
 //        Every live Soul on every world, by world, name and owner, and the candidate list of Gene's own accounts (with
 //        why each is one). Once confirmed, the list marks Gene's Souls and the real people's.
 //   node keep-souls.mjs confirm [--data …]... [--out <dir>] [--drop <account>]... [--add <account>]...
-//        Gene confirms the candidates (less --drop, plus --add): <out>/gene-accounts.json, which save and copy need.
+//        Prints the candidates, then records them, the drops and adds and the data folders in <out>/gene-accounts.json
+//        (less --drop, plus --add). Souls on the operator's list of Gene's Souls are always his.
 //   node keep-souls.mjs save    [--data …]... [--out <dir>]
-//        One save of every real person's Soul (identity, body, memories, relationships) as <out>/save-<time>.tar, mode
-//        0600, with manifest.json (each file's SHA-256) inside and <tar>.sha256 beside it.
+//        Refuses unless confirmed for the same data folders and the same candidates. One save of every real person's
+//        Soul (identity, body, memories, relationships; only the tables and columns in SAVED) as <out>/save-<time>.tar,
+//        mode 0600, with manifest.json (each file's SHA-256) inside and <tar>.sha256 beside it.
 //   node keep-souls.mjs copy    [--saved <tar>, default the newest in <out>] [--out <dir>] [--args <directory.args>] [--store <accounts.sqlite>]
 //        [--import-accounts <program>] [--bodies <bodies.json>]
 //        Checks the save against its checksums, then copies each Soul into the new system's account store unpaired:
@@ -129,7 +131,8 @@ export function classify(stages, gene) {
   const genePeople = new Set([...(gene ?? [])].map((id) => personOf(stages, id)));
   const rows = [];
   for (const w of stages.worlds) for (const s of w.souls) {
-    const who = s.owner === OPERATOR ? 'operator test' : !gene ? '?' : gene.has(s.owner) || genePeople.has(personOf(stages, s.owner)) ? 'Gene' : 'real';
+    // A Soul on the operator's list of Gene's Souls is always his, whatever the confirmed accounts say.
+    const who = s.owner === OPERATOR ? 'operator test' : s.denied ? 'Gene' : !gene ? '?' : gene.has(s.owner) || genePeople.has(personOf(stages, s.owner)) ? 'Gene' : 'real';
     const a = stages.accounts.get(s.owner);
     rows.push({ world: w.slug, worldId: s.world_id, file: w.file, soul: s.id, name: s.name, owner: s.owner,
       signIn: a ? `${a.issuer} ${a.subject}` : null, email: s.email, who, pairable: !!a });
@@ -139,15 +142,58 @@ export function classify(stages, gene) {
 
 // --- Saving one Soul ------------------------------------------------------------------------------------------------
 
-const SOUL_COLUMNS = ['soul_id', 'from_id', 'to_id', 'saved_by_soul', 'creator_soul', 'sender', 'recipient', 'holder'];
-const SKIP_TABLES = new Set(['souls', 'users', 'snapshots', 'take_chunks', 'take_archives', 'brain_calls', 'prompts', 'schema_migrations', 'render_scene_captures', 'spend_hourly', 'paid_costs', 'narratives']);
-const SECRET_COLUMNS = /^(token_hash|token|secret|poll_hash|password|.*_secret)$/;
-const IDENTITY = /^(account_|travel_|soul_now|soul_profile|soul_token)/;
-const BODY = /^(edge_body|legacy_looks|soul_auto_portraits|body_)/;
-const RELATIONSHIPS = /^(edge_follows|edge_mail|talks$|edge_invite|edge_comms_conversations|edge_comms_turns|edge_comms_turn_names)/;
+/**
+ * What is saved: only these tables, and in each only these columns (an allowlist; a column a world added later is not
+ * saved). `by` are the columns that name the Soul; `owner` matches its owner's account; `mentions` matches a body
+ * that names it. Every other table is never read: in particular the sign-in and pairing tables (account requests,
+ * approvals, agent grants and logins, window codes, token tombstones), webhook subscriptions (their URL can be a
+ * credential), idempotency keys, model calls and snapshots.
+ */
+export const SAVED = {
+  identity: {
+    account_soul_memberships_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'account_id', 'attribution', 'created_at'] },
+    account_legacy_authority_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'legacy_owner_id', 'captured_at', 'revoked_at', 'revoked_reason'] },
+    travel_incarnations_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'traveller', 'home', 'state', 'at', 'updated_at'] },
+    soul_now_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'text', 'at'] },
+    soul_profile_photos_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'hash', 'image'] },
+  },
+  body: {
+    edge_body_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'state', 'doing', 'since', 'anchor_x', 'anchor_z', 'rule', 'slept'] },
+    legacy_looks_v1: { by: ['soul_id'], cols: ['world_id', 'seq', 'soul_id', 'entity_id', 'owner', 'body', 'rolled_back_seq'] },
+    soul_auto_portraits_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'look_key', 'hash', 'width', 'height', 'image'] },
+    body_definitions_v1: { by: ['creator_soul'], cols: ['asset_id', 'descriptor', 'creator_soul', 'owner', 'source_world', 'license', 'rights_confirmed', 'status', 'created_at'] },
+    body_collection_v1: { by: ['saved_by_soul'], cols: ['owner', 'asset_id', 'saved_by_soul', 'saved_at'] },
+    edge_body_owners_v1: { owner: true, cols: ['world_id', 'owner', 'asset_id', 'descriptor'] },
+  },
+  memories: {
+    events: { by: ['soul_id', 'author'], cols: ['world_id', 'seq', 'tick', 'kind', 'author', 'payload', 'at', 'soul_id'] },
+    edge_timeline_v1: { by: ['soul_id'], cols: ['world_id', 'receipt_id', 'soul_id', 'kind', 'tick', 'at', 'world_day', 'time', 'place_id', 'title', 'world', 'object_id'] },
+    edge_place_knowledge_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'place_id', 'how', 'visits', 'first_tick', 'last_tick'] },
+    edge_lore_visits_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'place_id', 'source', 'tick'] },
+    edge_reading_progress_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'book_id', 'content_version', 'next_passage'] },
+    edge_receipts_v1: { by: ['soul_id'], cols: ['world_id', 'receipt_id', 'soul_id', 'capability', 'phase', 'accepted_tick', 'started_tick', 'ended_tick', 'code', 'reason', 'created_at'] },
+    edge_outcomes_v1: { by: ['soul_id'], cols: ['world_id', 'receipt_id', 'soul_id', 'body'] },
+    edge_refusals_v1: { by: ['soul_id'], cols: ['world_id', 'at', 'tick', 'soul_id', 'verb', 'capability', 'code'] },
+    edge_written_objects_v1: { by: ['soul_id'], cols: ['world_id', 'id', 'soul_id', 'receipt_id', 'body'] },
+    edge_comms_speech: { by: ['soul_id'], cols: ['world_id', 'id', 'soul_id', 'tick', 'at', 'channel', 'text', 'heard_by'] },
+    edge_plans_v1: { by: ['soul_id'], cols: ['world_id', 'plan_id', 'soul_id', 'state', 'body', 'created_at', 'updated_at'] },
+    edge_personal_reminders_v1: { by: ['soul_id'], cols: ['world_id', 'soul_id', 'id', 'request', 'kind', 'due_world_minute', 'due_real_ms', 'state', 'created_at', 'created_tick', 'delivered_at'] },
+    edge_items_v1: { by: ['holder'], cols: ['world_id', 'item_id', 'state', 'holder', 'place_id', 'body', 'updated_at'] },
+    soul_inbox_queue_v1: { by: ['scope'], cols: ['world_id', 'scope', 'n', 'text', 'sent_at', 'delivered_at', 'acknowledged_at', 'reply', 'outcome', 'result', 'result_at'] },
+  },
+  relationships: {
+    edge_comms_turns: { by: ['soul_id'], cols: ['world_id', 'conversation_id', 'seq', 'soul_id', 'tick', 'at', 'text'] },
+    edge_comms_conversations: { mentions: true, cols: ['world_id', 'id', 'state', 'created_at', 'updated_at', 'body'] },
+    edge_mail_v1: { by: ['sender', 'recipient'], cols: ['world_id', 'id', 'sender', 'recipient', 'created_tick', 'body'] },
+    talks: { by: ['from_id', 'to_id'], cols: ['id', 'world_id', 'tick', 'at', 'from_id', 'to_id', 'body'] },
+    edge_follows_v1: { mentions: true, cols: ['world_id', 'receipt_id', 'body'] },
+    edge_invites_v1: { mentions: true, cols: ['world_id', 'invite_id', 'state', 'body', 'created_at'] },
+  },
+};
+const SOUL_ROW = ['id', 'world_id', 'owner', 'entity_id', 'name', 'description', 'created_at', 'retired_at', 'native'];
 
-/** A row as JSON: secrets dropped, bytes as base64. */
-const clean = (row) => Object.fromEntries(Object.entries(row).filter(([k]) => !SECRET_COLUMNS.test(k)).map(([k, v]) => [k, v instanceof Uint8Array ? { base64: Buffer.from(v).toString('base64') } : typeof v === 'bigint' ? Number(v) : v]));
+/** A row as JSON: bytes as base64. */
+const clean = (row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v instanceof Uint8Array ? { base64: Buffer.from(v).toString('base64') } : typeof v === 'bigint' ? Number(v) : v]));
 
 /** The entity's body in the world's latest snapshot (null: the default body). */
 function snapshotBody(db, worldId, entity) {
@@ -169,28 +215,26 @@ export function saveSoul(row, stages) {
   const db = open(row.file);
   try {
     db.exec('BEGIN');
-    const soul = clean(db.prepare('SELECT * FROM souls WHERE id = ?').get(row.soul));
+    const present = new Set(tables(db));
+    const pick = (t, cols) => { const have = new Set(columns(db, t)); return cols.filter((c) => have.has(c)).map((c) => `"${c}"`).join(', '); };
+    const soul = clean(db.prepare(`SELECT ${pick('souls', SOUL_ROW)} FROM souls WHERE id = ?`).get(row.soul));
     const names = new Map(db.prepare('SELECT id, name FROM souls').all().map((s) => [s.id, s.name]));
     const out = { identity: { soul, owner: { account: row.owner, signIn: row.signIn, email: row.email } }, body: { snapshot: snapshotBody(db, row.worldId, soul.entity_id) }, memories: {}, relationships: {} };
-    const like = `%${row.soul}%`;
     const conversations = new Set();
-    for (const t of tables(db)) {
-      if (SKIP_TABLES.has(t) || t.startsWith('sqlite_')) continue;
-      const cols = columns(db, t);
-      const by = SOUL_COLUMNS.filter((c) => cols.includes(c));
-      const where = [...by.map((c) => `"${c}" = ?`), ...(cols.includes('owner') ? ['"owner" = ?'] : []), ...(cols.includes('body') && !by.length ? ['"body" LIKE ?'] : []), ...(t === 'events' ? ['"author" = ?'] : [])];
+    for (const [part, saved] of Object.entries(SAVED)) for (const [t, spec] of Object.entries(saved)) {
+      if (!present.has(t)) continue;
+      const have = new Set(columns(db, t));
+      const by = (spec.by ?? []).filter((c) => have.has(c));
+      const where = [...by.map((c) => [`"${c}" = ?`, row.soul]), ...(spec.owner ? [['"owner" = ?', row.owner]] : []), ...(spec.mentions && have.has('body') ? [['"body" LIKE ?', `%${row.soul}%`]] : [])];
       if (!where.length) continue;
-      const args = [...by.map(() => row.soul), ...(cols.includes('owner') ? [row.owner] : []), ...(cols.includes('body') && !by.length ? [like] : []), ...(t === 'events' ? [row.soul] : [])];
-      let rows = db.prepare(`SELECT * FROM "${t}" WHERE ${where.join(' OR ')}`).all(...args);
+      const rows = db.prepare(`SELECT ${pick(t, spec.cols)} FROM "${t}" WHERE ${where.map((w) => w[0]).join(' OR ')}`).all(...where.map((w) => w[1]));
       if (t === 'edge_comms_turns') for (const r of rows) conversations.add(r.conversation_id);
-      if (!rows.length) continue;
-      const part = IDENTITY.test(t) ? 'identity' : BODY.test(t) ? 'body' : RELATIONSHIPS.test(t) ? 'relationships' : 'memories';
-      out[part][t] = rows.map(clean);
+      if (rows.length) out[part][t] = rows.map(clean);
     }
     // The whole of each conversation it spoke in: who else was there, and what they said.
     const people = new Map(), met = (id, how) => { if (!id || id === row.soul || !names.has(id)) return; const p = people.get(id) ?? { soul: id, name: names.get(id), turns: 0, mail: 0, talks: 0, follows: 0 }; p[how]++; people.set(id, p); };
     if (conversations.size) {
-      const all = db.prepare(`SELECT * FROM edge_comms_turns WHERE conversation_id IN (${[...conversations].map(() => '?').join(',')}) ORDER BY conversation_id, seq`).all(...conversations);
+      const all = db.prepare(`SELECT ${pick('edge_comms_turns', SAVED.relationships.edge_comms_turns.cols)} FROM edge_comms_turns WHERE conversation_id IN (${[...conversations].map(() => '?').join(',')}) ORDER BY conversation_id, seq`).all(...conversations);
       out.relationships.edge_comms_turns = all.map(clean);
       for (const r of all) met(r.soul_id, 'turns');
     }
@@ -343,10 +387,16 @@ export function copy({ tar, store, importAccounts, bodies, out, now = stamp() })
   const work = mkdtempSync(join(out, `.copy-${now}-`));
   try {
     backupSet(saved, join(work, 'set'));
-    const staging = join(out, `new-${now}`);
+    // One staging folder per save: a second copy reads back the ids the first minted, so each Soul keeps its new id.
+    const staging = join(out, `new-${saved.manifest.at}`);
+    if (!importAccounts || !existsSync(importAccounts)) throw new Error(`no import-accounts program at ${importAccounts}`);
     const r = spawnSync(importAccounts, [join(work, 'set'), '--out', staging, '--json', ...(bodies ? ['--bodies', bodies] : [])], { encoding: 'utf8' });
-    let row;
-    try { row = JSON.parse(r.stdout); } catch { throw new Error(`import-accounts: ${r.stderr || r.stdout}`); }
+    if (r.error) throw new Error(`import-accounts: ${r.error.message}`);
+    let row = null;
+    try { row = JSON.parse(r.stdout); } catch { /* reported below */ }
+    if (!row || typeof row !== 'object') throw new Error(`import-accounts (exit ${r.status}): ${r.stderr || r.stdout || 'no output'}`);
+    // The staging folder names people: the directory's only.
+    for (const f of ['', ...readdirSync(staging, { recursive: true }).map(String)]) { const p = join(staging, f); chmodSync(p, statSync(p).isDirectory() ? 0o700 : 0o600); }
     // Creators are kept only where the world's creator is a person's account; anything else must be clean.
     if (!row.accountsEqual || row.conflicts || row.worlds.some((w) => !w.equal || w.unowned)) throw new Error(`import-accounts was not clean: ${r.stdout}`);
     const brought = merge(join(staging, 'accounts.sqlite'), store);
@@ -391,9 +441,13 @@ function parse(argv) {
   return o;
 }
 
+function printCandidates(cands, gene, print) {
+  for (const c of cands) print(`  ${gene ? (gene.has(c.account) ? '[confirmed] ' : '[not confirmed] ') : ''}${c.account}  ${c.signIn ? `${c.signIn.issuer} ${c.signIn.subject}` : 'no sign-in'}  ${c.souls} Souls: ${c.why.join('; ')}`);
+}
+
 export function main(argv, print = console.log) {
   const o = parse(argv);
-  if (!['list', 'confirm', 'save', 'copy'].includes(o.cmd)) { print(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 26).join('\n')); return 2; }
+  if (!['list', 'confirm', 'save', 'copy'].includes(o.cmd)) { print(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, readFileSync(new URL(import.meta.url), 'utf8').split('\n').findIndex((l) => l.startsWith('import'))).join('\n')); return 2; }
   if (o.cmd !== 'list') { mkdirSync(o.out, { recursive: true, mode: 0o700 }); chmodSync(o.out, 0o700); }
   if (o.cmd === 'copy') {
     o.saved ??= readdirSync(o.out).filter((f) => /^save-\d{8}T\d{6}Z\.tar$/.test(f)).sort().map((f) => join(o.out, f)).at(-1);
@@ -417,15 +471,26 @@ export function main(argv, print = console.log) {
   const stages = readStages(o.data, { etc: o.etc ?? '/etc/sim-worlds' });
   const gene = confirmed(o.out);
   if (o.cmd === 'confirm') {
-    const ids = new Set([...candidates(stages).map((c) => c.account), ...o.add]);
+    const cands = candidates(stages), known = new Set([...stages.accounts.keys(), ...stages.worlds.flatMap((w) => w.souls.map((s) => s.owner))]);
+    print('keep-souls: the candidates for Gene\'s accounts:');
+    printCandidates(cands, null, print);
+    for (const d of o.drop) if (!cands.some((c) => c.account === d)) print(`keep-souls: warning: --drop ${d} is not a candidate; ignored`);
+    for (const a of o.add) if (!known.has(a)) print(`keep-souls: warning: --add ${a} is no account and owns no Soul in these worlds; added anyway`);
+    const ids = new Set([...cands.map((c) => c.account), ...o.add]);
     for (const d of o.drop) ids.delete(d);
-    writeFileSync(confirmedFile(o.out), JSON.stringify({ confirmedAt: new Date().toISOString(), accounts: [...ids].sort() }, null, 1) + '\n', { mode: 0o600 });
+    const record = { confirmedAt: new Date().toISOString(), data: [...o.data].sort(), candidates: cands.map((c) => ({ account: c.account, why: c.why })),
+      dropped: o.drop, added: o.add, accounts: [...ids].sort() };
+    writeFileSync(confirmedFile(o.out), JSON.stringify(record, null, 1) + '\n', { mode: 0o600 });
     print(`keep-souls: Gene's accounts confirmed (${ids.size}): ${[...ids].sort().join(', ')}`);
     print(`keep-souls: ${classify(stages, ids).filter((r) => r.who === 'real').length} real people's Souls; next: keep-souls.mjs save`);
     return 0;
   }
   if (o.cmd === 'save') {
     if (!gene) { print(`keep-souls: Gene's accounts are not confirmed yet: run list, then confirm (${confirmedFile(o.out)})`); return 1; }
+    // The confirmation holds only for what Gene was shown: the same data folders and the same candidates.
+    const record = readJson(confirmedFile(o.out), {}), now = candidates(stages).map((c) => c.account).sort();
+    if (JSON.stringify(record.data) !== JSON.stringify([...o.data].sort())) { print(`keep-souls: refused: confirmed for the data folders ${JSON.stringify(record.data)}, not ${JSON.stringify([...o.data].sort())}; run list and confirm again`); return 1; }
+    if (JSON.stringify((record.candidates ?? []).map((c) => c.account).sort()) !== JSON.stringify(now)) { print('keep-souls: refused: the candidates for Gene\'s accounts changed since confirm; run list and confirm again'); return 1; }
     const r = save({ stages, gene, out: o.out });
     print(`keep-souls: saved ${r.manifest.counts.souls} Souls of ${r.manifest.counts.people} people in ${r.manifest.counts.worlds} worlds to ${r.tar} (sha256 ${r.sha256})`);
     print(reconcile(readSave(r.tar), null));
@@ -434,7 +499,7 @@ export function main(argv, print = console.log) {
   const rows = classify(stages, gene), cands = candidates(stages);
   if (o.json) { print(JSON.stringify({ confirmed: gene ? [...gene] : null, candidates: cands, souls: rows }, null, 1)); return 0; }
   print(gene ? `Gene's accounts (confirmed): ${[...gene].sort().join(', ')}` : 'Gene\'s accounts: NOT CONFIRMED. Candidates (confirm with: keep-souls.mjs confirm [--drop <account>] [--add <account>]):');
-  for (const c of cands) print(`  ${gene ? (gene.has(c.account) ? '[confirmed] ' : '[not confirmed] ') : ''}${c.account}  ${c.signIn ? `${c.signIn.issuer} ${c.signIn.subject}` : 'no sign-in'}  ${c.souls} Souls: ${c.why.join('; ')}`);
+  printCandidates(cands, gene, print);
   print('');
   print(`Live Souls: ${rows.length} in ${stages.worlds.length} worlds (who: Gene, real, operator test, or ? until confirmed)`);
   for (const w of stages.worlds) {

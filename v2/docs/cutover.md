@@ -147,10 +147,14 @@ LAUNCHER_PORT=<today's launcher port>
 
 | Step | Command | Rehearsed |
 |---|---|---:|
+| 0a. List every live Soul in the old worlds, and the candidates for Gene's own accounts (W5) | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs list` | fake host |
+| 0b. Confirm Gene's accounts, once he has checked 0a's candidates (`--drop <account>` for one that is not his) | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs confirm` | fake host |
+| 0c. Save every other person's Soul to one private file | `node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs save` | fake host |
 | 1. Stop the directory (it holds its stores) | `systemctl stop souls-directory` | 0.0 s |
 | 2. Save who owns what to one file | `node $P/v2/tools/ops/cutover/souls-state.mjs save --world /var/lib/souls/worlds/worlds/$WORLD --out /var/lib/souls/saved/eden-owners-$(date -u +%Y%m%dT%H%MZ).tar` | 0.1 s |
 | 3. Wipe them (refused unless step 2's file holds them as they are) | `node $P/v2/tools/ops/cutover/souls-state.mjs wipe --saved /var/lib/souls/saved/eden-owners-<that time>.tar` | 0.1 s |
 | 4. Start the directory on fresh stores | `systemctl start souls-directory` | 0.1 s |
+| 4a. Copy 0c's Souls into the fresh stores, unpaired, with the directory stopped again; prints the list to reconcile | `systemctl stop souls-directory && node /srv/sim-worlds/production/v2/tools/ops/cutover/keep-souls.mjs copy; systemctl start souls-directory` | fake host |
 | 5. Switch Eden's old page | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --slug eden --stream $STREAM --routes /var/lib/souls/routes/worlds.json --client /usr/local/lib/souls/client --static $STATIC --port $LAUNCHER_PORT` | 1.4 s |
 | 6. Look in a real browser | open `https://soul.game/w/eden/`: the page draws Eden and reads `$STREAM` (the toolbar shows "Link to this moment") | 6.8 s |
 | 7. Switch back, on a stop condition | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --back --slug eden --port $LAUNCHER_PORT` | 1.5 s |
@@ -167,6 +171,18 @@ committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-
   each aside (`<file>.wiped-<time>`) and leaves an empty tokens file; the directory makes fresh stores when it starts
   and writes the tokens file again from them. Nothing is deleted, and the world is not touched: its Souls' bodies stay.
   Undoing it is renaming the files back with the directory stopped.
+- **Real people's Souls** (W5, `v2/tools/ops/cutover/keep-souls.mjs`): Gene's own Souls are tests and may go; every other
+  person's live Soul is kept. 0a to 0c only read the old worlds (`/srv/sim-worlds-data/production` and `legacy`) and
+  write to `/srv/sim-worlds-data/kept-souls/` (mode 0700): `gene-accounts.json` (the candidates shown, the drops and
+  the data folders; `save` refuses if the candidates have changed since), and `save-<time>.tar` with its `.sha256`.
+  The save holds each Soul's identity, body, memories and relationships, from an allowlist of tables and columns;
+  sign-in, pairing, webhook and idempotency records are never read. 4a checks the save's checksums. It then brings
+  the Souls in with `import-accounts`, using one staging folder per save (`new-<save time>`, so a rerun keeps the
+  same new ids), and adds them to the directory's account store under each owner's account, found by sign-in. They
+  carry no token and no pairing, so owners pair again. A rerun changes nothing. 4a prints, and keeps as
+  `reconcile-<time>.txt`, a plain list per person for Gene to reconcile. Run 4a after step 4, so the Souls land in
+  the fresh stores. Nothing in the old worlds is deleted. Tested on a fake host (`keep-souls.test.mjs`); not part of
+  the rehearsal.
 - **Several worlds** (W1): step 5 with another `--slug`, `--stream` and its own `--static` adds that world to the same
   binding; step 7's `--back --slug` turns back only that world.
 
