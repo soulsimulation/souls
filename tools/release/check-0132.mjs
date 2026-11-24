@@ -179,6 +179,10 @@ async function worldPage(video) {
     // B3-7: when the page's newest whole chunk moved on (its serverTick), by the page's clock
     const poll = () => { const t = window.__soulsV2?.takes; if (t && t.serverTick !== pub.at(-1)?.tick) { pub.push({ tick: t.serverTick, at: performance.now() }); if (pub.length > 400) pub.shift(); } requestAnimationFrame(poll); };
     requestAnimationFrame(poll);
+    // L1 measurement: frames whose play moment is at the newest chunk's end (b34-smooth's rule), after the first chunks
+    const hold = (window.__hold = { frames: 0, held: 0 });
+    const samp = () => { const t = window.__soulsV2?.takes; if (t && t.chunks.length > 2) { const play = t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30); hold.frames++; if (play >= t.chunks.at(-1).toTick) hold.held++; } requestAnimationFrame(samp); };
+    requestAnimationFrame(samp);
     window.Worker = class extends W {
       constructor(...a) {
         super(...a);
@@ -410,6 +414,8 @@ else if (ONLY.has('2')) {
     await sleep(3000);
   }
   report.lines[2].logSync = logSync();
+  // L1 measurement: every part's span and its arrival on the page, mapped to world time, and the page's hold share
+  report.lines[2].pageParts = await page.evaluate(() => { const now = performance.now(), w = window.__worldAt?.(now) ?? null; return { worldAtNowUs: w, nowMs: now, parts: (window.__parts ?? []).map((p) => [p.from, p.to, Math.round(p.at * 10) / 10]), hold: window.__hold }; }).catch((e) => String(e));
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
   report.clip = 'clip/';
