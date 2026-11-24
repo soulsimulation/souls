@@ -1127,7 +1127,8 @@ function actsOf(words) {
     const me = [...rows.values()].find((r) => r.soul === ME);
     return (body = me ? { id: me.id, forms: kinds[me.entry ?? me.kind]?.forms ?? {} } : { id: null, forms: {} });
   };
-  const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); return kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]?.forms ?? {}; };
+  // a thing's forms, or null when its kind is not in the copy (then nothing is read as the body's in its place)
+  const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); const k = kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]; return k ? k.forms ?? {} : null; };
   for (const w of words.map(String)) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
     // Q1: a bare id after a plain walk is the next fallback (a walk takes no thing), as the skill's ranked list has it
@@ -1158,7 +1159,8 @@ function actsOf(words) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
       // Q1: `<verb>:<thing>` where the thing offers no such act and the Soul's own body does, with a thing to take
       // (`pick_up:<apple>`, `wave_at:<their body>`, `point:<pond>`): that act of the body, on the thing
-      const f = HANDS[form] ?? form.replace(/-/g, '_'), mine = !verb.includes(':') && !MOVES.has(form) && !formsOf(tail)[form] && tail !== own().id ? own().forms[f] : null;
+      const theirs = !verb.includes(':') && !MOVES.has(form) ? formsOf(tail) : null;
+      const f = HANDS[form] ?? form.replace(/-/g, '_'), mine = theirs && !theirs[form] && tail !== own().id ? own().forms[f] : null;
       const take = mine ? Object.entries(mine.takes ?? {}).find(([, t]) => t?.type === 'thing' && !t.select)?.[0] : null;
       if (take && own().id) { out.push({ verb: `${NS}:${f}`, this: own().id, form: f, args: { [take]: tail } }); continue; }
       out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
