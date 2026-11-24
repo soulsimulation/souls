@@ -64,7 +64,7 @@ fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
 }
 
-/// Bodies where the controller has them, things where they were placed; every thing is within reach.
+/// Bodies where the controller has them, things where they were placed (for reach); every thing is within reach.
 #[derive(Default)]
 struct Snap {
     nodes: BTreeMap<Id, Vec3>,
@@ -79,8 +79,9 @@ impl Geometry for Snap {
             Ask::Distance { .. } => None,
         }
     }
+    /// A body where the controller has it. A thing is the tree's to answer (where it is, who holds it).
     fn read(&self, node: Id) -> Option<Seen> {
-        let position = *self.things.get(&node).or_else(|| self.nodes.get(&node))?;
+        let position = *self.nodes.get(&node)?;
         Some(Seen {
             id: node,
             kind: name("entry:node"),
@@ -164,6 +165,11 @@ struct Stage {
     called: BTreeMap<Id, String>,
     /// Entries the tree refused (T2's checks), kept in the log alone, as this runner kept every entry before.
     unapplied: u64,
+    /// What the tree refused of each run's entries, by intent: an act's answer carries it, so a pass means the tree
+    /// took the run.
+    refused_by: BTreeMap<Id, Vec<String>>,
+    /// What of the current case's scene the tree would not hold, until the case is cleared.
+    scene_refused: Vec<String>,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -297,6 +303,8 @@ impl Stage {
             souls_of: BTreeMap::from([(body, soul)]),
             called: BTreeMap::new(),
             unapplied: 0,
+            refused_by: BTreeMap::new(),
+            scene_refused: Vec::new(),
         };
         s.look();
         s
@@ -515,7 +523,22 @@ impl Stage {
         else {
             return;
         };
-        let v = match (def.get("type").and_then(J::str), to) {
+        let v = self.json_of(def, to);
+        let fname = fname.clone();
+        let key = self
+            .things
+            .iter()
+            .find(|(_, t)| t.id == node)
+            .map(|(k, _)| k.clone());
+        if let Some(t) = key.and_then(|k| self.things.get_mut(&k)) {
+            set_key(&mut t.fields, &fname, v);
+        }
+    }
+
+    /// A field's value as the case writes it, from the tree's: a bool by 0 or 1, an enum by its bare name, words by
+    /// their reference.
+    fn json_of(&self, def: &J, to: &Cbor) -> J {
+        match (def.get("type").and_then(J::str), to) {
             (Some("bool"), Cbor::Uint(u)) => J::Bool(*u != 0),
             (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
             (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
@@ -532,16 +555,41 @@ impl Stage {
                 .and_then(|id| self.words.get(&id))
                 .map_or(J::Null, |w| J::Str(w.clone())),
             _ => J::Null,
-        };
-        let fname = fname.clone();
-        let key = self
-            .things
-            .iter()
-            .find(|(_, t)| t.id == node)
-            .map(|(k, _)| k.clone());
-        if let Some(t) = key.and_then(|k| self.things.get_mut(&k)) {
-            set_key(&mut t.fields, &fname, v);
         }
+    }
+
+    /// A thing's fields as the tree holds them. A field the tree does not hold (a timed, schedule or list field, or
+    /// one K3 refused) is read from what the case set, since the tree cannot show it. None once it is gone.
+    fn tree_fields(&self, t: &Thing) -> Option<Vec<(String, J)>> {
+        let node = self.tree.node(self.tree.handle(t.id)?)?;
+        let state = self
+            .entry(&t.kind)
+            .and_then(|e| e.get("state"))
+            .and_then(J::obj)
+            .unwrap_or(&[]);
+        Some(
+            state
+                .iter()
+                .map(|(k, def)| {
+                    let n = match def.get("n") {
+                        Some(J::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    };
+                    let held = n.and_then(|n| node.fields().get(&n));
+                    let own = || {
+                        t.fields
+                            .iter()
+                            .find(|(f, _)| f == k)
+                            .map_or(J::Null, |(_, v)| v.clone())
+                    };
+                    let v = match (held, def.get("type").and_then(J::str)) {
+                        (Some(_), Some("list")) | (None, _) => own(),
+                        (Some(v), _) => self.json_of(def, v),
+                    };
+                    (k.clone(), v)
+                })
+                .collect(),
+        )
     }
 
     /// The forms' entries: to the tree as one part, then each to the log. An entry the tree refuses is still logged
@@ -550,6 +598,19 @@ impl Stage {
         let out = std::mem::take(&mut self.forms.out);
         if let Err(r) = self.apply_to_tree(&out) {
             self.unapplied += out.len() as u64;
+            let intents: BTreeSet<Id> = out
+                .iter()
+                .filter_map(|e| match e.envelope.cause {
+                    Cause::Intent(i) => Some(i),
+                    _ => None,
+                })
+                .collect();
+            for i in intents {
+                self.refused_by
+                    .entry(i)
+                    .or_default()
+                    .push(format!("{}: {}", r.name, r.detail));
+            }
             eprintln!(
                 "the tree refused a form's entries: {}: {}",
                 r.name, r.detail
@@ -801,6 +862,7 @@ impl Stage {
             .collect();
         self.souls_of.retain(|b, _| *b == self.body);
         self.called.clear();
+        self.scene_refused.clear();
         let mut gone: Vec<Id> = self.held(self.body).into_iter().map(|(_, t)| t).collect();
         for b in &bodies {
             gone.extend(self.held(*b).into_iter().map(|(_, t)| t));
@@ -1068,7 +1130,10 @@ impl Stage {
                     .into_iter()
                     .collect();
                 if let Err(r) = self.write_bodies(bodies) {
-                    eprintln!("{n} is not where the case has it: {}: {}", r.name, r.detail);
+                    self.scene_refused.push(format!(
+                        "{n} where the case has it: {}: {}",
+                        r.name, r.detail
+                    ));
                     unset.insert(*id);
                     continue;
                 }
@@ -1131,7 +1196,8 @@ impl Stage {
             if !cs.is_empty()
                 && let Err(r) = self.write(cs)
             {
-                eprintln!("{n}'s links are not the case's: {}: {}", r.name, r.detail);
+                self.scene_refused
+                    .push(format!("{n}'s links: {}: {}", r.name, r.detail));
                 unset.insert(*id);
             }
         }
@@ -1170,7 +1236,11 @@ impl Stage {
                     continue;
                 };
                 set_key(n, "kind", J::Str(t.kind.clone()));
-                set_key(n, "fields", J::Obj(t.fields.clone()));
+                set_key(
+                    n,
+                    "fields",
+                    J::Obj(self.tree_fields(t).unwrap_or_else(|| t.fields.clone())),
+                );
                 if !self.arranged.contains(&t.id) {
                     continue;
                 }
@@ -1249,7 +1319,7 @@ impl Stage {
                             k.clone(),
                             obj(vec![
                                 ("kind", J::Str(x.kind.clone())),
-                                ("fields", J::Obj(x.fields.clone())),
+                                ("fields", J::Obj(self.tree_fields(x).unwrap_or_default())),
                             ]),
                         ));
                     }
@@ -1295,8 +1365,17 @@ impl Stage {
                 if unset {
                     continue;
                 }
+                let listed: Vec<String> = n
+                    .iter()
+                    .find(|(k, _)| k == "hands")
+                    .and_then(|(_, h)| h.obj())
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|(h, _)| h.clone())
+                    .collect();
                 let hands = HANDS
                     .iter()
+                    .filter(|(h, _)| listed.iter().any(|l| l == h))
                     .map(|(h, _)| {
                         let t = held.iter().find(|(x, _)| x == h).map(|(_, t)| *t);
                         ((*h).to_owned(), t.map_or(J::Null, |t| J::Str(call(t))))
@@ -1312,7 +1391,7 @@ impl Stage {
                             k.clone(),
                             obj(vec![
                                 ("kind", J::Str(x.kind.clone())),
-                                ("fields", J::Obj(x.fields.clone())),
+                                ("fields", J::Obj(self.tree_fields(x).unwrap_or_default())),
                             ]),
                         ));
                     }
@@ -1384,7 +1463,9 @@ impl Stage {
             ]);
         }
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
-        let args = self.args_of(&entry, &form, act, ids);
+        // A thing argument the act leaves out goes to the form as the rules chose it, as worldd's `Acts` chooses it.
+        let chosen = replica::rules::chosen_act(&self.kinds, act, &state, asker.get("sees"));
+        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids);
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -1802,6 +1883,25 @@ impl Stage {
         self.k3 = loaded;
     }
 
+    /// An answer with what the tree refused: of the case's scene (`scene_refused`) and of run `rid`'s entries
+    /// (`tree_refused`), each when there is any.
+    fn refusals(&self, mut answer: J, rid: Option<&str>) -> J {
+        let words = |v: &[String]| J::Arr(v.iter().map(|w| J::Str(w.clone())).collect());
+        let run = rid
+            .and_then(|r| self.runs.get(r))
+            .and_then(|r| self.refused_by.get(&r.intent))
+            .filter(|v| !v.is_empty());
+        if let J::Obj(o) = &mut answer {
+            if !self.scene_refused.is_empty() {
+                o.push(("scene_refused".into(), words(&self.scene_refused)));
+            }
+            if let Some(v) = run {
+                o.push(("tree_refused".into(), words(v)));
+            }
+        }
+        answer
+    }
+
     /// What the body holds, by the gate's keys.
     fn holding(&self) -> J {
         J::Arr(
@@ -1843,8 +1943,8 @@ impl Stage {
                 let fields = q.get("fields").and_then(J::obj).unwrap_or(&[]).to_vec();
                 self.set(&s("id"), &fields)
             }
-            "fields" => match self.things.get(&s("id")) {
-                Some(t) => obj(vec![("fields", J::Obj(t.fields.clone()))]),
+            "fields" => match self.things.get(&s("id")).and_then(|t| self.tree_fields(t)) {
+                Some(f) => obj(vec![("fields", J::Obj(f))]),
                 None => obj(vec![("fields", J::Null)]),
             },
             "offers" => {
@@ -1867,7 +1967,7 @@ impl Stage {
                 q.get("case").unwrap_or(&none),
                 q.get("ids").unwrap_or(&none),
             ) {
-                Ok(_) => obj(vec![]),
+                Ok(_) => self.refusals(obj(vec![]), None),
                 Err(e) => err(e),
             },
             "begin" | "act" => {
@@ -1876,14 +1976,19 @@ impl Stage {
                     q.get("case").unwrap_or(&none),
                     q.get("ids").unwrap_or(&none),
                 );
-                if s("op") == "begin" || b.get("verdict").and_then(J::str) != Some("started") {
-                    return b;
+                let rid = b.get("rid").and_then(J::str).map(str::to_owned);
+                if s("op") == "begin" || rid.is_none() {
+                    return self.refusals(b, rid.as_deref());
                 }
-                let rid = b.get("rid").and_then(J::str).unwrap_or_default().to_owned();
-                self.wait(&rid)
+                let rid = rid.unwrap_or_default();
+                let w = self.wait(&rid);
+                self.refusals(w, Some(&rid))
             }
             "progress" => self.progress(&s("rid")),
-            "wait" => self.wait(&s("rid")),
+            "wait" => {
+                let w = self.wait(&s("rid"));
+                self.refusals(w, Some(&s("rid")))
+            }
             "leave" => self.leave(),
             "body" => obj(vec![
                 (

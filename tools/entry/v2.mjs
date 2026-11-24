@@ -74,7 +74,7 @@ export default function v2Transport({build = true} = {}) {
     async body() { return call({op: 'body'}); },
     async restart() { await call({op: 'restart'}); },
     async reset() { await call({op: 'reset'}); },
-    async arrange(scene) { await call({op: 'arrange', ...scene}); },
+    async arrange(scene) { return call({op: 'arrange', ...scene}); },
   };
   return t;
 }

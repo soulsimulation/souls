@@ -154,6 +154,16 @@ function sceneGap(c, entry, form, t) {
   return leans ? t.treeGap?.(entry, form) ?? null : null;
 }
 
+/** What a world that keeps a tree could not do, from an act's answer: `scene`, the case's start would not stand in
+ *  its tree (the case is skipped, by the refusal's name); `run`, its tree refused the run's own entries (the case
+ *  fails, by name). A pass then means the tree took what the run wrote. */
+export function refusedBy(got) {
+  return {
+    scene: got?.scene_refused?.length ? `the world's tree would not hold the case's start: ${got.scene_refused[0]}` : null,
+    run: got?.tree_refused?.length ? `the world's tree refused the run's entries: ${got.tree_refused[0]}` : null,
+  };
+}
+
 /** Fields read back until they hold `want` (or the time runs out): what the world shows from outside. */
 async function readUntil(t, id, want, ms = 6000) {
   const end = Date.now() + ms;
@@ -201,8 +211,11 @@ async function ruleCase(t, row, kinds, placed) {
   for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
   for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
   const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])), {case: c, ids});
+  const refused = refusedBy(got);
+  if (refused.scene) return {result: 'skip', why: refused.scene};
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
   const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
+  if (refused.run) off.push(refused.run);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), got: brief(got), ...(via ? {via} : {})};
 }
 
@@ -236,9 +249,12 @@ async function effectCase(t, row, kinds, placed) {
     const before = await t.fields(id);
     const args = Object.fromEntries(Object.entries(step.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v]));
     const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: step.actor ? {...c.state, actor: step.actor} : c.state}, ids});
+    const refused = refusedBy(got);
+    if (refused.scene) return {result: 'skip', why: `step ${k}: ${refused.scene}`, steps};
     const sets = setsOf(step.expect, ids, c, kinds);
     const after = got.verdict === 'no' ? await settled(t, id) : await readUntil(t, id, sets[id] ?? {});
     const {off, via} = judge(step.expect ?? {}, got, before, after);
+    if (refused.run) off.push(refused.run);
     for (const [nid, want] of Object.entries(sets)) { const now = nid === id ? after : await readUntil(t, nid, want); if (!sameFields(now, want)) off.push(`after the step, ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(want)}`); }
     if (unread.length && got.verdict === 'yes') {
       const want = (step.expect.changes ?? []).filter(x => x.change !== 'set').map(changeLine).sort(), have = (got.changes ?? []).map(changeLine).sort();
@@ -321,7 +337,8 @@ async function disturbCase(t, row, kinds, placed) {
   const ids = {[c.act.this]: id};
   for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind && nid !== c.act.this) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
   // a world that keeps the case's scene in its tree sets it now, so what the Soul holds before is the case's
-  await t.arrange?.({case: c, ids});
+  const set = refusedBy(await t.arrange?.({case: c, ids}));
+  if (set.scene) return {result: 'skip', why: set.scene};
   const body0 = await t.body();
   const b = await t.begin(id, row.form, c.act.args, {case: c, ids});
   if (b.verdict !== 'started') return {result: 'fail', why: `the act was not accepted (${b.code ?? b.reason ?? b.verdict}), though every need is met`};
@@ -334,6 +351,7 @@ async function disturbCase(t, row, kinds, placed) {
   else await t.restart();
   const landed = ['accepted', 'started'].includes((await t.progress(b.rid)).phase);   // still under way once it was done
   const end = await t.wait(b.rid);
+  const stopRefused = refusedBy(end).run;
   const off = [], ended = {phase: end.receipt ?? end.verdict, ...(end.code ? {code: end.code} : {}), ...(end.text ? {reason: end.text} : {})};
   const sentAt = {step: (sent.step ?? 0) + 1, moving: sent.moving, ...(r.passed ? {late: true} : {})};
   if (end.verdict === 'yes' && !landed) return {result: 'skip', why: `the form completed before the disturbance landed: it did not test a stop`, ended, sent_at: sentAt};
@@ -361,6 +379,7 @@ async function disturbCase(t, row, kinds, placed) {
       if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
     }
   }
+  for (const r of [stopRefused, refusedBy(again).run]) if (r) off.push(r);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
 }
 

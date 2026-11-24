@@ -555,6 +555,20 @@ pub fn decide(input: &Value) -> Value {
     decide_parts(part("kinds"), part("act"), part("state"), part("asker"))
 }
 
+/// The act with each thing argument it leaves out chosen by its selector, as [`decide_parts`] chooses it (#3914), so a
+/// world can hand the form what the rules decided on. `None` when nothing is chosen.
+pub fn chosen_act(
+    kinds: &Value,
+    act: &Value,
+    state: &Value,
+    sees: Option<&Value>,
+) -> Option<Value> {
+    match select::chosen(kinds, act, state, sees) {
+        select::Choice::Args(a) => Some(a),
+        _ => None,
+    }
+}
+
 /// [`decide`] with the input's four parts given apart, so many cases can share one set of kinds.
 pub fn decide_parts(
     kinds: Option<&Value>,
