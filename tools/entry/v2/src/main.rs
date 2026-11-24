@@ -920,12 +920,26 @@ impl Stage {
         let fields = self.defaults(kind);
         let b = self.body_at();
         // Beside the body, toward the middle of the ground on its farther axis, so a long run of cases never walks
-        // off it.
-        let toward = |v: i64| if v > 0 { -AWAY } else { AWAY };
+        // off it. A thing longer than that (a 14 m narrowboat) is set past its own half length, so the whole of it,
+        // and every point a body stands at on it, lies toward the middle: centred 3 m away, each seat case's rise put
+        // the body at a stand point 2.8 m farther out, until one lay off the ground (0.135 E11c).
+        let half = |axis: usize| {
+            self.entry(kind)
+                .and_then(|e| e.get("geometry"))
+                .and_then(|g| g.get("bounds_mm"))
+                .and_then(J::arr)
+                .and_then(|a| match a.get(axis) {
+                    Some(J::Int(mm)) => i64::try_from(*mm / 2).ok(),
+                    _ => None,
+                })
+                .map_or(0, |mm| mm.saturating_mul(1000))
+        };
+        let away = |axis: usize| AWAY.max(half(axis).saturating_add(500_000));
+        let toward = |v: i64, axis: usize| if v > 0 { -away(axis) } else { away(axis) };
         let at = if b.x.abs() >= b.z.abs() {
-            Vec3::new(b.x + toward(b.x), 0, b.z)
+            Vec3::new(b.x + toward(b.x, 0), 0, b.z)
         } else {
-            Vec3::new(b.x, 0, b.z + toward(b.z))
+            Vec3::new(b.x, 0, b.z + toward(b.z, 2))
         };
         let Ok(id) = self.mint.mint() else {
             return err("no id");
