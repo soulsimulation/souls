@@ -2,7 +2,8 @@
 // The three production/qualification callers share this fixed released input recipe. No install or provider call.
 import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -54,6 +55,13 @@ try {
   if (test) {
     run('tests', ['--test', 'v2/web/src/crowd/crowd.test.ts', 'v2/tools/import-body/import-body.test.ts', 'v2/tools/import-body/presets.test.ts', 'v2/web/body-assets.test.ts'], { ...process.env, B15_BODY_ASSETS: out, B15_MEDIA_ROOT: repo });
     const env = { ...process.env, BRAIN_MODE: 'fake', CARGO_BUILD_JOBS: '4', B15_REQUIRE_PREPARED: '1', B15_BODY_ASSETS: out, B15_IMPORT_OUTPUT: out + '-private-import' };
+    // The account importer is gone (0.134 D3, no migrations), so no imported birth exists: the native wear case is
+    // born wearing the first released body, in the importer's births shape, against the released catalogue's hash.
+    const bodies = readFileSync(join(out, 'bodies.json')), births = join(env.B15_IMPORT_OUTPUT, 'births');
+    mkdirSync(births, { recursive: true });
+    writeFileSync(join(births, 'garden.json'), JSON.stringify({ format: 'souls-births/1', world: 'garden',
+      catalogueHash: createHash('sha256').update(bodies).digest('hex'),
+      births: [{ soul: 'b1'.repeat(16) + ':1', entry: 'b1'.repeat(16) + ':0', asked: 0, body: JSON.parse(bodies).bodies[0].hash }] }) + '\n');
     for (const [pkg, file, name] of [['worldd', 'wear', 'b15_imported_choice_ordinary_c3']]) {
       const args = ['test', '--manifest-path', join(repo, 'v2/Cargo.toml'), '--release', '-p', pkg, '--test', file, name, '--locked', '--', '--exact', '--nocapture'];
       const stdout = run('native-' + pkg, args, env, process.env.CARGO ?? 'cargo', join(repo, 'v2'), total);
