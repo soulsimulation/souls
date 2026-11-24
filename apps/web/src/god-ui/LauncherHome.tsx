@@ -179,10 +179,21 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         const n = godName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36);
         if (n) { localStorage.setItem('sim.dev', n); creator = n; headers = { authorization: `Bearer dev:${n}` }; }
       }
-      const r = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined, timeZone: timeZone.trim() }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d.url) throw new Error(d.message ?? `the launcher answered ${r.status}`);
-      location.href = d.url;
+      // 0.135 W1: a world on the new engine may still be starting (202, or 503 with its key): ask again for the same world,
+      // with its key and address and a fresh sign-in token each time, until it is made (a short wait, then the list)
+      let resume: { key: string; slug: string } | null = null;
+      for (let tries = 0; ; tries++) {
+        if (resume) { const fresh = await userAuthHeaders(); if (fresh.authorization) headers = fresh; }
+        const r: Response = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined, timeZone: timeZone.trim(), ...(resume ?? {}) }) });
+        const d: { url?: string; key?: string; slug?: string; retry_after?: number; message?: string } = await r.json().catch(() => ({}));
+        if (r.ok && d.url) { location.href = d.url; return; }
+        if ((r.status === 202 || r.status === 503) && typeof d.key === 'string' && typeof d.slug === 'string' && tries < 150) {
+          resume = { key: d.key, slug: d.slug };
+          await new Promise((ok) => setTimeout(ok, Math.min(10, Math.max(1, Number(d.retry_after) || 2)) * 1000));
+          continue;
+        }
+        throw new Error(d.message ?? `the launcher answered ${r.status}`);
+      }
     } catch (err) { setState({ phase: 'error', message: String((err as Error).message) }); }
   };
   const secs = state.started ? Math.round((now - state.started) / 1000) : 0;
@@ -191,7 +202,7 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
       <form className="lh-dialog" role="dialog" aria-modal="true" aria-labelledby="lh-dialog-title" data-new-world-dialog="1" onSubmit={create}>
         <h2 id="lh-dialog-title">A new world</h2>
         <label className="lh-label" htmlFor="lh-name">Name</label>
-        <input id="lh-name" ref={input} data-world-name="1" value={name} maxLength={60} placeholder="e.g. Willow Hollow" onChange={(e) => setName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
+        <input id="lh-name" ref={input} data-world-name="1" value={name} maxLength={40} placeholder="e.g. Willow Hollow" onChange={(e) => setName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
         <p className="lh-slug dim">{slugPreview ? <>It will live at <code>{BASE}/w/{/^[a-z]/.test(slugPreview) ? slugPreview : 'world-' + slugPreview}</code></> : <>&nbsp;</>}</p>
         <label className="lh-label" htmlFor="lh-god">Your name, as its god <span className="lh-opt">(shown on the world list)</span></label>
         <input id="lh-god" data-god-name="1" value={godName} maxLength={32} placeholder="e.g. Gene" onChange={(e) => setGodName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
