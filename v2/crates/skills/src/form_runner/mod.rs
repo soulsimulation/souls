@@ -19,10 +19,14 @@
 //!   walk or the move ended with (`out-of-reach`, `claim-taken`, ...). A form writes no exit.
 //!
 //! - **The effect's instant** (F2, #2767). The effect lands once, at the contact instant of the form's hand step (its
-//!   first `move` step: the world wakes the runner with [`Woke::Contact`] when that move's start-up ends), or, in a
-//!   form with no hand step, when the last step ends. The runner only says when ([`Runner::take_effect`]); the world
-//!   writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped before that instant, a run has no
-//!   effect; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one field each.
+//!   last step, when that is a `move`, `take`, `put`, `sit` or `use_held` step, or a `sit` or `lie` followed only by
+//!   waits, whose posture outlives the run: the world wakes the runner with [`Woke::Contact`] when that move's
+//!   start-up ends), or, in any other form whose last step is not a hand step (a move then a wait, a repeated move
+//!   then a rise), when the last step ends (E7). The runner only says when
+//!   ([`Runner::take_effect`]); the world writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped
+//!   before that instant, a run has no effect, so a Soul that leaves during a later step (a wait, the next of several
+//!   moves) gets none; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one
+//!   field each.
 //!
 //! - **Leaving** (F3, #2768). The Soul's leave ([`Woke::Leave`]) is taken at once and ends the run `left` at the next
 //!   stable moment: at once during a walk or a pause, and during a move at its next phase boundary (its contact or its
@@ -1690,7 +1694,8 @@ pub struct Runner {
     timer: Option<Id>,
     ended: bool,
     planning: bool,
-    /// The hand step: the first `move` (or [`Step::Hand`]) step, whose contact is the effect's instant.
+    /// The hand step: the last step, when it is a `move`, [`Step::Hand`], `sit` or `use_held` step, or a `sit` followed
+    /// only by waits, whose contact is the effect's instant; with none, the effect's instant is the last step's end.
     hand: Option<usize>,
     /// The effect's instant came and the world has not taken it; `effected` once it came.
     effect: bool,
@@ -1704,12 +1709,23 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
-        let hand = steps.iter().position(|s| {
-            matches!(
-                s,
-                Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
-            )
-        });
+        // The last step's contact: a hand step with a step after it (a wait, the next of repeated moves, a rise)
+        // would land the effect before the run is done, so a Soul that leaves then would keep it (E7). A seat taken
+        // and then only waited in is the one exception: the posture outlives the run, so its contact stays the
+        // effect's instant (a swing's link to its swinger), and a leave during the waits keeps it (rule 10).
+        let hand = steps
+            .iter()
+            .rposition(|s| {
+                matches!(
+                    s,
+                    Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
+                )
+            })
+            .filter(|&i| {
+                i + 1 == steps.len()
+                    || matches!(steps[i], Step::Sit { .. })
+                        && steps[i + 1..].iter().all(|s| matches!(s, Step::Wait(_)))
+            });
         Runner {
             steps,
             node,
