@@ -188,6 +188,15 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const yourCamera = () => { setCameraNote(''); if (handle?.setManualNavigation) handle.setManualNavigation('orbit'); else handle?.setCameraMode('manual'); };
   // VF3 (Gene): the status ("● Live · time", and any reason it is not live) and the camera chip live in the top bar
   // (Shell's slots); nothing sits at the bottom of the screen.
+  // Gene (24 Nov): "Back 1 min", "Link to this moment" and "From the start" live in the time panel the Live pill opens,
+  // not in the top bar; only a world with no clock (so no pill and no panel) keeps them in the bar.
+  const timePanel = !!worldTime;
+  const moments = <>
+    {/* Gene: "Show it to everyone": the history scrub ("Back 1 min") shows to every viewer, no `?rewind` flag */}
+    <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>
+    {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
+    {v2History() && state?.shownTick != null && !state.loading && <button type="button" title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
+  </>;
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
         {/* #1392 (Gene): at the present time the element is one "● Live" pill; the day and time are in the panel it opens.
@@ -209,19 +218,18 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
             <span>Only you see this</span>
             {previewHour != null && <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>}
           </div>
+          {/* a phone's top bar is out of sight behind the menu, so a recording also leaves from here */}
+          <div className="time-preview-moments" role="group" aria-label="Go back in time">{moments}{state?.presentation === 'history' && <button type="button" onClick={() => handle?.live()}>Back to live</button>}</div>
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
-        {/* Gene: "Show it to everyone": the history scrub ("Back 1 min") shows to every viewer, no `?rewind` flag */}
-        <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>
-        {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
+        {!timePanel && moments}
         {state?.presentation === 'history' && <>
           <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>
           <button onClick={() => handle?.live()}>Return to live</button>
           {v2History() && <button type="button" title="Play faster" onClick={() => { const x = speed >= 8 ? 1 : speed * 2; setPlaySpeed(x); setSpeed(x); }}>×{speed}</button>}
           {v2History() && firstTick !== null && state.shownTick != null && <input type="range" aria-label="Every moment since the world began" min={firstTick} max={Math.max(firstTick + 1, Math.floor(Date.now() * 1000 / TICK_US))} step={1} value={scrub ?? state.shownTick} onChange={(e) => setScrub(Number(e.target.value))} onPointerUp={(e) => scrubTo(Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') scrubTo(Number((e.target as HTMLInputElement).value)); }} />}
         </>}
-        {v2History() && state?.shownTick != null && !state.loading && <button type="button" title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
       </div>
     </div>;
   // #893: phones get the camera menu as a bottom sheet; Follow appears when a Soul is selected.
