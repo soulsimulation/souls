@@ -1792,7 +1792,19 @@ impl Stage {
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
         // A thing argument the act leaves out goes to the form as the rules chose it, as worldd's `Acts` chooses it.
         let chosen = replica::rules::chosen_act(&self.kinds, act, &state, asker.get("sees"));
-        let args = self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names);
+        let args = match self.args_of(&entry, &form, chosen.as_ref().unwrap_or(act), ids, &names) {
+            Ok(args) => args,
+            Err(detail) => {
+                return obj(vec![
+                    ("verdict", J::s("no")),
+                    ("reason", J::s("slot-unknown")),
+                    ("code", J::s("slot-unknown")),
+                    ("detail", J::Str(detail)),
+                    ("receipt", J::s("refused")),
+                    ("by", J::s("runner")),
+                ]);
+            }
+        };
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -1889,7 +1901,15 @@ impl Stage {
     /// name.
     /// The form's arguments from the case's act. A node argument is named as the case names it: a thing it placed
     /// (`ids`), else a body or Soul the case names (`names`), else a thing by the runner's own key.
-    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J, names: &Names) -> Args {
+    /// A slot of another thing that thing's entry does not declare is refused `slot-unknown` (the detail here).
+    fn args_of(
+        &mut self,
+        entry: &J,
+        form: &str,
+        act: &J,
+        ids: &J,
+        names: &Names,
+    ) -> Result<Args, String> {
         let takes = entry
             .get("forms")
             .and_then(|f| f.get(form))
@@ -1933,7 +1953,7 @@ impl Stage {
                     (Some(id), Some(slot)) if Some(id) == this => Arg::Name(slot.to_owned()),
                     (Some(id), Some(slot)) => match self.slot_of(id, slot) {
                         Some(n) => Arg::Slot(id, n),
-                        None => Arg::Node(id),
+                        None => return Err(format!("{k}: {slot}")),
                     },
                     (Some(id), None) => Arg::Node(id),
                     (None, _) => continue,
@@ -1947,7 +1967,7 @@ impl Stage {
             };
             out.insert(k.clone(), arg);
         }
-        out
+        Ok(out)
     }
 
     fn progress_of(&self, rid: &str, moving: bool) -> J {

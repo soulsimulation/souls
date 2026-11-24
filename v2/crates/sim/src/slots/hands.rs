@@ -14,7 +14,8 @@
 //! - **Refusals by name.** A body with no hands asking to take: `take-needs-hands`, before any claim, so it never gets
 //!   an imaginary grip (`docs/design/custom-bodies.md`). Not enough free hands: `hands-full`. A put of a thing the body
 //!   does not hold: `not-held`. A put target filled at the check, or filled since (at contact): `slot-occupied`, and
-//!   the thing stays in the hand. A filled slot is asked of the one slot model ([`super::Slots::occupant`]): a seat a
+//!   the thing stays in the hand. A thing a body sits in (a vehicle and its rider): `thing-occupied`, at the take and
+//!   again at contact. A filled slot is asked of the one slot model ([`super::Slots::occupant`]): a seat a
 //!   body holds is filled too. A thing gone by contact: `thing-missing`. A refusal at contact cancels the move.
 //! - **A held tool's tip.** Reach is measured from the effector: the hand, or the named tip of the tool held in it
 //!   (`crate::moves::Reach::tip`), so a body holding a pole presses what its bare hand cannot reach.
@@ -244,6 +245,8 @@ pub struct Cx<'a, G: Reach> {
 struct Pending {
     thing: Id,
     to: Frame,
+    /// A take (into a hand), not a put: at contact it is refused when a body has sat in the thing since.
+    take: bool,
 }
 
 /// The takes and puts in progress, by their move's instance: each transfers at its contact instant.
@@ -288,7 +291,8 @@ impl Holding {
 
     /// Starts `mv`, steered to free hands, for `body` to take `thing` at `now`: at contact the thing becomes a child of
     /// the first of those hands' slots. Refused, with nothing changed: `take-needs-hands`, `thing-missing`,
-    /// `thing-not-carried`, `hands-full`, then the move's own refusals (`out-of-reach` among them).
+    /// `thing-not-carried`, `thing-occupied` (a body sits in it, here or by contact), `hands-full`, then the move's own
+    /// refusals (`out-of-reach` among them).
     pub fn take<G: Reach>(
         &mut self,
         cx: &mut Cx<'_, G>,
@@ -308,6 +312,7 @@ impl Holding {
                 format!("{} is not held in a hand", show(thing)),
             );
         };
+        seated_in(cx, thing)?;
         let free = free_hands(cx.tree, &cx.log.rules, body, &all);
         if free.len() < usize::from(need) {
             return refuse(
@@ -333,7 +338,14 @@ impl Holding {
             node: body,
             slot: Some(free[0].slot),
         };
-        self.pending.insert(n, Pending { thing, to });
+        self.pending.insert(
+            n,
+            Pending {
+                thing,
+                to,
+                take: true,
+            },
+        );
         Ok(n)
     }
 
@@ -369,7 +381,14 @@ impl Holding {
             to.node,
             now,
         )?;
-        self.pending.insert(n, Pending { thing, to });
+        self.pending.insert(
+            n,
+            Pending {
+                thing,
+                to,
+                take: false,
+            },
+        );
         Ok(n)
     }
 
@@ -401,6 +420,9 @@ impl Holding {
 
     fn contact<G: Reach>(&mut self, cx: &mut Cx<'_, G>, p: Pending, at: Micros) -> R<()> {
         let (_, audience, ..) = node_of(cx.tree, p.thing)?;
+        if p.take {
+            seated_in(cx, p.thing)?;
+        }
         occupied(cx.slots, cx.tree, p.to)?;
         let id = cx.mint.mint().map_err(|e| Refusal {
             name: "id-counter-exhausted",
@@ -458,6 +480,35 @@ impl Holding {
 
 /// `slot-occupied` when `to` names a slot someone or something is in, asked of the one slot model: a seat a body
 /// holds, or a slot the tree holds a thing in.
+/// Refuses `thing-occupied` when a body sits in `thing`: one holding a seat of it (the slot model), or a body's node
+/// in one of its slots (a kind whose owner is a family). A thing someone sits in is never taken into a hand, so a
+/// vehicle that can be held never carries its rider off (0.135 E10b).
+fn seated_in<G: Reach>(cx: &Cx<'_, G>, thing: Id) -> R<()> {
+    let family = |k: &Name| {
+        cx.log
+            .rules
+            .kinds
+            .get(k.as_str())
+            .is_some_and(|d| d.owner == "family")
+    };
+    let in_slot = cx
+        .tree
+        .handle(thing)
+        .and_then(|h| cx.tree.children(h))
+        .into_iter()
+        .flatten()
+        .filter_map(|c| cx.tree.node(*c))
+        .find(|n| n.slot().is_some() && family(n.kind()))
+        .map(|n| n.id());
+    match cx.slots.holder(thing).or(in_slot) {
+        Some(rider) => refuse(
+            "thing-occupied",
+            format!("{} sits in {}", show(rider), show(thing)),
+        ),
+        None => Ok(()),
+    }
+}
+
 fn occupied(slots: &Slots, tree: &Tree, to: Frame) -> R<()> {
     match slots.occupant(tree, to) {
         Some(t) => refuse(
