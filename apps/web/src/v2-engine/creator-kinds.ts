@@ -16,13 +16,15 @@
 // is `looks.model: "upload:<hash>"`; the old page fetches it from where the world serves uploads (`/v2/uploads/<hash>`,
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
+import { KIT_ROLES } from '@souls/generators';
 import { placedOf, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
+import { kindState, type Fields } from './source/kinds-state.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
   slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
-  line?: number[][]; lineWidth?: number; outline?: number[][] };
+  line?: number[][]; lineWidth?: number; outline?: number[][]; fields?: Record<number, unknown> };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
 
@@ -66,10 +68,50 @@ export function kitShape(p: Json): Json | null {
   return out;
 }
 
+// A kind's own look (`looks.shape`, the content kinds' and a whole entry's): kit shapes in whole mm, millidegrees and
+// permille, made metres, radians and fractions as the look gate makes them (tools/entry/look.mjs `shapeInMetres`, copied:
+// the page imports nothing from tools/). A number under a key whose unit is not known here makes no look (the bounds box).
+const SHAPE_LENGTH = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'polygon', 'p', 'pivot', 'width', 'height', 'depth']);
+const SHAPE_ANGLE = new Set(['roll', 'arc', 'yaw', 'pitch']);
+const ROLES: ReadonlySet<string> = new Set(KIT_ROLES);
+function inMetres(v: unknown, key = ''): unknown {
+  if (Array.isArray(v)) return v.map((x) => inMetres(x, key));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, inMetres(x, k)]));
+  if (typeof v !== 'number') return v;
+  if (SHAPE_LENGTH.has(key)) return v / 1000;
+  if (SHAPE_ANGLE.has(key)) return (v * Math.PI) / 180_000;
+  if (key === 'segments') return v;
+  if (key === 'scale' || key === 'glow') return v / 1000;
+  throw new Error(`looks.shape: no unit for ${key}`);
+}
+/** An entry's state field as the def declares it (look.mjs `defOf`): what a shape's `when` and the looks table read. */
+export type EntryField = { n: number; type: string; unit?: string; values?: string[]; default?: unknown };
+const pictured = (state: unknown) => Object.entries(obj(state) ?? {}).filter((e): e is [string, EntryField] => !!obj(e[1]) && typeof (e[1] as Json).n === 'number' && !['text', 'list', 'schedule'].includes(String((e[1] as Json).type)));
+const defaultOf = (f: EntryField) => (f.type === 'timed' ? obj(f.default)?.value : f.default);
+/** A whole-number state value as the picture draws it (permille is a fraction). */
+export const drawnValue = (f: EntryField, v: unknown) => (f.type === 'int' && f.unit === 'permille' && typeof v === 'number' ? v / 1000 : v);
+/** The def's make, palette and state from the entry's `looks.shape`, with its looks table; null when it has none. */
+function shapeLook(entry: Json): { make: Json; palette: Record<string, string>; state: Json; tags: string[] } | null {
+  const looks = obj(entry.looks), shape = obj(looks?.shape);
+  if (!shape || !Array.isArray(shape.shapes) || !shape.shapes.length) return null;
+  let args: Json;
+  // a role the old page's kit does not know draws still, as a fixed part (kit/2 refuses the def otherwise)
+  const parts = shape.shapes.map((p) => { const q = obj(p); if (!q || typeof q.role !== 'string' || ROLES.has(q.role)) return p; const { role: _r, pivot: _p, ...rest } = q; return rest; });
+  try { args = inMetres({ ...(typeof shape.round === 'number' ? { round: shape.round } : {}), shapes: parts }) as Json; } catch { return null; }
+  const fields = pictured(entry.state);
+  if (Array.isArray(looks!.table)) args = { ...args, looks_table: looks!.table, looks_units: Object.fromEntries(fields.filter(([, f]) => f.unit).map(([k, f]) => [k, f.unit])) };
+  const state = Object.fromEntries(fields.map(([k, f]) => [k, f.type === 'bool' ? { type: 'bool', default: f.default }
+    : f.type === 'enum' ? { type: 'enum', values: f.values, default: f.default } : { type: 'number', default: drawnValue(f, defaultOf(f)) }]));
+  const palette = Object.fromEntries(Object.entries(obj(shape.palette) ?? {}).filter(([, v]) => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v))) as Record<string, string>;
+  return { make: { kind: 'gen', gen: 'kit/2', args }, palette, state, tags: Array.isArray(shape.tags) ? shape.tags.filter((t): t is string => typeof t === 'string') : [] };
+}
+
 /** A creator's kind's record (its bytes) as the old page's def, with the model's hash when it names one; null when it is
  *  not a `souls-entry/1` record. The def's name is the kind's, with its revision's hash, so a changed definition is a
- *  new def and the things placed from the old one keep theirs. */
-export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null } | null {
+ *  new def and the things placed from the old one keep theirs. Its look, in order: an uploaded model, its kit parts
+ *  (`geometry.parts`), its own shape (`looks.shape`, with the state its `when`s and looks table read: `fields`), else its
+ *  bounds as one box, named `…-box`, so a look that arrives later for the same kind is a new def. */
+export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField> } | null {
   let entry: Json | null;
   try { entry = obj(JSON.parse(new TextDecoder().decode(bytes))); } catch { return null; }
   if (!entry || entry.format !== 'souls-entry/1') return null;
@@ -81,16 +123,21 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
   const palette = Object.fromEntries(Object.entries(obj(g.palette) ?? {}).filter(([, v]) => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)));
   const shapes = (Array.isArray(g.parts) ? g.parts : []).map((p) => (obj(p) ? kitShape(p as Json) : null)).filter((s): s is Json => !!s);
   const upload = UPLOAD.exec(String(obj(entry.looks)?.model ?? ''));
-  const make = upload ? { kind: 'mesh' as const, asset: upload[2] }
+  const own = upload || shapes.length ? null : shapeLook(entry), boxed = !upload && !shapes.length && !own;
+  const make = upload ? { kind: 'mesh' as const, asset: upload[2] } : own ? own.make
     : { kind: 'gen' as const, gen: 'kit/2', args: { shapes: shapes.length ? shapes : [{ kind: 'box', at: [0, box[1] / 2, 0], size: box, color: '#b8a58a' }] } };
-  const card = obj(entry.text)?.card;
+  const colours = own ? { ...palette, ...own.palette } : palette;
+  const card = obj(entry.text)?.card, named = boxed ? `${name}-box` : name;
   let def;
   try {
-    def = defSchema.parse({ schema: 'def/1', name, version: 1, description: typeof card === 'string' ? card.slice(0, 4000) : '', form: 'point', make,
-      size: { box }, ...(Object.keys(palette).length ? { palette } : {}) });
+    def = defSchema.parse({ schema: 'def/1', name: named, version: 1, description: typeof card === 'string' ? card.slice(0, 4000) : '', form: 'point', make,
+      size: { box }, ...(Object.keys(colours).length ? { palette: colours } : {}), ...(own && Object.keys(own.state).length ? { state: own.state } : {}),
+      ...(own?.tags.length ? { tags: own.tags } : {}) });
   } catch { return null; }
   const { budget: _b, ...hashable } = def;
-  return { def: { ...def, budget: { tris: 0, bytes: 0, textures: 0 }, hash: hashOf(hashable), ref: `${name}@1`, by: 'v2', born: 0 }, model: upload ? upload[1] : null };
+  const fields = own ? Object.fromEntries(pictured(entry.state)) : undefined;
+  return { def: { ...def, budget: { tris: 0, bytes: 0, textures: 0 }, hash: hashOf(hashable), ref: `${named}@1`, by: 'v2', born: 0 }, model: upload ? upload[1] : null,
+    ...(fields && Object.keys(fields).length ? { fields } : {}) };
 }
 
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
@@ -104,11 +151,24 @@ export function entityId(node: string): string {
   return `e_v${((h >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 11)}`;
 }
 
+type Drawn = NonNullable<ReturnType<typeof kindDef>>;
+const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
+/** A thing's state as its def's picture reads it, from its node's fields: plain values only (a timed value's is read
+ *  where it is drawn, so it is left out here), a permille as a fraction. */
+export function lookState(fields: Fields | undefined, defs: Record<string, EntryField>): Record<string, boolean | number | string> {
+  const out: Record<string, boolean | number | string> = {};
+  for (const [k, v] of Object.entries(kindState(fields, defs))) {
+    if (typeof v === 'boolean' || typeof v === 'string') out[k] = v;
+    else if (typeof v === 'number' || typeof v === 'bigint') out[k] = drawnValue(defs[k], Number(v)) as number;
+  }
+  return out;
+}
+
 /** What the stream says of the creator's kinds and the things of them, kept as parts arrive; `next` makes the diff. */
 export class CreatorKinds {
   private nodes = new Map<string, NodeLike>();
   /** Defs by the full kind name they draw, and each definition node's full name. */
-  private defs = new Map<string, { def: StoredDef; model: string | null }>();
+  private defs = new Map<string, Drawn>();
   private definers = new Map<string, string>();
   /** What the layer was last sent: each thing's def and place. */
   private sent = new Map<string, string>();
@@ -119,7 +179,9 @@ export class CreatorKinds {
   private oldDefs = new Map<string, string>();
   private gone = new Set<string>();
   /** W2: content kinds' own shapes (take-parts.ts), by full and plain name: after the old and library defs. */
-  private shapes = new Map<string, { def: StoredDef; model: string | null }>();
+  private shapes = new Map<string, Drawn>();
+  /** Each definition node's entry bytes as last read (a later look for the same kind is read again). */
+  private readonly read = new Map<string, Uint8Array>();
   /** Where a model's bytes are, by its upload hash (gatewayd's `/v2/uploads/<hash>`, same origin). */
   private readonly uploadUrl: (hash: string) => string;
   private readonly onModel: (sha: string, url: string) => void;
@@ -136,15 +198,17 @@ export class CreatorKinds {
       const full = this.definers.get(id);
       if (full === undefined) continue;
       this.definers.delete(id);
+      this.read.delete(id);
       if (![...this.definers.values()].includes(full)) this.defs.delete(full);
       if (![...this.definers.values()].some((f) => f.split('@')[0] === full.split('@')[0])) this.defs.delete(full.split('@')[0]);
     }
     for (const n of nodes) {
       this.nodes.set(n.id, n);
-      if (n.kind.split('@')[0] !== DEFINITION || !n.defines || !n.entry || this.definers.get(n.id) === n.defines) continue;
+      if (n.kind.split('@')[0] !== DEFINITION || !n.defines || !n.entry || (this.definers.get(n.id) === n.defines && same(this.read.get(n.id), n.entry))) continue;
       const d = kindDef(n.defines, n.entry);
       if (!d) continue;
       this.definers.set(n.id, n.defines);
+      this.read.set(n.id, n.entry);
       // a thing names its kind by the full name, or (as the creator places it) by the plain one: the newest definition.
       // W2: a content kind's own shape (take-parts.ts, `entry:` definers) is kept apart: it draws only what nothing else does
       const into = n.id.startsWith('entry:') ? this.shapes : this.defs;
@@ -202,14 +266,16 @@ export class CreatorKinds {
       if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
-      const ref = d ? d.def.ref : old!, key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), tint ?? null]);
+      // a kind drawn from its own shape shows its state: the parts its `when`s and looks table pick
+      const shown = d?.fields ? { ...lookState(n.fields as Fields | undefined, d.fields), ...(tint !== undefined ? { tint } : {}) } : tint !== undefined ? { tint } : undefined;
+      const ref = d ? d.def.ref : old!, key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), shown ?? null]);
       live.add(eid);
       if (this.sent.get(eid) === key && m.entities.has(eid) && !(d && need(d.def))) continue;
       if (d && need(d.def)) defs.push(d.def);
       // K5: a part carried laid flat is drawn so (the layer's `r: [yaw, x, z]`), and stood up again once set down so
       const r = turnOf(to, this.tilted.has(eid));
       if (to.tilt) this.tilted.add(eid); else this.tilted.delete(eid);
-      upserts.push({ id: eid, def: ref, in: { parent: 'world' }, p: [...to.p], r, ...(tint !== undefined ? { state: { tint } } : {}) });
+      upserts.push({ id: eid, def: ref, in: { parent: 'world' }, p: [...to.p], r, ...(shown !== undefined ? { state: shown } : {}) });
       this.sent.set(eid, key);
     }
     // sent again with each diff until the layer has dropped it (a diff it did not apply loses nothing)
