@@ -2770,10 +2770,23 @@ fn serve(args: &[String]) -> R<()> {
                                 "worldd: the public stream is degraded, no viewers: {fault}; try {tries} refused, the next in {wait} ms"
                             );
                             let _ = ready_tx.send(false);
-                            std::thread::sleep(std::time::Duration::from_millis(wait));
+                            // The wait, answering each ask to sleep meanwhile: a degraded stream writes no sleeping
+                            // pointer, so the world stays awake.
+                            for _ in 0..wait / 100 {
+                                if let Ok((_, answer)) =
+                                    sleep_rx.recv_timeout(std::time::Duration::from_millis(100))
+                                {
+                                    let _ = answer.send(Err(format!("stream-degraded: {fault}")));
+                                }
+                            }
                         }
                     }
                 };
+                // An ask made during the last try is as old as that try, its asker likely gone: answered no, never
+                // taken for a sleep the world would not make (the stream would stop with it).
+                while let Ok((_, answer)) = sleep_rx.try_recv() {
+                    let _ = answer.send(Err("stream-recovering: asked before it served".to_owned()));
+                }
                 measures::STREAM.serving();
                 if tries > 0 {
                     eprintln!("worldd: the public stream recovered after {tries} refused tries");
@@ -2825,10 +2838,9 @@ fn serve(args: &[String]) -> R<()> {
                 }
             })();
             if let Err(e) = result {
-                eprintln!(
-                    "worldd: the public stream stopped, the world goes on: {}",
-                    refusal(e)
-                );
+                let fault = refusal(e);
+                measures::STREAM.stopped(&fault);
+                eprintln!("worldd: the public stream stopped, the world goes on: {fault}");
             }
         })
         .map_err(|e| e.to_string())?;
