@@ -460,3 +460,181 @@ fn a_restart_reseats_a_body_in_the_place_it_was_climbing_out_of() {
         assert_eq!(b.resumed, vec![(body, name)]);
     }
 }
+
+/// E11d review of #4551: a body killed during a climb out with no clean way on, beside a seat that moves with its
+/// cabin (N14) while that cabin is away from its own stop, is never seated into the away cabin (it would ride off, a
+/// named jump): it is held where the log had it, named `resume-held-away`, and its next act is answered by name.
+#[test]
+fn a_restart_beside_an_away_cabin_holds_the_body_out_of_it() {
+    use sim::courses::{Course, Shape, Station};
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let clear = |p: Vec3| {
+        (-3..=3).all(|i| {
+            (-3..=3).all(|j| {
+                !on(
+                    &town,
+                    ground,
+                    Vec3::new(p.x + i * 200_000, 0, p.z + j * 200_000),
+                )
+            })
+        })
+    };
+    let off = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| clear(p))
+        .expect("a point with no ground within 0.6 m");
+    let start = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| on(&town, ground, p))
+        .expect("ground");
+    let body = id(1);
+    let placed = Placed::from([(
+        body,
+        (
+            Pose {
+                frame,
+                position: off,
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: ground,
+                    height: 0,
+                },
+            },
+            None,
+        ),
+    )]);
+    let first = town.surfaces[&ground]
+        .place(body, frame, start, Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    let cabin = id(50);
+    let seat = PlaceAt {
+        thing: cabin,
+        place: Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, 300_000],
+        },
+        point: Vec3::new(off.x, 450_000, off.z),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: Vec::new(),
+    };
+    b.add_place(seat.clone()).expect("its seat");
+    // Its cabin runs there and back between its own stop and one 3 m on, 10 s at each, at 1 m/s: 11 s in, it is
+    // between the two, away from its own stop.
+    let far = Vec3::new(off.x, 450_000, off.z + 3_000_000);
+    let course = Course {
+        stations: vec![
+            Station {
+                at: seat.point,
+                dwell: 10 * S,
+            },
+            Station {
+                at: far,
+                dwell: 10 * S,
+            },
+        ],
+        shape: Shape::ThereAndBack,
+        speed: S,
+        t0: 0,
+        within: 30 * S,
+    };
+    let there = PlaceAt {
+        point: far,
+        ..seat.clone()
+    };
+    b.slots
+        .run(
+            cabin,
+            1,
+            &course,
+            vec![(0, seat), (1, there)],
+            &std::collections::BTreeSet::from([0]),
+        )
+        .expect("its run");
+    let (x0, x1, z0, z1) = (
+        off.x - 100_000,
+        off.x + 100_000,
+        off.z - 100_000,
+        off.z + 100_000,
+    );
+    b.slots
+        .footprint(cabin, vec![[[x0, z0], [x1, z0], [x1, z1], [x0, z1]]]);
+    let mut now = 11 * S;
+    assert!(!b.slots.at_own_stop(cabin, 1, now), "the cabin is away");
+    b.begin(now);
+    b.add_body_at(humanoid(), first, &placed)
+        .expect("a body off its floor starts");
+    let p = b.runner.controller.body(body).unwrap().pose;
+    assert_eq!(b.slots.held_by(body), None, "not in the away cabin: {p:?}");
+    assert!(
+        matches!(p.support, Support::Surface { .. }),
+        "on its floor: {p:?}"
+    );
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (off.x, off.z),
+        "held where it was"
+    );
+    assert!(!b.runner.controller.carried(body), "never carried off");
+    assert_eq!(b.resumed, vec![(body, "resume-held-away")]);
+    // Its next act is answered by name, never left hanging: a walk to the nearest open ground (ground all round it
+    // for 1 m). Held off its floor, as every `resume-held` body is, the walk is refused `spot-none-free` today (the
+    // spot table stands no asker off the ground); the open follow-up is in the PR. Through the cabin's return to its
+    // own stop (26 s) and on, it is never seated in the cabin.
+    let open = |p: Vec3| {
+        (-2..=2).all(|i| {
+            (-2..=2).all(|j| {
+                on(
+                    &b.town,
+                    ground,
+                    Vec3::new(p.x + i * 500_000, 0, p.z + j * 500_000),
+                )
+            })
+        })
+    };
+    let mut near: Vec<Vec3> = (-50..=50)
+        .flat_map(|i| {
+            (-50..=50).map(move |j| Vec3::new(off.x + i * 400_000, 0, off.z + j * 400_000))
+        })
+        .collect();
+    near.sort_by_key(|p| ((p.x - off.x).pow(2) + (p.z - off.z).pow(2), p.x, p.z));
+    let to = near
+        .into_iter()
+        .find(|&p| open(p))
+        .expect("open ground within 20 m");
+    let walk = Asked {
+        body,
+        actor: Actor::Soul(body),
+        ask: Ask::Walk {
+            node: ground,
+            point: Some(to),
+            gait: None,
+        },
+        fallbacks: Vec::new(),
+    };
+    let started = b.start(vec![(id(100), walk)]);
+    println!("the walk after the restart: {started:?}");
+    assert!(started.iter().all(|(_, r)| r.is_ok()), "{started:?}");
+    let mut done = None;
+    let until = now + 60 * S;
+    while now < until {
+        now += TICK;
+        if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id(100)) {
+            done.get_or_insert((now, r));
+        }
+        assert_eq!(b.slots.held_by(body), None, "never seated in the cabin");
+        assert!(!b.runner.controller.carried(body), "never carried off");
+    }
+    println!("the walk's answer: {done:?}");
+    let (when, r) = done.expect("the walk is answered");
+    assert!(when <= 11 * S + 5 * S, "answered within 5 s: {when}");
+    if let Err(e) = r {
+        assert!(!e.is_empty(), "refused by name");
+    }
+}

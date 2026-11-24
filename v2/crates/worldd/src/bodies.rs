@@ -250,7 +250,8 @@ pub struct Bodies {
     pub wind_log: Vec<Effect>,
     /// What a restart did with each body the log had standing off its floor (E11d, killed during a climb out), by
     /// name: `climb-out`, `resume-nearest`, `resume-seated` (back in the place it was climbing out of),
-    /// `resume-seated-other` (that place taken: another free place of its thing) or `resume-held` (left where it was).
+    /// `resume-seated-other` (that place taken: another free place of its thing), `resume-held` (left where it was) or
+    /// `resume-held-away` (left where it was because the free places of its thing move with a cabin that is away, N14).
     pub resumed: Vec<(Id, &'static str)>,
     /// The never-stuck ladder over the bodies' walks (0.133 N1).
     pub unstuck: crate::unstick::Unstuck,
@@ -715,7 +716,9 @@ impl Bodies {
             // and goes straight away from it, so that is the place of the things the body is over nearest where the
             // log had it (ties by thing, slot, place); held there by the place's own position (`restore`'s `was`),
             // else, taken, another free place of that thing, named. Its next rise climbs out or is refused by name.
-            // With none free it is left where the log had it, as a seat gone at a restart leaves a body.
+            // With none free it is left where the log had it, as a seat gone at a restart leaves a body. A place that
+            // moves with its cabin (N14) is never taken while the cabin is away from its own stop: the body would ride
+            // off with it. Left there for that, it is named `resume-held-away`.
             Some((floor, None, at)) => {
                 let now = self.runner.now;
                 let d = |p: Vec3| i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2);
@@ -733,6 +736,7 @@ impl Bodies {
                     }
                 }
                 left.sort_by_key(|&(d, thing, slot, k, _)| (d, thing, slot, k));
+                let mut away = false;
                 let name = left.first().copied().and_then(|(_, thing, slot, k, spot)| {
                     let slots = std::iter::once(Some(slot)).chain(
                         self.slots
@@ -742,6 +746,10 @@ impl Bodies {
                             .collect::<Vec<_>>(),
                     );
                     for s in slots {
+                        if s.is_some_and(|s| !self.slots.at_own_stop(thing, s, now)) {
+                            away = true;
+                            continue;
+                        }
                         if self
                             .slots
                             .restore(
@@ -764,7 +772,12 @@ impl Bodies {
                     }
                     None
                 });
-                self.resumed.push((id, name.unwrap_or("resume-held")));
+                let held = if away {
+                    "resume-held-away"
+                } else {
+                    "resume-held"
+                };
+                self.resumed.push((id, name.unwrap_or(held)));
             }
             None => {}
         }

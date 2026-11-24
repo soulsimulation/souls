@@ -175,7 +175,10 @@ slot) with the stance the request named. Postures are the controller's stance in
   rule from where it is, over water or the boxes of the thing it is over (`climb-out`); else to the floor's nearest
   legal point when that line is as clean (`resume-nearest`); else it is never carried through a cut
   (`resume-held`): it is seated again in the seat it was climbing out of, so its next rise climbs out or is refused by
-  name, or, with no such seat free, left where it was, as a seat gone at a restart leaves a body. A thing's boxes are refreshed when an edit changes anything under it.
+  name, or, with no such seat free, left where it was, as a seat gone at a restart leaves a body. A seat that moves
+  with its cabin (N14) is not taken there while the cabin is away from its own stop (`Slots::at_own_stop`), so a
+  restart never seats a body into a cabin that rides off; left where it was for that, the body is named
+  `resume-held-away`. A thing's boxes are refreshed when an edit changes anything under it.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
