@@ -55,12 +55,20 @@ impl StandIn {
         let stalls: Stalls = Arc::default();
         let fails: Fails = Arc::default();
         let refused: Refused = Arc::default();
-        let (shared, held, failing, refusing) =
-            (objects.clone(), stalls.clone(), fails.clone(), refused.clone());
+        let (shared, held, failing, refusing) = (
+            objects.clone(),
+            stalls.clone(),
+            fails.clone(),
+            refused.clone(),
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (objects, stalls, fails, refused) =
-                    (shared.clone(), held.clone(), failing.clone(), refusing.clone());
+                let (objects, stalls, fails, refused) = (
+                    shared.clone(),
+                    held.clone(),
+                    failing.clone(),
+                    refusing.clone(),
+                );
                 std::thread::spawn(move || {
                     serve(stream, &objects, &stalls, &fails, &refused, page.max(1))
                 });

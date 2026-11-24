@@ -1056,7 +1056,10 @@ fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it
             if h.contains(&want) {
                 return h;
             }
-            assert!(Instant::now() < end, "no stream {state} in health.json: {h}");
+            assert!(
+                Instant::now() < end,
+                "no stream {state} in health.json: {h}"
+            );
             std::thread::sleep(Duration::from_millis(100));
         }
     };
