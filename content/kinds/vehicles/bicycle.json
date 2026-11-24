@@ -27,7 +27,7 @@
         "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [],
-      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "steps": [{"step":"move","move":"steer","at":"handlebar","toward":{"arg":"toward"}}],
       "effects": []
     }
   },

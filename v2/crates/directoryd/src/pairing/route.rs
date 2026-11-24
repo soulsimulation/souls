@@ -160,18 +160,19 @@ pub fn route(
                 force: b.get("force").and_then(Value::as_bool) == Some(true),
             };
             match p.ask(&ask, now()) {
-                Ok(a)
-                    if world.is_some_and(|w| p.ask_world(&a.code, &w).is_err())
-                        || former.is_some_and(|f| p.ask_former(&a.code, &f).is_err()) =>
+                Ok(a) => match world
+                    .map_or(Ok(()), |w| p.ask_world(&a.code, &w))
+                    .and_then(|()| former.map_or(Ok(()), |f| p.ask_former(&a.code, &f)))
                 {
-                    refuse(500, "store")
-                }
-                Ok(a) => json(
-                    200,
-                    json!({"code": a.code, "link": format!("{}/pair?code={}", p.public_url, a.code),
-                           "interval": a.interval}),
-                    "asked",
-                ),
+                    // Refused by its own name: an unplaced world is the caller's (400), the store's is ours (500).
+                    Err(e) => refuse(if e == "store" { 500 } else { 400 }, e),
+                    Ok(()) => json(
+                        200,
+                        json!({"code": a.code, "link": format!("{}/pair?code={}", p.public_url, a.code),
+                               "interval": a.interval}),
+                        "asked",
+                    ),
+                },
                 Err(e) => refuse(400, e),
             }
         }

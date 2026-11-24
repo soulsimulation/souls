@@ -133,7 +133,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve as absolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
-import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
+import { findHome, makeHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
 import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { kitEntry } from './kit.mjs';
@@ -870,7 +870,7 @@ function helperClaim(home) {
 async function pairing(home, url, grant, { within = 15_000 } = {}) {
   if (!/^creator-[0-9a-f]{32}-\d+$/.test(grant ?? '')) throw Object.assign(new Error('pair <world url> --creator creator-<32 hex>-<n>'), { code: 'not-a-creator' });
   const { directory, world, gateway } = worldOf(url);
-  mkdirSync(home, { recursive: true, mode: 0o700 });
+  makeHome(home);
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
@@ -982,7 +982,8 @@ if (isMain(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   try {
     const asked = requestOf(process.argv.slice(2));
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    // 0.133 Q2: a creator's pairing adds to a home, so it never takes a parent folder's
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: asked.pair !== undefined });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
     if (asked.look) {
       // The picture needs no creator; the words without a browser come from the creator's daemon when there is one.

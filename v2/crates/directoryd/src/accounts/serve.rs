@@ -6,7 +6,7 @@
 //!
 //! - `POST /v1/account/view-token` (V13b), signed in either way: `{"token", "expires", "owned": [{"grant", "follow"}]}`,
 //!   a short-lived view token for the gateways ([`super::view`]) scoped to what the account owns. A signed-out
-//!   session, or one whose token has expired, gets none.
+//!   session, or one whose token has expired, gets none; an account that owns nothing gets `{"owned": []}`, no token.
 //! - `POST /v1/account/sign-out` with the provider's session: that session gets no view token again.
 //!
 //! The first two answer `{"account", "principal"}`. The mailbox's (R13, #2753; [`super::mailbox`]):
@@ -111,9 +111,40 @@ pub fn configure_current_authority(app: &Arc<App>) -> Result<(), String> {
             let worlds = app.worlds.as_ref().ok_or("world-authority-required")?;
             worlds.ownership(world).map_err(|e| e.name.to_owned())
         }))?;
-        pairing.reconcile_current_authority()?;
+        // A slow or failing world store never stops the start (as R17's creator record): the world files already
+        // written stand, the reason is said by name, and the copier writes them when the store answers.
+        if let Err(e) = pairing.reconcile_current_authority() {
+            eprintln!("directoryd: degraded: {e}: the world files already written stand; retrying");
+            pairing.owe_all();
+        }
+        let weak = Arc::downgrade(app);
+        std::thread::spawn(move || copier(weak));
     }
     Ok(())
+}
+
+/// The copier's first wait and its longest, between passes while world files are owed (doubling, as R17's retries).
+const COPY_FIRST: std::time::Duration = std::time::Duration::from_millis(500);
+const COPY_MOST: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Writes the world files a slow world store kept back ([`crate::pairing::Pairing::copy_owed`]), waiting longer after
+/// each pass that leaves some owed, until the directory ends.
+fn copier(app: std::sync::Weak<App>) {
+    let mut wait = COPY_FIRST;
+    loop {
+        std::thread::sleep(wait);
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        let Some(pairing) = &app.pairing else {
+            return;
+        };
+        wait = if pairing.copy_owed() {
+            (wait * 2).min(COPY_MOST)
+        } else {
+            COPY_FIRST
+        };
+    }
 }
 
 pub struct Request {
@@ -685,11 +716,13 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
                     || creator_worlds_of(grant, app).is_some_and(|worlds| !worlds.is_empty())
             })
             .collect::<Vec<_>>(),
-        Ok(_) => return refuse(404, "nothing-owned"),
+        Ok(_) => Vec::new(),
         Err(_) => return refuse(500, "store"),
     };
+    // Signed in and owning nothing yet is a normal state (a new person, or one whose Souls stayed behind): no token,
+    // and no error for the page to show or retry on.
     if owned.is_empty() {
-        return refuse(404, "nothing-owned");
+        return (200, json!({"owned": []}), format!("{note} nothing-owned"));
     }
     let expires = now() + VIEW_TTL_S;
     let grants: Vec<String> = owned.iter().map(|(g, _)| g.clone()).collect();

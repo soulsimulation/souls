@@ -281,7 +281,7 @@ const s = await get('/s/eden/marker.txt');
 check(s.status === 200 && s.sys === 'v2' && s.body.startsWith('the viewers origin'), '/s/* still reaches the viewers\' origin');
 const hb = await get('/w/hamlet/v1/bootstrap');
 check(hb.old && hb.sys === null, `hamlet's bootstrap (not canonical) stays with today's launcher (${hb.status})`);
-for (const path of ['/w/eden/v1/bootstrap', '/v1/pair/show']) {
+for (const path of ['/w/eden/v1/bootstrap', '/v1/pair/show', '/v1/account/view-token', '/v1/account/requests/x']) {   // the page's sign-in exchange, the card's login approval
   const r = await get(path, path.startsWith('/v1') ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' } : undefined);
   check(r.sys === 'v2' && !r.old, `${path}: the new system (${r.status})`);
 }

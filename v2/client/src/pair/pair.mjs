@@ -20,7 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { writeGuide } from '../home/guide.mjs';
-import { CREDENTIALS, Refused, findHome } from '../home/home.mjs';
+import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
 
 const SLOW_DOWN = 5;
 
@@ -144,7 +144,7 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (got.pending) continue;
     if (got.refused) throw Object.assign(new Refused(got.refused, got.device ? `connected to ${got.device}` : 'refused'), { device: got.device ?? null });
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
-    mkdirSync(home, { recursive: true, mode: 0o700 });
+    makeHome(home); // a new home gets its .gitignore (0.133 Q2)
     const id = localId(got.grant);
     const history = await advertisedHistory(advert ?? advertOf(directory, world));
     const configFile = join(home, 'config.json');
@@ -172,7 +172,8 @@ if (isMain(import.meta.url)) {
   const say = (v) => console.log(JSON.stringify(v));
   try {
     for (const n of ['--directory', '--world', '--gateway']) if (!opt(n)) throw new Refused('usage', `${n} is needed`);
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    // 0.133 Q2: a pairing never lands in a parent folder's home, unless `--home` names it
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: true, named: opt('--home') ?? null });
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',

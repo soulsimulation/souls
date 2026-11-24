@@ -1601,6 +1601,32 @@ impl Town {
         Ok((map, surfaces, buildings, basis, square_pieces))
     }
 
+    /// The ground-level floor (level 0) of a building on the open ground that holds the entry point `at` (µm, the
+    /// open ground's frame) for today's walking body and has an open way to the open ground (an unblocked link with an
+    /// end on each), with the point in that floor's frame: where births go when the open ground round an entry holds
+    /// no place (verdelis-eden's dome garden covers its entry at (0, 0), and the open ground is cut out under it). A
+    /// floor above the ground and a sealed one are never taken. `None` when no such floor holds it.
+    pub fn entry_floor(&self, at: Vec3) -> Option<(Id, Vec3)> {
+        let holds = |node: Id, p: Vec3| {
+            self.surfaces.get(&node).is_some_and(|s| {
+                s.place(node, Frame { node, slot: None }, p, Quat::IDENTITY)
+                    .is_ok()
+            })
+        };
+        let ground = self.ground;
+        self.buildings.iter().find_map(|b| {
+            let p = crate::links::back(&b.place, at).ok()?;
+            b.floors.iter().find_map(|(&node, &(level, _))| {
+                let out = b.links.iter().any(|l| {
+                    l.blocked.is_none()
+                        && matches!(&l.ends, [Some(x), Some(y)]
+                            if (x.floor == node && y.floor == ground) || (y.floor == node && x.floor == ground))
+                });
+                (level == 0 && out && holds(node, p)).then_some((node, p))
+            })
+        })
+    }
+
     /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity
     /// kept; refused when it stands on none (`off-ground`).
     pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {

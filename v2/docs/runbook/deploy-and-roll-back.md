@@ -15,7 +15,9 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
    pin or service-manager settings reach it, so it never claims the live world or writes its archive, whatever build
    it is. It must serve within the world's start bound
    (below). It is then fed the intents the last records took (I4's answered rows), one tick's group at a time, and must give every
-   one a named end, then answer the probe (below). Invariants, not hashes: two builds fed the same intents need not
+   one a named end, then answer the probe (below). The copy first catches its clock up from where its copied log
+   ends to now, which on a quiet world can be hours of ticks, so the first group's answers have the start bound;
+   each later group's have four times the probe's, and an answer that comes late counts with a later group's. Invariants, not hashes: two builds fed the same intents need not
    write the same bytes. A failed rehearsal leaves the pin where it was.
 2. **Canary.** The pin in the world's directory record is set to the new build (one conditional write, W8) and the
    world is restarted (`systemctl restart --no-block worldd@<world>`). It must serve its socket within the world's start bound
@@ -61,7 +63,9 @@ bash v2/tools/ops/world-rollback.sh <world>   # back to the build that deploy le
 ```
 
 The wrappers call the `deploy` program as `deploy <world> <build hash> [--window-s 60] [--records 200]` and `deploy
-rollback <world> <to hash> --from <hash>`. `world-deploy.sh` takes the build from the install
+rollback <world> <to hash> --from <hash>`. `deploy <world> <build hash> --rehearse-only` runs step 1 alone and stops:
+it reads no pin, restarts nothing, takes no step lock and writes only under `$WORLDS_ROOT/rehearsals/`, so a staged
+build can be rehearsed against every live world before a release moves any. `world-deploy.sh` takes the build from the install
 (`/usr/local/lib/souls/worldd`, staged under its hash) and the build it leaves from the world's pin (`deploy pinned
 <world>`), which it keeps in `$WORLDS_ROOT/deploys/<world>` for `world-rollback.sh`. The install puts `deploy` in
 `/usr/local/lib/souls`. `release.sh` uses the same probe.

@@ -21,7 +21,8 @@
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
-//!   name (a take or a seating once its commit is written, below). A carry in progress is sampled each tick between
+//!   name (a take or a seating once its commit is written, below; a lift that names where its front goes once its way
+//!   comes back, [`WayAsk`]). A carry in progress is sampled each tick between
 //!   its carriers ([`Engine::tick`]). A carry that breaks off (a carrier's leave, carriers drifted apart, a restart)
 //!   sets its load down where it is and says why (0.135 C3).
 //! - **A restart keeps its activities** (E26, #3329): once the bodies are back, [`Engine::restore`] reads them from
@@ -35,6 +36,7 @@
 //! Not here: the view tier addressing an offer to the bodies asked (#3368's follow-up).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use replica::activity::ActivityKind;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal, read_id};
@@ -47,7 +49,7 @@ use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
-use sim::activity::carry::{Carry, Fixed, Load};
+use sim::activity::carry::{Carry, Fixed, Load, turn};
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
 use sim::moves::{Moves, Reach};
@@ -140,6 +142,8 @@ pub struct Engine {
     out: Vec<Effect>,
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
+    /// Whether the rides' seat courses (N14) were written to their things at this start.
+
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
     /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
@@ -156,6 +160,51 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
+    /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
+    fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
+    /// The way searches lifts asked since the last call to [`Engine::ways_asked`], in order.
+    asked: Vec<WayAsk>,
+    /// Each lift waiting for its way, by intent: the act, run again when the way comes back ([`Engine::way_back`]).
+    waiting: BTreeMap<Id, Act>,
+    /// Each way back and not yet read by its lift run again, by intent: what was asked, and the way or its refusal.
+    found: BTreeMap<Id, (WayAsk, Way)>,
+    /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
+    entries: Json,
+}
+
+/// A lift's way, found: none for a straight way, else the poses of one that turns the load, or its refusal.
+pub type Way = R<Option<Vec<turn::Ends>>>;
+
+/// A lift's way (0.135 R2, off the clock): a lift that names where its front goes has its way swept and, when the
+/// straight way clips, a way that turns the load searched ([`Load::way_to`]) on a thread of its own, never on the
+/// world's clock. The lift is answered when the way comes back, in the order the ways were asked; in lockstep the
+/// clock waits for it before the next tick, as for every check, so the same inputs land the lift at the same tick.
+/// The same inputs give the same way on any thread.
+#[derive(Clone, Debug)]
+pub struct WayAsk {
+    /// The lift's intent.
+    pub intent: Id,
+    pub load: Load,
+    pub fixed: Arc<Fixed>,
+    /// Where the front and the back carriers stand, and where the front goes, on the open ground's plan, µm.
+    pub front: [i64; 2],
+    pub back: [i64; 2],
+    pub to: [i64; 2],
+}
+
+impl WayAsk {
+    /// The sweep and the search, off the clock.
+    pub fn search(&self) -> Way {
+        self.load
+            .way_to(&self.fixed, self.front, self.back, self.to)
+    }
+
+    /// Whether `other` asks the same search.
+    fn same(&self, other: &WayAsk) -> bool {
+        (self.intent, self.load, self.front, self.back, self.to)
+            == (other.intent, other.load, other.front, other.back, other.to)
+            && *self.fixed == *other.fixed
+    }
 }
 
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
@@ -193,18 +242,52 @@ fn break_off(
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
-/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing.
+/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing. A seated,
+/// lying or riding body is where its seat is ([`feet_of`]), as the served world's reach reads it, not at its slot
+/// frame's zero.
 struct Feet(BTreeMap<Id, (Id, [i64; 2])>);
 
 impl Feet {
-    fn of(c: &Controller, bodies: impl IntoIterator<Item = Id>) -> Feet {
+    fn of(
+        c: &Controller,
+        tree: &Tree,
+        entries: &Json,
+        bodies: impl IntoIterator<Item = Id>,
+    ) -> Feet {
         Feet(
             bodies
                 .into_iter()
-                .filter_map(|b| c.body(b).map(|m| (b, sim::index::place_of(m))))
+                .filter_map(|b| c.body(b).map(|m| (b, feet_of(tree, entries, &m.pose))))
                 .collect(),
         )
     }
+}
+
+/// Where a body with pose `pose` stands (0.135 E21, [`sim::reach::body_at`]): a seated, lying or riding one at its
+/// slot's point of the thing it is in, carried from that thing's frame onto the node it is placed on; any other, or
+/// one whose thing's entry or place is not found, where its pose has it.
+fn feet_of(tree: &Tree, entries: &Json, pose: &replica::pose::Pose) -> (Id, [i64; 2]) {
+    let thing = tree.handle(pose.frame.node).and_then(|h| tree.node(h));
+    let within = thing
+        .as_ref()
+        .and_then(|n| crate::acts::entry_in(entries, tree, n));
+    let on = |_: Id, p: Vec3| {
+        let n = thing.as_ref()?;
+        let place = n.place()?;
+        let up = place
+            .position
+            .plus(place.orientation.rotate(p).ok()?)
+            .ok()?;
+        Some((n.parent()?, up))
+    };
+    let (floor, at) = sim::reach::body_at(pose, within.as_deref(), on).unwrap_or_else(|| {
+        let node = match pose.support {
+            replica::pose::Support::Surface { surface, .. } => surface,
+            _ => pose.frame.node,
+        };
+        (node, pose.position)
+    });
+    (floor, [at.x, at.z])
 }
 
 impl Reach for Feet {
@@ -302,8 +385,10 @@ fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
 
 impl Engine {
     /// The engine carrying each load whose kind `entries` states as its entry says (0.135 C2): `entries` is the
-    /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out.
+    /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out. The
+    /// entries are kept, so a touch reaches a seated body at its seat (0.135 E21, [`feet_of`]).
     pub fn with_loads(mut self, entries: &Json) -> Engine {
+        self.entries = entries.clone();
         for (_, e) in entries.obj().unwrap_or(&[]) {
             if let (Some(kind), Ok(load)) = (e.get("kind").and_then(Json::str), Load::of(e)) {
                 self.loads.insert(kind.to_owned(), load);
@@ -334,6 +419,7 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
+
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
@@ -350,7 +436,46 @@ impl Engine {
             loads: BTreeMap::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
+            fixed: BTreeMap::new(),
+            asked: Vec::new(),
+            waiting: BTreeMap::new(),
+            found: BTreeMap::new(),
+            entries: Json::Null,
         }
+    }
+
+    /// Whether act `id` waits for its way (a lift, [`WayAsk`]): it is answered when the way comes back.
+    pub fn waits(&self, id: Id) -> bool {
+        self.waiting.contains_key(&id)
+    }
+
+    /// The lifts waiting for their ways, by intent.
+    pub fn waiting_ids(&self) -> Vec<Id> {
+        self.waiting.keys().copied().collect()
+    }
+
+    /// Lifts waiting for ways and ways back not yet read: what the engine keeps between ticks for them (0.135 R2).
+    pub fn ways_kept(&self) -> (usize, usize) {
+        (self.waiting.len(), self.found.len())
+    }
+
+    /// The way searches asked since the last call, in order, to be searched off the clock.
+    pub fn ways_asked(&mut self) -> Vec<WayAsk> {
+        std::mem::take(&mut self.asked)
+    }
+
+    /// A way come back for `ask`: the lift waiting for it, to be run again, which reads the way; none when the lift
+    /// no longer waits (its deadline passed), and the way is dropped.
+    pub fn way_back(&mut self, ask: WayAsk, way: Way) -> Option<Act> {
+        let act = self.waiting.remove(&ask.intent)?;
+        self.found.insert(ask.intent, (ask, way));
+        Some(act)
+    }
+
+    /// Lift `id`'s deadline passed while it waited for its way: it waits no longer, and whether it was waiting.
+    pub fn way_late(&mut self, id: Id) -> bool {
+        self.found.remove(&id);
+        self.waiting.remove(&id).is_some()
     }
 
     /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
@@ -366,7 +491,7 @@ impl Engine {
         if bodies.is_empty() {
             return;
         }
-        let feet = Feet::of(c, bodies);
+        let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(
             tree,
             c,
@@ -434,6 +559,9 @@ impl Engine {
         a: &Act,
         now: Micros,
     ) -> R<()> {
+        // A way this act asked for, come back (a lift run again, [`Engine::way_back`]): taken here, so however the act
+        // ends (refused before its way is read, say `carry-lifted`) nothing of it is kept.
+        let found = self.found.remove(&a.id);
         if let Some(ask) = match a.verb {
             Verb::Steer => Some(crate::carrier::Ask::Steer),
             Verb::Land => Some(crate::carrier::Ask::Land),
@@ -525,7 +653,7 @@ impl Engine {
                 // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
-                    let feet = Feet::of(c, [asker, a.body]);
+                    let feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
                             continue;
@@ -803,17 +931,35 @@ impl Engine {
                         None => None,
                     };
                     let xz = |v: Vec3| [v.x, v.z];
-                    load.check(
-                        crew,
-                        xz(f),
-                        xz(k),
-                        xz(middle),
-                        axis,
-                        to.map(xz).zip(fixed.as_ref()),
-                    )?;
+                    load.check_lift(crew, xz(f), xz(k), xz(middle), axis)?;
                     let on_plan: Vec<(Id, [i64; 2])> =
                         sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
                     load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
+                    // 0.135 R2, off the clock: the way to a destination is swept, and when the straight way clips one
+                    // that turns the load is searched, on the way thread; the lift waits for it, nothing written, and
+                    // runs again when it comes back. A way asked for other inputs (a carrier moved since, the ground
+                    // changed) is asked again.
+                    let way = match (to, fixed) {
+                        (Some(to), Some(fixed)) => {
+                            let ask = WayAsk {
+                                intent: a.id,
+                                load,
+                                fixed: Arc::new(fixed),
+                                front: xz(f),
+                                back: xz(k),
+                                to: xz(to),
+                            };
+                            match found {
+                                Some((asked, way)) if asked.same(&ask) => way?,
+                                _ => {
+                                    self.waiting.insert(a.id, a.clone());
+                                    self.asked.push(ask);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        _ => None,
+                    };
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
@@ -833,6 +979,15 @@ impl Engine {
                         .iter()
                         .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
                         .collect();
+                    // 0.135 R2: a way that turns the load is kept on the carry and said to its carriers after the lift.
+                    if let Some(way) = way {
+                        self.take(&mut carry, Some((a.id, a.soul)));
+                        self.activities.next = tree.next();
+                        let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
+                        self.activities
+                            .carry_way(&mut tree, activity, board, &way, by)?;
+                        carry.way = way;
+                    }
                     self.carries.insert(activity, carry);
                 } else {
                     let mut carry = self
@@ -949,11 +1104,29 @@ impl Engine {
     }
 
     /// The engine's part of a tick at `now`: its due timers (a leave let go, an offer or a pair lapsed), then one
-    /// sample of each carry between its carriers.
-    pub fn tick(&mut self, live: &Tree, c: &mut Controller, slots: &mut Slots, now: Micros) {
+    /// sample of each carry between its carriers, checked against the fixed geometry of its ground as the walkers'
+    /// ground `versions` have it (0.135 C7).
+    pub fn tick(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        slots: &mut Slots,
+        versions: &sim::ground::Versions,
+        now: Micros,
+    ) {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
+        }
+        // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
+        let changed = slots.runs_changed();
+        if !changed.is_empty() {
+            self.out.extend(slot_courses(live, slots, &changed, now));
+        }
+        // N14: a ride's trip ends when its seats next come to a stop: what its start form set goes back (a cable car's
+        // `under_way`), so a ride set off once is boarded again.
+        for (thing, ends) in slots.trip_ended(now) {
+            self.out.extend(trip_end(live, thing, &ends, now));
         }
         let mut tree = None;
         while let Some(t) = self.due.fire(now) {
@@ -965,7 +1138,7 @@ impl Engine {
                 .instance_of(&t)
                 .and_then(|n| self.moves.record(n));
             if let Some((body, target)) = aimed.map(|r| (r.body, r.target)) {
-                let feet = Feet::of(c, [body, target]);
+                let feet = Feet::of(c, tr, &self.entries, [body, target]);
                 let _ = self.moves.fire(c, &mut self.due, &mut self.mint, &feet, &t);
                 continue;
             }
@@ -1123,11 +1296,65 @@ impl Engine {
                     }
                 }
             }
+            // 0.135 C7: every step is checked against its ground's fixed geometry, read again only when the walkers'
+            // ground has changed since (`versions`, G3's); a step into it stops the carry, its load set down where its
+            // last sample had it.
+            let mut blocked = Vec::new();
             for (activity, f, k) in step {
-                if let Some(carry) = self.carries.get_mut(&activity)
-                    && let Err(r) = carry.step(tr, now, f, k)
-                {
-                    eprintln!("worldd: a carry's sample was not written: {r}");
+                let Some(carry) = self.carries.get_mut(&activity) else {
+                    continue;
+                };
+                let fresh = self
+                    .fixed
+                    .get(&carry.ground)
+                    .is_some_and(|(v, _)| v == versions);
+                if !fresh {
+                    match Fixed::of(tr, carry.ground) {
+                        Ok(g) => {
+                            self.fixed.insert(carry.ground, (versions.clone(), g));
+                        }
+                        Err(e) => {
+                            self.fixed.remove(&carry.ground);
+                            eprintln!("worldd: the carry {} stopped: {e}", show(activity));
+                            blocked.push(activity);
+                            continue;
+                        }
+                    }
+                }
+                let done = match self.fixed.get(&carry.ground) {
+                    Some((_, g)) => carry.step(tr, now, f, k, g),
+                    None => Err(refusal("carry-geometry", show(carry.ground))),
+                };
+                match done {
+                    Ok(()) => {}
+                    Err(r) if r.name == "carry-load-blocked" || r.name == "carry-geometry" => {
+                        eprintln!("worldd: the carry {} stopped: {r}", show(activity));
+                        blocked.push(activity);
+                    }
+                    Err(r) => eprintln!("worldd: a carry's sample was not written: {r}"),
+                }
+            }
+            for a in blocked {
+                let Some(mut carry) = self.carries.remove(&a) else {
+                    continue;
+                };
+                match break_off(
+                    &mut carry,
+                    &mut self.activities,
+                    &mut self.mint,
+                    tr,
+                    now,
+                    None,
+                    "souls:carry-blocked",
+                    None,
+                ) {
+                    // A crew's part set down is no longer its own (0.135 A2).
+                    Ok(()) => {
+                        if let Some(s) = self.asm.as_mut() {
+                            s.ended(a);
+                        }
+                    }
+                    Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
                 }
             }
         }
@@ -2218,7 +2445,7 @@ impl Engine {
     /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
     /// [`Engine::out`].
     pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
-        let Some((_, _, follower, _)) = self
+        let Some((_, _, follower, _, _)) = self
             .activities
             .following()
             .into_iter()
@@ -2257,7 +2484,20 @@ impl Engine {
 
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
-    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+    /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
+    /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    pub fn walked(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        body: Id,
+        intent: Id,
+        now: Micros,
+        walk: bool,
+    ) {
+        if walk && self.activities.lead(&self.moves, body) {
+            return;
+        }
         let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
@@ -2318,8 +2558,9 @@ impl Engine {
         self.collect(None);
     }
 
-    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
-    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Every follow running (0.135 G2): its activity, the leader's body, the follower's body and Soul, and the width
+    /// of a place beside the leader (R1, hand in hand).
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
     }
 
@@ -2327,6 +2568,75 @@ impl Engine {
     pub fn out(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.out)
     }
+}
+
+/// The entry that sets ride `thing`'s fields `ends` back (N14, a trip's end): those that hold another value; none when
+/// every one holds it already or is unset.
+fn trip_end(live: &Tree, thing: Id, ends: &[(u64, Value)], now: Micros) -> Option<Effect> {
+    let node = live.handle(thing).and_then(|h| live.node(h))?;
+    let changes: Vec<_> = ends
+        .iter()
+        .filter(|(n, to)| node.fields().get(n).is_some_and(|v| v != to))
+        .map(|(n, to)| crate::carrier::set(thing, *n, to.clone()))
+        .collect();
+    if changes.is_empty() {
+        return None;
+    }
+    match crate::carrier::entry(live, thing, changes, now, Cause::World, Actor::World) {
+        Ok(e) => Some(e),
+        Err(r) => {
+            eprintln!("worldd: {}'s trip does not end: {r}", show(thing));
+            None
+        }
+    }
+}
+
+/// The courses of the slots that move with their cabins (N14) of the rides `changed`, written onto each whose
+/// [`replica::schedule::F_SEAT_COURSES`] is not what its slots run now (`slots`, from its entry), or cleared on one whose
+/// slots no longer run (a ride a god edit moved where they do not): one entry of the world's a ride, so every copy and
+/// the page read where each slot and its rider are. A restart with the same entries writes nothing.
+fn slot_courses(live: &Tree, slots: &Slots, changed: &BTreeSet<Id>, now: Micros) -> Vec<Effect> {
+    let mut by: BTreeMap<Id, BTreeMap<u64, Value>> =
+        changed.iter().map(|t| (*t, BTreeMap::new())).collect();
+    for (thing, slot, c) in slots.slot_courses() {
+        if let Some(m) = by.get_mut(&thing) {
+            m.insert(slot, c.to_value());
+        }
+    }
+    let mut out = Vec::new();
+    for (thing, courses) in by {
+        let to = Value::Map(courses);
+        let held = live
+            .handle(thing)
+            .and_then(|h| live.node(h))
+            .map(|n| n.fields().get(&replica::schedule::F_SEAT_COURSES).cloned());
+        let Some(held) = held else {
+            continue;
+        };
+        if held.as_ref() == Some(&to) || (held.is_none() && to == Value::Map(BTreeMap::new())) {
+            continue;
+        }
+        let e = crate::carrier::entry(
+            live,
+            thing,
+            vec![crate::carrier::set(
+                thing,
+                replica::schedule::F_SEAT_COURSES,
+                to,
+            )],
+            now,
+            Cause::World,
+            Actor::World,
+        );
+        match e {
+            Ok(e) => out.push(e),
+            Err(r) => eprintln!(
+                "worldd: {}'s slot courses are not written: {r}",
+                show(thing)
+            ),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -2360,5 +2670,80 @@ mod kind_tests {
                 "bad"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod feet_tests {
+    use super::*;
+    use replica::pose::{Frame, Pose, Quat, Support};
+
+    /// 0.135 E21 follow-up: a touch's reach to a seated Soul (an accept, a role's move) is from its seat. The testworld
+    /// building (60 m west, turned 33°) read as a bench whose end seat is 9.5 m from its origin: a Soul standing 0.4 m
+    /// from that seat is 0.4 m from the seated one, both ways, inside a handshake's reach; before, it was measured from
+    /// the bench's origin, 9.5 m off.
+    #[test]
+    fn a_touch_reaches_a_seated_body_at_its_seat() {
+        let generated = testworld::generate(1, 0).expect("the synthetic world");
+        let imported = import_eden::load(&generated.text).expect("the imported world");
+        let (ground, bench) = (imported.nodes["ground"], imported.nodes["building"]);
+        let tree = &imported.tree;
+        let node = tree.node(tree.handle(bench).unwrap()).unwrap();
+        let end_x = testworld::BUILDING_LENGTH / 2 + 1_500;
+        let entry = replica::rules::json::parse(&format!(
+            r#"{{"slots":{{"middle":{{"admits":"body","at_mm":[0,450,0]}},"end":{{"admits":"body","at_mm":[{end_x},450,0]}}}}}}"#
+        ))
+        .unwrap();
+        let entries = Json::Obj(vec![(plain(node.kind().as_str()).to_owned(), entry)]);
+        let place = node.place().unwrap();
+        let out = |x: i64, z: i64| {
+            let d = place
+                .orientation
+                .rotate(Vec3::new(x * 1000, 0, z * 1000))
+                .unwrap();
+            place.position.plus(d).unwrap()
+        };
+        let seated = Pose {
+            frame: Frame {
+                node: bench,
+                slot: Some(2),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        };
+        let standing = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: out(end_x, 400),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        };
+        let id = |n: u64| Id::new(Scope([0xce; 16]), n).unwrap();
+        let feet = Feet(BTreeMap::from([
+            (id(1), feet_of(tree, &entries, &seated)),
+            (id(2), feet_of(tree, &entries, &standing)),
+        ]));
+        let d = |a, b| {
+            feet.distance(
+                id(a),
+                &Effector::Held,
+                None,
+                id(b),
+                &Name::new("p").unwrap(),
+            )
+            .expect("one floor")
+        };
+        let (to, from) = (d(2, 1), d(1, 2));
+        println!("a touch from 0.4 m off the end slot: {to} µm, {from} µm back");
+        assert!((to - 400_000).abs() <= 10_000, "to the seated Soul: {to}");
+        assert_eq!(to, from);
+        // With no entry for the bench its seat is not found: the old measure, from the bench's origin, 9.5 m off.
+        assert_eq!(feet_of(tree, &Json::Null, &seated), (bench, [0, 0]));
     }
 }

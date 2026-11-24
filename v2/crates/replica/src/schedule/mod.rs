@@ -57,6 +57,10 @@ pub const F_POSTED_BY: u64 = 86;
 /// A moving node steered off its own course (a punt, #3603): who steers it, the course it left, when, and its wake
 /// (`sim::courses::punts::Steer`); an empty map while it is on its own course.
 pub const F_STEER: u64 = 87;
+/// The courses of a ride's seats that move with their cabins (N14, `sim::courses::rides::seat_runs`): `{slot: course}`,
+/// each a [`course::Course`] of the slot's point in its thing's frame, as [`F_COURSE`] is a node's. Written by the world
+/// from the ride's entry; the page reads where a seat and its rider are from it.
+pub const F_SEAT_COURSES: u64 = 88;
 
 /// The most rows hours may hold.
 pub const HOURS_MOST: usize = 64;

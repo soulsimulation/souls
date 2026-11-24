@@ -37,3 +37,15 @@ test('an ask is one call, a retry, a refusal it could not act on, or no intent; 
   assert.equal(f.kinds.length, 1);
   assert.deepEqual(f.things.map((t) => [t.name, t.pose]), [['a red apple', [3000, 0, 2000, 0]], ['a green apple', [1000, 0, 1000, 0]]]);
 });
+
+test("0.133 Q2: a walk that ended within reach of an open-ground place is at it, by its receipt's away_m", async () => {
+  const { walkedTo, placeIds } = await import('./battery.mjs');
+  const find = { at: 1, words: ['find', 'pond'], answer: { ok: true, found: [{ id: 'ab-70', name: 'pond' }, { id: 'ab-71', name: 'pond shore' }] } };
+  const walk = (target, away) => ({ at: 2, words: ['act', target, '--wait'], answer: { ok: true, phase: 'done', away_m: away, receipt: { target } } });
+  assert.deepEqual(walkedTo([find, walk('ab-70 ab-71', 0.2)], 0), ['g-pond']);
+  assert.deepEqual(walkedTo([find, walk('ab-71', 0)], 0), ['g-pond.shore-bank']);
+  assert.deepEqual(walkedTo([find, walk('ab-70', 3.4)], 0), [], 'too far to be at it');
+  assert.deepEqual(walkedTo([walk('ab-9', 0)], 0, () => 'cottage'), ['g-cottage'], 'named by the stream when the seat never found it');
+  assert.deepEqual(walkedTo([find, walk('ab-70', 0.2)], 5), [], 'before the instruction');
+  assert.deepEqual(placeIds(['lab-pond-hall', 'pond shore']), ['g-lab-pond-hall', 'g-pond.shore-bank']);
+});

@@ -85,7 +85,17 @@ width is the larger of its other two sides, its two outermost `grip` points alon
 hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
 `state.hold_crew`'s, how many hold it standing: 0.135 C6, so a part one holds standing can take four to carry). Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
-too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`).
+A straight way that clips is searched for one that turns the load (0.135 R2: through a door narrower than its length,
+carried in line, each move checked as a step is); no such way is `carry-load-blocked`, a search past its small budget
+(a door near the lift, a few milliseconds) `carry-unproven`. The sweep and the search run off the world's clock, so
+many lifts at once never make a tick late: a lift that names a destination is answered when its way comes back (at
+the next tick when the search is quick), and one whose way has not come back by the act's deadline is refused
+`carry-way-late`. A way found is said to the carry's audience at the lift (`souls:carry-way`, each pose where the front
+and the back carriers stand), and the carriers walk it.
+While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
+load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
+(`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
 Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
 a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
 `content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and
@@ -178,7 +188,17 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
 `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
-stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+stops). On Engine v2 a ride whose stops differ moves its seats, never the thing (N14, `sim::courses::rides::seat_runs`):
+across and back (`returns` true, a cable car) each seat waits at the stop its `stand` names, then runs to each other stop
+keeping its offset from the stop's stand point and its height over the floor there; round a ring (`returns` false, three
+or more seats, a big wheel or a carousel) the seats turn one step at a time between their declared points. Each waits
+3 minutes at a stop. So a ride's seat is declared where it waits for riders, beside its stop and within standing reach.
+The old page draws a cabin at each seat that moves, unless the ride's def has cars of its own (a big wheel's gondolas). A rider
+boards only at its seat's own stop, gets off at any stop within reach, and is carried on between them (a rise there is
+refused `boarding-frame-away`; a form that sits is refused before any walk while no cabin waits at its stop, saying
+when the next is back). A trip ends when the seats next come to a stop: the fields its `start` form `set` (a bool or a
+whole number, such as `under_way`) go back to their defaults, so a ride set off once is boarded again. A kind is a
+vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
 (SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a

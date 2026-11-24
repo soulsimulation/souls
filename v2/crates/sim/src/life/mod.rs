@@ -8,7 +8,9 @@
 //!   nearest first. A spot is held while a body stands closer to it than two body radii (the spatial index walks use),
 //!   and a held spot is passed over, as is one the ground does not hold (#4216). When every entry spot is held the
 //!   birth takes the nearest free place on further rings ([`Standing::beyond`]); with none, it waits, named
-//!   [`NO_FREE_PLACE`] ([`Life::held_back`]). Two bodies are never born on one point.
+//!   [`NO_FREE_PLACE`] ([`Life::held_back`]), or [`OFF_SURFACE`] when no spot tried was held and the ground held none
+//!   of them. Two bodies are never born on one point. A world answers a birth so named and withdraws it
+//!   ([`Life::withdraw`]): a join is never left waiting with no answer (verdelis-eden, 24 Nov).
 //! - **Carried, never dropped.** Births are taken in the order asked, at most [`Life::per_tick`] a tick; the rest wait
 //!   for the next tick. Each born body says how long it waited. The budget is a count, not a reading of the clock: a
 //!   birth's cost is measured (the `joins` bench), and the engine never reads wall time (K7).
@@ -58,8 +60,32 @@ pub trait Standing {
     }
 }
 
+/// The places of `.0`, then, once every one of those is tried, those of `.1` for the same entry: births by an entry on
+/// the open ground take the floor that holds it ([`crate::walk::town::Town::entry_floor`]) only when the ground round
+/// it holds no free place.
+pub struct Then<'a, A, B>(pub &'a A, pub Option<&'a B>);
+
+impl<A: Standing, B: Standing> Standing for Then<'_, A, B> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let n = self.0.tries() + self.0.beyond();
+        if i < n {
+            self.0.spot(entry, i)
+        } else {
+            self.1?.spot(entry, i - n)
+        }
+    }
+    fn tries(&self) -> u64 {
+        self.0.tries()
+    }
+    fn beyond(&self) -> u64 {
+        self.0.beyond() + self.1.map_or(0, |b| b.tries() + b.beyond())
+    }
+}
+
 /// Why a birth waits when every place by its entry, and every further one, is held.
 pub const NO_FREE_PLACE: &str = "birth-no-free-place";
+/// Why a birth waits when the ground holds none of the places by its entry or further, and none was held by a body.
+pub const OFF_SURFACE: &str = "birth-off-surface";
 
 /// Rings tried past an entry's own when all of those are held.
 pub const FAR_RINGS: u64 = 8;
@@ -234,7 +260,16 @@ impl Life {
         self.waiting.len()
     }
 
-    /// Why `soul`'s birth waits, when its last try found every place held ([`NO_FREE_PLACE`]).
+    /// Takes `soul`'s waiting birth back, if it waits: true when it did.
+    pub fn withdraw(&mut self, soul: Id) -> bool {
+        self.held_back.remove(&soul);
+        let before = self.waiting.len();
+        self.waiting.retain(|w| w.soul != soul);
+        self.waiting.len() < before
+    }
+
+    /// Why `soul`'s birth waits, when its last try found no place: every place held ([`NO_FREE_PLACE`]), or none on
+    /// the ground ([`OFF_SURFACE`]).
     pub fn held_back(&self, soul: Id) -> Option<&'static str> {
         self.held_back.get(&soul).copied()
     }
@@ -306,27 +341,27 @@ impl Life {
         standing: &impl Standing,
         family: &Family,
     ) -> Option<Born> {
-        let surfaces = floors.for_build(build)?;
+        let Some(surfaces) = floors.for_build(build) else {
+            self.held_back.insert(b.soul, OFF_SURFACE);
+            return None;
+        };
         let mut placed: Option<Moved> = None;
         let next = self.minter.next();
         let body = Id::new(self.minter.scope(), next)?;
         // Held: a body closer than two body radii to the spot, as the index has it (bodies born this tick included).
         let clear = 2 * build.size.radius_mm().max(Size::Standard.radius_mm()) * 1000;
-        let mut any = false;
+        let mut held = false;
         for i in 0..standing.tries() + standing.beyond() {
             let Some((node, at)) = standing.spot(b.entry, i) else {
-                if i == 0 {
-                    return None;
-                }
                 break;
             };
-            any = true;
             if !runner
                 .controller
                 .near()
                 .bodies_within(node, [at.x, at.z], clear)
                 .is_empty()
             {
+                held = true;
                 continue;
             }
             let frame = Frame { node, slot: None };
@@ -338,9 +373,13 @@ impl Life {
             }
         }
         let Some(moved) = placed else {
-            if any {
-                self.held_back.insert(b.soul, NO_FREE_PLACE);
-            }
+            // An entry that declares no place has none free.
+            let why = if held || standing.spot(b.entry, 0).is_none() {
+                NO_FREE_PLACE
+            } else {
+                OFF_SURFACE
+            };
+            self.held_back.insert(b.soul, why);
             return None;
         };
         self.held_back.remove(&b.soul);

@@ -29,9 +29,11 @@ const V2=typeof window!=='undefined'&&!!v2Stream();
 const doingNow=(soul:PublicSoul)=>V2&&soul.doing?doingText(soul.doing,null,soul.id)||null:null;
 type Camera={following:boolean;follow():void;stop():void};
 
+/** The old process's per-Soul record. A world the new engine runs has none (the launcher answers it 404
+ *  world.new-engine): the card is the stream's Soul (name, look, what it is doing), and nothing is asked. */
 function usePublicRecord(api:Api,soulId:string):Rec{
- const [rec,setRec]=useState<Rec>('loading');
- useEffect(()=>{let live=true,timer:ReturnType<typeof setTimeout>|undefined;setRec('loading');
+ const [rec,setRec]=useState<Rec>(V2?'unavailable':'loading');
+ useEffect(()=>{if(V2)return;let live=true,timer:ReturnType<typeof setTimeout>|undefined;setRec('loading');
   const read=async()=>{try{const r=await api(PUBLIC_SOUL_PATH(soulId));if(!live)return;
    if(r.status===404||r.status===405){setRec('unavailable');return;}
    const p=r.status===200?readPublicRecord(r.data):null;setRec(prev=>p??(prev!=='loading'?prev:'unavailable'));}catch{/* keep the last record */}

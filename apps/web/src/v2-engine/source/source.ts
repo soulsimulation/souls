@@ -35,6 +35,8 @@ export type NodeRec = {
   def?: string;
   /** Its def's params (import-eden's field 19, W3), when it has any. */
   params?: Record<string, unknown>;
+  /** The open ground's: the defs the world defines itself (import-eden's field 102), `[ref, stored def's JSON text]`. */
+  defBodies?: [string, string][];
   /** R4 (0.134): a creator's tint (replica `tint::F_TINT`, field 145): `[part, rgb]` rows, `tint:whole` for the whole
    *  thing and `part:<name>` for a part; empty once undone. Absent when the thing was never recoloured. */
   tint?: [string, number][];
@@ -61,6 +63,9 @@ export type NodeRec = {
   /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
    *  `courseAt` (#3603). */
   course?: Uint8Array;
+  /** N14: the courses of a ride's seats that move with their cabins (field 88, `replica::schedule::F_SEAT_COURSES`), by
+   *  slot, each its value's canonical bytes for `courseAt`: the slot's point in the thing's frame. */
+  seats?: Record<number, Uint8Array>;
   /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
    *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
   fields?: Fields;

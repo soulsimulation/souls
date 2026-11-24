@@ -20,3 +20,11 @@ test('before a moment is drawn the rewind is there but cannot be pressed', () =>
   const html = renderToStaticMarkup(createElement(ViewerFrame, { handle: null, state: null, dt: 0.1, navigationOpen: false, onNavigationChange() {} }));
   assert.match(html, /<button disabled="">Back 1 min<\/button>/);
 });
+
+// Gene (24 Nov): with a world clock the Live pill opens the time panel, and the moment controls live there, not in the bar.
+test('with a world clock the bar shows no moment controls (they are in the time panel)', () => {
+  const state = { shownTick: 12_000, loading: false, presentation: 'live', selection: { soulId: null } } as unknown as WorldViewerState;
+  const html = renderToStaticMarkup(createElement(ViewerFrame, { handle: {} as WorldViewerHandle, state, dt: 0.1, navigationOpen: false, onNavigationChange() {}, worldTime: 'Sat · 6:12 am', worldMinutes: 375 }));
+  assert.doesNotMatch(html, /Back 1 min|Link to this moment|From the start/);
+  assert.match(html, /world-time-button/);
+});

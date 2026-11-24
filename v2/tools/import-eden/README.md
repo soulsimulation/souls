@@ -55,7 +55,12 @@ entry.
 
 A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
 as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
-stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none.
+stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none. A def the
+world defines itself (a template's `define`, which no page's library has: hello-hamlet's reading room) is kept once on
+the open ground as field 102, `[[ref, def] …]` with each whole stored def as JSON text (the exporter's `ground.defs`, the
+defs the world places), so that page draws it as the world's own page does (its roof) and not from the thing's solids.
+On the ground and not on a thing, removing any thing of the def never loses it. It is in every baseline: Eden-2026's
+31 such defs are about 64 KB of a baseline of about 9 MB.
 
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for
@@ -69,7 +74,10 @@ own floor, one with a room on its level or raised more than a step (a pavilion's
 thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that
 floor, in the room there that holds it. The open ground is cut out under such a floor and a roof is no ground, so
 otherwise nobody could stand by them. A lawn's or a path's low floor is ground cover and keeps its things on the
-open ground, and so does a decor thing (a cableway reaches far past its valley station).
+open ground. A decor thing at the root is placed on the floor too (verdelis-eden's bubbles and succulents under its
+dome, 24 Nov), unless a point its kind's entry declares is off that floor: a cableway reaches far past its valley
+station, so it stays on the open ground. That needs the world's entries (`load_with`, as `worldd seed` loads); with
+none (`load`) a decor thing stays where it is, and a decor thing in a building's slot keeps its slot.
 
 Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
 (radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand

@@ -4,9 +4,15 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use common::{id, stand, town_of};
+use replica::ids::{Id, Scope};
+use replica::kinds::sizes::Build;
 use replica::pose::Vec3;
 use sim::ground::{HUMAN_RADIUS, Scene, Turn, cut_floor};
+use sim::host::Runner;
+use sim::life::{Birth, Life, Ring, Then};
 use sim::links::Kind;
 
 /// A hall 6 m wide whose south wall, at z = 3 m to 3.1 m, has a 1 m doorway to the open ground in its middle. Its
@@ -103,5 +109,109 @@ fn a_walker_on_the_short_floor_aims_at_its_doorway_and_is_routed_out() {
         corner.is_ok(),
         "{:?}",
         corner.err().map(|e| (e.name, e.detail))
+    );
+}
+
+/// Review of #4574: 200 births by an entry at the middle of the test world's three-storey building, as worldd asks
+/// them (the open ground's ring first, then the floor that holds the entry), are all born, on the open ground round it,
+/// and none above the ground.
+#[test]
+fn births_at_a_storeyed_building_stay_on_the_ground_round_it() {
+    let (t, nodes) = common::town(b"entry-storeys");
+    let mid = t
+        .buildings
+        .iter()
+        .find(|b| b.thing == nodes["building"])
+        .expect("the building")
+        .place
+        .pos;
+    let entry = id(900);
+    let ring = |node, at| Ring {
+        entries: BTreeMap::from([(entry, (node, at))]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    };
+    let on_ground = ring(t.ground, Vec3::new(mid.x, 0, mid.z));
+    let floor = t
+        .entry_floor(Vec3::new(mid.x, 0, mid.z))
+        .map(|(n, p)| ring(n, p));
+    let standing = Then(&on_ground, floor.as_ref());
+    let mut runner = Runner::new(50_000);
+    let mut life = Life::new(Scope([9; 16]), 8);
+    for n in 1..=200 {
+        life.ask(Birth {
+            soul: id(n),
+            entry,
+            asked: 0,
+        })
+        .expect("asked");
+    }
+    let upper: Vec<Id> = t
+        .buildings
+        .iter()
+        .flat_map(|b| b.floors.iter())
+        .filter(|(_, (level, _))| *level > 0)
+        .map(|(n, _)| *n)
+        .collect();
+    let (mut born, mut nodes_born) = (0, BTreeMap::<Id, usize>::new());
+    for k in 1..=60 {
+        for b in life.tick_built(
+            k * 50_000,
+            &mut runner,
+            &t,
+            &standing,
+            &common::humanoid(),
+            &|_| Build::STANDARD,
+        ) {
+            born += 1;
+            let node = runner
+                .controller
+                .body(b.body)
+                .expect("body")
+                .pose
+                .frame
+                .node;
+            *nodes_born.entry(node).or_default() += 1;
+        }
+        if life.waiting() == 0 {
+            break;
+        }
+    }
+    println!("born {born}: {nodes_born:?}");
+    assert_eq!(born, 200, "every birth taken");
+    assert_eq!(nodes_born.get(&t.ground), Some(&200), "on the open ground");
+    assert!(
+        upper.iter().all(|n| !nodes_born.contains_key(n)),
+        "none upstairs"
+    );
+}
+
+/// verdelis-eden (24 Nov): the floor an entry under a roof falls back to is the ground-level floor that holds it, in
+/// that floor's frame, with a way out; a point outside, or on a sealed floor (raised off the ground with no doorway),
+/// has none.
+#[test]
+fn an_entry_under_a_roof_falls_back_to_its_open_floor_never_a_sealed_one() {
+    let (t, nodes) = town_of(import_eden::load(&hall(3000)).expect("loads"), b"entry-at");
+    let floor = nodes["e_hall/floor-0"];
+    let (node, at) = t
+        .entry_floor(Vec3::new(500_000, 0, -500_000))
+        .expect("the hall's floor");
+    assert_eq!(node, floor, "in the hall");
+    assert_eq!(
+        (at.x, at.z),
+        (500_000, -500_000),
+        "the hall stands at the origin"
+    );
+    assert_eq!(t.entry_floor(Vec3::new(0, 0, 6_000_000)), None, "outside");
+    let sealed = hall(3000)
+        .replace(r#""y": 0,"#, r#""y": 3000,"#)
+        .replace(r#""openings": [{"#, r#""unused": [{"#);
+    let (t, nodes) = town_of(import_eden::load(&sealed).expect("loads"), b"entry-sealed");
+    assert!(t.surfaces.contains_key(&nodes["e_hall/floor-0"]), "cut");
+    assert_eq!(
+        t.entry_floor(Vec3::new(500_000, 0, -500_000)),
+        None,
+        "no way out"
     );
 }

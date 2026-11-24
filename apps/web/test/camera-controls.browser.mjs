@@ -61,7 +61,7 @@ try{
  check('The × on the Following chip ends Follow',await page.locator('.viewer-following').count()===0);
  // History still works beside the new chrome.
  await page.waitForFunction(()=>Number(document.querySelector('.viewer-history')?.dataset.viewerTick)>=1300,null,{timeout:90000});
- await page.getByRole('button',{name:'Back 1 min',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='history',null,{timeout:60000});
+ await page.locator('.world-time-button').click();await page.getByRole('button',{name:'Back 1 min',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='history',null,{timeout:60000});
  await page.getByRole('button',{name:'Return to live',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='live');
  await page.screenshot({path:run+'/desktop-camera.png'});
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Close panel',exact:true}).click().catch(()=>{});await page.waitForTimeout(600);

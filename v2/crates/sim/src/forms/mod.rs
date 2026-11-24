@@ -27,7 +27,11 @@
 //! - **Reserved, and ended in one entry** (F3, #2768). Accepting a form writes one entry at commit, in arrival order:
 //!   a `souls:form-started` event and, when the form is done at a thing, the reservation, a `souls:reserves` link from
 //!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`] reserves nothing. A
-//!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. However
+//!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. A form
+//!   that only takes seats (#4575, [`slots_taken`]: a bench's `sit`, a boat's `board`) holds those seats and not its
+//!   whole thing, so two Souls sit on one bench at once; the second racing for the same seat is refused
+//!   `place-taken`, and a form that holds the whole thing (a carry, a vehicle's drive) and a seat's run refuse each
+//!   other `thing-reserved`. The log's reservation link is the same either way. However
 //!   a run ends, one entry removes the reservation and names the ending (a `souls:form-ended` event with its name),
 //!   and the world ends the run's walk, move and timers with it: no path frees one alone. Ending never undoes an
 //!   effect.
@@ -327,6 +331,9 @@ struct FormRun {
     mv: Option<Instance>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
+    /// The seats it reserves in place of its whole thing ([`slots_taken`], #4575): each one's thing and slot. Empty
+    /// for a run that reserves its whole thing, or nothing.
+    slots_held: Vec<(Id, u64)>,
     /// When the run is due to have ended, world time: its start plus its steps' [`span`] (C20).
     due: Micros,
     /// A long form's stages, and the one in progress (F11).
@@ -446,6 +453,43 @@ struct Waiting {
     limits: Limits,
 }
 
+/// The seats a form done at `node` reserves in place of its whole thing (#4575), read from the form's entry as bound:
+/// each `sit` or `lie` step's slot, and the standing slot a `reparent` of the actor hands it into, on the thing the
+/// step names (E14) or `node`. A form reserves only those when taking them is all it does to the thing: every step a
+/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own. Any other step or
+/// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
+/// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
+/// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
+fn slots_taken(
+    node: Id,
+    steps: &[Step],
+    effects: &[form_runner::Effect],
+    long: bool,
+) -> Vec<(Id, u64)> {
+    use form_runner::Effect as E;
+    let only_seats = !long
+        && steps.iter().all(|s| {
+            matches!(
+                s,
+                Step::WalkTo { .. } | Step::Sit { .. } | Step::Rise | Step::Wait(_)
+            )
+        })
+        && effects
+            .iter()
+            .all(|e| matches!(e, E::Link { .. } | E::Unlink { all: false, .. }));
+    let mut taken: Vec<(Id, u64)> = steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Sit { slot, on, .. } => Some((on.unwrap_or(node), *slot)),
+            _ => None,
+        })
+        .filter(|_| only_seats)
+        .collect();
+    taken.sort_unstable();
+    taken.dedup();
+    taken
+}
+
 /// Whether `step` changes the body's posture (a seat taken or left, a ground posture): a run in one is let finish it.
 fn posture(step: &Step) -> bool {
     matches!(step, Step::Sit { .. } | Step::Rise | Step::Settle { .. })
@@ -476,6 +520,12 @@ pub struct Forms {
     expiring: BTreeSet<(Micros, Id)>,
     /// Reserved things, to the run that holds each.
     reserved: BTreeMap<Id, RunId>,
+    /// Reserved seats, by thing and slot, to the runs that hold each (#4575): a slot of more than one place (E16) is
+    /// reserved by as many runs as it has places.
+    slot_runs: BTreeMap<(Id, u64), BTreeSet<RunId>>,
+    /// Each seat run's own thing, to the seat runs done at it (#4575): held shared, so a whole-thing form, a removal
+    /// and F4's in-use check see the run there, while another seat run is not kept from its own seat by it.
+    sharing: BTreeMap<Id, BTreeSet<RunId>>,
     /// Nodes a form reserves nothing at: kinds of ground (E21).
     shared: BTreeSet<Id>,
     /// The kinds' amount fields (F4).
@@ -690,10 +740,77 @@ impl Forms {
         self.shared.insert(node);
     }
 
-    /// The body whose run holds thing `thing`, if one does.
+    /// The body whose run holds thing `thing`, if one does: the whole thing, else shared as a seat run's own thing,
+    /// else one of its seats (#4575).
     pub fn holder(&self, thing: Id) -> Option<Id> {
-        let run = self.reserved.get(&thing)?;
+        let run = self
+            .reserved
+            .get(&thing)
+            .or_else(|| self.sharing.get(&thing).and_then(|runs| runs.first()))
+            .or_else(|| {
+                self.slot_runs
+                    .range((thing, 0)..=(thing, u64::MAX))
+                    .find_map(|(_, runs)| runs.first())
+            })?;
         self.runs.get(run).map(|fr| fr.body)
+    }
+
+    /// The bodies whose runs hold the seat of `thing` in `slot` (#4575), by run.
+    pub fn seat_holders(&self, thing: Id, slot: u64) -> Vec<Id> {
+        self.slot_runs
+            .get(&(thing, slot))
+            .into_iter()
+            .flatten()
+            .filter_map(|r| self.runs.get(r).map(|fr| fr.body))
+            .collect()
+    }
+
+    /// Whether every place of the seat of `thing` in `slot` is held or reserved by someone other than `body`: a body
+    /// in it, or another run on its way to it (#4575). A pick of a free seat skips such a seat.
+    pub fn seat_taken(&self, slots: &Slots, thing: Id, slot: u64, body: Id) -> bool {
+        let most = slots
+            .place_in(thing, slot)
+            .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX));
+        let mut taken: BTreeSet<Id> = slots.holders_in(thing, slot).into_iter().collect();
+        taken.extend(self.seat_holders(thing, slot));
+        taken.remove(&body);
+        taken.len() >= most
+    }
+
+    /// A body other than `body` whose seat run uses `thing`, if one does: it holds a seat of `thing`, or `thing` is
+    /// the run's own (shared, E14's lecture whose `attend` seats on a bench).
+    fn other_seat_holder(&self, thing: Id, body: Id) -> Option<Id> {
+        self.slot_runs
+            .range((thing, 0)..=(thing, u64::MAX))
+            .flat_map(|(_, runs)| runs)
+            .chain(self.sharing.get(&thing).into_iter().flatten())
+            .filter_map(|r| self.runs.get(r).map(|fr| fr.body))
+            .find(|b| *b != body)
+    }
+
+    /// Frees run `run`'s reservations: its whole thing's, its own thing's shared hold and its seats'.
+    fn unreserve(&mut self, run: RunId, held: Option<(Id, Id)>, taken: &[(Id, u64)]) {
+        if let Some((thing, _)) = held
+            && self.reserved.get(&thing) == Some(&run)
+        {
+            self.reserved.remove(&thing);
+        }
+        if let Some((thing, _)) = held
+            && let Some(runs) = self.sharing.get_mut(&thing)
+        {
+            runs.remove(&run);
+            if runs.is_empty() {
+                self.sharing.remove(&thing);
+            }
+        }
+        for key in taken {
+            if let Some(runs) = self.slot_runs.get_mut(key) {
+                runs.remove(&run);
+                if runs.is_empty() {
+                    self.slot_runs.remove(key);
+                }
+            }
+        }
     }
 
     /// Current form identity for off-clock questions: intent, stage and step.
@@ -871,18 +988,32 @@ impl Forms {
                 how: name("body-gone"),
             });
         }
+        // A run that holds a seat of the thing, or holds it shared as its own (#4575), ends with it, as one that
+        // holds the whole thing does.
+        let seated: BTreeSet<RunId> = self
+            .slot_runs
+            .range((node, 0)..=(node, u64::MAX))
+            .flat_map(|(_, runs)| runs.iter().copied())
+            .chain(self.sharing.get(&node).into_iter().flatten().copied())
+            .collect();
         let runs = [
             self.by_body.get(&node).map(|r| (*r, "body-gone")),
             self.reserved.get(&node).map(|r| (*r, "thing-gone")),
-        ];
-        for (run, how) in runs.into_iter().flatten() {
+        ]
+        .into_iter()
+        .flatten()
+        .chain(seated.into_iter().map(|r| (r, "thing-gone")));
+        for (run, how) in runs.collect::<Vec<_>>() {
             if let Some(fr) = self.runs.get_mut(&run) {
-                // The thing is gone, so the body writes the ending.
-                if how == "thing-gone" {
+                // The thing is gone, so the body writes the ending; a seat of another thing (E14) gone leaves the
+                // form's own thing and its link standing, so that ending unlinks it as any other does.
+                if how == "thing-gone" && fr.node == node {
                     fr.node = fr.body;
                 }
-                if let Some((thing, _)) = fr.held.take() {
-                    self.reserved.remove(&thing);
+                if how == "body-gone" || fr.node == fr.body {
+                    let held = fr.held.take();
+                    let taken = std::mem::take(&mut fr.slots_held);
+                    self.unreserve(run, held, &taken);
                 }
             }
             self.finish(w, run, name(how), now);
@@ -1169,19 +1300,70 @@ impl Forms {
             }
         }
         let reserves = node != body && !self.shared.contains(&node);
+        // A form that only takes seats reserves those seats, not its whole thing (#4575): two Souls sit on one bench
+        // at once, while a form that moves, carries or changes the thing holds all of it.
+        let taken = match reserves {
+            true => slots_taken(node, &steps, &effects, long.is_some()),
+            false => Vec::new(),
+        };
+        let reserved = |thing: Id, holder: Id| Refusal {
+            name: "thing-reserved",
+            detail: format!(
+                "{} is held by {}; next: wait until it is free, then ask again",
+                show(thing),
+                show(holder)
+            ),
+        };
         // The body's own run, which this act preempts, holds nothing against it.
+        let whole_holder = |forms: &Forms, thing: Id| {
+            forms
+                .reserved
+                .get(&thing)
+                .and_then(|r| forms.runs.get(r))
+                .map(|fr| fr.body)
+                .filter(|h| *h != body)
+        };
         if reserves
-            && let Some(holder) = self.holder(node)
-            && holder != body
+            && taken.is_empty()
+            && let Some(holder) =
+                whole_holder(self, node).or_else(|| self.other_seat_holder(node, body))
         {
-            return Err(Refusal {
-                name: "thing-reserved",
-                detail: format!(
-                    "{} is held by {}; next: wait until it is free, then ask again",
-                    show(node),
-                    show(holder)
-                ),
-            });
+            return Err(reserved(node, holder));
+        }
+        // A seat run's own thing, held whole by another run (a lecture's `finish` under way), refuses it too.
+        if !taken.is_empty()
+            && let Some(holder) = whole_holder(self, node)
+        {
+            return Err(reserved(node, holder));
+        }
+        for &(thing, slot) in &taken {
+            if let Some(holder) = whole_holder(self, thing) {
+                return Err(reserved(thing, holder));
+            }
+            // A seat is taken once another run reserves each of its places (one, or a slot's `most`, E16): the
+            // second Soul racing for one seat is refused here, by the seat's own name, and stands where it stood. A
+            // seat a body already sits in is the sit step's to refuse, as before.
+            let most = w
+                .places
+                .as_ref()
+                .and_then(|p| p.slots.place_in(thing, slot))
+                .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX));
+            let mut taken: BTreeSet<Id> = self.seat_holders(thing, slot).into_iter().collect();
+            taken.remove(&body);
+            if taken.len() >= most {
+                return Err(Refusal {
+                    name: "place-taken",
+                    detail: format!(
+                        "slot {slot} of {} is taken by {}; next: ask for another place, or wait until it is free",
+                        show(thing),
+                        taken
+                            .iter()
+                            .map(|b| show(*b))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                });
+            }
         }
         if let Some(old) = running {
             // A seat taken or left, or a ground posture, runs to its end first, as a cancel lets it: the body is never
@@ -1251,8 +1433,14 @@ impl Forms {
         let fields = BTreeMap::from([(1, Value::Uint(run)), (2, body.to_value())]);
         self.out
             .push(entry(&open, now, changes, name(STARTED), fields));
-        if link.is_some() {
+        if link.is_some() && taken.is_empty() {
             self.reserved.insert(node, run);
+        }
+        for key in &taken {
+            self.slot_runs.entry(*key).or_default().insert(run);
+        }
+        if link.is_some() && !taken.is_empty() {
+            self.sharing.entry(node).or_default().insert(run);
         }
         let due = now.saturating_add(span(&steps, &limits));
         self.runs.insert(
@@ -1266,6 +1454,7 @@ impl Forms {
                 walk: None,
                 mv: None,
                 held: link.map(|l| (node, l)),
+                slots_held: taken,
                 long,
                 due,
             },
@@ -1336,6 +1525,19 @@ impl Forms {
             Ok((steps, effects)) => self.start(w, body, node, intent, steps, effects, limits, now),
             Err(stages) => self.start_stages(w, body, node, intent, stages, limits, now),
         }
+    }
+
+    /// [`other_slots`] for a caller that binds the arguments itself and starts with [`Forms::start`] (worldd's acts,
+    /// E14b): each slot argument on another thing is refused by name as [`Forms::commit`] refuses it.
+    pub fn other_slots<G: Geometry, R: Reach>(
+        &self,
+        w: &World<'_, G, R>,
+        body: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        args: &form_runner::Args,
+    ) -> Result<(), Refusal> {
+        other_slots(w, &self.slots_of, body, entry, form, args)
     }
 
     /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
@@ -1441,11 +1643,25 @@ impl Forms {
             .claims(fr.body)
             .map(|b| hands(b.family()).iter().map(|h| h.slot).collect())
             .unwrap_or_default();
+        // A thing another run holds a seat of, or holds shared as its seat run's own (#4575), is in use as one it
+        // holds whole is.
         let reserved: Vec<Id> = self
             .reserved
             .iter()
             .filter(|(_, r)| **r != run)
             .map(|(t, _)| *t)
+            .chain(
+                self.slot_runs
+                    .iter()
+                    .filter(|(_, rs)| rs.iter().any(|r| *r != run))
+                    .map(|((t, _), _)| *t),
+            )
+            .chain(
+                self.sharing
+                    .iter()
+                    .filter(|(_, rs)| rs.iter().any(|r| *r != run))
+                    .map(|(t, _)| *t),
+            )
             .collect();
         let (len, mut keys) = (self.out.len(), Vec::new());
         for (n, e) in (0u64..).zip(&fr.effects) {
@@ -1701,11 +1917,15 @@ impl Forms {
             // Out of a seat by B3's rise (its end wakes the run, [`Forms::fire`]); up from a ground posture, or a body
             // standing, at once (C25).
             Next::Rise => {
-                if let Some(d) = self.settled.remove(&body) {
+                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
+                // A body in a seat rises from it (0.135 E21): a ground posture it settled into before was ended by the
+                // walk to the seat, which claimed its legs, so the record of it is dropped, not released.
+                if let Some(d) = self.settled.remove(&body)
+                    && seated.is_none()
+                {
                     let _ = w.controller.release(body, d);
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 }
-                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
                 let Some(_) = seated else {
                     return self.wake(w, run, Woke::Moved(name("done")), now);
                 };
@@ -1910,9 +2130,7 @@ impl Forms {
             self.by_timer.remove(&id);
             let _ = w.due.clear(fr.body, id);
         }
-        if let Some((thing, _)) = fr.held {
-            self.reserved.remove(&thing);
-        }
+        self.unreserve(run, fr.held, &fr.slots_held);
         // A removal this tick (a run's own effect, F4) took the thing and its link: the ending has no unlink, and the
         // body writes it.
         let removed = amounts::View {
@@ -2322,12 +2540,31 @@ pub fn holders<'a>(
 ) -> Vec<Orphan> {
     let mut out = Vec::new();
     let held = reservations(log);
+    // A run holds its link's thing whole, or shared with the seats it reserves (#4575).
+    let holds = |fr: &FormRun, run: RunId, thing: Id| match fr.slots_held.is_empty() {
+        true => forms.reserved.get(&thing) == Some(&run),
+        false => {
+            forms
+                .sharing
+                .get(&thing)
+                .is_some_and(|rs| rs.contains(&run))
+                && fr
+                    .slots_held
+                    .iter()
+                    .all(|k| forms.slot_runs.get(k).is_some_and(|rs| rs.contains(&run)))
+        }
+    };
+    let by_link: BTreeMap<Id, RunId> = forms
+        .runs
+        .iter()
+        .filter_map(|(r, fr)| fr.held.map(|(_, l)| (l, *r)))
+        .collect();
     for (&link, &[body, thing]) in &held {
-        let ok = forms
-            .reserved
-            .get(&thing)
-            .and_then(|r| forms.runs.get(r))
-            .is_some_and(|fr| fr.held == Some((thing, link)) && fr.body == body);
+        let ok = by_link.get(&link).is_some_and(|r| {
+            forms.runs.get(r).is_some_and(|fr| {
+                fr.held == Some((thing, link)) && fr.body == body && holds(fr, *r, thing)
+            })
+        });
         if !ok {
             out.push(Orphan::Reservation { link, body, thing });
         }

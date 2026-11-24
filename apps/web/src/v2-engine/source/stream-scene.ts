@@ -9,14 +9,15 @@
 // - things, buildings, paths and areas: every node that is an imported thing (its `origin`, today's id, with no `/` or
 //   `.`: a building's floors, rooms and windows and a place derived from a thing are drawn by the thing), at its world
 //   pose, with its shape (an area's outline, a path's line and width) and the def it was imported from (field 2) out of
-//   the core library the page already carries (`coreLibrary`), with its def's params (field 19, W3); from a world imported
-//   before W3, a building's size and storeys from its floors' surfaces.
+//   the core library the page already carries (`coreLibrary`), or, for a def the world defines itself, the def the open
+//   ground keeps (field 102), with its def's params (field 19, W3); from a world imported before W3, a building's size
+//   and storeys from its floors' surfaces. A thing on a course no def draws (a punt) is the takes' (takes.ts).
 //
 // What the stream does not carry is drawn plain and named in `plain` (the hatch): a def the library does not have is
 // drawn from the thing's own solids (field 12) as boxes; from a world imported before W3, a def's other params (colours,
 // roof, a door's size) are the def's defaults. Things a creator places later are not here: creator-kinds.ts sends them as the stream shows them.
 // The snapshot reaches the layer through scene-offer.ts.
-import { coreLibrary, type Entity, type StoredDef } from '@souls/world-compiler';
+import { coreLibrary, defSchema, type Entity, type StoredDef } from '@souls/world-compiler';
 import { TILE_M, TILE_N, tileKey, type Ground } from '@souls/ground';
 import { placedOf } from '../world-state.ts';
 import { kindDef } from '../creator-kinds.ts';
@@ -51,12 +52,44 @@ export function libraryDef(kind: string, ref?: string, lib: Lib = coreLibrary())
   return ix.get(`core-${name}`) ?? ix.get(name);
 }
 
-/** The library def a thing placed while the world runs draws by (creator-kinds.ts): a point thing's only, since such
- *  a node carries no outline or line the page reads; none for a building's parts, places or the engine's own kinds. */
-export function placedDef(kind: string): StoredDef | undefined {
+/** The defs the world defines itself (a template's `define`, which no page's library has), as the stream carries them:
+ *  once each, on the open ground (import-eden's field 102, `NodeRec.defBodies`), so removing a thing of one never loses
+ *  it; by the ref it is kept under and by its own `name@version` (a thing may name it either way). A body that is not a
+ *  def is left out. */
+export function worldDefs(nodes: readonly NodeRec[]): Map<string, StoredDef> {
+  const out = new Map<string, StoredDef>();
+  for (const n of nodes) {
+    for (const [ref, body] of n.defBodies ?? []) {
+      try {
+        const d = JSON.parse(body) as Partial<StoredDef>, def = defSchema.parse(d);
+        if (typeof d.hash !== 'string') continue;
+        const stored: StoredDef = { ...def, ref: typeof d.ref === 'string' ? d.ref : ref, hash: d.hash, by: typeof d.by === 'string' ? d.by : 'v2', born: 0 };
+        out.set(ref, stored);
+        out.set(`${def.name}@${def.version}`, stored);
+      } catch { /* drawn from its solids */ }
+    }
+  }
+  return out;
+}
+
+/** The library def a thing placed while the world runs draws by (creator-kinds.ts): a point thing's, or, given the
+ *  node's shape (a creator's `place --path | --area`: its line, field 16, or its outline, field 11), a path's or an
+ *  area's; none for a building's parts, places or the engine's own kinds. */
+export function placedDef(kind: string, shape?: { line?: number[][]; outline?: number[][] }): StoredDef | undefined {
   if (kind.startsWith('souls:') || NOT_THINGS.has(plainKind(kind).split(':').pop() ?? '')) return undefined;
   const d = libraryDef(kind);
-  return d?.form === 'point' ? d : undefined;
+  if (d?.form === 'point') return d;
+  if (d?.form === 'path' && (shape?.line?.length ?? 0) >= 2) return d;
+  if (d?.form === 'area' && (shape?.outline?.length ?? 0) >= 3) return d;
+  return undefined;
+}
+
+/** A shaped thing's shape as the layer's entity holds it (metres, world: a path's line and width, an area's outline),
+ *  or null for a point def or a node without its shape. */
+export function shapeOf(def: StoredDef, n: { line?: number[][]; lineWidth?: number; outline?: number[][] }): Entity['shape'] | null {
+  if (def.form === 'area' && n.outline && n.outline.length >= 3) return { area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]) };
+  if (def.form === 'path' && n.line && n.line.length >= 2) return { path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), ...(n.lineWidth ? { width: m(n.lineWidth) } : {}) };
+  return null;
 }
 
 /** The content kinds' entries as CarriedParts draws a part from its own shape (take-parts.ts): `souls-entry/1` with the
@@ -119,6 +152,7 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
   const hundreds = covered.map(toward0);
   const ext = (hundreds[2] > hundreds[0] && hundreds[3] > hundreds[1] ? hundreds : covered) as [number, number, number, number];
   const defs = new Map<string, StoredDef>(), entities: Entity[] = [], waters: Ground['waters'] = [], plain = new Set<string>();
+  const own = worldDefs(nodes);
   for (const n of nodes) {
     const o = n.origin;
     if (!o || o.includes('/') || o.includes('.') || isBody(n) || NOT_THINGS.has(plainKind(n.kind).split(':').pop() ?? '')) continue;
@@ -126,13 +160,15 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
     // water: the recipe's, as the old world kept it (an area or a path, its level)
     if (n.waterLevel !== undefined && n.outline && n.outline.length >= 3) waters.push({ id: o, area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]), level: m(n.waterLevel) });
     else if (n.waterLevel !== undefined && n.line && n.line.length >= 2) waters.push({ id: o, path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), w: m(n.lineWidth ?? 4000), level: m(n.waterLevel) });
-    let def = libraryDef(n.kind, n.def, lib) ?? null;
+    let def = (n.def ? own.get(n.def) : undefined) ?? libraryDef(n.kind, n.def, lib) ?? null;
+    // a thing on a course no library def draws (a punt) is drawn by the takes, where its course has it (takes.ts)
+    if (!def && n.course) continue;
     if (!def) { def = solidsDef(n.kind, n.solids); plain.add(`${plainKind(n.kind)}: ${def ? 'its solids as boxes' : 'not drawn (no def, no solids)'}`); }
     if (!def) continue;
     defs.set(def.ref, def);
     const e: Entity = { id: o, def: def.ref, in: { parent: 'world' }, by: 'v2', born: 0, v: 1 };
-    if (n.outline && n.outline.length >= 3 && def.form === 'area') e.shape = { area: n.outline.map(([x, z]) => [m(x), m(z)] as [number, number]) };
-    else if (n.line && n.line.length >= 2 && def.form === 'path') e.shape = { path: n.line.map(([x, z]) => [m(x), m(z)] as [number, number]), ...(n.lineWidth ? { width: m(n.lineWidth) } : {}) };
+    const shape = shapeOf(def, n);
+    if (shape) e.shape = shape;
     else {
       const at = placedOf(byId, n.id);
       if (!at) continue; // in a hand: the bodies' adapter draws it

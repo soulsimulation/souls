@@ -13,7 +13,7 @@
 // go to the bridge, which shows them in the dock as the old page showed a member its conversation.
 import { decode, encode } from 'cborg';
 import { session, watchSession } from '../auth-session.ts';
-import { v2MailboxPlace, viewToken, type MailboxPlace } from './owner-mailbox.ts';
+import { NothingOwned, v2MailboxPlace, viewToken, type MailboxPlace } from './owner-mailbox.ts';
 
 /** A private turn as a member's page reads it: its conversation, the body that spoke, when (µs) and its words. */
 export type Heard = { conversation: string; speaker: string; at: number; words: string };
@@ -44,6 +44,8 @@ export const followFrame = (bodies: readonly string[]) =>
 
 /** The gateway's protocol version the page speaks (v2/web/src/source/socket.ts `PROTOCOL`). */
 const PROTOCOL = 2;
+/** How long a signed-in page that owns nothing waits before it asks the directory again. */
+export const NOTHING_OWNED_MS = 60_000;
 
 /** One view socket for the signed-in person's own Souls: signs in, follows their bodies, hands on what they hear; the
  *  token is renewed on the open socket before it expires, and the socket comes back after a drop. */
@@ -59,7 +61,8 @@ class HeardSocket {
   }
   start(): void {
     if (this.stopped) return;
-    viewToken(this.place).then((g) => this.connect(g), () => (this.timer = setTimeout(() => this.start(), 5_000)));
+    // Signed in and owning nothing yet is a normal state: asked again once a minute (a Soul made since), not every 5 s.
+    viewToken(this.place).then((g) => this.connect(g), (e) => (this.timer = setTimeout(() => this.start(), e instanceof NothingOwned ? NOTHING_OWNED_MS : 5_000)));
   }
   private connect(g: { token: string; expires: number; owned: { grant: string }[] }): void {
     // The bodies its Souls drive, as the stream names them, once the page holds them. (The directory's `follow` is the

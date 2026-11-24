@@ -1317,7 +1317,7 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
     // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
     let reach = 600_000;
     let mut by_seat = BTreeMap::new();
-    for (body, thing, slot, point) in riders {
+    for &(body, thing, slot, point) in &riders {
         let d = sight
             .distance(
                 body,
@@ -1338,4 +1338,170 @@ fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
             assert_eq!(was, d, "{slot}: the same from another place");
         }
     }
+    // 0.135 E20: a steer is at the thing's control point (the motorboat's wheel, the narrowboat's tiller), so the seat
+    // decides: the helm and the seat beside it reach the wheel, the back seats do not; only the stern reaches the
+    // tiller, not the berth or the galley 7 m off. The steer move's reach (content/moves/steer.json).
+    for &(body, thing, slot, point) in &riders {
+        let control = if point == "key" { "wheel" } else { "tiller" };
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(control).unwrap(),
+            )
+            .expect("measured");
+        println!("E20: seated in {slot}, {d} µm from the {control}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "front" | "stern"),
+            "{slot} to the {control}: {d} µm"
+        );
+    }
+}
+
+/// 0.135 E21: reach to and from a seated, lying or riding Soul is measured from where its body is, its seat's place
+/// in the world, not its slot frame's zero. The building (60 m west, turned 33°) read as a long bench: a Soul on its
+/// end seat, 1.5 m beyond the east wall and 9.5 m from the bench's origin, is in reach of a Soul standing 0.4 m from
+/// that seat, both ways, and out of reach of one standing 2 m from it; a walk to it is planned to its seat. The ring
+/// (75 m east) read as content's motorboat: its riders are a seat apart, the helm 0.7 m from the front seat and 1.3 m
+/// from the back left, both beyond a press's 0.6 m. Before, every seated body was at its frame's zero: the riders 0
+/// apart, the bench's Soul at the building's origin.
+#[test]
+fn e21_reach_to_a_seated_body_is_from_its_seat() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let ground = imported.nodes["ground"];
+    let (bench, boat) = (imported.nodes["building"], imported.nodes["ring"]);
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let mut town =
+        Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).expect("the town");
+    let node = |id: Id| town.tree.node(town.tree.handle(id).unwrap()).unwrap();
+    let end_x = testworld::BUILDING_LENGTH / 2 + 1_500;
+    let bench_entry = replica::rules::json::parse(&format!(
+        r#"{{"slots":{{"middle":{{"admits":"body","at_mm":[0,450,0]}},"end":{{"admits":"body","at_mm":[{end_x},450,0]}}}}}}"#
+    ))
+    .unwrap();
+    let motorboat = content_entry("vehicles/motorboat");
+    let kinds = Json::Obj(vec![
+        (plain(node(bench).kind()).to_owned(), bench_entry),
+        (plain(node(boat).kind()).to_owned(), motorboat.clone()),
+    ]);
+    let slot_of = |entry: &Json, slot: &str| {
+        let slots = entry.get("slots").unwrap().obj().unwrap();
+        1 + slots.iter().position(|(k, _)| k == slot).unwrap() as u64
+    };
+    let id = |n: u64| Id::new(Scope([0xcd; 16]), n).unwrap();
+    let seated = |n: u64, thing: Id, slot: u64| Moved {
+        id: id(n),
+        pose: replica::pose::Pose {
+            frame: Frame {
+                node: thing,
+                slot: Some(slot),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: replica::pose::Support::Slot,
+        },
+        linear: Vec3::ZERO,
+        piece: 0,
+        tri: 0,
+    };
+    // On the open ground beside the bench's end seat: a point of the bench's frame carried out.
+    let place = node(bench).place().unwrap();
+    let out = |x: i64, z: i64| {
+        place
+            .position
+            .plus(
+                place
+                    .orientation
+                    .rotate(Vec3::new(x * 1000, 0, z * 1000))
+                    .unwrap(),
+            )
+            .unwrap()
+    };
+    let standing = |n: u64, at: Vec3| {
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        town.surfaces[&ground]
+            .place(id(n), frame, at, Quat::IDENTITY)
+            .unwrap()
+    };
+    let (near, far) = (standing(2, out(end_x, 400)), standing(3, out(end_x, 2_000)));
+    let bodies = BTreeMap::from([
+        (id(1), seated(1, bench, 2)),
+        (id(2), near),
+        (id(3), far),
+        (id(4), seated(4, boat, slot_of(&motorboat, "helm"))),
+        (id(5), seated(5, boat, slot_of(&motorboat, "front"))),
+        (id(6), seated(6, boat, slot_of(&motorboat, "back_left"))),
+    ]);
+    let split = town.split(1);
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: Arc::new(bodies.clone()),
+        carrying: Arc::new(BTreeSet::new()),
+        tree: split.shared.tree,
+        split: Some(RefCell::new(split)),
+        builds: Arc::new(bodies.keys().map(|b| (*b, Build::STANDARD)).collect()),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let d = |from: u64, to: u64| {
+        sight
+            .distance(
+                id(from),
+                &Effector::Held,
+                None,
+                id(to),
+                &Name::new("p").unwrap(),
+            )
+            .expect("measured")
+    };
+    let reach = 600_000;
+    let about = |got: i64, want: i64| (got - want).abs() <= 10_000;
+    let (to_near, from_near, to_far) = (d(2, 1), d(1, 2), d(3, 1));
+    println!(
+        "E21: the bench's end {to_near} µm from the near Soul, {from_near} back, {to_far} from the far one"
+    );
+    assert!(
+        to_near <= reach && about(to_near, 400_000),
+        "near to the seated Soul: {to_near}"
+    );
+    assert!(
+        about(from_near, 400_000),
+        "the seated Soul to the near one: {from_near}"
+    );
+    assert!(
+        to_far > reach && about(to_far, 2_000_000),
+        "far to the seated Soul: {to_far}"
+    );
+    let (front, back) = (d(4, 5), d(4, 6));
+    println!("E21: the helm {front} µm from the front place, {back} from the back left");
+    assert!(
+        front > reach && about(front, 700_000),
+        "helm to front: {front}"
+    );
+    assert!(
+        back > reach && about(back, 1_300_961),
+        "helm to back left: {back}"
+    );
+    // A walk to the bench's Soul is planned to its seat, in the bench's frame.
+    let seen = sight.read(id(1)).expect("read");
+    assert_eq!(seen.parent, Some(bench));
+    assert_eq!(seen.position, Vec3::new(end_x * 1000, 450_000, 0));
 }

@@ -80,15 +80,19 @@ A moved world's ground, buildings and things are drawn by the entity layer (`Wor
 old world published (`snapshot.json`, `v2/docs/cutover.md`). A world with no such snapshot (one made on the new engine),
 or any v2 world opened with `?scene=stream`, is drawn from its stream alone: `v2-engine/source/stream-scene.ts` builds the
 layer's snapshot from the stream's first copy of the world (the open ground's terrain tiles, waters, and each imported
-thing at its world pose with its library def and its def's params, import-eden's field 19), and the layer takes it
-through `scene-offer.ts`. The page's layout then falls back to a plain field (`LiveWorld.tsx`, a 404 from `/v1/scene` on
-a v2 page). What the stream does not carry is drawn plain: from a world imported before W3 (no field 19), a def's params
-beyond a building's size and storeys take the def's defaults; a def the library lacks is
-drawn from the thing's solids as boxes, and `window.__soulsStreamScene.plain` lists each such case.
+thing at its world pose with its library def, or the world's own def, which the open ground keeps once (import-eden's field 102),
+and its def's params, field 19), and the layer takes it through `scene-offer.ts`. A rowing punt (on a course, no library
+def) is drawn by the takes as today's `rowing-punt` fixture (`takes.ts`). The page's layout then falls back to a plain
+field (`LiveWorld.tsx`, a 404 from `/v1/scene` on a v2 page). What the stream does not carry is drawn plain: from a world
+imported before W3 (no field 19), a def's params beyond a building's size and storeys take the def's defaults; a def
+neither the library nor the stream has (a world imported before field 102) is drawn from the thing's solids as boxes, and
+`window.__soulsStreamScene.plain` lists each such case.
 
 A thing placed while the world runs (a creator's, or one a Soul makes) is drawn by `creator-kinds.ts`: by a creator's
-own kind, else the def the world's own things of its kind have, else the library def named like its kind, else a box
-the size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`).
+own kind, else the def the world's own things of its kind have, else the library def named like its kind, else its
+entry's own shape (`looks.shape`, in its state: the parts its `when`s pick and its looks table moves), else a box the
+size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`; the
+shapes come in one data file beside the bundle, `KIND_LOOKS_URL`, fetched once, and replace the boxes when it lands).
 
 A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
 the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to

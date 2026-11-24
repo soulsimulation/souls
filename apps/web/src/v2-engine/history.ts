@@ -7,6 +7,7 @@ import { decode } from 'cborg';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS, type Frame, type RecordedChunk } from './takes.ts';
 import type { HistoryMsg, Seeked } from './history-worker.ts';
+import { DAY_US, dayIndexKey, yearCountsKey } from './history-keys.ts';
 
 /** The world's history export, from the page's config: the route's `v2History`, else beside the stream's `views/`. */
 export function historyBase(stream: string, config: unknown): string | null {
@@ -31,6 +32,8 @@ export class V2History {
   private readonly hour: string | undefined;
   constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; }
 
+  /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
+  private floor: number | undefined;
   private seek(at: number): Promise<Seeked> {
     if (!this.worker) {
       this.worker = this.make();
@@ -43,7 +46,7 @@ export class V2History {
     const seq = ++this.seq;
     return new Promise((ok, no) => {
       this.waiting.set(seq, (r) => (r instanceof Error ? no(r) : ok(r)));
-      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at });
+      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at, floor: this.floor });
     });
   }
 
@@ -52,15 +55,20 @@ export class V2History {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     let at = from * TICK_US, first = true, next: number | null = null;
-    // K3: once the first moment is known, a window before it starts there (no walk back through empty days)
-    const known = this.firstAt ? await this.firstAt.catch(() => null) : null;
+    // K3: a window before the world's first moment starts there, and no seek walks back through the empty days before
+    // it (a young world: each would be a 404). Not known (no public events yet): no day before the asked one's.
+    const known = await this.first(endUs).catch(() => null);
     if (known !== null && at < known) at = known;
+    this.floor = known ?? Math.min(at, this.floor ?? Infinity);
     const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {
       if (signal?.aborted) throw new Error('aborted');
       // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
-      const s = await this.seek(at).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f); }), until = Math.min(s.next ?? s.start + s.length, endUs + 2 * STEP_US);
+      const s = await this.seek(at).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f); });
+      // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
+      // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
+      const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
       // the bundle's state and its motion, then its time step by step
       bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
       first = false;
@@ -83,28 +91,34 @@ export class V2History {
 
   /** K3: the world time (µs) of the history's first moment the world ran: the first bundle of the first day with
    *  public events (V4's year counts, a slot a day, read back from the year of `nowUs`), or null when there are none.
-   *  A seeded world's record at time 0 (its state before it first ran) is not a moment of play. */
+   *  A seeded world's record at time 0 (its state before it first ran) is not a moment of play. The years are read
+   *  back only while they might hold more: a year whose first day with events is not its day 0 began the world's
+   *  record, so the year before it is not asked for (the origin would answer 404); a world stopped across a new year
+   *  therefore plays from the later year. */
   async first(nowUs: number): Promise<number | null> {
     return (this.firstAt ??= this.findFirst(nowUs));
   }
   private firstAt: Promise<number | null> | undefined;
   private async findFirst(nowUs: number): Promise<number | null> {
-    const base = new URL(this.base, location.href), DAY_US = 86_400_000_000;
+    const base = new URL(this.base, location.href);
     const read = async (path: string) => {
       const r = await fetch(new URL(path, base));
       return r.ok ? (decode(new Uint8Array(await r.arrayBuffer()), { useMaps: true }) as Map<number, unknown>) : null;
     };
     const top = Math.floor(Math.floor(nowUs / DAY_US) / 365);
-    let year = top, counts: Map<number, unknown> | null = null;
+    const daysOf = (c: Map<number, unknown>) => ((c.get(5) ?? []) as number[][]).filter((r) => r[2] > 0).map((r) => r[0]);
+    let year = top, slots: number[] = [];
+    // this year's counts, else last year's (a world that has had no events yet this year); then back while each year
+    // read has events on its day 0
     for (let y = top; y >= 0 && y > top - 50; y--) {
-      const c = await read(`history/everyone/counts/year/${String(y).padStart(4, '0')}`);
-      if (!c) { if (counts) break; continue; }
-      counts = c; year = y;
+      const c = await read(yearCountsKey(y)), d = c ? daysOf(c) : [];
+      if (!d.length) { if (slots.length || y < top) break; continue; }
+      slots = d; year = y;
+      if (Math.min(...d) > 0) break;
     }
-    const slots = ((counts?.get(5) ?? []) as number[][]).filter((r) => r[2] > 0).map((r) => r[0]);
     if (!slots.length) return null;
     const day = year * 365 + Math.min(...slots);
-    const index = await read(`bundles/${String(day).padStart(8, '0')}/index`);
+    const index = await read(dayIndexKey(day));
     const starts = ((index?.get(3) ?? []) as unknown[][]).map((r) => Number(r[0])).filter((x) => x > 0);
     return starts.length ? Math.min(...starts) : null;
   }

@@ -71,11 +71,32 @@ const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
 const CIRCLE: &str = "test:circle";
+/// An open ground under the zone's place, and a thing of walls on it (R2 off the clock: the fixed geometry a carry
+/// reads, `sim::activity::carry::Fixed::of`).
+const OPEN_GROUND: &str = "eden:ground";
+const WALLS: &str = "test:walls";
+const BAR: &str = "test:bar";
+const LIFT: &str = "test:lift";
+const WHEEL: &str = "test:wheel";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
     [
-        PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CIRCLE,
+        PLACE,
+        WALKER,
+        VESSEL,
+        RACK,
+        PLANK,
+        PAIR,
+        CARRY,
+        COURT,
+        CAN,
+        CIRCLE,
+        OPEN_GROUND,
+        WALLS,
+        BAR,
+        LIFT,
+        WHEEL,
     ]
     .iter()
     .enumerate()
@@ -105,8 +126,8 @@ fn humanoid() -> Family {
     }
 }
 
-/// N2's test world as a town and its ground: the replica's zone is rooted at that ground, so a body the town stands
-/// on the ground stands under the tree's root.
+/// N2's test world as a town and its ground: the replica's zone is rooted at a place over that ground ([`zone_place`]),
+/// so a body the town stands on the ground stands on the ground's node, as in a served world.
 fn town() -> (Town, Id) {
     let w = testworld::generate(1, 0).expect("the test world");
     let Import {
@@ -238,6 +259,37 @@ fn tree_rules() -> TreeRules {
                     ..k("thing", &[], &[], None)
                 },
             ),
+            (
+                fullname(OPEN_GROUND),
+                k("place", &["body", "thing", PAIR, CARRY], &[], None),
+            ),
+            (fullname(WALLS), k("thing", &[], &[], None)),
+            (
+                fullname(WHEEL),
+                Kind {
+                    slots: (1..=4)
+                        .map(|s| (s, BTreeSet::from(["family".to_owned()])))
+                        .collect(),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
+            (
+                fullname(LIFT),
+                Kind {
+                    slots: BTreeMap::from([(1, BTreeSet::from(["family".to_owned()]))]),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
+            (
+                fullname(BAR),
+                Kind {
+                    slots: BTreeMap::from([
+                        (1, BTreeSet::from(["family".to_owned()])),
+                        (2, BTreeSet::from(["family".to_owned()])),
+                    ]),
+                    ..k("thing", &[], &[], None)
+                },
+            ),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -352,6 +404,9 @@ fn entries() -> Json {
         (CAN.into(), can),
         (PLANK.into(), plank),
         (CIRCLE.into(), circle_entry()),
+        (LIFT.into(), lift_entry()),
+        (WHEEL.into(), wheel_entry()),
+        (BAR.into(), bar_entry()),
     ])
 }
 
@@ -379,14 +434,13 @@ fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
     )
 }
 
-/// The world as built: the two walkers, the vessel 300 mm from the first, the rack 400 mm from it, the plank between
-/// the two.
+/// The world as built, on an open ground under the zone's place: the two walkers, the vessel 300 mm from the first,
+/// the rack 400 mm from it, the plank between the two.
 fn world() -> Replica {
     let g = ground();
-    let h = header(g);
-    let mut r = Replica::start(h.stored()).expect("a replica");
     let off = |p: Vec3, dx: i64| Vec3::new(p.x + dx, 0, p.z);
     let changes = vec![
+        create(g, OPEN_GROUND, zone_place(), Vec3::ZERO),
         create(w1(), WALKER, g, at1()),
         create(w2(), WALKER, g, at2()),
         create(vessel(), VESSEL, g, off(at1(), 300_000)),
@@ -402,7 +456,17 @@ fn world() -> Replica {
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
         create(circle(), CIRCLE, g, circle_at()),
+        create(bar(), BAR, g, bar_at()),
+        create(lift(), LIFT, g, lift_at()),
+        create(wheel(), WHEEL, g, wheel_at()),
     ];
+    world_of(zone_place(), changes)
+}
+
+/// N2's test world's ground with `changes` written on it as built.
+fn world_of(g: Id, changes: Vec<(Id, Change)>) -> Replica {
+    let h = header(g);
+    let mut r = Replica::start(h.stored()).expect("a replica");
     let effects: Vec<Value> = changes
         .into_iter()
         .enumerate()
@@ -448,6 +512,17 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     b.add_body(humanoid(), p1)?;
     b.add_body(humanoid(), p2)?;
     b.add_place(circle_place(ground))?;
+    for p in bar_places(ground) {
+        b.add_place(p)?;
+    }
+    let (cabin, r) = lift_place(ground);
+    b.add_place(cabin)?;
+    b.slots.trip_ends(lift(), r.ends.clone());
+    b.slots.run(lift(), r.slot, &r.course, r.stops, &r.own)?;
+    for (p, r) in wheel_places(ground) {
+        b.add_place(p)?;
+        b.slots.run(wheel(), r.slot, &r.course, r.stops, &r.own)?;
+    }
     Ok(b)
 }
 
@@ -487,6 +562,50 @@ fn circle_place(ground: Id) -> sim::slots::PlaceAt {
         floor: ground,
         more: import_eden::more_places(Vec3::ZERO, 2, Some([3_000_000, 3_000_000])),
     }
+}
+
+/// #4575: a counter with two places of one body each along z, 5 m south of the circle. Place 1 (`a`) is nearer the
+/// walkers than place 2 (`b`), and the walkers stand as far from it as each other, so the nearest free pick gives
+/// both of them `a` unless it skips a place another Soul's run is on its way to.
+fn bar() -> Id {
+    id(11)
+}
+fn bar_at() -> Vec3 {
+    Vec3::new(-41_350_000, 0, 25_000_000)
+}
+fn bar_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:bar", "owner": "thing",
+      "points": { "a_by": { "role": "stand", "at_mm": [0, 0, 1600] }, "b_by": { "role": "stand", "at_mm": [0, 0, -400] } },
+      "slots": { "a": { "admits": "body", "most": 1, "at_mm": [0, 0, 1000], "stand": "a_by" },
+        "b": { "admits": "body", "most": 1, "at_mm": [0, 0, -1000], "stand": "b_by" } },
+      "geometry": { "bounds_mm": [600, 100, 3000] },
+      "forms": { "stand_at": { "who": "anyone", "starts": "act",
+        "takes": { "place": { "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+        "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+        "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+        "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }] } } }"#,
+    )
+    .unwrap()
+}
+/// The counter's two places as a served world registers them, each with its stand point 600 mm north of it.
+fn bar_places(ground: Id) -> Vec<sim::slots::PlaceAt> {
+    [(1, 1_000_000), (2, -1_000_000)]
+        .into_iter()
+        .map(|(slot, dz)| sim::slots::PlaceAt {
+            thing: bar(),
+            place: replica::moves::Place {
+                slot,
+                height: 0,
+                stand: [0, 600_000],
+            },
+            point: Vec3::new(bar_at().x, 0, bar_at().z + dz),
+            facing: Quat::IDENTITY,
+            floor: ground,
+            more: Vec::new(),
+        })
+        .collect()
 }
 
 /// An answer frame's sequence and its receipt's entries, or its refusal's reason.
@@ -1034,6 +1153,58 @@ fn e16_two_souls_take_a_slot_of_two_naming_it_through_the_gateway() {
     run.stop();
 }
 
+/// #4575: two Souls take places at one thing at the same moment through the gateway. The second's act is sent while
+/// the first's run is still walking to its place, as Bea's sit on Eden's bench was sent 40 ms after Ada's. A form
+/// that only takes a slot reserves that slot (here one of two places, E16), not the whole thing, so the second is not
+/// refused `thing-reserved`: both runs go on at once, and both end in the slot, each at its own place.
+#[test]
+fn i4575_two_souls_take_places_at_one_thing_at_once_through_the_gateway() {
+    let (run, mut a, mut b) = serve("i4575");
+    let place = || {
+        p(&[(
+            1,
+            Value::Array(vec![Value::Array(vec![
+                Value::Bytes(b"place".to_vec()),
+                Value::Bytes(b"circle".to_vec()),
+            ])]),
+        )])
+    };
+    a.send("test:play", Some(circle()), place());
+    a.started();
+    b.send("test:play", Some(circle()), place());
+    let (first, second) = (a.answer(), b.answer());
+    println!("#4575 at once: first {first:?}, second {second:?}");
+    first.expect("the first takes a place");
+    second.expect("the second takes the other place while the first's run goes on");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(circle()), Some(1)));
+    assert_eq!(parent(&r, w2()), (Some(circle()), Some(1)));
+    run.stop();
+}
+
+/// #4575: two Souls ask for a place at the counter at the same moment, naming none. The world's nearest free pick
+/// skips a place another Soul's run is on its way to, so the second is given the other place, not the first's (and
+/// refused `place-taken`, as on Eden's bench). Both end in their own places.
+#[test]
+fn i4575_two_souls_asking_for_a_place_at_once_are_given_different_places() {
+    let (run, mut a, mut b) = serve("i4575-pick");
+    a.send("test:stand_at", Some(bar()), BTreeMap::new());
+    a.started();
+    b.send("test:stand_at", Some(bar()), BTreeMap::new());
+    let (first, second) = (a.answer(), b.answer());
+    println!("#4575 pick: first {first:?}, second {second:?}");
+    first.expect("the first takes the nearer place");
+    second.expect("the second is given the other place");
+    let r = run.replay();
+    let (pa, pb) = (parent(&r, w1()), parent(&r, w2()));
+    println!("#4575 pick: places {pa:?} {pb:?}");
+    assert_eq!(pa, (Some(bar()), Some(1)));
+    assert_eq!(pb, (Some(bar()), Some(2)));
+    run.stop();
+}
+
+#[path = "acts/attend.rs"]
+mod attend;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]
@@ -1364,21 +1535,30 @@ fn take_then_walk(walk_at: i64) -> TakeThenWalk {
     out
 }
 
-/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 4 and makes contact at about tick 9. The
+/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 8 and makes contact at about tick 14 (its
+/// approach walk ends on the grip's point since 0.135 E20, not 300 mm short of it, so both are four ticks later than
+/// they were; a walk arriving before tick 8 is in the run's walk, which its claim on the legs ends `claim-taken`). The
 /// Soul's walk arriving before the contact leaves the run there (`left`, nothing taken); arriving after it, at the
 /// press's end (`left`, the vessel taken at the contact stays in the hand). Either way the walk goes on and is done,
 /// and no intent waits to its deadline.
 #[test]
 fn i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end() {
     let hand = (Some(w1()), Some(1));
-    for (walk_at, taken) in [(5, false), (12, true)] {
+    for (walk_at, taken) in [(10, false), (16, true)] {
         let (first, second, vessel_at, walker) = take_then_walk(walk_at);
         println!(
             "I4 walk at tick {walk_at}: take {first:?}, walk {second:?}, vessel {vessel_at:?}"
         );
         assert_eq!(first, (1, Err("left".to_owned())), "the run is left");
         assert!(matches!(second, (2, Ok(_))), "the walk is done: {second:?}");
-        assert_eq!(walker, south(3_000_000), "walked to where it was sent");
+        // Arrived: within the walk's reach of its spot (`skills::route::AT_SPOT`); where in it depends on its last
+        // steps, and so on where the take's walk left the body.
+        let to = south(3_000_000);
+        let off = (i128::from(walker.x - to.x).pow(2) + i128::from(walker.z - to.z).pow(2)).isqrt();
+        assert!(
+            off <= i128::from(skills::route::AT_SPOT),
+            "walked to where it was sent: {off} µm off"
+        );
         if taken {
             assert_eq!(vessel_at, hand, "the effect landed at the contact stays");
         } else {
@@ -1950,4 +2130,628 @@ fn a2_4_a_walk_to_a_spot_ringed_by_bodies_arrives_through_make_way() {
         "on its spot: {off} µm off"
     );
     run.world.stop();
+}
+
+// ---- 0.135 R2 off the clock (follow-up to #4564): a lift whose way must turn its load waits for it off the clock. --
+
+/// How many crews lift in one tick.
+const CREWS: u64 = 20;
+
+/// Crew `k`'s front and back walkers and its plank.
+fn crew(k: u64) -> (Id, Id, Id) {
+    (id(100 + 2 * k), id(101 + 2 * k), id(200 + k))
+}
+
+/// Where crew `k`'s front and back stand: as A4's two, the crews in a row north of them 2.5 m apart.
+fn crew_at(k: u64) -> (Vec3, Vec3) {
+    let z = at1().z + k as i64 * 2_500_000;
+    (Vec3::new(at1().x, 0, z), Vec3::new(at2().x, 0, z))
+}
+
+/// Where every crew's lift sends its front: inside a room of walls with no door, 4 m square, east of the crews.
+fn sealed() -> Vec3 {
+    Vec3::new(-30_000_000, 0, 54_000_000)
+}
+
+/// The zone's place: the replica's root, the open ground under it (so a carry reads its fixed geometry, 0.135 C7).
+fn zone_place() -> Id {
+    id(90)
+}
+
+/// The test world with the crews and their planks, on an open ground under the zone's place, and the sealed room's
+/// walls: each plank between its crew's two (as A4's), the crews in a row west of the room.
+fn crews_world() -> Replica {
+    let g = ground();
+    let mut changes = vec![create(g, OPEN_GROUND, zone_place(), Vec3::ZERO)];
+    let (on, mut wall) = create(id(91), WALLS, g, sealed());
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let rows = [
+        [0, 2_000, 2_000, 100],
+        [0, -2_000, 2_000, 100],
+        [2_000, 0, 100, 2_000],
+        [-2_000, 0, 100, 2_000],
+    ]
+    .iter()
+    .map(|[cx, cz, hx, hz]| Value::Array([*cx, *cz, *hx, *hz, 0, 0, 2_400].map(int).to_vec()))
+    .collect();
+    if let Change::Create { fields, .. } = &mut wall {
+        fields.insert(sim::ground::scene::F_SOLIDS, Value::Array(rows));
+    }
+    changes.push((on, wall));
+    for k in 0..CREWS {
+        let ((f, b, plank), (at_f, at_b)) = (crew(k), crew_at(k));
+        changes.push(create(f, WALKER, g, at_f));
+        changes.push(create(b, WALKER, g, at_b));
+        changes.push(create(
+            plank,
+            PLANK,
+            g,
+            Vec3::new(at_b.x + 1_350_000, 0, at_b.z),
+        ));
+    }
+    world_of(zone_place(), changes)
+}
+
+fn crews_bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let mut placed = Vec::new();
+    for k in 0..CREWS {
+        let ((f, b, _), (at_f, at_b)) = (crew(k), crew_at(k));
+        placed.push(town.surfaces[&ground].place(f, frame, at_f, Quat::IDENTITY)?);
+        placed.push(town.surfaces[&ground].place(b, frame, at_b, Quat::IDENTITY)?);
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    for p in placed {
+        b.add_body(humanoid(), p)?;
+    }
+    Ok(b)
+}
+
+/// What a lift was answered, and at which tick.
+type Lift = (i64, Result<Vec<u64>, String>);
+
+/// The crews' run: what each lift was answered and at which tick, the zone's state after it, and the clock's ticks
+/// over the 50 ms budget while the lifts were taken and answered (ticks 4 to 8), and the longest of those ticks.
+#[derive(Debug, PartialEq)]
+struct Lifted {
+    answers: Vec<Lift>,
+    state: [u8; 32],
+    over: u64,
+    longest_us: u64,
+    /// What the engine still keeps for lifts' ways after the run: lifts waiting, ways back not yet read.
+    kept: (usize, usize),
+}
+
+/// In lockstep, every crew's carry is proposed (tick 1), joined (2) and started (3), then every crew lifts its plank
+/// in tick 4, its front sent into the sealed room east of them: the straight way there clips the room's walls, so each
+/// lift's way is searched off the clock, and no way gets in (the costliest search: its whole budget, or its band).
+/// `deadline`, when given, is how long each act stays open. With `both`, each crew's two carriers lift in tick 4, each
+/// to 5 m east of its front on clear ground: the front's lift lands when its way comes back, the back's is refused
+/// `carry-lifted`.
+fn crews_lift(deadline: Option<replica::time::Micros>, both: bool) -> Lifted {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.measures = true;
+    if let Some(d) = deadline {
+        cfg.deadline = d;
+    }
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| crews_bodies()));
+    cfg.engine = Some((
+        tree_rules(),
+        vec![activity(CARRY, ["test:front", "test:back"])],
+    ));
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let world = answers::start(crews_world(), rules, store.clone(), cfg).expect("the world starts");
+    let run = Run {
+        world,
+        store,
+        path: std::env::temp_dir().join("r2-off-clock-unused.sock"),
+    };
+    let run_to = |tick| {
+        let (done, ran) = std::sync::mpsc::channel();
+        run.world
+            .events
+            .send(answers::Event::RunTo { tick, done })
+            .unwrap();
+        ran.recv().expect("the clock ran")
+    };
+    let mut sequence = BTreeMap::<Id, u64>::new();
+    let mut ask = |tick, soul: Id, verb: &str, target, parameters| {
+        let s = sequence.entry(soul).or_default();
+        *s += 1;
+        let (reply, rx) = std::sync::mpsc::channel();
+        let bytes = intent_bytes(soul, *s, verb, Some(target), parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+        rx
+    };
+    let answered = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        rx.try_iter()
+            .find(|f| answers::progress_of(f).is_none())
+            .map(|f| answer_in(&f).1)
+    };
+    let health = || {
+        let h = parse(&run.world.measures.as_ref().unwrap().health(0)).unwrap();
+        let int = |v: Option<&Json>| match v {
+            Some(Json::Int(n)) => *n as u64,
+            other => panic!("a count: {other:?}"),
+        };
+        // The last tick's time: its phases' sum.
+        let last = match h.get("last_tick_us") {
+            Some(Json::Obj(phases)) => phases.iter().map(|(_, us)| int(Some(us))).sum(),
+            other => panic!("the last tick's phases: {other:?}"),
+        };
+        (int(h.get("over_budget")), last)
+    };
+    let role = |r: &str| p(&[(1, Value::Text(name(r)))]);
+    let proposed: Vec<_> = (0..CREWS)
+        .map(|k| {
+            let kind = p(&[(1, Value::Text(name(&fullname(CARRY))))]);
+            ask(1, crew(k).0, "activity:propose", ground(), kind)
+        })
+        .collect();
+    run_to(1);
+    let carries: Vec<Id> = proposed
+        .iter()
+        .map(|rx| run.created(&answered(rx).expect("answered").expect("proposed"), CARRY))
+        .collect();
+    let mut steps = Vec::new();
+    for (k, &c) in carries.iter().enumerate() {
+        let (f, b, _) = crew(k as u64);
+        steps.push((2, ask(2, f, "activity:join", c, role("test:front"))));
+        steps.push((2, ask(2, b, "activity:join", c, role("test:back"))));
+        steps.push((3, ask(3, f, "activity:start", c, BTreeMap::new())));
+    }
+    run_to(3);
+    for (tick, rx) in &steps {
+        let a = answered(rx).unwrap_or_else(|| panic!("tick {tick}: unanswered"));
+        a.unwrap_or_else(|r| panic!("tick {tick}: {r}"));
+    }
+    let (over_before, _) = health();
+    let mut lifts = Vec::new();
+    for (k, &c) in carries.iter().enumerate() {
+        let ((f, b, plank), (at_f, _)) = (crew(k as u64), crew_at(k as u64));
+        let to = match both {
+            true => Vec3::new(at_f.x + 5_000_000, 0, at_f.z),
+            false => sealed(),
+        };
+        let lift = p(&[(1, plank.to_value()), (2, point(to).remove(&1).unwrap())]);
+        lifts.push(ask(4, f, "carry:lift", c, lift.clone()));
+        if both {
+            lifts.push(ask(4, b, "carry:lift", c, lift));
+        }
+    }
+    let mut answers: Vec<Option<Lift>> = vec![None; lifts.len()];
+    let (mut state, mut longest_us, mut kept) = ([0; 32], 0, (0, 0));
+    for tick in 4..=8 {
+        let ran = run_to(tick);
+        (state, kept) = (ran.state, ran.ways_kept);
+        longest_us = longest_us.max(health().1);
+        for (a, rx) in answers.iter_mut().zip(&lifts) {
+            if a.is_none() {
+                *a = answered(rx).map(|r| (tick, r));
+            }
+        }
+    }
+    let (over_after, _) = health();
+    run.world.stop();
+    Lifted {
+        answers: answers
+            .into_iter()
+            .map(|a| a.expect("every lift answered"))
+            .collect(),
+        state,
+        over: over_after - over_before,
+        longest_us,
+        kept,
+    }
+}
+
+/// 0.135 R2 off the clock: twenty crews lift in one tick, each lift's way into the sealed room searched (up to
+/// `turn::BUDGET` poses, a few milliseconds each in release). The searches run on the way thread, never on the clock
+/// (there a search panics the clock in a debug build and is counted in a release build), so no tick runs over its
+/// 50 ms, and each lift is answered the tick after it was taken, lockstep having waited for its way before that tick
+/// as it waits for every check. Run again with the same inputs, every answer lands at the same tick and the zone ends
+/// in the same state.
+#[test]
+fn r2_twenty_crews_lift_in_one_tick_and_every_tick_is_on_time() {
+    let on_clock = sim::commit::checks_on_clock();
+    let first = crews_lift(None, false);
+    println!(
+        "R2 off the clock: {} lifts answered {:?}; ticks 4 to 8 over budget {}, the longest of them {} µs",
+        first.answers.len(),
+        first
+            .answers
+            .iter()
+            .map(|(t, r)| (*t, r.as_ref().map(|_| "lifted").map_err(String::as_str)))
+            .collect::<BTreeSet<_>>(),
+        first.over,
+        first.longest_us
+    );
+    assert_eq!(
+        sim::commit::checks_on_clock(),
+        on_clock,
+        "no search on the clock"
+    );
+    assert!(
+        first.answers.iter().all(|(tick, _)| *tick == 5),
+        "each lift answered the tick after it was taken: {:?}",
+        first.answers
+    );
+    assert!(
+        first.answers.iter().all(|(_, r)| matches!(
+            r.as_ref().map_err(String::as_str),
+            Err("carry-unproven" | "carry-load-blocked")
+        )),
+        "each searched, and no way into the sealed room: {:?}",
+        first.answers
+    );
+    // The time bound holds a release build to the 50 ms tick; a debug build on a loaded runner is only reported.
+    if !cfg!(debug_assertions) {
+        assert_eq!(first.over, 0, "no tick over its budget");
+    }
+    assert_eq!(
+        first.kept,
+        (0, 0),
+        "nothing kept for the lifts once answered"
+    );
+    let again = crews_lift(None, false);
+    assert_eq!(
+        again.answers, first.answers,
+        "the same answers at the same ticks"
+    );
+    assert_eq!(again.state, first.state, "the same state: the run replays");
+}
+
+/// 0.135 R2 off the clock: a lift whose way has not come back by its act's deadline is refused `carry-way-late`, and
+/// the way that comes back after is dropped (each act open one microsecond: the ways come back before tick 5 and the
+/// deadlines pass at its start).
+#[test]
+fn r2_a_lift_whose_way_is_late_is_refused_by_name() {
+    let late = crews_lift(Some(1), false);
+    assert!(
+        late.answers
+            .iter()
+            .all(|a| *a == (5, Err("carry-way-late".to_owned()))),
+        "{:?}",
+        late.answers
+    );
+    assert_eq!(late.kept, (0, 0), "nothing kept for the late lifts");
+}
+
+/// 0.135 R2 off the clock (review of #4593): both carriers of each crew lift their carry in one tick. Both wait for
+/// their ways; when the ways come back the front's lift lands and the back's is refused `carry-lifted` before it reads
+/// its way. Nothing is kept for either afterwards: no lift waiting, no way (and no ground's geometry) held.
+#[test]
+fn r2_two_carriers_lift_one_carry_in_one_tick_and_nothing_is_kept() {
+    let both = crews_lift(None, true);
+    for (k, pair) in both.answers.chunks(2).enumerate() {
+        assert!(
+            matches!(&pair[0], (5, Ok(_))),
+            "crew {k}'s front lifts: {:?}",
+            pair[0]
+        );
+        assert_eq!(
+            pair[1],
+            (5, Err("carry-lifted".to_owned())),
+            "crew {k}'s back"
+        );
+    }
+    assert_eq!(both.kept, (0, 0), "nothing kept for the lifts");
+}
+
+/// N14: a lift whose one cabin runs across and back between its low stop (where it is declared, its stand point 800 mm
+/// south) and its high stop 4 m north, east of the walkers. Its `board` sets it off (`under_way`, as the cable car's
+/// `ride`) and needs it not under way; it is left by a rise.
+fn lift() -> Id {
+    id(12)
+}
+fn lift_at() -> Vec3 {
+    Vec3::new(-36_000_000, 0, 30_000_000)
+}
+fn lift_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:lift", "owner": "thing",
+      "state": { "under_way": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+      "points": { "low": { "role": "stand", "at_mm": [0, 0, -800], "yaw_mdeg": 0 },
+        "high": { "role": "stand", "at_mm": [0, 0, 3200], "yaw_mdeg": 0 } },
+      "slots": { "cabin": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "low" } },
+      "geometry": { "bounds_mm": [2000, 3000, 6000] },
+      "forms": {
+        "board": { "who": "anyone", "starts": "act",
+          "takes": { "seat": { "type": "slot",
+            "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+          "needs": [{ "need": "state", "field": "under_way", "is": false }, { "need": "slot_free", "slot": { "arg": "seat" } }],
+          "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" },
+            { "change": "set", "field": "under_way", "to": true, "event": "set_off" }] },
+        "get_off": { "who": "anyone", "starts": "act", "steps": [{ "step": "rise" }] } },
+      "ride": { "seats": ["cabin"], "stops": ["low", "high"], "returns": true, "start": "board",
+        "speed_mm_s": 1000, "ground": "level" } }"#,
+    )
+    .unwrap()
+}
+/// How long the lift's cabin waits at each stop here, µs: 8 s, not a ride's 3 minutes, so a test sees a whole lap (8 s
+/// at the low stop from the world's start, 4 s up, 8 s at the high stop, 4 s down, and again).
+const LIFT_STOP: i64 = 8_000_000;
+/// The lift's cabin seat as a served world registers it, and its run (`sim::courses::rides::seat_runs`, as
+/// `worldd::places::runs` gives it) on the open ground, from the world's start (world time is real time), each stop
+/// [`LIFT_STOP`] long.
+#[allow(clippy::disallowed_methods)]
+fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun) {
+    let place = sim::slots::PlaceAt {
+        thing: lift(),
+        place: replica::moves::Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, -800_000],
+        },
+        point: Vec3::new(lift_at().x, 450_000, lift_at().z),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: Vec::new(),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    let seats = BTreeMap::from([(1, place.clone())]);
+    let at = lift_at();
+    let mut runs = sim::courses::rides::seat_runs(
+        &lift_entry(),
+        &seats,
+        &|p: Vec3| p.plus(at).ok(),
+        &|_, _| Some(0),
+        now,
+    );
+    assert_eq!(runs.len(), 1, "the cabin runs");
+    let mut r = runs.remove(0);
+    for s in &mut r.course.stations {
+        s.dwell = LIFT_STOP;
+    }
+    r.course.within = r.course.load().expect("a lap").period;
+    assert_eq!(r.ends.len(), 1, "its trip's end sets under_way back");
+    (place, r)
+}
+
+/// The lift's `under_way` (field 28) as the log has it: 1 set off, 0 not.
+fn under_way(r: &Replica) -> Option<Value> {
+    let t = r.tree();
+    t.node(t.handle(lift()).unwrap())
+        .unwrap()
+        .fields()
+        .get(&28)
+        .cloned()
+}
+
+/// N14: a Soul boards a cabin at its stop through the gateway, setting the lift off; another is refused while it is
+/// under way. The rider is carried in its seat while the cabin is between stops (a rise is refused `boarding-frame-away`
+/// and it stays in the slot), and gets off at the far stop, on its feet at that stop's stand point, 4 m from where it
+/// got on: never set down mid-way, never left aloft. The trip ended at that stop (`under_way` back to false), so the
+/// lift is never stuck under way: while the cabin is away a board is refused before any walk, saying when it is back,
+/// and once it is back the Soul boards it again.
+#[test]
+// The world's clock is real time: the test reads it to wait for the cabin (#1926's way).
+#[allow(clippy::disallowed_methods)]
+fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_the_gateway() {
+    let started = std::time::Instant::now();
+    let at =
+        |ms: u64| std::thread::sleep(Duration::from_millis(ms).saturating_sub(started.elapsed()));
+    let (run, mut a, mut b) = serve("n14");
+    let boarded = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board: {boarded:?} after {:?}", started.elapsed());
+    boarded.expect("boarded at its stop");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)));
+    assert_eq!(under_way(&r), Some(Value::Uint(1)), "set off");
+    // The world wrote the cabin's course onto the lift at its start, for every copy and the page to read.
+    let t = r.tree();
+    let written = t
+        .node(t.handle(lift()).unwrap())
+        .unwrap()
+        .fields()
+        .get(&replica::schedule::F_SEAT_COURSES)
+        .cloned();
+    let Some(Value::Map(courses)) = written else {
+        panic!("no seat courses on the lift: {written:?}")
+    };
+    let course = replica::schedule::course::Course::read(&courses[&1]).expect("a course");
+    assert_eq!(course.stations.len(), 2);
+    assert_eq!(course.stations[1].at.z - course.stations[0].at.z, 4_000_000);
+    let other = b.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 another board while under way: {other:?}");
+    assert!(other.is_err(), "its one seat is taken");
+    // On its way to the far stop (it leaves 8 s in and takes 4 s): carried, not set down.
+    at(10_000);
+    let away = a.act("test:get_off", Some(lift()), BTreeMap::new());
+    println!(
+        "N14 get off on the way: {away:?} after {:?}",
+        started.elapsed()
+    );
+    assert_eq!(away, Err("boarding-frame-away".to_owned()));
+    assert_eq!(
+        parent(&run.replay(), w1()),
+        (Some(lift()), Some(1)),
+        "still in its seat"
+    );
+    // At the far stop the trip has ended, and it gets off there.
+    at(14_500);
+    assert_eq!(
+        under_way(&run.replay()),
+        Some(Value::Uint(0)),
+        "the trip ended at the stop"
+    );
+    let off = a.act("test:get_off", Some(lift()), BTreeMap::new());
+    println!(
+        "N14 get off at the far stop: {off:?} after {:?}",
+        started.elapsed()
+    );
+    off.expect("gets off at the far stop");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(ground()), None), "on the ground");
+    let t = r.tree();
+    let p = t
+        .node(t.handle(w1()).unwrap())
+        .unwrap()
+        .place()
+        .unwrap()
+        .position;
+    let high = Vec3::new(lift_at().x, 0, lift_at().z + 3_200_000);
+    println!("N14 stands at {p:?}, the far stand point {high:?}");
+    assert!(
+        (p.x - high.x).abs() <= 300_000 && (p.z - high.z).abs() <= 300_000,
+        "at the far stop's stand point"
+    );
+    // While the cabin is on its way back, a board is refused before any walk, saying when it is back.
+    at(21_000);
+    let early = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board while the cabin is away: {early:?}");
+    assert_eq!(early, Err("boarding-frame-away".to_owned()));
+    let still = run.replay();
+    let t = still.tree();
+    assert_eq!(
+        t.node(t.handle(w1()).unwrap())
+            .unwrap()
+            .place()
+            .unwrap()
+            .position,
+        p,
+        "not walked toward a cabin that is away"
+    );
+    // Back at its stop: the Soul boards it again.
+    at(24_500);
+    let again = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board again: {again:?} after {:?}", started.elapsed());
+    again.expect("boards again once the cabin is back");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)), "aboard again");
+    assert_eq!(under_way(&r), Some(Value::Uint(1)), "set off again");
+    run.stop();
+}
+
+/// N14 review: a small wheel of four gondolas (bottom, right, top, left of a ring 2 m across, its bottom 0.45 m up), all
+/// boarded from one stand point 1 m in front of it, 5 m north of the first walker. Its `board` names no gondola.
+fn wheel() -> Id {
+    id(13)
+}
+fn wheel_at() -> Vec3 {
+    Vec3::new(-40_000_000, 0, 36_000_000)
+}
+fn wheel_entry() -> Json {
+    parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:wheel", "owner": "thing",
+      "points": { "boarding": { "role": "stand", "at_mm": [0, 0, -1000] }, "out": { "role": "stand", "at_mm": [0, 0, 1000] } },
+      "slots": {
+        "g1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "boarding" },
+        "g2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [2000, 2450, 0], "stand": "boarding" },
+        "g3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 4450, 0], "stand": "boarding" },
+        "g4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-2000, 2450, 0], "stand": "boarding" } },
+      "geometry": { "bounds_mm": [5000, 5000, 3000] },
+      "forms": {
+        "board": { "who": "anyone", "starts": "act",
+          "takes": { "seat": { "type": "slot",
+            "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+          "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+          "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" }] } },
+      "ride": { "seats": ["g1", "g2", "g3", "g4"], "stops": ["boarding", "out"], "returns": false, "start": "board",
+        "speed_mm_s": 1000, "ground": "level" } }"#,
+    )
+    .unwrap()
+}
+/// The wheel's four places as a served world registers them, and their runs, each step a stop of 40 s, the wheel's
+/// clock set so that at the world's start it stands at the step where gondola 1 is at the top, out of reach, and two
+/// others wait at the platform (world time is real time).
+#[allow(clippy::disallowed_methods)]
+fn wheel_places(ground: Id) -> Vec<(sim::slots::PlaceAt, sim::courses::rides::SeatRun)> {
+    let at = wheel_at();
+    let declared = [
+        (1, Vec3::new(0, 450_000, 0)),
+        (2, Vec3::new(2_000_000, 2_450_000, 0)),
+        (3, Vec3::new(0, 4_450_000, 0)),
+        (4, Vec3::new(-2_000_000, 2_450_000, 0)),
+    ];
+    let registered: BTreeMap<u64, sim::slots::PlaceAt> = declared
+        .iter()
+        .map(|(n, p)| {
+            (
+                *n,
+                sim::slots::PlaceAt {
+                    thing: wheel(),
+                    place: replica::moves::Place {
+                        slot: *n,
+                        height: p.y,
+                        stand: [-p.x, -1_000_000 - p.z],
+                    },
+                    point: p.plus(at).unwrap(),
+                    facing: Quat::IDENTITY,
+                    floor: ground,
+                    more: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    let mut runs = sim::courses::rides::seat_runs(
+        &wheel_entry(),
+        &registered,
+        &|p: Vec3| p.plus(at).ok(),
+        &|_, _| Some(0),
+        0,
+    );
+    assert_eq!(runs.len(), 4, "every gondola runs");
+    for r in &mut runs {
+        for s in &mut r.course.stations {
+            s.dwell = 40_000_000;
+        }
+    }
+    // Gondola 1's third stop (two steps round) is the top; start the clock 1 s into it.
+    let table = runs[0].course.load().unwrap();
+    let top = table
+        .legs
+        .iter()
+        .filter(|l| l.stop.is_some())
+        .nth(2)
+        .unwrap()
+        .start;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    for r in &mut runs {
+        r.course.t0 = now - top - 1_000_000;
+        r.course.within = r.course.load().unwrap().period;
+    }
+    runs.into_iter()
+        .map(|r| (registered[&r.slot].clone(), r))
+        .collect()
+}
+
+/// N14 review: a Soul's `board` on a big wheel names no gondola. At a step where gondola 1 is up the wheel the world
+/// picks one that waits at the platform (not the nearest stand point's first, gondola 1), walks the Soul there and
+/// seats it: it is never sent to a gondola that is aloft.
+#[test]
+fn n14_a_wheel_is_boarded_at_a_gondola_that_waits_while_gondola_1_is_aloft_through_the_gateway() {
+    let (run, mut a, _) = serve("n14w");
+    let boarded = a.act("test:board", Some(wheel()), BTreeMap::new());
+    println!("N14 wheel board: {boarded:?}");
+    boarded.expect("boarded at a waiting gondola");
+    let (parent, slot) = parent(&run.replay(), w1());
+    assert_eq!(parent, Some(wheel()));
+    println!("N14 wheel: in gondola {slot:?}");
+    assert!(
+        matches!(slot, Some(2..=4)),
+        "not gondola 1, aloft: {slot:?}"
+    );
+    run.stop();
 }

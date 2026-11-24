@@ -6,7 +6,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { MailBox: OwnerBox, V2OwnerMailbox, inboxOf, mailboxPlace, viewToken } = await import('./owner-mailbox.ts');
+const { MailBox: OwnerBox, V2OwnerMailbox, inboxOf, mailboxPlace, viewToken, NothingOwned } = await import('./owner-mailbox.ts');
 
 const GRANT = `soul-${'2b'.repeat(16)}-2`;
 
@@ -106,4 +106,14 @@ test('B3-2: the page\'s sign-in is exchanged for the view token: a provider sess
   assert.equal(asked[1].init.body, JSON.stringify({ name: 'Ada' }), 'a local dev session: the directory\'s test sign-in by that name');
   await assert.rejects(viewToken(place, post, async () => null), /not signed in/);
   assert.equal(asked.length, 2, 'signed out: nothing asked');
+});
+
+test('signed in, owning nothing: the directory\'s empty answer (and an older directory\'s 404 nothing-owned) is NothingOwned, not a failure', async () => {
+  const place = { directory: 'http://127.0.0.1:9002', gateway: 'ws://127.0.0.1:9001/v2/ws', session: { page: true as const } };
+  const empty = (async () => new Response(JSON.stringify({ owned: [] }))) as unknown as typeof fetch;
+  await assert.rejects(viewToken(place, empty, async () => 'provider.jwt'), (e) => e instanceof NothingOwned);
+  const older = (async () => new Response(JSON.stringify({ refused: 'nothing-owned' }), { status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(viewToken(place, older, async () => 'dev:Ada'), (e) => e instanceof NothingOwned);
+  const other = (async () => new Response(JSON.stringify({ refused: 'no-view-key' }), { status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(viewToken(place, other, async () => 'dev:Ada'), (e) => !(e instanceof NothingOwned) && /no-view-key/.test(String(e)));
 });

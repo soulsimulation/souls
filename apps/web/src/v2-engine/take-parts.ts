@@ -123,6 +123,8 @@ export class CarriedParts {
   private readonly prior = new Map<string, { until: number; record: PartNode }>();
   private readonly kinds: { apply(nodes: PartNode[], removed: string[]): void };
   private readonly entries: ReadonlyMap<string, Uint8Array>;
+  /** Content kinds' whole entries (their own shapes), by plain name, once the page has them (`addLooks`). */
+  private readonly looks = new Map<string, Uint8Array>();
   /** `kinds`: the page's CreatorKinds; `entries`: kind entries by plain name (a part drawn from its own shape). */
   constructor(kinds: { apply(nodes: PartNode[], removed: string[]): void }, entries: ReadonlyMap<string, Uint8Array> = new Map()) {
     this.kinds = kinds; this.entries = entries;
@@ -152,7 +154,7 @@ export class CarriedParts {
       // is its look before the library's (`part:`, kept with the kinds' own defs): the library's rack defs are another
       // frame (core-rack-upright lies flat along x, 3.66 m; the kind's upright stands 2.44 m along y).
       if (n.origin && !this.unheld.has(n.id)) continue;
-      const own = this.partKinds.get(k), seen = own ? undefined : this.entries.get(k), entry = own ?? (seen && (this.holders.get(k) ?? seen));
+      const own = this.partKinds.get(k), seen = own ? undefined : this.entries.get(k), entry = own ?? (seen && (this.holders.get(k) ?? this.looks.get(k) ?? seen));
       if (entry && !this.defined.has(n.kind)) {
         this.defined.add(n.kind);
         this.kinds.apply([{ id: `${own ? 'part' : 'entry'}:${n.kind}`, kind: 'souls:kind', parent: null, defines: n.kind, entry }], []);
@@ -176,6 +178,19 @@ export class CarriedParts {
       if (!was || was.parent === n.parent) continue;
       if ((was.parent && this.tracks.has(was.parent)) || (n.parent && this.tracks.has(n.parent))) this.prior.set(n.id, { until: to, record: this.prior.get(n.id)?.record ?? was });
     }
+  }
+
+  /** Content kinds' whole entries, by plain name, that reach the page after the stream (use-v2-souls.ts: the build's
+   *  looks file): a kind drawn so far from its bounds alone is defined again from its own shape. A part's or a holder's
+   *  look stays its own. */
+  addLooks(more: ReadonlyMap<string, Uint8Array>): void {
+    for (const [k, v] of more) if (!this.partKinds.has(k) && !this.holders.has(k)) this.looks.set(k, v);
+    const again: PartNode[] = [];
+    for (const kind of this.defined) {
+      const k = plain(kind), v = this.looks.get(k);
+      if (v && more.has(k) && this.entries.get(k)) again.push({ id: `entry:${kind}`, kind: 'souls:kind', parent: null, defines: kind, entry: v });
+    }
+    if (again.length) this.kinds.apply(again, []);
   }
 
   /** Listens to the reader's worker, as WorldState.watch does; returns it. */

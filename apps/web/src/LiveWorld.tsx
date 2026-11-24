@@ -5,6 +5,7 @@ import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { playSpeed, v2History } from './v2-engine/history.ts';
+import { CABIN } from './v2-engine/bridge.ts';
 import { seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
@@ -990,7 +991,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // rider, and a god attraction's carrier gets a car drawn at its twin, unless the thing has its own cars (#2198, below)
       if(refresh){if(records!==carrierRecords){carrierRecords=records;carrierIds=recordedCarriers(records);}/* #1574: records is a fresh object per take, never edited in place */rideCars=entityLayer.active&&!expansion?entityLayer.rideCars():[];rideCarWheels=entityLayer.active&&!expansion?entityLayer.rideCarWheels():new Map();rideWheels=entityLayer.active&&!expansion?entityLayer.rideWheels():new Map();}
       {const framed=new Set<string>([...(expansion?['eden-balloon']:[]),...(entityLayer.active&&!expansion?rideNames??[]:[])]),more=carrierPoses([...new Set([...carrierIds,...rideCars])],at.entities as Record<string,{p?:readonly number[];yaw?:number}|undefined>,framed);
-       rideCarriers.push(...more);const cars=new Set(rideCars);rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
+       rideCarriers.push(...more);const cars=new Set(rideCars),ownCars=new Set(rideWheels.values());for(const id of carrierIds)if(records[id]?.def===CABIN&&!ownCars.has(id.split('#')[0]))cars.add(id);/* N14: a seat that moves with its cabin gets a car, unless its ride has its own (a big wheel's gondolas) */rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
        // #2198: a big wheel's ride goes round in one of its own gondolas: the wheel turns that gondola to it once it leaves home
        for(const [cid,thing] of rideWheels){const c=more.find(x=>x.id===cid),home=(records[cid] as {carrier?:{home?:readonly number[]}}|undefined)?.carrier?.home;entityLayer.wheelRide(thing,c?{p:c.p,aloft:!!home&&Math.hypot(c.p[0]-home[0],c.p[1]-home[1],c.p[2]-home[2])>0.05}:null);}}
       const cards = refresh ? cardsAt(s.plays, at.tick) : null;
