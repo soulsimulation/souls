@@ -2998,8 +2998,21 @@ fn serve(args: &[String]) -> R<()> {
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
                 // unit's 10 s stop timeout; best effort.
+                // A stopping world writes nothing new to `views/`: the stream thread is asked to stop cutting first, and
+                // the drain backs up only what is already spooled.
+                let stopping = Arc::new((
+                    std::sync::atomic::AtomicBool::new(false),
+                    std::sync::atomic::AtomicBool::new(false),
+                ));
                 if let Some(d) = writer.drainer() {
+                    let stopping = Arc::clone(&stopping);
                     crate::stopped::on_stop(move || {
+                        use std::sync::atomic::Ordering;
+                        stopping.0.store(true, Ordering::Release);
+                        let parked = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                        while !stopping.1.load(Ordering::Acquire) && std::time::Instant::now() < parked {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
                         let held = d.drain(std::time::Duration::from_secs(8));
                         eprintln!(
                             "worldd: the public stream's backup {} before the stop",
@@ -3015,6 +3028,13 @@ fn serve(args: &[String]) -> R<()> {
                 let _ = ready_tx.send(true);
                 drop(stream_found);
                 loop {
+                    // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
+                    if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
+                        stopping.1.store(true, std::sync::atomic::Ordering::Release);
+                        loop {
+                            std::thread::park();
+                        }
+                    }
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
                         Ok((record, bytes)) => {
                             if record >= writer.source_cursor() {
