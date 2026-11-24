@@ -688,7 +688,8 @@ if (isMain(import.meta.url)) {
     else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
+      // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
