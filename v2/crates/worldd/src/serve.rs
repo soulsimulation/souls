@@ -558,9 +558,11 @@ fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: 
             .and_then(|t| entry.get("text")?.get(t)?.str())
             .or_else(|| entry.get("text")?.get("card")?.str())
             .unwrap_or("");
+        // A dance's moves are each at its own body (on the beat): the engine checks no distance at its accept.
         let reach = a
             .roles
             .iter()
+            .filter(|_| !a.beat)
             .filter_map(|r| r.mv.as_ref())
             .filter_map(|mv| moves.iter().find(|m| m.name == *mv))
             .map(|m| m.reach)
@@ -3823,6 +3825,10 @@ mod tests {
             "a hug is anywhere, within its reach"
         );
         assert_eq!(one("eden:dance_together").get("asks"), Some(&Json::Int(7)));
+        assert!(
+            one("eden:dance_together").get("near_m").is_none(),
+            "a dance checks no distance"
+        );
         assert!(
             one("eden:follow").get("near_m").is_none(),
             "following checks no distance"

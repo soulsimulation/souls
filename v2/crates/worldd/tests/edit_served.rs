@@ -4452,12 +4452,22 @@ fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_b
         std::thread::sleep(Duration::from_millis(100));
     };
     assert_eq!(told, bodies.to_vec(), "each player told at its body");
-    // Let go at once: the same two start a game on the open ground.
-    let again = start_at(&mut hands, g);
-    let got = hands[0].act("activity:leave", again, BTreeMap::new());
-    assert_eq!(got.kind, 1, "left: {got:?}");
-    let got = hands[1].act("activity:leave", again, BTreeMap::new());
-    assert_eq!(got.kind, 1, "left: {got:?}");
+    // Let go at once: an offer from the same player is answered by where the game is played (at a board, through its
+    // forms), not by a body still held; on the open ground it is refused by name.
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, kind.clone()),
+            (2, Value::Text(Name::new("eden:first").unwrap())),
+            (3, Value::Array(vec![bodies[1].to_value()])),
+        ]),
+    );
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "together.at-its-thing"),
+        "a board game is played at its board: {got:?}"
+    );
 
     // The creator undoes the removal: the board alone comes back.
     let got = creator_asks(Asked::Undo);
@@ -4481,10 +4491,17 @@ fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_b
         (2, "not-permitted"),
         "nobody holds the first side of the board that came back: {got:?}"
     );
+    // Both are free: they start a game at the board that came back.
+    let again = start_at(&mut hands, board);
+    for h in hands.iter_mut() {
+        let got = h.act("activity:leave", again, BTreeMap::new());
+        assert_eq!(got.kind, 1, "left: {got:?}");
+    }
     drop(s);
     println!(
-        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone and \
-         playing again on the ground at once), and its undo brought the board back with no game or role link"
+        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone, and a game \
+         offered on the ground refused together.at-its-thing), and its undo brought the board back with no game or \
+         role link; the two then played at it again"
     );
 }
 
