@@ -1364,21 +1364,30 @@ fn take_then_walk(walk_at: i64) -> TakeThenWalk {
     out
 }
 
-/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 4 and makes contact at about tick 9. The
+/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 8 and makes contact at about tick 14 (its
+/// approach walk ends on the grip's point since 0.135 E20, not 300 mm short of it, so both are four ticks later than
+/// they were; a walk arriving before tick 8 is in the run's walk, which its claim on the legs ends `claim-taken`). The
 /// Soul's walk arriving before the contact leaves the run there (`left`, nothing taken); arriving after it, at the
 /// press's end (`left`, the vessel taken at the contact stays in the hand). Either way the walk goes on and is done,
 /// and no intent waits to its deadline.
 #[test]
 fn i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end() {
     let hand = (Some(w1()), Some(1));
-    for (walk_at, taken) in [(5, false), (12, true)] {
+    for (walk_at, taken) in [(10, false), (16, true)] {
         let (first, second, vessel_at, walker) = take_then_walk(walk_at);
         println!(
             "I4 walk at tick {walk_at}: take {first:?}, walk {second:?}, vessel {vessel_at:?}"
         );
         assert_eq!(first, (1, Err("left".to_owned())), "the run is left");
         assert!(matches!(second, (2, Ok(_))), "the walk is done: {second:?}");
-        assert_eq!(walker, south(3_000_000), "walked to where it was sent");
+        // Arrived: within the walk's reach of its spot (`skills::route::AT_SPOT`); where in it depends on its last
+        // steps, and so on where the take's walk left the body.
+        let to = south(3_000_000);
+        let off = (i128::from(walker.x - to.x).pow(2) + i128::from(walker.z - to.z).pow(2)).isqrt();
+        assert!(
+            off <= i128::from(skills::route::AT_SPOT),
+            "walked to where it was sent: {off} µm off"
+        );
         if taken {
             assert_eq!(vessel_at, hand, "the effect landed at the contact stays");
         } else {
