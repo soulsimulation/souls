@@ -1,7 +1,7 @@
 {
   "format": "souls/world-limits/1",
-  "about": "Per-world limits (#4013 follow-up, #1960). Keyed by the world's slug, which the machine's world-authority map (/etc/souls/placement-data/authority.json) turns into its placed instance. install.sh apply writes worldd@<instance>.service.d/limits.conf from it (world-limits.mjs); a world not listed keeps worldd@.service's own limits (MemoryMax=2G) and deploy's 30 s start bound. memory_max: a systemd MemoryMax (digits then M or G). start_within_s: how long deploy's rehearsal and canary wait for the world to serve (1 to 3600). Runbook: v2/docs/runbook/world-restarting.md.",
+  "about": "Per-world limits (#4013 follow-up, #1960). Keyed by the world's slug, which the machine's world-authority map (/etc/souls/placement-data/authority.json) turns into its placed instance. install.sh apply writes worldd@<instance>.service.d/limits.conf from it (world-limits.mjs); a world not listed keeps worldd@.service's own limits (MemoryMax=2G) and deploy's 30 s start bound. memory_max: a systemd MemoryMax (digits then M or G); memory_low: a systemd MemoryLow, the memory kept from reclaim under pressure (souls.slice holds as much MemoryLow, so it reaches the world). start_within_s: how long deploy's rehearsal and canary wait for the world to serve (1 to 3600). Runbook: v2/docs/runbook/world-restarting.md.",
   "worlds": {
-    "eden": { "memory_max": "8G", "start_within_s": 600 }
+    "eden": { "memory_max": "4G", "memory_low": "2G", "start_within_s": 600 }
   }
 }

@@ -173,14 +173,25 @@ function oneFence(binding) {
   const { oldWorldId, canonicalSlug, routesFile, clientDir, staticDir, bodiesDir } = binding;
   const v2Bodies = binding.v2Bodies ?? (bodiesDir ? `/w/${canonicalSlug}/v2/bodies/` : null);
   let publishing = null, published = null; // the flight, and the stream the files in staticDir were published for
+  // 24 Nov: a static folder the launcher cannot write (its unit's ProtectSystem=strict sandbox) never leaves a routed page
+  // without its views: they are held here instead, for the stream they were read for, and served as the files would be
+  let held = null;
   // The manifest goes first: without it nothing here is served, so a reader never mixes one routing's files with another's
   // while they are removed or rewritten. Then the six files (and any `.tmp` a stopped publish left).
   const clear = () => {
+    held = null;
     if (!staticDir) return;
     rmSync(join(staticDir, 'manifest.json'), { force: true });
     for (const name of [...Object.keys(STATIC), 'manifest.json']) { rmSync(join(staticDir, name), { force: true }); rmSync(join(staticDir, `${name}.tmp`), { force: true }); }
   };
   const manifest = () => { try { return JSON.parse(readBounded(join(staticDir, 'manifest.json'), 1024 * 1024)); } catch { return null; } };
+  // one published view for `stream`: the file in staticDir, else the view held in memory, else null (the old world answers)
+  const view = (stream, name) => {
+    if (!staticDir || !stream) return null;
+    const m = manifest();
+    if (m?.files?.[name] && m.stream === stream) return readBounded(join(staticDir, name), 64 * 1024 * 1024);
+    return held?.m.stream === stream && held.m.files[name] ? held.bodies[name] : null;
+  };
   const route = () => {
     try {
       const value = JSON.parse(readBounded(routesFile, 32 * 1024 * 1024));
@@ -192,6 +203,21 @@ function oneFence(binding) {
     } catch { throw unavailable(); }
   };
   const active = () => route().canonical === true;
+  // The replica the routed page loads, by version (cdn-walk, 24 Nov: `/replica_bg.wasm` answered no-store, so every
+  // viewer fetched its 2 MB again). `<world>/v2/replica/<version>/` holds replica.js and the replica_bg.wasm it loads
+  // beside itself, the version being the first 16 hex of sha256 over both files, so the page's two files always match
+  // and the current version's answers are immutable. The plain `/replica.js` and `/replica_bg.wasm` the Soul client's
+  // upgrade reads keep no-store. Read again when either file's size or time changes.
+  let replica = null;
+  const replicaNow = () => {
+    const key = ['replica.js', 'replica_bg.wasm'].map((n) => { const s = statSync(join(clientDir, n)); return `${s.ino}:${s.size}:${s.mtimeMs}`; }).join('/');
+    if (replica?.key !== key) {
+      const js = readBounded(join(clientDir, 'replica.js'), 32 * 1024 * 1024), wasm = readBounded(join(clientDir, 'replica_bg.wasm'), 32 * 1024 * 1024);
+      replica = { key, js, wasm, version: createHash('sha256').update(js).update(wasm).digest('hex').slice(0, 16) };
+    }
+    return replica;
+  };
+  const replicaVersion = () => { try { return replicaNow().version; } catch { return null; } };
   const bound = (w) => !!w && worldIdOf(w) === oldWorldId;
   return {
     bound,
@@ -216,7 +242,7 @@ function oneFence(binding) {
       try { const r = route(); stream = r.canonical === true && publicStream(r.stream) ? r.stream : null; } catch { /* unverifiable: not routed */ }
       if (stream !== published) published = null; // rolled back (or re-routed): the next routing publishes afresh
       // rolled back (or the routing cannot be verified): the previous routing's files go, so a re-route never serves them
-      if (!stream && staticDir && !publishing && existsSync(join(staticDir, 'manifest.json'))) clear();
+      if (!stream && staticDir && !publishing && (held || existsSync(join(staticDir, 'manifest.json')))) { try { clear(); } catch { /* an unwritable folder: nothing of it is served */ } }
       return stream;
     },
     /** The world's name in the new engine (its routes key, the `world` its Souls are paired for), under the same rule as
@@ -232,28 +258,41 @@ function oneFence(binding) {
       // R2 (0.133): the world's public history export (its route's `history`, `/s/…/`), for the page's past time
       let history = null;
       try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}) };
+      const version = replicaVersion();
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
+        ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once
      *  per routing: a later call for the same stream does nothing. Resolves to the manifest, or null (not routed, or no
-     *  staticDir); rejects when the old world does not answer its snapshot (nothing is then served: its views answer live). */
+     *  staticDir); rejects when the old world does not answer its snapshot (nothing is then served: its views answer live).
+     *  A staticDir the launcher cannot write (24 Nov: EROFS under the unit's sandbox) holds the views in memory instead:
+     *  that flight's manifest names why (`unwritable`, for the launcher's log line) and the page is served the same. */
     publish(w, read) {
       const stream = staticDir ? this.v2Stream(w) : null;
       if (!stream) { published = null; return Promise.resolve(null); }
-      if (published === stream) return Promise.resolve(manifest());
+      if (published === stream) return Promise.resolve(held?.m.stream === stream ? held.m : manifest());
       return publishing ??= (async () => {
-        const files = {};
-        mkdirSync(staticDir, { recursive: true });
-        clear();
+        const files = {}, bodies = {};
+        let unwritable = null;
+        try { mkdirSync(staticDir, { recursive: true }); clear(); } catch (e) { unwritable = e; held = null; }
         for (const [name, path] of Object.entries(STATIC)) {
           let a; try { a = await read(path); } catch { a = null; }
-          if (a?.status !== 200) { if (name === 'snapshot.json') { clear(); throw Error('cutover.static-snapshot-unavailable'); } continue; }
-          writeFileSync(join(staticDir, `${name}.tmp`), a.body); renameSync(join(staticDir, `${name}.tmp`), join(staticDir, name));
+          if (a?.status !== 200) { if (name === 'snapshot.json') { try { clear(); } catch { /* unwritable */ } throw Error('cutover.static-snapshot-unavailable'); } continue; }
+          bodies[name] = a.body;
           files[name] = { from: path, bytes: a.body.length, sha256: createHash('sha256').update(a.body).digest('hex') };
         }
         const m = { schema: 'souls/old-static/1', world: canonicalSlug, oldWorldId, stream, files };
-        writeFileSync(join(staticDir, 'manifest.json.tmp'), JSON.stringify(m)); renameSync(join(staticDir, 'manifest.json.tmp'), join(staticDir, 'manifest.json'));
+        try {
+          if (unwritable) throw unwritable;
+          for (const name of Object.keys(files)) { writeFileSync(join(staticDir, `${name}.tmp`), bodies[name]); renameSync(join(staticDir, `${name}.tmp`), join(staticDir, name)); }
+          writeFileSync(join(staticDir, 'manifest.json.tmp'), JSON.stringify(m)); renameSync(join(staticDir, 'manifest.json.tmp'), join(staticDir, 'manifest.json'));
+        } catch (e) {
+          try { clear(); } catch { /* the folder stays as it was; its manifest, if any, names another stream */ }
+          held = { m, bodies };
+          published = stream;
+          return { ...m, unwritable: `${staticDir}: ${e?.code ?? e?.message ?? e}` };
+        }
         published = stream;
         return m;
       })().finally(() => { publishing = null; });
@@ -267,7 +306,8 @@ function oneFence(binding) {
       const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
       const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null) return false;
+      const versioned = mutating ? null : /^\/v2\/replica\/([0-9a-f]{16})\/(replica\.js|replica_bg\.wasm)$/.exec(path);
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null && !versioned) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -286,17 +326,27 @@ function oneFence(binding) {
         res.writeHead(200, { 'content-type': bodyType(body), 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
         return true;
       }
+      if (versioned) {
+        // The current version is immutable; another (a page loaded before the client changed) gets today's bytes, kept nowhere.
+        let r = null;
+        try { r = replicaNow(); } catch { r = null; }
+        if (!r) { res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.client-unavailable', message: 'The new engine client is unavailable. Ask the operator to restore the served bundle.' })); return true; }
+        const bytes = versioned[2] === 'replica.js' ? r.js : r.wasm, current = versioned[1] === r.version && !url.search;
+        res.writeHead(200, { 'content-type': types[versioned[2]], 'content-length': bytes.length, 'cache-control': current ? 'public, max-age=31536000, immutable' : 'no-store' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
+      }
       if (capture !== null) {
         // W4 prep (0.133): the page binds the scenery the published scene.json names, by its hash. The old world keeps a
         // scene's capture only once one of its takes carried it, so a world loaded for the switch (or one nobody watched
         // since its scene last changed) answers 404 and the page stops at "World layout could not be prepared". The
         // published scene is that capture: answered as the old world answers it (`{worldId, ...capture}`, http.ts),
         // only for this stream's file and this world; any other hash passes through.
-        const m = staticDir ? manifest() : null, world = url.searchParams.get('world');
+        const world = url.searchParams.get('world');
         let json = null;
         try {
-          if (m?.files?.['scene.json'] && m.stream === this.v2Stream(w) && (world === null || world === oldWorldId) && [...url.searchParams.keys()].every((k) => k === 'world')) {
-            const { renderSceneRef: ref, ...scene } = JSON.parse(readBounded(join(staticDir, 'scene.json'), 64 * 1024 * 1024));
+          const published = (world === null || world === oldWorldId) && [...url.searchParams.keys()].every((k) => k === 'world') ? view(this.v2Stream(w), 'scene.json') : null;
+          if (published) {
+            const { renderSceneRef: ref, ...scene } = JSON.parse(published);
             if (ref?.hash === capture) json = JSON.stringify({ worldId: oldWorldId, contract: 'render-scene-capture/1', ref, body: scene });
           }
         } catch { json = null; }
@@ -309,9 +359,8 @@ function oneFence(binding) {
         // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers.
         // Only the query-less form is published: the snapshot's wire forms (`?defs=ref`, `&cols=1`; apps/server/src/god/
         // routes.ts) differ in body and headers (x-defs-ref, x-ground-ref, column-packed entities), so they pass through.
-        const name = SERVED.get(path), m = staticDir ? manifest() : null;
         let body = null;
-        try { if (m?.files?.[name] && m.stream === this.v2Stream(w) && !url.search) body = readBounded(join(staticDir, name), 64 * 1024 * 1024); } catch { body = null; }
+        try { if (!url.search) body = view(this.v2Stream(w), SERVED.get(path)); } catch { body = null; }
         if (!body) return false;
         res.writeHead(200, { 'content-type': 'application/json', 'content-length': body.length, 'cache-control': 'no-cache', 'x-souls-static': 'published' }).end(req.method === 'HEAD' ? undefined : body);
         return true;

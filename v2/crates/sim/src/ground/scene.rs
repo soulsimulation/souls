@@ -57,7 +57,7 @@ pub struct Solid {
 /// width and the height of the floor it opens from. A step ([`steps_of`]) is a doorway of no depth on a low floor's
 /// open edge, `across` pointing off the floor, or between two of a floor's surfaces ([`inner_steps_of`]); its link is
 /// derived ([`step_id`]), never a link of the tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Doorway {
     pub link: Id,
     pub at: Xz,

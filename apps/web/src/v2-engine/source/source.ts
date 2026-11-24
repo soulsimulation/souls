@@ -35,6 +35,9 @@ export type NodeRec = {
   def?: string;
   /** Its def's params (import-eden's field 19, W3), when it has any. */
   params?: Record<string, unknown>;
+  /** R4 (0.134): a creator's tint (replica `tint::F_TINT`, field 145): `[part, rgb]` rows, `tint:whole` for the whole
+   *  thing and `part:<name>` for a part; empty once undone. Absent when the thing was never recoloured. */
+  tint?: [string, number][];
   /** A path thing's or a river's line `[x, z]` mm, world (field 16), and its width mm (field 17). */
   line?: number[][];
   lineWidth?: number;

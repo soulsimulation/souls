@@ -443,7 +443,13 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
             && historical.forms.is_empty()
     );
 
+    // The body found again on the ground as installed, as a tick's reground finds it (`Host::reground`): the stair
+    // removal cuts the open ground's squares again (S13), so the pieces it stood on are numbered anew.
+    let here = town.relocate(&body).unwrap();
     let mut fresh = old.clone();
+    fresh.places[0].0 = here;
+    fresh.lines[0].0 = here;
+    fresh.forms[0].body = here;
     fresh.form_map = Some(Arc::clone(&current));
     fresh.forms[0].generation = 2;
     worker.send(fresh.clone());
