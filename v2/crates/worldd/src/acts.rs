@@ -1546,8 +1546,9 @@ pub struct Acts {
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
     /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
     zone: replica::effects::Header,
-    /// The bodies as every [`Sight`] of a batch of starts sees them, while one is held ([`Acts::hold_sight`]).
-    held: Option<Held>,
+    /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
+    /// at its first use.
+    held: Option<Option<Held>>,
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -2008,8 +2009,16 @@ impl Acts {
             (Some(slots), Some(floors)) => Some(Places { slots, floors }),
             _ => None,
         };
-        let (bodies, carrying, builds) = match &self.held {
-            Some(h) => h.clone(),
+        // Held for a batch of starts: built at the first of them and read by the rest, none of which moves a body.
+        let (bodies, carrying, builds) = match &mut self.held {
+            Some(Some(h)) => {
+                debug_assert!(
+                    *h == Held::of(controller),
+                    "a start moved a body while the bodies were held"
+                );
+                h.clone()
+            }
+            Some(slot) => slot.insert(Held::of(controller)).clone(),
             None => Held::of(controller),
         };
         let sight = Sight {
@@ -2108,8 +2117,9 @@ impl Acts {
     /// Holds one snapshot of the bodies for every [`Sight`] until [`Acts::release_sight`] (S10): for the tick's form
     /// starts, between which no body moves (a start claims legs and sets timers; the controller steps them in a later
     /// tick). Each start otherwise rebuilt it whole: every body, every build, at about 0.4 ms each at 750 bodies.
-    pub fn hold_sight(&mut self, bodies: Option<&Bodies>) {
-        self.held = bodies.map(|b| Held::of(&b.runner.controller));
+    /// The snapshot is built at the first start that needs it, so a tick with no starts builds none.
+    pub fn hold_sight(&mut self) {
+        self.held = Some(None);
     }
 
     /// Lets each [`Sight`] read the bodies afresh again.
