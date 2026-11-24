@@ -222,7 +222,20 @@ async fn connections(conns: &Conns, n: usize) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn i4_a_walk_accepted_before_a_gateway_restart_gets_its_receipt_after_it_once() {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("i4-restart");
+    restart("i4-restart", false).await;
+}
+
+/// The client sends the walk again through the new gateway (`gateway-upgrade.md` step 3): the new gateway keeps it,
+/// and the world's answer to the repeat and its handed-on copy from the ended connection reach the Soul once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn i4_a_walk_sent_again_through_the_new_gateway_gets_its_receipt_once() {
+    restart("i4-resend", true).await;
+}
+
+/// A walk through one gateway, `kill -9`, a second gateway (and with `resend`, the walk sent again through it), then
+/// its receipt from the world twice on the newest connection: the Soul gets it once.
+async fn restart(name: &str, resend: bool) {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let world_path = dir.join("w.sock");
@@ -255,6 +268,11 @@ async fn i4_a_walk_accepted_before_a_gateway_restart_gets_its_receipt_after_it_o
     let second = gatewayd(&world_path, &dir.join("tokens.txt"));
     connections(&conns, 2).await;
     let (mut ws, _) = connect(&second.1, &token, cursor).await;
+    if resend {
+        ws.send(Message::Binary(walk(1).into())).await.unwrap();
+        let progress = next(&mut ws).await.unwrap();
+        assert_eq!(kind_and_sequence(&progress), (Some(3), Some(1)));
+    }
 
     // The walk ends: the world hands its receipt to the newest connection, and it comes twice.
     let receipt = Answer::Receipt {

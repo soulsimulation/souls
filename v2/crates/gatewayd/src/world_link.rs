@@ -13,7 +13,8 @@
 //! [`handover_ask`], and the world hands an ended gateway connection's answers to the newest one, or holds them until
 //! one asks (`worldd::handover`). An answer for an intent this gateway does not hold is passed to its actor's socket
 //! (and kept for a resume) the first time; an answer that could come twice (to an intent sent on two connections, one
-//! the gateway answered itself by its deadline, or one passed on so) is remembered ([`RECENT`]) and a second copy
+//! the gateway answered itself by its deadline, or one passed on so) is remembered ([`RECENT`]), as is every kept
+//! intent answered lately ([`ANSWERED`]: a client's repeat through a new gateway), and a second copy
 //! dropped, so each intent is answered once. A stopping gateway (SIGTERM) lets the world go before its sockets close,
 //! so what the world answers after that goes to the next gateway rather than to sockets that are closing.
 //!
@@ -158,6 +159,11 @@ pub const HANDOVER: u64 = 31;
 /// an ended connection) are remembered, so the second is dropped.
 pub const RECENT: usize = 4096;
 
+/// How many kept intents' answers are remembered, newest last: a kept intent the world answers on two connections (a
+/// client's repeat through a new gateway, and the ended connection's copy handed on) has both copies leave the world
+/// in one tick, so a short ring that every answer passes through catches the second.
+pub const ANSWERED: usize = 1024;
+
 /// The frame that says this is the world's gateway ([`HANDOVER`]).
 pub fn handover_ask() -> Vec<u8> {
     encode(&Value::Map([(HANDOVER, Value::Array(Vec::new()))].into())).unwrap_or_default()
@@ -239,6 +245,8 @@ struct State {
     waiting: BTreeMap<Vec<u8>, VecDeque<u64>>,
     /// Intents answered whose answer could come again, by actor's bytes and sequence, newest last ([`RECENT`]).
     recent: VecDeque<(Vec<u8>, u64)>,
+    /// Every kept intent answered lately, by actor's bytes and sequence, newest last ([`ANSWERED`]).
+    answered: VecDeque<(Vec<u8>, u64)>,
 }
 
 /// What an answer from the world is to the gateway.
@@ -428,7 +436,7 @@ impl Link {
         s.now = Some(now.clone());
         let id = (key.to_vec(), sequence);
         let Some(p) = s.index.remove(&id).and_then(|n| s.pending.remove(&n)) else {
-            if s.recent.contains(&id) {
+            if s.recent.contains(&id) || s.answered.contains(&id) {
                 return Answered::Again;
             }
             s.remember(id.0, id.1);
@@ -436,8 +444,12 @@ impl Link {
         };
         s.landed(&p.key, p.flying);
         if p.resent {
-            s.remember(id.0, id.1);
+            s.remember(id.0.clone(), id.1);
         }
+        if s.answered.len() == ANSWERED {
+            s.answered.pop_front();
+        }
+        s.answered.push_back(id);
         Answered::Kept(p.received, p.handed)
     }
 
