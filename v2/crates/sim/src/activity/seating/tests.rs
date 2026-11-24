@@ -30,7 +30,7 @@ use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, Kind, plain};
 
 use super::{Seating, Target};
-use crate::activity::carry::{Carry, HEIGHT, yaw_toward};
+use crate::activity::carry::{Carry, Fixed, HEIGHT, yaw_toward};
 use crate::activity::{Activities, Ask};
 use crate::controller::Controller;
 use crate::ground::Piece;
@@ -717,7 +717,9 @@ impl W {
             }
             self.t += TICK;
             let (f, b) = (add(c, across), add(c, v(-across.x, 0, -across.z)));
-            named(carry.step(&mut self.tree, self.t, f, b))?;
+            // The way here is scripted, not walked, with B9's board for the part: it is not checked against geometry.
+            let fixed = Fixed::new(Vec::new());
+            named(carry.step(&mut self.tree, self.t, f, b, &fixed))?;
             self.carriers.insert(self.bodies[ks[0]], f);
             self.carriers.insert(self.bodies[ks[1]], b);
             self.snapshot(None);

@@ -85,6 +85,9 @@ width is the larger of its other two sides, its two outermost `grip` points alon
 hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
 too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
+load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
+(`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
 Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
 a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
 `content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and

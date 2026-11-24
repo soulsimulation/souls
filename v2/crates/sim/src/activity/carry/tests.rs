@@ -589,7 +589,7 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
         last = f;
         grips.push((xz(f), xz(b)));
         carry
-            .step(&mut s.town.tree, tick * TICK, f, b)
+            .step(&mut s.town.tree, tick * TICK, f, b, &s.fixed)
             .unwrap_or_else(|e| panic!("tick {tick}: {}: {}", e.name, e.detail));
     }
     let (lf, ff) = (
@@ -1022,5 +1022,155 @@ mod from_entry {
             Carry::place_of(turned(fr), turned(bk), turned(Vec3::new(1_400_000, 0, off))),
             [1_400_000, off]
         );
+    }
+}
+
+/// 0.135 C7: every step of a carried load is checked against fixed geometry, with or without a named destination.
+mod each_step {
+    use replica::rules::json::parse;
+
+    use super::super::{Fixed, Load, Quad, SWEEP_STEP, outline, way};
+
+    const M: i64 = 1_000_000;
+
+    /// A 6.1 m frame, 1.2 m wide, its grips 1.75 m from its middle: its ends reach 0.95 m beyond its carriers.
+    fn frame() -> Load {
+        Load::of(
+            &parse(
+                r#"{"kind": "test:frame", "geometry": {"bounds_mm": [1200, 6100, 76]},
+                "points": {"a": {"role": "grip", "at_mm": [0, 1300, 0]}, "b": {"role": "grip", "at_mm": [0, 4800, 0]}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn post(x: i64, z: i64, half: i64) -> Quad {
+        [
+            [x - half, z - half],
+            [x + half, z - half],
+            [x + half, z + half],
+            [x - half, z + half],
+        ]
+    }
+
+    /// Carried lengthways east toward a wall across the way, a tick's walk at a time, with no destination named:
+    /// every step short of the wall passes, and the first whose load would meet it is refused `carry-load-blocked`,
+    /// naming the wall. The load's front end reaches it while its front carrier is still short of it.
+    #[test]
+    fn c7_a_long_load_carried_toward_a_wall_is_stopped_at_it() {
+        let load = frame();
+        assert_eq!(load.half_length, 3_050_000);
+        let wall = [
+            [20 * M, -3 * M],
+            [20 * M + 200_000, -3 * M],
+            [20 * M + 200_000, 3 * M],
+            [20 * M, 3 * M],
+        ];
+        let fixed = Fixed::new(vec![wall]);
+        let [b, f] = load.places();
+        let at = |x: i64| ([x + f, 0], [x + b, 0]);
+        let tick = 70_000;
+        let mut x = 0;
+        let r = loop {
+            match way(&fixed, &load, at(x), at(x + tick), &[]) {
+                Ok(()) => x += tick,
+                Err(r) => break r,
+            }
+            assert!(x < 30 * M, "stopped before 30 m");
+        };
+        assert_eq!(r.name, "carry-load-blocked");
+        assert!(r.detail.contains("(20000, -3000)"), "{}", r.detail);
+        let front_end = x + tick + load.half_length;
+        assert!(
+            front_end > 20 * M && front_end - 20 * M <= tick,
+            "{front_end}"
+        );
+        assert!(
+            x + tick + f < 20 * M - 800_000,
+            "the front carrier is short of the wall"
+        );
+    }
+
+    /// One long tick that would sweep a thin load through a post between its carriers, the load clear of it before
+    /// and after: refused, since the way is checked at every [`SWEEP_STEP`], not only where it ends.
+    #[test]
+    fn c7_a_post_between_the_carriers_is_not_jumped() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction/rack_beam.json");
+        let beam = Load::of(&parse(&std::fs::read_to_string(root).unwrap()).unwrap()).unwrap();
+        let [b, f] = beam.places();
+        // The beam along z, its carriers north and south of the post; they walk east past it in one step.
+        let at = |x: i64| ([x, f], [x, b]);
+        let fixed = Fixed::new(vec![post(10 * M, 0, 50_000)]);
+        let (from, to) = (at(10 * M - 4 * SWEEP_STEP), at(10 * M + 4 * SWEEP_STEP));
+        assert!(fixed.hit(&outline(from.0, from.1, &beam)).is_none());
+        assert!(fixed.hit(&outline(to.0, to.1, &beam)).is_none());
+        let r = way(&fixed, &beam, from, to, &[]).unwrap_err();
+        assert_eq!(r.name, "carry-load-blocked");
+        // With no post the same step passes; a step that does not move is checked where it stands.
+        assert!(way(&Fixed::new(Vec::new()), &beam, from, to, &[]).is_ok());
+        assert!(way(&fixed, &beam, at(10 * M), at(10 * M), &[]).is_err());
+    }
+
+    /// Held at its carriers' height, a load passes over a low box (a beam seated low in a bay) and is stopped by one
+    /// as high as it is carried (a beam seated high).
+    #[test]
+    fn c7_a_load_passes_over_a_low_box_not_through_a_high_one() {
+        let load = frame();
+        let [b, f] = load.places();
+        let at = |x: i64| ([x + f, 0], [x + b, 0]);
+        let band = load.as_held().unwrap().1;
+        assert!(band[0] < 900_000 && band[1] > 900_000, "{band:?}");
+        let low = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[254_000, 356_000]]);
+        assert!(way(&low, &load, at(0), at(8 * M), &[]).is_ok());
+        let high = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
+        let r = way(&high, &load, at(0), at(8 * M), &[]).unwrap_err();
+        assert_eq!(r.name, "carry-load-blocked");
+    }
+
+    /// What a load takes up as it is held: the upright laid flat (its entry's turn) is 2.44 m along the carry, 1.22 m
+    /// across and 76 mm deep; held standing, as a crew takes it from its slot, 1.22 m along, 76 mm across and 2.44 m
+    /// high.
+    #[test]
+    fn c7_a_load_takes_up_what_it_does_as_it_is_held() {
+        use replica::pose::{Quat, Vec3};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction/rack_upright.json");
+        let up = Load::of(&parse(&std::fs::read_to_string(root).unwrap()).unwrap()).unwrap();
+        let near = |a: Vec3, b: Vec3| {
+            (a.x - b.x).abs() <= 2 && (a.y - b.y).abs() <= 2 && (a.z - b.z).abs() <= 2
+        };
+        let flat = up.held_half().unwrap();
+        assert!(
+            near(flat, Vec3::new(1_219_000, 38_000, 609_500)),
+            "{flat:?}"
+        );
+        let standing = Load {
+            turn: Quat::IDENTITY,
+            ..up
+        };
+        let e = standing.held_half().unwrap();
+        assert!(near(e, Vec3::new(609_500, 1_219_000, 38_000)), "{e:?}");
+        let (plan, band) = standing.as_held().unwrap();
+        assert_eq!((plan.half_length, plan.half_width), (e.x, e.z));
+        assert_eq!(band, [900_000 - e.y, 900_000 + e.y]);
+    }
+
+    /// What its load already met where the carry began (a part taken from beside the parts of its bay) is passed, so
+    /// it can be carried out from there; any other geometry on the way still stops it.
+    #[test]
+    fn c7_a_load_carried_out_from_beside_what_it_touched() {
+        let load = frame();
+        let [b, f] = load.places();
+        let at = |x: i64| ([x + f, 0], [x + b, 0]);
+        let beside = post(0, 600_000, 100_000);
+        let fixed = Fixed::new(vec![beside, post(10 * M, 0, 100_000)]);
+        let began = fixed.hits(&outline(at(0).0, at(0).1, &load));
+        assert_eq!(began, vec![beside]);
+        assert!(way(&fixed, &load, at(0), at(SWEEP_STEP), &[]).is_err());
+        assert!(way(&fixed, &load, at(0), at(SWEEP_STEP), &began).is_ok());
+        let r = way(&fixed, &load, at(0), at(8 * M), &began).unwrap_err();
+        assert!(r.detail.contains("(9900, -100)"), "{}", r.detail);
     }
 }

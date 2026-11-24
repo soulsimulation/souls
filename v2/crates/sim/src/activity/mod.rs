@@ -632,8 +632,9 @@ impl Activities {
     }
 
     /// The world's word that a carry in `activity` broke off and `load` was set down where it was, and `why`
-    /// (`souls:partner-left`, `souls:carriers-apart`, `souls:world-restarted`): `souls:carry-set-down`, `{1: activity, 2: load, 3: why}`,
-    /// to the activity's audience, acted and caused as `by` says (0.135 C3).
+    /// (`souls:partner-left`, `souls:carriers-apart`, `souls:world-restarted`, C7's `souls:carry-blocked`):
+    /// `souls:carry-set-down`, `{1: activity, 2: load, 3: why}`, to the activity's audience, acted and caused as `by`
+    /// says (0.135 C3).
     pub fn carry_set_down(
         &mut self,
         tree: &mut Tree,
