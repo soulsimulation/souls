@@ -4951,6 +4951,21 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         v3(m_a.x + 2_000_000, 0, -32_000_000),
     );
     walk_two(&s, s3, s6, aside, "the holders step out of team 2's way").await;
+    // Each frame leaves the row between the bays and goes home with its carriers either side of the bays' middle line,
+    // as the beams do. Walkers still go round the west and east bays' frames where they stood before they went home
+    // (a take is not written to the walkers' map): a carrier walking 0.6 m from where one stood goes round it, its
+    // partner walks straight, and the carry breaks off `souls:carriers-apart` (seen in this test; its own fix, outside
+    // A4).
+    let a_out = [
+        v3(m_a.x - 2_000_000, 0, m_a.z),
+        v3(m_a.x - 2_000_000, 0, -24_000_000),
+        v3(m_a.x - 7_000_000, 0, -24_000_000),
+    ];
+    let b_out = [
+        v3(m_b.x + 2_000_000, 0, m_b.z),
+        v3(m_b.x + 2_000_000, 0, -24_000_000),
+        v3(m_b.x + 7_000_000, 0, -24_000_000),
+    ];
     tokio::join!(
         frame_home(
             &s,
@@ -4958,7 +4973,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
             s2,
             out_ma,
             ma,
-            &[],
+            &a_out,
             (stand, 1, home(0)),
             "team 1 takes frame A home"
         ),
@@ -4968,7 +4983,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
             s5,
             out_mb,
             mb,
-            &[],
+            &b_out,
             (stand_e, 1, home(1)),
             "team 2 takes frame B home"
         ),
