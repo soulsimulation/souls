@@ -458,7 +458,8 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   const upgrade = await new Promise((resolve) => { const s = connect(P, '127.0.0.1', () => s.write(`GET /w/eden/v1/ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16).toString('base64')}\r\n\r\n`)); let got = ''; s.on('data', (d) => { got += d; }); s.on('close', () => resolve(got)); s.on('error', () => resolve(got)); });
   assert.doesNotMatch(upgrade, /^HTTP\/1\.1 101/, 'no socket to an old world');
   // the site's own pages and the world list need no world process
-  assert.equal((await fetch(`${base}/__sim/worlds.json`)).status, 200);
+  const listed = (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === 'eden');
+  assert.deepEqual([listed?.status, listed?.engine], ['running', 'new'], 'listed as live on the new engine, not asleep');
   // wake-recent at start and the keep-alive have had their turns: they keep other living, never eden
   for (let i = 0; i < 100 && launcher.pool.status('other').status !== 'running'; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 200));
