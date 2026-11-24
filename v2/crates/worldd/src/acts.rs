@@ -306,11 +306,11 @@ impl Planning {
 
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
-    bodies: BTreeMap<Id, Moved>,
+    bodies: Arc<BTreeMap<Id, Moved>>,
     /// The bodies carried across a link now.
-    carrying: BTreeSet<Id>,
+    carrying: Arc<BTreeSet<Id>>,
     split: Option<RefCell<Split<'a>>>,
-    builds: BTreeMap<Id, Build>,
+    builds: Arc<BTreeMap<Id, Build>>,
     tree: &'a Tree,
     kind: Name,
     /// The world's entries by kind, for a thing's points and bounds.
@@ -1473,6 +1473,45 @@ pub static F_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 pub static WITH_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static START_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static START_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static START_WITH_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The bodies as a [`Sight`] sees them: each body as the controller has it, those carried across a link now, and
+/// each body's build. Built once for a batch of form starts in which no body moves ([`Acts::hold_sight`], S10).
+type Held = (
+    Arc<BTreeMap<Id, Moved>>,
+    Arc<BTreeSet<Id>>,
+    Arc<BTreeMap<Id, Build>>,
+);
+
+trait HeldOf {
+    fn of(controller: &Controller) -> Held;
+}
+
+impl HeldOf for Held {
+    fn of(controller: &Controller) -> Held {
+        (
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.body(id).map(|b| (id, *b)))
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .bodies()
+                    .filter(|b| controller.carrying(b.id).is_some())
+                    .map(|b| b.id)
+                    .collect(),
+            ),
+            Arc::new(
+                controller
+                    .ids()
+                    .filter_map(|id| controller.build(id).map(|build| (id, build)))
+                    .collect(),
+            ),
+        )
+    }
+}
 
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
@@ -1504,6 +1543,8 @@ pub struct Acts {
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
     /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
     zone: replica::effects::Header,
+    /// The bodies as every [`Sight`] of a batch of starts sees them, while one is held ([`Acts::hold_sight`]).
+    held: Option<Held>,
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -1850,6 +1891,7 @@ impl Acts {
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
             zone: header,
+            held: None,
         }
     }
 
@@ -1964,20 +2006,14 @@ impl Acts {
             (Some(slots), Some(floors)) => Some(Places { slots, floors }),
             _ => None,
         };
+        let (bodies, carrying, builds) = match &self.held {
+            Some(h) => h.clone(),
+            None => Held::of(controller),
+        };
         let sight = Sight {
-            bodies: controller
-                .ids()
-                .filter_map(|id| controller.body(id).map(|b| (id, *b)))
-                .collect(),
-            carrying: controller
-                .bodies()
-                .filter(|b| controller.carrying(b.id).is_some())
-                .map(|b| b.id)
-                .collect(),
-            builds: controller
-                .ids()
-                .filter_map(|id| controller.build(id).map(|build| (id, build)))
-                .collect(),
+            bodies,
+            carrying,
+            builds,
             split: split.map(RefCell::new),
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
@@ -2072,10 +2108,44 @@ impl Acts {
             })
     }
 
+    /// Holds one snapshot of the bodies for every [`Sight`] until [`Acts::release_sight`] (S10): for the tick's form
+    /// starts, between which no body moves (a start claims legs and sets timers; the controller steps them in a later
+    /// tick). Each start otherwise rebuilt it whole: every body, every build, at about 0.4 ms each at 750 bodies.
+    pub fn hold_sight(&mut self, bodies: Option<&Bodies>) {
+        self.held = bodies.map(|b| Held::of(&b.runner.controller));
+    }
+
+    /// Lets each [`Sight`] read the bodies afresh again.
+    pub fn release_sight(&mut self) {
+        self.held = None;
+    }
+
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or
     /// the first refusal. A resend of an intent whose run is going joins it; one whose effects are logged gets them.
     #[allow(clippy::too_many_arguments)]
     pub fn start(
+        &mut self,
+        tree: &Tree,
+        bodies: Option<&mut Bodies>,
+        body: Id,
+        candidates: &[(Id, String)],
+        args: &Args,
+        intent: Intent,
+        tick: u64,
+        now: Micros,
+    ) -> R<Asked> {
+        let t_start = crate::measures::steady_us();
+        let w_before = WITH_US.load(std::sync::atomic::Ordering::Relaxed) + F_US.load(std::sync::atomic::Ordering::Relaxed);
+        let r = self.start_inner(tree, bodies, body, candidates, args, intent, tick, now);
+        let w_after = WITH_US.load(std::sync::atomic::Ordering::Relaxed) + F_US.load(std::sync::atomic::Ordering::Relaxed);
+        START_US.fetch_add(crate::measures::steady_us() - t_start, std::sync::atomic::Ordering::Relaxed);
+        START_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        START_WITH_US.fetch_add(w_after - w_before, std::sync::atomic::Ordering::Relaxed);
+        r
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_inner(
         &mut self,
         tree: &Tree,
         bodies: Option<&mut Bodies>,

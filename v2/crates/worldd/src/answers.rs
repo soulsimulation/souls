@@ -3957,6 +3957,8 @@ impl Clock {
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
         let tick = u64::try_from(self.tick).unwrap_or(0);
+        // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
+        self.forms.hold_sight(self.bodies.as_ref());
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
             let Some(o) = self.open.get(&id) else {
                 continue;
@@ -3988,6 +3990,7 @@ impl Clock {
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
         }
+        self.forms.release_sight();
         for a in std::mem::take(&mut self.engine_acts) {
             let Some(o) = self.open.get(&a.id) else {
                 continue;
@@ -4562,6 +4565,8 @@ impl Clock {
                 let names = ["acts", "edits", "set-downs", "start_forms", "start_moves", "follow_orders", "write_forms", "set_loose", "offer_map"];
                 use std::sync::atomic::Ordering::Relaxed;
                 let (wu, fu, wn) = (crate::acts::WITH_US.load(Relaxed), crate::acts::F_US.load(Relaxed), crate::acts::WITH_N.load(Relaxed).max(1));
+                let (su, sn, sw) = (crate::acts::START_US.load(Relaxed), crate::acts::START_N.load(Relaxed).max(1), crate::acts::START_WITH_US.load(Relaxed));
+                eprintln!("s10-diag start: {sn} starts, {:.3} ms each, of which in Sight and its closure {:.3} ms", su as f64 / sn as f64 / 1000.0, sw as f64 / sn as f64 / 1000.0);
                 eprintln!("s10-diag with: {wn} calls, sight build {:.3} ms each, closure {:.3} ms each, {:.2} calls/tick", wu as f64 / wn as f64 / 1000.0, fu as f64 / wn as f64 / 1000.0, wn as f64 / g.1 as f64);
                 let line: Vec<String> = names.iter().zip(g.0).map(|(n, t)| format!("{n} {:.2}", t as f64 / g.1 as f64 / 1000.0)).collect();
                 eprintln!("s10-diag commit ms/tick over {} ticks: {}", g.1, line.join(", "));
