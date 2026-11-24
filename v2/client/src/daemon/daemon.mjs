@@ -2052,7 +2052,8 @@ async function give(req) {
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
-  return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
+  // `sequence`: the command waits for its end, so a refused offer or accept (too far, already in one) is said.
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
 }
 
 const groundIn = (rows) => [...rows.values()].find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? null;

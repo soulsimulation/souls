@@ -257,7 +257,8 @@ export function requestOf(argv) {
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
   // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd). A carry's or a part's step
   // always waits: the next step needs its end (0.135 C, A).
-  const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list');
+  const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list')
+    || (['together', 'give'].includes(args[0]) && args[1] !== 'kinds');
   if (args.includes('--wait')) args.splice(args.indexOf('--wait'), 1);
   const [op = 'status', ...rest] = args;
   if (op === 'schedule') {
