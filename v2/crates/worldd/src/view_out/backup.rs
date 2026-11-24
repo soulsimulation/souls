@@ -22,8 +22,8 @@
 //!
 //! **The newest claim wins** (R16). Before it fences, a backup given its claim ([`Claim`]) reads the directory: a
 //! writer that holds the world's newest claim puts over the other head (the older writer wrote it during the overlap
-//! of a move, between this writer's open and its first put), and the older writer, finding the newer one's head,
-//! fences. A directory that does not answer leaves the pass refused, to be tried again; without a claim (no
+//! of a move, between this writer's open and its first put) at once, in the same pass, reading it again each time the
+//! older writer moved it, and the older writer, finding the newer one's head, fences. A directory that does not answer leaves the pass refused, to be tried again; without a claim (no
 //! directory), the first head wins, as before.
 
 use std::collections::BTreeSet;
@@ -33,11 +33,13 @@ use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use directoryd::directory::store::{Store as ObjectStore, When};
+use directoryd::directory::store::{Object, Store as ObjectStore, When};
 use replica::encode::to_hex;
 
 /// The waits between refused passes: 1, 2, 4 … 32 s, then every 60 s.
 pub const BACKOFF_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
+/// Puts over an older writer's head in one pass, each after reading the head it moved to (R16).
+const TAKE_TRIES: usize = 5;
 /// Old generations' recovery objects deleted from the store in one pass (#3833).
 const DELETES_PER_PASS: usize = 64;
 /// The generations closed long enough ago to delete waiting, at most: a rollover adds one, so this holds hours of
@@ -485,8 +487,7 @@ impl<S: ObjectStore> Worker<S> {
                     eprintln!(
                         "worldd: the public stream's backup finds an older writer's head and holds the newest claim; it writes its own over it"
                     );
-                    self.confirm(o.bytes, o.etag)?;
-                    Err(lost.into())
+                    self.put_over(head, o)
                 }
                 // The directory did not answer: not known to be another's yet, so tried again.
                 Some(Err(e)) => Err(e.into()),
@@ -496,6 +497,42 @@ impl<S: ObjectStore> Worker<S> {
                 ))),
             },
         }
+    }
+
+    /// Puts `head` over an older writer's head `there` (R16), at once and in this pass: an older writer still running
+    /// writes on, and a pass that backed off would find its next head each time. Each refusal reads the store's head
+    /// again and puts over that, up to [`TAKE_TRIES`] times with no wait; none of them is a refused pass.
+    fn put_over(&mut self, head: Vec<u8>, mut there: Object) -> Result<bool, Short> {
+        for _ in 0..TAKE_TRIES {
+            let lost = match self.store.put(&self.head_key, &head, When::Is(&there.etag)) {
+                Ok(etag) => {
+                    self.confirm(head, etag)?;
+                    return Ok(true);
+                }
+                Err(e) => e,
+            };
+            match self.store.get(&self.head_key) {
+                Ok(Some(o)) if o.bytes == head => {
+                    self.confirm(head, o.etag)?;
+                    return Ok(true);
+                }
+                Ok(Some(o)) => there = o,
+                Ok(None) => {
+                    self.confirm_absent()?;
+                    return Err(lost.into());
+                }
+                Err(_) => return Err(lost.into()),
+            }
+        }
+        self.confirm(there.bytes, there.etag)?;
+        Err(super::fault(
+            "stream-backup-contended",
+            format!(
+                "{}: the older writer's head moved {TAKE_TRIES} times",
+                self.head_key
+            ),
+        )
+        .into())
     }
 
     /// The store's head learned again, as the store holds it now: a spool with no confirmed head (or one of another
@@ -636,9 +673,8 @@ mod tests {
             Some(unanswered),
         );
         assert!(matches!(b.pass(), Err(Short::Refused(_))));
-        // B holds the newest claim: it learns A's head and puts over it on the next pass.
+        // B holds the newest claim: it puts over A's head in the same pass.
         b.claim = Some(Box::new(|| Ok(true)));
-        assert!(matches!(b.pass(), Err(Short::Refused(_))));
         assert!(matches!(b.pass(), Ok(true)), "B's head is in the store");
         let there = store.get("p/head").unwrap().unwrap();
         assert_eq!(there.bytes, b"b1");
@@ -656,5 +692,68 @@ mod tests {
             b"b1",
             "the older writer never puts over the newer one's head"
         );
+    }
+
+    /// A writer's running backup (its own thread) on `store`, having found `found` there, its state in `states`.
+    fn running(
+        tag: &str,
+        store: &'static Memory,
+        found: (&[u8], &str),
+        newest: bool,
+        states: Arc<Mutex<Vec<State>>>,
+    ) -> Spool {
+        let dir = std::env::temp_dir().join(format!("v2-r16-live-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut spool = Spool::new(dir, "store".into());
+        spool.confirm("p/head", found.0, found.1).unwrap();
+        let claim: Claim = Box::new(move || Ok(newest));
+        let report = Box::new(move |s| states.lock().unwrap().push(s));
+        start(&mut spool, store, "p/".into(), report, Some(claim)).unwrap();
+        spool
+    }
+
+    /// R16, a live overlap: the old writer A keeps writing a head every second; B, holding the newer claim, opened
+    /// against the head both found. B's backup takes the store's head within a few seconds, though A keeps moving it,
+    /// and A, finding B's head, fences; the store keeps B's.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // Real time: the backups' own threads.
+    fn r16_the_newer_claim_takes_the_head_from_an_old_writer_that_keeps_writing() {
+        let store: &'static Memory = Box::leak(Box::default());
+        let found = store.put("p/head", b"h0", When::Absent).unwrap();
+        let (a_states, b_states) = (Arc::default(), Arc::default());
+        let a = running("a", store, (b"h0", &found), false, Arc::clone(&a_states));
+        let fenced = |s: &Arc<Mutex<Vec<State>>>| {
+            s.lock()
+                .unwrap()
+                .iter()
+                .any(|s| matches!(s, State::Fenced { .. }))
+        };
+        let write = |spool: &Spool, n: u32| {
+            spool.head("p/head", format!("a{n}").as_bytes()).unwrap();
+        };
+        // A writes before B's first put, and goes on writing every second.
+        write(&a, 1);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(store.get("p/head").unwrap().unwrap().bytes, b"a1");
+        let b = running("b", store, (b"h0", &found), true, Arc::clone(&b_states));
+        b.head("p/head", b"b1").unwrap();
+        let begun = Instant::now();
+        let mut n = 1;
+        while !(fenced(&a_states) && store.get("p/head").unwrap().unwrap().bytes == b"b1") {
+            assert!(
+                begun.elapsed() < Duration::from_secs(5),
+                "the newer claim takes the head within a few seconds; A's states {:?}, B's {:?}",
+                a_states.lock().unwrap(),
+                b_states.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(1000));
+            n += 1;
+            write(&a, n);
+        }
+        assert!(!fenced(&b_states), "the newer writer is never fenced");
+        // A writes on; its backup has stopped, and the store keeps B's head.
+        write(&a, n + 1);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(store.get("p/head").unwrap().unwrap().bytes, b"b1");
     }
 }

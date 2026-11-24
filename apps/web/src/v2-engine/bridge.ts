@@ -30,6 +30,10 @@ type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; rem
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
+/** R16: how often, at most, the reader is started again for a baseline its replica cannot read. */
+export const RENEW_MS = 10_000;
+/** Whether a reader's error is its replica refusing a baseline's format (a replica older than the stream). */
+export const unreadableBaseline = (message: string) => /public-stream-record: baseline identity/.test(message);
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
@@ -165,19 +169,38 @@ export class V2Bridge {
   }
 
   start(stream: string, make: () => Worker): void {
-    this.worker = make();
-    this.worker.onmessage = (e: MessageEvent<Msg>) => this.receive(e.data);
-    this.worker.onerror = (e) => { this.view.error = e.message || 'the v2 reader stopped'; };
-    this.worker.postMessage({ stream: new URL(stream, location.href).href });
+    this.restart = () => {
+      this.worker?.terminate();
+      this.worker = make();
+      this.worker.onmessage = (e: MessageEvent<Msg>) => this.receive(e.data);
+      this.worker.onerror = (e) => { this.view.error = e.message || 'the v2 reader stopped'; };
+      this.worker.postMessage({ stream: new URL(stream, location.href).href });
+    };
+    this.restart();
   }
+  private restart: (() => void) | null = null;
+  /** When the reader was last started again for a baseline its replica could not read (wall ms), and whether the
+   *  next snapshot is a new reader's whole copy. */
+  private renewedAt = -Infinity;
+  private renewed = false;
 
   /** The world's body catalogue (its `bodies` rows), so each body is drawn in the look the v2 world gives it. */
   looks(bodies: readonly CatalogueBody[]): void { this.catalogue = new Map(bodies.map((b) => [b.hash, b])); }
 
-  stop(): void { this.worker?.terminate(); this.worker = null; }
+  stop(): void { this.worker?.terminate(); this.worker = null; this.restart = null; }
 
   receive(m: Msg): void {
-    if (m.t === 'error') { this.view.error = m.message; return; }
+    if (m.t === 'error') {
+      this.view.error = m.message;
+      // R16: a baseline in a newer stream format than this page's replica reads (a release moves the worlds before the
+      // served client). A new reader loads the served replica again (no-cache), so a tab left open heals itself.
+      if (unreadableBaseline(m.message) && this.restart && this.wallNow() - this.renewedAt >= RENEW_MS) {
+        this.renewedAt = this.wallNow();
+        this.renewed = true;
+        this.restart();
+      }
+      return;
+    }
     // B2-3: a still world writes no part; its pointer says it is quiet up to a time (worldd view_out `idle`, every half
     // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
@@ -192,7 +215,12 @@ export class V2Bridge {
       this.publish();
       return;
     }
-    if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
+    if (m.t === 'snapshot') {
+      // A new reader knows nothing the old one showed: what its whole copy leaves out is gone.
+      const removed = this.renewed ? [...this.nodes.keys()].filter((id) => !m.s.nodes.some((n) => n.id === id)) : m.s.removed;
+      this.renewed = false;
+      this.nodesChanged(m.s.nodes, removed, this.view.newestTo ?? 0); this.publish(); return;
+    }
     const p = m.p;
     this.liveFrom ??= p.from;
     for (const id of p.removed) this.places.delete(id);

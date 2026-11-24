@@ -1661,10 +1661,13 @@ impl<S: ObjectStore> PublicWriter<S> {
         // what an earlier writer published from its own spool: it starts a new generation below, so it never cuts a
         // part at an address of that lost tail (rule: exact bytes before exposure).
         let mut fresh = false;
+        // R16: the claim's epoch the recovered generation was made under, when one was recovered.
+        let mut recovered_epoch = None;
         if let Some(head) = head {
             let h = object_map(&head.bytes)?;
             let hash = obj_bytes(&h, 1)?;
             w.recover(&hash)?;
+            recovered_epoch = Some(replica::stream::public::baseline_epoch(&w.baseline)?);
             if from_store && let Some(spool) = &w.spool {
                 // The store's head as this writer found it: what its backup writes against, and fences on.
                 spool.confirm(&head_key, &head.bytes, &head.etag)?;
@@ -1870,7 +1873,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         let fresh = fresh && !w.force_remainder && w.migration_cut.is_none();
         w.fresh = fresh;
         w.fresh_at = w.cursor;
-        if w.rollover_due() && !fresh {
+        // R16: a generation recovered under another claim (a restart, or a takeover from a copied spool while the
+        // old machine may still cut parts of it) gets no new part from this writer: it rolls over now, under this
+        // claim, with the hand-off, so this writer's parts are at addresses no other claim's writer uses.
+        let retake = !fresh
+            && w.epoch.is_some()
+            && recovered_epoch.is_some_and(|e| e != w.epoch)
+            && !w.force_remainder
+            && w.migration_cut.is_none();
+        if (w.rollover_due() && !fresh) || retake {
             w.rollover()?;
         }
         w.prune();

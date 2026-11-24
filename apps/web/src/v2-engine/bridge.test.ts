@@ -145,3 +145,45 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
   // cover a walker's next sample (every 0.2 s, p99 0.25 s)
   assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
 });
+
+test('R16: a reader whose replica cannot read a baseline is started again, at most every 10 s, and the new copy replaces the old', () => {
+  (globalThis as unknown as { location?: { href: string } }).location ??= { href: 'https://example.test/w/eden/' };
+  type Fake = { posted: unknown[]; terminated: boolean; onmessage: unknown; onerror: unknown; postMessage: (m: unknown) => void; terminate: () => void };
+  const made: Fake[] = [];
+  const make = () => {
+    const w: Fake = { posted: [], terminated: false, onmessage: null, onerror: null, postMessage(m) { this.posted.push(m); }, terminate() { this.terminated = true; } };
+    made.push(w);
+    return w as unknown as Worker;
+  };
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  let now = 1_000_000;
+  b.wallNow = () => now;
+  b.start('views/x/', make);
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  assert.equal(made.length, 1);
+  const nodes = () => [...(b as unknown as { nodes: Map<string, unknown> }).nodes.keys()].sort();
+  assert.deepEqual(nodes(), ['b.7', 'w.0', 'w.1', 'w.2']);
+  // Another error is shown, and the reader is left as it is.
+  b.receive({ t: 'error', message: 'Error: stream-baseline-hash' });
+  assert.equal(made.length, 1);
+  // The old replica refusing a five-field baseline (R16's claim epoch): a new reader, which loads the served replica again.
+  const refused = 'Error: public-stream-record: baseline identity\n    at install (worker.ts:197)';
+  b.receive({ t: 'error', message: refused });
+  assert.equal(made.length, 2, 'started again');
+  assert.ok(made[0].terminated, 'the old reader is stopped');
+  assert.deepEqual(made[1].posted, [{ stream: 'https://example.test/w/eden/views/x/' }]);
+  assert.equal(b.view.error, refused, 'the page still says why until the new reader plays');
+  // Refused again within 10 s: not again yet (a client not moved yet is not fetched in a loop); after, once more.
+  now += 5_000;
+  b.receive({ t: 'error', message: refused });
+  assert.equal(made.length, 2);
+  now += 5_000;
+  b.receive({ t: 'error', message: refused });
+  assert.equal(made.length, 3);
+  // The new reader's whole copy: the body gone meanwhile is gone from the page too.
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor], removed: [] } });
+  assert.deepEqual(nodes(), ['w.0', 'w.1', 'w.2'], 'what the new copy leaves out is removed');
+  b.stop();
+  b.receive({ t: 'error', message: refused });
+  assert.equal(made.length, 3, 'a stopped bridge starts nothing');
+});

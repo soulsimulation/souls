@@ -3496,6 +3496,114 @@ fn r16_run(
     (began, out.player.hash().unwrap())
 }
 
+/// Every file under `dir`, by its path below it.
+fn r16_tree(dir: &Path, below: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+    for e in fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            r16_tree(&p, below, out);
+        } else {
+            out.insert(
+                p.strip_prefix(below).unwrap().to_owned(),
+                fs::read(&p).unwrap(),
+            );
+        }
+    }
+}
+
+/// R16: a takeover from a copied spool. The old writer A (claim 4) runs; its world's folder (views and spool) is copied
+/// while it runs, and B (claim 5) starts from the copy. Both cut parts on, from different records (two machines live at
+/// once). B's first act is a rollover under its own claim, so no address the two publish holds different bytes.
+#[test]
+fn r16_a_takeover_from_a_copied_spool_never_cuts_an_address_the_old_writer_cuts() {
+    let h = header();
+    let d = scratch("r16-copied");
+    let store = directoryd::directory::store::Memory::default();
+    let open = |at: &Path, epoch| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &at.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((at.join("stream-backup"), "store".into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([74; 16]), 1).unwrap();
+    let record = |r: u64, value: u64| {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(value)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        w3e_packet(&h, vec![effect])
+    };
+    let (a_dir, b_dir) = (d.join("a"), d.join("b"));
+    let mut a = open(&a_dir, 4);
+    for r in 0..3 {
+        a.push(r, &record(r, r)).unwrap();
+        a.flush().unwrap();
+    }
+    let status = Command::new("cp")
+        .arg("-R")
+        .arg(&a_dir)
+        .arg(&b_dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let mut b = open(&b_dir, 5);
+    let a_generation = replica::ids::sha256(&a.baseline);
+    let b_generation = replica::ids::sha256(&b.baseline);
+    for r in 3..7 {
+        a.push(r, &record(r, r)).unwrap();
+        a.flush().unwrap();
+        b.push(r, &record(r, r + 100)).unwrap();
+        b.flush().unwrap();
+    }
+    let (mut at_a, mut at_b) = (BTreeMap::new(), BTreeMap::new());
+    r16_tree(&a_dir.join("views"), &a_dir, &mut at_a);
+    r16_tree(&b_dir.join("views"), &b_dir, &mut at_b);
+    let shared: Vec<_> = at_a.keys().filter(|k| at_b.contains_key(*k)).collect();
+    let g = replica::encode::to_hex(&a_generation);
+    assert!(
+        shared
+            .iter()
+            .any(|k| k.to_string_lossy().contains(&format!("g/{g}/2"))),
+        "the copy holds A's first parts"
+    );
+    for k in shared {
+        if k.ends_with("pointer") {
+            continue;
+        }
+        assert_eq!(at_a[k], at_b[k], "{} holds different bytes", k.display());
+    }
+    assert!(
+        at_a.keys()
+            .any(|k| k.to_string_lossy().contains(&format!("g/{g}/6"))),
+        "A cut on in its generation"
+    );
+    assert_ne!(b_generation, a_generation, "B rolled over at its open");
+}
+
 /// R16: every baseline a writer under a directory claim makes carries the claim's epoch, so two claims' writers on
 /// the same records, rolling over at the very same cursors, never make one generation address; each is deterministic
 /// for its own claim, and with no claim the addresses are those made before. A restart under a new claim keeps the

@@ -1485,10 +1485,12 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
     std::thread::sleep(Duration::from_secs(2));
     stop.store(true, Ordering::Relaxed);
     walking.join().expect("the walker");
-    let (_, files) = served_stream(&dir);
+    // R16: the restart (a new claim) rolls its generation over at once, so the stream it serves is a new generation;
+    // the files viewers were shown stay where they were, with their bytes.
+    served_stream(&dir);
     for (path, bytes) in &published {
         assert_eq!(
-            files.get(path),
+            std::fs::read(path).ok().as_ref(),
             Some(bytes),
             "published bytes survive the kill"
         );

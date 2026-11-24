@@ -443,6 +443,11 @@ pub fn baseline_claimed(
     }
     encoded(&Value::Map(m))
 }
+/// The claim's epoch a baseline was made under (R16, field 5), or none for a baseline made with no claim or before.
+pub fn baseline_epoch(baseline: &[u8]) -> R<Option<u64>> {
+    let m = read_map(baseline, "public baseline")?;
+    m.get(&5).map(uint).transpose()
+}
 /// Integrity-bound observation, computed only after the producer canonically applied a whole source part.
 /// The delta replaces only changed top-level projection fields; no historical effects are manufactured.
 /// Audience-validated public observation delta, shared by stream and history readers.
@@ -1997,6 +2002,8 @@ mod r16_claimed_baseline_tests {
             assert_eq!(p.hash().unwrap(), players[0].hash().unwrap());
             assert_eq!(p.record(), 7);
         }
+        assert_eq!(baseline_epoch(&old).unwrap(), None);
+        assert_eq!(baseline_epoch(&b).unwrap(), Some(2));
         // A fifth field that is not an epoch, or a sixth, is refused.
         let Value::Map(mut m) = crate::encode::decode(&a).unwrap().value else {
             unreachable!()
