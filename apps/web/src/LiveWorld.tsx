@@ -26,7 +26,7 @@ import {conversationFrame} from './WorldConversationFrame.ts';
 import {WorldEyes,type EyesWhere} from './WorldEyes.ts';
 import {WorldHover,type HoverTarget} from './WorldHover.ts';
 import {EDEN_VIEWER_PLACES} from './WorldEdenPlaceData.ts';
-import {WorldSoulAvatars} from './SoulAvatars.ts';
+import {WorldSoulAvatars, soulAvatars} from './SoulAvatars.ts';
 import {edenExpansionCapture} from './WorldEdenActivation.ts';
 import {worldPlaceView,CURATED_WORLD_LOCATIONS,type WorldPlaceId} from './WorldPlaces.ts';
 import type {createWorldEdenExpansion} from './WorldEdenExpansion.ts';
@@ -1014,7 +1014,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         alive.add(soul.id);
         const drawnBody=recordedBody(rec?.body,at.entities[soul.entityId]?.state??{});
         const lift = drawnBody?.family === 'floater' ? (() => { const b = floaterBody(drawnBody); return b.hoverHeight + b.radius + 0.15; })() : 2.05;
-        if(refresh&&!eyes&&!soul.profilePhoto)portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
+        if(refresh&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
