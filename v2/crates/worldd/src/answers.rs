@@ -3958,7 +3958,7 @@ impl Clock {
     fn start_forms(&mut self, now: Micros) {
         let tick = u64::try_from(self.tick).unwrap_or(0);
         // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
-        self.forms.hold_sight(self.bodies.as_ref());
+        self.forms.hold_sight();
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
             let Some(o) = self.open.get(&id) else {
                 continue;
