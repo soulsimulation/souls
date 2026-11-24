@@ -63,6 +63,9 @@ export type NodeRec = {
   /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
    *  `courseAt` (#3603). */
   course?: Uint8Array;
+  /** N14: the courses of a ride's seats that move with their cabins (field 88, `replica::schedule::F_SEAT_COURSES`), by
+   *  slot, each its value's canonical bytes for `courseAt`: the slot's point in the thing's frame. */
+  seats?: Record<number, Uint8Array>;
   /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
    *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
   fields?: Fields;

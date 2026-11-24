@@ -188,7 +188,17 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
 `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
-stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+stops). On Engine v2 a ride whose stops differ moves its seats, never the thing (N14, `sim::courses::rides::seat_runs`):
+across and back (`returns` true, a cable car) each seat waits at the stop its `stand` names, then runs to each other stop
+keeping its offset from the stop's stand point and its height over the floor there; round a ring (`returns` false, three
+or more seats, a big wheel or a carousel) the seats turn one step at a time between their declared points. Each waits
+3 minutes at a stop. So a ride's seat is declared where it waits for riders, beside its stop and within standing reach.
+The old page draws a cabin at each seat that moves, unless the ride's def has cars of its own (a big wheel's gondolas). A rider
+boards only at its seat's own stop, gets off at any stop within reach, and is carried on between them (a rise there is
+refused `boarding-frame-away`; a form that sits is refused before any walk while no cabin waits at its stop, saying
+when the next is back). A trip ends when the seats next come to a stop: the fields its `start` form `set` (a bool or a
+whole number, such as `under_way`) go back to their defaults, so a ride set off once is boarded again. A kind is a
+vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
 (SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
