@@ -7,12 +7,11 @@ import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const v2 = resolve(here, '../../..');
 const release = join(here, 'release.sh');
 const dir = mkdtempSync(join(tmpdir(), 'souls-r13-release-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -61,7 +60,12 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   writeFileSync(join(folder, 'facts.json'), '{}');
   writeFileSync(join(folder, 'world.json'), '{"entry": [1000, 2000]}');
 
-  const bundled = run(['bundle', out, sha, '0.133.1', bins, page, join(v2, 'client'), pkg]);
+  // A stand-in client (served.test.mjs checks the real one), so this needs no installed packages.
+  const client = join(dir, 'client');
+  for (const d of ['src', 'skill']) mkdirSync(join(client, d), { recursive: true });
+  exe(join(client, 'served/build.mjs'), '');
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  const bundled = run(['bundle', out, sha, '0.133.1', bins, page, client, pkg]);
   assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
   const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RESEED_DATA: data, RESEED_ETC: etc, RESEED_LIB: lib };
   const staged = run(['stage', out], env);
