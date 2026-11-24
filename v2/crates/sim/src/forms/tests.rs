@@ -2632,3 +2632,106 @@ fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
         assert_eq!(seats.is_empty(), whole, "{file} {form}: {effects:?}");
     }
 }
+
+/// #4575 review: a seat run whose seat is on another thing (E14, a lecture's `attend` on a bench) holds its own thing
+/// shared. A whole-thing form at the lecture (its `finish`) is refused `thing-reserved` naming the attendee while the
+/// attend runs, a second attendee is not kept from the other seat by it, and once both have sat the finish starts.
+#[test]
+fn i4575_e14_a_whole_thing_form_at_a_lecture_is_refused_while_it_is_attended() {
+    use skills::form_runner::Step;
+    let (mut b, bench, [left, right], ada, bea) = two_seat_bench();
+    let lecture = b.mint.mint().expect("id");
+    b.snap.things.insert(lecture, (Vec3::ZERO, BTreeMap::new()));
+    let attend = |slot| {
+        vec![
+            Step::Sit {
+                slot,
+                lie: false,
+                stand: false,
+                on: Some(bench),
+            },
+            Step::Wait(500_000),
+        ]
+    };
+    let limits = Limits::default();
+    b.steps(ada, lecture, attend(left), intent(ada, 0), limits)
+        .expect("Ada's attend starts");
+    assert_eq!(b.forms.holder(lecture), Some(ada));
+    let finish = b
+        .steps(
+            bea,
+            lecture,
+            vec![Step::Wait(300_000)],
+            intent(bea, 0),
+            limits,
+        )
+        .expect_err("refused");
+    println!(
+        "#4575 E14 finish while attended: {}: {}",
+        finish.name, finish.detail
+    );
+    assert_eq!(finish.name, "thing-reserved");
+    assert!(finish.detail.contains(&replica::world_model::show(ada)));
+    let second = b.steps(bea, lecture, attend(right), intent(bea, 1), limits);
+    assert!(matches!(second, Ok(Asked::Started(_))), "{second:?}");
+    b.run(30_000_000);
+    assert!(
+        b.forms.ended.iter().all(|e| e.how.as_str() == "done"),
+        "{:?}",
+        b.forms.ended
+    );
+    assert_eq!(b.forms.holder(lecture), None, "nothing held after");
+    let later = b.steps(
+        bea,
+        lecture,
+        vec![Step::Wait(300_000)],
+        intent(bea, 2),
+        limits,
+    );
+    assert!(matches!(later, Ok(Asked::Started(_))), "{later:?}");
+}
+
+/// #4575 review: the lecture removed (its `lapse`, or a god delete) while an attend runs ends the attend `thing-gone`:
+/// its seat's reservation and the lecture's shared hold go with it, its sit's move is cut so the seat is given back,
+/// and nothing of the run is left.
+#[test]
+fn i4575_e14_a_lecture_removed_mid_attend_ends_it_and_frees_the_seat() {
+    use skills::form_runner::Step;
+    let (mut b, bench, [left, _], ada, _) = two_seat_bench();
+    let lecture = b.mint.mint().expect("id");
+    b.snap.things.insert(lecture, (Vec3::ZERO, BTreeMap::new()));
+    let attend = vec![
+        Step::Sit {
+            slot: left,
+            lie: false,
+            stand: false,
+            on: Some(bench),
+        },
+        Step::Wait(500_000),
+    ];
+    b.steps(ada, lecture, attend, intent(ada, 0), Limits::default())
+        .expect("Ada's attend starts");
+    let now = b.now;
+    {
+        let (mut w, forms) = b.world();
+        forms.gone(&mut w, lecture, now);
+    }
+    let hows: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| (e.body, e.how.as_str().to_owned()))
+        .collect();
+    println!("#4575 E14 lecture removed mid-attend: ended {hows:?}");
+    assert_eq!(hows, vec![(ada, "thing-gone".to_owned())]);
+    assert!(b.forms.is_empty(), "no run left");
+    assert_eq!(b.forms.holder(lecture), None);
+    assert_eq!(b.forms.seat_holders(bench, left), Vec::<Id>::new());
+    b.run(30_000_000);
+    assert_eq!(
+        b.slots.as_ref().expect("slots").holder_in(bench, left),
+        None,
+        "the seat given back"
+    );
+    b.clean();
+}

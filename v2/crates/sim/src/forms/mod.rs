@@ -523,6 +523,9 @@ pub struct Forms {
     /// Reserved seats, by thing and slot, to the runs that hold each (#4575): a slot of more than one place (E16) is
     /// reserved by as many runs as it has places.
     seats: BTreeMap<(Id, u64), BTreeSet<RunId>>,
+    /// Each seat run's own thing, to the seat runs done at it (#4575): held shared, so a whole-thing form, a removal
+    /// and F4's in-use check see the run there, while another seat run is not kept from its own seat by it.
+    sharing: BTreeMap<Id, BTreeSet<RunId>>,
     /// Nodes a form reserves nothing at: kinds of ground (E21).
     shared: BTreeSet<Id>,
     /// The kinds' amount fields (F4).
@@ -734,13 +737,18 @@ impl Forms {
         self.shared.insert(node);
     }
 
-    /// The body whose run holds thing `thing`, if one does: the whole thing, else one of its seats (#4575).
+    /// The body whose run holds thing `thing`, if one does: the whole thing, else shared as a seat run's own thing,
+    /// else one of its seats (#4575).
     pub fn holder(&self, thing: Id) -> Option<Id> {
-        let run = self.reserved.get(&thing).or_else(|| {
-            self.seats
-                .range((thing, 0)..=(thing, u64::MAX))
-                .find_map(|(_, runs)| runs.first())
-        })?;
+        let run = self
+            .reserved
+            .get(&thing)
+            .or_else(|| self.sharing.get(&thing).and_then(|runs| runs.first()))
+            .or_else(|| {
+                self.seats
+                    .range((thing, 0)..=(thing, u64::MAX))
+                    .find_map(|(_, runs)| runs.first())
+            })?;
         self.runs.get(run).map(|fr| fr.body)
     }
 
@@ -766,21 +774,31 @@ impl Forms {
         taken.len() >= most
     }
 
-    /// A body other than `body` whose run holds a seat of `thing`, if one does.
+    /// A body other than `body` whose seat run uses `thing`, if one does: it holds a seat of `thing`, or `thing` is
+    /// the run's own (shared, E14's lecture whose `attend` seats on a bench).
     fn other_seat_holder(&self, thing: Id, body: Id) -> Option<Id> {
         self.seats
             .range((thing, 0)..=(thing, u64::MAX))
             .flat_map(|(_, runs)| runs)
+            .chain(self.sharing.get(&thing).into_iter().flatten())
             .filter_map(|r| self.runs.get(r).map(|fr| fr.body))
             .find(|b| *b != body)
     }
 
-    /// Frees run `run`'s reservations, its whole thing's and its seats'.
+    /// Frees run `run`'s reservations: its whole thing's, its own thing's shared hold and its seats'.
     fn unreserve(&mut self, run: RunId, held: Option<(Id, Id)>, seats: &[(Id, u64)]) {
         if let Some((thing, _)) = held
             && self.reserved.get(&thing) == Some(&run)
         {
             self.reserved.remove(&thing);
+        }
+        if let Some((thing, _)) = held
+            && let Some(runs) = self.sharing.get_mut(&thing)
+        {
+            runs.remove(&run);
+            if runs.is_empty() {
+                self.sharing.remove(&thing);
+            }
         }
         for key in seats {
             if let Some(runs) = self.seats.get_mut(key) {
@@ -967,11 +985,13 @@ impl Forms {
                 how: name("body-gone"),
             });
         }
-        // A run that holds a seat of the thing (#4575) ends with it, as one that holds the whole thing does.
+        // A run that holds a seat of the thing, or holds it shared as its own (#4575), ends with it, as one that
+        // holds the whole thing does.
         let seated: BTreeSet<RunId> = self
             .seats
             .range((node, 0)..=(node, u64::MAX))
             .flat_map(|(_, runs)| runs.iter().copied())
+            .chain(self.sharing.get(&node).into_iter().flatten().copied())
             .collect();
         let runs = [
             self.by_body.get(&node).map(|r| (*r, "body-gone")),
@@ -1307,6 +1327,12 @@ impl Forms {
         {
             return Err(reserved(node, holder));
         }
+        // A seat run's own thing, held whole by another run (a lecture's `finish` under way), refuses it too.
+        if !seats.is_empty()
+            && let Some(holder) = whole_holder(self, node)
+        {
+            return Err(reserved(node, holder));
+        }
         for &(thing, slot) in &seats {
             if let Some(holder) = whole_holder(self, thing) {
                 return Err(reserved(thing, holder));
@@ -1409,6 +1435,9 @@ impl Forms {
         }
         for key in &seats {
             self.seats.entry(*key).or_default().insert(run);
+        }
+        if link.is_some() && !seats.is_empty() {
+            self.sharing.entry(node).or_default().insert(run);
         }
         let due = now.saturating_add(span(&steps, &limits));
         self.runs.insert(
@@ -1598,7 +1627,8 @@ impl Forms {
             .claims(fr.body)
             .map(|b| hands(b.family()).iter().map(|h| h.slot).collect())
             .unwrap_or_default();
-        // A thing another run holds a seat of (#4575) is in use as one it holds whole is.
+        // A thing another run holds a seat of, or holds shared as its seat run's own (#4575), is in use as one it
+        // holds whole is.
         let reserved: Vec<Id> = self
             .reserved
             .iter()
@@ -1609,6 +1639,12 @@ impl Forms {
                     .iter()
                     .filter(|(_, rs)| rs.iter().any(|r| *r != run))
                     .map(|((t, _), _)| *t),
+            )
+            .chain(
+                self.sharing
+                    .iter()
+                    .filter(|(_, rs)| rs.iter().any(|r| *r != run))
+                    .map(|(t, _)| *t),
             )
             .collect();
         let (len, mut keys) = (self.out.len(), Vec::new());
@@ -2452,13 +2488,19 @@ pub fn holders<'a>(
 ) -> Vec<Orphan> {
     let mut out = Vec::new();
     let held = reservations(log);
-    // A run holds its link's thing whole, or the seats it reserves there (#4575).
+    // A run holds its link's thing whole, or shared with the seats it reserves (#4575).
     let holds = |fr: &FormRun, run: RunId, thing: Id| match fr.seats.is_empty() {
         true => forms.reserved.get(&thing) == Some(&run),
-        false => fr
-            .seats
-            .iter()
-            .all(|k| forms.seats.get(k).is_some_and(|rs| rs.contains(&run))),
+        false => {
+            forms
+                .sharing
+                .get(&thing)
+                .is_some_and(|rs| rs.contains(&run))
+                && fr
+                    .seats
+                    .iter()
+                    .all(|k| forms.seats.get(k).is_some_and(|rs| rs.contains(&run)))
+        }
     };
     let by_link: BTreeMap<Id, RunId> = forms
         .runs
