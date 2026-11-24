@@ -59,7 +59,7 @@ An aborted rung is in the table as `aborted by the guard (<reason>)`, beside wha
 
 Variables used below. `PROD` and `BUILD` are the release owner's SSH names for the production machine and the build
 machine. `REL` is the live release's checkout on the production machine (`/srv/sim-worlds/production`). `L` is the
-run's folder on the build machine.
+run's folder on the build machine. `LO` is the loopback address on both machines.
 
 **1. The kit on the build machine.** Use a checkout of the commit production runs, with this change in it, on
 Linux x86-64 with rustup and Node 22.18 or later:
@@ -92,10 +92,10 @@ with no job running (`souls-timed-<n>` owns physical cores 3(n-1) to 3n-1 and th
 path is Eden's `views/world.json` `stream`, printed by the preflight as `stream ...`:
 
 ```sh
-ssh -fN -o ExitOnForwardFailure=yes -L 127.0.0.1:17330:127.0.0.1:7330 -L 127.0.0.1:17320:127.0.0.1:7320 "$PROD"
+ssh -fN -o ExitOnForwardFailure=yes -L "$LO:17330:$LO:7330" -L "$LO:17320:$LO:7320" "$PROD"
 S=<the stream path, no leading or trailing slash>
-GATEWAY=ws://127.0.0.1:17330 TOKENS_FILE=$L/souls.tokens \
-  STREAM=http://127.0.0.1:17320/$S/ VIEWER_URL=https://soul.game/s/$S/ \
+GATEWAY=ws://$LO:17330 TOKENS_FILE=$L/souls.tokens \
+  STREAM=http://$LO:17320/$S/ VIEWER_URL=https://soul.game/s/$S/ \
   PROBE="ssh $PROD node $REL/v2/tools/bench/stage2a/guard.mjs probe --every 5" \
   DRIVER_CPUS=<the runner's cores> OUT=$L/run \
   bash v2/tools/bench/stage2a/limits.sh
@@ -107,7 +107,7 @@ access to `$PROD`, the release owner gives it a key for an ordinary user before 
 laptop: that would put the laptop's network in every receipt.
 
 **5. After the run.** On the directory machine, `test-soul retire-all eden`, then delete the tokens file on both
-machines. Close the forward (`pkill -f 17330:127.0.0.1:7330` on the build machine). Paste `$L/run/table.md` into
+machines. Close the forward (`pkill -f "$LO:17330:$LO:7330"` on the build machine). Paste `$L/run/table.md` into
 [capacity](../../../docs/architecture/capacity.md) with the preflight lines from `$L/run/run.txt`, which give each
 world's state, Eden's memory and the gateway's connect time.
 
