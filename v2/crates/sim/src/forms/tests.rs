@@ -666,6 +666,11 @@ fn without_walks(v: &json::Value) -> json::Value {
 
 /// `entry` with every `move` step taken out of its forms: a form with no hand step.
 fn without_moves(v: &json::Value) -> json::Value {
+    without_steps(v, "move")
+}
+
+/// `entry` with every step named `step` taken out of its forms.
+fn without_steps(v: &json::Value, step: &str) -> json::Value {
     match v {
         json::Value::Obj(o) => json::Value::Obj(
             o.iter()
@@ -675,13 +680,13 @@ fn without_moves(v: &json::Value) -> json::Value {
                         json::Value::Arr(
                             s.iter()
                                 .filter(|st| {
-                                    st.get("step").and_then(json::Value::str) != Some("move")
+                                    st.get("step").and_then(json::Value::str) != Some(step)
                                 })
                                 .cloned()
                                 .collect(),
                         ),
                     ),
-                    _ => (k.clone(), without_moves(x)),
+                    _ => (k.clone(), without_steps(x, step)),
                 })
                 .collect(),
         ),
@@ -724,10 +729,11 @@ fn caused(log: &[Effect], intent: &Intent) -> Vec<u64> {
 #[test]
 fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
     let (entry, form) = effecting();
-    let pause = 2_000_000;
     for (case, entry, before_end) in [
-        // The press's recovery (300 ms) and the pause come after contact.
-        ("at the hand step's contact", entry.clone(), 300_000 + pause),
+        // The press is the last step: its recovery (300 ms) comes after contact.
+        ("at the hand step's contact", without_steps(&entry, "wait"), 300_000),
+        // A pause after the press: the effect waits for it (E7), so a Soul that leaves during it has none.
+        ("at the pause's end, after the hand step", entry.clone(), 0),
         ("at the last step's end", without_moves(&entry), 0),
     ] {
         let mut b = Bench::new();
@@ -754,6 +760,76 @@ fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
             effect.envelope.at, e.at
         );
         assert_eq!(effect.envelope.at, e.at - before_end, "{case}");
+        b.clean();
+    }
+}
+
+/// E7: a Soul that leaves partway through a later, repeated step (the second of two presses, or the pause after them)
+/// gets none of the form's effects: the run ends `left`, nothing of the thing is set, and its reservation is freed, in
+/// the run and in the log.
+#[test]
+fn e7_a_soul_that_leaves_during_a_later_repeated_step_gets_no_effect() {
+    let press = r#"{ "step": "move", "move": "press", "at": "button" },"#;
+    let lamp = include_str!("../../../skills/src/form_runner/kinds/lamp.json");
+    assert!(lamp.contains(press), "the lamp's press");
+    let entry = parse(&lamp.replacen(press, &format!("{press}\n{press}"), 1)).expect("JSON");
+    let form = "switch_on";
+    assert_eq!(
+        bind(&entry, form).expect("binds"),
+        bind(&parse(lamp).expect("JSON"), form)
+            .map(|mut s| {
+                s.insert(2, s[1].clone());
+                s
+            })
+            .expect("binds"),
+        "the press is repeated"
+    );
+    // The second press (step 2, moving), and the pause after it (step 3).
+    for (case, step, moving) in [("the second press", 2, true), ("the pause", 3, false)] {
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+        b.start(body, node, &entry, form, Limits::default());
+        assert_eq!(b.forms.holder(node), Some(body), "reserved");
+        let mut log = Vec::new();
+        while !(b.forms.at(body) == Some(step) && b.forms.in_hand_move(body) == moving) {
+            assert!(!b.forms.is_empty() && b.now < 30_000_000, "{case}: reached");
+            b.tick();
+            b.flush(&mut log);
+        }
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, body, None, now).expect("left");
+        // A pause is left at once, its end written by the leave itself.
+        b.flush(&mut log);
+        while !b.forms.is_empty() && b.now < 30_000_000 {
+            b.tick();
+            b.flush(&mut log);
+        }
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{case}: {:?}", b.forms.ended)
+        };
+        println!(
+            "{case}: left at step {step} at {} µs, ended {} at {} µs; {} log entries, {} effects",
+            now,
+            e.how.as_str(),
+            e.at,
+            log.len(),
+            effect_entries(&log).len()
+        );
+        assert_eq!(e.how.as_str(), "left", "{case}");
+        assert!(effect_entries(&log).is_empty(), "{case}: no effect landed");
+        assert!(
+            log.iter().flat_map(Effect::changes).all(|c| !matches!(
+                c.change,
+                Change::Set { node: n, .. } if n == node
+            )),
+            "{case}: the thing's fields are as they were"
+        );
+        assert_eq!(b.forms.holder(node), None, "{case}: the reservation is freed");
+        assert!(
+            super::reservations(&log).is_empty(),
+            "{case}: and in the log"
+        );
         b.clean();
     }
 }

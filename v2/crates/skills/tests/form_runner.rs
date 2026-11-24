@@ -412,7 +412,8 @@ fn c25_every_step_shape_binds() {
 
 /// C25 (#3496) A1, A3: the runner over each new shape. No steps: done at once, the effect taken (one act, one
 /// receipt). `rise` and `settle` ask the world and go on when it answers done. `use_held` is the hand step: the
-/// effect's instant when the node is in the body's hand, else the run ends `not-held`.
+/// effect's instant when the node is in the body's hand and it is the last step (else the last step's end, E7), else
+/// the run ends `not-held`.
 #[test]
 fn c25_the_runner_runs_every_step_shape() {
     let mut h = Fake::default();
@@ -449,9 +450,13 @@ fn c25_the_runner_runs_every_step_shape() {
     h.held = true;
     let mut r = Runner::new(use_held(), node(), Limits::default());
     assert!(matches!(r.wake(&mut h, Woke::Start), Next::Sleep));
-    assert!(r.take_effect(), "the effect's instant is the use");
+    assert!(!r.take_effect(), "a wait follows the use: not yet (E7)");
     let (id, ..) = h.only();
     assert_eq!(ended(&r.wake(&mut h, Woke::Timer(id))), Some("done"));
+    assert!(r.take_effect(), "the effect's instant is the wait's end");
+    let mut r = Runner::new(vec![Step::UseHeld], node(), Limits::default());
+    assert_eq!(ended(&r.wake(&mut h, Woke::Start)), Some("done"));
+    assert!(r.take_effect(), "the use as the last step is the effect's instant");
 }
 
 /// C24 (#3495): every effect kind content uses binds: a link with its kind's most and an unlink of every end, a timer
