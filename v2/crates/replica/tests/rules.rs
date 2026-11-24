@@ -893,3 +893,33 @@ fn drift_against_the_live_form_rules_cases() {
         cases.len()
     );
 }
+
+/// #4360: a closed container the asker may not see into is unknown by its `closed` section, as the TS rules answer,
+/// never by a slot, a thing in it or a count. The kind is written here, a made-up `test:` one.
+#[test]
+fn a_closed_container_is_unknown_by_its_closed_section() {
+    let kinds = parse(
+        r#"{"test:stump": {"kind": "test:stump", "owner": "thing",
+            "closed": {"audience": {"rule": "creator"}, "fields": []},
+            "slots": {"inside": {"admits": "thing", "most": 1}},
+            "forms": {"search": {"who": "anyone", "starts": "act",
+              "takes": {"thing": {"type": "thing", "select": {"of": "things", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}},
+              "needs": [], "steps": [], "effects": []}}}}"#,
+    )
+    .expect("kinds");
+    let act = parse(r#"{"this": "st", "form": "search"}"#).expect("act");
+    let state = parse(
+        r#"{"actor": "b1", "nodes": {"st": {"kind": "test:stump", "slots": {"inside": []}}, "b1": {"hands": {"right": null}}}}"#,
+    )
+    .expect("state");
+    let asker = parse(r#"{"sees": ["public"]}"#).expect("asker");
+    let v = decide_parts(Some(&kinds), Some(&act), Some(&state), Some(&asker));
+    assert_eq!(
+        v.get("verdict").and_then(Value::str),
+        Some("unknown"),
+        "{}",
+        v.to_json()
+    );
+    assert_eq!(v.get("node").and_then(Value::str), Some("st"));
+    assert_eq!(v.get("field").and_then(Value::str), Some("closed"));
+}
