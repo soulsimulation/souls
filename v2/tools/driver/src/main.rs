@@ -361,8 +361,6 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
 /// #4154's stuck measure, per agent from its own answers (not the gateway's receipts file, which logs few Souls):
 /// stuck is an act outstanding with no answer for 60 s or more; refused-only is 60 s or more of acting with nothing
 /// but refusals back. Also the agents' last answer's age at the end of the schedule.
-/// S11: how many agents read their own copy at once, before the run, to learn their Soul's body.
-const BODY_READS: usize = 16;
 /// S11: how far a Soul must have gone in a stall's window to be on its way, not stuck, µm.
 const MOVED_UM: i128 = 1_000_000;
 /// S11: each node's motion samples as the public stream showed them ([`stream::Seen::motion`]).
@@ -1583,45 +1581,10 @@ async fn main() {
             }
         }
     }
-    // S11: each agent's Soul's body, for the stuck rule's reading of its motion. The first agent's copy holds only the
-    // Souls in its scope; each other agent reads its own Soul's body from its own copy, before the run, at most
-    // BODY_READS at a time.
+    // S11: each agent's Soul's body, for the stuck rule's reading of its motion: from the first agent's copy, and for a
+    // Soul born during the run (C3: at its first act), from the `body-of` link its birth wrote on the public stream.
     let mut own_bodies: BTreeMap<Id, Id> =
         aimed.as_ref().map(|t| t.bodies.clone()).unwrap_or_default();
-    if aimed.is_some() {
-        let began = Instant::now();
-        let gate = Arc::new(Semaphore::new(BODY_READS));
-        let mut reads = Vec::new();
-        for (k, x) in actors.iter().enumerate() {
-            let Actor::Soul(soul) = *x else { continue };
-            if own_bodies.contains_key(&soul) {
-                continue;
-            }
-            let Some(c) = chans.get(k).cloned() else {
-                continue;
-            };
-            let gate = gate.clone();
-            reads.push(tokio::spawn(async move {
-                let _slot = gate.acquire_owned().await.ok()?;
-                let (back, seen) = tokio::sync::oneshot::channel();
-                c.send(Job::Read(back)).ok()?;
-                let seen = seen.await.ok()?.ok()?;
-                Some((soul, *seen.bodies.get(&soul)?))
-            }));
-        }
-        let asked = reads.len();
-        for r in reads {
-            if let Ok(Some((soul, body))) = r.await {
-                own_bodies.insert(soul, body);
-            }
-        }
-        println!(
-            "bodies: {} of {} Souls' bodies known ({asked} read from their own copies in {} ms, before the run)",
-            own_bodies.len(),
-            actors.len(),
-            began.elapsed().as_millis()
-        );
-    }
 
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
@@ -1760,6 +1723,22 @@ async fn main() {
     let seen = reader.map(|r| r.join().unwrap_or_default());
     let visible = seen.as_ref().map(|v| visible_report(&sent, v));
     // S11: each agent's Soul's body, to read its motion off the public stream.
+    if let Some(v) = &seen {
+        for x in &actors {
+            let Actor::Soul(soul) = *x else { continue };
+            if let Some([a, b]) = v.body_of.iter().find(|e| e.contains(&soul)) {
+                own_bodies
+                    .entry(soul)
+                    .or_insert(if *a == soul { *b } else { *a });
+            }
+        }
+        println!(
+            "bodies: {} of {} Souls' bodies known ({} body-of links on the stream)",
+            own_bodies.len(),
+            actors.len(),
+            v.body_of.len()
+        );
+    }
     let bodies: Vec<Option<Id>> = actors
         .iter()
         .map(|x| match x {
