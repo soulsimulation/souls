@@ -1800,48 +1800,19 @@ fn bodies(
         name: "family",
         detail: e,
     })?;
+    // Each recorded body is placed on its own: one that cannot be is left out by name, and the others start (a local
+    // failure never stops unrelated actors). One standing off its ground is restored onto the nearest legal point
+    // (`worldd::bodies::restore_place`).
     let mut at = Vec::new();
     for (id, (pose, _)) in placed {
-        let build = builds.get(id).copied().ok_or_else(|| Refusal {
-            name: "body-unknown",
-            detail: "recorded build missing".into(),
-        })?;
-        let (node, point, facing) = match pose.support {
-            replica::pose::Support::Surface { surface, .. } => {
-                (surface, pose.position, pose.orientation)
-            }
-            replica::pose::Support::Slot => {
-                let site = places
-                    .iter()
-                    .find(|p| {
-                        p.thing == pose.frame.node
-                            && pose.frame.slot.is_none_or(|s| s == p.place.slot)
-                    })
-                    .ok_or_else(|| Refusal {
-                        name: "place-unknown",
-                        detail: "recorded support unavailable".into(),
-                    })?;
-                (site.floor, site.stand()?, site.facing)
-            }
-            replica::pose::Support::Volume { .. }
-            | replica::pose::Support::Track
-            | replica::pose::Support::None => {
-                return Err(Refusal {
-                    name: "recorded-body-support",
-                    detail: "unsupported native body support".into(),
-                });
-            }
-        };
-        let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
-            name: "body-class-unprepared",
-            detail: "recorded body".into(),
-        })?;
-        let surface = surfaces.get(&node).ok_or_else(|| Refusal {
-            name: "no-surface",
-            detail: "recorded ground".into(),
-        })?;
-        let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
-        at.push((moved, build));
+        match recorded_body(&town, &places, *id, pose, builds) {
+            Ok(one) => at.push(one),
+            Err(r) => eprintln!(
+                "worldd: {} was not placed again, left out: {}",
+                replica::world_model::show(*id),
+                refusal(r)
+            ),
+        }
     }
     // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
     let mut moving = Vec::new();
@@ -1874,9 +1845,73 @@ fn bodies(
     }
 
     for (a, build) in at {
-        b.add_body_at_built(family.clone(), a, placed, build)?;
+        let id = a.id;
+        if let Err(r) = b.add_body_at_built(family.clone(), a, placed, build) {
+            eprintln!(
+                "worldd: {} was not added again, left out: {}",
+                replica::world_model::show(id),
+                refusal(r)
+            );
+        }
     }
     Ok(b)
+}
+
+/// One recorded body placed again for [`bodies`]: on its recorded ground, or by its seat's stand point when it sat,
+/// with its build; restored onto the nearest legal point when its ground no longer holds where it stood.
+fn recorded_body(
+    town: &Town,
+    places: &[PlaceAt],
+    id: Id,
+    pose: &replica::pose::Pose,
+    builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
+) -> Result<(sim::mover::Body, replica::kinds::sizes::Build), Refusal> {
+    let build = builds.get(&id).copied().ok_or_else(|| Refusal {
+        name: "body-unknown",
+        detail: "recorded build missing".into(),
+    })?;
+    let (node, point, facing) = match pose.support {
+        replica::pose::Support::Surface { surface, .. } => {
+            (surface, pose.position, pose.orientation)
+        }
+        replica::pose::Support::Slot => {
+            let site = places
+                .iter()
+                .find(|p| {
+                    p.thing == pose.frame.node && pose.frame.slot.is_none_or(|s| s == p.place.slot)
+                })
+                .ok_or_else(|| Refusal {
+                    name: "place-unknown",
+                    detail: "recorded support unavailable".into(),
+                })?;
+            (site.floor, site.stand()?, site.facing)
+        }
+        replica::pose::Support::Volume { .. }
+        | replica::pose::Support::Track
+        | replica::pose::Support::None => {
+            return Err(Refusal {
+                name: "recorded-body-support",
+                detail: "unsupported native body support".into(),
+            });
+        }
+    };
+    let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
+        name: "body-class-unprepared",
+        detail: "recorded body".into(),
+    })?;
+    let surface = surfaces.get(&node).ok_or_else(|| Refusal {
+        name: "no-surface",
+        detail: "recorded ground".into(),
+    })?;
+    let (moved, _) = worldd::bodies::restore_place(
+        surface,
+        id,
+        Frame { node, slot: None },
+        point,
+        facing,
+        build,
+    )?;
+    Ok((moved, build))
 }
 
 /// The world's store; its reads at the start are made [`patiently`] (#1960).
@@ -5545,5 +5580,194 @@ mod s10c_lockstep {
         let b = run(&facts, &entries, &slots);
         println!("S10c: logs of {} and {} bytes", a.len(), b.len());
         assert_eq!(sha256(&a), sha256(&b), "the same inputs write the same log");
+    }
+
+    /// N2's test world built as `serve` builds it, with its building's floor and that floor's door end: the shape of
+    /// the hello-hamlet world whose saved state bricked on restart (a body logged on the cottage's floor 0.77 m past
+    /// the floor's door end, mid-crossing, so every restart refused every move).
+    fn door_world() -> (Town, Town, Id, Vec<PlaceAt>, Id, Vec3, Id) {
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let floor = imported.nodes["building/floor-1"];
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
+        let (places, ..) = worldd::places::register(&mut town, &[]);
+        let (link, door) = town
+            .buildings
+            .iter()
+            .flat_map(|b| b.links.iter())
+            .find_map(|l| {
+                let e = l.ends.iter().flatten().find(|e| e.floor == floor)?;
+                Some((l.id, e.middle()))
+            })
+            .expect("the building's floor has a door");
+        let ground = built.ground;
+        (town, planner, floor, places, link, door, ground)
+    }
+
+    /// A point 765 mm past the floor's door end (the saved row's offset), straight out of the floor: of the four ways
+    /// along the axes, the one farthest from any point the floor holds.
+    fn past_door(town: &Town, floor: Id, door: Vec3) -> Vec3 {
+        let surface = &town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&floor];
+        let off = |p: &Vec3| {
+            let (_, n) = sim::ground::exits::nearest(surface.pieces(), *p).unwrap();
+            (i128::from(n.x - p.x)).pow(2) + (i128::from(n.z - p.z)).pow(2)
+        };
+        let p = [(765_000, 0), (-765_000, 0), (0, 765_000), (0, -765_000)]
+            .into_iter()
+            .map(|(dx, dz)| Vec3::new(door.x + dx, door.y, door.z + dz))
+            .max_by_key(off)
+            .unwrap();
+        let here = Frame {
+            node: floor,
+            slot: None,
+        };
+        let probe = Id::new(Scope([7; 16]), 99).unwrap();
+        assert!(
+            surface
+                .place(probe, here, p, replica::pose::Quat::IDENTITY)
+                .is_err_and(|r| r.name == "off-surface"),
+            "a point past the door end, off the floor"
+        );
+        p
+    }
+
+    fn standing(node: Id, at: Vec3) -> replica::pose::Pose {
+        replica::pose::Pose {
+            frame: Frame { node, slot: None },
+            position: at,
+            orientation: replica::pose::Quat::IDENTITY,
+            support: replica::pose::Support::Surface {
+                surface: node,
+                height: 0,
+            },
+        }
+    }
+
+    /// The minimised fixture of the bricked world's saved state: two bodies logged standing, one on the floor past its
+    /// door end (off its surface), one on the open ground. The restart starts both: the first restored onto the
+    /// nearest point its own floor holds, the other where it stood; neither stops the other, and a third with no
+    /// recorded build is left out by name while both start.
+    #[test]
+    fn a_body_logged_off_its_ground_is_restored_and_never_stops_the_others() {
+        use replica::kinds::sizes::{Build, Size};
+        let (town, planner, floor, places, _, door, ground) = door_world();
+        let past = past_door(&town, floor, door);
+        let off = Id::new(Scope([7; 16]), 1).unwrap();
+        let fine = Id::new(Scope([7; 16]), 2).unwrap();
+        let unknown = Id::new(Scope([7; 16]), 3).unwrap();
+        let on_ground = Vec3::new(-40_000_000, 0, 30_000_000);
+        let placed: Placed = BTreeMap::from([
+            (off, (standing(floor, past), None)),
+            (fine, (standing(ground, on_ground), None)),
+            (unknown, (standing(ground, on_ground), None)),
+        ]);
+        let builds = BTreeMap::from([(off, Build::STANDARD), (fine, Build::STANDARD)]);
+        let b = bodies(town, planner, ground, &placed, places, Vec::new(), &builds)
+            .expect("the bodies start");
+        let (node, at) = b.pose(off).expect("the off-surface body was restored");
+        assert_eq!(node, floor, "restored on its own floor");
+        // The nearest point its floor holds: no farther than the door end it was logged past.
+        let d = ((i128::from(at.x - past.x)).pow(2) + (i128::from(at.z - past.z)).pow(2)).isqrt();
+        assert!(
+            d <= 765_000 + 2_000,
+            "restored {d} µm from where it was logged: {at:?}"
+        );
+        let surface = &b.town.surfaces_for(Size::Standard).unwrap()[&floor];
+        assert!(
+            surface
+                .place(
+                    off,
+                    Frame {
+                        node: floor,
+                        slot: None
+                    },
+                    at,
+                    replica::pose::Quat::IDENTITY
+                )
+                .is_ok(),
+            "restored on a point its floor holds"
+        );
+        let (gnode, gat) = b.pose(fine).expect("the other body started");
+        assert_eq!((gnode, gat.x, gat.z), (ground, on_ground.x, on_ground.z));
+        assert!(
+            b.pose(unknown).is_none(),
+            "a body that cannot be placed is left out"
+        );
+        // The restored pose is written again in the first record, so the log heals.
+        let mut b = b;
+        let rows = b.moved();
+        assert!(
+            rows.iter().any(|(id, p, _)| *id == off && p.position == at),
+            "{rows:?}"
+        );
+        assert!(!rows.iter().any(|(id, ..)| *id == fine), "{rows:?}");
+    }
+
+    /// The write path: a body carried across a link is not logged while it is carried (its pose then follows the
+    /// line past its floor's edge), so a kill mid-crossing restarts it where it last stood.
+    #[test]
+    fn a_body_crossing_a_link_is_logged_where_it_last_stood() {
+        use replica::kinds::sizes::Build;
+        let (town, planner, floor, places, link, door, ground) = door_world();
+        let surface = &town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&floor];
+        let body = Id::new(Scope([7; 16]), 1).unwrap();
+        let (_, inside) = sim::ground::exits::nearest(surface.pieces(), door).unwrap();
+        let recorded = surface
+            .place_built(
+                body,
+                Frame {
+                    node: floor,
+                    slot: None,
+                },
+                inside,
+                replica::pose::Quat::IDENTITY,
+                Build::STANDARD,
+            )
+            .unwrap()
+            .pose;
+        let placed: Placed = BTreeMap::from([(body, (recorded, None))]);
+        let builds = BTreeMap::from([(body, Build::STANDARD)]);
+        let mut b = bodies(town, planner, ground, &placed, places, Vec::new(), &builds).unwrap();
+        assert!(b.moved().is_empty());
+        // Out through the door and on past its end, at 1 m/s: half a second in, it is still crossing.
+        let past = past_door(&b.town, floor, door);
+        let far = Vec3::new(past.x * 2 - door.x, past.y, past.z * 2 - door.z);
+        b.runner
+            .controller
+            .carry(
+                body,
+                sim::controller::Track {
+                    link: Some(link),
+                    line: vec![door, past, far],
+                    speed: 1_000_000,
+                    to: ground,
+                    arrive: None,
+                    hold: false,
+                },
+            )
+            .unwrap();
+        b.begin(0);
+        for n in 1..=10 {
+            b.step(n * 50_000);
+        }
+        let now = b.runner.controller.body(body).unwrap().pose;
+        assert_ne!(
+            now.position, recorded.position,
+            "the body moved along the carry"
+        );
+        assert!(b.runner.controller.carried(body), "still crossing");
+        assert!(b.moved().is_empty(), "nothing logged mid-crossing");
+        assert_eq!(
+            b.placed()[&body].0,
+            recorded,
+            "the checkpoint keeps where it last stood"
+        );
     }
 }

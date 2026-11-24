@@ -30,7 +30,14 @@
 //! - **In the log** (K18, #3160). Each tick's part lists the bodies whose pose changed ([`Bodies::moved`]), a body in
 //!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
-//!   the seat is held in the slots table again and a rise or another sit sees it.
+//!   the seat is held in the slots table again and a rise or another sit sees it. A body being carried (across a
+//!   link, or walked out by the world's rule) is not written while it is carried: its pose then lies on neither end's
+//!   ground, so the log keeps where it last stood until it lands.
+//! - **Restore, never stuck.** A recorded standing pose its ground no longer holds (`off-surface`: a log written
+//!   mid-crossing before the rule above, or ground an edit changed) is restored onto the nearest legal point of that
+//!   same ground ([`restore_place`], the walk-out's rule `sim::ground::exits::nearest`), named on stderr, and written
+//!   again in the first tick. This is a restore at start-up, not a move. A body that cannot be restored at all is left
+//!   out by name: one bad row never stops the others.
 //!
 //! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
 //!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
@@ -367,6 +374,32 @@ fn load(text: &str) -> R<Move> {
     Move::from_value(&v)
 }
 
+/// A body placed again where a record had it standing on `surface` (`at`, its frame's position, µm), with whether it
+/// was restored: a point the surface no longer holds (`off-surface`) is moved onto its nearest legal point by the
+/// walk-out's rule (`sim::ground::exits::nearest`: the point itself when legal, else the nearest edge point moved
+/// 1 mm in), on the same ground. A restore at start-up, never a move; any other refusal stands.
+pub fn restore_place(
+    surface: &sim::mover::Surface,
+    id: Id,
+    frame: replica::pose::Frame,
+    at: replica::pose::Vec3,
+    orientation: replica::pose::Quat,
+    build: Build,
+) -> R<(Moved, bool)> {
+    let refused = match surface.place_built(id, frame, at, orientation, build) {
+        Ok(b) => return Ok((b, false)),
+        Err(r) if r.name == "off-surface" => r,
+        Err(r) => return Err(r),
+    };
+    let Some((_, to)) = sim::ground::exits::nearest(surface.pieces(), at) else {
+        return Err(refused);
+    };
+    Ok((
+        surface.place_built(id, frame, to, orientation, build)?,
+        true,
+    ))
+}
+
 impl Bodies {
     /// No bodies yet, over `town`, stepped in ticks of `tick` µs.
     pub fn new(town: Town, tick: Micros) -> R<Bodies> {
@@ -653,10 +686,28 @@ impl Bodies {
             name: "body-class-unprepared",
             detail: "no prepared geometry".into(),
         })?;
-        let body = match placed.get(&body.id) {
+        let (body, logged) = match placed.get(&body.id) {
             Some((p, _)) => match p.support {
                 Support::Surface { surface, .. } => match surfaces.get(&surface) {
-                    Some(s) => s.place_built(body.id, p.frame, p.position, p.orientation, build)?,
+                    Some(s) => {
+                        let (b, restored) =
+                            restore_place(s, body.id, p.frame, p.position, p.orientation, build)?;
+                        if !restored {
+                            (b, b.pose)
+                        } else {
+                            eprintln!(
+                                "worldd: {} restored onto the nearest legal point of its ground: recorded off-surface \
+                                 at ({}, {}) µm, now ({}, {}) µm",
+                                replica::world_model::show(b.id),
+                                p.position.x,
+                                p.position.z,
+                                b.pose.position.x,
+                                b.pose.position.z
+                            );
+                            // Its row is written again in the first tick, so the log heals.
+                            (b, *p)
+                        }
+                    }
                     None => {
                         return Err(Refusal {
                             name: "no-surface",
@@ -664,11 +715,11 @@ impl Bodies {
                         });
                     }
                 },
-                _ => body,
+                _ => (body, body.pose),
             },
-            None => body,
+            None => (body, body.pose),
         };
-        self.logged.insert(body.id, body.pose);
+        self.logged.insert(body.id, logged);
         self.add_body_built(family, body, build)
     }
 
@@ -709,11 +760,17 @@ impl Bodies {
         c.ids()
             .filter_map(|id| {
                 let b = c.body(id)?;
-                let stance = match b.pose.support {
+                // A carried body's pose follows the carry's line in the frame it set out from, past that ground's
+                // edge: it is kept where it last stood until it lands, so a restart never finds it off its ground.
+                let pose = match self.logged.get(&id) {
+                    Some(p) if c.carried(id) => *p,
+                    _ => b.pose,
+                };
+                let stance = match pose.support {
                     Support::Slot => self.slots.stance(id),
                     _ => self.sleeping.contains_key(&id).then_some(Stance::Lie),
                 };
-                Some((id, (b.pose, stance)))
+                Some((id, (pose, stance)))
             })
             .collect()
     }
@@ -820,8 +877,8 @@ impl Bodies {
         out
     }
 
-    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c): part of the zone's
-    /// state hash.
+    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c), a carried one where it
+    /// last stood ([`Bodies::placed`]): part of the zone's state hash, so a restart's state equals the last record's.
     pub fn poses(&self) -> Vec<(Id, Pose)> {
         self.every()
             .into_iter()
