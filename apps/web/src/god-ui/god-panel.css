@@ -116,3 +116,9 @@
   .gp-owner-ops input { background: #2a2b28; color: #ebeae3; border-color: rgba(255, 255, 255, .2); }
   .gp-btn.gp-danger:not(:disabled) { border-color: #e88; color: #f2a0a0; }
 }
+/* 0.133 item 6: Build (BuildBar.tsx), at the foot of the view so the world stays clickable */
+/* world-chrome.css pins every panel card under the HUD; Build sits at the foot instead */
+.gp-card.gp-build { top: auto !important; right: auto; left: 50%; bottom: calc(84px + var(--sa-b, 0px)); transform: translateX(-50%); width: min(420px, calc(100% - 32px)); max-height: none; }
+.gp-build .gp-head { display: flex; align-items: center; gap: 8px; }
+.gp-build .gp-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.gp-build select { max-width: 200px; }

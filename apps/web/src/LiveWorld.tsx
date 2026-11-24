@@ -132,6 +132,7 @@ import {cameraGround,cameraGroundSampler,clearShotEye} from './WorldCameraGround
 import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
+import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
@@ -1295,6 +1296,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; return; }
       down = null;
       if (entityLayer.active && godFeature('flags') && (e.altKey || flagModeRef.current)) return;  // a flag drop (onFlagClick), not a selection: no place card over the god panel
+      if (buildTakesClicks()) return;  // 0.133 item 6: the creator panel's Build places or selects (god-ui/BuildBar.tsx), not a card
       const target=hover.pick(e.clientX,e.clientY);
       if(touch&&target?.kind==='soul'&&controlsApi.current?.flyToSoul(target.id,{chip:true}))return;  // #892: one tap follows (the card's flight)
       if(touch&&(!target||target.kind==='place')&&(context.current.cameraMode==='follow'||chipFlight())){setPlaceCard(null);soulFlight=null;rts.flyToGround(e);return;}  // #892: a tap on the ground frees the camera there
