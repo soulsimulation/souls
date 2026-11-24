@@ -10,6 +10,7 @@ import { registerMesh, type MeshCtx } from './registry.ts';
 import { shapeFaceMeshes } from './faces.ts'; // XP8 hook
 import { kitClassSurface, kitSurfaceAttribute, kitSurfaceSuffix } from './kit-surfaces.ts'; // Y1 / XP7 hook
 import { addShadowProxy } from './shadow-proxy.ts';
+import { recolourOf } from './vocab-look.ts';
 
 const cache = new Map<string, THREE.Object3D>();
 /** Entry 33: hand-operated things this viewer has drawn out (on false), so a fire catches only when it was seen lit by hand. */
@@ -263,5 +264,7 @@ registerMesh({
 
 // K2: $params can change geometry; both prototype and instance identity include numeric values.
 function kitCacheKey(ctx: MeshCtx, args: KitProgramArgs): string {
-  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state);
+  // R4: a creator's recolour of a palette key colours the prototype's vertices, so it is part of the key
+  const recoloured = recolourOf(ctx.entity.state?.tint)?.parts;
+  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state) + (recoloured ? ':' + JSON.stringify(recoloured) : '');
 }
