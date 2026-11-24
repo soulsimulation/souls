@@ -1373,6 +1373,37 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
         placed.fields().contains_key(&import_eden::F_SOLIDS),
         "the placed bench stands as its kind's bounds say"
     );
+    // Its outline leaves its seats usable: the Soul walks to the bench (7 m), sits on it and rises.
+    let bench = got.names[&1];
+    let act = |s: &mut UnixStream, sequence: u64, verb: &str, target: Option<Id>| {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new(verb).unwrap(),
+            target: target.map(Target::Node),
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+        socket_end(s)
+    };
+    walk(&mut souls, &w, w.souls[0], 2, -30 * M, 31_500_000);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul walks to the bench: {got:?}");
+    let sat = act(&mut souls, 3, "eden:sit", Some(bench));
+    println!("the Soul sits on the placed bench: {sat:?}");
+    assert_eq!(sat.kind, 1, "the Soul sits on the placed bench: {sat:?}");
+    let rose = act(&mut souls, 4, "eden:rise", None);
+    assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
 }
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
