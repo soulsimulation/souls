@@ -77,12 +77,13 @@ function dayIndex(base: URL, day: number): Promise<Index | null> {
   return days.get(day)!;
 }
 
-async function seek(base: URL, seq: number, at: number) {
+async function seek(base: URL, seq: number, at: number, floor?: number) {
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
   // V4's walk: the last bundle that starts at or before the moment, back through earlier days to a year. A day after
-  // today has no index yet (the origin answers 404), so neither the walk nor the next bundle's lookup asks for one.
-  const now = today();
-  for (let day = Math.min(Math.floor(at / DAY_US), now); day > Math.floor(at / DAY_US) - 366; day--) {
+  // today has no index yet (the origin answers 404), so neither the walk nor the next bundle's lookup asks for one;
+  // nor is a day before the world's first (`floor`, the page's), so a young world's walk asks no empty day.
+  const now = today(), lowest = Math.max(Math.floor(at / DAY_US) - 365, floor === undefined ? -Infinity : Math.floor(floor / DAY_US));
+  for (let day = Math.min(Math.floor(at / DAY_US), now); day >= lowest; day--) {
     const ix = await dayIndex(base, day);
     let i = ix ? ix.length - 1 : -1;
     while (i >= 0 && ix![i][0] > at) i--;
@@ -106,7 +107,7 @@ async function seek(base: URL, seq: number, at: number) {
   throw new Error(`no history in the year before ${at} µs`);
 }
 
-self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number }>) => {
-  const { base, seq, at } = e.data;
-  seek(new URL(base), seq, at).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
+self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; floor?: number }>) => {
+  const { base, seq, at, floor } = e.data;
+  seek(new URL(base), seq, at, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
 };

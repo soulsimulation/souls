@@ -96,6 +96,36 @@ test('K3: the first moment is the first bundle of the first day with public even
   }
 });
 
+test('a young world: every seek names the world\'s first moment as its floor, so its walk asks no day before it', async () => {
+  const { encode } = await import('cborg');
+  const DAY = 86_400_000_000, day = 20781, first = day * DAY + 50_000_000_000; // the world began this day
+  const files: Record<string, unknown> = {
+    'history/everyone/counts/year/0056': new Map<number, unknown>([[1, 1], [5, [[day - 56 * 365, 0, 3]]]]),
+    [`bundles/000${day}/index`]: new Map<number, unknown>([[1, 1], [2, day], [3, [[first, 'k', new Uint8Array(32)]]]]),
+  };
+  const realFetch = globalThis.fetch, realLocation = (globalThis as { location?: unknown }).location;
+  (globalThis as { location?: unknown }).location = { href: 'http://example.invalid/w/a/' };
+  globalThis.fetch = (async (u: URL) => {
+    const path = String(u).replace('http://example.invalid/s/x/history/', '');
+    return files[path] ? new Response(encode(files[path])) : new Response(null, { status: 404 });
+  }) as typeof fetch;
+  const posted: { at: number; floor?: number }[] = [];
+  const w = { onmessage: null as null | ((e: MessageEvent) => void), postMessage(m: { seq: number; at: number; floor?: number }) {
+    posted.push(m);
+    const s: Seeked = { seq: m.seq, at: m.at, start: first, length: BUNDLE, next: null, nodes: [place, body(0)], samples: [] };
+    queueMicrotask(() => w.onmessage?.({ data: { t: 'seeked', s } } as MessageEvent));
+  }, terminate() {} };
+  try {
+    const h = new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' });
+    // "Back 1 min" a minute after the world began asks for a moment before its first bundle
+    const from = Math.floor((first - 30_000_000) / TICK_US);
+    await h.chunks(from, from + 60 * TICKS, 10);
+    assert.ok(posted.length > 0 && posted.every((m) => m.floor === first && m.at >= first), JSON.stringify(posted));
+  } finally {
+    globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
+  }
+});
+
 test('the history export\'s paths are the ones the origin serves: the counts under a second history/, the bundles not', () => {
   // the shapes soul.game answered 200 on 24 Nov (read-only curl of a moved world's export)
   const base = 'https://soul.game/s/w/a-a-0/history/', at = (k: string) => new URL(k, base).href;

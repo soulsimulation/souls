@@ -97,6 +97,65 @@ fn a_seek_gives_the_public_state_at_its_moment() {
     );
 }
 
+/// 24 Nov (Eden on soul.game, "That moment could not be loaded"): a bundle's snapshot holds no timers, so a timer set
+/// before its window and cleared in it is not refused (`timer-missing`); the seek gives the state it gives without it.
+#[test]
+fn a_timer_set_before_a_window_and_cleared_in_it_seeks() {
+    let (store, header, _, _) = recorded();
+    let ix = replica::history::DayIndex::read(
+        &store
+            .get(&format!("{PREFIX}bundles/00000000/index"))
+            .expect("get")
+            .expect("an index")
+            .bytes,
+    )
+    .expect("a day index");
+    let (_, key, hash) = ix.bundles.last().expect("a bundle").clone();
+    let b = replica::history::Bundle::read_named(
+        &archive::bundle_body(&store.get(&key).expect("get").expect("there").bytes)
+            .expect("inflates"),
+        &hash,
+    )
+    .expect("a bundle");
+    let Value::Map(mut view) = b.view.clone() else {
+        panic!("a view is a map")
+    };
+    let Some(Value::Array(mut records)) = view.get(&8).cloned() else {
+        panic!("records")
+    };
+    // The window's first change, again as the clear of a timer its node set before the window.
+    let i = records
+        .iter()
+        .position(|r| matches!(r, Value::Map(m) if m.contains_key(&7)))
+        .expect("a change");
+    let Value::Map(mut clear) = records[i].clone() else {
+        unreachable!()
+    };
+    let timer = clear.get(&6).expect("a node").clone();
+    clear.remove(&7);
+    clear.insert(
+        11,
+        Value::Array(vec![Value::Map([(1, Value::Uint(2)), (2, timer)].into())]),
+    );
+    records.insert(i, Value::Map(clear));
+    view.insert(8, Value::Array(records));
+    let with = replica::history::Bundle::new(
+        b.header.clone(),
+        b.start,
+        b.length,
+        b.snapshot.clone(),
+        Value::Map(view),
+    )
+    .expect("a bundle");
+    let at = b.start + b.length - 1;
+    let want = replica::history::seek::state_at(&b, &header, at).expect("seeks");
+    let got = replica::history::seek::state_at(&with, &header, at).expect("seeks across the clear");
+    assert_eq!(
+        public_snapshot(&got, &Redactions::default()),
+        public_snapshot(&want, &Redactions::default())
+    );
+}
+
 #[test]
 fn a3_the_event_index_holds_time_kind_node_and_actor_only() {
     let (store, _, _, _) = recorded();
