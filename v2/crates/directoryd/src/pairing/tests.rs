@@ -1366,3 +1366,68 @@ fn n3720_a_name_another_soul_of_the_world_has_is_refused_name_taken() {
     p.set_profile("acct_other", &other, &named("Oriel"))
         .expect("a retired Soul's name is free");
 }
+
+#[test]
+fn a_request_for_one_world_never_reads_another_worlds_owner() {
+    use replica::ids::{Id, Scope};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    let a = Id::new(Scope([1; 16]), 0).unwrap();
+    let zone = Id::new(Scope([3; 16]), 1).unwrap();
+    let instance = |l: u8| {
+        format!(
+            "{}-{}",
+            to_hex(&[l; 16]),
+            crate::accounts::principal_text(zone).replace(':', "-")
+        )
+    };
+    for l in [4, 5] {
+        std::fs::create_dir_all(root.join("worlds").join(instance(l))).unwrap();
+        std::fs::write(root.join("worlds").join(instance(l)).join("tokens"), "").unwrap();
+    }
+    let registry = root.join("authority.json");
+    let founder = crate::accounts::principal_text(a);
+    std::fs::write(
+        &registry,
+        serde_json::to_vec(&serde_json::json!({"format":"souls/world-authority/1",
+        "worldsRoot":root,"worlds":{"garden":{"instance":instance(4),"creator":founder},
+        "forest":{"instance":instance(5),"creator":founder}}}))
+        .unwrap(),
+    )
+    .unwrap();
+    p.authority_file = Some(registry);
+    // The world store times out on every read, as an object store does when it stalls.
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    p.current_owner_reader(Arc::new(move |_| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Err("store-unreachable".into())
+    }))
+    .unwrap();
+    let code = p
+        .ask(
+            &Ask {
+                secret_hash: sha256(b"one world"),
+                device: "waiting agent".into(),
+                label: "a new soul".into(),
+                soul: None,
+                scope: "soul".into(),
+                force: false,
+            },
+            T0,
+        )
+        .unwrap()
+        .code;
+    // Keeping the request reads no owner record; an unplaced world is refused by its own name.
+    p.ask_world(&code, "garden").unwrap();
+    assert_eq!(p.ask_world(&code, "meadow"), Err("world-unplaced"));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    // One world's authority reads that world's owner only.
+    assert_eq!(
+        p.authority(Some("garden")).err(),
+        Some("world-authority-unavailable")
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}

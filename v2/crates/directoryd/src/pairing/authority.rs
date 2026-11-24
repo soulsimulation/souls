@@ -15,6 +15,9 @@ pub(super) struct Authority {
     pub tokens: PathBuf,
     pub creator: String,
     pub generation: u64,
+    /// The registry's instance and founding creator, checked against the world's current owner record.
+    instance: String,
+    founder: String,
 }
 
 macro_rules! io_error {
@@ -163,7 +166,9 @@ fn regular(path: &Path) -> Result<(), &'static str> {
 }
 
 impl Pairing {
-    pub(super) fn authorities(&self) -> Result<Option<BTreeMap<String, Authority>>, &'static str> {
+    /// The registry as the root-owned file names it, without asking the world store: enough to know a world is
+    /// placed. Its creators are the founding ones until [`Pairing::verified`] reads the current owner.
+    fn registry(&self) -> Result<Option<BTreeMap<String, Authority>>, &'static str> {
         let Some(path) = &self.authority_file else {
             return Ok(None);
         };
@@ -205,35 +210,15 @@ impl Pairing {
             if crate::accounts::principal_from_text(creator).is_none() {
                 return Err("world-authority-invalid");
             }
-            let (creator, generation) = if let Some(read) = self.owner_reader.get() {
-                let current = read(world).map_err(|_| "world-authority-unavailable")?;
-                let expected = format!(
-                    "{}-{}",
-                    replica::encode::to_hex(&current.lineage),
-                    crate::accounts::principal_text(current.zone).replace(':', "-")
-                );
-                if expected != instance
-                    || crate::accounts::principal_text(current.founder) != creator
-                {
-                    return Err("world-authority-mismatch");
-                }
-                (
-                    current
-                        .creator
-                        .map(crate::accounts::principal_text)
-                        .unwrap_or_default(),
-                    current.generation,
-                )
-            } else {
-                (creator.to_owned(), 0)
-            };
             let tokens = root.join("worlds").join(instance).join("tokens");
             regular(&tokens)?;
             let authority = Authority {
                 world: world.clone(),
                 tokens,
-                creator,
-                generation,
+                creator: creator.to_owned(),
+                generation: 0,
+                instance: instance.to_owned(),
+                founder: creator.to_owned(),
             };
             if out.insert(world.clone(), authority.clone()).is_some()
                 || out.insert(instance.to_owned(), authority).is_some()
@@ -259,14 +244,71 @@ impl Pairing {
         Ok(Some(out))
     }
 
+    /// One registry row checked against its world's current owner record, with that owner's creator and generation.
+    /// Only this world's record is read, so a slow or failing read of another world never refuses this one.
+    fn verified(&self, mut authority: Authority) -> Result<Authority, &'static str> {
+        if let Some(read) = self.owner_reader.get() {
+            let current = read(&authority.world).map_err(|_| "world-authority-unavailable")?;
+            let expected = format!(
+                "{}-{}",
+                replica::encode::to_hex(&current.lineage),
+                crate::accounts::principal_text(current.zone).replace(':', "-")
+            );
+            if expected != authority.instance
+                || crate::accounts::principal_text(current.founder) != authority.founder
+            {
+                return Err("world-authority-mismatch");
+            }
+            authority.creator = current
+                .creator
+                .map(crate::accounts::principal_text)
+                .unwrap_or_default();
+            authority.generation = current.generation;
+        }
+        Ok(authority)
+    }
+
+    /// Every placed world, each checked against its current owner record (for the files written for all worlds).
+    pub(super) fn authorities(&self) -> Result<Option<BTreeMap<String, Authority>>, &'static str> {
+        let Some(rows) = self.registry()? else {
+            return Ok(None);
+        };
+        let mut checked: BTreeMap<String, Authority> = BTreeMap::new();
+        let mut out = BTreeMap::new();
+        for (key, row) in rows {
+            let authority = match checked.get(&row.world) {
+                Some(a) => a.clone(),
+                None => {
+                    let a = self.verified(row)?;
+                    checked.insert(a.world.clone(), a.clone());
+                    a
+                }
+            };
+            out.insert(key, authority);
+        }
+        Ok(Some(out))
+    }
+
+    /// The placed world `world` names (by name, instance or alias), checked against its own owner record only.
     pub(super) fn authority(&self, world: Option<&str>) -> Result<Option<Authority>, &'static str> {
-        match self.authorities()? {
+        match self.registry()? {
             None => Ok(None),
-            Some(rows) => rows
-                .get(world.ok_or("world-required")?)
-                .cloned()
-                .map(Some)
-                .ok_or("world-unplaced"),
+            Some(mut rows) => {
+                let row = rows
+                    .remove(world.ok_or("world-required")?)
+                    .ok_or("world-unplaced")?;
+                self.verified(row).map(Some)
+            }
+        }
+    }
+
+    /// Whether `world` is placed, from the registry alone: a pairing request is kept without reading the world
+    /// store, and its world's owner is checked when the request is approved.
+    pub(super) fn placed(&self, world: &str) -> Result<(), &'static str> {
+        match self.registry()? {
+            None => Ok(()),
+            Some(rows) if rows.contains_key(world) => Ok(()),
+            Some(_) => Err("world-unplaced"),
         }
     }
 
