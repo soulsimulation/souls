@@ -88,6 +88,58 @@ impl Frame {
     }
 }
 
+/// Where each member of a pair will stand once it has taken its place, before the pair starts (0.134 T1's accept
+/// reads a touch's reach from there). `members` are in the order the activity will hold them, each with its role
+/// and where it stands now (its node and position, `sim::index::place_of`; none when not known). The rule is
+/// [`super::Activities::pending_places`]' for members none of whom holds a stand yet: the k-th member of a role takes
+/// its role's k-th stand; the frame is set from where all of them stand, on one node, turned by the first member
+/// given a stand. A member keeps where it stands (none) when its role names no stand or none is left, when the
+/// members are not all on one node, when the frame cannot be set, or when it stands farther from the middle than its
+/// role's `within`.
+pub fn ahead(
+    members: &[(&replica::activity::Role, Option<(replica::ids::Id, Vec3)>)],
+) -> Vec<Option<Vec3>> {
+    let mut stands = Vec::new();
+    for (i, (role, _)) in members.iter().enumerate() {
+        let k = members[..i]
+            .iter()
+            .filter(|(r, _)| r.name == role.name)
+            .count();
+        stands.push(role.stands.get(k).copied());
+    }
+    let none = vec![None; members.len()];
+    let Some(pos) = members.iter().map(|m| m.1).collect::<Option<Vec<_>>>() else {
+        return none;
+    };
+    let Some(node) = pos.first().map(|p| p.0) else {
+        return none;
+    };
+    if pos.iter().any(|p| p.0 != node) {
+        return none;
+    }
+    let first = stands
+        .iter()
+        .find_map(|s| s.map(|s| s.0))
+        .unwrap_or(Vec3::ZERO);
+    let pts: Vec<Vec3> = pos.iter().map(|p| p.1).collect();
+    let Ok(f) = Frame::of(&pts, first) else {
+        return none;
+    };
+    members
+        .iter()
+        .zip(stands)
+        .zip(pts)
+        .map(|(((role, _), s), p)| {
+            let (dx, dz) = (i128::from(p.x - f.origin.x), i128::from(p.z - f.origin.z));
+            let near = role
+                .within
+                .is_none_or(|w| dx * dx + dz * dz <= i128::from(w).pow(2));
+            let (at, yaw) = s.filter(|_| near)?;
+            f.place(at, yaw).ok().map(|(p, _)| p)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
