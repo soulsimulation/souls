@@ -1032,8 +1032,12 @@ impl Forms {
             form_runner::turn(&mut steps, p.orientation)?;
         }
         // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
-        // which a seated body's legs would refuse (`resource-held`, #4143).
-        if node == body {
+        // which a seated body's legs would refuse (`resource-held`, #4143). So is a move on the thing whose seat or
+        // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
+        // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
+        // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
+        let in_its_slot = w.places.as_ref().and_then(|p| p.slots.held_by(body)) == Some(node);
+        if node == body || in_its_slot {
             steps.retain(|s| {
                 !matches!(
                     s,
