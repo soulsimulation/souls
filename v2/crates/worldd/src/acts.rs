@@ -1836,6 +1836,37 @@ fn ranked_things(
     Ok((ranked, rank))
 }
 
+/// Why slot `slot` of `on`, which argument `key` names, is not the act's to take, by the names `Forms::other_slots`
+/// gives at commit (E14): `slot-of-a-body`, `object.private` (another Soul's, #3700), `slot-unknown` (neither its
+/// entry declares it nor the world holds it as a seat). `None` when it may be.
+fn other_refused(
+    tree: &Tree,
+    kinds: &Json,
+    b: &Bodies,
+    body: Id,
+    key: &str,
+    on: Id,
+    slot: u64,
+) -> Option<Refusal> {
+    let body_of = |id: Id| {
+        tree.links_at(id)
+            .iter()
+            .find(|e| plain(tree.ty(e)) == "souls:body-of")
+            .map(|e| e.other)
+    };
+    if b.runner.controller.body(on).is_some() || body_of(on).is_some() {
+        return Some(refusal("slot-of-a-body", key));
+    }
+    let soul = body_of(body).unwrap_or(body);
+    if let Some(words) = replica::who_may::private_to(tree, on, soul) {
+        return Some(refusal("object.private", format!("{key}: who may: {words}")));
+    }
+    if b.slots.place_in(on, slot).is_none() && slot_name(tree, kinds, on, slot).is_none() {
+        return Some(refusal("slot-unknown", format!("{key}: slot {slot}")));
+    }
+    None
+}
+
 /// The name of slot `slot` (1, 2, ... in its entry's order) of `thing`, by its entry.
 fn slot_name(tree: &Tree, kinds: &Json, thing: Id, slot: u64) -> Option<String> {
     let n = tree.node(tree.handle(thing)?)?;
@@ -2334,7 +2365,11 @@ impl Acts {
                 let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
                 for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
                     if let Some(skills::form_runner::Arg::Slot(on, s)) = all.get(key) {
-                        if b.slots.holder_in(*on, *s).is_some_and(|h| h != body) {
+                        // Refused by the names the form runner's commit gives (`Forms::other_slots`, E14), here
+                        // before the needs read the slot: a body, a thing private to another, an undeclared slot.
+                        if let Some(e) = other_refused(tree, &self.kinds, b, body, key, *on, *s) {
+                            other = Some(e);
+                        } else if b.slots.holder_in(*on, *s).is_some_and(|h| h != body) {
                             taken = Some(slot_name(tree, &self.kinds, *on, *s).unwrap_or(key.clone()));
                         }
                         continue;
@@ -2570,6 +2605,9 @@ impl Acts {
                     effects.extend(sets);
                 }
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                // A slot of another thing is checked as `Forms::commit` checks it (E14): no body, nothing private
+                // to another, a slot its kind declares or a seat the world holds.
+                forms.other_slots(w, body, &entry, form, &all)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
             match r {

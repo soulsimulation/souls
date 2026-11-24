@@ -26,6 +26,14 @@ fn west_bench() -> Id {
 fn east_bench() -> Id {
     id(43)
 }
+/// A bench private to the second walker's Soul, 6 m south of the first walker: further from the lectures than
+/// either other bench, so never the one they pick.
+fn private_bench() -> Id {
+    id(44)
+}
+fn private_at() -> Vec3 {
+    south(6_000_000)
+}
 /// Both lectures 5 m north of the first walker, each bench 1.5 m west or east of them and 2 m nearer the walkers.
 fn lectures_at() -> Vec3 {
     Vec3::new(at1().x, 0, at1().z + 5_000_000)
@@ -65,6 +73,15 @@ fn furniture() -> Vec<(Id, &'static str, Vec3, BTreeMap<u64, Value>)> {
         ),
         (west_bench(), BENCH, bench_at(false), BTreeMap::new()),
         (east_bench(), BENCH, bench_at(true), BTreeMap::new()),
+        (
+            private_bench(),
+            BENCH,
+            private_at(),
+            BTreeMap::from([
+                (replica::who_may::F_OWNER, w2().to_value()),
+                (replica::who_may::F_ACCESS, Value::Uint(2)),
+            ]),
+        ),
     ]
 }
 
@@ -155,8 +172,11 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     b.add_body(humanoid(), p1)?;
     b.add_body(humanoid(), p2)?;
-    for bench in [west_bench(), east_bench()] {
-        let at = bench_at(bench == east_bench());
+    for (bench, at) in [
+        (west_bench(), bench_at(false)),
+        (east_bench(), bench_at(true)),
+        (private_bench(), private_at()),
+    ] {
         for (slot, dx) in [(1, -400_000), (2, 400_000)] {
             let place = replica::moves::Place::from_value(
                 &decode(&replica::effects::fixture_bytes(&format!(
@@ -300,6 +320,20 @@ fn e14b_a_soul_attends_the_halls_lecture_on_a_bench_seat_through_the_gateway() {
     let taken = a.act("eden:attend", Some(hall_lecture()), seat(west_bench(), 1));
     println!("E14b hall attend on a held seat: {taken:?}");
     assert_eq!(taken, Err("place-taken".to_owned()));
+    // E14's review: another thing's slot is refused through the gateway when that thing is private to another Soul,
+    // is another Soul's body, or has no such slot; nothing is taken.
+    for (on, slot, why) in [
+        (private_bench(), 1, "object.private"),
+        (w2(), 1, "slot-of-a-body"),
+        (west_bench(), 3, "slot-unknown"),
+    ] {
+        let got = a.act("eden:attend", Some(hall_lecture()), seat(on, slot));
+        println!("E14b hall attend on slot {slot} of {}: {got:?}", replica::world_model::show(on));
+        assert_eq!(got, Err(why.to_owned()));
+    }
+    let r = replay(&initial, &store);
+    assert_eq!(parent(&r, w1()), (Some(ground()), None), "nothing taken");
+    assert_eq!(parent(&r, w2()), (Some(west_bench()), Some(1)), "w2 where it sat");
     let attended = a.act("eden:attend", Some(hall_lecture()), seat(east_bench(), 1));
     println!("E14b hall attend on the east bench's left: {attended:?}");
     assert!(attended.is_ok(), "a receipt: {attended:?}");
