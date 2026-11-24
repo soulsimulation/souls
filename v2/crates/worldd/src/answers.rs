@@ -4449,6 +4449,10 @@ impl Clock {
         self.step_bodies(now);
         self.write_motion();
         at[4] = mark();
+        let diag = std::env::var_os("SOULS_S10_DIAG").is_some();
+        let sub = || if diag { measures::steady_us() } else { 0 };
+        let mut s = [0u64; 14];
+        s[0] = sub();
         // 4. Committed acts: the checks back since the last tick, then the moves taken.
         for (mut act, checks) in std::mem::take(&mut self.checked) {
             let Some(id) = Id::new(self.lineage, act.id) else {
@@ -4520,23 +4524,45 @@ impl Clock {
                 }
             }
         }
+        s[1] = sub();
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
         self.undos(now);
         self.wears(now);
+        s[2] = sub();
         // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
         self.set_downs(now);
         self.crews_parts(now);
+        s[3] = sub();
         self.start_forms(now);
+        s[4] = sub();
         self.start_moves(now);
+        s[5] = sub();
         self.follow_orders(now);
+        s[6] = sub();
         self.write_forms(now);
+        s[7] = sub();
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
+        s[8] = sub();
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
             w.offer_map(b, self.replica.version());
+        }
+        s[9] = sub();
+        if diag {
+            static SUM: std::sync::Mutex<([u64; 9], u64)> = std::sync::Mutex::new(([0; 9], 0));
+            let mut g = SUM.lock().unwrap_or_else(|e| e.into_inner());
+            for i in 0..9 {
+                g.0[i] += s[i + 1].saturating_sub(s[i]);
+            }
+            g.1 += 1;
+            if g.1 % 200 == 0 {
+                let names = ["acts", "edits", "set-downs", "start_forms", "start_moves", "follow_orders", "write_forms", "set_loose", "offer_map"];
+                let line: Vec<String> = names.iter().zip(g.0).map(|(n, t)| format!("{n} {:.2}", t as f64 / g.1 as f64 / 1000.0)).collect();
+                eprintln!("s10-diag commit ms/tick over {} ticks: {}", g.1, line.join(", "));
+            }
         }
         at[5] = mark();
         remember_orders(&mut self.order_records, &self.effects);
