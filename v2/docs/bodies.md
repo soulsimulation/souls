@@ -169,6 +169,15 @@ by the intent, and is answered once, at its end: a receipt naming both when done
 (`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
 sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
 
+A form's run on the same body yields to its Soul's own walk (intents rule 10). A run whose walk is running when the
+Soul's walk takes the claim on its legs ends `claim-taken` in the next tick, as one waiting for its plan does; a run
+in a hand move is left (`left`) at the move's phase end. Only a running walk holds a route claim: a run that awaited
+its plan with one and then goes straight to a move (an approach with no way) gives it back (S11, 0.133).
+
+A form walker asks the planner for its line once while it is on the same floor (S11): pushed along by the bodies
+round it while it waits, it keeps its question, and the line that comes back is followed from where it now is, or
+asked again when it is pushed off it. A walk's place and legs are still asked for the body exactly as it stands.
+
 C14 (#3442): a walk to a node that is neither a point nor a seat (a room, the square, an area) goes to a free standing
 spot in it: its middle by E2's shared library (`replica::select`), granted by N9's table, the same every run. A walk,
 sit or lie with ranked fallbacks (other targets of the same form) takes the first that holds: a sit's or a lie's

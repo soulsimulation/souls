@@ -1420,6 +1420,16 @@ impl Forms {
         };
         let body = fr.body;
         let long = fr.long.is_some();
+        // The route claim a plan was awaited with (`Next::Planning`) belongs to the walk: a step that is not a walk
+        // (an approach with no way goes straight to its move) gives it back, so a Soul's own walk during that move
+        // leaves the run at the move's phase end, as rule 10 says, and a move that moves the body is not its own rival
+        // (S11 review).
+        if !matches!(next, Next::Walk(_) | Next::Planning | Next::Sleep)
+            && !self.walks.iter().any(|r| r.body == body)
+            && let Some(d) = fr.walk.take()
+        {
+            let _ = w.controller.release(body, d);
+        }
         match next {
             Next::Sleep => {}
             Next::Planning => {
@@ -1786,6 +1796,29 @@ impl Forms {
                 continue;
             }
             self.wake(w, run, Woke::Planning, now);
+        }
+        // A run whose walk is running (an entry in the walks) and lost its claim on the legs (its Soul's own walk took
+        // them, intents rule 10) ends `claim-taken`, as one waiting for its plan does (S11): its walk's inputs went
+        // nowhere, it asked no way, so C21's watch never saw it, and the run stood at its walk step, its act never
+        // answered. A run in any other step holds no route claim (`handle` gives it back), so a move in progress is
+        // left at its phase end instead.
+        let walking: BTreeSet<Id> = self.walks.iter().map(|r| r.body).collect();
+        let lost: Vec<RunId> = self
+            .runs
+            .iter()
+            .filter(|(run, fr)| {
+                !self.planning.contains(run)
+                    && walking.contains(&fr.body)
+                    && fr.walk.is_some_and(|driver| {
+                        !w.controller
+                            .claims(fr.body)
+                            .is_some_and(|c| c.running().contains_key(&driver))
+                    })
+            })
+            .map(|(run, _)| *run)
+            .collect();
+        for run in lost {
+            self.finish(w, run, name("claim-taken"), now);
         }
         if self.walks.is_empty() {
             return;

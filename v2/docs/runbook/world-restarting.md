@@ -26,8 +26,19 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   stream is degraded, no viewers: <fault>; try <n> refused, the next in <ms> ms` at each try, and `health.json` has
   `"stream":{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` (`serving` once it recovers). Fix the store or
   the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait in
-  memory until the stream catches up. A stream that ends after serving says `"state":"stopped"` with its fault; a
-  restart starts it again.
+  memory until the stream catches up. A stream that ends after serving (a local fault, such as the disk) says
+  `"state":"stopped"` with its fault; a restart starts it again.
+- **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
+  its words, its recovery objects and the chain's head are written there first: the parts under `views/`, the recovery
+  chain in the spool `<world>/stream-backup/` (never served, because it holds the world's records). The store gets
+  them from the backup thread, behind the stream, so a stall or refusal delays only the backup. The journal says
+  `worldd: the public stream's backup is behind, viewers unaffected: <fault>; pass <n> refused, <k> objects wait, the
+  next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
+  `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
+  holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
+  log is. A restart, even after a SIGKILL, recovers the chain from the spool's head, so viewers keep the exact bytes
+  they were shown. Do not delete `stream-backup/` on a running machine. A new machine has none and recovers from the
+  store.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a

@@ -1213,13 +1213,21 @@ fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
     stream_until("serving");
+    // Its backup puts the recovery chain's head last (R15).
+    let end = Instant::now() + Duration::from_secs(30);
+    while !s
+        .paths()
+        .iter()
+        .any(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+    {
+        assert!(Instant::now() < end, "the stream's backup wrote its head");
+        std::thread::sleep(Duration::from_millis(100));
+    }
     w.kill();
-    assert!(
-        s.paths().iter().any(|p| p.contains("/stream-recovery/")),
-        "the first start wrote its stream's recovery objects"
-    );
-    // As on a new machine: no views, so the stream recovers from the store, and the store refuses those reads.
+    // As on a new machine: no views and no spool, so the stream recovers from the store, and the store refuses those
+    // reads.
     std::fs::remove_dir_all(dir.join("views")).expect("views");
+    std::fs::remove_dir_all(dir.join("stream-backup")).expect("the stream's spool");
     let _ = std::fs::remove_file(&health);
     s.refuse_reads(usize::MAX, 403, "stream-recovery");
     let mut w = serve_env(&dir, &socket, &args, &env);
@@ -1241,6 +1249,264 @@ fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it
     assert!(pointer.is_file(), "the pointer is back");
     let (_, files) = served_stream(&dir);
     assert!(!files.is_empty(), "it names a valid stream");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R15 (0.133): viewers read the public stream from the machine's disk, and the store is its backup only. A 60 s store
+/// stall mid-run (every write's answer lost, every read held past the client's timeout) never delays a viewer or the
+/// world: the newest part or quiet mark on disk stays within 2 s of the world's time throughout, a Soul's walks are
+/// answered, and `health.json` says the backup is degraded while the stream serves. Once the store answers, the backup
+/// catches up by itself, with no restart. A SIGKILL while the backup is behind restarts on the spool's exact bytes;
+/// a new machine (no views, no spool) recovers the same stream from the store alone, with the log's state hash.
+// A real process on the real clock: the stall, the back-off and the pointer's times are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
+    use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
+    use replica::stream::Pointer;
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+    const STALL: Duration = Duration::from_secs(60);
+    let d = scratch("r15");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r15", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    let health_says = |want: &str| -> String {
+        let end = Instant::now() + Duration::from_secs(150);
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(want) {
+                return h;
+            }
+            assert!(Instant::now() < end, "no {want} in health.json: {h}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let stall = |on: bool| {
+        if on {
+            s.fail_writes(usize::MAX, Fail::Lost);
+            s.stall_reads(usize::MAX, Duration::from_secs(6), "");
+        } else {
+            s.fail_writes(0, Fail::Lost);
+            s.stall_reads(0, Duration::ZERO, "");
+        }
+    };
+    // The store's head is the spool's: the backup is current.
+    let backed_up = || {
+        // The spool's one head, `stream-recovery/<stream>/head`; its objects come and go as they are backed up.
+        let spool = dir.join("stream-backup");
+        let mut head = None;
+        let mut todo = vec![spool.clone()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).expect("the spool").flatten() {
+                let p = e.path();
+                if p.file_name().is_some_and(|n| n == "head") {
+                    head = Some(p);
+                } else if p.is_dir() && !p.ends_with("objects") {
+                    todo.push(p);
+                }
+            }
+        }
+        let head = head.expect("the spool's head");
+        let key = head
+            .strip_prefix(&spool)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let bucket = supervisor::bucket::Bucket::parse(&spec, |k| {
+            env.iter()
+                .find(|(n, _)| *n == k)
+                .map_or(String::new(), |(_, v)| (*v).to_owned())
+        })
+        .expect("the store");
+        use directoryd::directory::store::Store;
+        let end = Instant::now() + Duration::from_secs(150);
+        loop {
+            let there = bucket.get(&key).ok().flatten().map(|o| o.bytes);
+            if there.is_some() && there == std::fs::read(&head).ok() {
+                return;
+            }
+            assert!(Instant::now() < end, "the store's head is the spool's");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    };
+    // A Soul walks back and forth until told to stop: each walk answered is the world going on.
+    let seq = Arc::new(AtomicU64::new(0));
+    let walker = |stop: Arc<AtomicBool>| {
+        let (socket, seq) = (socket.clone(), Arc::clone(&seq));
+        std::thread::spawn(move || {
+            let mut c = connect(&socket);
+            let mut answered = 0u64;
+            while !stop.load(Ordering::Relaxed) {
+                let n = seq.fetch_add(1, Ordering::Relaxed) + 1;
+                let x = if n % 2 == 0 { -40 } else { -34 };
+                walk(&mut c, body, root.scope(), ground, n, x, 30);
+                assert_eq!(answer(&mut c).0, 1, "walk {n} ends in a receipt");
+                answered += 1;
+            }
+            answered
+        })
+    };
+    // What a viewer sees: how far the newest part or quiet mark on disk is behind the world's time, sampled every
+    // 100 ms; the most, µs.
+    let worst = Arc::new(AtomicI64::new(0));
+    let looking = Arc::new(AtomicBool::new(true));
+    let viewer = {
+        let (dir, worst, looking) = (dir.clone(), Arc::clone(&worst), Arc::clone(&looking));
+        std::thread::spawn(move || {
+            let mut samples = 0u64;
+            while looking.load(Ordering::Relaxed) {
+                let world = json::parse(
+                    &std::fs::read_to_string(dir.join("views/world.json")).unwrap_or_default(),
+                );
+                let stream = world.ok().and_then(|w| {
+                    w.get("stream")
+                        .and_then(json::Value::str)
+                        .map(str::to_owned)
+                });
+                if let Some(p) = stream
+                    .and_then(|s| std::fs::read(dir.join(s).join("pointer")).ok())
+                    .and_then(|b| Pointer::read(&b).ok())
+                {
+                    let wall_ms = i64::try_from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis(),
+                    )
+                    .unwrap();
+                    let world_now = p.anchor_world + (wall_ms - p.anchor_wall_ms as i64) * 1000;
+                    let shown = p.newest_to.max(p.quiet_until).unwrap_or(p.anchor_world);
+                    worst.fetch_max(world_now - shown, Ordering::Relaxed);
+                    samples += 1;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            samples
+        })
+    };
+
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    health_says("\"stream\":{\"state\":\"serving\"}");
+    health_says("\"stream_backup\":{\"state\":\"current\"}");
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    std::thread::sleep(Duration::from_secs(3));
+    backed_up();
+    let before = worst.swap(0, Ordering::Relaxed);
+    println!(
+        "viewer delay before the stall: at most {} ms",
+        before / 1000
+    );
+
+    // The stall: the stream serves on, the backup falls behind and says so.
+    stall(true);
+    let began = Instant::now();
+    let said = w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+    assert!(said.contains("store-unreachable"), "{said}");
+    let h = health_says("\"stream_backup\":{\"state\":\"degraded\"");
+    assert!(h.contains("\"stream\":{\"state\":\"serving\"}"), "{h}");
+    std::thread::sleep(STALL.saturating_sub(began.elapsed()));
+    let h = health_says("\"stream_backup\":{\"state\":\"degraded\"");
+    let behind: u64 = h
+        .split("\"behind\":")
+        .nth(1)
+        .and_then(|r| r.split('}').next()?.parse().ok())
+        .unwrap_or(0);
+    let during = worst.swap(0, Ordering::Relaxed);
+    println!(
+        "viewer delay during the {} s stall: at most {} ms; {behind} objects wait",
+        STALL.as_secs(),
+        during / 1000
+    );
+    assert!(
+        during < 2_000_000,
+        "a viewer is never 2 s behind: {during} µs"
+    );
+    assert!(behind > 0, "the backup waits on the store: {h}");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+
+    // The store answers: the backup catches up by itself.
+    stall(false);
+    let answered = Instant::now();
+    w.line("worldd: the public stream's backup caught up after ");
+    health_says("\"stream_backup\":{\"state\":\"current\"}");
+    backed_up();
+    println!(
+        "the backup caught up {} ms after the store answered",
+        answered.elapsed().as_millis()
+    );
+    stop.store(true, Ordering::Relaxed);
+    let walks = walking.join().expect("the walker");
+    println!("{walks} walks answered across the stall");
+    assert!(walks > 3, "the world went on: {walks}");
+    let after = worst.swap(0, Ordering::Relaxed);
+    assert!(after < 2_000_000, "nor while it catches up: {after} µs");
+
+    // A SIGKILL while the backup is behind: the restart publishes on from the spool's exact bytes.
+    stall(true);
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    w.line("worldd: the public stream's backup is behind, viewers unaffected: ");
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::Relaxed);
+    walking.join().expect("the walker");
+    let (_, published) = served_stream(&dir);
+    w.kill();
+    stall(false);
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let stop = Arc::new(AtomicBool::new(false));
+    let walking = walker(Arc::clone(&stop));
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::Relaxed);
+    walking.join().expect("the walker");
+    let (_, files) = served_stream(&dir);
+    for (path, bytes) in &published {
+        assert_eq!(
+            files.get(path),
+            Some(bytes),
+            "published bytes survive the kill"
+        );
+    }
+    backed_up();
+    looking.store(false, Ordering::Relaxed);
+    println!("{} viewer samples", viewer.join().expect("the viewer"));
+    w.kill();
+
+    // A new machine: no views, no spool. The stream recovers from the store alone, and the world's state is its log's.
+    let state = last_state(&dir.join("log"));
+    std::fs::remove_dir_all(dir.join("views")).expect("views");
+    std::fs::remove_dir_all(dir.join("stream-backup")).expect("the spool");
+    let w = serve_env(&dir, &socket, &args, &env);
+    let started = w.line("worldd: started at tick");
+    assert!(started.ends_with(&format!("state {state}")), "{started}");
+    w.line("listening");
+    health_says("\"stream\":{\"state\":\"serving\"}");
+    let (_, again) = served_stream(&dir);
+    let mut same = 0;
+    for (path, bytes) in &again {
+        if let Some(b) = files.get(path) {
+            assert_eq!(b, bytes, "the store's chain is what viewers were shown");
+            same += 1;
+        }
+    }
+    println!("{same} files recovered from the store byte for byte");
     w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
