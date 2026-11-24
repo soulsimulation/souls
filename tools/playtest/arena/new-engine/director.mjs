@@ -26,8 +26,11 @@ export const mailboxSoul = (soul) => String(soul).replace(/^s_/, 'soul-');
 export const NO_NEW_FORM = { 'sit-ground': 'sitting on the ground', plan: 'a multi-step plan (out of 0.135)', 'walk-to': 'a walk to a point' };
 
 /** An old-client step in the new client's words: `act "walk to <words>"` or `act walk:<id>` → `act ?<words>` (found in
- *  the Soul's copy); `--wait <n>` → `--wait`; `{{prev.found[i].act}}` → the found thing's id (the new client's `find`
- *  names things, not acts: an id alone is a walk there). A verb with no new-engine form → `{ skip }`. */
+ *  the Soul's copy); `--wait <n>` → `--wait`; `{{prev.found[i].act}}` → `!` and the found thing's id, read as that
+ *  thing's own offer (`offerOf`: the new client's `find` names things, not acts, and an id alone is a walk there). Every
+ *  act waits for its ending: the old client's `act` answered with the world's verdict, the new one's only sends it
+ *  unless it waits, and a scripted seat closes its owner's message by that answer. A verb with no new-engine form →
+ *  `{ skip }`. */
 export function newWords(step) {
   const w = [...step];
   const verb = w[0] === 'act' ? String(w[1] ?? '').split(':')[0] : w[0];
@@ -38,7 +41,15 @@ export function newWords(step) {
   }
   const i = w.indexOf('--wait');
   if (i >= 0 && /^\d+$/.test(w[i + 1] ?? '')) w.splice(i + 1, 1);
-  return w.map((x) => String(x).replace(/\{\{prev\.found\[(\d+)\]\.act\}\}/g, '{{prev.found[$1].id}}'));
+  if (w[0] === 'act' && !w.includes('--wait')) w.push('--wait');
+  return w.map((x) => String(x).replace(/\{\{prev\.found\[(\d+)\]\.act\}\}/g, '!{{prev.found[$1].id}}'));
+}
+
+/** The act a thing offers of its own, as the old `find` gave it (`sit:<id>` for a bench): the first of `inspect`'s
+ *  offers that is not a plain walk there; the id alone (a walk) when it offers nothing else. */
+export async function offerOf(v2, id) {
+  const offers = (await v2.cli('inspect', id)).offers ?? [];
+  return offers.find((o) => o.name !== 'walk' && o.act)?.act ?? id;
 }
 
 /** A place path from a node's frames: the place names of its parents, innermost first. */
@@ -118,7 +129,7 @@ export function newEngineModules({ log = () => {} } = {}) {
           words = words.map((x) => x.replaceAll('{id}', m.id));
           const bound = bindPrev(words, prev);
           if (bound.error) { ok = false; note({ message: m.id, step: words, error: bound.error }); break; }
-          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w)));
+          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w.startsWith('!') ? offerOf(v2, w.slice(1)) : w)));
           const r = await v2.cli(...words);
           prev = r;
           const refused = r?.ok === false || r?.phase === 'refused';
