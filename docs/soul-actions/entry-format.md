@@ -174,7 +174,9 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
 `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
-stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+stops). A ride's seat is placed where it waits for riders at its stop: no more than the body's standing reach (2.06 m)
+above the stop's stand point and a step from it, because Engine v2 does not move a seat along the track and refuses a
+seat above that reach (`place-out-of-reach`). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
 (SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a

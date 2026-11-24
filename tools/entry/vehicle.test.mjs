@@ -72,3 +72,19 @@ test('the vehicle sections are meaning: they are in the hash; a look beside is n
   const look = copy(e); look.looks = {model: 'look:bike'};
   assert.equal(F.hashKinds([look]).get(e.kind).hash, base.hash);
 });
+
+test('E15: each cable car cabin is boarded and left where it waits, at a stop of the ride, within standing reach', () => {
+  // The standard body's standing reach (v2 sim::slots STANDARD_REACH, today's seatReach): a seat above it is refused.
+  const REACH_MM = 2060;
+  const car = load('content/kinds/rides/cable_car.json');
+  assert.deepEqual(F.validateEntry(car), []);
+  const cabins = car.looks.shape.shapes.filter(s => s.role === 'gondola' && s.round);
+  for (const seat of car.ride.seats) {
+    const slot = car.slots[seat], stand = car.points[slot.stand].at_mm, [x, y, z] = slot.at_mm;
+    assert.ok(car.ride.stops.includes(slot.stand), `${seat} is left at a stop of the ride, not at ${slot.stand}`);
+    assert.ok(y - stand[1] >= 0 && y - stand[1] <= REACH_MM, `${seat} is ${y - stand[1]} mm above its stand point`);
+    assert.ok(Math.hypot(x - stand[0], z - stand[2]) <= 1500, `${seat} is within a step of its stand point`);
+    // the seat is inside a drawn cabin, so a body sits in the cabin it is drawn in
+    assert.ok(cabins.some(c => [0, 1, 2].every(i => Math.abs(slot.at_mm[i] - c.at[i]) <= c.size[i] / 2)), `${seat} is in a cabin`);
+  }
+});
