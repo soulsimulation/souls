@@ -5,6 +5,7 @@ import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { playSpeed, v2History } from './v2-engine/history.ts';
+import { CABIN } from './v2-engine/bridge.ts';
 import { momentTick, seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
@@ -131,6 +132,7 @@ import {cameraGround,cameraGroundSampler,clearShotEye} from './WorldCameraGround
 import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
+import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
@@ -701,7 +703,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
       const ref=reference as {contract?:unknown;hash?:unknown;rulesVersion?:unknown}|undefined;
       const mismatch=reference!==undefined&&ref?.rulesVersion!==chunk.take.rulesVersion;
-      const bare=history&&!v2History();  // a moved world's past is drawn in its current scenery: a seek never tears the world down
+      // a moved world's past (its history export) and a world drawn from its stream (W2) have no old scenery to name: their
+      // past is drawn in the same scenery as their live view (the current layout, or the stream's ground), so a seek never
+      // tears the world down; only an old-engine recording with no reference shows people on plain ground
+      const bare=history&&!v2History()&&!streamBound();
       const key=reference===undefined?(bare?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
       if(key===sceneKey&&(sceneSettled||now<sceneRetryAt))return sceneSettled;
       const request=++sceneRequest;sceneKey=key;sceneRetryAt=Infinity;sceneSettled=false;initialGate?.cancel();setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
@@ -992,7 +997,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // rider, and a god attraction's carrier gets a car drawn at its twin, unless the thing has its own cars (#2198, below)
       if(refresh){if(records!==carrierRecords){carrierRecords=records;carrierIds=recordedCarriers(records);}/* #1574: records is a fresh object per take, never edited in place */rideCars=entityLayer.active&&!expansion?entityLayer.rideCars():[];rideCarWheels=entityLayer.active&&!expansion?entityLayer.rideCarWheels():new Map();rideWheels=entityLayer.active&&!expansion?entityLayer.rideWheels():new Map();}
       {const framed=new Set<string>([...(expansion?['eden-balloon']:[]),...(entityLayer.active&&!expansion?rideNames??[]:[])]),more=carrierPoses([...new Set([...carrierIds,...rideCars])],at.entities as Record<string,{p?:readonly number[];yaw?:number}|undefined>,framed);
-       rideCarriers.push(...more);const cars=new Set(rideCars);rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
+       rideCarriers.push(...more);const cars=new Set(rideCars),ownCars=new Set(rideWheels.values());for(const id of carrierIds)if(records[id]?.def===CABIN&&!ownCars.has(id.split('#')[0]))cars.add(id);/* N14: a seat that moves with its cabin gets a car, unless its ride has its own (a big wheel's gondolas) */rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
        // #2198: a big wheel's ride goes round in one of its own gondolas: the wheel turns that gondola to it once it leaves home
        for(const [cid,thing] of rideWheels){const c=more.find(x=>x.id===cid),home=(records[cid] as {carrier?:{home?:readonly number[]}}|undefined)?.carrier?.home;entityLayer.wheelRide(thing,c?{p:c.p,aloft:!!home&&Math.hypot(c.p[0]-home[0],c.p[1]-home[1],c.p[2]-home[2])>0.05}:null);}}
       const cards = refresh ? cardsAt(s.plays, at.tick) : null;
@@ -1296,6 +1301,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; return; }
       down = null;
       if (entityLayer.active && godFeature('flags') && (e.altKey || flagModeRef.current)) return;  // a flag drop (onFlagClick), not a selection: no place card over the god panel
+      if (buildTakesClicks()) return;  // 0.133 item 6: the creator panel's Build places or selects (god-ui/BuildBar.tsx), not a card
       const target=hover.pick(e.clientX,e.clientY);
       if(touch&&target?.kind==='soul'&&controlsApi.current?.flyToSoul(target.id,{chip:true}))return;  // #892: one tap follows (the card's flight)
       if(touch&&(!target||target.kind==='place')&&(context.current.cameraMode==='follow'||chipFlight())){setPlaceCard(null);soulFlight=null;rts.flyToGround(e);return;}  // #892: a tap on the ground frees the camera there

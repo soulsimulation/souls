@@ -1211,7 +1211,11 @@ impl Bodies {
         // Preserve C19's stable request order and nearest currently free slot; each distance is keyed to that slot.
         sits.sort_by_key(|s| (s.1, s.2));
         for (id, body, thing, stance) in sits {
-            let slot = self.slots.free(&self.runner.controller, body, thing);
+            // A slot whose cabin is away from its own stop is not free now (N14).
+            let slots = &self.slots;
+            let slot = slots.free_unless(&self.runner.controller, body, thing, &|s| {
+                !slots.at_own_stop(thing, s, now)
+            });
             let reach = Reached {
                 cache: &self.reached,
                 order: Some(id),

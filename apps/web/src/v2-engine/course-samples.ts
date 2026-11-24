@@ -9,7 +9,8 @@ export const COURSE_STEP_US = 100_000;
  *  µs; throws by name. */
 export type CourseAt = (field: Uint8Array, t: bigint) => ArrayLike<bigint>;
 
-/** Places by node id, flat `[t µs, x, y, z µm, ...]`, in time order. */
+/** Places by node id, flat `[t µs, x, y, z µm, ...]`, in time order; a seat that moves with its cabin (N14) by
+ *  [`seatKey`]. */
 export type CoursePlaces = Record<string, number[]>;
 
 /** At most this many places a node, the newest (an hour at COURSE_STEP_US). A generation's first part runs from world
@@ -20,20 +21,26 @@ export const COURSE_MAX_PLACES = 36_000;
 /** The places of every node with a course from `from` to `to` (world µs, both ends), `step` apart, the newest
  *  COURSE_MAX_PLACES of them. A node whose course the replica refuses is left out (the page then draws it where it was
  *  placed). */
-export function coursePlaces(courseAt: CourseAt, nodes: Iterable<{ id: string; course?: Uint8Array }>, from: number, to: number,
+/** N14: the key of slot `slot`'s places of node `id` (a ride's seat that moves with its cabin). */
+export const seatKey = (id: string, slot: number) => `${id}#${slot}`;
+
+export function coursePlaces(courseAt: CourseAt, nodes: Iterable<{ id: string; course?: Uint8Array; seats?: Record<number, Uint8Array> }>, from: number, to: number,
   step = COURSE_STEP_US): CoursePlaces {
   const out: CoursePlaces = {};
   if (!(to >= from) || !Number.isFinite(from) || !Number.isFinite(to) || !(step > 0)) return out;
   const times: number[] = [];
   for (let t = Math.max(Math.floor(from / step), Math.ceil(to / step) - COURSE_MAX_PLACES) * step; t < to; t += step) times.push(t);
   times.push(to);
-  for (const n of nodes) {
-    if (!n.course) continue;
+  const one = (key: string, course: Uint8Array) => {
     try {
       const flat: number[] = [];
-      for (const t of times) { const v = courseAt(n.course, BigInt(Math.floor(t))); flat.push(t, Number(v[0]), Number(v[1]), Number(v[2])); }
-      out[n.id] = flat;
+      for (const t of times) { const v = courseAt(course, BigInt(Math.floor(t))); flat.push(t, Number(v[0]), Number(v[1]), Number(v[2])); }
+      out[key] = flat;
     } catch { /* a course the replica refuses is not moved */ }
+  };
+  for (const n of nodes) {
+    if (n.course) one(n.id, n.course);
+    for (const [slot, c] of Object.entries(n.seats ?? {})) one(seatKey(n.id, Number(slot)), c);
   }
   return out;
 }

@@ -427,22 +427,87 @@ fn a_second_thing_in_a_held_slot_is_left_out_of_it_and_reported() {
 }
 
 #[test]
-fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
-    // A step between two surfaces of one level (the Mars campus's Chiba deck) once refused the whole import (link-self).
+fn a_stair_from_a_floor_to_itself_is_walked_as_that_floor() {
+    // A flight between two pieces of one storey (the Mars campus's Chiba deck) can be no link (link-self): it becomes
+    // the floor's surfaces, split halfway where its ends are apart (16 mm), and counts as the flight it is. One rising
+    // more than a step is noted, not linked.
+    let stair = r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900}"#;
     let text = SMALL.replace(
-        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900}"#,
-        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900},
-     {"id": "step", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 900, "y0": 2900, "y1": 2916}"#,
+        stair,
+        &format!(
+            r#"{stair},
+     {{"id": "step", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 680, "y0": 2900, "y1": 2916}},
+     {{"id": "level", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [1000, 0]], "width": 680, "y0": 2900, "y1": 2900}},
+     {{"id": "high", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 680, "y0": 2900, "y1": 3200}}"#
+        ),
     );
     assert_ne!(text, SMALL);
     let im = load(&text).expect("loads");
     assert_eq!(
         im.notes,
-        vec!["e_house: a stair on floor 1 to itself, not linked".to_owned()]
+        vec![
+            "e_house: a stair on floor 1 to itself rising more than a step, not linked".to_owned()
+        ]
+    );
+    assert_eq!(im.floor_flights, (2, 3));
+    let surfaces = match im
+        .tree
+        .node(im.tree.handle(im.nodes["e_house/floor-1"]).unwrap())
+        .unwrap()
+        .fields()
+        .get(&import_eden::F_SURFACES)
+    {
+        Some(Value::Array(a)) => a.clone(),
+        other => panic!("{other:?}"),
+    };
+    // The floor's own surface, then the step's two halves (2900 to the middle, 2916 from it) and the level flight,
+    // each 680 + 2 × 360 mm wide.
+    let row = |k: usize| format!("{:?}", surfaces[k]);
+    assert_eq!(surfaces.len(), 4);
+    assert!(
+        row(1).contains("Uint(2900)") && row(1).contains("Uint(250)"),
+        "{}",
+        row(1)
+    );
+    assert!(
+        row(2).contains("Uint(2916)") && row(2).contains("Uint(250)"),
+        "{}",
+        row(2)
+    );
+    assert!(
+        row(3).contains("Uint(700)") && row(3).contains("Nint(699)"),
+        "{}",
+        row(3)
     );
     let (rows, ..) = count(&im);
-    let stairs = rows.iter().find(|r| r.what == "stairs (links)").unwrap();
-    assert_eq!(stairs.tree, 1);
+    let get = |w: &str| rows.iter().find(|r| r.what == w).unwrap().tree;
+    assert_eq!(get("stairs (links)"), 3);
+    assert_eq!(get("floor surfaces"), 2);
+}
+
+#[test]
+fn a_window_in_no_rooms_wall_is_the_nearest_rooms() {
+    // The Mars kitchen's serving hatch: an outer wall's window naming no room is the window of the room nearest it.
+    let text = SMALL.replace(
+        r#"{"id": "window-1", "kind": "window", "at": [-2000, -3000], "yaw": 180000, "width": 1000, "height": 1250, "sill": 900, "level": 0, "from": "kitchen", "fromWall": true, "inRoom": [0, 0, -3000, 180000]}"#,
+        r#"{"id": "window-1", "kind": "window", "at": [3000, 4000], "yaw": 90000, "width": 3070, "height": 1260, "sill": 1370, "level": 0}"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    assert!(im.notes.is_empty(), "{:?}", im.notes);
+    assert_eq!(parent_key(&im, "e_house/window-1"), "e_house/hall");
+    let h = im.tree.handle(im.nodes["e_house/window-1"]).unwrap();
+    let p = im.tree.node(h).unwrap().place().unwrap().position;
+    // The hall's origin is (2000, 100, 0) in the house: the hatch is 1000 mm east and 4000 mm south of it.
+    assert_eq!((p.x, p.y, p.z), (1_000_000, 0, 4_000_000));
+    let (rows, ..) = count(&im);
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.what == "windows (nodes)")
+            .unwrap()
+            .tree,
+        1
+    );
 }
 
 /// A thing that names another kind's entry (field 27, from its world's map: a Mars sofa borrows `eden:sofa`) is found

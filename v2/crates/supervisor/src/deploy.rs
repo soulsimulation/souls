@@ -1084,6 +1084,21 @@ impl Deploy<'_> {
         build_path(self.root, build)
     }
 
+    /// The rehearsal alone (`deploy --rehearse-only`): `new` on a scratch copy of the world, as [`Deploy::run`]
+    /// begins. It reads neither the store nor the pin, restarts nothing and writes only under `rehearsals/`.
+    pub fn rehearse(&self, new: &[u8], probe: &mut Probe) -> Result<Rehearsal, String> {
+        // Short, so its socket's path fits (104 bytes on macOS): one rehearsal of a build at a time on a machine.
+        let scratch = self.root.join("rehearsals").join(&to_hex(new)[..16]);
+        rehearse(
+            &self.path(new),
+            &state_path(self.root, &self.world),
+            &scratch,
+            self.window,
+            &self.canary,
+            probe,
+        )
+    }
+
     /// Rehearses `new`, pins it, restarts the world and watches it; rolls back to the build it replaced on a fault.
     pub fn run(
         &self,
@@ -1099,16 +1114,7 @@ impl Deploy<'_> {
             Ok((b, _)) => b,
             Err(e) => return (Ended::NotDeployed { why: e }, tl, None),
         };
-        // Short, so its socket's path fits (104 bytes on macOS): one rehearsal of a build at a time on a machine.
-        let scratch = self.root.join("rehearsals").join(&to_hex(new)[..16]);
-        let r = match rehearse(
-            &self.path(new),
-            &state,
-            &scratch,
-            self.window,
-            &self.canary,
-            probe,
-        ) {
+        let r = match self.rehearse(new, probe) {
             Ok(r) => r,
             Err(why) => {
                 note(format!("rehearsal failed: {why}"));
@@ -1286,6 +1292,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The fake build of the catch-up test: this test binary, run as that test's child.
+    const CHILD: &str = "SOULS_REHEARSAL_CATCH_UP_CHILD";
+    const NAME: &str = "deploy::tests::a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused";
+
     /// 0.134.0: a quiet world's copy caught its clock up for longer than a tick's wait before it answered the first
     /// fed intent; every later answer then counted for the tick after it and the last was never waited for, so a
     /// build that ended all 192 was refused `rehearsal.unanswered: 1 of 192`. The first answers have the start bound,
@@ -1293,8 +1303,6 @@ mod tests {
     #[test]
     fn a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused() {
         use std::os::unix::fs::PermissionsExt;
-        const CHILD: &str = "SOULS_REHEARSAL_CATCH_UP_CHILD";
-        const NAME: &str = "deploy::tests::a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused";
         if let Some(sock) = std::env::var_os(CHILD) {
             // The fake build: serves the socket, answers nothing for `delay` (catching up), then ends each intent.
             let delay = std::env::var("SOULS_REHEARSAL_DELAY_MS").unwrap();
@@ -1378,6 +1386,93 @@ mod tests {
             "a copy that never answers is still refused"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `deploy --rehearse-only`: the rehearsal alone passes or fails as a deploy's would, and moves no pin, restarts
+    /// nothing and writes nothing outside `rehearsals/`: the world's folder, its build and the store stay as they were.
+    #[test]
+    fn a_rehearsal_alone_moves_no_pin_and_writes_only_its_scratch() {
+        use directoryd::directory::store::Memory;
+        use std::os::unix::fs::PermissionsExt;
+        fn files(dir: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else if p.is_file() {
+                    // Not the scratch copy's socket.
+                    out.insert(p.clone(), std::fs::read(&p).unwrap());
+                }
+            }
+        }
+        // Short: the scratch socket, `<root>/rehearsals/<16 hex>/gateway.sock`, must fit 104 bytes on macOS.
+        let root = std::env::temp_dir().join(format!("ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let world = World {
+            lineage: [7; 16],
+            zone: Id::new(Scope([8; 16]), 1).unwrap(),
+        };
+        let state = state_path(&root, &world);
+        std::fs::create_dir_all(&state).unwrap();
+        // The import's part, then two ticks that each answered one intent.
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&state)).unwrap(), 1).unwrap();
+        log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+            .unwrap();
+        for seq in 1..=2 {
+            let intent = Value::Map(BTreeMap::from([(2, Value::Uint(seq))]));
+            let row = Value::Map(BTreeMap::from([(5, intent)]));
+            let part = Value::Map(BTreeMap::from([(ANSWERED, Value::Array(vec![row]))]));
+            log.append(encode(&part).unwrap()).unwrap();
+        }
+        log.wait_durable(3).unwrap();
+        drop(log.close());
+        let (old, new) = (crate::build_hash(b"old"), crate::build_hash(b"new"));
+        let store = Memory::default();
+        set_pin(&store, &world, &old).unwrap();
+        // The new build staged by hash: the catch-up test's fake, answering at once.
+        let build = build_path(&root, &new);
+        std::fs::create_dir_all(build.parent().unwrap()).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+        std::fs::write(
+            &build,
+            format!(
+                "#!/bin/sh\nexport {CHILD}=\"$5\" SOULS_REHEARSAL_DELAY_MS=0\n\
+                 exec {quoted} --exact {NAME} --nocapture\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut before = BTreeMap::new();
+        files(&root, &mut before);
+        let d = Deploy {
+            store: &store,
+            root: &root,
+            world,
+            canary: Canary {
+                window: Duration::from_secs(1),
+                start_within: Duration::from_secs(5),
+                answer_within: Duration::from_millis(200),
+                every: Duration::from_millis(100),
+            },
+            window: 2,
+        };
+        let r = d
+            .rehearse(&new, &mut Probe::Ask(0))
+            .expect("the rehearsal passes");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 2, 2));
+        assert!(r.served_kept, "{r:?}");
+        assert!(r.scratch.starts_with(root.join("rehearsals")), "{r:?}");
+        let mut after = BTreeMap::new();
+        files(&root, &mut after);
+        after.retain(|p, _| !p.starts_with(root.join("rehearsals")));
+        assert_eq!(after, before, "nothing outside rehearsals/ was written");
+        assert_eq!(
+            pin(&store, &root, &world).unwrap().0,
+            old,
+            "the pin never moved"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

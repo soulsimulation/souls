@@ -87,6 +87,10 @@ fn ground() -> Surface {
 }
 /// The longest a run is followed, µs of world time.
 const LONGEST: Micros = 180_000_000;
+/// How long a rider in a seat that moves with its cabin is carried before its rise is refused (N14): a cable car's
+/// trip to its next stop, a big wheel's turn down to its platform.
+const CARRIED: Micros = 3_600_000_000;
+
 /// How long a body left on its way down into a seat is given to finish sitting before its rise is refused (E11).
 const SETTLE: Micros = 10_000_000;
 /// The fixtures' place and body kinds: the ground admits bodies and things, a body's slots 1 and 2 are its hands.
@@ -365,6 +369,8 @@ struct Stage {
     /// Where each body a case seated (0.135 E10) stood before: it stands there again if its seat's stand point is
     /// off the ground.
     seated_from: BTreeMap<Id, Vec3>,
+    /// When each thing was placed: a ride's seats run on its own clock from then (N14).
+    placed_at: BTreeMap<Id, Micros>,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -591,6 +597,7 @@ impl Stage {
             acts_due: DueList::new(),
             slots: Slots::new(),
             seated_from: BTreeMap::new(),
+            placed_at: BTreeMap::new(),
         };
         s.look();
         s
@@ -1142,6 +1149,7 @@ impl Stage {
         }
         self.placed += 1;
         let key = format!("x{}", self.placed);
+        self.placed_at.insert(id, self.now);
         self.seat(id);
         // The create was read as a form's make: it is the gate's thing, by the gate's key.
         self.things.retain(|_, t| t.id != id);
@@ -1176,9 +1184,11 @@ impl Stage {
                     n.fields(),
                     &[(entry.to_owned(), self.kinds.get(entry)?.clone())],
                 );
-                Some((slots, x))
+                Some((slots, x, self.kinds.get(entry)?.clone()))
             });
-        let places = found.map_or_else(Vec::new, |(slots, x)| {
+        let entry = found.as_ref().map(|f| f.2.clone());
+        let xf = found.as_ref().map(|f| f.1);
+        let places = found.map_or_else(Vec::new, |(slots, x, _)| {
             slots
                 .into_iter()
                 .filter_map(|s| {
@@ -1197,7 +1207,29 @@ impl Stage {
                 })
                 .collect()
         });
-        let _ = self.slots.replace(id, places);
+        // A ride's seats move with their cabins (N14), on the ride's own clock from when it was placed, over the flat
+        // ground (height 0 everywhere).
+        let runs = match (entry, xf) {
+            (Some(e), Some(x)) if !self.slots.holder(id).is_some() => {
+                let seats = places.iter().map(|p| (p.place.slot, p.clone())).collect();
+                let t0 = self.placed_at.get(&id).copied().unwrap_or(self.now);
+                sim::courses::rides::seat_runs(
+                    &e,
+                    &seats,
+                    &|p| x.point(p).ok(),
+                    &|_, _| Some(0),
+                    t0,
+                )
+            }
+            _ => Vec::new(),
+        };
+        if self.slots.replace(id, places).is_ok() {
+            for r in runs {
+                if let Err(e) = self.slots.run(id, r.slot, &r.course, r.stops, &r.own) {
+                    eprintln!("a ride's seat run did not load: {}: {}", e.name, e.detail);
+                }
+            }
+        }
     }
 
     /// `body` out of the seat it holds (or is taking or leaving) and standing on the ground at that seat's stand point,
@@ -2734,15 +2766,20 @@ impl Stage {
     /// again (0.135 E11). Answered as `wait` answers; a body in no seat has nothing to rise from. A body left on its
     /// way down keeps its seat and finishes sitting first (`not-seated` until then), as the clock runs on.
     fn rise(&mut self) -> J {
-        let end = self.now + SETTLE;
+        let (end, aloft_end) = (self.now + SETTLE, self.now + CARRIED);
         for k in 0.. {
             let r = self.rise_once(k);
-            let lowering = r.get("code").and_then(J::str) == Some("not-seated")
-                && self.slots.held_by(self.body).is_some();
-            if !lowering || self.now >= end {
+            let held = self.slots.held_by(self.body).is_some();
+            let code = r.get("code").and_then(J::str);
+            let lowering = code == Some("not-seated") && held && self.now < end;
+            // A seat that moves with its cabin away from a stop carries its rider on to the next (N14): it rises there.
+            let aloft = code == Some("boarding-frame-away") && held && self.now < aloft_end;
+            if !lowering && !aloft {
                 return r;
             }
-            self.tick();
+            for _ in 0..if aloft { 20 } else { 1 } {
+                self.tick();
+            }
         }
         err("no rise")
     }

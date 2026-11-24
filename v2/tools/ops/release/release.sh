@@ -38,8 +38,9 @@ ETC=${RELEASE_ETC:-/etc/souls}
 export WORLDS_ROOT
 # The four artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7).
 ARTIFACTS=(worldd gatewayd page.tar client.tar)
-# What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13).
-TOOLS=(deploy gateway-upgrade world-aside)
+# What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
+# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
+TOOLS=(deploy gateway-upgrade world-aside assets-check)
 # A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
@@ -238,6 +239,7 @@ move() {
     echo "move: the gateway already moved by this release"
   else
     echo "move: gateway-upgrade to ${gw:0:16}…"
+    install -m 755 "$rel/bin/assets-check" "$LIB/.assets-check.new" && mv "$LIB/.assets-check.new" "$LIB/assets-check"
     "$rel/bin/gateway-upgrade" "$WORLDS_ROOT/builds/$gw/gatewayd" "${order[@]}" --lib "$LIB" || refuse "release.gateway-failed"
     touch "$rel/moved/gateway"
   fi

@@ -14,7 +14,9 @@
 #                                                 clients at /v2/entries, #3760; gatewayd refuses to start without one),
 #                                                 and the alarm daemon's socket to wake it by (--wake, O2), and the
 #                                                 install's view key (--view-key /etc/souls/view.key, made here once
-#                                                 when absent), which checks a signed-in page's view token
+#                                                 when absent), which checks a signed-in page's view token, and
+#                                                 the world's uploads folder (--uploads <folder>/uploads, #1960), where
+#                                                 its creator's checked models and pictures are kept and served by hash
 #   /etc/systemd/system/worldd@<name>.service.d/place.conf   WORLDD_SOCKET, the socket worldd serve binds
 #   /etc/systemd/system/multi-user.target.wants/{worldd,souls-gateway}@<name>.service   the instances, enabled
 #   /var/lib/souls/views/w/<name>/{views,history}  links the origin serves, so the page's ?world=<name> finds them
@@ -83,7 +85,7 @@ if [ "$CONFIG_ONLY" = 0 ]; then
       if [ -f "$SRC/$f" ]; then cmp -s "$SRC/$f" "$R$WORLD/$f" || die "placed identity or public support differs"; fi
     done
   fi
-  mkdir -p "$R$WORLD/views" "$R$WORLD/history" "$R$WORLD/receipts"
+  mkdir -p "$R$WORLD/views" "$R$WORLD/history" "$R$WORLD/receipts" "$R$WORLD/uploads"
   link() { if [ -L "$2" ]; then [ "$(readlink "$2")" = "$1" ] || die "placement link differs"; elif [ -e "$2" ]; then die "placement link is occupied"; else ln -s "$1" "$2"; fi; }
   link "$WORLD/views" "$R$LINKS/views"
   link "$WORLD/history" "$R$LINKS/history"
@@ -104,13 +106,15 @@ if [ "$DATA_ONLY" = 0 ]; then
   # --wake (O2, 0.133 S3b): an intent for the world while it sleeps is held and the alarm daemon asked to wake it.
   # --view-key (V13b): the directory's key for the page's view tokens (install.sh writes it once; made here too when
   # absent, so the gateway always starts); last, as the release owner appended it on soul.game (24 Nov).
+  # --uploads (#1960): the creator's uploads, kept in the world's folder (the gateway makes it if missing; its checker
+  # is the install's assets-check beside gatewayd); after the view key, as existing worlds' files gain it by hand.
   VIEW_KEY=/etc/souls/view.key
   if [ ! -e "$R$VIEW_KEY" ]; then
     (umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$R$VIEW_KEY")
     if [ -z "$R" ] && getent group souls > /dev/null 2>&1; then chown root:souls "$VIEW_KEY"; fi
     chmod 640 "$R$VIEW_KEY"
   fi
-  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s --wake %s --world-name %s%s --view-key %s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$DATA/worlds/alarms.sock" "$NAME" "$EXCHANGE" "$VIEW_KEY")
+  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s --wake %s --world-name %s%s --view-key %s --uploads %s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$DATA/worlds/alarms.sock" "$NAME" "$EXCHANGE" "$VIEW_KEY" "$WORLD/uploads")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
   if [ -e "$R$DROPIN" ]; then [ "$(cat "$R$DROPIN")" = "$DROP_TEXT" ] || die "world configuration differs"; else printf '%s\n' "$DROP_TEXT" > "$R$DROPIN"; fi

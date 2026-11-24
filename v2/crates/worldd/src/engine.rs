@@ -142,6 +142,8 @@ pub struct Engine {
     out: Vec<Effect>,
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
+    /// Whether the rides' seat courses (N14) were written to their things at this start.
+
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
     /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
@@ -417,6 +419,7 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
+
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
@@ -1114,6 +1117,16 @@ impl Engine {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
+        }
+        // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
+        let changed = slots.runs_changed();
+        if !changed.is_empty() {
+            self.out.extend(slot_courses(live, slots, &changed, now));
+        }
+        // N14: a ride's trip ends when its seats next come to a stop: what its start form set goes back (a cable car's
+        // `under_way`), so a ride set off once is boarded again.
+        for (thing, ends) in slots.trip_ended(now) {
+            self.out.extend(trip_end(live, thing, &ends, now));
         }
         let mut tree = None;
         while let Some(t) = self.due.fire(now) {
@@ -2555,6 +2568,75 @@ impl Engine {
     pub fn out(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.out)
     }
+}
+
+/// The entry that sets ride `thing`'s fields `ends` back (N14, a trip's end): those that hold another value; none when
+/// every one holds it already or is unset.
+fn trip_end(live: &Tree, thing: Id, ends: &[(u64, Value)], now: Micros) -> Option<Effect> {
+    let node = live.handle(thing).and_then(|h| live.node(h))?;
+    let changes: Vec<_> = ends
+        .iter()
+        .filter(|(n, to)| node.fields().get(n).is_some_and(|v| v != to))
+        .map(|(n, to)| crate::carrier::set(thing, *n, to.clone()))
+        .collect();
+    if changes.is_empty() {
+        return None;
+    }
+    match crate::carrier::entry(live, thing, changes, now, Cause::World, Actor::World) {
+        Ok(e) => Some(e),
+        Err(r) => {
+            eprintln!("worldd: {}'s trip does not end: {r}", show(thing));
+            None
+        }
+    }
+}
+
+/// The courses of the slots that move with their cabins (N14) of the rides `changed`, written onto each whose
+/// [`replica::schedule::F_SEAT_COURSES`] is not what its slots run now (`slots`, from its entry), or cleared on one whose
+/// slots no longer run (a ride a god edit moved where they do not): one entry of the world's a ride, so every copy and
+/// the page read where each slot and its rider are. A restart with the same entries writes nothing.
+fn slot_courses(live: &Tree, slots: &Slots, changed: &BTreeSet<Id>, now: Micros) -> Vec<Effect> {
+    let mut by: BTreeMap<Id, BTreeMap<u64, Value>> =
+        changed.iter().map(|t| (*t, BTreeMap::new())).collect();
+    for (thing, slot, c) in slots.slot_courses() {
+        if let Some(m) = by.get_mut(&thing) {
+            m.insert(slot, c.to_value());
+        }
+    }
+    let mut out = Vec::new();
+    for (thing, courses) in by {
+        let to = Value::Map(courses);
+        let held = live
+            .handle(thing)
+            .and_then(|h| live.node(h))
+            .map(|n| n.fields().get(&replica::schedule::F_SEAT_COURSES).cloned());
+        let Some(held) = held else {
+            continue;
+        };
+        if held.as_ref() == Some(&to) || (held.is_none() && to == Value::Map(BTreeMap::new())) {
+            continue;
+        }
+        let e = crate::carrier::entry(
+            live,
+            thing,
+            vec![crate::carrier::set(
+                thing,
+                replica::schedule::F_SEAT_COURSES,
+                to,
+            )],
+            now,
+            Cause::World,
+            Actor::World,
+        );
+        match e {
+            Ok(e) => out.push(e),
+            Err(r) => eprintln!(
+                "worldd: {}'s slot courses are not written: {r}",
+                show(thing)
+            ),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

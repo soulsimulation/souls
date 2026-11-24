@@ -5,15 +5,25 @@
 //! Every intent sent is kept until it is answered. When the socket drops, the gateway reconnects and sends what is
 //! unanswered again, in the order it first sent it, so each actor's intents reach the world in sequence order; the
 //! world drops repeats by (actor, sequence) (`worldd`'s `gateway_link`). An intent that arrives while the world is
-//! away is answered at once with [`RESTARTING`] and never sent. An answer for an intent no longer kept (the world
-//! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
-//! itself, and the world's repeats across its own restart, are I4's durable half.
+//! away is answered at once with [`RESTARTING`] and never sent. The world's repeats across its own restart are I4's
+//! durable half.
+//!
+//! **A restart of the gateway itself** (0.133 verification). The intents a gateway kept go with it, while the world
+//! goes on: a walk accepted before the restart ends after it. So each connection to the world begins with
+//! [`handover_ask`], and the world hands an ended gateway connection's answers to the newest one, or holds them until
+//! one asks (`worldd::handover`). An answer for an intent this gateway does not hold is passed to its actor's socket
+//! (and kept for a resume) the first time; an answer that could come twice (to an intent sent on two connections, one
+//! the gateway answered itself by its deadline, or one passed on so) is remembered ([`RECENT`]), as is every kept
+//! intent answered lately ([`ANSWERED`]: a client's repeat through a new gateway), and a second copy
+//! dropped, so each intent is answered once. A stopping gateway (SIGTERM) lets the world go before its sockets close,
+//! so what the world answers after that goes to the next gateway rather than to sockets that are closing.
 //!
 //! A sleeping world (O2, #2731): with a wake set ([`Link::set_wake`], the gateway's `--wake`), an intent that
 //! arrives while the world is away is held instead, and the gateway asks once for the world to be woken; the held
 //! intents go when it is reachable, as on any reconnect, and one whose deadline passes first is answered as below.
-//! Only an intent asks: a sync request is a read, and a reader (a viewer) wakes no world, so it is answered
-//! [`RESTARTING`] as before.
+//! A sync request asks too: only an agent sends one (viewers read the public stream, which wakes nothing), and an
+//! agent's client syncs before it sends its first intent, so without it a Soul arriving at a sleeping world waited
+//! forever. The sync request itself is still answered [`RESTARTING`]: the client asks again once the world is up.
 //!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
 //! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
@@ -48,7 +58,7 @@ use std::time::Duration;
 use replica::effects::Actor;
 use replica::encode::{Name, Value, decode, encode};
 use replica::sync::wire;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
@@ -141,6 +151,24 @@ fn delivery_metadata(frame: &[u8]) -> Option<DeliveryTrace> {
 /// How many of one agent's intents may be in the world's line at a time, sent and not yet answered (S2).
 pub const TURN: usize = 4;
 
+/// The key of the frame sent first on each connection to the world, `{31: []}`: this is the world's gateway, so the
+/// answers an ended connection could not take come here (worldd's `handover::ASK`).
+pub const HANDOVER: u64 = 31;
+
+/// How many answers that could come twice (to an intent sent again, answered by the gateway itself, or handed on from
+/// an ended connection) are remembered, so the second is dropped.
+pub const RECENT: usize = 4096;
+
+/// How many kept intents' answers are remembered, newest last: a kept intent the world answers on two connections (a
+/// client's repeat through a new gateway, and the ended connection's copy handed on) has both copies leave the world
+/// in one tick, so a short ring that every answer passes through catches the second.
+pub const ANSWERED: usize = 1024;
+
+/// The frame that says this is the world's gateway ([`HANDOVER`]).
+pub fn handover_ask() -> Vec<u8> {
+    encode(&Value::Map([(HANDOVER, Value::Array(Vec::new()))].into())).unwrap_or_default()
+}
+
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
@@ -194,6 +222,8 @@ struct Pending {
     reason: &'static str,
     /// In the world's line: sent on this connection and not yet answered at all (S2).
     flying: bool,
+    /// Sent on more than one connection: the world may answer it on each.
+    resent: bool,
 }
 
 #[derive(Default)]
@@ -213,9 +243,31 @@ struct State {
     /// S2: each agent's intents in the world's line now, and those waiting their turn, by number, oldest first.
     flying: BTreeMap<Vec<u8>, usize>,
     waiting: BTreeMap<Vec<u8>, VecDeque<u64>>,
+    /// Intents answered whose answer could come again, by actor's bytes and sequence, newest last ([`RECENT`]).
+    recent: VecDeque<(Vec<u8>, u64)>,
+    /// Every kept intent answered lately, by actor's bytes and sequence, newest last ([`ANSWERED`]).
+    answered: VecDeque<(Vec<u8>, u64)>,
+}
+
+/// What an answer from the world is to the gateway.
+#[derive(Debug, PartialEq, Eq)]
+enum Answered {
+    /// To a kept intent: when it was received and handed on.
+    Kept(u64, u64),
+    /// To an intent this gateway does not hold (sent before it started): passed to its actor.
+    Unheld,
+    /// Already answered: dropped.
+    Again,
 }
 
 impl State {
+    fn remember(&mut self, key: Vec<u8>, sequence: u64) {
+        if self.recent.len() == RECENT {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((key, sequence));
+    }
+
     /// Sends kept intent `n` now if its agent has a place in the world's line, else queues it behind the agent's own.
     fn turn(&mut self, n: u64) {
         let Some(p) = self.pending.get(&n) else {
@@ -313,6 +365,7 @@ impl Link {
                 due: received.saturating_add(wait),
                 reason,
                 flying: false,
+                resent: false,
             },
         );
         drop(out);
@@ -324,6 +377,14 @@ impl Link {
     pub fn ask(&self, key: Vec<u8>, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
+            // Only an agent (a grant on a socket) asks here: a Soul's client syncs before it sends any intent, so a
+            // sleeping world that waited for an intent would never be woken by one. Asked awake once, as an intent
+            // asks; the request is still answered `world.restarting` and the client asks again.
+            if let Some(wake) = s.wake.clone()
+                && !std::mem::replace(&mut s.asked, true)
+            {
+                wake();
+            }
             return Sent::Restarting;
         };
         let ours = s.next;
@@ -367,14 +428,29 @@ impl Link {
         s.now.clone().unwrap_or(Value::Array(Vec::new()))
     }
 
-    /// Takes the intent an answer is for, with when it was received and handed on; none if it was answered already.
-    fn answered(&self, key: &[u8], sequence: u64, now: &Value) -> Option<(u64, u64)> {
+    /// Takes the intent an answer is for. One this gateway does not hold is passed on the first time only: the world
+    /// hands on an ended connection's answers (a gateway restarted under a walk), and an answer that could come twice
+    /// is remembered ([`RECENT`]).
+    fn answered(&self, key: &[u8], sequence: u64, now: &Value) -> Answered {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.now = Some(now.clone());
-        let n = s.index.remove(&(key.to_vec(), sequence))?;
-        let p = s.pending.remove(&n)?;
+        let id = (key.to_vec(), sequence);
+        let Some(p) = s.index.remove(&id).and_then(|n| s.pending.remove(&n)) else {
+            if s.recent.contains(&id) || s.answered.contains(&id) {
+                return Answered::Again;
+            }
+            s.remember(id.0, id.1);
+            return Answered::Unheld;
+        };
         s.landed(&p.key, p.flying);
-        Some((p.received, p.handed))
+        if p.resent {
+            s.remember(id.0.clone(), id.1);
+        }
+        if s.answered.len() == ANSWERED {
+            s.answered.pop_front();
+        }
+        s.answered.push_back(id);
+        Answered::Kept(p.received, p.handed)
     }
 
     /// The world said the intent is in progress, with `left` µs until its deadline (C20): it stays kept, now due
@@ -411,6 +487,8 @@ impl Link {
                     q.retain(|w| *w != n);
                 }
                 s.landed(&p.key, p.flying);
+                // The world's own answer may still come: it is not passed on a second time.
+                s.remember(p.key.clone(), p.sequence);
                 out.push((p.key, p.actor, p.sequence, p.reason));
             }
         }
@@ -453,6 +531,7 @@ impl Link {
         for n in &kept {
             if let Some(p) = s.pending.get_mut(n) {
                 p.flying = false;
+                p.resent = true;
             }
         }
         for n in kept {
@@ -495,12 +574,12 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             "the world is reachable; {resent} unanswered intents sent again"
         ));
         was_up = true;
-        let (mut read, mut write) = stream.into_split();
+        let (read, mut write) = stream.into_split();
         let mut queue = gw.link.connected();
         // #3784: with a directory, ask the world for its Souls' wind-down words (now, and each change after).
         let ask = gw.mailbox.get().map(|_| crate::mailbox::states_ask());
         let writer = tokio::spawn(async move {
-            if let Some(ask) = ask {
+            for ask in std::iter::once(handover_ask()).chain(ask) {
                 let len = u32::try_from(ask.len()).unwrap_or(u32::MAX).to_be_bytes();
                 if write.write_all(&len).await.is_err() || write.write_all(&ask).await.is_err() {
                     return;
@@ -513,7 +592,23 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 }
             }
         });
+        // A stopping gateway (O16) lets the world go first, between frames: what the world answers after that it
+        // hands to the next gateway, instead of to sockets that are closing.
+        let mut read = tokio::io::BufReader::new(read);
+        let mut closing = gw.closing.subscribe();
+        let mut stopping = false;
         loop {
+            if read.buffer().is_empty() {
+                tokio::select! {
+                    _ = closing.wait_for(|c| *c) => {
+                        stopping = true;
+                        break;
+                    }
+                    more = read.fill_buf() => if more.map_or(true, |b| b.is_empty()) {
+                        break;
+                    },
+                }
+            }
             let mut len = [0u8; 4];
             if read.read_exact(&mut len).await.is_err() {
                 break;
@@ -551,7 +646,12 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             }
             match read_answer(&frame) {
                 Some((key, sequence, version, cursor, outcome)) => {
-                    if let Some((received, handed)) = gw.link.answered(&key, sequence, &version) {
+                    let times = match gw.link.answered(&key, sequence, &version) {
+                        Answered::Kept(received, handed) => Some((received, handed)),
+                        Answered::Unheld => Some((at, at)),
+                        Answered::Again => None,
+                    };
+                    if let Some((received, handed)) = times {
                         if let Some(t) = &trace {
                             t.at("pending-match", "matched");
                         }
@@ -575,6 +675,9 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             gw.reply(&key, sync_refused(n, RESTARTING));
         }
         writer.abort();
+        if stopping {
+            return;
+        }
     }
 }
 

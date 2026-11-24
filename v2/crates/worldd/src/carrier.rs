@@ -62,7 +62,7 @@ pub const HOLD: Micros = 120_000_000;
 pub const LAND_NEAR: i64 = 6_000_000;
 
 /// One entry on `node` of `changes`, caused by `cause`, acted by `actor`.
-fn entry(
+pub(crate) fn entry(
     tree: &Tree,
     node: Id,
     changes: Vec<Change>,
@@ -98,7 +98,7 @@ fn entry(
     })
 }
 
-fn set(node: Id, field: u64, to: Value) -> Change {
+pub(crate) fn set(node: Id, field: u64, to: Value) -> Change {
     Change::Set {
         node,
         field,

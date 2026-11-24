@@ -89,8 +89,10 @@ neither the library nor the stream has (a world imported before field 102) is dr
 `window.__soulsStreamScene.plain` lists each such case.
 
 A thing placed while the world runs (a creator's, or one a Soul makes) is drawn by `creator-kinds.ts`: by a creator's
-own kind, else the def the world's own things of its kind have, else the library def named like its kind, else a box
-the size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`).
+own kind, else the def the world's own things of its kind have, else the library def named like its kind, else its
+entry's own shape (`looks.shape`, in its state: the parts its `when`s pick and its looks table moves), else a box the
+size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`; the
+shapes come in one data file beside the bundle, `KIND_LOOKS_URL`, fetched once, and replace the boxes when it lands).
 
 A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
 the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to
