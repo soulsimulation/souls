@@ -18,7 +18,12 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
 - **What comes over.** Every thing, room, floor, door, doorway, stair, window and named place, as N1 maps them. A
   flight between two pieces of one storey (Chiba's upper deck on the Mars campus) is walked as that floor's surfaces and
   counted as a stair; a window in no room's wall (the Mars kitchen's serving hatch) is the window of the room nearest
-  it, on its level or the nearest level. An upload
+  it, on its level or the nearest level. A storey today's mesh floors found (a `mesh-floor:` tag, from the model on a
+  150 mm grid) has its seams of up to 360 mm between surfaces at one height closed, so a partition's doorways join the
+  areas either side (Chiba's ground storey). Its lowest storey, when it stands more than a step (220 mm) but no more
+  than two above the ground, gets an entrance tread at half its height along each open edge, as today's page stepped
+  onto it from the terrain (Chiba, 374 mm up; the Mars tool camp and Freeside). Neither is counted
+  among the floor surfaces, as the bake has none. An upload
   comes by its SHA-256 (its CDN key, `docs/operations/cdn.md`): a thing that names one (a mesh's asset, a picture's media)
   holds the hash in field 24. A thing whose kind has a Soul Actions entry in SA-E11's map
   (`content/worlds/eden/map.json`, or `--map`) names it in field 25; the others are listed with the reason (waiting for

@@ -85,7 +85,9 @@ body path, and publishes into its own static folder. `--stream` is the world's f
 - `--client` holds at least `replica.js` and `replica_bg.wasm` (v2's `target/wasm-load/pkg`), matching the v2 world's
   build. Without the release's `soul-client.json`, the routed `/v1/config` answers 503 and the page uses its inline config.
 - `--bodies` is a built body-assets folder (`V2_BODY_ASSETS`, with `bodies.json`). The launcher serves it at
-  `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another.
+  `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another. A release
+  sets it itself on every bound world that names no catalogue: the install's `/usr/local/lib/souls/web/assets/bodies`
+  (`release.sh bodies binding`, [release.md](release.md)).
 - `--stream` must reach the v2 origin on the page's origin (the front door's `/s/` route).
 - With `--port`, it reads the world's page afterwards and prints the `v2Stream` and `v2Bodies` the page carries.
 
@@ -236,6 +238,14 @@ each object copied to `aside/<label>/`, read back and compared before any origin
 with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step
 the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
 it and `switch-eden.sh` after release-v2.
+
+Any other moved world starts fresh from its own kept facts the same way, by hand, with `bash
+v2/tools/ops/cutover/reseed-world.sh <world> <sha> check`, then `run` (0.133; `<world>` is its folder's name under
+`/var/lib/souls/worlds/worlds/`, root on the host, with release `<sha>` staged). That is how an importer fix reaches a
+world already seeded (Chiba's entrance, mars-college-2026), so the release may be the build the world is on already.
+It has the same steps and the same safety as Eden's (receipt first, folder and bucket objects aside, nothing deleted,
+`resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
+the world from the receipt. Re-seeding a world needs Gene's yes; `reseed-world.test.mjs` runs it on stand-ins.
 
 ## One writer
 

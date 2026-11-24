@@ -1287,6 +1287,125 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
     assert_eq!(got.kind, 1, "a wall where no Soul stands commits: {got:?}");
 }
 
+/// BUILDSAFE for a thing placed new: a creator places a bench (a boot kind, `eden:bench`, with no fields, as the old
+/// page and `souls-god place` send it), so it has no solids of its own at edit time. Its footprint is its kind's
+/// bounds (`geometry.bounds_mm`), judged before it commits: on a standing Soul it is refused `edit.would-bury`
+/// naming the Soul; beside the Soul it commits, standing as its bounds say.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    for (k, v) in top.iter_mut() {
+        if let ("kinds", json::Value::Arr(a)) = (k.as_str(), v) {
+            a.push(
+                json::parse(&format!(
+                    r#"{{"ref": "core-bench@1", "hash": "{}", "name": "core:bench", "form": "point", "layer": "solid",
+                        "door": false, "mesh": false, "slots": 2}}"#,
+                    replica::encode::to_hex(&replica::ids::sha256(b"souls/testworld/core-bench@1"))
+                ))
+                .unwrap(),
+            );
+        }
+    }
+    let d = scratch("bury-placed");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/seating/bench.json"),
+        entries.join("bench.json"),
+    )
+    .unwrap();
+    let w = seed_entries(&d, &f.to_json(), 1, (-40, 30), Some(&entries));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc1);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (sx, sz) = (-37 * M, 30 * M);
+    walk(&mut souls, &w, w.souls[0], 1, sx, sz);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
+    let (_, rules) = served_copy(&w);
+    let bench = rules
+        .kinds
+        .keys()
+        .find(|k| replica::world_model::plain(k) == "eden:bench")
+        .expect("the world pins eden:bench")
+        .clone();
+    let place = |x: i64, z: i64| Op::Place {
+        name: 1,
+        kind: Name::new(&bench).unwrap(),
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(x, 0, z),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, place(sx, sz))).await;
+    println!("a bench placed where the Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, place(-30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "a bench beside the Soul commits: {got:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let placed = t.node(t.handle(got.names[&1]).unwrap()).unwrap();
+    assert!(
+        placed.fields().contains_key(&import_eden::F_SOLIDS),
+        "the placed bench stands as its kind's bounds say"
+    );
+    // Its outline leaves its seats usable: the Soul walks to the bench (7 m), sits on it and rises.
+    let bench = got.names[&1];
+    let act = |s: &mut UnixStream, sequence: u64, verb: &str, target: Option<Id>| {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new(verb).unwrap(),
+            target: target.map(Target::Node),
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+        socket_end(s)
+    };
+    walk(&mut souls, &w, w.souls[0], 2, -30 * M, 31_500_000);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul walks to the bench: {got:?}");
+    let sat = act(&mut souls, 3, "eden:sit", Some(bench));
+    println!("the Soul sits on the placed bench: {sat:?}");
+    assert_eq!(sat.kind, 1, "the Soul sits on the placed bench: {sat:?}");
+    let rose = act(&mut souls, 4, "eden:rise", None);
+    assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 /// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:

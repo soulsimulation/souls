@@ -13,12 +13,19 @@ use sim::edit::Planned;
 use sim::ground::scene::FLOOR;
 use sim::slots::{PlaceAt, Slots};
 
-/// Each affected thing, its places on their floors, and the runs of those that move with their cabins (N14), so a god
-/// edit that moves a ride (or what it stands on) registers its runs again and the world writes its courses again.
-pub struct Projection(Vec<Delta>);
+/// One affected thing: its places, each with its floor, its own boxes (E11d), and the runs of those that move with
+/// their cabins (N14).
+type Delta = (
+    Ref,
+    Vec<(PlaceAt, Ref)>,
+    sim::slots::Footprint,
+    Vec<sim::courses::rides::SeatRun>,
+);
 
-/// One affected thing: its places, each with its floor, and its runs.
-type Delta = (Ref, Vec<(PlaceAt, Ref)>, Vec<sim::courses::rides::SeatRun>);
+/// Each affected thing's places, boxes and runs (N14: a god edit that moves a ride, or what it stands on, registers its
+/// runs again and the world writes its courses again), and the refreshed boxes of each thing above an edited one (E11d:
+/// a box placed, moved or removed under a seat's thing changes what a climb out of it may pass over).
+pub struct Projection(Vec<Delta>, Vec<(Id, sim::slots::Footprint)>);
 
 fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
     let mut next: Vec<_> = tree.handle(id).into_iter().collect();
@@ -70,6 +77,7 @@ impl Projection {
                 .map_or(Ref::Node(id), |(n, _)| Ref::New(*n))
         };
         let mut affected = BTreeSet::new();
+        let mut edited = Vec::new();
         for op in &plan.checked.edit.ops {
             let id = match op {
                 Op::Place { name, .. } => committed.names[name],
@@ -82,13 +90,39 @@ impl Projection {
             };
             subtree(copy.tree(), id, &mut affected);
             subtree(preview.tree(), id, &mut affected);
+            edited.push(id);
         }
         let ground = crate::buildsafe::open_ground(&preview);
+        let mut above = BTreeSet::new();
+        for id in edited {
+            for tree in [copy.tree(), preview.tree()] {
+                let mut at = tree
+                    .handle(id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent());
+                while let Some(a) = at.filter(|a| Some(*a) != ground) {
+                    above.insert(a);
+                    at = tree
+                        .handle(a)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| n.parent());
+                }
+            }
+        }
+        let refresh = above
+            .into_iter()
+            .filter(|a| !affected.contains(a))
+            .filter_map(|a| {
+                let (floor, ..) = on_floor(preview.tree(), ground, a, Vec3::ZERO)?;
+                (floor != a).then(|| (a, crate::places::footprint(preview.tree(), a, floor)))
+            })
+            .collect();
         // The open ground's heights, read once and only for an edit that touches a ride (N14).
         let mut terrain: Option<Option<sim::ground::Terrain>> = None;
         let mut deltas = Vec::new();
         for thing in affected {
             let mut places = Vec::new();
+            let mut own = Vec::new();
             let mut runs = Vec::new();
             if let Some(n) = preview
                 .tree()
@@ -111,6 +145,9 @@ impl Projection {
                         else {
                             continue;
                         };
+                        if own.is_empty() {
+                            own = crate::places::footprint(preview.tree(), thing, floor);
+                        }
                         places.push((
                             PlaceAt {
                                 thing,
@@ -159,9 +196,9 @@ impl Projection {
                     }
                 }
             }
-            deltas.push((named(thing), places, runs));
+            deltas.push((named(thing), places, own, runs));
         }
-        Ok(Self(deltas))
+        Ok(Self(deltas, refresh))
     }
 
     /// Rechecked on the commit tick, before any replica or slot mutation.
@@ -192,8 +229,14 @@ impl Projection {
             Ref::Node(id) => id,
             Ref::New(n) => names[&n],
         };
-        for (thing, places, runs) in self.0 {
+        for (thing, own) in self.1 {
+            if slots.place(thing).is_some() {
+                slots.footprint(thing, own);
+            }
+        }
+        for (thing, places, own, runs) in self.0 {
             let thing = id(thing);
+            slots.footprint(thing, own);
             let floor = places.first().map(|(_, f)| id(*f));
             let places = places
                 .into_iter()
@@ -291,11 +334,15 @@ mod tests {
             );
             let runs: Vec<_> = runs.into_iter().filter(|r| r.slot == 1).collect();
             assert_eq!(runs.len(), 1);
-            Projection(vec![(
-                Ref::Node(lift),
-                vec![(place, Ref::Node(ground))],
-                runs,
-            )])
+            Projection(
+                vec![(
+                    Ref::Node(lift),
+                    vec![(place, Ref::Node(ground))],
+                    Vec::new(),
+                    runs,
+                )],
+                Vec::new(),
+            )
         };
         let mut slots = Slots::new();
         projected(Vec3::ZERO)

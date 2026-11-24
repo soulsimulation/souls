@@ -74,6 +74,8 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
 /// Seat events wake the queue; its skills run before this tick's one controller step.
 pub fn step(b: &mut Bodies, now: Micros) {
     let changed = b.slots.changes();
+    // A climb out of a seat (E11d) is seen as the body's own motion; its record is not kept here.
+    let _ = b.slots.climbs();
     let takes = b.town.with_ground(|_, ground| {
         let w = World {
             ground,

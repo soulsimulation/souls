@@ -29,6 +29,16 @@
 //!   sit is cancelled before contact (a later claim on its legs, `claim-taken`). A body is never left stuck: when a
 //!   later claim cancels a sit after contact, or a rise before it, the body is handed back onto the floor at the stand
 //!   point under that claim's driver and the seat is released, since a tick never steps a body in a slot.
+//! - **Climbing out** (E11d). A rise whose stand point and the short search beside it ([`rise_point`]) are all off the
+//!   floor (a boat moored with its stand point's side away from the bank, the floor cut back under a seat) is not
+//!   refused while there is floor near: [`climb_point`] takes the thing's other stand points, then the nearest floor
+//!   within [`CLIMB_BOUND`] of the seat, within a step's height of its floor and clear of standing bodies, by a
+//!   straight line that passes off the floor only over water or the seat's thing's own boxes ([`Slots::footprint`]),
+//!   never another cut (a wall, a fence, another hull). At the rise's
+//!   contact the body is handed onto the floor's frame at the seat's point and the world carries it along that line
+//!   at walking speed ([`Controller::carry`], N10's walk-out): it never appears there, and the climb is named
+//!   ([`ClimbOut`], `climb-out`). With no such floor the rise ends `off-surface` and the body stays seated, its seat
+//!   held: it acts seated, leaves the world as any seated body does, and rises once there is floor near again.
 //! - **Rising onto a taken spot.** The stand point may be taken: [`clear_spot`] finds the nearest clear point, and the
 //!   body walks there by the mover. It never appears there.
 //!
@@ -62,7 +72,7 @@ use replica::tree::Tree;
 use replica::world_model::show;
 
 use crate::controller::{Controller, Driver, Part, Stance};
-use crate::mover::Surface;
+use crate::mover::{Floors, Surface};
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::timers::{DueList, Timer};
 
@@ -126,6 +136,266 @@ pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Op
 /// How far from a seat's stand point a rising body may stand, µm: its own clearance radius for its admitted class.
 pub fn rise_bound(build: Build) -> i64 {
     build.size.radius_mm() * 1000
+}
+
+/// How far from its seat's point a body that cannot rise at the stand point climbs out, µm (E11d): a step off a boat
+/// onto the bank, never a walk.
+pub const CLIMB_BOUND: i64 = 3_000_000;
+
+/// The grid, µm, on which the nearest floor within [`CLIMB_BOUND`] is searched.
+pub const CLIMB_STEP: i64 = 100_000;
+
+/// How often, µm, a climb out's line is sampled for the floor (a cut for a wall or a box is at least two body radii wide).
+pub const CLIMB_SAMPLE: i64 = 50_000;
+
+/// What a climb out is named in [`Slots::climbs`].
+pub const CLIMB_OUT: &str = "climb-out";
+
+/// A body that rose where its stand point and the short search beside it were off the floor (E11d), carried from its
+/// seat's point to `to` on the floor at walking speed ([`crate::gaits::WALK`]), in a straight line, from `at`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClimbOut {
+    pub body: Id,
+    pub thing: Id,
+    pub from: Vec3,
+    pub to: Vec3,
+    pub at: Micros,
+}
+
+/// A thing's own boxes on its floor (`crate::ground::scene::Solid`'s rings, µm, x and z in the floor's frame): what a
+/// body climbing out of one of its seats may pass over ([`Slots::footprint`]).
+pub type Footprint = Vec<[[i64; 2]; 4]>;
+
+/// Whether `p` lies within `grow` of the convex ring `r` (x and z, µm): inside it, or that near one of its edges.
+fn near_ring(r: &[[i64; 2]; 4], p: [i64; 2], grow: i64) -> bool {
+    let o = |a: [i64; 2], b: [i64; 2]| {
+        i128::from(b[0] - a[0]) * i128::from(p[1] - a[1])
+            - i128::from(b[1] - a[1]) * i128::from(p[0] - a[0])
+    };
+    let sides: Vec<i128> = (0..4).map(|k| o(r[k], r[(k + 1) % 4])).collect();
+    if sides.iter().all(|&s| s >= 0) || sides.iter().all(|&s| s <= 0) {
+        return true;
+    }
+    let g = i128::from(grow);
+    (0..4).any(|k| {
+        let (a, b) = (r[k], r[(k + 1) % 4]);
+        let (dx, dz) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let (px, pz) = (i128::from(p[0] - a[0]), i128::from(p[1] - a[1]));
+        let l2 = dx * dx + dz * dz;
+        let t = if l2 == 0 {
+            0
+        } else {
+            ((px * dx + pz * dz) * 1_000_000 / l2).clamp(0, 1_000_000)
+        };
+        let (cx, cz) = (dx * t / 1_000_000 - px, dz * t / 1_000_000 - pz);
+        cx * cx + cz * cz <= g * g
+    })
+}
+
+/// What a climb out (E11d) is checked against: the floor, the world's water on it ([`Floors::wet`]), the boxes of the
+/// thing climbed out of, and whether a body already stands at a point; from where (`from`, x and z) and the height of
+/// the floor it starts from (`base`).
+struct Climb<'a> {
+    floor: &'a Surface,
+    floors: &'a dyn Floors,
+    own: &'a [[[i64; 2]; 4]],
+    taken: &'a dyn Fn(Vec3) -> bool,
+    body: Id,
+    node: Id,
+    facing: Quat,
+    from: Vec3,
+    base: i64,
+    build: Build,
+}
+
+impl Climb<'_> {
+    fn frame(&self) -> Frame {
+        Frame {
+            node: self.node,
+            slot: None,
+        }
+    }
+
+    /// Where the body stands at `p` on the floor, when it may land there: a dry floor point within a step's height
+    /// ([`crate::ground::STEP`]) of the floor it starts from, where no body stands.
+    fn landing(&self, p: Vec3) -> Option<Vec3> {
+        let b = self
+            .floor
+            .place_built(self.body, self.frame(), p, self.facing, self.build)
+            .ok()?;
+        let foot = b.pose.position.y - self.build.hover_mm * 1000;
+        ((foot - self.base).abs() <= crate::ground::STEP * 1000 && !(self.taken)(b.pose.position))
+            .then_some(b.pose.position)
+    }
+
+    /// Whether the straight line from `from` to `to` is a way out, sampled every [`CLIMB_SAMPLE`]: each point off the
+    /// floor lies over water or wading ground, or on the boxes of the thing climbed out of (grown by the body's
+    /// clearance), never on another cut (a wall, a fence, a box, another hull); and once on the floor it stays on it.
+    fn way_out(&self, to: Vec3) -> bool {
+        let from = self.from;
+        let grow = (self.build.size.radius_mm() + crate::ground::MARGIN + 10) * 1000;
+        let (dx, dz) = (i128::from(to.x - from.x), i128::from(to.z - from.z));
+        let len = (dx * dx + dz * dz).isqrt() as i64;
+        let n = len / CLIMB_SAMPLE + 1;
+        let mut on = false;
+        for k in 0..=n {
+            let p = Vec3::new(
+                from.x + (dx * i128::from(k) / i128::from(n)) as i64,
+                0,
+                from.z + (dz * i128::from(k) / i128::from(n)) as i64,
+            );
+            let here = self
+                .floor
+                .place_built(self.body, self.frame(), p, self.facing, self.build)
+                .is_ok();
+            if on && !here {
+                return false;
+            }
+            if !here
+                && !self.floors.wet(self.node, p)
+                && !self.own.iter().any(|r| near_ring(r, [p.x, p.z], grow))
+            {
+                return false;
+            }
+            on |= here;
+        }
+        on
+    }
+
+    /// Whether `p` is within [`CLIMB_BOUND`] of `from`.
+    fn near(&self, p: Vec3) -> bool {
+        let (dx, dz) = (i128::from(p.x - self.from.x), i128::from(p.z - self.from.z));
+        dx * dx + dz * dz <= i128::from(CLIMB_BOUND) * i128::from(CLIMB_BOUND)
+    }
+
+    /// The nearest landing within [`CLIMB_BOUND`] of `from` with a way out, on a grid of [`CLIMB_STEP`] (ties by x,
+    /// then z).
+    fn nearest(&self) -> Option<Vec3> {
+        let n = CLIMB_BOUND / CLIMB_STEP;
+        let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
+            .flat_map(|i| (-n..=n).map(move |j| (i * CLIMB_STEP, j * CLIMB_STEP)))
+            .map(|(dx, dz)| (dx * dx + dz * dz, dx, dz))
+            .filter(|(d2, ..)| *d2 <= CLIMB_BOUND * CLIMB_BOUND)
+            .collect();
+        grid.sort_unstable();
+        grid.into_iter()
+            .map(|(_, dx, dz)| Vec3::new(self.from.x + dx, 0, self.from.z + dz))
+            .find_map(|p| self.landing(p).filter(|&l| self.way_out(l)))
+    }
+}
+
+/// Where a body of `build` that cannot rise at its seat `at`'s stand point (nor beside it, [`rise_point`]) climbs out
+/// to on `floor` (E11d), with a way out from the seat's point: first the stand points of the thing's other seats
+/// (`others`, by slot), each with its own short search; then the nearest point of the floor within [`CLIMB_BOUND`] of
+/// the seat's point, on a grid of [`CLIMB_STEP`] (ties by x, then z). A target is a dry floor point within a step's
+/// height of the seat's floor where no body stands (`taken`), and the line to it passes only over water, wading
+/// ground or the seat's thing's own boxes (`own`) before it reaches the floor. Bounded and the same for the same
+/// inputs. `None`: no such floor within the bound.
+#[allow(clippy::too_many_arguments)]
+pub fn climb_point<'a>(
+    floor: &Surface,
+    floors: &dyn Floors,
+    at: &PlaceAt,
+    others: impl Iterator<Item = &'a PlaceAt>,
+    own: &[[[i64; 2]; 4]],
+    taken: &dyn Fn(Vec3) -> bool,
+    body: Id,
+    build: Build,
+) -> R<Option<Vec3>> {
+    let cl = Climb {
+        floor,
+        floors,
+        own,
+        taken,
+        body,
+        node: at.floor,
+        facing: at.facing,
+        from: Vec3::new(at.point.x, 0, at.point.z),
+        base: at.point.y - at.place.height,
+        build,
+    };
+    for o in others.filter(|o| o.floor == at.floor && o.place.slot != at.place.slot) {
+        if let Some(p) = rise_point(floor, o, body, build)?
+            && cl.near(p)
+            && let Some(l) = cl.landing(p)
+            && cl.way_out(l)
+        {
+            return Ok(Some(l));
+        }
+    }
+    Ok(cl.nearest())
+}
+
+/// What a restart does with a body the log had standing ([`Slots::resume`], E11d).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Resumed {
+    /// On its floor: placed as it is.
+    Stood,
+    /// Off its floor (killed during a climb out): carried on, as a climb is, to this landing.
+    Climbs(Vec3),
+    /// Off its floor with no landing within [`CLIMB_BOUND`]: carried to the floor's nearest legal point
+    /// ([`crate::ground::exits::nearest`]), the last resort, whose line is a way out all the same.
+    Nearest(Vec3),
+    /// Off its floor with no way out: never carried through a cut. The world seats it again in the seat it was
+    /// climbing out of ([`Slots::over`]), so its next rise climbs out or is refused by name; with no such seat free it
+    /// is left where the log had it (`resume-held`).
+    Held,
+}
+
+impl Resumed {
+    /// The landing the world carries the body to, if any.
+    pub fn to(self) -> Option<Vec3> {
+        match self {
+            Resumed::Climbs(p) | Resumed::Nearest(p) => Some(p),
+            Resumed::Stood | Resumed::Held => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Resumed::Stood => "stood",
+            Resumed::Climbs(_) => CLIMB_OUT,
+            Resumed::Nearest(_) => "resume-nearest",
+            Resumed::Held => "resume-held",
+        }
+    }
+}
+
+/// A body at `at` on `floor` (`frame`'s node), placed: as the mover places it when it stands on the floor; else, off
+/// the floor, where it is, its piece and triangle the floor's nearest legal point's (no step reads them before it is
+/// carried or walks). `off-surface` only when the floor has no ground at all.
+pub fn placed_off(
+    floor: &Surface,
+    id: Id,
+    frame: Frame,
+    at: Vec3,
+    facing: Quat,
+    build: Build,
+) -> R<crate::mover::Body> {
+    if let Ok(b) = floor.place_built(id, frame, at, facing, build) {
+        return Ok(b);
+    }
+    let Some((_, to)) = crate::ground::exits::nearest(floor.pieces(), at) else {
+        return refuse("off-surface", format!("({}, {}) µm: no ground", at.x, at.z));
+    };
+    let mut b = floor.place_built(id, frame, to, facing, build)?;
+    b.pose.position.x = at.x;
+    b.pose.position.z = at.z;
+    b.pose.position.y = at.y;
+    Ok(b)
+}
+
+/// The world's carry of a climb out (E11d) or of its rest after a restart: along a straight line to `to` on `floor` at
+/// walking speed, waiting at its end while another body stands there (#4215).
+pub fn climb_track(floor: Id, to: Vec3) -> crate::controller::Track {
+    crate::controller::Track {
+        link: None,
+        line: vec![to],
+        speed: crate::gaits::WALK.speed,
+        to: floor,
+        arrive: None,
+        hold: true,
+    }
 }
 
 /// Today's standing reach of the standard 1.75 m body (`BODY_MODEL.overheadMax`, 2.06 m), µm: the highest seat top it
@@ -249,6 +519,10 @@ pub struct Slots {
     held: BTreeMap<Spot, Hold>,
     by_body: BTreeMap<Id, Spot>,
     changed: Vec<Id>,
+    /// The climbs out begun (E11d), drained by the world ([`Slots::climbs`]).
+    climbs: Vec<ClimbOut>,
+    /// Each seat's thing's own boxes on its floor, which a body climbing out of it may pass over (E11d).
+    footprints: BTreeMap<Id, Footprint>,
     /// Each body's admitted build, as its adapter gave it; [`STANDARD_BUILD`] when none was.
     builds: BTreeMap<Id, Build>,
     /// The things that move on a course (a punt, #3603): their loaded tracks and their homes. A seat on one is taken
@@ -454,6 +728,81 @@ impl Slots {
     /// Seat ownership changes, drained by the world to wake standing queues.
     pub fn changes(&mut self) -> Vec<Id> {
         std::mem::take(&mut self.changed)
+    }
+
+    /// Gives `thing`'s own boxes on its seats' floor (E11d): a body climbing out of one of its seats may pass over
+    /// them. A thing with none given is passed over only where there is water.
+    pub fn footprint(&mut self, thing: Id, own: Footprint) {
+        self.footprints.insert(thing, own);
+    }
+
+    /// What a restart does with a body the log had standing at `at` on `floor` (`frame`'s node), E11d. Standing on the
+    /// floor, it stands ([`Resumed::Stood`]). Off it (a kill during a climb out), it climbs on by the climb's own rule
+    /// from where it is: the nearest landing within [`CLIMB_BOUND`] whose line passes off the floor only over water
+    /// or the boxes of a thing on that floor that hold `at` ([`Resumed::Climbs`]); else the floor's nearest legal
+    /// point, when its line is such a way out ([`Resumed::Nearest`]); else it is left where it is
+    /// ([`Resumed::Held`]): never carried through a cut. No body standing is asked of, since a restart adds them
+    /// one by one; the carry waits at its end while one stands there.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resume(
+        &self,
+        floors: &dyn Floors,
+        floor: &Surface,
+        id: Id,
+        frame: Frame,
+        at: Vec3,
+        facing: Quat,
+        build: Build,
+    ) -> Resumed {
+        if floor.place_built(id, frame, at, facing, build).is_ok() {
+            return Resumed::Stood;
+        }
+        let own: Vec<[[i64; 2]; 4]> = self
+            .over(frame.node, at, build)
+            .into_iter()
+            .flat_map(|t| self.footprints[&t].iter().copied())
+            .collect();
+        let cl = Climb {
+            floor,
+            floors,
+            own: &own,
+            taken: &|_| false,
+            body: id,
+            node: frame.node,
+            facing,
+            from: Vec3::new(at.x, 0, at.z),
+            base: at.y - build.hover_mm * 1000,
+            build,
+        };
+        if let Some(l) = cl.nearest() {
+            return Resumed::Climbs(l);
+        }
+        if let Some((_, to)) = crate::ground::exits::nearest(floor.pieces(), at)
+            && let Ok(b) = floor.place_built(id, frame, to, facing, build)
+            && cl.way_out(b.pose.position)
+        {
+            return Resumed::Nearest(b.pose.position);
+        }
+        Resumed::Held
+    }
+
+    /// The things with seats on `floor` whose own boxes (grown by `build`'s clearance) hold `at`, by id: what a body
+    /// standing off the floor there is over (E11d).
+    pub fn over(&self, floor: Id, at: Vec3, build: Build) -> Vec<Id> {
+        let grow = (build.size.radius_mm() + crate::ground::MARGIN + 10) * 1000;
+        self.footprints
+            .iter()
+            .filter(|(thing, rings)| {
+                self.place(**thing).is_some_and(|p| p.floor == floor)
+                    && rings.iter().any(|r| near_ring(r, [at.x, at.z], grow))
+            })
+            .map(|(t, _)| *t)
+            .collect()
+    }
+
+    /// The climbs out begun since the last call (E11d), in the order they began.
+    pub fn climbs(&mut self) -> Vec<ClimbOut> {
+        std::mem::take(&mut self.climbs)
     }
 
     /// Adds a seat (`place-duplicate` when its thing has one in that slot).
@@ -1106,8 +1455,12 @@ impl Slots {
         self.give_way(c, at, floors, key, now)
     }
 
+    /// Hands `body` from its seat `at` onto the floor under `driver`, standing: at the stand point or the first point
+    /// out from it ([`rise_point`]); else it climbs out ([`climb_point`], E11d): handed onto the floor's frame at the
+    /// seat's point and carried by the world at walking speed in a straight line to the floor, never appearing there
+    /// ([`ClimbOut`]). `off-surface` when there is no floor within [`CLIMB_BOUND`] by a way out: the body stays seated.
     fn stand(
-        &self,
+        &mut self,
         c: &mut Controller,
         at: &PlaceAt,
         floors: &dyn crate::mover::Floors,
@@ -1119,6 +1472,7 @@ impl Slots {
             name: "body-missing",
             detail: show(body),
         })?;
+        let all = floors;
         let floors = floors.for_build(build).ok_or_else(|| Refusal {
             name: "body-class-unprepared",
             detail: "no prepared support surfaces".into(),
@@ -1130,14 +1484,63 @@ impl Slots {
             node: at.floor,
             slot: None,
         };
-        let Some(p) = rise_point(floor, at, body, build)? else {
+        if let Some(p) = rise_point(floor, at, body, build)? {
+            let placed = floor.place_built(body, frame, p, at.facing, build)?;
+            return c.stand(body, driver, placed, now);
+        }
+        // A climb out starts from the body's own place in the seat (E16: a bench's places), never from another.
+        let mut here = at.clone();
+        if !at.more.is_empty()
+            && let Some(p) = c.body(body).map(|b| b.pose.position)
+            && let Ok(d) = at.facing.rotate(Vec3::new(p.x, 0, p.z))
+        {
+            here.point.x += d.x;
+            here.point.z += d.z;
+        }
+        let near = c.near();
+        let taken = |p: Vec3| {
+            near.bodies_within(at.floor, [p.x, p.z], crate::controller::LANDING_ROOM)
+                .iter()
+                .any(|(o, _)| *o != body)
+        };
+        let own = self
+            .footprints
+            .get(&at.thing)
+            .map_or(&[][..], Vec::as_slice);
+        let to = climb_point(
+            floor,
+            all,
+            &here,
+            self.places_of(at.thing),
+            own,
+            &taken,
+            body,
+            build,
+        )?;
+        let Some(to) = to else {
             return refuse(
                 "off-surface",
-                format!("{}: no stand point within reach", show(at.thing)),
+                format!(
+                    "{}: no floor within {CLIMB_BOUND} µm of the slot by a way out",
+                    show(at.thing)
+                ),
             );
         };
-        let placed = floor.place_built(body, frame, p, at.facing, build)?;
-        c.stand(body, driver, placed, now)
+        let landed = floor.place_built(body, frame, to, at.facing, build)?;
+        let mut placed = landed;
+        placed.pose.position.x = here.point.x;
+        placed.pose.position.z = here.point.z;
+        let from = placed.pose.position;
+        let h = c.stand(body, driver, placed, now)?;
+        c.carry(body, climb_track(at.floor, landed.pose.position))?;
+        self.climbs.push(ClimbOut {
+            body,
+            thing: at.thing,
+            from,
+            to: landed.pose.position,
+            at: now,
+        });
+        Ok(h)
     }
 }
 
