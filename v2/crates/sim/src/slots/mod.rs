@@ -1220,7 +1220,7 @@ impl Slots {
             return refuse(
                 "off-surface",
                 format!(
-                    "{}: no floor within {CLIMB_BOUND} µm of the seat by a way out",
+                    "{}: no floor within {CLIMB_BOUND} µm of the slot by a way out",
                     show(at.thing)
                 ),
             );

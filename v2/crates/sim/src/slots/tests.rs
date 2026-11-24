@@ -945,10 +945,10 @@ fn e11d_a_seat_facing_the_water_climbs_out_onto_the_bank_behind_it() {
         assert_eq!(
             (h.pose.position.x, h.pose.position.z),
             (0, 0),
-            "handed onto the floor's frame at the seat's own point, never at the bank"
+            "handed onto the floor's frame at the slot's own point, never at the bank"
         );
-        assert!(w.c.carried(b), "carried by the world from the seat");
-        assert_eq!(w.slots.holder(w.chair), None, "the seat is free");
+        assert!(w.c.carried(b), "carried by the world from the slot");
+        assert_eq!(w.slots.holder(w.chair), None, "the slot is free");
         let climbs = w.slots.climbs();
         let [cl] = climbs.as_slice() else {
             panic!("one climb out: {climbs:?}")
@@ -1011,7 +1011,7 @@ fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
         Support::Slot,
         "seated still"
     );
-    assert_eq!(w.slots.holder(w.chair), Some(b), "its seat held");
+    assert_eq!(w.slots.holder(w.chair), Some(b), "its slot held");
     assert!(
         !w.c.carried(b) && w.slots.climbs().is_empty(),
         "no climb, nothing moved"
@@ -1095,7 +1095,7 @@ fn e11d_the_things_other_stand_point_comes_first() {
     assert_eq!(
         (cl.to.x, cl.to.z),
         (2_000_000, 300_000),
-        "the other seat's stand point"
+        "the other slot's stand point"
     );
     step_until_landed(&mut w, b, contact + 1);
     let p = w.c.body(b).unwrap().pose.position;

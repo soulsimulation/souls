@@ -2101,12 +2101,12 @@ fn e11d_a_rise_with_floor_behind_the_seat_climbs_out_and_ends_done() {
     };
     assert_eq!(e.how.as_str(), "done", "risen");
     let slots = b.slots.as_mut().expect("slots");
-    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    assert_eq!(slots.holder_in(chair, slot), None, "the slot free");
     assert_eq!(slots.climbs().len(), 1, "one climb out");
     let p = b.c.body(body).expect("a body").pose;
     assert!(
         matches!(p.support, replica::pose::Support::Surface { .. }) && p.position.z <= -2_000_000,
-        "on the floor behind the seat: {p:?}"
+        "on the floor behind the slot: {p:?}"
     );
     assert!(!b.c.carried(body), "landed");
     b.clean();
