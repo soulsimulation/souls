@@ -741,3 +741,79 @@ fn e10_a_seated_rider_steers_and_a_passenger_or_a_bystander_is_refused() {
         assert_eq!(r.detail, "who may: whoever holds it", "{who}");
     }
 }
+
+/// E10b: a vehicle in one body's hand while another body sits in its drive slot has one holder, the carrier. The body
+/// in the drive slot is refused `not-permitted`, as a passenger is, so two bodies never both hold it; the carrier keeps
+/// its `who: holder` forms (it can always put the vehicle down), and the rider is still seated and may get off. With
+/// the vehicle set down (loose in the place), the same rider holds it again.
+#[test]
+fn e10b_a_carried_vehicle_is_the_carriers_alone_not_its_riders() {
+    let name = "f6:v";
+    let entry = parse(&format!(
+        r#"{{"format":"souls-entry/1","kind":"{name}","owner":"thing",
+        "slots":{{"saddle":{{"admits":"body","posture":"sit","most":1}}}},
+        "vehicle":{{"drive":"saddle","steer":"steer","speed_mm_s":5000,"ground":"level"}},
+        "forms":{{"steer":{{"who":"holder"}}}}}}"#
+    ))
+    .expect("JSON");
+    let text = format!("{KINDS}\n{{1: \"{name}\", 2: \"thing\", 6: {{1: [\"body\"]}}}}");
+    let kinds = parse_kinds(&text).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let id = |n| Id::new(FIXTURE_SCOPE_A, n).expect("an id");
+    let (root, vehicle, carrier, rider) = (id(1), id(2), id(3), id(4));
+    let node = |id, kind: &str, parent, slot| Node {
+        id,
+        kind: full(kind),
+        parent,
+        slot,
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let steer = |carried: bool| {
+        let (parent, slot) = if carried {
+            (carrier, Some(2))
+        } else {
+            (root, None)
+        };
+        let draft = Draft {
+            kinds: kinds.clone(),
+            nodes: vec![
+                node(root, "souls:place", None, None),
+                node(carrier, "souls:body", Some(root), None),
+                node(vehicle, name, Some(parent), slot),
+                node(rider, "souls:body", Some(vehicle), Some(1)),
+            ],
+            ..Draft::default()
+        };
+        let (tree, rules) = Tree::load(&draft).unwrap_or_else(|e| panic!("loads: {e}"));
+        let may_steer = |body| {
+            may(
+                &tree,
+                &rules.audiences,
+                &|_| None,
+                body,
+                vehicle,
+                &entry,
+                "steer",
+            )
+        };
+        (may_steer(carrier), may_steer(rider))
+    };
+    let (by_carrier, by_rider) = steer(true);
+    assert!(by_carrier.is_ok(), "the carrier holds it: {by_carrier:?}");
+    let r = by_rider.expect_err("the body in the drive slot of a carried vehicle");
+    assert_eq!(r.name, "not-permitted", "{}", r.detail);
+    assert_eq!(r.detail, "who may: whoever holds it");
+    let (by_carrier, by_rider) = steer(false);
+    assert!(by_rider.is_ok(), "set down, the rider holds it: {by_rider:?}");
+    assert_eq!(
+        by_carrier.expect_err("a body beside it").name,
+        "not-permitted"
+    );
+}
