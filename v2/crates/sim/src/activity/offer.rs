@@ -303,6 +303,12 @@ impl Activities {
         Some((self.kinds.get(&o.kind)?, o.asker))
     }
 
+    /// The asker's role in `offer` and the one an acceptor takes, while it is open: a pair's members in order.
+    pub fn offered_roles(&self, offer: Id) -> Option<[&Name; 2]> {
+        let o = self.offers.open.get(&offer)?;
+        Some([&o.role, &o.other])
+    }
+
     fn answerable(&self, offer: Id, body: Id, now: Micros) -> R<Open> {
         let Some(o) = self.offers.open.get(&offer) else {
             return refuse("offer-missing", show(offer));

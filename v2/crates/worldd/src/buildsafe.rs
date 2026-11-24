@@ -25,6 +25,9 @@
 //! - **The one creator** (G1e). [`Creator`] holds the world's one creator as its directory record names it, read at
 //!   the start and again on a change (`worldd serve`); every other actor's edit, and every edit while the record names
 //!   none, is refused `edit.not-the-creator`.
+//! - **A thing placed new** ([`stand_as_kinds`]). A place of a boot kind carries no solids of its own (the old page
+//!   and `souls-god place` send none), so before the check it is given its kind's walk outline from its entry's
+//!   bounds: G2 then refuses it on a standing Soul (`edit.would-bury`), as it refuses an existing thing moved there.
 //!
 //! Not here: a body partway across a link on the tree (the tree holds no crossing), other body sizes, the stretch of
 //! a walker's path between it and its next corner (it walks round what is put there).
@@ -35,11 +38,12 @@ use replica::encode::encode;
 use replica::ids::Id;
 use replica::kinds::sizes::Size;
 use replica::pose::{Frame, Pose, Support, Vec3};
+use replica::rules::json::Value as Json;
 use replica::tree::Rules;
 use replica::world_model::{Kind, plain};
 use sim::edit::safety::Who;
 use sim::ground::Versions;
-use sim::ground::scene::GROUND;
+use sim::ground::scene::{F_SOLIDS, GROUND};
 use sim::links::Doors;
 use sim::routes::HANDS;
 use sim::walk::town::{Basis, Rebuilt, Town};
@@ -64,6 +68,23 @@ pub fn open_ground(copy: &Replica) -> Option<Id> {
         queue.extend(tree.children(h).unwrap_or_default());
     }
     None
+}
+
+/// A thing placed new stands as its kind's bounds say: each place of a boot kind whose entry (in `entries`, by the
+/// entry the thing names, else its kind's plain name) gives `geometry.bounds_mm` gets its walk outline as its solids
+/// (N1's field 12), unless the batch gives its own. Without it a placed thing has no footprint when the edit is
+/// checked, so G2 would let it land on a standing Soul; with it, G2 judges what it would bury before it commits
+/// (`edit.would-bury`, naming the Soul) and walkers go round it, as `replica::edit::check` does for a creator's kind.
+pub fn stand_as_kinds(edit: &mut replica::edit::Edit, entries: &Json) {
+    for op in &mut edit.ops {
+        if let replica::edit::Op::Place { kind, fields, .. } = op
+            && !fields.contains_key(&F_SOLIDS)
+            && let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields))
+            && let Some(solids) = replica::kinds::defined::solids_of(entry)
+        {
+            fields.insert(F_SOLIDS, solids);
+        }
+    }
 }
 
 /// Every Soul's body on `copy`, in the tree's order (breadth first), as G2 judges it.

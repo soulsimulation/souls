@@ -543,6 +543,9 @@ pub struct Forms {
     /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
     /// writes it on the body ([`Forms::seat_posture`]).
     postures: BTreeMap<String, u64>,
+    /// Runs whose rise ended while the world still carries their body out of the seat (E11d, a climb out): each is
+    /// woken by how its move ended once the body stands on the floor ([`Forms::tick`]).
+    landing: BTreeMap<RunId, Name>,
     /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
     /// (E14, [`other_slots`]).
     slots_of: BTreeMap<String, BTreeSet<u64>>,
@@ -2078,6 +2081,7 @@ impl Forms {
         now: Micros,
     ) {
         self.planning.remove(&run);
+        self.landing.remove(&run);
         let Some(fr) = self.runs.get_mut(&run) else {
             return;
         };
@@ -2193,6 +2197,23 @@ impl Forms {
             }
             self.wake(w, run, Woke::Planning, now);
         }
+        let landed: Vec<RunId> = self
+            .landing
+            .keys()
+            .filter(|run| {
+                self.runs
+                    .get(run)
+                    .is_none_or(|fr| !w.controller.carried(fr.body))
+            })
+            .copied()
+            .collect();
+        for run in landed {
+            if let Some(how) = self.landing.remove(&run)
+                && self.runs.contains_key(&run)
+            {
+                self.wake(w, run, Woke::Moved(how), now);
+            }
+        }
         // A run whose walk is running (an entry in the walks) and lost its claim on the legs (its Soul's own walk took
         // them, intents rule 10) ends `claim-taken`, as one waiting for its plan does (S11): its walk's inputs went
         // nowhere, it asked no way, so C21's watch never saw it, and the run stood at its walk step, its act never
@@ -2269,7 +2290,12 @@ impl Forms {
                         if how.as_str() == "done" {
                             self.seat_posture(w.tree, run, t.due);
                         }
-                        self.wake(w, run, Woke::Moved(how), t.due);
+                        if how.as_str() == "done" && w.controller.carried(rec.body) {
+                            // A rise that climbs out (E11d): its run goes on once the body stands on the floor.
+                            self.landing.insert(run, how);
+                        } else {
+                            self.wake(w, run, Woke::Moved(how), t.due);
+                        }
                     }
                 }
                 // Phase 1 begins at the contact instant (B2). A hand-off the places refused there (a rise with no

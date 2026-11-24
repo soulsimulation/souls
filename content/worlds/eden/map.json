@@ -258,6 +258,7 @@
     {"def": "core/toilet@1", "placed": 16, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:toilet", "forms": "own", "state": {"cistern": "default"}},
     {"def": "core/bathtub@1", "placed": 16, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:bathtub", "forms": "own", "state": {"water": "default"}, "dropped": {"level": "a share of a full tub; the entry holds grams of water and starts empty"}},
     {"def": "core/hearth@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:hearth", "forms": "base", "dropped": {"on": "the fire's glow is the look's; lighting it is no form today either"}},
-    {"def": "core/chest@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:chest", "forms": "own", "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}}
+    {"def": "core/chest@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:chest", "forms": "own", "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}},
+    {"def": "core/radio@2", "placed": 1, "entry": "eden:radio", "forms": "own", "state": {"on": {"from": "on"}, "station": "default"}, "note": "House 1 living-room radio console; on/off proof, station-name mismatch retained"}
   ]
 }

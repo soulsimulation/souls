@@ -165,7 +165,11 @@ is that thing's: a Soul that offers in a role, or accepts or joins one, holds th
 member, so the kind's forms that ask for it (`who: {"link": "<role>"}`, `"need": "linked"`) pass for it and refuse others
 by name. Its leave, or the offer's lapse or decline, takes the link down. Offered on the open ground, it links nothing.
 A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
-at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
+at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does. The accept checks the move's
+reach from the places the two will take, not from where they stand (0.134 item 5), so two who walked up to each other
+can touch; each may step at most the move's reach to its place, so a pair farther apart is refused `together.too-far`
+before anyone moves. A walk to a place ends within 5 cm of it, so a kind's places sit at least 10 cm inside its moves'
+reach.
 A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.
 `"on_beat": true` (0.134 T3) puts the move on the world's beat: each member's begins on one beat, at its own body, and
 again on the next beat after it ends, until the member leaves. The role's link `most` is how many take it, so a dance

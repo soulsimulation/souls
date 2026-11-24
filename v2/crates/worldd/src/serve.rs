@@ -1840,7 +1840,15 @@ fn bodies(
             name: "no-surface",
             detail: "recorded ground".into(),
         })?;
-        let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
+        // A body killed mid-climb out of a seat (E11d) stands off its floor: placed where it was; `Bodies::add_body_at_built` resumes it.
+        let moved = sim::slots::placed_off(
+            surface,
+            *id,
+            Frame { node, slot: None },
+            point,
+            facing,
+            build,
+        )?;
         at.push((moved, build));
     }
     // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
@@ -1857,9 +1865,19 @@ fn bodies(
             }
         }
     }
+    let owns: Vec<(Id, sim::slots::Footprint)> = places
+        .iter()
+        .map(|p| (p.thing, p.floor))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|(thing, floor)| (thing, worldd::places::footprint(&town.tree, thing, floor)))
+        .collect();
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, own) in owns {
+        b.slots.footprint(thing, own);
     }
     for (thing, course) in moving {
         let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
@@ -3589,8 +3607,8 @@ mod tests {
                 assert_eq!(
                     s,
                     vec![
-                        (Vec3::new(-250_000, 0, 0), 0),
-                        (Vec3::new(250_000, 0, 0), 0)
+                        (Vec3::new(-225_000, 0, 0), 0),
+                        (Vec3::new(225_000, 0, 0), 0)
                     ]
                 );
             }

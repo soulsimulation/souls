@@ -87,7 +87,7 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   on the machine (`world-limits.mjs`, slug to instance through the world-authority map) and runs `systemctl
   daemon-reload`; the cap applies at the world's next start, or at once with `memory-bounds.sh apply` (below). A
   world not listed keeps the unit's `MemoryMax=2G`. Each world's own `MemoryMax` is what ends a world that overruns, so
-  only that world is killed and restarted; `souls.slice`'s 14 GB is a backstop sized never to be reached (24 Nov: a 3 GB
+  only that world is killed and restarted; `souls.slice`'s 18 GB (14 GB until 24 Nov) is a backstop sized never to be reached (24 Nov: a 3 GB
   slice cap ended Eden when a fourth world started), and its `MemoryLow` of 2 GB lets Eden's own `MemoryLow` count. To
   put the slice and the limits on a machine live, restarting nothing: `sudo bash v2/tools/ops/memory-bounds.sh apply`
   (it backs up what it replaces and prints the undo, `memory-bounds.sh undo <backup>`); `memory-bounds.sh check` reads
