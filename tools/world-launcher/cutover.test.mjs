@@ -210,6 +210,15 @@ test('W1: one binding file, two worlds: each switches and turns back alone, its 
   assert.equal(Object.hasOwn(await page('mars'), 'v2Stream'), false, 'Mars not bound: its page names no stream');
   assert.equal((await act('mars')).status, 200, 'Mars still acts on the old engine');
   assert.equal((await act('eden')).status, 409, 'Eden refuses old acts');
+  // R16: the old page's replica route carries the content's SHA-256 as an ETag, on GET and HEAD, and a changed file
+  // (a moved client of the same length) another; only the replica's files carry one.
+  const etag = async (name, method = 'HEAD') => (await fetch(`${base}/w/eden/${name}`, { method })).headers.get('etag');
+  const hashOf = (text) => `"${createHash('sha256').update(text).digest('hex')}"`;
+  assert.equal(await etag('replica.js'), hashOf('test module')); assert.equal(await etag('replica_bg.wasm', 'GET'), hashOf('test wasm'));
+  assert.equal(await etag('replica_bg.wasm'), await etag('replica_bg.wasm', 'GET')); assert.equal(await etag('eden.mjs'), null);
+  writeFileSync(join(client, 'replica_bg.wasm'), 'test wasn');
+  assert.equal(await etag('replica_bg.wasm'), hashOf('test wasn'), 'a changed file has another ETag');
+  writeFileSync(join(client, 'replica_bg.wasm'), 'test wasm');
 
   // a second world is added: it shares the routes, client and bodies folders, never Eden's static folder
   assert.throws(() => v2Switch({ binding: file, slug: 'mars', stream: '/s/mars/', staticDir: staticOf('eden') }), /cutover.binding-invalid/, 'one static folder per world');

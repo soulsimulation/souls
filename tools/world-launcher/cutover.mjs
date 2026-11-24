@@ -32,7 +32,10 @@ function answer(dir, path) {
       return { status: 200, type: 'application/json', body: Buffer.from(JSON.stringify({ soulClient })) };
     }
     const name = path === '/llms.txt' ? 'instructions.md' : path.slice(1);
-    return { status: 200, type: types[name], body: readBounded(join(dir, name), 32 * 1024 * 1024) };
+    const body = readBounded(join(dir, name), 32 * 1024 * 1024);
+    // R16: the replica's two files carry their content's hash, so an open page tells a new replica by a HEAD alone.
+    const etag = name === 'replica.js' || name === 'replica_bg.wasm' ? `"${createHash('sha256').update(body).digest('hex')}"` : undefined;
+    return { status: 200, type: types[name], body, ...(etag ? { etag } : {}) };
   } catch { return null; }
 }
 // The same public stream path the v2 origin's routes accept (v2/tools/origin/world-routes.mjs): `/s/…/`, no dot segments.
@@ -305,7 +308,7 @@ function oneFence(binding) {
       if (!a) {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.client-unavailable', message: 'The new engine client is unavailable. Ask the operator to restore the served bundle.' }));
-      } else res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : a.body);
+      } else res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-store', ...(a.etag ? { etag: a.etag } : {}) }).end(req.method === 'HEAD' ? undefined : a.body);
       return true;
     },
   };

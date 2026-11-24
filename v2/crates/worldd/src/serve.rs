@@ -2794,11 +2794,9 @@ fn serve(args: &[String]) -> R<()> {
     // over never makes a lost tail's address; and before fencing, the backup asks the directory whether this run still
     // holds the newest claim: the newest writer puts over an older one's head, and the older one fences.
     let stream_epoch = off_claim.as_ref().map(|(epoch, _)| *epoch);
-    // ... and the host its clean-stop mark names: a spool copied to another machine never reads as this one's.
-    let stream_host = off_claim
-        .as_ref()
-        .map(|(_, machine)| machine.as_str().to_owned())
-        .unwrap_or_default();
+    // ... and the host its clean-stop mark names (this machine's own identity): a spool copied to another machine
+    // never reads as this one's.
+    let stream_host = view_out::host_identity();
     let backup_claim = match off_claim {
         Some((epoch, machine)) => {
             let mut d = Directory::new(

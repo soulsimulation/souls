@@ -1360,6 +1360,28 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
         Err(e) => Err(io(e)),
     }
 }
+/// R16: this machine's identity for a spool's clean-stop mark: `/etc/machine-id` where there is one, else its host
+/// name. Never a claim's machine name, which is `local` on every machine that sets none.
+pub fn host_identity() -> String {
+    if let Ok(id) = fs::read_to_string("/etc/machine-id")
+        && !id.trim().is_empty()
+    {
+        return format!("machine-id:{}", id.trim());
+    }
+    let name = fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        });
+    if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
+        return format!("host:{}", name.trim());
+    }
+    String::new()
+}
 pub struct PublicStart<'a> {
     pub root: &'a Path,
     pub header: &'a Header,
@@ -1879,13 +1901,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         // R16: a generation recovered under another claim (a restart, or a takeover from a copied spool while the
         // old machine may still cut parts of it) gets no new part from this writer: it rolls over now, under this
         // claim, with the hand-off, so this writer's parts are at addresses no other claim's writer uses. Not when the
-        // spool says its last writer stopped cleanly on this host, in this folder, at the head recovered (a stop or a
-        // sleep, then a start or a wake): it cuts nothing more, so no other writer can have cut parts of it, and a
-        // rollover would only cost a whole seed and baseline. A copied spool, a crash or an unknown state rolls over.
+        // spool says its last writer stopped cleanly on this host, in this folder, at the head recovered, under the
+        // claim just before this one (a stop or a sleep, then a start or a wake): it cuts nothing more, and no claim
+        // came between, so no other writer can have cut parts of it, and a rollover would only cost a whole seed and
+        // baseline. A copied spool, a crash, a claim between or an unknown state rolls over.
         let clean = !from_store
             && w.spool
                 .as_ref()
-                .is_some_and(|s| s.take_clean(&head_key, &w.host));
+                .zip(w.epoch)
+                .is_some_and(|(s, epoch)| s.take_clean(&head_key, &w.host, epoch));
         let retake = !fresh
             && !clean
             && w.epoch.is_some()
@@ -2654,8 +2678,8 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// next start on this host, in this folder, keeps its generation rather than rolling it over. Called only once
     /// nothing more is cut; a cut after it moves the head and voids the mark. Best effort.
     pub fn mark_clean(&self) {
-        if let Some(spool) = &self.spool
-            && let Err(e) = spool.mark_clean(&format!("{}head", self.prefix), &self.host)
+        if let (Some(spool), Some(epoch)) = (&self.spool, self.epoch)
+            && let Err(e) = spool.mark_clean(&format!("{}head", self.prefix), &self.host, epoch)
         {
             eprintln!("worldd: the public stream's clean-stop mark was not written: {e}");
         }

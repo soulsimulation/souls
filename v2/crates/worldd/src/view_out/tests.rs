@@ -3694,6 +3694,86 @@ fn r16_a_clean_stop_then_a_start_keeps_the_generation_and_a_crash_rolls_it() {
     assert_ne!(generation(&w), third, "a mark the head moved past");
 }
 
+/// R16: a copy of the folder taken during a clean stop, then A starts again and B starts from the copy. Even where
+/// the copy sits at the same path and its host reads as the same (machine names are `local` everywhere), at most one
+/// of them keeps the generation: the mark names the stopping writer's claim, and only the claim directly after it
+/// (no claim between) keeps it. Either order.
+#[test]
+fn r16_a_copy_taken_during_a_clean_stop_lets_at_most_one_start_keep_the_generation() {
+    let h = header();
+    let store = directoryd::directory::store::Memory::default();
+    let open = |at: &Path, epoch| {
+        PublicWriter::open_spooled(
+            PublicStart {
+                names: None,
+                root: &at.join("views"),
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+            Closed::default(),
+            Some((at.join("stream-backup"), "store".into(), "same".into())),
+            Some(epoch),
+        )
+        .unwrap()
+    };
+    let body = Id::new(Scope([76; 16]), 1).unwrap();
+    for (tag, a_first) in [("a-first", true), ("b-first", false)] {
+        let d = scratch(&format!("r16-copy-{tag}"));
+        let (a_dir, copy) = (d.join("w"), d.join("copy"));
+        let mut a = open(&a_dir, 4);
+        a.push(
+            0,
+            &w3e_packet(
+                &h,
+                vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+            ),
+        )
+        .unwrap();
+        a.flush().unwrap();
+        let first = replica::ids::sha256(&a.baseline);
+        a.mark_clean();
+        drop(a);
+        let status = Command::new("cp")
+            .arg("-R")
+            .arg(&a_dir)
+            .arg(&copy)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // A on its machine, and B on another whose folder (the copy, at the same path) and host read the same: each
+        // takes the next claim in turn, in this order or the other.
+        let mut kept = 0;
+        for (n, epoch) in [5, 6].into_iter().enumerate() {
+            let a_turn = (n == 0) == a_first;
+            if !a_turn {
+                // B's machine: the copy at the same path.
+                let held = d.join("held");
+                fs::rename(&a_dir, &held).unwrap();
+                fs::rename(&copy, &a_dir).unwrap();
+                let w = open(&a_dir, epoch);
+                kept += usize::from(replica::ids::sha256(&w.baseline) == first);
+                drop(w);
+                fs::rename(&a_dir, &copy).unwrap();
+                fs::rename(&held, &a_dir).unwrap();
+            } else {
+                let w = open(&a_dir, epoch);
+                kept += usize::from(replica::ids::sha256(&w.baseline) == first);
+            }
+        }
+        assert_eq!(
+            kept, 1,
+            "{tag}: one start keeps the generation, the other rolls over"
+        );
+    }
+}
+
 /// R16: every baseline a writer under a directory claim makes carries the claim's epoch, so two claims' writers on
 /// the same records, rolling over at the very same cursors, never make one generation address; each is deterministic
 /// for its own claim, and with no claim the addresses are those made before. A restart under a new claim keeps the

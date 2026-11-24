@@ -191,8 +191,9 @@ export class V2Bridge {
       this.worker.postMessage({ stream: new URL(stream, location.href).href });
     };
     this.served = served ?? null;
-    // The replica this reader loads: what the world serves as it starts.
-    if (served) void served().then((v) => { if (v !== null) this.replica ??= v; });
+    // The replica this reader loads: what the world serves as it starts. Unknown (that ask failed): any replica the
+    // world later serves may be another, so the first refusal renews on any (R16).
+    this.first = served ? served().then((v) => { if (v !== null) this.replica ??= v; }) : Promise.resolve();
     this.restart();
   }
   private restart: (() => void) | null = null;
@@ -201,6 +202,7 @@ export class V2Bridge {
    *  after that (RENEW_MS doubling to RENEW_MAX_MS); whether an ask is out; whether the next snapshot is a new
    *  reader's whole copy. */
   private replica: string | undefined = undefined;
+  private first: Promise<void> = Promise.resolve();
   private askAt = -Infinity;
   private wait = RENEW_MS;
   private asking = false;
@@ -212,16 +214,15 @@ export class V2Bridge {
   private unreadable(): void {
     if (!this.served || !this.restart || this.asking || this.wallNow() < this.askAt) return;
     this.asking = true;
-    void this.served().then((v) => {
+    void this.first.then(() => this.served!()).then((v) => {
       this.asking = false;
       if (!this.restart) return;
-      if (v !== null && this.replica !== undefined && v !== this.replica) {
+      if (v !== null && v !== this.replica) {
         this.replica = v; this.wait = RENEW_MS; this.askAt = this.wallNow() + RENEW_MS;
         this.renewed = true;
         this.restart();
         return;
       }
-      if (this.replica === undefined && v !== null) this.replica = v;
       this.askAt = this.wallNow() + this.wait;
       this.wait = Math.min(this.wait * 2, RENEW_MAX_MS);
     });

@@ -147,7 +147,7 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
 });
 
 /** A bridge on fake readers and a fake served replica, on a fake wall clock. */
-function renewing() {
+function renewing(first: string | null = 'v1') {
   (globalThis as unknown as { location?: { href: string } }).location ??= { href: 'https://example.test/w/eden/' };
   type Fake = { posted: unknown[]; terminated: boolean; onmessage: unknown; onerror: unknown; postMessage: (m: unknown) => void; terminate: () => void };
   const made: Fake[] = [];
@@ -156,7 +156,7 @@ function renewing() {
     made.push(w);
     return w as unknown as Worker;
   };
-  const t = { now: 1_000_000, served: 'v1' as string | null, asked: 0 };
+  const t = { now: 1_000_000, served: first, asked: 0 };
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.wallNow = () => t.now;
   b.start('views/x/', make, async () => { t.asked++; return t.served; });
@@ -220,6 +220,20 @@ test('R16: the same served replica refusing a baseline (a real fault) is never r
   b.receive({ t: 'error', message: refused });
   await settle();
   assert.equal(made.length, 1);
+});
+
+test('R16: when the reader\'s own replica could not be asked at its start, the first refusal renews on any served replica', async () => {
+  const { b, made, t } = renewing(null);
+  await settle();
+  t.served = 'v1';
+  b.receive({ t: 'error', message: refused });
+  await settle();
+  assert.equal(made.length, 2, 'unknown, so renewed');
+  // From then on the reader's replica is known: the same one again is not renewed.
+  t.now += RENEW_MAX_MS;
+  b.receive({ t: 'error', message: refused });
+  await settle();
+  assert.equal(made.length, 2);
 });
 
 test('R16: the served replica is told by HEAD alone: ETag, else Last-Modified, else length, for replica.js and the WASM beside it', async () => {
