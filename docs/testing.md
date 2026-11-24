@@ -454,9 +454,10 @@ When the local machine is busy, record the clip on a `souls-timed` runner with i
 `{"sim.dev": "admin"}`, and `steps.mjs`), push it to an `agent/` branch, then dispatch the timed run from that branch.
 The runner brings up the ref's old page on a new-engine world of the template
 (`tools/playtest/arena/new-engine/old-page.mjs`, built in the job); `_shared/cast.mjs` pairs the kit's Souls through
-the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. A kit
-whose verbs have no new-engine form yet (rides, the television: 0.135 K4) carries `skip` in its kit.json, saying why,
-and the runner refuses it by name:
+the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. The
+ride kits board by the ride's `board` form, waiting while it is away on its course (`_shared/ride.mjs`). A kit whose
+verbs have no new-engine form yet (the television, the core ferris wheel) carries `skip` in its kit.json, saying why
+and what is missing, and the runner refuses it by name:
 
 ```bash
 gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'
