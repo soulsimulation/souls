@@ -700,7 +700,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
       const ref=reference as {contract?:unknown;hash?:unknown;rulesVersion?:unknown}|undefined;
       const mismatch=reference!==undefined&&ref?.rulesVersion!==chunk.take.rulesVersion;
-      const key=reference===undefined?(history?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
+      const bare=history&&!v2History();  // a moved world's past is drawn in its current scenery: a seek never tears the world down
+      const key=reference===undefined?(bare?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
       if(key===sceneKey&&(sceneSettled||now<sceneRetryAt))return sceneSettled;
       const request=++sceneRequest;sceneKey=key;sceneRetryAt=Infinity;sceneSettled=false;initialGate?.cancel();setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
       staticBatches.reset();batchGeometry=null;batchRevision=-1;entityBatches.reset();entityBatchRevision=-1;
@@ -717,8 +718,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       renderer.domElement.dataset.sceneHash='';renderer.domElement.dataset.sceneBinding='loading';sceneryStatus('Loading the scenery for this recording.');
       const active=()=>!abort.signal.aborted&&request===sceneRequest;
       if(reference===undefined){
-        const pending=history?Promise.resolve(parseSceneInfo(null)):currentLayout();
-        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(history?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=history?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
+        const pending=bare?Promise.resolve(parseSceneInfo(null)):currentLayout();
+        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(bare?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=bare?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
       }else if(mismatch){failLayout('The scenery reference does not match this recording.');}
       else void sceneHistory.resolve(reference).then(result=>{
         if(!active())return;

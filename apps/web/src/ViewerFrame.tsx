@@ -1,6 +1,6 @@
 import {NavbarMenu} from './NavbarMenu.tsx';
 import {FullscreenToggle} from './FullscreenToggle.tsx';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import {ImportCredits} from './ImportCredits.tsx';
 import { createPortal } from 'react-dom';
 import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
@@ -10,7 +10,7 @@ import { arrivalFraction, heldLabel, initialPending } from './viewer-arrival.ts'
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
-import { hourLabel, setVisitorPreviewHour, subscribeVisitorHour, visitorPreviewHour } from './visitor-hour.ts';
+import { momentAgo, momentClock, momentDay } from './moment-clock.ts';
 import { subscribeWorldZone, worldZone } from './world-zone.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
@@ -68,9 +68,8 @@ export function useViewerInsets(root: RefObject<HTMLDivElement | null>, visible:
 
 /** VF2 (Gene): one "your camera" (drag orbits, right-drag pans, scroll zooms to the pointer, WASD/QE/RF keys;
  * WorldRtsCamera), and a split camera control beside Live: current state / one-click switching, modes and help. */
-export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationChange, worldTime, worldMinutes, connected = true, connecting = false, worldName, followName, selectedName, slots, initial }: { handle: WorldViewerHandle | null; state: WorldViewerState | null; dt: number; navigationOpen: boolean; onNavigationChange: (open: boolean) => void; onNavigationOpen?: () => void; worldTime?: string; worldMinutes?: number | null; connected?: boolean; connecting?: boolean; worldName?: string; followName?: string | null; selectedName?: string | null; slots?: { status: HTMLElement | null; camera: HTMLElement | null }; initial?: InitialWorldProgress | null }) {
+export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationChange, worldTime, connected = true, connecting = false, worldName, followName, selectedName, slots, initial }: { handle: WorldViewerHandle | null; state: WorldViewerState | null; dt: number; navigationOpen: boolean; onNavigationChange: (open: boolean) => void; onNavigationOpen?: () => void; worldTime?: string; worldMinutes?: number | null; connected?: boolean; connecting?: boolean; worldName?: string; followName?: string | null; selectedName?: string | null; slots?: { status: HTMLElement | null; camera: HTMLElement | null }; initial?: InitialWorldProgress | null }) {
   const [cameraNote, setCameraNote] = useState('');
-  const previewHour = useSyncExternalStore(subscribeVisitorHour, visitorPreviewHour, visitorPreviewHour);
   const zone = useSyncExternalStore(subscribeWorldZone, worldZone, worldZone);   // #1649: a real-time world's own time zone
   const [hourOpen, setHourOpen] = useState(false);
   const hourButton = useRef<HTMLButtonElement>(null);
@@ -100,7 +99,11 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   };
   // K3: a moved world plays from its first moment, at a chosen speed, with a scrub bar over everything since
   const [firstTick, setFirstTick] = useState<number | null>(null), [speed, setSpeed] = useState(playSpeed), [scrub, setScrub] = useState<number | null>(null);
-  const scrubTo = (v: number) => { setScrub(null); void handle?.seek(v); };
+  // a drag shows where it is going and goes there when let go, or after 0.6 s still (keys, and a release the bar never hears)
+  const scrubTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrubTo = (v: number) => { if (scrubTimer.current) clearTimeout(scrubTimer.current); scrubTimer.current = null; setScrub(null); void handle?.seek(v); };
+  const scrubbing = (v: number) => { setScrub(v); if (scrubTimer.current) clearTimeout(scrubTimer.current); scrubTimer.current = setTimeout(() => scrubTo(v), 600); };
+  useEffect(() => () => { if (scrubTimer.current) clearTimeout(scrubTimer.current); }, []);
   const fromStart = async () => {
     const h = v2History(), now = state?.shownTick;
     if (!h || now == null) return;
@@ -109,7 +112,9 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     setFirstTick(Math.floor(us / TICK_US));
     void handle?.seek(Math.floor(us / TICK_US));
   };
-  useEffect(() => { if (state?.presentation === 'history' && firstTick === null && state.shownTick != null) void v2History()?.first(state.shownTick * TICK_US).then((us) => { if (us !== null) setFirstTick(Math.floor(us / TICK_US)); }).catch(() => {}); }, [state?.presentation, firstTick]);
+  // the scrub bar's left end (the world's first moment), looked up once the time panel opens or a recording plays
+  const shown = state?.shownTick != null;
+  useEffect(() => { if ((hourOpen || state?.presentation === 'history') && firstTick === null && state?.shownTick != null) void v2History()?.first(state.shownTick * TICK_US).then((us) => { if (us !== null) setFirstTick(Math.floor(us / TICK_US)); }).catch(() => {}); }, [hourOpen, state?.presentation, firstTick, shown]);
   const help = useRef<HTMLDivElement>(null);
   const unavailable = !!state?.unavailableReason;
   const current = state?.shownTick != null && !state.loading && !unavailable;
@@ -160,8 +165,6 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     : lost ? 'Reconnecting…'
     : settledReason ? heldLabel(settledReason)
     : state!.presentation === 'history' ? 'Recorded' : 'Live';
-  const pill = !!live && !settledReason && !arriving && !!worldTime;
-  const statusClass = arriving || state?.loading ? 'loading' : !lost && !settledReason && current && connected ? 'ok' : 'warn';
   // #892: a glide to a Soul (flyToSoul) is Follow on its way, not your camera (no "Free" flash between two Souls)
   const kind = state?.cameraMode === 'follow' || state?.flyingTo ? 'follow' : state?.cameraMode === 'manual' ? 'yours' : 'broadcast';
   // Touch gestures on phones/tablets, read when the help is shown (the window may have been resized since).
@@ -189,56 +192,63 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   }, [navigationOpen, handle, onNavigationChange]);
   const toBroadcast = () => { setCameraNote(''); handle?.setCameraMode('broadcast'); };
   const yourCamera = () => { setCameraNote(''); if (handle?.setManualNavigation) handle.setManualNavigation('orbit'); else handle?.setCameraMode('manual'); };
-  // VF3 (Gene): the status ("● Live · time", and any reason it is not live) and the camera chip live in the top bar
-  // (Shell's slots); nothing sits at the bottom of the screen.
-  // Gene (24 Nov): "Back 1 min", "Link to this moment" and "From the start" live in the time panel the Live pill opens,
-  // not in the top bar; only a world with no clock (so no pill and no panel) keeps them in the bar.
-  const timePanel = !!worldTime;
-  const moments = <>
-    {/* Gene: "Show it to everyone": the history scrub ("Back 1 min") shows to every viewer, no `?rewind` flag */}
-    <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>
-    {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
-    {v2History() && state?.shownTick != null && !state.loading && <button type="button" title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
-  </>;
+  // VF3 (Gene): the status and the camera chip live in the top bar (Shell's slots); nothing sits at the bottom of the screen.
+  // Gene (24 Nov): the top bar holds ONE time control, the pill ("● Live", or "● Recorded · <clock of the moment shown>").
+  // Everything else about time is in the panel it opens: the one clock, Back 1 min, Pause/Play, speed, the scrub bar,
+  // From the start, Link to this moment and Return to live. The old time-of-day preview (a second, view-only clock) is gone.
+  const v2 = !!v2History();
+  const shownTick = state?.shownTick ?? null;
+  const recorded = state?.presentation === 'history';
+  // a moved world's tick is world time in µs since the epoch: its clock is the real time of the moment shown
+  const shownMs = v2 && shownTick != null ? shownTick * TICK_US / 1000 : null;
+  const clock = shownMs !== null ? momentClock(shownMs, zone) : worldTime?.split(' · ').slice(-1)[0] ?? '';
+  const day = shownMs !== null ? momentDay(shownMs, zone) : worldTime?.includes(' · ') ? worldTime.split(' · ')[0] : '';
+  const ago = recorded && shownMs !== null ? momentAgo(shownMs, Date.now()) : '';
+  const busy = !handle || shownTick == null || !!state?.loading;
+  const minute = v2 ? 60e6 / TICK_US : 60 / dt;
+  const back = () => { if (shownTick != null) void handle?.seek(Math.max(0, shownTick - minute)); };
+  // Pause from live holds the moment shown: a seek to it (the recording plays from there), then paused
+  const pause = async () => { if (shownTick == null || !handle) return; if (!recorded) await handle.seek(shownTick); handle.setPlaying(false); };
+  const playing = recorded && state?.playback === 'playing';
+  const pillText = arriving || state?.loading || lost || settledReason ? status : recorded ? clock ? `Recorded · ${clock}` : 'Recorded' : 'Live';
+  const pillClass = arriving || state?.loading ? 'loading' : lost || settledReason || !current || !connected ? 'warn' : recorded ? 'recorded' : 'ok';
+  const panelPlace = (): CSSProperties => {
+    const r = hourButton.current?.getBoundingClientRect(), top = r?.height ? r.bottom + 8 : 60;  // a phone's pill is hidden behind the menu
+    return innerWidth <= 700 ? { top, left: 16, right: 16, width: 'auto' } : { top, left: Math.max(16, Math.min((r?.left ?? 16) - 4, innerWidth - 336)) };
+  };
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
-        {/* #1392 (Gene): at the present time the element is one "● Live" pill; the day and time are in the panel it opens.
-            A previewed hour turns the circle orange and the pill shows that hour; Back to now restores Live. */}
-        {pill ? <button ref={hourButton} type="button" className="world-time-button live-pill" aria-expanded={hourOpen} aria-label={previewHour != null ? `Previewing ${hourLabel(previewHour)}: change the time of day` : `Live, ${worldTime}: preview the time of day`} title={`${zone ? `Local time in ${zone.replace(/_/g, ' ')}. ` : ''}Preview the time of day (only you see it)`} onClick={() => setHourOpen(!hourOpen)}>
-          <span className={previewHour != null ? 'preview' : statusClass} data-viewer-status data-viewer-live={live} data-viewer-preview={previewHour != null || undefined}>{previewHour != null ? hourLabel(previewHour) : status}</span>
-        </button> : <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>}
-        {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title={`${zone ? `Local time in ${zone.replace(/_/g, ' ')}. ` : ''}Preview the time of day (only you see it)`} onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
-        {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 4) }; })()}>
-          <div className="time-preview-head">
-            <span className="time-preview-value">{previewHour != null ? hourLabel(previewHour) : worldTime?.split(' · ').slice(-1)[0]}</span>
-            <span className={previewHour != null ? 'time-preview-tag preview' : 'time-preview-tag'}>{previewHour != null ? 'Preview' : 'Now'}</span>
+        <button ref={hourButton} type="button" className="time-pill" disabled={arriving} aria-expanded={hourOpen} aria-haspopup="dialog" aria-label={`${pillText}: time controls`} title="Time: go back, pause, play, share this moment" onClick={() => setHourOpen(!hourOpen)}>
+          <span className={pillClass} data-viewer-status data-viewer-live={live}>{pillText}</span>
+        </button>
+        {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-panel" role="dialog" aria-label="Time" data-time-panel={recorded ? 'recorded' : 'live'} style={panelPlace()}>
+          <div className="time-panel-head">
+            <span className="time-panel-clock" data-moment-clock={shownTick ?? ''}>{clock || '—'}</span>
+            <span className={recorded ? 'time-panel-tag recorded' : 'time-panel-tag'}>{recorded ? 'Recorded' : 'Live'}</span>
           </div>
-          {worldTime && <span className="time-preview-now" data-world-time>{previewHour != null ? `In the world: ${worldTime}` : worldTime.split(' · ')[0]}</span>}
-          {zone && <span className="dim" data-world-zone={zone}>Local time in {zone.replace(/_/g, ' ')}</span>}
-          <input type="range" min={0} max={1425} step={15} value={previewHour ?? worldMinutes ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} />
-          <div className="time-preview-ticks" aria-hidden="true"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
-          <div className="time-preview-foot">
-            <span>Only you see this</span>
-            {previewHour != null && <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>}
+          <span className="time-panel-day">{[day, ago, zone ? `time in ${zone.replace(/_/g, ' ')}` : ''].filter(Boolean).join(' · ')}{state?.loading ? ' · loading that moment…' : ''}</span>
+          <div className="time-panel-row" role="group" aria-label="Playback">
+            <button type="button" disabled={busy} onClick={back}>Back 1 min</button>
+            {playing ? <button type="button" disabled={busy} onClick={() => handle?.setPlaying(false)}>Pause</button>
+              : recorded ? <button type="button" disabled={busy} onClick={() => handle?.setPlaying(true)}>Play</button>
+              : <button type="button" disabled={busy} onClick={() => void pause()}>Pause</button>}
+            {v2 && recorded && <button type="button" title="Playback speed" aria-label={`Speed ×${speed}: play faster`} onClick={() => { const x = speed >= 8 ? 1 : speed * 2; setPlaySpeed(x); setSpeed(x); }}>×{speed}</button>}
           </div>
-          {/* a phone's top bar is out of sight behind the menu, so a recording also leaves from here */}
-          <div className="time-preview-moments" role="group" aria-label="Go back in time">{moments}{state?.presentation === 'history' && <button type="button" onClick={() => handle?.live()}>Back to live</button>}</div>
+          {v2 && firstTick !== null && shownTick != null && <input type="range" aria-label="Every moment since the world began" min={firstTick} max={Math.max(firstTick + 1, Math.floor(Date.now() * 1000 / TICK_US))} step={1} value={scrub ?? shownTick} onChange={(e) => scrubbing(Number(e.target.value))} onPointerUp={(e) => scrubTo(Number((e.target as HTMLInputElement).value))} />}
+          <div className="time-panel-row" role="group" aria-label="Moments">
+            {v2 && <button type="button" disabled={busy} title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
+            {v2 && <button type="button" disabled={shownTick == null} data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(shownTick!)}>{copied ? 'Copied' : 'Link to this moment'}</button>}
+            {recorded && <button type="button" className="time-panel-live" onClick={() => handle?.live()}>Return to live</button>}
+          </div>
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
-        {!timePanel && moments}
-        {state?.presentation === 'history' && <>
-          <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>
-          <button onClick={() => handle?.live()}>Return to live</button>
-          {v2History() && <button type="button" title="Play faster" onClick={() => { const x = speed >= 8 ? 1 : speed * 2; setPlaySpeed(x); setSpeed(x); }}>×{speed}</button>}
-          {v2History() && firstTick !== null && state.shownTick != null && <input type="range" aria-label="Every moment since the world began" min={firstTick} max={Math.max(firstTick + 1, Math.floor(Date.now() * 1000 / TICK_US))} step={1} value={scrub ?? state.shownTick} onChange={(e) => setScrub(Number(e.target.value))} onPointerUp={(e) => scrubTo(Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') scrubTo(Number((e.target as HTMLInputElement).value)); }} />}
-        </>}
       </div>
     </div>;
   // #893: phones get the camera menu as a bottom sheet; Follow appears when a Soul is selected.
   const phoneSheet = coarse || (() => { try { return matchMedia('(max-width: 700px)').matches; } catch { return false; } })();
   const followable = state?.selection.soulId ?? null;
-  const cameraLabel=arriving?'Loading':state?.presentation==='history'?'Recorded':kind==='follow'?`Following ${followName??(!state?.selection.soulId&&state?.selection.entityId?'a thing':'a Soul')}`:kind==='yours'?'Free':'Broadcast';
+  const cameraLabel=arriving?'Loading':kind==='follow'?`Following ${followName??(!state?.selection.soulId&&state?.selection.entityId?'a thing':'a Soul')}`:kind==='yours'?'Free':'Broadcast';
   const cameraAction=kind==='broadcast'?'Switch to Free camera':'Return to Broadcast';
   const cameraBlock=<div className="viewer-camera-chip camera-split" data-camera={kind} data-follow-soul={kind==='follow'?state?.selection.soulId??'':undefined}>
     <button type="button" className="camera-main" disabled={!handle||arriving} aria-label={`${cameraLabel}: ${cameraAction}`} title={cameraAction} data-tooltip={cameraAction} onClick={()=>kind==='broadcast'?yourCamera():toBroadcast()}>

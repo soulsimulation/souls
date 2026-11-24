@@ -101,9 +101,12 @@ PR that causes it; and V3-bundle in the release gate. A PR that changes only the
 ## Controls gate
 
 `tools/test-harness/e2e-controls/controls.mjs` opens every moved world's page (`/w/<slug>/` whose config carries
-`v2Stream`) in headless Chromium and clicks each main header control: Live, then in its time panel (the header for a world with no clock) Back 1 min (it must land on an earlier
-moment, never "could not be loaded"), Back again, From the start, Link to this moment (opened in a new tab, which must
-show that moment), Return to live, the Broadcast menu, the sound switch, Explore, its places, following a Soul from
+`v2Stream`) in headless Chromium and clicks each main header control. Time: the header's one time control is the pill
+(it must read "Live", with no other time control beside it); every time control is pressed in the panel it opens: Pause
+(the pill reads "Recorded · <clock>" and the clock holds), Play (it runs), Back 1 min (it must land about 60 s earlier
+on the same page, never "could not be loaded"), Back again, From the start, Link to this moment (the button says
+"Copied"; the link opened in a new tab must show that moment) and Return to live (the pill reads "Live"). Then the
+Broadcast menu, the sound switch, Explore, its places, following a Soul from
 Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
 failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
 only exception and is empty. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
