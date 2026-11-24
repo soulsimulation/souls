@@ -381,7 +381,12 @@ test('a routed world whose views are published gets its page and reads without i
   assert.equal(launcher.pool.status('eden').status, 'stopped', 'and load nothing');
   // views published before (as a page of the running old world publishes them; kept on disk across restarts)
   const staticDir = join(dir, 'origin/s/eden/static'); mkdirSync(staticDir, { recursive: true });
-  const published = '{"contract":"world/1","seq":490,"entities":[{"id":"e_1"},{"id":"e_2"}],"buildsRev":3}';
+  // its things as the old model names them: a dome with its authored meaning and viewpoint (turned 90 degrees), a pond
+  // with none (found by a search), and a cup on a table (not at the root: never a place)
+  const published = JSON.stringify({ contract: 'world/1', seq: 490, buildsRev: 3, defs: [{ name: 'eden-dome', version: 1, size: { box: [6, 4, 8] } }],
+    entities: [{ id: 'e_1', def: 'eden-dome@1', in: { parent: 'world' }, name: 'eden-dome', p: [10, 0, 20], r: Math.PI / 2, about: { title: 'Eden Dome', what: 'A glass dome over a garden.', viewpoint: { eye: [0, 2, 5], at: [0, 1, 0] } } },
+      { id: 'e_2', def: 'core-pond@1', in: { parent: 'world' }, name: 'garden-pond', p: [-4, 0, 3], r: 0 },
+      { id: 'e_3', def: 'core-cup@1', in: { parent: 'e_1', slot: 'top' }, name: 'cup', p: [0, 0], r: 0, about: { title: 'Cup' } }] });
   writeFileSync(join(staticDir, 'snapshot.json'), published);
   writeFileSync(join(staticDir, 'manifest.json'), JSON.stringify({ schema: 'souls/old-static/1', world: 'eden', oldWorldId: 'eden-original-1', stream: '/s/eden/', files: { 'snapshot.json': {} } }));
   const eden = await page('eden');
@@ -404,11 +409,22 @@ test('a routed world whose views are published gets its page and reads without i
   const visitors = await view('/v1/world/visitors');   // apps/server http.ts: a world without travel; SoulTravel.tsx stops asking
   assert.equal(visitors.status, 200); assert.deepEqual(await visitors.json(), { contract: 'travel/1', world: 'eden-original-1', available: false, open: false, visitors: [], recent: [] });
   const seq = await view('/v1/world/seq');   // god/routes.ts, from the published snapshot: the page's heartbeat never resyncs for nothing
-  assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 490, entities: 2, builds: 3 });
-  const context = await view('/v1/world/context');   // god/context-views.ts: a listing with no places (Explore shows none, not an error)
+  assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 490, entities: 3, builds: 3 });
+  // god/context-views.ts: Explore's places, from the published snapshot (the model the new engine's world came from)
+  const context = await view('/v1/world/context');
   assert.equal(context.status, 200); const c = await context.json();
-  assert.deepEqual([c.contract, c.revision, c.source, c.scope, c.targets, c.total, c.nextCursor], ['world-context/1', 490, 'authored-meaning', 'semantic', [], 0, null]); assert.match(c.listingRevision, /^[0-9a-f]{64}$/);
-  assert.equal((await view('/v1/world/context?q=pond')).status, 200, 'a search is a listing too');
+  assert.deepEqual([c.contract, c.revision, c.source, c.scope, c.total, c.nextCursor], ['world-context/1', 490, 'authored-meaning', 'semantic', 1, null]); assert.match(c.listingRevision, /^[0-9a-f]{64}$/);
+  const round = (v) => v.map((n) => Math.round(n * 1000) / 1000);
+  const [dome] = c.targets;
+  assert.deepEqual([c.targets.length, dome.ref, dome.title, dome.what, round(dome.point), dome.radius, dome.enclosed], [1, 'e_1', 'Eden Dome', 'A glass dome over a garden.', [10, 2, 20], 5, false], 'the dome, at half its height, its radius half its diagonal');
+  assert.deepEqual([round(dome.viewpoint.eye), round(dome.viewpoint.at)], [[15, 2, 20], [10, 1, 20]], 'its viewpoint carried out of its turned frame');
+  const pond = await (await view('/v1/world/context?q=POND')).json();   // a search reads every place at the root, by its name too
+  assert.deepEqual([pond.scope, pond.total, pond.targets.map((t) => [t.ref, t.title])], ['search-all', 1, [['e_2', 'Garden pond']]]);
+  const exact = await (await view('/v1/world/context?ref=e_2')).json();
+  assert.deepEqual([exact.scope, exact.targets.map((t) => t.ref)], ['exact', ['e_2']]);
+  assert.equal((await view('/v1/world/context?q=cup')).status, 200); assert.equal((await (await view('/v1/world/context?q=cup')).json()).total, 0, 'a thing on another is not a place');
+  const stale = await view(`/v1/world/context?cursor=${'0'.repeat(64)}:100`);
+  assert.equal(stale.status, 409, 'a cursor of another listing'); assert.equal((await stale.json()).code, 'context.changed');
   const me = await view('/v1/me', { authorization: 'Bearer dev:ada' });   // its sign-in, as a world's with no old twin
   assert.equal(me.status, 200); assert.equal((await me.json()).me?.userId, 'dev:ada');
   const anon = await view('/v1/me'); assert.equal(anon.status, 401); assert.equal((await anon.json()).code, 'signin-required');
@@ -452,10 +468,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const bot = await get('/', { accept: 'text/html', 'user-agent': 'Googlebot/2.1' });
   assert.equal(bot.status, 200, 'a crawler gets the same page'); assert.equal(bot.headers.get('x-souls-engine'), 'new');
-  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/seq', '/v1/world/souls', '/mcp']) {
+  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls', '/mcp']) {
     const r = await get(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path);
   }
-  assert.equal((await get('/v1/world/visitors')).status, 200); assert.equal((await get('/v1/world/context?q=pond')).status, 200);
+  // the page's polled reads are never a 404, with nothing published either (the release walk fails on any same-origin 404)
+  for (const path of ['/v1/world/visitors', '/v1/world/context', '/v1/world/context?q=pond']) assert.equal((await get(path)).status, 200, path);
+  const seq = await get('/v1/world/seq'); assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 0, entities: 0 }, 'nothing published: seq 0');
   assert.equal((await get('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200);
   const views = await fetch(`${base}/w/eden/v1/world/context/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"refs":["r1"]}' });
   assert.equal(views.status, 404, 'Explore\'s place pictures: none, and nothing asked of an old process');
