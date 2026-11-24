@@ -2,9 +2,12 @@
 //! (`content/kinds/hall/lecture.json`) and Eden's gathering lecture (`content/kinds/gathering/lecture.json`) stand
 //! between two benches (`content/kinds/seating/bench.json`) set the same distance from them, each bench's two seats
 //! registered as the world's places. A Soul attends the hall's lecture on a bench seat it names as `[bench id, slot
-//! number]` and gets a receipt; one whose leave comes mid-sit is answered `left` and ends free, standing, its seat
-//! free. The gathering lecture's `attend` selects its seat from the free slots `in` its `parent`: a Soul nearer one
-//! bench is given that bench's nearest free seat; one standing as near both is refused `arg-ambiguous`, by name.
+//! number]` and gets a receipt. Its cancel before the sit's contact is answered `act.stopped` and it ends free,
+//! standing, its seat free; after the contact it is answered `act.stopped-still-seated`, seated and listening until
+//! it leaves; a listener who rises instead leaves the audience too. The gathering lecture's `attend` selects its seat
+//! from the free slots `in` its `parent`, never a private one: a Soul nearer one bench is given that bench's nearest
+//! free seat; one standing as near both is refused `arg-ambiguous`, by name. A private bench, another Soul's body and
+//! an undeclared slot are refused by name.
 use super::*;
 
 const HALL_LECTURE: &str = "eden:hall_lecture";
@@ -33,6 +36,14 @@ fn private_bench() -> Id {
 }
 fn private_at() -> Vec3 {
     south(6_000_000)
+}
+/// A bench private to a third Soul, 1 m behind the lectures: nearer them than any other, so the gathering lecture's
+/// pick passes over it only because it is private.
+fn near_private_bench() -> Id {
+    id(45)
+}
+fn near_private_at() -> Vec3 {
+    Vec3::new(lectures_at().x, 0, lectures_at().z + 1_000_000)
 }
 /// Both lectures 5 m north of the first walker, each bench 1.5 m west or east of them and 2 m nearer the walkers.
 fn lectures_at() -> Vec3 {
@@ -79,6 +90,15 @@ fn furniture() -> Vec<(Id, &'static str, Vec3, BTreeMap<u64, Value>)> {
             private_at(),
             BTreeMap::from([
                 (replica::who_may::F_OWNER, w2().to_value()),
+                (replica::who_may::F_ACCESS, Value::Uint(2)),
+            ]),
+        ),
+        (
+            near_private_bench(),
+            BENCH,
+            near_private_at(),
+            BTreeMap::from([
+                (replica::who_may::F_OWNER, id(99).to_value()),
                 (replica::who_may::F_ACCESS, Value::Uint(2)),
             ]),
         ),
@@ -177,6 +197,7 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
         (west_bench(), bench_at(false)),
         (east_bench(), bench_at(true)),
         (private_bench(), private_at()),
+        (near_private_bench(), near_private_at()),
     ] {
         for (slot, dx) in [(1, -400_000), (2, 400_000)] {
             let place = replica::moves::Place::from_value(
@@ -303,12 +324,13 @@ fn e14b_a_soul_attends_the_halls_lecture_on_a_bench_seat_through_the_gateway() {
     };
     let (mut a, mut b) = (client(w1()), client(w2()));
 
-    // Standing as near one bench as the other, and the lecture as far from both: the world cannot choose.
+    // The bench nearest the lecture is private to someone else, so never chosen: of the other two, standing as near
+    // one as the other, and the lecture as far from both, the world cannot choose.
     let ambiguous = a.act("eden:attend", Some(lecture()), BTreeMap::new());
     println!("E14b gathering attend, seat left out, on the axis: {ambiguous:?}");
     assert_eq!(ambiguous, Err("arg-ambiguous".to_owned()));
 
-    // Nearer the west bench: its nearest free seat, `left`.
+    // Nearer the west bench: its nearest free seat, `left` (not the nearer private bench's).
     let picked = b.act("eden:attend", Some(lecture()), BTreeMap::new());
     println!("E14b gathering attend, seat left out, west of the axis: {picked:?}");
     assert!(picked.is_ok(), "attended: {picked:?}");
@@ -385,20 +407,20 @@ fn cancel_bytes(soul: Id, sequence: u64, replaces: u64) -> Vec<u8> {
     encode(&i.to_value()).unwrap()
 }
 
-/// A lockstep run of the hall world: w1's attend on the east bench's `left` arrives at tick 1 and, when `leave_at`
-/// says, its cancel of the attend arrives then (the Soul leaves). Returns the attend's and the walk's final answers, the
-/// first tick w1 was in the seat, who is seated at the end, and the replayed world.
+/// A lockstep run of the hall world: w1's attend on the east bench's `left` arrives at tick 1, then each of `then`
+/// (its tick and its intent's bytes). Returns the attend's final answer, each other intent's, the first tick w1 was
+/// in the seat, who is seated at the end, and the replayed world.
 type Lock = (
     Result<Vec<u64>, String>,
-    Option<Result<Vec<u64>, String>>,
+    Vec<Option<Result<Vec<u64>, String>>>,
     Option<i64>,
     Vec<(Id, Id)>,
     Replica,
 );
 
-fn attend_in_lockstep(leave_at: Option<i64>, then_leave: Option<i64>) -> Lock {
+fn attend_in_lockstep(then: &[(i64, Vec<u8>)]) -> Lock {
     let (world, store, initial, _) = hall("lockstep", true);
-    let (attend, walk) = (std::sync::mpsc::channel(), std::sync::mpsc::channel());
+    let attend = std::sync::mpsc::channel();
     world
         .events
         .send(answers::Event::ArrivalAt {
@@ -413,30 +435,23 @@ fn attend_in_lockstep(leave_at: Option<i64>, then_leave: Option<i64>) -> Lock {
             reply: attend.0,
         })
         .unwrap();
-    if let Some(t) = leave_at {
+    let mut replies = Vec::new();
+    for (tick, bytes) in then {
+        let (tx, rx) = std::sync::mpsc::channel();
         world
             .events
             .send(answers::Event::ArrivalAt {
-                tick: t,
-                bytes: cancel_bytes(w1(), 2, 1),
-                reply: walk.0,
+                tick: *tick,
+                bytes: bytes.clone(),
+                reply: tx,
             })
             .unwrap();
-    }
-    let left = std::sync::mpsc::channel();
-    if let Some(t) = then_leave {
-        world
-            .events
-            .send(answers::Event::ArrivalAt {
-                tick: t,
-                bytes: intent_bytes(w1(), 3, "eden:leave", Some(hall_lecture()), BTreeMap::new()),
-                reply: left.0,
-            })
-            .unwrap();
+        replies.push(rx);
     }
     let mut first_seated = None;
     let mut seated = Vec::new();
-    for tick in 1..=600 {
+    let last = then.iter().map(|(t, _)| *t).max().unwrap_or(0) + 400;
+    for tick in 1..=last.max(600) {
         let (done, ran) = std::sync::mpsc::channel();
         world
             .events
@@ -454,14 +469,9 @@ fn attend_in_lockstep(leave_at: Option<i64>, then_leave: Option<i64>) -> Lock {
             .map(|f| answer_in(&f).1)
             .next()
     };
-    if then_leave.is_some() {
-        let l = final_of(&left.1);
-        println!("E14b the lecture's leave after: {l:?}");
-        assert!(matches!(l, Some(Ok(_))), "the leave's receipt: {l:?}");
-    }
     let out = (
         final_of(&attend.1).expect("the attend's answer"),
-        final_of(&walk.1),
+        replies.iter().map(final_of).collect(),
         first_seated,
         seated,
         replay(&initial, &store),
@@ -472,7 +482,7 @@ fn attend_in_lockstep(leave_at: Option<i64>, then_leave: Option<i64>) -> Lock {
 
 #[test]
 fn e14b_a_soul_that_leaves_mid_sit_is_free() {
-    let (done, _, seated_at, seated, r) = attend_in_lockstep(None, None);
+    let (done, _, seated_at, seated, r) = attend_in_lockstep(&[]);
     println!(
         "E14b lockstep attend: {done:?}, in the seat from tick {seated_at:?}, seated {seated:?}"
     );
@@ -480,41 +490,86 @@ fn e14b_a_soul_that_leaves_mid_sit_is_free() {
     let seated_at = seated_at.expect("the body was handed into the seat");
     assert_eq!(seated, vec![(w1(), east_bench())]);
     assert_eq!(listeners(&r, hall_lecture()), 1);
-    // The Soul's cancel arrives in the sit before its contact: the attend ends, the body is taken out onto the
-    // seat's stand point, nothing of it landed.
-    let (attend, cancel, _, seated, r) = attend_in_lockstep(Some(seated_at - 2), None);
-    println!(
-        "E14b leave before the contact: attend {attend:?}, cancel {cancel:?}, seated {seated:?}, listeners {}, w1 in {:?} at {:?}",
-        listeners(&r, hall_lecture()),
-        parent(&r, w1()),
-        super::at(&r, w1())
+    let rise = || intent_bytes(w1(), 3, "eden:rise", None, BTreeMap::new());
+    let leave = || intent_bytes(w1(), 3, "eden:leave", Some(hall_lecture()), BTreeMap::new());
+    let walk = |n| {
+        intent_bytes(
+            w1(),
+            n,
+            "eden:walk",
+            Some(ground()),
+            point(south(2_000_000)),
+        )
+    };
+    let free = |r: &Replica, seated: &[(Id, Id)], what: &str| {
+        assert!(seated.is_empty(), "{what}: no one holds a seat");
+        assert_eq!(
+            parent(r, w1()),
+            (Some(ground()), None),
+            "{what}: standing, free"
+        );
+        assert_eq!(
+            listeners(r, hall_lecture()),
+            0,
+            "{what}: not in the audience"
+        );
+    };
+    let show = |what: &str,
+                attend: &Result<Vec<u64>, String>,
+                then: &[Option<Result<Vec<u64>, String>>],
+                r: &Replica| {
+        println!(
+            "E14b {what}: attend {attend:?}, then {then:?}, listeners {}, w1 in {:?} at {:?}",
+            listeners(r, hall_lecture()),
+            parent(r, w1()),
+            super::at(r, w1())
+        );
+    };
+
+    // The Soul's cancel in the sit before its contact: the attend ends, the body is taken out onto the seat's stand
+    // point, nothing of it landed.
+    let (attend, then, _, seated, r) =
+        attend_in_lockstep(&[(seated_at - 2, cancel_bytes(w1(), 2, 1))]);
+    show("cancel before the contact", &attend, &then, &r);
+    assert_eq!(attend, Err("act.stopped".to_owned()));
+    assert!(matches!(then[0], Some(Ok(_))), "the cancel's receipt");
+    free(&r, &seated, "cancel before the contact");
+
+    // Just after the contact the seat and the audience have landed: the answer says the Soul is still seated (it is,
+    // and listening), and the lecture's `leave` then frees it.
+    let (attend, then, _, seated, r) =
+        attend_in_lockstep(&[(seated_at + 1, cancel_bytes(w1(), 2, 1))]);
+    show("cancel after the contact", &attend, &then, &r);
+    assert_eq!(attend, Err(worldd::acts::STILL_SEATED.to_owned()));
+    assert_eq!(seated, vec![(w1(), east_bench())], "still seated");
+    assert_eq!(listeners(&r, hall_lecture()), 1, "still listening");
+    let (_, then, _, seated, r) = attend_in_lockstep(&[
+        (seated_at + 1, cancel_bytes(w1(), 2, 1)),
+        (seated_at + 100, leave()),
+    ]);
+    assert!(
+        matches!(then[1], Some(Ok(_))),
+        "the leave's receipt: {then:?}"
     );
+    free(&r, &seated, "cancel after the contact, then leave");
+
+    // A listener who rises, or rises and walks off, instead of leaving the lecture is no longer in its audience, and
+    // the lecture's leave then has nothing to undo.
+    let (attend, then, _, seated, r) = attend_in_lockstep(&[(seated_at + 100, rise())]);
+    show("rise", &attend, &then, &r);
+    assert!(
+        attend.is_ok() && matches!(then[0], Some(Ok(_))),
+        "attended, then risen"
+    );
+    free(&r, &seated, "rise");
+    let (_, then, _, seated, r) =
+        attend_in_lockstep(&[(seated_at + 100, rise()), (seated_at + 200, walk(4))]);
+    show("rise and walk off", &attend, &then, &r);
+    assert!(matches!(then[1], Some(Ok(_))), "walked off: {then:?}");
+    assert!(seated.is_empty());
     assert_eq!(
-        attend,
-        Err("act.stopped".to_owned()),
-        "the attend is stopped"
-    );
-    assert!(
-        matches!(cancel, Some(Ok(_))),
-        "the cancel's receipt: {cancel:?}"
-    );
-    assert!(seated.is_empty(), "no one holds a seat");
-    assert_eq!(parent(&r, w1()), (Some(ground()), None), "standing, free");
-    assert_eq!(listeners(&r, hall_lecture()), 0, "not in the audience");
-    // Just after the contact: what landed there stays (the seat and the audience, as a hand move's effect does,
-    // 0.134 I4), and the lecture's own leave frees the seat.
-    let (attend, cancel, _, seated, r) =
-        attend_in_lockstep(Some(seated_at + 1), Some(seated_at + 100));
-    println!(
-        "E14b leave after the contact: attend {attend:?}, cancel {cancel:?}, seated {seated:?}, listeners {}, w1 in {:?}",
         listeners(&r, hall_lecture()),
-        parent(&r, w1()),
+        0,
+        "walked off: not in the audience"
     );
-    assert!(
-        matches!(cancel, Some(Ok(_))),
-        "the cancel's receipt: {cancel:?}"
-    );
-    assert!(seated.is_empty(), "no one holds a seat");
-    assert_eq!(parent(&r, w1()), (Some(ground()), None), "standing, free");
-    assert_eq!(listeners(&r, hall_lecture()), 0, "not in the audience");
 }

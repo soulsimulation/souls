@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SEEN_ALL, judge } from './check.mjs';
-import { otherSlot, slotsOf } from './other-slot.mjs';
+import { otherSlot, slotsOf, wireArgs } from './other-slot.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const entry = (p) => JSON.parse(readFileSync(join(root, 'content/kinds', p), 'utf8'));
@@ -27,6 +27,10 @@ test('E14b: <thing id>/<slot> names a slot of another thing, by name or number, 
   assert.throws(() => otherSlot(`${bench}/0`, kinds, rows), (e) => e.code === 'act-slot-unknown');
   const pairs = [['seat', { node: bench, slot: 'right' }], ['words', { 23: 'hello' }], ['item', other], ['n', 2]];
   assert.deepEqual(slotsOf(pairs, kinds, rows), [['seat', { node: bench, slot: 2 }], ['words', { 23: 'hello' }], ['item', other], ['n', 2]]);
+  // As an act and a scheduled act send them: ids alone as the string, anything else as parameter 1's pairs.
+  assert.deepEqual(wireArgs({ item: other }, kinds, rows, { 2: 'gait:jog' }), { args: `item=${other}`, params: { 2: 'gait:jog' } });
+  assert.deepEqual(wireArgs({ seat: { node: bench, slot: 'right' } }, kinds, rows), { args: undefined, params: { 1: [['seat', { node: bench, slot: 2 }]] } });
+  assert.deepEqual(wireArgs(undefined, kinds, rows), { args: undefined, params: undefined });
 });
 
 const pkg = join(root, 'v2/target/wasm-load/pkg');

@@ -98,6 +98,11 @@ type R<T> = Result<T, Refusal>;
 /// cannot go on by its own name. It was 180 s, and every walk over about 250 m ended `act.timed-out` while moving.
 pub const WALK_MOST: Micros = 1_800_000_000;
 
+/// How an act its Soul stopped ends when its form had already seated the body on another thing's seat and linked it
+/// (E14b: a listener on the hall's bench): it stays seated and linked until it leaves, which its form's own `leave`
+/// does, or any rise does ([`Acts::untie`]).
+pub const STILL_SEATED: &str = "act.stopped-still-seated";
+
 /// The ending of a form's walk that stopped making progress (C21, #3484).
 pub const BLOCKED: &str = "walk.blocked";
 
@@ -1590,6 +1595,65 @@ pub struct Acts {
     /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
     /// at its first use.
     held: Option<Option<Held>>,
+    /// Each body seated by a form on a seat of another thing, with the links that form made from it (E14b): held
+    /// with the seat, so a body that leaves the seat by any way but a form ([`Acts::untie`]) leaves them too.
+    ties: BTreeMap<Id, Tie>,
+}
+
+/// A form's links from a body that sat it on a seat of another thing (E14b: a lecture's listener on the hall's
+/// bench): the form's node, the seat (its thing and slot), the links' types, and whether the body was seen in it.
+#[derive(Clone, Debug)]
+struct Tie {
+    node: Id,
+    on: Id,
+    slot: u64,
+    links: Vec<String>,
+    seated: bool,
+}
+
+/// The tie form `form` of `entry` makes when it starts with arguments `all`: a slot of another thing the actor is
+/// seated in (a `sit` or `lie` step's slot, or a `reparent` of the actor into it) and the links it makes from the
+/// actor. `None` when it makes no such link or takes no such seat.
+fn tie_of(entry: &Json, form: &str, all: &skills::form_runner::Args, node: Id) -> Option<Tie> {
+    let f = entry.get("forms")?.get(form)?;
+    fn arg(v: Option<&Json>) -> Option<&str> {
+        v.and_then(|v| v.get("arg")).and_then(Json::str)
+    }
+    let steps = f.get("steps").and_then(Json::arr).unwrap_or(&[]);
+    let effects = f.get("effects").and_then(Json::arr).unwrap_or(&[]);
+    let seat_key = steps
+        .iter()
+        .filter(|s| matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")))
+        .find_map(|s| arg(s.get("slot")))
+        .or_else(|| {
+            effects
+                .iter()
+                .filter(|e| {
+                    e.get("change").and_then(Json::str) == Some("reparent")
+                        && e.get("what").and_then(Json::str) == Some("actor")
+                })
+                .find_map(|e| arg(e.get("into")))
+        })?;
+    let &skills::form_runner::Arg::Slot(on, slot) = all.get(seat_key)? else {
+        return None;
+    };
+    let kind = entry.get("kind").and_then(Json::str)?;
+    let links: Vec<String> = effects
+        .iter()
+        .filter(|e| {
+            e.get("change").and_then(Json::str) == Some("link")
+                && e.get("from").and_then(Json::str) == Some("actor")
+        })
+        .filter_map(|e| e.get("link").and_then(Json::str))
+        .map(|l| replica::audience::link_type(kind, l))
+        .collect();
+    (!links.is_empty()).then_some(Tie {
+        node,
+        on,
+        slot,
+        links,
+        seated: false,
+    })
 }
 
 /// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
@@ -2077,7 +2141,59 @@ impl Acts {
             hatches: BTreeMap::new(),
             zone: header,
             held: None,
+            ties: BTreeMap::new(),
         }
+    }
+
+    /// E14b: the links to end because their body left the seat of another thing its form sat it in, by any way but a
+    /// form (a rise, a carry, a restart's eject): each `(node, link)`, for one world entry at the node. A form running
+    /// on the body is left to end first, so a form's own unlink (the lecture's `leave`) is never written twice. A tie
+    /// whose body never reached its seat is dropped once no run holds the body.
+    pub fn untie(&mut self, tree: &Tree, bodies: Option<&Bodies>) -> Vec<(Id, Id)> {
+        let Some(b) = bodies else {
+            self.ties.clear();
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let forms = &self.forms;
+        self.ties.retain(|body, t| {
+            if b.slots.holder_in(t.on, t.slot) == Some(*body) {
+                t.seated = true;
+                return true;
+            }
+            if forms.at(*body).is_some() {
+                return true;
+            }
+            if t.seated {
+                for l in tree.links_at(*body) {
+                    if l.other == t.node
+                        && let Some((ty, ..)) = tree.link(l.link)
+                        && t.links.iter().any(|n| n == ty.as_str())
+                    {
+                        out.push((t.node, l.link));
+                    }
+                }
+            }
+            false
+        });
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Whether `body` sits in the seat of another thing its form took, still linked by it (E14b): an act stopped
+    /// after its seat was taken is answered so ([`STILL_SEATED`]).
+    pub fn still_seated(&self, tree: &Tree, bodies: Option<&Bodies>, body: Id) -> bool {
+        let (Some(t), Some(b)) = (self.ties.get(&body), bodies) else {
+            return false;
+        };
+        b.slots.holder_in(t.on, t.slot) == Some(body)
+            && tree.links_at(body).iter().any(|l| {
+                l.other == t.node
+                    && tree
+                        .link(l.link)
+                        .is_some_and(|(ty, ..)| t.links.iter().any(|n| n == ty.as_str()))
+            })
     }
 
     /// N2 (0.133): the forms read back from the log at a restart at `now` (`Forms::recover`): every run the log shows
@@ -2625,6 +2741,11 @@ impl Acts {
                 Ok(a) => {
                     if let Asked::Started(run) | Asked::Running(run) = a {
                         self.runs.insert(run, intent.id);
+                    }
+                    if let Asked::Started(_) = a
+                        && let Some(t) = tie_of(&entry, form, &all, *node)
+                    {
+                        self.ties.insert(body, t);
                     }
                     return Ok(a);
                 }

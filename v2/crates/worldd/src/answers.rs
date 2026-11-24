@@ -2041,6 +2041,14 @@ impl Clock {
                 .find(|(_, o)| o.actor == actor && Some(o.sequence) == intent.replaces)
         {
             let (stopped, body) = (o.sequence, o.body);
+            // E14b: stopped after its form sat the body on another thing's seat and linked it, it is still seated.
+            let how = match self
+                .forms
+                .still_seated(self.replica.tree(), self.bodies.as_ref(), body)
+            {
+                true => acts::STILL_SEATED,
+                false => STOPPED,
+            };
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(open));
             self.forms.leave(
                 self.replica.tree(),
@@ -2053,7 +2061,7 @@ impl Clock {
                 self.note(open, MOVE_ENDED, Some(STOPPED), now);
             }
             if cut != Some(Cut::Finishing) {
-                self.end(open, |c| c.refusal(actor, stopped, STOPPED));
+                self.end(open, |c| c.refusal(actor, stopped, how));
             }
             self.next_intent += 1;
             self.inputs.push(Input::Intent {
@@ -3994,6 +4002,38 @@ impl Clock {
         }
     }
 
+    /// E14b: the links [`acts::Acts::untie`] ends, one world entry at each link's node, in this tick.
+    fn untie(&mut self, now: Micros) {
+        let ends = self.forms.untie(self.replica.tree(), self.bodies.as_ref());
+        if ends.is_empty() {
+            return;
+        }
+        let tree = self.replica.tree();
+        let effects = ends
+            .into_iter()
+            .filter_map(|(node, link)| {
+                let (_, _, _, audience) = tree.link(link)?;
+                Some(Effect {
+                    envelope: Envelope {
+                        sequence: 0,
+                        at: now,
+                        cause: Cause::World,
+                        actor: Actor::World,
+                        audience,
+                        node,
+                    },
+                    body: Body::Changes(vec![ChangeRec {
+                        change: Change::Unlink { link },
+                        rest: Rest::new(),
+                    }]),
+                    events: None,
+                    rest: Rest::new(),
+                })
+            })
+            .collect();
+        self.write_own(effects, "links left with their place");
+    }
+
     /// After step 4 (F10b, #3476): each thing the tick's acts made loose gets its end, each made kept loses it.
     fn set_loose(&mut self, now: Micros) {
         if self.loose.idle() {
@@ -4698,6 +4738,9 @@ impl Clock {
         self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
+        // E14b: a body that left the seat of another thing its form sat it in, by any way but a form, leaves that
+        // form's links too (a listener who rises is no longer in the lecture's audience).
+        self.untie(now);
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {

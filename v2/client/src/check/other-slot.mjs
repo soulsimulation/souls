@@ -26,6 +26,19 @@ export function otherSlot(value, kinds, rows) {
   return { node: m[1], slot };
 }
 
+/**
+ * A candidate's arguments as `wireIntent` takes them, for an act sent now and one a schedule sends at its moment
+ * alike: thing ids only go as the `name=<id>` string; any other value (a number, words, a slot of another thing) makes
+ * them parameter 1's pairs, each slot of another thing by its number ([`slotsOf`]), beside `params`.
+ */
+export function wireArgs(args, kinds, rows, params) {
+  const pairs = slotsOf(Object.entries(args ?? {}), kinds, rows), counted = pairs.some(([, v]) => typeof v !== 'string');
+  return {
+    args: counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined,
+    params: counted ? { ...(params ?? {}), 1: pairs } : params,
+  };
+}
+
 /** A form's argument pairs as they go on the wire: each slot of another thing by its slot's number. */
 export function slotsOf(pairs, kinds, rows) {
   return pairs.map(([n, v]) => {
