@@ -136,7 +136,7 @@ test('3 and 4: each copied into the new system unpaired, under its owner\'s acco
   // A second run changes nothing.
   const rows = () => { const d = new DatabaseSync(STORE, { readOnly: true }); try { return ['provider_accounts_v1', 'souls_v1', 'imported_souls_v1', 'account_grants_v1'].map((t) => d.prepare(`SELECT * FROM ${t} ORDER BY 1, 2`).all().map((r) => JSON.stringify(r))); } finally { d.close(); } };
   const once = rows();
-  const again = run('copy', '--saved', tar, '--store', STORE, '--import-accounts', IMPORT);
+  const again = run('copy', '--store', STORE, '--import-accounts', IMPORT); // the newest save, as the host paste runs it
   assert.equal(again.code, 0, again.text);
   assert.match(again.text, /0 Souls copied .* 2 already there/);
   assert.deepEqual(rows(), once);

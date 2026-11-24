@@ -12,7 +12,7 @@
 //   node keep-souls.mjs save    [--data …]... [--out <dir>]
 //        One save of every real person's Soul (identity, body, memories, relationships) as <out>/save-<time>.tar, mode
 //        0600, with manifest.json (each file's SHA-256) inside and <tar>.sha256 beside it.
-//   node keep-souls.mjs copy    --saved <tar> [--out <dir>] [--args <directory.args>] [--store <accounts.sqlite>]
+//   node keep-souls.mjs copy    [--saved <tar>, default the newest in <out>] [--out <dir>] [--args <directory.args>] [--store <accounts.sqlite>]
 //        [--import-accounts <program>] [--bodies <bodies.json>]
 //        Checks the save against its checksums, then copies each Soul into the new system's account store unpaired:
 //        X11's import-accounts brings them (old id kept as `formerly`, no token, no pairing), and each joins its
@@ -396,7 +396,8 @@ export function main(argv, print = console.log) {
   if (!['list', 'confirm', 'save', 'copy'].includes(o.cmd)) { print(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 26).join('\n')); return 2; }
   if (o.cmd !== 'list') { mkdirSync(o.out, { recursive: true, mode: 0o700 }); chmodSync(o.out, 0o700); }
   if (o.cmd === 'copy') {
-    if (!o.saved) { print('keep-souls: copy needs --saved <save-….tar>'); return 2; }
+    o.saved ??= readdirSync(o.out).filter((f) => /^save-\d{8}T\d{6}Z\.tar$/.test(f)).sort().map((f) => join(o.out, f)).at(-1);
+    if (!o.saved) { print(`keep-souls: no save in ${o.out}: run save first`); return 1; }
     const store = o.store ?? storeOf(o.args ?? '/etc/souls/directory.args');
     if (!store || !existsSync(store)) { print(`keep-souls: no account store at ${store}`); return 1; }
     const now = stamp();
