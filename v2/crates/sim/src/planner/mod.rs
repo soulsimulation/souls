@@ -17,8 +17,16 @@
 //! - **Stale ground.** A walker sent with piece numbers its node's ground no longer holds (a change cut its squares or
 //!   its floor again and numbered the pieces anew, S13c) is found again where it stands and answered from there; one
 //!   that stands on no ground now is refused [`GROUND_CHANGED`] for that walk alone.
-//! - **Contained.** A panic in one batch's answers is caught: every walk, line and form question in that batch is
-//!   answered [`FAILED`] (a form's walk with no legs), so no act is left waiting, and the planner goes on.
+//! - **Contained.** A panic in one question's answer is caught there (S13d): that walk, line or form question alone is
+//!   refused [`FAILED`], and the batch's other questions are answered as ever. A panic outside them (the spot tables'
+//!   writing) refuses every walk, line and form question in the batch [`FAILED`]. No act is left waiting, and the
+//!   planner goes on.
+//! - **One answer each.** Every question a batch asks gets exactly one answer (S13d). A walk whose place the spot
+//!   tables have neither granted nor refused is asked again at most [`UNANSWERED`] times, then refused [`NO_SPOT`]. A
+//!   batch on a map the planner does not hold is left unanswered (the install it waits for comes first) at most
+//!   [`UNANSWERED`] batches in a row, then each of its questions is refused [`MAP_STALE`]. A form's walk the planner
+//!   cannot plan for the body's class is refused by that name (`body-class-unprepared`), and a refused form walk
+//!   carries its refusal, so the form ends with the planner's own name, not `souls:no-way`.
 //! - **Waits.** [`Thread::take`] waits for the answers to everything sent. In lockstep as long as it takes, so what a
 //!   tick reads never depends on the threads' timing and a run fed the same inputs at the same ticks repeats (K12's
 //!   replay). A free-running clock never stops for the planner: it waits at most a bound for each batch, and a batch
@@ -31,7 +39,9 @@ use crate::host::{Planned, Wants};
 use crate::walk::World;
 use crate::walk::town::{Rebuilt, Town};
 use replica::effects::{Part, Refusal};
+use replica::ids::Id;
 use replica::pose::{Support, Vec3};
+use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -40,8 +50,16 @@ use std::time::Duration;
 
 /// A walk's refusal when its walker stands on no ground now: the ground changed under it after the tick that asked.
 pub const GROUND_CHANGED: &str = "walk.ground-changed";
-/// Each walk, line and form's refusal in a batch whose answers panicked.
+/// A walk, line or form question's refusal when its answer panicked (outside any one question: the whole batch's).
 pub const FAILED: &str = "planner.failed";
+/// A walk's refusal when the spot tables gave its place no answer in [`UNANSWERED`] asks.
+pub const NO_SPOT: &str = "planner.no-spot";
+/// Each question's refusal once [`UNANSWERED`] batches in a row came on a map the planner does not hold.
+pub const MAP_STALE: &str = "planner.map-stale";
+/// How many times a question is left unanswered before it is refused by name: a re-ask is bounded (S13d).
+pub const UNANSWERED: u32 = 16;
+/// A walk left waiting for its place is forgotten when it is not asked again in this many batches.
+const FORGET: u64 = 64;
 
 /// The straight distance, µm, from `a` to `b`: a reach check (B2), the planner's.
 pub fn reach(a: Vec3, b: Vec3) -> i64 {
@@ -94,7 +112,8 @@ pub struct FormQuestion {
 
 #[derive(Clone, Debug)]
 pub enum FormResult {
-    Walk(Vec<crate::walk::Leg>),
+    /// The walk's legs (none: no way there), or the planner's refusal, which the form ends with (S13d).
+    Walk(Result<Vec<crate::walk::Leg>, Refusal>),
     Line(Result<crate::walk::town::Line, replica::effects::Refusal>),
 }
 
@@ -168,11 +187,57 @@ impl GroundTrace {
 /// The planner over its own town.
 pub struct Planner {
     pub town: Town,
+    /// Batches answered.
+    batch: u64,
+    /// Each walk (body, order) whose place the spot tables have not answered yet: how many times it was left
+    /// unanswered, and the batch it was last asked in.
+    waits: BTreeMap<(Id, Id), (u32, u64)>,
+    /// Batches in a row on a map the planner does not hold.
+    stale: u32,
+    /// Questions whose answers panicked, caught there (each refused [`FAILED`]).
+    pub panics: u64,
+    /// A test's forced panic in this body's answers.
+    #[cfg(test)]
+    fault: Option<Id>,
 }
 
 impl Planner {
     pub fn new(town: Town) -> Planner {
-        Planner { town }
+        Planner {
+            town,
+            batch: 0,
+            waits: BTreeMap::new(),
+            stale: 0,
+            panics: 0,
+            #[cfg(test)]
+            fault: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn fault(&self, body: Id) {
+        assert!(
+            self.fault != Some(body),
+            "a forced panic in one body's answer"
+        );
+    }
+
+    #[cfg(not(test))]
+    fn fault(&self, _: Id) {}
+
+    /// `answer`'s result, or `failed`'s when it panics: one question's panic is caught there (S13d).
+    fn isolated<T>(
+        &mut self,
+        answer: impl FnOnce(&mut Self) -> T,
+        failed: impl FnOnce() -> T,
+    ) -> T {
+        match catch_unwind(AssertUnwindSafe(|| answer(&mut *self))) {
+            Ok(t) => t,
+            Err(_) => {
+                self.panics += 1;
+                failed()
+            }
+        }
     }
 
     /// Answers one tick's wants: the spot tables written from its marks, then each waiting walk's place and legs,
@@ -208,10 +273,18 @@ impl Planner {
     fn answer_traced(&mut self, w: &Wants, trace: &mut GroundTrace) -> Planned {
         let mut out = Planned::default();
         trace.begin(w);
+        self.batch += 1;
         if let Some(map) = &w.form_map {
             if **map != self.town.versions {
-                return out;
+                // The install of the batch's map comes before it (FIFO); a planner that stays behind refuses by name
+                // rather than leave every question to be asked again for ever (S13d).
+                self.stale += 1;
+                if self.stale < UNANSWERED {
+                    return out;
+                }
+                return refused(w, MAP_STALE, "the planner's map stays behind the batch's");
             }
+            self.stale = 0;
             out.map = Some(Arc::clone(map));
         }
         self.town.body_classes.clone_from(&w.classes);
@@ -226,53 +299,28 @@ impl Planner {
             }
             out.revoked = self.town.revoked();
         }
+        let batch = self.batch;
+        self.waits
+            .retain(|_, (_, last)| batch.saturating_sub(*last) < FORGET);
         for (body, target, order) in &w.places {
-            let r = match self.town.spot(body.id, target) {
-                Some(Ok(p)) => {
-                    trace.line("lookup-grant", || {
-                        format!("key={}", GroundTrace::key(body.id, *order))
-                    });
-                    out.searched += 1;
-                    trace.line("route-start", || {
-                        format!("key={}", GroundTrace::key(body.id, *order))
-                    });
-                    let result = self
-                        .town
-                        .plan_with_metrics(body, p.node, p.at)
-                        .map(|(legs, metrics)| (p, legs, metrics))
-                        .map_err(|e| e.name);
-                    trace.line("route-end", || {
-                        format!(
-                            "key={} result={}",
-                            GroundTrace::key(body.id, *order),
-                            result.as_ref().err().copied().unwrap_or("ok")
-                        )
-                    });
-                    result
-                }
-                Some(Err(name)) => {
-                    trace.line("lookup-refusal", || {
-                        format!("key={} result={name}", GroundTrace::key(body.id, *order))
-                    });
-                    Err(name)
-                }
-                None => {
-                    trace.line("lookup-none", || {
-                        format!("key={}", GroundTrace::key(body.id, *order))
-                    });
-                    continue;
-                }
-            };
-            out.places.insert(body.id, (*order, r));
+            let placed = self.isolated(
+                |me| me.place(body, target, *order, trace, &mut out.searched),
+                || Some(Err(FAILED)),
+            );
+            if let Some(r) = placed {
+                out.places.insert(body.id, (*order, r));
+            }
         }
         for (body, to) in &w.lines {
-            let line = match self.standing(body) {
-                Ok(b) => {
+            let line = self.isolated(
+                |me| {
+                    me.fault(body.id);
+                    let b = me.standing(body)?;
                     out.searched += 1;
-                    self.town.line(&b, *to)
-                }
-                Err(r) => Err(r),
-            };
+                    me.town.line(&b, *to)
+                },
+                || Err(refusal(FAILED)),
+            );
             out.lines.insert(body.id, (*to, line));
         }
         for q in &w.reach {
@@ -285,55 +333,15 @@ impl Planner {
             && **map == self.town.versions
         {
             for q in &w.forms {
-                let body = match self.standing(&q.body) {
-                    Ok(b) => b,
-                    Err(r) => {
-                        out.forms.insert(q.key, failed_form(q, map, r));
-                        continue;
-                    }
-                };
-                out.searched += 1;
-                let result = match q.query {
-                    FormQuery::Walk {
-                        node,
-                        at,
-                        reach,
-                        door,
-                        ring,
-                    } => {
-                        let view = match self.town.view_for(body.id) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-                        let legs = view
-                            .on_floor(node, at)
-                            .and_then(|(floor, at, _)| {
-                                // A ring is given on the floor itself (`node` is the floor).
-                                let ring = ring.as_ref().filter(|_| floor == node);
-                                let to = view
-                                    .stand_near_shape(
-                                        floor,
-                                        at,
-                                        ring.map(|(r, on)| (&r[..], *on)),
-                                        reach,
-                                        Some(&body),
-                                        door,
-                                    )
-                                    .or_else(|| {
-                                        (floor == crate::walk::node_of(&body)).then_some(at)
-                                    })?;
-                                view.plan(&body, floor, to).ok()
-                            })
-                            .unwrap_or_default();
-                        FormResult::Walk(legs)
-                    }
-                    FormQuery::Line { to } => FormResult::Line(self.town.line(&body, to)),
-                };
+                let result = self.isolated(
+                    |me| me.form(q, &mut out.searched),
+                    || refused_form(q, refusal(FAILED)),
+                );
                 out.forms.insert(
                     q.key,
                     FormAnswer {
                         generation: q.generation,
-                        map: std::sync::Arc::clone(map),
+                        map: Arc::clone(map),
                         result,
                     },
                 );
@@ -341,36 +349,138 @@ impl Planner {
         }
         out
     }
+
+    /// A waiting walk's place and legs, or a refusal's name; `None` while the spot tables have not answered its place,
+    /// asked again at most [`UNANSWERED`] times before it is refused [`NO_SPOT`] (S13d).
+    fn place(
+        &mut self,
+        body: &crate::mover::Body,
+        target: &crate::spots::Target,
+        order: Id,
+        trace: &mut GroundTrace,
+        searched: &mut u64,
+    ) -> Option<crate::host::Placed> {
+        self.fault(body.id);
+        let key = || format!("key={}", GroundTrace::key(body.id, order));
+        let r = match self.town.spot(body.id, target) {
+            Some(Ok(p)) => {
+                trace.line("lookup-grant", key);
+                *searched += 1;
+                trace.line("route-start", key);
+                let result = self
+                    .town
+                    .plan_with_metrics(body, p.node, p.at)
+                    .map(|(legs, metrics)| (p, legs, metrics))
+                    .map_err(|e| e.name);
+                trace.line("route-end", || {
+                    format!(
+                        "{} result={}",
+                        key(),
+                        result.as_ref().err().copied().unwrap_or("ok")
+                    )
+                });
+                result
+            }
+            Some(Err(name)) => {
+                trace.line("lookup-refusal", || format!("{} result={name}", key()));
+                Err(name)
+            }
+            None => {
+                trace.line("lookup-none", key);
+                let (n, last) = self.waits.entry((body.id, order)).or_insert((0, 0));
+                *n += 1;
+                *last = self.batch;
+                if *n < UNANSWERED {
+                    return None;
+                }
+                Err(NO_SPOT)
+            }
+        };
+        self.waits.remove(&(body.id, order));
+        Some(r)
+    }
+
+    /// A form question's answer: its walk's legs or its line, from where the body stands, or the planner's refusal.
+    fn form(&mut self, q: &FormQuestion, searched: &mut u64) -> FormResult {
+        self.fault(q.body.id);
+        let body = match self.standing(&q.body) {
+            Ok(b) => b,
+            Err(r) => return refused_form(q, r),
+        };
+        *searched += 1;
+        match q.query {
+            FormQuery::Walk {
+                node,
+                at,
+                reach,
+                door,
+                ring,
+            } => {
+                let view = match self.town.view_for(body.id) {
+                    Ok(v) => v,
+                    // A body class the planner has no geometry for: refused by name, never left unanswered (S13d).
+                    Err(r) => return FormResult::Walk(Err(r)),
+                };
+                let legs = view
+                    .on_floor(node, at)
+                    .and_then(|(floor, at, _)| {
+                        // A ring is given on the floor itself (`node` is the floor).
+                        let ring = ring.as_ref().filter(|_| floor == node);
+                        let to = view
+                            .stand_near_shape(
+                                floor,
+                                at,
+                                ring.map(|(r, on)| (&r[..], *on)),
+                                reach,
+                                Some(&body),
+                                door,
+                            )
+                            .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
+                        view.plan(&body, floor, to).ok()
+                    })
+                    .unwrap_or_default();
+                FormResult::Walk(Ok(legs))
+            }
+            FormQuery::Line { to } => FormResult::Line(self.town.line(&body, to)),
+        }
+    }
 }
 
-/// A form question's refusal: a walk with no legs (the form hears that it has no way), a line refused by name.
-fn failed_form(q: &FormQuestion, map: &Arc<crate::ground::Versions>, r: Refusal) -> FormAnswer {
-    FormAnswer {
-        generation: q.generation,
-        map: Arc::clone(map),
-        result: match q.query {
-            FormQuery::Walk { .. } => FormResult::Walk(Vec::new()),
-            FormQuery::Line { .. } => FormResult::Line(Err(r)),
+fn refusal(name: &'static str) -> Refusal {
+    Refusal {
+        name,
+        detail: match name {
+            FAILED => "the planner's answer to this question panicked".into(),
+            _ => "the planner could not answer".into(),
         },
     }
 }
 
-/// The answers to a batch whose answers panicked (S13c): each walk, line and form question refused [`FAILED`], each
-/// reach question answered (a straight distance), stamped with the batch's map so the tick that asked takes them.
-fn failed(w: &Wants) -> Planned {
-    let refusal = || Refusal {
-        name: FAILED,
-        detail: "the planner's answers to this batch panicked".into(),
+/// A form question refused by name: its walk or its line, so the form ends with that name (S13d).
+fn refused_form(q: &FormQuestion, r: Refusal) -> FormResult {
+    match q.query {
+        FormQuery::Walk { .. } => FormResult::Walk(Err(r)),
+        FormQuery::Line { .. } => FormResult::Line(Err(r)),
+    }
+}
+
+/// Every walk, line and form question in `w` refused `name` (a batch whose answers panicked outside any one
+/// question, S13c, or on a map the planner stays behind, S13d), each reach question answered (a straight distance),
+/// stamped with the batch's map so the tick that asked takes them.
+fn refused(w: &Wants, name: &'static str, detail: &str) -> Planned {
+    let r = || Refusal {
+        name,
+        detail: detail.into(),
     };
     let mut out = Planned {
         map: w.form_map.clone(),
         ..Planned::default()
     };
     for (body, _, order) in &w.places {
-        out.places.insert(body.id, (*order, Err(FAILED)));
+        out.places.insert(body.id, (*order, Err(name)));
     }
     for (body, to) in &w.lines {
-        out.lines.insert(body.id, (*to, Err(refusal())));
+        out.lines.insert(body.id, (*to, Err(r())));
     }
     for q in &w.reach {
         out.reach.insert(
@@ -380,10 +490,22 @@ fn failed(w: &Wants) -> Planned {
     }
     if let Some(map) = &w.form_map {
         for q in &w.forms {
-            out.forms.insert(q.key, failed_form(q, map, refusal()));
+            out.forms.insert(
+                q.key,
+                FormAnswer {
+                    generation: q.generation,
+                    map: Arc::clone(map),
+                    result: refused_form(q, r()),
+                },
+            );
         }
     }
     out
+}
+
+/// The answers to a batch whose answers panicked outside any one question: each refused [`FAILED`].
+fn failed(w: &Wants) -> Planned {
+    refused(w, FAILED, "the planner's answers to this batch panicked")
 }
 
 /// One batch's answers, or, when `answer` panics, [`failed`]'s; and whether it panicked.
@@ -406,12 +528,12 @@ enum Input {
 /// A planner on a thread of its own.
 pub struct Thread {
     wants: Option<Sender<Input>>,
-    /// A batch's answers, and whether they panicked (then each question refused [`FAILED`]).
-    answers: Receiver<(Planned, bool)>,
+    /// A batch's answers, and how many of its questions (or the batch itself) panicked, each refused [`FAILED`].
+    answers: Receiver<(Planned, u64)>,
     /// Batches sent and not yet taken.
     out: usize,
     handle: Option<JoinHandle<()>>,
-    /// Batches whose answers panicked (each question refused [`FAILED`]).
+    /// Questions (or whole batches) whose answers panicked, each refused [`FAILED`] (S13d: one question each).
     pub panicked: u64,
     /// Route searches the planner ran, in the batches taken.
     pub searched: u64,
@@ -421,7 +543,7 @@ impl Thread {
     /// Starts `planner` on a thread named `planner`.
     pub fn spawn(mut planner: Planner) -> std::io::Result<Thread> {
         let (wtx, wrx) = channel::<Input>();
-        let (ptx, prx) = channel::<(Planned, bool)>();
+        let (ptx, prx) = channel::<(Planned, u64)>();
         let handle = std::thread::Builder::new()
             .name("planner".into())
             .spawn(move || {
@@ -455,14 +577,21 @@ impl Thread {
                             continue;
                         }
                     };
+                    let before = planner.panics;
                     let (p, panicked) = answer_batch(&w, |w| planner.answer_traced(w, &mut trace));
                     if panicked {
                         eprintln!(
                             "planner: a batch's answers panicked; each question refused {FAILED}"
                         );
                     }
+                    let questions = planner.panics - before;
+                    if questions > 0 {
+                        eprintln!(
+                            "planner: {questions} questions' answers panicked; each refused {FAILED}"
+                        );
+                    }
                     let count = p.places.len();
-                    let sent = ptx.send((p, panicked));
+                    let sent = ptx.send((p, questions + u64::from(panicked)));
                     trace.line("answer-send", || {
                         format!(
                             "places={count} result={}",
@@ -524,8 +653,8 @@ impl Thread {
         all
     }
 
-    fn merge(&mut self, all: &mut Planned, (p, panicked): (Planned, bool)) {
-        self.panicked += u64::from(panicked);
+    fn merge(&mut self, all: &mut Planned, (p, panicked): (Planned, u64)) {
+        self.panicked += panicked;
         self.searched += p.searched;
         all.merge(p);
     }
@@ -567,12 +696,15 @@ impl Drop for Thread {
 }
 
 #[cfg(test)]
+mod answers_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::host::ReachQuestion;
     use crate::mover::Body;
     use crate::spots::Target;
-    use replica::ids::{Id, Scope};
+    use replica::ids::Scope;
     use replica::pose::{Frame, Pose, Quat};
 
     fn id(n: u64) -> Id {
@@ -662,7 +794,7 @@ mod tests {
         assert_eq!(p.reach[&(a.id, id(30), 0, id(20))], [4_000_000, 0]);
         let walk = &p.forms[&key(&a, FormKind::Walk)];
         assert_eq!(walk.generation, 3);
-        assert!(matches!(&walk.result, FormResult::Walk(legs) if legs.is_empty()));
+        assert!(matches!(&walk.result, FormResult::Walk(Err(r)) if r.name == FAILED));
         let line = &p.forms[&key(&b, FormKind::Line)];
         assert_eq!(line.generation, 4);
         assert!(matches!(&line.result, FormResult::Line(Err(r)) if r.name == FAILED));

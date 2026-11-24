@@ -263,7 +263,12 @@ fn same_as_found_again(stale: &sim::host::Planned, again: &sim::host::Planned, w
     assert!(line(again).is_ok(), "the walker found again has a line");
     assert_eq!(line(stale), line(again));
     let walk = |p: &sim::host::Planned| match &p.forms[&keys(who)[0]].result {
-        FormResult::Walk(legs) => legs.iter().map(|l| (l.to, l.link)).collect::<Vec<_>>(),
+        FormResult::Walk(walk) => walk
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|l| (l.to, l.link))
+            .collect::<Vec<_>>(),
         FormResult::Line(_) => unreachable!(),
     };
     assert!(!walk(again).is_empty(), "the form's walk has legs");
