@@ -3919,6 +3919,146 @@ impl GwSoul {
     }
 }
 
+/// A stand and a bay a creator places live hold parts at their kind's slot points, as ones seeded from a world's facts
+/// do: the creator places a frame stand with a frame in each slot and a rack bay on the open ground, and a crew of two
+/// takes a frame off the stand (not `part-pose`) and seats it in the bay's `upright_a` (not `slot.unknown`).
+#[test]
+fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_bay() {
+    let d = scratch("liveseat");
+    let (facts, slots) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa7);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let on_ground = |prefix: &str, x: i64, z: i64| Op::Place {
+        name: 1,
+        kind: Name::new(
+            rules
+                .kinds
+                .keys()
+                .find(|k| k.starts_with(prefix))
+                .unwrap_or_else(|| panic!("the world's {prefix}")),
+        )
+        .unwrap(),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(x, 0, z),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let placed = |got: Got, what: &str| {
+        println!("the creator places {what}: {got:?}");
+        assert_eq!(got.kind, 1, "{what} commits: {got:?}");
+        got.names[&1]
+    };
+    let stand = placed(
+        creator_edit(on_ground("mars:frame_stand@", 48 * M, -24 * M)),
+        "a frame stand",
+    );
+    let frames: Vec<Id> = (1..=2)
+        .map(|k| {
+            placed(
+                creator_edit(upright(&w, &rules, Some((stand, k)), 0, 0)),
+                &format!("a frame in the stand's slot {k}"),
+            )
+        })
+        .collect();
+    let bay = placed(
+        creator_edit(on_ground("mars:rack_bay@", 56 * M, -24 * M)),
+        "a rack bay",
+    );
+    // The stand's slot points are its kind's: a frame stands 100 mm up, 150 mm either side of the stand's middle.
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let (sh, gh) = (t.handle(stand).unwrap(), t.handle(g).unwrap());
+    assert_eq!(
+        sim::ground::scene::slot_points(t, sh, gh).unwrap(),
+        vec![
+            (1, v3(48 * M, 100_000, -24 * M - 150_000)),
+            (2, v3(48 * M, 100_000, -24 * M + 150_000))
+        ]
+    );
+    let ua = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), gh)
+        .unwrap()
+        .into_iter()
+        .find(|(n, _)| *n == slots["upright_a"])
+        .expect("the bay's upright_a has its point")
+        .1;
+    drop(copy);
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let both = |hands: &mut [Hand], at: Vec3, what: &str| {
+        hands[0].walk_to(g, v3(at.x, 0, at.z - 2_200_000));
+        hands[1].walk_to(g, v3(at.x, 0, at.z + 2_200_000));
+        let x = socket_end(&mut hands[0].s);
+        let y = socket_end(&mut hands[1].s);
+        assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+    };
+    let fa = frames[0];
+    both(&mut hands, where_is(&w, fa).2, "the crew to frame A");
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    let got = hands[1].act("activity:accept", crew, BTreeMap::new());
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    let got = hands[0].act("part:take", crew, BTreeMap::from([(1, fa.to_value())]));
+    println!("the crew takes frame A off the live-placed stand: {got:?}");
+    assert_eq!(got.kind, 1, "taken: {got:?}");
+    assert_eq!(where_is(&w, fa).0, Some(crew), "frame A rides its crew");
+    both(&mut hands, ua, "frame A to the bay");
+    let got = hands[0].act(
+        "part:put",
+        crew,
+        BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots["upright_a"]))]),
+    );
+    println!("the crew seats frame A in the live-placed bay's upright_a: {got:?}");
+    assert_eq!(got.kind, 1, "seated: {got:?}");
+    assert_eq!(
+        where_is(&w, fa).0,
+        Some(bay),
+        "frame A in the bay: {:?}",
+        where_is(&w, fa)
+    );
+}
+
 /// 0.135 A3 (#3342's X17, narrowed): four Souls build one rack bay from the yard and take it down, each step its own
 /// intent on its own gateway connection, in a served world (N2's test world, a bay at the build site, the construction
 /// entries). A body plays in one activity at a time, and a crew of two starts it.
