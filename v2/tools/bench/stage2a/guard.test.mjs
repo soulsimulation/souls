@@ -18,6 +18,9 @@ test('a healthy Eden with headroom may start; each refusal is named', () => {
   assert.deepEqual(refusals(at(0, 1000, 0), b).map((w) => w.split(' ')[0] + ' ' + w.split(' ')[1]),
     ['Eden is', "Eden's health", "Eden's ticks", 'Eden uses', 'souls.slice uses']);
   assert.match(refusals(at(0, 1000, 0), at(10, 1000, 0))[0], /no tick ran/);
+  // the cgroup's inactive page cache is not pressure: Eden at 2.4 of 4 GB with 0.6 GB of it is at 45 %
+  const cached = at(10, 1200, 1, 2.4); cached.eden.inactive = 0.6 * G;
+  assert.deepEqual(refusals(at(0, 1000, 0), cached), []);
 });
 
 test('the load stops on late ticks over 30 s, on memory past 85 %, and on a silent probe', () => {
@@ -43,7 +46,7 @@ test('a probe sample reads Eden, the slice and every world from files only', () 
   writeFileSync(join(cg, 'souls.slice', `worldd@${id}.service`, 'memory.max'), 'max\n');
   const s = sample({ root, cgroup: cg, instance: id, now: 1_004_000 });
   assert.deepEqual({ state: s.state, age: s.healthAgeS, ticks: s.h.ticks.count, eden: s.eden, slice: s.slice.current, worlds: s.worlds, stream: s.stream, wrss: s.wrss },
-    { state: 'running', age: 4, ticks: 7, eden: { current: G, max: null }, slice: 2 * G, worlds: { running: 1, stopped: 1 }, stream: '/eden-stream/', wrss: G / 1024 });
+    { state: 'running', age: 4, ticks: 7, eden: { current: G, max: null, inactive: 0 }, slice: 2 * G, worlds: { running: 1, stopped: 1 }, stream: '/eden-stream/', wrss: G / 1024 });
   assert.ok(refusals(s, s).includes("Eden's memory or MemoryMax unknown"));
 });
 

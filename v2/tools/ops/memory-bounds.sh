@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Memory bounds per world (24 Nov incident: one souls.slice cap of 3 GB, a fourth world started, and the slice's OOM
-# killer ended Eden). Puts the repo's souls.slice (MemoryMax 14G, MemoryLow 2G) and each listed world's limits.conf
+# killer ended Eden). Puts the repo's souls.slice (MemoryMax 18G, MemoryLow 2G) and each listed world's limits.conf
 # (world-limits.json through world-limits.mjs: Eden MemoryMax 4G, MemoryLow 2G) on this machine and applies them live.
 # It restarts and stops nothing: daemon-reload, then `systemctl set-property --runtime` on the slice and the listed
 # worlds. Every other world keeps worldd@'s MemoryMax=2G. MemoryHigh stays infinity (below MemoryMax with no swap it
