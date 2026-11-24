@@ -10,6 +10,11 @@
 # gatewayd and driver in $CARGO_TARGET_DIR/release, node, and Eden's facts at $EDEN_FACTS (default
 # $FARM_DATA/eden-2026-current.facts.json). Fake minds only: no model runs, nothing leaves loopback.
 # Prints the analyser's summary (analyze.mjs) and leaves the run in the out folder.
+#
+# VIEWERS=<m> (0.133 P3) adds m viewers on the world's public stream while the agents act (viewers.mjs; its arm is
+# this rung's), on VIEWER_CPUS (default DRIVER_CPUS); they need replica's wasm-bindgen package at REPLICA_PKG
+# (default $CARGO_TARGET_DIR/wasm-load/pkg). The rung's own processes are stopped by pid when it ends or is stopped,
+# and it refuses a folder under /var/lib/souls or /etc/souls (a served machine's worlds).
 set -u
 N=$1 ARM=$2 RATE=$3 CPUS=$4 SECS=${5:-120}
 V2=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -18,6 +23,9 @@ FACTS=${EDEN_FACTS:-$FARM_DATA/eden-2026-current.facts.json}
 DRIVER_CPUS=${DRIVER_CPUS:-40-47}
 D=${6:-${FARM_DATA:-$V2/../.local}/stage2a/$N-$ARM-$RATE-$CPUS}
 E=$(dirname "$D")/entries
+case "$(realpath -m "$D")/ $(realpath -m "${WORLD_ROOT:-/nonexistent}")/" in
+  */var/lib/souls/* | */etc/souls/*) echo "rung.sh: refusing a folder under /var/lib/souls or /etc/souls" >&2; exit 2 ;;
+esac
 # The world's folder: in the run's folder, or with WORLD_ROOT (e.g. /dev/shm) on a disk of its own, removed after the
 # run. On a shared machine whose disk another job saturates, the log's sync is that job's cost, not this load's.
 W=${WORLD_ROOT:+$WORLD_ROOT/stage2a-$N-$ARM-$RATE-${CPUS//,/_}}
@@ -27,6 +35,11 @@ rm -rf "$D" "$(dirname "$W")"; mkdir -p "$D/run" "$E" "$(dirname "$W")"
 # Run in the background (`pin ... &`), so `exec`: the background job's pid is the program's own.
 pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@"; fi; }
 cat /proc/loadavg > "$D/loadavg.before"
+# Stopped or not, the rung's own processes end with it, by pid (never by name: other runs use the same programs).
+SP= VP= GP= OP= WP= TP=
+stop_all() { for p in $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; }
+trap stop_all EXIT
+trap 'exit 143' INT TERM HUP
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"
 
 "$B/worldd" seed --facts "$FACTS" --dir "$W" --entries "$E" --souls "${N%%x*}" > "$D/seed.log" 2>&1 \
@@ -41,7 +54,7 @@ if [ "${SYNC_TRACE:-0}" = 1 ]; then
   for _ in $(seq 1 50); do WP=$(pgrep -P "$TP" -n) && break; sleep 0.1; done
 else
   pin "$B/worldd" serve --dir "$W" --socket "$W.sock" > "$D/worldd.log" 2>&1 &
-  WP=$! TP=
+  WP=$!
 fi
 for _ in $(seq 1 120); do [ -S "$W.sock" ] && [ -f "$W/views/world.json" ] && break; sleep 1; done
 sleep 2
@@ -59,6 +72,11 @@ STREAM=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")
 STREAM_URL="http://127.0.0.1:$OPORT/${STREAM#/}"
 [ "${STREAM_URL%/}" = "$STREAM_URL" ] && STREAM_URL="$STREAM_URL/"
 echo "rung $N $ARM $RATE cpus=$CPUS: world $WP gateway $GP ($ADDR) origin $OP ($STREAM_URL)"
+if [ "${VIEWERS:-0}" -gt 0 ]; then
+  taskset -c "${VIEWER_CPUS:-$DRIVER_CPUS}" node "$V2/tools/bench/stage2a/viewers.mjs" "http://127.0.0.1:$OPORT/" "${STREAM_URL#*://*/}" \
+    "${REPLICA_PKG:-$B/../wasm-load/pkg}" "$VIEWERS" "$ARM" "$SECS" "$D/driver.out" "$D" > "$D/viewers.log" 2>&1 &
+  VP=$!
+fi
 
 node "$V2/tools/driver/loads.mjs" "mix-$N-$ARM-$RATE" --seconds "$SECS" --seed 1 --out "$D/schedule.txt" > "$D/loads.log" 2>&1
 # Every 5 s: each process's cores and memory, and the world's health (ticks, phases).
@@ -84,9 +102,11 @@ echo "driver exit $?" >> "$D/driver.out"
 date +%s >> "$D/win.txt"
 sleep 5
 kill "$SP" 2> /dev/null
+if [ -n "$VP" ]; then kill -TERM "$VP" 2> /dev/null; wait "$VP" 2> /dev/null; fi
 cp "$W/health.json" "$D/health.final.json" 2> /dev/null
 kill "$GP" "$OP" "$WP" 2> /dev/null
 wait "$GP" "$OP" $TP 2> /dev/null; while kill -0 "$WP" 2> /dev/null; do sleep 0.2; done
+SP= VP= GP= OP= WP= TP=
 # The world's folder (a few hundred MB at 500 Souls) goes once measured, unless KEEP_WORLD=1: a ladder on a disk
 # would otherwise fill it (a full disk ends the world's log: `log-failed`, every act after it refused).
 du -sh "$W" > "$D/world-size.txt" 2>&1
