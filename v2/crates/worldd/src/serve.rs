@@ -395,24 +395,33 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 /// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
-fn with_punts(facts: &str) -> R<String> {
+///
+/// With the facts' terrain when it read it (S12): the punts change no ground, so [`with_rides`] reads it from here
+/// rather than loading the facts again.
+fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
-        return Ok(facts.to_owned());
+        return Ok((facts.to_owned(), None));
     };
     // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
     let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
     let root = *im.nodes.get("world").ok_or("the facts have no world")?;
     let header = import_eden::header(root, &im.rules)?;
     let next = im.tree.to_state().next;
-    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
-        .map_err(|e| format!("the town: {e:?}"))?;
+    // On the start's threads (S12): the same town as on one.
+    let mut town = Town::new_on(
+        im.tree,
+        ground,
+        Doors::new(header, im.rules, next),
+        sim::ground::START_THREADS,
+    )
+    .map_err(|e| format!("the town: {e:?}"))?;
     let view = town.view();
     let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
         view.stand_near(ground, p, 0, None).is_some()
     });
     if moorings.is_empty() {
-        return Ok(facts.to_owned());
+        return Ok((facts.to_owned(), Some(terrain)));
     }
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
@@ -506,7 +515,7 @@ fn with_punts(facts: &str) -> R<String> {
             _ => return Err(format!("the facts have no '{key}' list")),
         }
     }
-    Ok(f.to_json())
+    Ok((f.to_json(), Some(terrain)))
 }
 
 /// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
@@ -571,7 +580,12 @@ fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
 /// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
 /// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
-fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+/// `terrain` is the facts' ground's terrain when [`with_punts`] read it, else it is read here.
+fn with_rides(
+    facts: &str,
+    entries: &[(String, Json)],
+    terrain: Option<Option<sim::ground::Terrain>>,
+) -> R<String> {
     let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
         .iter()
         .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
@@ -580,11 +594,16 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
     if rides.is_empty() {
         return Ok(facts.to_owned());
     }
-    let im = import_eden::load(facts)?;
-    let Some(&ground) = im.nodes.get("ground") else {
-        return Ok(facts.to_owned());
+    let terrain = match terrain {
+        Some(t) => t,
+        None => {
+            let im = import_eden::load(facts)?;
+            let Some(&ground) = im.nodes.get("ground") else {
+                return Ok(facts.to_owned());
+            };
+            sim::ground::Terrain::of(&im.tree, ground)?
+        }
     };
-    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
         return Err("the facts are not an object".into());
@@ -679,24 +698,38 @@ static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// The cache's format and the meaning of what it holds: bump it whenever [`courses`], the punts' moorings or the
 /// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
-/// never read as now's. The build's own hash (`WORLDD_BUILD`, the launcher's) or the crate's version is in the key
-/// too, so a deploy of a new build computes them again.
+/// never read as now's. The build's own hash is in the key too ([`build_id`]), so a deploy of a new build computes them
+/// again.
 const COURSES_FORMAT: &str = "souls/facts-courses/1";
 
 /// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
 /// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
 fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
-    let punts = with_punts(facts)?;
+    let (punts, terrain) = with_punts(facts)?;
     stamp("facts: punts");
-    let rides = with_rides(&punts, entries)?;
+    let rides = with_rides(&punts, entries, terrain)?;
     stamp("facts: rides");
     with_entry_kinds(&rides, entries)
 }
 
+/// This build's hash: the launcher's (`WORLDD_BUILD`), else the same one of this program's own bytes (S12), so
+/// `worldd seed` keeps [`courses`] under the key the launched world reads; else the crate's version.
+fn build_id() -> String {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        std::env::var("WORLDD_BUILD").unwrap_or_else(|_| {
+            std::env::current_exe()
+                .and_then(std::fs::read)
+                .map(|b| to_hex(&supervisor::build_hash(&b)))
+                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned())
+        })
+    })
+    .clone()
+}
+
 /// The cache key of `facts` and `entries` for this build.
 fn courses_key(facts: &str, entries: &[(String, Json)]) -> String {
-    let build =
-        std::env::var("WORLDD_BUILD").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
+    let build = build_id();
     let mut key = format!(
         "{COURSES_FORMAT}.{build}.{}",
         to_hex(&sha256(facts.as_bytes()))
@@ -1052,7 +1085,13 @@ fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
 
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
 /// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
-fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
+/// `classes` are the body classes whose grounds are cut with them (S12).
+fn recovered_towns(
+    built: &Built,
+    initial: &Replica,
+    records: &[Vec<u8>],
+    classes: &[replica::kinds::sizes::Size],
+) -> R<(Town, Town)> {
     let mut live = initial.frozen();
     for bytes in records {
         crate::progress();
@@ -1067,11 +1106,12 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         live.tree().next(),
     );
     stamp("log applied");
-    let towns = Town::with_planner_on(
+    let towns = Town::with_planner_classes_on(
         live.tree().frozen(),
         built.ground,
         doors,
         sim::ground::START_THREADS,
+        classes.iter().copied(),
     )
     .map_err(|e| format!("the recovered town: {e}"))?;
     stamp("town and planner");
@@ -1380,6 +1420,11 @@ fn seed_in(args: &[String]) -> R<String> {
             std::fs::write(&p, &bytes).map_err(io(&p))?;
         }
         println!("hatches: {}", modules.len());
+        // The facts' courses kept for this build (S12), from the entries as `serve` reads them back: its first start
+        // reads them instead of cutting the punts' town again.
+        let mut kept = Vec::new();
+        entries(&dir.join("entries"), &mut kept)?;
+        courses_cached(Some(&dir.join("facts.courses")), &text, &kept)?;
     }
     // The Souls: ids of a scope of their own (not the tree's minter's), a token each.
     let name = instance(built.root);
@@ -2399,6 +2444,8 @@ fn serve(args: &[String]) -> R<()> {
         Err(e) => return Err(format!("body-catalogue: {e}")),
     };
     let mut born = born(&meta, &catalogue)?;
+    // The body classes its catalogue admits, their grounds cut with the towns (S12).
+    let classes: Vec<_> = catalogue.classes().collect();
     let facts = dir.join("facts.json");
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
@@ -2531,11 +2578,12 @@ fn serve(args: &[String]) -> R<()> {
         stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        let towns = Town::with_planner_on(
+        let towns = Town::with_planner_classes_on(
             live.tree().frozen(),
             built.ground,
             doors,
             sim::ground::START_THREADS,
+            classes.iter().copied(),
         )
         .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
@@ -2574,7 +2622,7 @@ fn serve(args: &[String]) -> R<()> {
                 let record = r.root.record;
                 let at =
                     Replica::restored(initial.header().clone(), r.tree, r.root.version.sequence);
-                let towns = recovered_towns(&built, &at, found.after(record))?;
+                let towns = recovered_towns(&built, &at, found.after(record), &classes)?;
                 (initial, Some((at, record)), None, None, towns)
             }
             None if found.first > 0 => {
@@ -2584,19 +2632,15 @@ fn serve(args: &[String]) -> R<()> {
                 ));
             }
             None => {
-                let towns = recovered_towns(&built, &initial, &found.records)?;
+                let towns = recovered_towns(&built, &initial, &found.records, &classes)?;
                 (initial, None, None, None, towns)
             }
         }
     };
     // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
-    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, planner)) = started;
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
-    town.prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
-    planner
-        .prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
+    // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     stamp("places to sit placed");
@@ -3494,7 +3538,7 @@ mod tests {
         let built = build(&facts.text, &[]).unwrap();
         let initial = Replica::start(built.header.stored()).unwrap();
         let (before, _) =
-            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
         assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
@@ -3521,7 +3565,7 @@ mod tests {
         )
         .unwrap();
         let records = vec![built.part.clone(), edited.stored().to_vec()];
-        let (mut town, mut planner) = recovered_towns(&built, &initial, &records).unwrap();
+        let (mut town, mut planner) = recovered_towns(&built, &initial, &records, &[]).unwrap();
         for one in [&mut town, &mut planner] {
             one.prepare_classes([Size::Large]).unwrap();
             assert_eq!(one.tree.to_state(), live.tree().to_state());
@@ -3534,7 +3578,7 @@ mod tests {
         }
         let mut invalid = records;
         invalid.push(vec![0xff]);
-        assert!(recovered_towns(&built, &initial, &invalid).is_err());
+        assert!(recovered_towns(&built, &initial, &invalid, &[]).is_err());
     }
 
     #[test]
@@ -4161,7 +4205,7 @@ mod tests {
         let built = build(&facts.text, &[]).unwrap();
         let initial = Replica::start(built.header.stored()).unwrap();
         let (mut town, mut planner) =
-            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
         let mut copy = town.copy().unwrap();
         for t in [&mut town, &mut planner, &mut copy] {
             t.prepare_classes([replica::kinds::sizes::Size::Large])

@@ -1536,6 +1536,51 @@ impl Town {
         Ok((town, planner))
     }
 
+    /// As [`Town::with_planner_on`], with each body class in `sizes` prepared too ([`Town::prepare_classes`]) for a
+    /// world's start (S12, 0.133): every class's ground is cut once, beside the standard one and each on at most
+    /// `threads` threads, and the planner gets a copy, as it gets the standard class's. The same towns as preparing each
+    /// alone, one class at a time on one thread.
+    pub fn with_planner_classes_on(
+        tree: Tree,
+        ground: Id,
+        doors: Doors,
+        threads: usize,
+        sizes: impl IntoIterator<Item = Size>,
+    ) -> Result<(Town, Town), String> {
+        let wanted: std::collections::BTreeSet<Size> =
+            sizes.into_iter().filter(|&s| s != Size::Standard).collect();
+        let (copy, versions) = (tree.frozen(), Versions::default());
+        let (towns, classes) = std::thread::scope(|s| {
+            let jobs: Vec<_> = wanted
+                .iter()
+                .map(|&size| {
+                    let (copy, versions) = (&copy, &versions);
+                    let job = s.spawn(move || {
+                        crate::commit::off_clock();
+                        Self::assemble_for(copy, ground, versions, size, threads)
+                    });
+                    (size, job)
+                })
+                .collect();
+            let towns = Town::with_planner_on(tree, ground, doors, threads);
+            let classes: Vec<_> = jobs
+                .into_iter()
+                .map(|(size, job)| {
+                    let g = job.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+                    (size, g)
+                })
+                .collect();
+            (towns, classes)
+        });
+        let (mut town, mut planner) = towns?;
+        for (size, g) in classes {
+            let g = Geometry::from(g?, ground);
+            planner.classes.insert(size, g.clone());
+            town.classes.insert(size, g);
+        }
+        Ok((town, planner))
+    }
+
     /// The line from where `body` stands toward `to` on its node ([`View::search`], the planning call): the planner's
     /// (K18b, #3175), not the clock's.
     pub fn line(&mut self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
