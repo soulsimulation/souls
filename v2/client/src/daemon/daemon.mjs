@@ -250,6 +250,7 @@ const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.
 const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
 const serving = new Map(); // sequence → the message its act serves
 const replyOf = new Map(); // C15: a message's reply, sent with its close
+const closedMail = new Map(); // Q1: messages this daemon closed (id → state), so a later `--for` or `ack` on one is told, not refused
 const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -274,12 +275,13 @@ const logged = [], LOGGED_KEPT = 500;
 let eventN = 0;
 // #3705 (today's `receipt`): each intent this daemon sent, by sequence, with every answer it had, the newest kept;
 // and the acts still going, newest last, that `stop` ends (an order stays until cancelled).
-const receipts = new Map(), RECEIPTS_KEPT = 200, going = [];
+const receipts = new Map(), RECEIPTS_KEPT = 200, going = [], entriesAt = new Map();
 const ANSWER_NAMES = ['', 'receipt', 'refused', 'accepted', 'resolved', 'unread'];
 const ORDERS = new Set(['souls:hold', 'souls:follow', 'souls:queue']);
 function receiptSent(sequence, ranked, { target, replaces, words }) {
   receipts.set(sequence, { sequence, verbs: ranked, ...(target ? { target: String(target) } : {}), ...(replaces !== undefined ? { replaces } : {}), sentAt: new Date().toISOString(), answers: [] });
-  if (receipts.size > RECEIPTS_KEPT) receipts.delete(receipts.keys().next().value);
+  entriesAt.set(sequence, entrySeq); // 0.133: the newest entry seen when it went; its own entries come after it
+  if (receipts.size > RECEIPTS_KEPT) { const old = receipts.keys().next().value; receipts.delete(old); entriesAt.delete(old); }
   if (words === undefined && ranked[0] !== 'souls:cancel') going.push(sequence);
 }
 function receiptAnswered(e) {
@@ -508,6 +510,8 @@ function closeMail(id, state, outcome) {
   const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
   replyOf.delete(id);
+  closedMail.set(id, state);
+  if (closedMail.size > 200) closedMail.delete(closedMail.keys().next().value);
   for (const [s, m] of serving) if (m === id) serving.delete(s); // closed once: a later answer closes nothing
   log(`message ${id} closed ${state} (${outcome})`);
   if (ws && signedIn) ws.send(line); else closes.push(line);
@@ -755,13 +759,26 @@ function remember(entries) {
  */
 /** The world's ladder's ended orders of my body, newest last (stuck.mjs). */
 const stuckSeen = [];
+/** 0.133: my walks' ends that say how far from their target they stood, newest last ({sequence, mm}). */
+const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
+/** 0.133: the newest entry sequence this daemon has seen, and the receipts waiting for an entry. */
+let entrySeq = -1;
+const entryWaiters = [];
 function onEntry(e) {
   counts.entries++;
+  entrySeq = Math.max(entrySeq, Number(e.sequence));
   // The version after an entry is its sequence and one (`replica::apply`).
   if (e.changes > 0) { owe(e.sequence + 1); followWanted = true; follow(); }
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  // 0.133: how far from its target a walk of mine ended (its end's field 7, mm), for that walk's receipt (`away_m`)
+  for (const ev of events) {
+    if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
+    const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+  }
+  for (const w of entryWaiters.splice(0)) w();
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
   for (const ev of events) {
     const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
@@ -1105,6 +1122,8 @@ function towardOf(req) {
 /** The engine's verbs for a rider of a thing on a course (#3603): `carrier:steer|stop|land:<id>`. */
 const CARRIER = /^carrier:(steer|stop|land)$/;
 const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
+/** Q1: everyday words for the body's hand acts, read only where the thing itself offers no act by that word. */
+const HANDS = { take: 'pick_up', pick: 'pick_up', grab: 'pick_up', pickup: 'pick_up', 'pick-up': 'pick_up' };
 
 /**
  * C10 (#3414): the thin command's act words as candidates, best first. A word is an offered act, `<verb>:<id>` (a
@@ -1114,9 +1133,20 @@ const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take t
  */
 function actsOf(words) {
   const out = [];
-  let kinds = null, rows = null;
+  let kinds = null, rows = null, body = null;
+  // Q1: the Soul's own body and its kind's forms, once per call: a gesture, a pose or a hand's act goes by its name
+  const own = () => {
+    if (body) return body;
+    kinds ??= heldKinds(); rows ??= rowsOf(copy);
+    const me = [...rows.values()].find((r) => r.soul === ME);
+    return (body = me ? { id: me.id, forms: kinds[me.entry ?? me.kind]?.forms ?? {} } : { id: null, forms: {} });
+  };
+  // a thing's forms, or null when its kind is not in the copy (then nothing is read as the body's in its place)
+  const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); const k = kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]; return k ? k.forms ?? {} : null; };
   for (const w of words.map(String)) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
+    // Q1: a bare id after a plain walk is the next fallback (a walk takes no thing), as the skill's ranked list has it
+    if (out.length && ID.test(w) && out.at(-1).verb === `${NS}:walk` && !out.at(-1).form) { out.push({ verb: `${NS}:walk`, this: w }); continue; }
     if (out.length && (ID.test(w) || arg)) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
@@ -1141,8 +1171,20 @@ function actsOf(words) {
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
+      // Q1: `<verb>:<thing>` where the thing offers no such act and the Soul's own body does, with a thing to take
+      // (`pick_up:<apple>`, `point:<pond>`): that act of the body, on the thing
+      const theirs = !verb.includes(':') && !MOVES.has(form) ? formsOf(tail) : null;
+      const snake = form.replace(/-/g, '_'), f = HANDS[form] ?? snake, mine = theirs && !theirs[snake] && tail !== own().id ? own().forms[f] : null;
+      const take = mine ? Object.entries(mine.takes ?? {}).find(([, t]) => t?.type === 'thing' && !t.select)?.[0] : null;
+      if (take && own().id) { out.push({ verb: `${NS}:${f}`, this: own().id, form: f, args: { [take]: tail } }); continue; }
       out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
-    } else out.push({ verb: w });
+    } else {
+      // Q1: a bare word that names an act of the Soul's own body (`wave`, `clap`, `lie_down`, `pick_up`): that act on
+      // the body, its thing arguments after it as for any act
+      const f = HANDS[w] ?? w.replace(/-/g, '_');
+      if (/^[a-z][a-z_]*$/.test(f) && own().id && own().forms[f]) out.push({ verb: `${NS}:${f}`, this: own().id, form: f });
+      else out.push({ verb: w });
+    }
   }
   return out;
 }
@@ -1368,6 +1410,12 @@ async function answer(req, conn = null) {
       const id = String(req.id ?? ''), reply = String(req.reply ?? '').replace(/\s+/g, ' ').trim(), close = req.close ?? null;
       if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
       if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
+      if (!mail.has(id) && closedMail.has(id)) {
+        // Q1: closed already by an act's end. The mailbox takes no word on a closed message, so nothing is sent and the
+        // agent is told: its owner will not see this reply (say it in your report instead)
+        return { ok: false, code: 'mail-closed', closed: closedMail.get(id), shown: false, sent: false,
+          detail: `message ${id} was already closed (${closedMail.get(id)}) by an act's end: your owner will not see this reply; say it in your report` };
+      }
       if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
       if (close === null) {
         // #3781 (today's N-C12): an interim note. The owner's page shows it under the message, which stays open, so a
@@ -1469,6 +1517,10 @@ async function answer(req, conn = null) {
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
+      // Q1: an errand's later step (`walk`, then `sit --for`) on a message an earlier step's end already closed goes
+      // unlinked, and says so: the agent's report is then the owner's answer
+      let unlinked = null;
+      if (req.for !== undefined && !mail.has(req.for) && closedMail.has(req.for)) { unlinked = { for: req.for, closed: closedMail.get(req.for), note: `message ${req.for} was already closed (${closedMail.get(req.for)}) by an earlier act's end: this act is not linked to it; put --for on an errand's last act only` }; delete req.for; }
       if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
       const candidates = standsFromSeat(Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf));
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
@@ -1512,7 +1564,7 @@ async function answer(req, conn = null) {
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
-      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
+      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
     case 'set-down': {
@@ -1752,6 +1804,18 @@ async function answer(req, conn = null) {
       if (why) got.receipt.why = why;
       const instead = r.answers.at(-1)?.answer === 'refused' && !stuck ? suggestionFor(r) : null;
       if (instead) got.receipt.try = instead;
+      // 0.133: a walk that ended says how far from its target it stood, metres (a fact: 0 is on or in it)
+      // By sequence: its end is an entry after the newest seen when it went and before the receipt's version (the
+      // version after an entry is its sequence and one). That entry can trail the receipt: it is waited for until the
+      // entries seen reach the receipt's version, at most a second.
+      const walked = done && r.verbs.some((v) => /:walk$/.test(v));
+      const after = entriesAt.get(r.sequence) ?? -1, version = r.answers.at(-1)?.version, before = version ? sequenceOf(version) : Infinity;
+      const endOf = () => awayEnded.findLast((a) => a.sequence > after && a.sequence < before);
+      for (const until = Date.now() + 1000; walked && !endOf() && entrySeq < before - 1 && Date.now() < until;) {
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); entryWaiters.push(() => { clearTimeout(t); ok(); }); });
+      }
+      const away = walked ? endOf() : null;
+      if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {

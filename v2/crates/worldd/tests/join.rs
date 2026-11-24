@@ -1124,9 +1124,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// writes its rungs as the world's entries (953 records, 3,150 motion samples); with N1's commit taken out the run
 /// writes the previous pin (dcf33b73...), so the ladder is the whole difference. Re-pinned by A2-2: a walker finds a
 /// way round bodies standing in its way (905 records, 2,342 motion samples); with main's walk skill put back the run
-/// writes the previous pin (06e9e816...), so the walk skill is the whole difference.
+/// writes the previous pin (06e9e816...), so the walk skill is the whole difference. Re-pinned by 0.133 Q1: a done walk's
+/// `souls:move-ended` carries field 7, how far from its target it ended, mm (same 905 records, 2,342 motion samples);
+/// with only field 7 left out the run writes the previous pin (26cdac83...), so field 7 is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "26cdac832ea50b51a929389b954dd7f428cf84c92f3e819c9dedc4ae3481431b";
+    "85d9b1984b7ec6ce8efd775b76246aa1327852ac036d39c6b2841895cc660f85";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

@@ -39,10 +39,11 @@ const KINDS: &str = r#"
 {1: "test:stand", 2: "thing", 6: {1: ["thing"]}}
 {1: "test:table", 2: "thing", 6: {1: ["thing"], 2: ["thing"]}}
 {1: "test:switch", 2: "thing", 18: {1: "fixed"}}
+{1: "test:cart", 2: "thing", 6: {1: ["body"]}, 18: {1: "one_hand"}}
 "#;
 
 /// The world: the walker (2), the hound (3), the stand (4) with the mug (6) in its slot, the table (5), the pole (7) on
-/// the ground and the switch (8).
+/// the ground, the switch (8), and a cart (9) a hand can hold, with a hound (10) sitting in its one slot.
 const WORLD: &str = r#"
 {
   1: [],
@@ -55,7 +56,9 @@ const WORLD: &str = r#"
     {1: 5, 2: "test:table", 3: 1},
     {1: 6, 2: "test:mug", 3: 4, 4: 1},
     {1: 7, 2: "test:pole", 3: 1},
-    {1: 8, 2: "test:switch", 3: 1}
+    {1: 8, 2: "test:switch", 3: 1},
+    {1: 9, 2: "test:cart", 3: 1},
+    {1: 10, 2: "test:hound", 3: 9, 4: 1}
   ],
   4: []
 }
@@ -212,6 +215,7 @@ fn world() -> World {
         (id(6), 300_000),
         (id(7), 200_000),
         (id(8), 1_200_000),
+        (id(9), 300_000),
     ]);
     let tip = Name::new("souls:tip").expect("a name");
     World {
@@ -542,4 +546,29 @@ fn a_move_cancelled_before_contact_transfers_nothing() {
     );
     assert_eq!(w.parent(mug), (Some(stand), Some(1)));
     assert!(w.log.parts.is_empty());
+}
+
+/// 0.135 E10b: a thing a hand can hold is not taken while a body sits in it, so a holdable vehicle never carries its
+/// rider off. Refused `thing-occupied`, naming the rider, before any move or claim.
+#[test]
+fn a_thing_a_body_sits_in_is_not_taken() {
+    let mut w = world();
+    let (walker, cart, rider) = (id(2), id(9), id(10));
+    let r = w
+        .holding
+        .take(&mut cx!(w), walker, &read_move(TAKE), cart, 0)
+        .expect_err("refused");
+    assert_eq!(r.name, "thing-occupied", "{}", r.detail);
+    assert!(
+        r.detail.contains(&replica::world_model::show(rider)),
+        "{}",
+        r.detail
+    );
+    assert!(w.moves.is_empty() && w.holding.is_empty() && w.log.parts.is_empty());
+    assert_eq!(w.parent(cart), (Some(id(1)), None), "the cart stays");
+    assert_eq!(
+        w.parent(rider),
+        (Some(cart), Some(1)),
+        "the rider stays seated"
+    );
 }
