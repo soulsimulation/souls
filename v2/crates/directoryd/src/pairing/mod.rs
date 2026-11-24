@@ -108,6 +108,11 @@ pub struct Pairing {
     tokens_file: Option<PathBuf>,
     authority_file: Option<PathBuf>,
     owner_reader: std::sync::OnceLock<OwnerReader>,
+    /// Each placed world's owner as last read from the world store, by instance, and the reads in flight: a request
+    /// waits at most [`authority::OWNER_WITHIN`] for a read, then uses this (local-first, as R15's stream).
+    owners: std::sync::Arc<Mutex<authority::Owners>>,
+    /// The world files a slow store kept back, for the copier ([`Pairing::copy_owed`]) to write.
+    owed: Mutex<authority::Owed>,
     /// Per account, the times of its wrong short codes.
     guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
@@ -214,6 +219,8 @@ impl Pairing {
             tokens_file,
             authority_file: std::env::var_os("DIRECTORYD_AUTHORITY_MAP").map(PathBuf::from),
             owner_reader: std::sync::OnceLock::new(),
+            owners: std::sync::Arc::default(),
+            owed: Mutex::default(),
             guesses: Mutex::default(),
             polls: Mutex::default(),
             soul_cap: std::env::var("DIRECTORYD_SOULS_PER_ACCOUNT")
@@ -591,10 +598,14 @@ impl Pairing {
                     Ok(world) => world,
                     Err(e) => return refused(e),
                 };
+                // A world store that cannot say who owns the world yet leaves the approval as it is: the daemon
+                // polls again, and the token is minted when the owner can be had.
                 let authority = match self.authority(world.as_deref()) {
                     Ok(authority) => authority,
+                    Err("world-authority-unavailable") => return Poll::Pending,
                     Err(e) => return refused(e),
                 };
+                let unpublished = std::cell::Cell::new(false);
                 if let Some(authority) = &authority
                     && is_creator_grant(&grant)
                     && grant != authority.creator_grant()
@@ -635,17 +646,38 @@ impl Pairing {
                             ON CONFLICT(grant_text,world) DO UPDATE SET device=excluded.device,token_hash=excluded.token_hash", params![grant, authority.world, device, token_hash])?;
                     }
                     // Publish the exact world's authority before the request can become delivered. A failed file
-                    // write rolls back the SQL approval transition and the same request remains recoverable.
-                    self.write_tokens(&tx)
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                    tx.execute(
-                        "UPDATE pair_requests_v1 SET state = 'delivered' WHERE secret_hash = ?1",
+                    // write rolls back the SQL approval transition and the same request remains recoverable: the
+                    // daemon is told to keep polling. Only that world's files are written.
+                    match &authority {
+                        Some(authority) => self.publish_world(&tx, authority),
+                        None => self.write_tokens(&tx),
+                    }
+                    .map_err(|e| {
+                        unpublished.set(true);
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                    })?;
+                    // Of two polls at once, one delivers.
+                    if tx.execute(
+                        "UPDATE pair_requests_v1 SET state = 'delivered' WHERE secret_hash = ?1 AND state = 'approved'",
                         params![to_hex(&hash)],
-                    )?;
+                    )? == 0
+                    {
+                        return Err(rusqlite::Error::QueryReturnedNoRows);
+                    }
                     tx.commit()?;
                     Ok(Ok(()))
                 })();
+                if let Some(authority) = authority.as_ref().filter(|a| !a.fresh) {
+                    self.owe(Some(&authority.world));
+                }
                 match stored {
+                    Err(_) if unpublished.get() => {
+                        if let Some(authority) = &authority {
+                            self.owe(Some(&authority.world));
+                        }
+                        return Poll::Pending;
+                    }
+                    Err(rusqlite::Error::QueryReturnedNoRows) => return refused("delivered"),
                     Err(_) => return refused("store"),
                     Ok(Err(other)) => return Poll::Refused("soul-connected".into(), Some(other)),
                     Ok(Ok(())) => {}
@@ -707,6 +739,7 @@ impl Pairing {
             Some(_) => {}
         }
         let db = self.db.lock().expect("the store");
+        let worlds = Self::worlds_of(&db, grant)?;
         db.execute(
             "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
             params![grant, account],
@@ -717,7 +750,9 @@ impl Pairing {
             params![grant],
         )
         .map_err(|_| "store")?;
-        self.write_tokens(&db).map_err(|_| "tokens-file")
+        self.publish(&db, &worlds, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")
+        })
     }
 
     /// Every hash the store holds for a Soul's token, for a test to read.

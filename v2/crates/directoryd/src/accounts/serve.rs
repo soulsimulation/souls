@@ -111,9 +111,40 @@ pub fn configure_current_authority(app: &Arc<App>) -> Result<(), String> {
             let worlds = app.worlds.as_ref().ok_or("world-authority-required")?;
             worlds.ownership(world).map_err(|e| e.name.to_owned())
         }))?;
-        pairing.reconcile_current_authority()?;
+        // A slow or failing world store never stops the start (as R17's creator record): the world files already
+        // written stand, the reason is said by name, and the copier writes them when the store answers.
+        if let Err(e) = pairing.reconcile_current_authority() {
+            eprintln!("directoryd: degraded: {e}: the world files already written stand; retrying");
+            pairing.owe_all();
+        }
+        let weak = Arc::downgrade(app);
+        std::thread::spawn(move || copier(weak));
     }
     Ok(())
+}
+
+/// The copier's first wait and its longest, between passes while world files are owed (doubling, as R17's retries).
+const COPY_FIRST: std::time::Duration = std::time::Duration::from_millis(500);
+const COPY_MOST: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Writes the world files a slow world store kept back ([`crate::pairing::Pairing::copy_owed`]), waiting longer after
+/// each pass that leaves some owed, until the directory ends.
+fn copier(app: std::sync::Weak<App>) {
+    let mut wait = COPY_FIRST;
+    loop {
+        std::thread::sleep(wait);
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        let Some(pairing) = &app.pairing else {
+            return;
+        };
+        wait = if pairing.copy_owed() {
+            (wait * 2).min(COPY_MOST)
+        } else {
+            COPY_FIRST
+        };
+    }
 }
 
 pub struct Request {

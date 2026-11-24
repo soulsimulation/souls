@@ -132,8 +132,15 @@ A world brought over from today's system (Eden: `import-world`, `worldd seed`, `
 so nothing else puts it in the directory's list. `register-world` writes its name record and its list row in the store
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
-with the map naming it: a map entry the directory cannot find in its own list stops every pairing
-(`world-authority-unavailable`).
+with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
+wait (`world-authority-unavailable`) until it is registered.
+
+A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
+world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so
+in the journal (`degraded: world-owner-unavailable <world>`). The directory writes only the files of the world a
+change is for. A world whose files it could not write, or wrote from the owner last read, is retried in the background
+with back-off until the store answers. A start whose store does not answer logs
+`degraded: world-authority-unavailable` and serves, keeping the files already written.
 
 ```sh
 DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory /usr/local/lib/souls/register-world eden \

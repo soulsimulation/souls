@@ -787,9 +787,10 @@ fn w3b_world_bound_normal_soul_creator_and_retirement_authority() {
             .unwrap()
             .contains(&grant)
     );
+    // A Soul's change writes its own world's files only: world two's Souls file is not even written.
     assert!(
         !std::fs::read_to_string(file_b.with_file_name("tokens.souls"))
-            .unwrap()
+            .unwrap_or_default()
             .contains(&grant)
     );
     let creator_grant = "creator-0123456789abcdef0123456789abcdef-0".to_owned();
@@ -1430,4 +1431,172 @@ fn a_request_for_one_world_never_reads_another_worlds_owner() {
         Some("world-authority-unavailable")
     );
     assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+/// Copier passes until nothing is owed, at most `within`; whether it ended owing nothing.
+#[allow(clippy::disallowed_methods)] // A test of how long a request is held on a stalled store measures wall time.
+fn copy_until_done(p: &Pairing, within: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while p.copy_owed() {
+        if started.elapsed() > within {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    true
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // As above.
+fn a_world_store_stalling_30_s_never_refuses_holds_or_loses_an_approval() {
+    use crate::directory::stand_in::{KEY_ID, StandIn};
+    use crate::worlds::list::Worlds;
+    use crate::worlds::list::register::{Imported, register};
+    use replica::ids::{Id, Scope};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    // The world store is the S3 stand-in, with two worlds registered in it as production's are.
+    let stand_in = StandIn::start(100).unwrap();
+    let vars = BTreeMap::from([
+        ("DIRECTORY_STORE_URL", stand_in.url("souls")),
+        ("AWS_ACCESS_KEY_ID", KEY_ID.to_owned()),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret".to_owned()),
+    ]);
+    let bucket = crate::directory::s3::S3::from_vars(|k| vars.get(k).cloned())
+        .unwrap()
+        .unwrap();
+    let founder = Id::new(Scope([3; 16]), 0).unwrap();
+    let mut worlds = serde_json::Map::new();
+    let mut files = BTreeMap::new();
+    for (name, n) in [("garden", 0xc3), ("forest", 0xc4)] {
+        let zone = Id::new(Scope([n; 16]), 1).unwrap();
+        register(
+            &bucket,
+            &Imported {
+                name,
+                label: name,
+                lineage: [n; 16],
+                zone,
+                creator: founder,
+                now: 100,
+            },
+        )
+        .unwrap();
+        let instance = format!(
+            "{}-{}",
+            to_hex(&[n; 16]),
+            crate::accounts::principal_text(zone).replace(':', "-")
+        );
+        let dir = root.join("worlds").join(&instance);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("tokens"), "").unwrap();
+        files.insert(name, dir.join("tokens"));
+        worlds.insert(
+            name.into(),
+            serde_json::json!({"instance": instance, "creator": crate::accounts::principal_text(founder)}),
+        );
+    }
+    let registry = root.join("authority.json");
+    std::fs::write(
+        &registry,
+        serde_json::to_vec(&serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,"worlds":worlds}))
+            .unwrap(),
+    )
+    .unwrap();
+    let listed = Arc::new(Worlds::new(
+        crate::directory::Directory::new(bucket, replica::encode::Name::new("m1").unwrap()),
+        BTreeMap::new(),
+        Box::new(|_| Ok(())),
+    ));
+    let reader = |p: &Pairing| {
+        let listed = listed.clone();
+        p.current_owner_reader(Arc::new(move |world| {
+            listed.ownership(world).map_err(|e| e.name.to_owned())
+        }))
+        .unwrap();
+    };
+    p.authority_file = Some(registry.clone());
+    reader(&p);
+    p.reconcile_current_authority().unwrap();
+    let header = format!(
+        "# souls-creator/1 0 {}",
+        crate::accounts::principal_text(founder)
+    );
+    assert!(
+        std::fs::read_to_string(&files["garden"])
+            .unwrap()
+            .contains(&header)
+    );
+    let forest = std::fs::read(&files["forest"]).unwrap();
+
+    // Every read of the world list and the worlds' identities now waits 30 s, past the client's 5 s.
+    stand_in.stall_reads(10_000, Duration::from_secs(30), "world-");
+    let bound = authority::OWNER_WITHIN + Duration::from_secs(1);
+    let (secret, code) = ask(&p, "studio laptop", None, false, T0);
+    let started = Instant::now();
+    p.ask_world(&code, "garden").unwrap();
+    let grant = p.approve("acct_owner", &code, T0).expect("approved");
+    assert!(
+        started.elapsed() < bound,
+        "approval held {:?}",
+        started.elapsed()
+    );
+    let started = Instant::now();
+    let Poll::Token { token, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("the token is delivered while the store stalls");
+    };
+    assert!(
+        started.elapsed() < bound,
+        "delivery held {:?}",
+        started.elapsed()
+    );
+    let line = format!("{grant} {}", to_hex(&sha256(token.as_bytes())));
+    // Only the approved world's files are written, from the owner last read.
+    let garden = std::fs::read_to_string(&files["garden"]).unwrap();
+    assert!(garden.contains(&header) && garden.contains(&line));
+    assert_eq!(std::fs::read(&files["forest"]).unwrap(), forest);
+    // The world is owed to the copier until its owner is read fresh; the stall ends and the copier ships it.
+    assert!(p.copy_owed(), "owed while the store stalls");
+    stand_in.stall_reads(0, Duration::ZERO, "");
+    assert!(copy_until_done(&p, Duration::from_secs(20)));
+    assert!(
+        std::fs::read_to_string(&files["garden"])
+            .unwrap()
+            .contains(&line)
+    );
+
+    // A restart into a stalled store starts from the owner the files were last written with.
+    let database = root.join("pairing.sqlite");
+    drop(p);
+    stand_in.stall_reads(10_000, Duration::from_secs(30), "world-");
+    let mut p = Pairing::open(&database, Some(legacy.clone()), "http://127.0.0.1:1").unwrap();
+    p.authority_file = Some(registry.clone());
+    reader(&p);
+    let started = Instant::now();
+    p.reconcile_current_authority().unwrap();
+    assert!(started.elapsed() < authority::OWNER_WITHIN * 2 + Duration::from_secs(1));
+    assert!(
+        std::fs::read_to_string(&files["garden"])
+            .unwrap()
+            .contains(&line)
+    );
+
+    // With no owner ever read for a world, the start is degraded by name, never ended, and nothing is lost.
+    std::fs::write(&files["garden"], "").unwrap();
+    drop(p);
+    let mut p = Pairing::open(&database, Some(legacy), "http://127.0.0.1:1").unwrap();
+    p.authority_file = Some(registry);
+    reader(&p);
+    assert_eq!(
+        p.reconcile_current_authority(),
+        Err("world-authority-unavailable".into())
+    );
+    p.owe_all();
+    assert!(p.copy_owed(), "owed while the store stalls");
+    stand_in.stall_reads(0, Duration::ZERO, "");
+    assert!(copy_until_done(&p, Duration::from_secs(20)));
+    let garden = std::fs::read_to_string(&files["garden"]).unwrap();
+    assert!(garden.contains(&header) && garden.contains(&line));
 }
