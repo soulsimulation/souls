@@ -2116,17 +2116,21 @@ fn beside(at: Vec3, from: Option<Vec3>, d: i64) -> Vec3 {
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with
-/// the largest outline, the first by id on a tie; none when `node` holds no room, or is one.
+/// the largest outline, the first by id on a tie; none when `node` holds no room, or is one, or is the ground or a named
+/// place (they hold buildings: a walk to them ends on them, never in a building's room).
 fn main_room(tree: &Tree, node: Id) -> Option<Id> {
-    let room = |n: &replica::tree::NodeRef<'_>| {
-        n.kind().as_str().split('@').next() == Some(sim::ground::scene::ROOM)
+    use sim::ground::scene::{GROUND, PLACE, ROOM};
+    let is = |n: &replica::tree::NodeRef<'_>, kind: &str| {
+        n.kind().as_str().split('@').next() == Some(kind)
     };
+    let room = |n: &replica::tree::NodeRef<'_>| is(n, ROOM);
     let h = tree.handle(node)?;
-    if room(&tree.node(h)?) {
+    let n = tree.node(h)?;
+    if room(&n) || is(&n, GROUND) || is(&n, PLACE) {
         return None;
     }
-    let (mut todo, mut best): (Vec<(replica::tree::Handle, u8)>, Option<(i128, Id)>) =
-        (vec![(h, 0)], None);
+    let mut todo: Vec<(replica::tree::Handle, u8)> = vec![(h, 0)];
+    let mut best: Option<(i128, Id)> = None;
     while let Some((h, depth)) = todo.pop() {
         for c in tree.children(h).unwrap_or_default() {
             let Some(n) = tree.node(*c) else { continue };
