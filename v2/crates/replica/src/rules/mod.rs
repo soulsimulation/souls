@@ -555,6 +555,21 @@ pub fn decide(input: &Value) -> Value {
     decide_parts(part("kinds"), part("act"), part("state"), part("asker"))
 }
 
+/// The act with each argument it leaves out chosen as [`decide_parts`] chooses it, so a world can hand the form what the
+/// rules decided on: a body slot from this thing's free ones, the one nearest the actor (`chosenSlots`, #3802), and a
+/// thing by its selector (#3914). `None` when nothing is chosen, including when no body slot is free.
+pub fn chosen_act(
+    kinds: &Value,
+    act: &Value,
+    state: &Value,
+    sees: Option<&Value>,
+) -> Option<Value> {
+    match select::chosen(kinds, act, state, sees) {
+        select::Choice::Args(a) => Some(a),
+        _ => None,
+    }
+}
+
 /// [`decide`] with the input's four parts given apart, so many cases can share one set of kinds.
 pub fn decide_parts(
     kinds: Option<&Value>,
@@ -570,7 +585,7 @@ pub fn decide_parts(
     else {
         return Rules::bad_verdict(-1, "malformed", vec![], vec![]);
     };
-    // A thing argument left out is chosen by its selector, as worldd and today's form rules choose it (#3914).
+    // A body slot or thing argument left out is chosen as worldd and today's form rules choose it (#3802, #3914).
     let owned;
     let mut none = None;
     let act = match select::chosen(kinds, act, state, asker.get("sees")) {
@@ -583,11 +598,33 @@ pub fn decide_parts(
             none = Some(arg);
             act
         }
+        // A closed container the asker may not see into: the unknown names the container and its `closed` section
+        // only, as the TS rules do (#4360).
         select::Choice::Unknown(node) => {
             return Value::object([
                 ("verdict", Value::s("unknown")),
                 ("need", Value::Int(-1)),
                 ("node", Value::s(&node)),
+                ("field", Value::s("closed")),
+                ("read", Value::Arr(Vec::new())),
+            ]);
+        }
+        // A body slot left out with none free is refused by name before any need is read (worldd `Acts`, #3802).
+        select::Choice::NoSlot(arg) => {
+            let this = act.get("this").cloned().unwrap_or(Value::Null);
+            return Value::object([
+                ("verdict", Value::s("no")),
+                ("reason", Value::s("slot_taken")),
+                ("need", Value::Int(-1)),
+                (
+                    "detail",
+                    Value::object([
+                        ("node", this),
+                        ("arg", Value::s(&arg)),
+                        ("free", Value::Int(0)),
+                    ]),
+                ),
+                ("fix", Value::Null),
                 ("read", Value::Arr(Vec::new())),
             ]);
         }

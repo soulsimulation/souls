@@ -3,7 +3,7 @@
   "kind": "eden:practice_mat",
   "owner": "thing",
   "state": {
-    "deployed": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "deployed": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "side": { "role": "stand", "at_mm": [0, 0, 1000] },

@@ -49,7 +49,7 @@
                 "change": "set",
                 "node": "f1",
                 "field": "feed",
-                "n": 1,
+                "n": 28,
                 "to": 2,
                 "by": -1
               },
@@ -57,7 +57,7 @@
                 "change": "set",
                 "node": "r1",
                 "field": "feed",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": 1
               }
@@ -106,7 +106,7 @@
                 "change": "set",
                 "node": "f1",
                 "field": "feed",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": -1
               },
@@ -114,7 +114,7 @@
                 "change": "set",
                 "node": "r2",
                 "field": "feed",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": 1
               }

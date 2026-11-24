@@ -580,6 +580,18 @@ impl Tree {
         }
     }
 
+    /// The kind of node `id`, live or removed in the part being applied (a removed node leaves lookup at once, but its
+    /// slot keeps its record until the part ends).
+    pub(crate) fn kind_any(&self, id: Id) -> Option<Name> {
+        let slot = self.by_id.get(&id).copied().or_else(|| {
+            self.dead
+                .iter()
+                .copied()
+                .find(|s| self.nodes[*s as usize].id == id)
+        })?;
+        Some(self.names[self.nodes[slot as usize].kind as usize].clone())
+    }
+
     fn live(&self, id: Id) -> R<u32> {
         match self.by_id.get(&id) {
             Some(s) if self.nodes[*s as usize].life == Life::Live => Ok(*s),
@@ -1025,7 +1037,7 @@ impl Tree {
         if result.is_ok()
             && let Some(rules) = rules
         {
-            result = rules.balanced(effects);
+            result = rules.balanced(self, effects);
         }
         if result.is_ok() && self.gaps_met != self.gaps.len() {
             result = refuse(

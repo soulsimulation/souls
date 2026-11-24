@@ -45,7 +45,7 @@
                 "change": "set",
                 "node": "d1",
                 "field": "shoots",
-                "n": 1,
+                "n": 28,
                 "to": 2,
                 "by": -1
               },
@@ -53,7 +53,7 @@
                 "change": "set",
                 "node": "np1",
                 "field": "shoots",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": 1
               }
@@ -99,14 +99,14 @@
                 "change": "set",
                 "node": "np1",
                 "field": "planted",
-                "n": 2,
+                "n": 29,
                 "to": 1
               },
               {
                 "change": "set",
                 "node": "np1",
                 "field": "supplies",
-                "n": 3,
+                "n": 30,
                 "to": 0
               }
             ],

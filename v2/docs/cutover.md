@@ -205,8 +205,13 @@ the switch back.
 
 A build whose header differs from the one Eden's log was written under cannot read that log (`worldd serve:
 header-mismatch`), so release-v2's rehearsal refuses it. Pre-release, Eden starts fresh instead, under the same world
-name, so its name, routes, gateway and pairing stay as they are: `bash v2/tools/ops/cutover/reseed-eden.sh <sha> check`,
-then `run` (root on the host, before release-v2; `reseed-eden-undo.sh <label> check|run` undoes it). It sets the world's
+name, so its name, routes, gateway and pairing stay as they are. From 0.133 it is a release step: `release.yml -f
+reseed=fresh` (or `release-v2.yml -f reseed=fresh`) runs it on the host after the stage and before the move, its
+pre-check first (a dry run runs only that), and `rollback-v2.yml -f reseed=<label>` undoes it; by hand, `bash
+v2/tools/ops/cutover/reseed-eden.sh <sha> check`, then `run` (root on the host, before release-v2;
+`reseed-eden-undo.sh <label> check|run` undoes it). A release staged from 0.133 carries the scripts, its own
+`world-aside` and the kinds at its commit. Every store call retries a dropped connection or a 5xx with back-off before
+it refuses. It sets the world's
 folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
 each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
 with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step

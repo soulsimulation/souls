@@ -141,6 +141,19 @@ impl S3 {
         self
     }
 
+    /// This store for `store-probe` (0.133), which measures the link itself: one bound, `timeout`, on each whole request
+    /// and no bound per phase, so a stall shows as its own length up to `timeout`; reads of whole objects up to
+    /// `read_limit` bytes.
+    pub fn for_probe(mut self, read_limit: u64, timeout: Duration) -> S3 {
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(read_limit);
+        self
+    }
+
     /// The store the environment names: [`URL_ENV`] in the offsite form ([`S3::from_url`], O3c #3529), else [`ENV`]
     /// (the region defaults to `auto`, R2's, and the prefix to none); `None` when neither `DIRECTORY_STORE_URL` nor
     /// `DIRECTORY_STORE_ENDPOINT` is set.

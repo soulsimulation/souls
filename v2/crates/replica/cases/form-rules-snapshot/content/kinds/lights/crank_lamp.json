@@ -3,8 +3,8 @@
   "kind": "eden:crank_lamp",
   "owner": "thing",
   "state": {
-    "charge": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
-    "on": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "charge": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "on": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [0, 320, 0] },

@@ -206,6 +206,7 @@ fn ours() -> BTreeMap<String, Kind> {
             .map(|s| (*s, BTreeSet::from(["thing".to_owned()])))
             .collect(),
         hands,
+        fields: Default::default(),
     };
     {
         BTreeMap::from([

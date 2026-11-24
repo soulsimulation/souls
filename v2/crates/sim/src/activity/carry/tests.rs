@@ -160,6 +160,7 @@ fn eden(souls: &[Id]) -> (Tree, Rules, Id, Id) {
             children: Default::default(),
             slots,
             hands,
+            fields: Default::default(),
         };
     rules.kinds.insert(
         ACTIVITY.to_owned(),

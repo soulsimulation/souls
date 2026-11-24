@@ -1837,7 +1837,9 @@ export class EngineBridge {
       if (!active && !initialBodyPlaces) { this.layerPlacesPending = null; return; }
       const day = this.layers.dayKey();
       if (initialBodyPlaces || day !== this.layerDay || this.layerPlacesPending !== null) {
-        if (!this.host.running) {
+        // R14: a world catching up its owed ticks (a handover's or a restart's boot, before its clock starts) is served,
+        // as in perceiveStep (#2501): whole, this pass held the boot's /healthz and every viewer's upgrade (Eden 2026).
+        if (!this.host.running && !(this.host.owedTicks > 0)) {
           // Tools that step a world by hand retain synchronous publication.
           this.places.sync(true);
           this.layerDay = day;

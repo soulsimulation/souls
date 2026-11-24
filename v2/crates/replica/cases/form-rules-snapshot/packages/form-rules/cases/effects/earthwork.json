@@ -83,7 +83,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "soil",
-                "n": 1,
+                "n": 28,
                 "to": 0,
                 "by": -1
               },
@@ -91,7 +91,7 @@
                 "change": "set",
                 "node": "p1",
                 "field": "soil",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": 1
               }
@@ -140,7 +140,7 @@
                 "change": "set",
                 "node": "p1",
                 "field": "soil",
-                "n": 1,
+                "n": 28,
                 "to": 0,
                 "by": -1
               },
@@ -148,7 +148,7 @@
                 "change": "set",
                 "node": "c6",
                 "field": "soil",
-                "n": 1,
+                "n": 28,
                 "to": 2,
                 "by": 1
               }

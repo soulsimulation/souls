@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:sandpit",
   "owner": "thing",
-  "state": {"castle":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"castle":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {"edge":{"role":"stand","at_mm":[0,0,1450]}},
   "geometry": {"bounds_mm":[2460,400,2460]},
   "forms": {

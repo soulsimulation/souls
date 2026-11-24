@@ -3,7 +3,7 @@
   "kind": "eden:microphone",
   "owner": "thing",
   "state": {
-    "voice": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+    "voice": {"n":28,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
   },
   "links": {"singer":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
   "points": {"singer_spot":{"role":"stand","at_mm":[0,0,550]},"grip":{"role":"grip","at_mm":[0,1560,20]}},

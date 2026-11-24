@@ -24,8 +24,11 @@
 #
 # <sha> is the release's full commit: its build is the worldd its staged manifest names
 # (/var/lib/souls/releases/<sha>/manifest.json; a release-v2 dry run stages it). Root on the production host, with
-# that release staged, release.yml's old page at the same commit (its content/kinds are the entries) and the one-off
-# `world-aside` (v2/tools/ops/src/world_aside.rs) at /var/lib/souls/oneoff/world-aside. RESEED_* stand in for the
+# that release staged. A release staged from 0.133 on carries `world-aside` (v2/tools/ops/src/world_aside.rs) in its
+# bin/ and the kinds (content/kinds at its commit) in reseed/kinds, and this uses those: release-v2 runs it as a step
+# (input reseed; release.sh reseed). An older one uses the one-off tool at /var/lib/souls/oneoff/world-aside (checked
+# against its reviewed sha256) and the live old page's content/kinds. Store calls that fail for a dropped connection or
+# a 5xx are tried again with back-off: world-aside's own, and here the pin's (0.133 R13). RESEED_* stand in for the
 # host's folders in a test.
 set -euo pipefail
 
@@ -34,8 +37,6 @@ DATA=${RESEED_DATA:-/var/lib/souls}
 ETC=${RESEED_ETC:-/etc/souls}
 LIB=${RESEED_LIB:-/usr/local/lib/souls}
 LIVE=${RESEED_LIVE:-/srv/sim-worlds/production}
-ENTRIES=${RESEED_ENTRIES:-$LIVE/content/kinds}
-TOOL=${RESEED_TOOL:-$DATA/oneoff/world-aside}
 ROOT=$DATA/worlds
 
 die() {
@@ -43,10 +44,21 @@ die() {
   exit 1
 }
 sha256() { if command -v sha256sum > /dev/null; then sha256sum "$1" | cut -c1-64; else shasum -a 256 "$1" | cut -c1-64; fi; }
+# A store call that can fail for a dropped connection: tried again after 2, 4, 8 and 16 s before the reseed refuses.
+# Only calls that are safe to repeat (a read, or setting the pin to the same build) go through it.
+patient() {
+  local wait
+  for wait in 2 4 8 16; do
+    "$@" && return 0
+    echo "reseed: '$1 ${2:-}' failed; trying again in $wait s" >&2
+    sleep "$wait"
+  done
+  "$@"
+}
 RESUME=''
 SHA=${1:-}
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
-  sed -n 2,30p "$0"
+  sed -n 2,32p "$0"
   exit 2
 }
 case ${2:-} in
@@ -56,7 +68,7 @@ case ${2:-} in
     [[ "$RESUME" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$ACT" = check ] || [ "$ACT" = run ]; } || die "<sha> resume <time> check|run"
     ;;
   *)
-    sed -n 2,30p "$0"
+    sed -n 2,32p "$0"
     exit 2
     ;;
 esac
@@ -94,19 +106,39 @@ VERSION=$(sed -n 's/^{"commit":"[0-9a-f]\{40\}","version":"\([0-9.]*\)".*/\1/p' 
 [ -n "$NEW" ] || die "no worldd in $REL/manifest.json"
 NEW_WORLDD=$ROOT/builds/$NEW/worldd
 [ -x "$NEW_WORLDD" ] && [ "$("$LIB/supervisor" hash "$NEW_WORLDD")" = "$NEW" ] || die "$NEW_WORLDD is missing or not $NEW"
-[ -x "$TOOL" ] || die "the one-off tool is not at $TOOL"
-[ "$(sha256 "$TOOL")" = "$ASIDE_TOOL_SHA256" ] || die "$TOOL is not the reviewed build (sha256 $(sha256 "$TOOL"), expected $ASIDE_TOOL_SHA256)"
+# The release's own world-aside and kinds when it carries them (staged from 0.133 on), else the one-off and the live
+# old page's kinds.
+if [ -n "${RESEED_TOOL:-}" ]; then TOOL=$RESEED_TOOL TOOL_FROM=given; elif [ -x "$REL/bin/world-aside" ]; then TOOL=$REL/bin/world-aside TOOL_FROM=release; else TOOL=$DATA/oneoff/world-aside TOOL_FROM=oneoff; fi
+if [ -n "${RESEED_ENTRIES:-}" ]; then ENTRIES=$RESEED_ENTRIES; elif [ -d "$REL/reseed/kinds" ]; then ENTRIES=$REL/reseed/kinds; else ENTRIES=$LIVE/content/kinds; fi
+[ -x "$TOOL" ] || die "world-aside is not at $TOOL"
+if [ "$TOOL_FROM" = release ]; then
+  TOOL_WHAT="the release's own, $TOOL"
+else
+  [ "$(sha256 "$TOOL")" = "$ASIDE_TOOL_SHA256" ] || die "$TOOL is not the reviewed build (sha256 $(sha256 "$TOOL"), expected $ASIDE_TOOL_SHA256)"
+  TOOL_WHAT="$TOOL, sha256 $ASIDE_TOOL_SHA256 (checked)"
+fi
 KINDS=$(grep -rl '"format": *"souls-entry/1"' "$ENTRIES" 2> /dev/null | wc -l | tr -d ' ')
 [ "$KINDS" -gt 0 ] || die "no kind entries under $ENTRIES"
-PINNED=$("$REL/bin/deploy" pinned "$WORLD") || die "the world's pin could not be read"
+PINNED=$(patient "$REL/bin/deploy" pinned "$WORLD") || die "the world's pin could not be read"
 
 if [ -n "$RESUME" ]; then
   STAMP=$RESUME
   RECEIPT=$ROOT/aside/$WORLD-$STAMP.reseed
   [ -f "$RECEIPT" ] || die "no reseed $STAMP to resume ($RECEIPT)"
+  ! grep -q '^undone=' "$RECEIPT" || die "reseed $STAMP was undone: start a fresh reseed instead"
   OLD=$(sed -n 's/^old=//p' "$RECEIPT")
   [ "$(sed -n 's/^new=//p' "$RECEIPT")" = "$NEW" ] || die "reseed $STAMP was for another build"
 else
+  # A fresh reseed only from a world not yet on this build, and with no earlier reseed to this build left un-undone:
+  # either of those is a reseed to resume, not to start again (0.133 R13).
+  for r in "$ROOT"/aside/"$WORLD"-*.reseed; do
+    [ -f "$r" ] || continue
+    if [ "$(sed -n 's/^new=//p' "$r")" = "$NEW" ] && ! grep -q '^undone=' "$r"; then
+      l=$(sed -n 's/^label=//p' "$r")
+      die "reseed $l to this build is not undone: resume it (reseed=$l; by hand: $0 $SHA resume $l check), or undo it first"
+    fi
+  done
+  [ "$PINNED" != "$NEW" ] || die "the world is already pinned to this build ($NEW): nothing to reseed fresh; resume a reseed that stopped with its label"
   STAMP=${RESEED_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
   RECEIPT=$ROOT/aside/$WORLD-$STAMP.reseed
   OLD=$PINNED
@@ -149,10 +181,11 @@ echo "reseed: pinned now       $PINNED"
 echo "reseed: the old build    $OLD"
 echo "reseed: the release      $VERSION at $SHA, its worldd $NEW"
 echo "reseed: store            $STORE_WHAT"
-echo "reseed: one-off tool     $TOOL, sha256 $ASIDE_TOOL_SHA256 (checked)"
+echo "reseed: world-aside      $TOOL_WHAT"
 echo "reseed: facts            $SRC_DIR/facts.json, sha256 $(sha256 "$SRC_DIR/facts.json")"
 echo "reseed: kind entries     $ENTRIES ($KINDS entries)"
-echo "reseed: creator          ${CREATOR:-none}"
+# whether it has one, not its account id: this line reaches the release's public log
+echo "reseed: creator          $([ -n "$CREATOR" ] && echo "kept (from world.json)" || echo none)"
 echo "reseed: entry point      $AT m"
 echo "reseed: bodies           ${BODIES:-none}"
 echo "reseed: units            worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true)"
@@ -192,11 +225,11 @@ if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"
   if [ -z "${RESEED_DATA:-}" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$OLD_DIR"; fi
 fi
 echo "reseed: 6. pin the release's build"
-"$LIB/supervisor" pin "$WORLD" "$NEW"
-[ "$("$REL/bin/deploy" pinned "$WORLD")" = "$NEW" ] || die "the pin did not take"
+patient "$LIB/supervisor" pin "$WORLD" "$NEW" || die "the pin refused; resume: bash $0 $SHA resume $STAMP check"
+[ "$(patient "$REL/bin/deploy" pinned "$WORLD")" = "$NEW" ] || die "the pin did not take"
 echo "reseed: 7. start the gateway; the world stays stopped until release-v2 starts it"
 systemctl start "souls-gateway@$WORLD"
 echo "reseed: done: $WORLD is fresh, pinned to ${NEW:0:16}…, its world stopped, its gateway started"
-echo "reseed: next, release-v2 again:"
-echo "  gh workflow run release-v2.yml --ref main -f version=$VERSION -f sha=$SHA -f dry_run=false -f target=production"
-echo "reseed: undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"
+echo "reseed: next, release-v2 moves it (within release.yml's run, the next step does)"
+echo "reseed: undo: gh workflow run rollback-v2.yml --ref main -f target=production -f reseed=$STAMP"
+echo "reseed: (on the host: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check)"

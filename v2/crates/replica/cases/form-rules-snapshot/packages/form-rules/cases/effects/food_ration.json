@@ -6,10 +6,10 @@
       "name": "open_take_eat_both_bites",
       "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "t1"]}, "t1": {"kind": "eden:ration_tin"}, "b1": {"hands": {"left": null, "right": null}}}},
       "do": [
-        {"act": {"this": "t1", "form": "open"}, "receipt": "rt1", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "open", "n": 1, "to": 1}], "events": [{"event": "eden:opened", "node": "t1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "t1", "form": "open"}, "receipt": "rt1", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "open", "n": 28, "to": 1}], "events": [{"event": "eden:opened", "node": "t1", "changes": [0]}], "timers": []}},
         {"act": {"this": "t1", "form": "take"}, "receipt": "rt2", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "t1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "t1", "changes": [0]}], "timers": []}},
-        {"act": {"this": "t1", "form": "bite"}, "receipt": "rt3", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "bites", "n": 2, "to": 1}], "events": [{"event": "eden:bitten", "node": "t1", "changes": [0]}], "timers": []}},
-        {"act": {"this": "t1", "form": "bite"}, "receipt": "rt4", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "bites", "n": 2, "to": 0}], "events": [{"event": "eden:bitten", "node": "t1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "t1", "form": "bite"}, "receipt": "rt3", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "bites", "n": 29, "to": 1}], "events": [{"event": "eden:bitten", "node": "t1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "t1", "form": "bite"}, "receipt": "rt4", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "t1", "field": "bites", "n": 29, "to": 0}], "events": [{"event": "eden:bitten", "node": "t1", "changes": [0]}], "timers": []}},
         {"act": {"this": "t1", "form": "bite"}, "receipt": "rt5", "expect": {"verdict": "no", "reason": "field_differs", "need": 2}},
         {"act": {"this": "t1", "form": "open"}, "receipt": "rt6", "expect": {"verdict": "no", "reason": "field_differs", "need": 0}}
       ],

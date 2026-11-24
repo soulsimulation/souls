@@ -1,12 +1,18 @@
 #!/usr/bin/env node
-// Two ordinary release steps (#1969), run by release.yml from a checkout of the release head:
+// The Soul client's stamp and the release's feed item (#1969):
 //
-//   node release-client.mjs stamp --version <release> [--client <client version>]
-//     Before the gate. First rebuilds a stale eden.mjs from its modules (inline.mjs), which then counts as changed.
-//     When eden.mjs or skill.md changed since the last release (the newest v* tag reachable from HEAD) and
-//     the client still carries that release's version or no longer matches its stamp, stamps it (stamp.mjs <client>;
-//     default: the next patch) and commits the stamp. Then stamp.mjs --check; exit 1 on any disagreement. Prints
+//   node release-client.mjs stamp [--client <client version>]
+//     On main, by eden-sync.yml after each push that touches the client, so main's client is stamped before any release
+//     head is picked (0.133 R13: a stamp made by the release itself was a new head that needed CI again). First
+//     rebuilds a stale eden.mjs from its modules (inline.mjs), which then counts as changed. When eden.mjs or skill.md
+//     changed since the last release (the newest v* tag reachable from HEAD) and the client still carries that
+//     release's version or no longer matches its stamp, stamps it in the tree (stamp.mjs <client>; default: the next
+//     patch); eden-sync.yml commits it. Then stamp.mjs --check; exit 1 on any disagreement. Prints
 //     `client=<version> stamped=<0|1>` as its last line.
+//   node release-client.mjs check --version <release>
+//     release.yml's preflight, from a checkout of the release head; changes nothing. Exit 1 when the head's client is
+//     not stamped (eden.mjs stale, or changed since the last release without a stamp): the release head is then one
+//     from before eden-sync's pull request merged. Prints `client=<version> stamped=0` as its last line.
 //   node release-client.mjs feed --version <release> --origin <https origin> (--port <launcher port> [--base /] | --ssh <target>)
 //     After the health checks. Posts one `release` item through the operator route (/__sim/op/feed-post, as op.mjs
 //     feed-post): the client version, the changelog link (<origin>/changelog#v<release>, the release's id in the feed) and
@@ -30,39 +36,40 @@ const head = (path) => readFileSync(ROOT + path, 'utf8');
 const fail = (m) => { console.error(m); process.exit(1); };
 
 const version = flag('version');
-if (!['stamp', 'feed'].includes(cmd) || !/^[0-9]+(\.[0-9]+){1,2}$/.test(version ?? '')) {
-  console.error('usage: release-client.mjs stamp --version <release> [--client <v>]\n'
+if (!['stamp', 'check', 'feed'].includes(cmd) || (cmd !== 'stamp' && !/^[0-9]+(\.[0-9]+){1,2}$/.test(version ?? ''))) {
+  console.error('usage: release-client.mjs stamp [--client <v>]\n'
+    + '       release-client.mjs check --version <release>\n'
     + '       release-client.mjs feed --version <release> --origin <https origin> (--port <p> [--base /] | --ssh <target>)');
   process.exit(2);
 }
 // the last release before this one: v<release> itself is skipped, so a feed post for an already-tagged release (release.yml
 // feed_only, from a checkout of its tag) compares with the release before it, as the ship's own post did
-let last; try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*', '--exclude', `v${version}`, 'HEAD'); } catch { fail('no v* tag reachable from HEAD: no last release to compare with'); }
+let last; try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*', ...(version ? ['--exclude', `v${version}`] : []), 'HEAD'); } catch { fail('no v* tag reachable from HEAD: no last release to compare with'); }
 
-if (cmd === 'stamp') {
+if (cmd === 'stamp' || cmd === 'check') {
   // PRs do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file): when this head's copy is not what
-  // inline.mjs builds from its modules, it is rebuilt here and goes into the stamp commit, so a release never serves a
+  // inline.mjs builds from its modules, eden-sync rebuilds it here into its pull request, so a release never serves a
   // stale client
   const inline = `${ROOT}${SOUL}inline.mjs`;
   const rebuilt = spawnSync(process.execPath, [inline, '--check'], { stdio: 'ignore' }).status !== 0;
+  const notYet = (why) => fail(`${why}: this head is from before eden-sync.yml's pull request (bot/eden-sync-*) merged. Release that merge or a later commit; to open the pull request now: gh workflow run eden-sync.yml --ref main`);
+  if (rebuilt && cmd === 'check') notYet('eden.mjs is not what its modules build');
   if (rebuilt) {
     try { execFileSync(process.execPath, [inline], { stdio: 'inherit' }); } catch { fail('inline.mjs could not build eden.mjs: the release stops'); }
-    console.log('eden.mjs was stale: rebuilt from its modules (inline.mjs) for the stamp commit');
+    console.log('eden.mjs was stale: rebuilt from its modules (inline.mjs)');
   }
   const lastClient = CLI_LINE.exec(at(last, `${SOUL}eden.mjs`) ?? '')?.[1], nowClient = CLI_LINE.exec(head(`${SOUL}eden.mjs`))?.[1];
   const changed = ['eden.mjs', 'skill.md'].some((f) => at(last, SOUL + f) !== head(SOUL + f));
   const off = problems((p) => { try { return readFileSync(ROOT + SOUL + p); } catch { return null; } });
   let stamped = 0, client = nowClient;
   if (changed && lastClient && nowClient && (nowClient === lastClient || off.length)) {
+    if (cmd === 'check') notYet(`the Soul client changed since ${last} (client ${lastClient}) and is not stamped`);
     client = flag('client') ?? nowClient.replace(/\d+$/, (n) => String(Number(n) + 1));
     try { execFileSync(process.execPath, [`${ROOT}${SOUL}stamp.mjs`, client], { stdio: 'inherit' }); } catch { fail(`stamp.mjs ${client} failed`); }
-    git('add', '--', `${SOUL}eden.mjs`, `${SOUL}skill.md`, `${SOUL}SOURCES.json`);
-    git('commit', '-q', '-m', `release: stamp the Soul client ${client} for ${version}`, '-m', `The client changed since ${last} (client ${lastClient}); stamp.mjs ${client}.`);
     stamped = 1;
-    console.log(`stamp commit ${git('rev-parse', 'HEAD')}: client ${lastClient} (${last}) -> ${client}`);
+    console.log(`stamped in the tree: client ${lastClient} (${last}) -> ${client}`);
   } else console.log(changed ? `client ${nowClient} already stamped since ${last} (client ${lastClient})` : `client unchanged since ${last}`);
-  if (rebuilt && !stamped) fail('eden.mjs was rebuilt but no stamp commit carries it: the release stops');
-  try { execFileSync(process.execPath, [`${ROOT}${SOUL}stamp.mjs`, '--check'], { stdio: 'inherit' }); } catch { fail('stamp.mjs --check failed: the release stops'); }
+  try { execFileSync(process.execPath, [`${ROOT}${SOUL}stamp.mjs`, '--check'], { stdio: 'inherit' }); } catch { fail('stamp.mjs --check failed'); }
   console.log(`client=${client} stamped=${stamped}`);
 } else {
   const origin = flag('origin');

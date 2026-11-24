@@ -122,6 +122,7 @@ fn rules(souls: &[Id]) -> Rules {
         children: children.iter().map(|c| (*c).to_owned()).collect(),
         slots: BTreeMap::new(),
         hands: None,
+        fields: Default::default(),
     };
     // A walker's hands hold things (the give, 0.133 R4); a book takes one hand.
     let mut walker = kind("family", &[]);
