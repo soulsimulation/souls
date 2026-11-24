@@ -164,11 +164,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([(id, body)]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([(id, body)])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: BTreeMap::from([(id, Build::STANDARD)]),
+        builds: Arc::new(BTreeMap::from([(id, Build::STANDARD)])),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -513,11 +513,11 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -590,11 +590,11 @@ fn a_point_upstairs_is_on_the_upper_floor() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -780,11 +780,11 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |thing: Id, point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -1017,14 +1017,16 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([below, on, outside]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([below, on, outside])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: [below.0, on.0, outside.0]
-            .into_iter()
-            .map(|b| (b, Build::STANDARD))
-            .collect(),
+        builds: Arc::new(
+            [below.0, on.0, outside.0]
+                .into_iter()
+                .map(|b| (b, Build::STANDARD))
+                .collect(),
+        ),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -1091,11 +1093,11 @@ fn an_aimed_move_names_a_visible_thing_and_never_a_hidden_one() {
     let aimed = |entry: &Json, body: Id, point: &str| {
         let kinds = Json::Obj(vec![(plain(b.kind()).to_owned(), entry.clone())]);
         Sight {
-            bodies: BTreeMap::new(),
-            carrying: BTreeSet::new(),
+            bodies: Arc::new(BTreeMap::new()),
+            carrying: Arc::new(BTreeSet::new()),
             tree,
             split: None,
-            builds: BTreeMap::new(),
+            builds: Arc::new(BTreeMap::new()),
             kind: Name::new("souls:body").unwrap(),
             kinds: &kinds,
             toward: &toward,

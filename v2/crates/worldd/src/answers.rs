@@ -3957,6 +3957,8 @@ impl Clock {
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
         let tick = u64::try_from(self.tick).unwrap_or(0);
+        // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
+        self.forms.hold_sight(self.bodies.as_ref());
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
             let Some(o) = self.open.get(&id) else {
                 continue;
@@ -3988,6 +3990,7 @@ impl Clock {
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
         }
+        self.forms.release_sight();
         for a in std::mem::take(&mut self.engine_acts) {
             let Some(o) = self.open.get(&a.id) else {
                 continue;
