@@ -54,6 +54,23 @@ pub const WAITS: [std::time::Duration; 3] = [
 
 std::thread_local! {
     static PATIENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// What this thread's patient reads say before each wait ([`waiting_says`]).
+    static ON_WAIT: std::cell::RefCell<Option<WaitSays>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Told the refusal and the wait before a patient read waits to try again.
+type WaitSays = Box<dyn Fn(&replica::effects::Refusal, std::time::Duration)>;
+
+/// R18: runs `f` with `say` told of each wait of this thread's patient reads, as it begins, so a gauge names the
+/// fault from the first unanswered try, not only once the reads give up.
+pub fn waiting_says<T>(
+    say: impl Fn(&replica::effects::Refusal, std::time::Duration) + 'static,
+    f: impl FnOnce() -> T,
+) -> T {
+    let before = ON_WAIT.with(|w| w.replace(Some(Box::new(say))));
+    let out = f();
+    ON_WAIT.with(|w| *w.borrow_mut() = before);
+    out
 }
 
 /// Runs `f` with this thread's reads through a [`Patient`] store tried again when the store is out of reach (#1960):
@@ -102,6 +119,11 @@ impl<S> Patient<S> {
                         e.detail,
                         wait.as_secs_f32()
                     );
+                    ON_WAIT.with(|w| {
+                        if let Some(say) = &*w.borrow() {
+                            say(&e, wait);
+                        }
+                    });
                     std::thread::sleep(wait);
                 }
                 answer => return answer,

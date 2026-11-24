@@ -1436,10 +1436,27 @@ fn r18_a_rate_limited_store_at_start_is_retried_and_the_world_listens() {
 /// R18 (0.133): a panic on the shipping thread, before its claim, left the world serving unclaimed with its archive
 /// waiting for ever (`the world goes on`). A debug build's forced panic there (`WORLDD_TEST_PANIC_SHIPPING`) ends the
 /// process by name, `worldd serve: shipping-panicked: …`, exit 1.
+#[cfg(debug_assertions)]
 #[test]
 fn r18_a_panic_on_the_shipping_thread_ends_the_process() {
+    panic_on_the_shipping_path_ends_the_process("r18-panic", "WORLDD_TEST_PANIC_SHIPPING", false);
+}
+
+/// R18 (0.133): a panic on the shipper's own thread, after the claim, printed `the world goes on`, and the world served
+/// on with its marks frozen. A debug build's forced panic there (`WORLDD_TEST_PANIC_SHIPPER`) ends the process by
+/// name, after `shipping: epoch …`.
+#[cfg(debug_assertions)]
+#[test]
+fn r18_a_panic_on_the_shipper_thread_after_the_claim_ends_the_process() {
+    panic_on_the_shipping_path_ends_the_process("r18-shipper", "WORLDD_TEST_PANIC_SHIPPER", true);
+}
+
+/// A world on a folder store started with the debug hook `hook` set ends `worldd serve: shipping-panicked: <hook>`,
+/// exit 1; `claimed`: after its `shipping: epoch` line.
+#[cfg(debug_assertions)]
+fn panic_on_the_shipping_path_ends_the_process(tag: &str, hook: &str, claimed: bool) {
     use std::ffi::OsStr;
-    let d = scratch("r18-panic");
+    let d = scratch(tag);
     let (dir, ..) = seeded(&d);
     let spec = d.join("bucket").display().to_string();
     let args = [
@@ -1448,19 +1465,14 @@ fn r18_a_panic_on_the_shipping_thread_ends_the_process() {
         OsStr::new("--machine"),
         OsStr::new("test-machine"),
     ];
-    let mut w = serve_env(
-        &dir,
-        &d.join("s"),
-        &args,
-        &[("WORLDD_TEST_PANIC_SHIPPING", "1")],
-    );
+    let mut w = serve_env(&dir, &d.join("s"), &args, &[(hook, "1")]);
+    if claimed {
+        w.line("shipping: epoch ");
+    }
     let ended = w.line("worldd serve: ");
     let status = w.child.wait().expect("it ends");
     println!("{ended}; {status}");
-    assert_eq!(
-        ended,
-        "worldd serve: shipping-panicked: WORLDD_TEST_PANIC_SHIPPING"
-    );
+    assert_eq!(ended, format!("worldd serve: shipping-panicked: {hook}"));
     assert_eq!(status.code(), Some(1));
     let _ = std::fs::remove_dir_all(&d);
 }

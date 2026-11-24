@@ -604,6 +604,11 @@ impl<S: Store + Send + 'static, C: Clock + 'static> Shipper<S, C> {
         let (tx, rx): (Sender<Item>, Receiver<Item>) = channel();
         let mark = self.mark();
         let h = std::thread::spawn(move || {
+            // R18: a test's forced panic on this thread, after the claim (`tests/serve.rs`); a debug build's only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("WORLDD_TEST_PANIC_SHIPPER").is_some() {
+                panic!("WORLDD_TEST_PANIC_SHIPPER");
+            }
             loop {
                 match rx.recv_timeout(POLL) {
                     Ok(item) => {

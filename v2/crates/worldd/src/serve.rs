@@ -163,7 +163,8 @@ const EVERY: u64 = 8 << 20;
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 
-/// R17: a start's claim or archive open refused for a reason other than a store that does not answer. The process
+/// R17: a start's claim or archive open refused for a reason other than a store that does not answer (R18: or the
+/// shipper's refused push while the world runs). The process
 /// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
 fn refused_at_start(e: Refusal) -> ! {
     // R18: start-up errors are written so that a closed stderr cannot panic the thread that says them.
@@ -171,9 +172,10 @@ fn refused_at_start(e: Refusal) -> ! {
     std::process::exit(1)
 }
 
-/// R18: the shipping thread panicked. Before its claim, the world would serve unclaimed and its archive wait for ever
-/// (`held`); after it, nothing would ship. The process ends by name, `worldd serve: shipping-panicked: <message>`,
-/// exit 1, and the unit restarts it.
+/// R18: the shipping thread (the claim, then the forwarding of records) or the shipper's own thread panicked. Before
+/// the claim the world would serve unclaimed and its archive wait for ever (`held`); after it nothing would ship, the
+/// marks would freeze, the log would grow for ever and acts with stakes would wait for ever. The process ends by name,
+/// `worldd serve: shipping-panicked: <message>`, exit 1, and the unit restarts it.
 fn shipping_panicked(panic: &(dyn std::any::Any + Send)) -> ! {
     let said = panic
         .downcast_ref::<&str>()
@@ -198,12 +200,27 @@ fn held(claimed: &std::sync::atomic::AtomicBool) {
 /// so never a crash loop. Any other answer is `f`'s at once; `gauge` then says `current`, or `stopped` with the fault.
 fn until_answered<T>(
     what: &str,
-    gauge: &measures::Stream,
+    gauge: &'static measures::Stream,
     mut f: impl FnMut() -> Result<T, Refusal>,
 ) -> Result<T, Refusal> {
     let mut tries = 0u64;
     loop {
-        match f() {
+        // R18: `degraded` from a patient read's first unanswered try, so a long run of them (a rate-limited store)
+        // names its fault in health.json, not only `recovering`.
+        let first = tries;
+        let patient = std::cell::Cell::new(0u64);
+        let tried = supervisor::bucket::waiting_says(
+            move |e, wait| {
+                patient.set(patient.get() + 1);
+                gauge.degraded(
+                    &refusal(e.clone()),
+                    first + patient.get(),
+                    wait.as_millis() as u64,
+                );
+            },
+            &mut f,
+        );
+        match tried {
             Err(e) if e.name == "store-unreachable" => {
                 tries += 1;
                 // R18: a rate-limited store's `Retry-After`, when longer, bounded.
@@ -2341,12 +2358,36 @@ fn off_machine(
             // The claim is held: the archive may write.
             claiming.store(true, std::sync::atomic::Ordering::SeqCst);
             let (to, _, h) = shipper.spawn();
-            report("the shipper", h);
+            // R18: the shipper stopping while the world runs (a panic, or a refused push such as `ship-gap`) would
+            // freeze its marks, so it ends the process by name. Only its last flush, once the records' sender is
+            // dropped as the world ends, is said and passed over.
+            let ending = Arc::new(AtomicBool::new(false));
+            let ended = Arc::clone(&ending);
+            std::thread::spawn(move || match h.join() {
+                Err(panic) => shipping_panicked(panic.as_ref()),
+                Ok(Err(e)) if !ended.load(std::sync::atomic::Ordering::SeqCst) => {
+                    refused_at_start(e)
+                }
+                Ok(Err(e)) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: the shipper's last flush: {}",
+                        refusal(e)
+                    );
+                }
+                Ok(Ok(_)) => {}
+            });
+            let mut lost = false;
             for item in items {
                 if to.send(item).is_err() {
+                    lost = true;
                     break;
                 }
             }
+            if !lost {
+                ending.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            drop(to);
             Ok(())
         })
         .map_err(|e| e.to_string())?;
