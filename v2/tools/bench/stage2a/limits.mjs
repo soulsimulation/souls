@@ -60,13 +60,13 @@ const top = (o, k) => Object.entries(o ?? {}).slice(0, k).map(([c, n]) => `${c} 
 
 export function table(rows, memLimitMb = 0, label = '') {
   const t = label ? [`**${label}**`, ''] : [];
-  t.push('| Agents | arm | rate | repeat | acts/s | receipt p50 / p95 ms | viewer delay p50 / p95 ms (first, last minute p50) | send → first visible move p95 ms | ticks on time | stuck | refusals by cause | cores world / gateway / origin (busiest world thread) | MB world / gateway / origin | viewers (peak, first picture p95 ms, drops) | limits |');
+  t.push('| Agents | arm | rate | repeat | acts/s | receipt p50 / p95 ms | viewer delay p50 / p95 ms (first, last minute p50) | send → first visible move p95 ms | ticks on time | stuck | refusals by cause | cores world / gateway / origin (busiest world thread) | MB world / gateway / origin | viewers (peak, first picture p95 ms, drops; reader cores) | limits |');
   t.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const x of rows) {
     const r = x.r, missed = judge(r, memLimitMb);
     if (!r) { t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${Array(10).fill('-').join(' | ')} | **${missed.join('; ')}** |`); continue; }
     const d = delayOf(r), v = r.viewers, b = r.threads?.world?.[0];
-    t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${d.p50Ms ?? '-'} / ${d.p95Ms ?? '-'}${d.from === 'viewers' ? ` (${d.firstP50Ms ?? '-'}, ${d.lastP50Ms ?? '-'})` : ' (driver)'} | ${r.wait.p95Ms ?? '-'} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} | ${top(r.byCause, 3)} | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin}${b ? ` (${b[0]} ${b[1]})` : ''} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} / ${r.cpu.originMb} | ${v ? `${v.peakViewers}, ${v.firstPicture?.p95Ms ?? '-'}, ${v.drops}` : 'none'} | ${missed.length ? `**${missed.join('; ')}**` : 'held'} |`);
+    t.push(`| ${x.n} | ${x.arm} | ${x.rate} | ${x.repeat} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${d.p50Ms ?? '-'} / ${d.p95Ms ?? '-'}${d.from === 'viewers' ? ` (${d.firstP50Ms ?? '-'}, ${d.lastP50Ms ?? '-'})` : ' (driver)'} | ${r.wait.p95Ms ?? '-'} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} | ${top(r.byCause, 3)} | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin}${b ? ` (${b[0]} ${b[1]})` : ''} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} / ${r.cpu.originMb} | ${v ? `${v.peakViewers}, ${v.firstPicture?.p95Ms ?? '-'}, ${v.drops}; readers ${v.readerCores} cores` : 'none'} | ${missed.length ? `**${missed.join('; ')}**` : 'held'} |`);
   }
   t.push('', gaveWay(rows, memLimitMb));
   return t.join('\n');

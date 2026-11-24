@@ -17,15 +17,21 @@
 #   STOP [1]             stop climbing after the first count on which a limit gave way (0: run every count);
 #   MEM_LIMIT_MB [unset] judge the rung's processes' memory together against this;
 #   OUT [$FARM_DATA or .local, /limits-<UTC time>]  the rungs' folders (keep it short: a socket path is at most 107
-#                        bytes); EDEN_FACTS, CARGO_TARGET_DIR, REPLICA_PKG and WORLD_ROOT pass through to rung.sh.
-# Needs the release worldd, gatewayd and driver, replica's wasm-bindgen package, Node 22.18 or later, taskset and
-# Eden's facts (box.sh's list). Prints each rung's line as it ends, then the table, the run's time and each rung's.
+#                        bytes); EDEN_FACTS [.local/eden.facts.json, as kit.sh unpacks it], CARGO_TARGET_DIR,
+#                        REPLICA_PKG and WORLD_ROOT pass through to rung.sh.
+# Needs the release worldd, gatewayd and driver, replica's wasm-bindgen package and Eden's facts (kit.sh builds and
+# packs them), Node 22.18 or later and taskset. Prints each rung's line as it ends, then the table, the run's time and each rung's.
 set -u
 COUNTS=${1:-100 250 500 750 1000}
 HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../../../.." && pwd)
+[ -n "${EDEN_FACTS:-}" ] || [ ! -f "$ROOT/.local/eden.facts.json" ] || export EDEN_FACTS=$ROOT/.local/eden.facts.json
+if [ -f "$ROOT/.local/limits-kit-commit" ] && [ "$(cat "$ROOT/.local/limits-kit-commit")" != "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null)" ]; then
+  echo "limits.sh: the kit was built from $(cut -c1-9 "$ROOT/.local/limits-kit-commit"), the checkout is another commit" >&2
+fi
 export SECS=${SECS:-600} VIEWERS=${VIEWERS:-500} DRIVER_CPUS=${DRIVER_CPUS:-$(($(nproc) - 1))}
 REPEATS=${REPEATS:-2} ARMS=${ARMS:-even uneven} RATE=${RATE:-every4}
-OUT=${OUT:-${FARM_DATA:-$HERE/../../../../.local}/limits-$(date -u +%m%d%H%M)}
+OUT=${OUT:-${FARM_DATA:-$ROOT/.local}/limits-$(date -u +%m%d%H%M)}
 case "$(realpath -m "$OUT")/" in
   /var/lib/souls/* | /etc/souls/*) echo "limits.sh: refusing OUT under /var/lib/souls or /etc/souls" >&2; exit 2 ;;
 esac
