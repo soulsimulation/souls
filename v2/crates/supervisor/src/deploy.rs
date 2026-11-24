@@ -859,13 +859,26 @@ pub fn rehearse(
     let mut s = connect(&socket_path(scratch), c.start_within)
         .ok_or("rehearsal.no-start: the build did not serve the scratch copy")?;
     let (mut ended, mut receipts, mut refused) = (0, 0, std::collections::BTreeMap::new());
-    for tick in &fed {
+    for (n, tick) in fed.iter().enumerate() {
         for b in tick {
             if !send(&mut s, b) {
                 return Err("rehearsal.no-start: the socket closed".into());
             }
         }
-        let (goal, until) = (ended + tick.len(), Instant::now() + c.answer_within * 4);
+        // The copy answers nothing until its clock has caught up, back to back, from the tick its copied log ends at
+        // to now: on a quiet world the window's records can span hours, so the first answers have the world's start
+        // bound, not a tick's. Answers that come late count with a later tick's; the last tick waits for them all.
+        let wait = if n == 0 {
+            c.start_within
+        } else {
+            c.answer_within * 4
+        };
+        let goal = if n + 1 == fed.len() {
+            total
+        } else {
+            ended + tick.len()
+        };
+        let until = Instant::now() + wait;
         while ended < goal {
             let Some(frame) = read_frame(&mut s, until.saturating_duration_since(Instant::now()))
             else {
@@ -1269,6 +1282,100 @@ mod tests {
         assert!(
             e.starts_with("canary.not-serving: no socket within 800 ms"),
             "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 0.134.0: a quiet world's copy caught its clock up for longer than a tick's wait before it answered the first
+    /// fed intent; every later answer then counted for the tick after it and the last was never waited for, so a
+    /// build that ended all 192 was refused `rehearsal.unanswered: 1 of 192`. The first answers have the start bound,
+    /// the last tick waits for every answer, and a build that answers nothing is still refused.
+    #[test]
+    fn a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        const CHILD: &str = "SOULS_REHEARSAL_CATCH_UP_CHILD";
+        const NAME: &str = "deploy::tests::a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused";
+        if let Some(sock) = std::env::var_os(CHILD) {
+            // The fake build: serves the socket, answers nothing for `delay` (catching up), then ends each intent.
+            let delay = std::env::var("SOULS_REHEARSAL_DELAY_MS").unwrap();
+            let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
+            let (mut s, _) = listener.accept().unwrap();
+            let Ok(ms) = delay.parse::<u64>() else {
+                loop {
+                    std::thread::park();
+                }
+            };
+            std::thread::sleep(Duration::from_millis(ms));
+            while let Ok(frame) = read_or_closed(&mut s, Duration::from_secs(30)) {
+                let Value::Map(m) = decode(&frame).unwrap().value else {
+                    panic!("a map")
+                };
+                let answer = match m.get(&wire::ASK) {
+                    Some(n) => Value::Map(BTreeMap::from([
+                        (1, Value::Uint(1)),
+                        (wire::ASK, n.clone()),
+                        (wire::IDS, Value::Array(vec![Value::Bytes(vec![1])])),
+                    ])),
+                    None => Value::Map(BTreeMap::from([(
+                        2,
+                        Value::Map(BTreeMap::from([
+                            (2, m[&2].clone()),
+                            (3, Value::Uint(2)),
+                            (4, Value::Text(Name::new("intent.expired").unwrap())),
+                        ])),
+                    )])),
+                };
+                assert!(send(&mut s, &encode(&answer).unwrap()));
+            }
+            std::process::exit(0);
+        }
+        let dir = std::env::temp_dir().join(format!("catch-up-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = dir.join("w");
+        std::fs::create_dir_all(&state).unwrap();
+        // The import's part, then three ticks that each answered one intent (its sequence is all the fake reads).
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&state)).unwrap(), 1).unwrap();
+        log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+            .unwrap();
+        for seq in 1..=3 {
+            let intent = Value::Map(BTreeMap::from([(2, Value::Uint(seq))]));
+            let row = Value::Map(BTreeMap::from([(5, intent)]));
+            let part = Value::Map(BTreeMap::from([(ANSWERED, Value::Array(vec![row]))]));
+            log.append(encode(&part).unwrap()).unwrap();
+        }
+        log.wait_durable(4).unwrap();
+        drop(log.close());
+        let exe = std::env::current_exe().unwrap();
+        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+        // A tick's wait is 4 × 200 ms; the copy answers 1.5 s in, well within its 5 s start bound.
+        let c = Canary {
+            window: Duration::from_secs(1),
+            start_within: Duration::from_secs(5),
+            answer_within: Duration::from_millis(200),
+            every: Duration::from_millis(100),
+        };
+        let rehearse_with = |delay: &str| {
+            // The rehearsal clears the build's environment, so the script names what the fake reads.
+            let build = dir.join(format!("build-{delay}"));
+            std::fs::write(
+                &build,
+                format!(
+                    "#!/bin/sh\nexport {CHILD}=\"$5\" SOULS_REHEARSAL_DELAY_MS={delay}\n\
+                     exec {quoted} --exact {NAME} --nocapture\n"
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let mut probe = Probe::Ask(0);
+            rehearse(&build, &state, &dir.join("r"), 3, &c, &mut probe)
+        };
+        let r = rehearse_with("1500").expect("every fed intent ended, late or not");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 3, 3));
+        assert_eq!(r.refused.get("intent.expired"), Some(&3));
+        let e = rehearse_with("never").unwrap_err();
+        assert_eq!(
+            e, "rehearsal.unanswered: 3 of 3 recorded intents reached no named end",
+            "a copy that never answers is still refused"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
