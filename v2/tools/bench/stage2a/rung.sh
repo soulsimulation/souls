@@ -36,8 +36,8 @@ rm -rf "$D" "$(dirname "$W")"; mkdir -p "$D/run" "$E" "$(dirname "$W")"
 pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@"; fi; }
 cat /proc/loadavg > "$D/loadavg.before"
 # Stopped or not, the rung's own processes end with it, by pid (never by name: other runs use the same programs).
-SP= VP= GP= OP= WP= TP=
-stop_all() { for p in $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; }
+SP= VP= GP= OP= WP= TP= DP=
+stop_all() { for p in $DP $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; }
 trap stop_all EXIT
 trap 'exit 143' INT TERM HUP
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"
@@ -97,8 +97,12 @@ SP=$!
 sleep 1
 date +%s > "$D/win.txt"
 taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run" --tokens "$W/souls.tokens" \
-  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" > "$D/driver.out" 2>&1
+  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" > "$D/driver.out" 2>&1 &
+# In the background and waited for, so a stop's trap runs at once rather than after the driver's end.
+DP=$!
+wait "$DP"
 echo "driver exit $?" >> "$D/driver.out"
+DP=
 date +%s >> "$D/win.txt"
 sleep 5
 kill "$SP" 2> /dev/null
