@@ -542,11 +542,11 @@ fn r4_undoing_a_recolour_gives_back_the_colour_before_it_and_the_first_one_none(
         )
     };
     let red = tint(&[("tint:whole", 0xff0000)]);
-    let red_seat = tint(&[("tint:whole", 0xff0000), ("part:seat", 0x0000ff)]);
+    let red_leg = tint(&[("tint:whole", 0xff0000), ("part:leg", 0x0000ff)]);
     recolour(&mut w, red.clone());
-    recolour(&mut w, red_seat.clone());
-    assert_eq!(held(&w), Some(red_seat.clone()));
-    w.undo(&mut ok()).expect("the seat's colour is undone");
+    recolour(&mut w, red_leg.clone());
+    assert_eq!(held(&w), Some(red_leg.clone()));
+    w.undo(&mut ok()).expect("the leg colour is undone");
     assert_eq!(held(&w), Some(red.clone()), "the colour before it");
     w.undo(&mut ok()).expect("the first recolour is undone");
     assert_eq!(held(&w), Some(tint(&[])), "no tint: the empty list");

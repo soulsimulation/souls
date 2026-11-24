@@ -90,18 +90,18 @@ mod tests {
 
     #[test]
     fn a_tint_is_rows_of_a_part_and_a_colour_each_part_once() {
-        let ok = Value::Array(vec![row(WHOLE, 0xff0000), row("part:seat", 0x0000ff)]);
+        let ok = Value::Array(vec![row(WHOLE, 0xff0000), row("part:leg", 0x0000ff)]);
         assert_eq!(
             read(&ok).unwrap(),
-            vec![(None, 0xff0000), (Some("seat"), 0x0000ff)]
+            vec![(None, 0xff0000), (Some("leg"), 0x0000ff)]
         );
         assert_eq!(read(&Value::Array(Vec::new())).unwrap(), vec![]);
         for bad in [
             Value::Uint(3),
             Value::Array(vec![row(WHOLE, 0x100_0000)]),
-            Value::Array(vec![row("part:seat", 1), row("part:seat", 2)]),
-            Value::Array(vec![row("seat", 1)]),
-            Value::Array(vec![row("part:Seat", 1)]),
+            Value::Array(vec![row("part:leg", 1), row("part:leg", 2)]),
+            Value::Array(vec![row("leg", 1)]),
+            Value::Array(vec![row("part:Leg", 1)]),
             Value::Array(vec![row("part:", 1)]),
             Value::Array(vec![Value::Array(vec![Value::Uint(1), Value::Uint(2)])]),
             Value::Array(

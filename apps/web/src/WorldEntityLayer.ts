@@ -1,5 +1,5 @@
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
-import {lockPose} from './gen-mesh/vocab-look.ts';
+import {lockPose, recolourOf} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';
 // The entity world's picture (spec <eden4>/28 §8): terrain baked from the
 // same ground recipe the server uses, water, a horizon ring, and one mesh per
@@ -1743,11 +1743,12 @@ export class WorldEntityLayer {
     if (!godFeature('flags') && isFlagDef((def as { ref?: string }).ref ?? e.def)) return null;   // G5: flags are switched off; their poles are not drawn
     const builder = meshFor(def);
     if (!builder) return null;
-    const params = paramsOf(e, def);
+    const params = paramsOf(e, def), recoloured = recolourOf(e.state?.tint)?.parts ?? {};
     const ctx: MeshCtx = {
       canonicalContext: this.immutable, def, entity: e, params, args: def.make.kind === 'gen' ? ((def.make.args ?? {}) as Record<string, unknown>) : {},
       baked: m.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), model: m, materials: this.lib,
-      tint: (key, fallback) => { if (!key) return fallback; const v = params[key]; return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback; },
+      // R4: a creator's recolour of one of the def's palette keys (`souls-god recolor --part <key>`) is that part's colour
+      tint: (key, fallback) => { if (!key) return fallback; if (recoloured[key.toLowerCase()]) return recoloured[key.toLowerCase()]; const v = params[key]; return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback; },
     };
     try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; obj.userData.entity ??= e.id; /* K4: a click on it names its entity (the camera follows one the takes carry) */ const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
   }

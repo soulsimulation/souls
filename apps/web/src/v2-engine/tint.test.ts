@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { applyLook, recolourOf } from '../gen-mesh/vocab-look.ts';
-import type { MeshCtx } from '../gen-mesh/registry.ts';
+import { meshFor, type MeshCtx } from '../gen-mesh/registry.ts';
+import { MaterialLib } from '../gen-mesh/materials.ts';
+import '../gen-mesh/kit.mesh.ts';
 import { thingState, tintState, WorldState, type LayerLike, type WorldDiff } from './world-state.ts';
 
 const chair = (tint?: [string, number][]) => ({ id: 'a.1', kind: 'eden:chair', parent: 'w.1', origin: 'e_chair', ...(tint ? { tint } : {}) });
@@ -19,6 +21,24 @@ function draw(state: Record<string, unknown>) {
   const hex = (m: THREE.Mesh) => '#' + (m.material as THREE.MeshStandardMaterial).color.getHexString();
   return { seat: hex(seat), back: hex(back) };
 }
+
+test('R4: a part named by a kit\'s palette key takes the recolour, and a recoloured kit is not the plain one\'s cached picture', () => {
+  const def = { hash: 'r4-kit', ref: 'r4-kit@1', name: 'r4-kit', description: 'a kit',  make: { kind: 'gen', gen: 'kit/2' }, tags: [], components: {}, params: {}, state: {}, palette: { wood: '#9a6b46', iron: '#2f3633' } } as unknown as MeshCtx['def'];
+  const args = { v: 2, round: 0, shapes: [{ kind: 'box', at: [0, 0.5, 0], size: [1, 0.1, 0.4], tint: 'wood' }, { kind: 'box', at: [0, 0.2, 0], size: [0.1, 0.4, 0.1], tint: 'iron', material: 'metal' }] };
+  // the entity layer's tint (WorldEntityLayer build): a recoloured palette key first, then params and the def's palette
+  const colours = (state: Record<string, unknown>) => {
+    const parts = recolourOf(state.tint)?.parts ?? {}, palette = (def as unknown as { palette: Record<string, string> }).palette;
+    const ctx = { def, entity: { id: 'e_kit', state }, params: {}, args, baked: { box: [1, 1, 1] }, materials: new MaterialLib(),
+      tint: (key: string | undefined, fallback: string) => (key ? parts[key] ?? palette[key] ?? fallback : fallback) } as unknown as MeshCtx;
+    const obj = meshFor(def)!.build(ctx)!, out = new Set<string>(), c = new THREE.Color();
+    obj.traverse((o) => { const g = (o as THREE.Mesh).geometry, col = g?.attributes?.color; if (!(o as THREE.Mesh).isMesh || !col || o.userData.shadowProxy) return; for (let i = 0; i < col.count; i++) out.add('#' + c.fromBufferAttribute(col as THREE.BufferAttribute, i).getHexString()); });
+    return out;
+  };
+  const plain = colours({}), blue = colours({ tint: 'wood=#3060ff' });
+  assert.ok(!plain.has('#3060ff'), 'the def draws its wood');
+  assert.ok(blue.has('#3060ff'), `the wood is the recolour: ${[...blue]}`);
+  assert.ok(!colours({}).has('#3060ff'), 'the plain kit is drawn plain again');
+});
 
 test('R4: a tint\'s rows are the entity\'s state.tint; none is no state, and an undone tint is empty', () => {
   assert.equal(tintState([['part:seat', 0xff], ['tint:whole', 0xff0000]]), '#ff0000 seat=#0000ff');
