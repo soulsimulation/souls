@@ -511,6 +511,7 @@ impl Bench {
             point,
             facing: Quat::IDENTITY,
             floor: id(1),
+            more: Vec::new(),
         };
         let stand = at(Vec3::new(0, place.height, 0)).stand().expect("a stand");
         let mut slots = crate::slots::Slots::new();

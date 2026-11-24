@@ -98,6 +98,7 @@ fn world(placed: &Placed, at: i64) -> Result<Bodies, Refusal> {
         point: seat(),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     let refused = b.seat_placed(placed, at);
     assert!(refused.is_empty(), "seated again: {refused:?}");
