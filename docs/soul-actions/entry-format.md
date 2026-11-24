@@ -150,6 +150,10 @@ On the new engine (0.135 G3), a role's `slots` (`in: "here"` may list them too) 
 activity starts: each slot's `stand` point, else the slot, in the activity's own frame. If all members stand on one
 floor, each walks to its stand and turns to its facing before the moves begin; a member farther than `within_mm`
 from their middle, or anyone when they stand on different floors or one is seated, stays where it is.
+On the new engine (0.135 B10), an activity offered or proposed at the entry's own thing (the offer's target is the thing)
+is that thing's: a Soul that offers in a role, or accepts or joins one, holds the role's link on the thing while it is a
+member, so the kind's forms that ask for it (`who: {"link": "<role>"}`, `"need": "linked"`) pass for it and refuse others
+by name. Its leave, or the offer's lapse or decline, takes the link down. Offered on the open ground, it links nothing.
 A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
 at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
 A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.

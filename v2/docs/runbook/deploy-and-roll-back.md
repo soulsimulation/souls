@@ -44,7 +44,10 @@ Every watch ends by retiring its body with ordinary `life:leave`, including fail
 the next watch recovers the same pending identity, confirms any uncertain birth through an idempotent join, and
 retires it before starting a new sample. An unavailable or refusing candidate leaves the receipt named
 `canary.probe-pending` until the rolled-back healthy endpoint can retire it. Do not delete a pending receipt to
-silence that failure. Scratch rehearsal uses its own operator receipt and body on the copied world.
+silence that failure. Scratch rehearsal uses its own operator receipt and body on the copied world. That body lives
+only in the scratch copy, so a scratch receipt left by a failed rehearsal whose copy is no longer served is dropped with
+the copy, `rehearsal.probe-dropped` in the deploy's record, and the build rehearses fresh; a copy still served retires
+its body first, as any watch does.
 
 Agents' sockets are the gateway's (I1): they stay open through every restart, intents sent while the world is away
 are answered `world.restarting`, and those the world had not answered are sent again when it is back. Every act the

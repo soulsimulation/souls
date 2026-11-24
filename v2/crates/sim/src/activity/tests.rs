@@ -780,4 +780,5 @@ fn g3_places_on_one_node_only_and_never_from_far_away() {
 mod call;
 mod give;
 mod offers;
+mod roles;
 mod together;

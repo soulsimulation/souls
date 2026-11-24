@@ -538,3 +538,63 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
             .is_empty()
     );
 }
+
+/// 0.135 E16: a slot whose `most` is above one has that many places: its point and the others, a standard body's
+/// clearance diameter (560 mm) apart, nearest first, each body's clearance circle inside the thing's footprint. A
+/// tent's `sleep` (`most: 2`, at z -300 mm in a 1981 x 2500 mm tent) gets one more place 560 mm to its side; a slot
+/// whose thing is too small for another body, or declares no bounds, holds one.
+#[test]
+fn e16_a_slot_of_several_bodies_has_a_place_for_each_inside_its_thing() {
+    use import_eden::more_places;
+    use replica::pose::Vec3;
+    let tent = Vec3::new(0, 100_000, -300_000);
+    assert_eq!(
+        more_places(tent, 2, Some([1_981_000, 2_500_000])),
+        vec![Vec3::new(-560_000, 0, 0)]
+    );
+    assert!(more_places(tent, 2, Some([800_000, 800_000])).is_empty());
+    assert!(more_places(tent, 2, None).is_empty());
+    // A petanque circle (`most: 6`) on a 3 m wide piste: five more, all inside it, each 560 mm or more from the rest.
+    let circle = Vec3::new(0, 0, -5_400_000);
+    let more = more_places(circle, 6, Some([3_000_000, 12_000_000]));
+    assert_eq!(more.len(), 5);
+    // From an entry: a body-sized thing's footprint is its slot's space; a thing taller than a body (a big wheel's
+    // gondola) has none of its own unless the slot declares one (`fits_mm`), so it holds one body.
+    let entry = |bounds: &str, fits: &str| {
+        let e = replica::rules::json::parse(&format!(
+            r#"{{"kind":"t:x","points":{{"by":{{"role":"stand","at_mm":[0,0,900]}}}},
+            "slots":{{"s":{{"admits":"body","posture":"sit","most":2,"at_mm":[0,1500,0],"stand":"by"{fits}}}}},
+            "geometry":{{"bounds_mm":{bounds}}}}}"#
+        ))
+        .unwrap();
+        let id = replica::ids::Id::new(replica::ids::Scope([1; 16]), 1).unwrap();
+        import_eden::body_slots_of(id, "t:x", &Default::default(), &[("t:x".into(), e)])
+            .remove(0)
+            .more
+    };
+    assert_eq!(
+        entry("[1981, 1330, 2500]", "").len(),
+        1,
+        "a tent-sized thing"
+    );
+    assert!(
+        entry("[30000, 30000, 8000]", "").is_empty(),
+        "a big wheel's gondola"
+    );
+    assert_eq!(
+        entry("[30000, 30000, 8000]", r#","fits_mm":[1800,1200,900]"#),
+        vec![Vec3::new(-560_000, 0, 0)],
+        "a gondola that declares its own space"
+    );
+    let all: Vec<Vec3> = std::iter::once(Vec3::ZERO).chain(more).collect();
+    for (i, p) in all.iter().enumerate() {
+        assert!(
+            (circle.x + p.x).abs() + 280_000 <= 1_500_000,
+            "{p:?} inside"
+        );
+        for q in &all[i + 1..] {
+            let d2 = i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2);
+            assert!(d2 >= 559_000i128.pow(2), "{p:?} and {q:?} apart");
+        }
+    }
+}

@@ -155,7 +155,7 @@ order, with Gene's yes. Set once, from the host:
 P=/srv/sim-worlds/production                          # the live release
 WORLD=<the new Eden's world name>                     # as place-world.sh placed it (/etc/souls/cutover.env's WORLD)
 STREAM=/s/$(node -e "console.log(JSON.parse(require('fs').readFileSync('/var/lib/souls/worlds/worlds/$WORLD/views/world.json','utf8')).stream.replace(/^\//,''))")
-STATIC=<a folder the launcher's user can write>       # where the launcher publishes old Eden's static views
+STATIC=/srv/sim-worlds-data/production/eden-static     # old Eden's static views: under the launcher unit's ReadWritePaths
 LAUNCHER_PORT=<today's launcher port>
 ```
 

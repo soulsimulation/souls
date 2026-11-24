@@ -400,15 +400,16 @@ impl Cx<'_> {
             })
     }
 
-    /// Slot `slot` of the node, refused `slot-occupied` when something is in it.
-    fn free_slot(&self, slot: u64) -> R<Frame> {
-        match self.view.occupant(self.node, slot) {
+    /// Slot `slot` of `node` (the form's node, or another thing a slot argument names, E14), refused `slot-occupied`
+    /// when something is in it.
+    fn free_slot(&self, node: Id, slot: u64) -> R<Frame> {
+        match self.view.occupant(node, slot) {
             Some(t) => refuse(
                 "slot-occupied",
-                format!("slot {slot} of {} holds {}", show(self.node), show(t)),
+                format!("slot {slot} of {} holds {}", show(node), show(t)),
             ),
             None => Ok(Frame {
-                node: self.node,
+                node,
                 slot: Some(slot),
             }),
         }
@@ -436,7 +437,7 @@ impl Cx<'_> {
             Bound::Transfer { from, into, .. } => vec![self.of(*from), self.of(*into)],
             Bound::Make { .. } => vec![self.node],
             Bound::Remove { what } | Bound::Take { what } => vec![self.of(*what)],
-            Bound::Put { what, .. } => vec![self.of(*what), self.node],
+            Bound::Put { what, on, .. } => vec![self.of(*what), on.unwrap_or(self.node)],
         };
         let missing = |t: &Id| self.view.at(*t).is_none() || self.view.removed(*t);
         if let Some(t) = named.iter().find(|t| missing(t)) {
@@ -524,7 +525,7 @@ impl Cx<'_> {
             Bound::Make { kind, into } => {
                 let frame = match into {
                     Place::Hand => self.free_hand()?,
-                    Place::Slot(s) => self.free_slot(*s)?,
+                    Place::Slot(s) => self.free_slot(self.node, *s)?,
                 };
                 let node = mint(m)?;
                 Ok(vec![(
@@ -581,8 +582,9 @@ impl Cx<'_> {
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)
             }
-            Bound::Put { what, slot } => {
+            Bound::Put { what, slot, on } => {
                 let thing = self.of(*what);
+                let into = on.unwrap_or(self.node);
                 // Held by the body, or standing loose beside it, on what the body stands on (a thing wheeled or
                 // pushed into the slot, C12).
                 let beside = |f: Frame| {
@@ -598,15 +600,15 @@ impl Cx<'_> {
                         format!("{} holds no {}", show(self.body), show(thing)),
                     );
                 }
-                if self.view.within(self.node, thing) {
+                if self.view.within(into, thing) {
                     return refuse(
                         "would-hold-itself",
-                        format!("{} is {} or in it", show(self.node), show(thing)),
+                        format!("{} is {} or in it", show(into), show(thing)),
                     );
                 }
                 self.not_in_use(thing)?;
-                self.not_fixed_unjudged(thing, *slot)?;
-                let to = self.free_slot(*slot)?;
+                self.not_fixed_unjudged(thing, into, *slot)?;
+                let to = self.free_slot(into, *slot)?;
                 self.transfer(m, thing, to)
             }
             Bound::Link { ty, soul, most } => super::links::link(self, m, ty, *soul, *most),
@@ -701,7 +703,7 @@ impl Cx<'_> {
     /// N19) only by an edit or a set-down, which judge what it would bury or cut off (BUILDSAFE). A form's put or
     /// reparent judges nothing, so it is refused `solid-into-slot` (#3697 re-review); a boot thing keeps today's
     /// behaviour (C12).
-    fn not_fixed_unjudged(&self, thing: Id, slot: u64) -> R<()> {
+    fn not_fixed_unjudged(&self, thing: Id, into: Id, slot: u64) -> R<()> {
         let tree = self.view.tree;
         let Some(kind) = self.view.kind(thing) else {
             return Ok(());
@@ -715,7 +717,7 @@ impl Cx<'_> {
             .is_some()
             || !made_fields(tree, &kind).is_empty();
         let pointed = matches!(
-            self.view.field(self.node, crate::ground::scene::F_SLOTS),
+            self.view.field(into, crate::ground::scene::F_SLOTS),
             Some(Value::Array(rows)) if rows.iter().any(|r| matches!(
                 r,
                 Value::Array(c) if c.first().and_then(int) == i64::try_from(slot).ok()
@@ -727,7 +729,7 @@ impl Cx<'_> {
                 format!(
                     "{} has solids and slot {slot} of {} is fixed ground: set it down instead, where it is judged",
                     show(thing),
-                    show(self.node)
+                    show(into)
                 ),
             );
         }

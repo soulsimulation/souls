@@ -9,6 +9,10 @@
 //!   A change with no generic inverse (a field the batch added, since T6 has no unset, unless its reader has a value
 //!   that reads as unset, `replica::edit::claims::neutral`; a node in motion; a body that is not changes; an unlink)
 //!   makes that batch's undo refused `undo.no-inverse`.
+//! - **Things, never a game (B10, #4239).** An activity node in what a batch removed (a game under its board) is
+//!   left out of the before-values, with its membership links and its members' role links on the node it was under:
+//!   undoing the board's removal brings back the board, its fields and its seats, and no activity or role link. The
+//!   activity ended when its thing went (`sim::activity`, `souls:activity-ended`).
 //! - **Undo, redo.** Undo reverses the newest batch not undone, redo the newest undo, and a new edit clears redo (the
 //!   rules of `apps/server/src/god/god.ts`). Each is written by the creator under `Cause::Effect(first)`, where `first`
 //!   is the sequence of the reversed batch's first effect ([`replica::edit::reverses`]).
@@ -153,7 +157,42 @@ impl Before {
                 }
             }
         }
+        b.without_activities();
         b
+    }
+
+    /// B10 (#4239): an undo restores things, never a game. An activity node among them (its fields an activity's,
+    /// `replica::activity::Node`) is left out, with every link at it (its memberships) and each member's role link on
+    /// the node it was under (a link of the member's role's type between that node and the member's body or Soul).
+    /// So undoing a board's removal brings the board, its fields and its seats back, and no activity or role link.
+    fn without_activities(&mut self) {
+        let games: Vec<(Id, Option<Id>, Vec<replica::activity::Member>)> = self
+            .nodes
+            .iter()
+            .filter_map(|(id, w)| {
+                let n = replica::activity::Node::from_fields(&w.fields).ok()?;
+                Some((*id, w.parent, n.members))
+            })
+            .collect();
+        for (id, under, members) in &games {
+            self.nodes.remove(id);
+            self.links.retain(|_, l| {
+                if l.ends.contains(id) {
+                    return false;
+                }
+                let Some(at) = under.filter(|p| l.ends.contains(p)) else {
+                    return true;
+                };
+                let other = if l.ends[0] == at {
+                    l.ends[1]
+                } else {
+                    l.ends[0]
+                };
+                !members
+                    .iter()
+                    .any(|m| m.role == l.ty && (m.body == other || m.soul == other))
+            });
+        }
     }
 }
 

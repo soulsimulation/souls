@@ -493,6 +493,78 @@ pub struct Forms {
     /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
     /// writes it on the body ([`Forms::seat_posture`]).
     postures: BTreeMap<String, u64>,
+    /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
+    /// (E14, [`other_slots`]).
+    slots_of: BTreeMap<String, BTreeSet<u64>>,
+}
+
+/// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
+/// the form's own thing is, before anything starts: the form's entry takes that argument as a `slot` (`arg-type`
+/// otherwise); the thing is no body (`slot-of-a-body`: a form never puts into, or seats in, another Soul); it is not
+/// private to someone else (#3700's `object.private`, as a bare sit on it is refused); and its kind declares the slot
+/// (`slot-unknown`), or the world holds it as a seat.
+fn other_slots<G: Geometry, R: Reach>(
+    w: &World<'_, G, R>,
+    slots_of: &BTreeMap<String, BTreeSet<u64>>,
+    body: Id,
+    entry: &replica::rules::json::Value,
+    form: &str,
+    args: &form_runner::Args,
+) -> Result<(), Refusal> {
+    let refuse = |name, detail: String| Err(Refusal { name, detail });
+    let takes = entry
+        .get("forms")
+        .and_then(|fs| fs.get(form))
+        .and_then(|f| f.get("takes"));
+    let asker = w
+        .tree
+        .links_at(body)
+        .iter()
+        .find(|e| w.tree.ty(e).as_str() == BODY_OF)
+        .map_or(body, |e| e.other);
+    for (key, arg) in args {
+        let &form_runner::Arg::Slot(on, n) = arg else {
+            continue;
+        };
+        let ty = takes
+            .and_then(|t| t.get(key))
+            .and_then(|t| t.get("type"))
+            .and_then(replica::rules::json::Value::str);
+        if ty != Some("slot") {
+            return refuse(
+                "arg-type",
+                format!("{key}: the form takes no slot by this name"),
+            );
+        }
+        let a_body = w.controller.body(on).is_some()
+            || w.tree
+                .links_at(on)
+                .iter()
+                .any(|e| w.tree.ty(e).as_str() == BODY_OF);
+        if a_body {
+            return refuse("slot-of-a-body", format!("{key}: {} is a body", show(on)));
+        }
+        if let Some(words) = replica::who_may::private_to(w.tree, on, asker) {
+            return refuse("object.private", format!("{key}: who may: {words}"));
+        }
+        let held = w
+            .places
+            .as_ref()
+            .is_some_and(|p| p.slots.place_in(on, n).is_some());
+        let kind = w
+            .tree
+            .handle(on)
+            .and_then(|h| w.tree.node(h))
+            .map(|t| t.kind().as_str().to_owned());
+        let declared = kind
+            .as_deref()
+            .and_then(|k| slots_of.get(k))
+            .is_some_and(|s| s.contains(&n));
+        if !held && !declared {
+            return refuse("slot-unknown", format!("{key}: slot {n} of {}", show(on)));
+        }
+    }
+    Ok(())
 }
 
 /// The state field a body's kind keeps its posture in (`stand`, `sit`, `lie`, ...), by name.
@@ -693,14 +765,20 @@ impl Forms {
     }
 
     /// Each body's run whose step in progress is a walk to its node's own point right before a `sit` or `lie` into a
-    /// slot of that node: the step's number, the node and the slot. The world aims that walk at the seat's own stand
-    /// point, as its places hold it (moved clear when the entry's point is blocked), not the entry's point.
+    /// slot of that node, or a walk to another thing right before a `sit` or `lie` into that thing's slot (E14): the
+    /// step's number, the seat's thing and the slot. The world aims that walk at the seat's own stand point, as its
+    /// places hold it (moved clear when the entry's point is blocked), not the entry's point.
     pub fn seat_walks(&self) -> BTreeMap<Id, (usize, Id, u64)> {
         self.runs
             .values()
             .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
-                (Step::WalkTo { on: None, .. }, Step::Sit { slot, .. }) => {
-                    Some((fr.body, (fr.runner.at()?, fr.node, *slot)))
+                (
+                    Step::WalkTo { on, .. },
+                    Step::Sit {
+                        slot, on: place, ..
+                    },
+                ) if on == place => {
+                    Some((fr.body, (fr.runner.at()?, place.unwrap_or(fr.node), *slot)))
                 }
                 _ => None,
             })
@@ -1036,18 +1114,56 @@ impl Forms {
         // standing slot the body is in (a motorboat's key from its helm, a phone box's door from inside it): its legs
         // are the seat's. The move's reach is the world's, from the seat to the point (worldd's `Sight::reach_in_slot`), so
         // a seat out of reach of the point is refused `out-of-reach` (0.135 E13).
+        // A form that leaves the body in that slot (no rise or sit of its own, nor the rise the binding adds to a form
+        // that moves the actor, `form_runner::rises_out`) is done from inside: its own walks to the thing's points are
+        // dropped too (a phone box opened from inside, 0.135 E17), never walked by legs the slot holds.
         let in_its_slot = w.places.as_ref().and_then(|p| p.slots.held_by(body)) == Some(node);
+        let stays = in_its_slot
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. }));
         if node == body || in_its_slot {
-            steps.retain(|s| {
-                !matches!(
-                    s,
-                    Step::WalkTo {
-                        on: None,
-                        approach: true,
-                        ..
-                    }
-                )
+            steps.retain(|s| match s {
+                Step::WalkTo {
+                    on: None, approach, ..
+                } => !*approach && !stays,
+                _ => true,
             });
+        }
+        // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
+        // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
+        // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
+        // is as it was.
+        let soul = match intent.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        let rises_first = in_its_slot && !stays;
+        let mut unlinked: Vec<&Name> = Vec::new();
+        for e in effects.iter().filter(|_| rises_first) {
+            if let form_runner::Effect::Unlink { ty, .. } = e {
+                unlinked.push(ty);
+            }
+            if let form_runner::Effect::Link { ty, soul: s, .. } = e
+                && !unlinked.contains(&ty)
+            {
+                let end = if *s { soul } else { body };
+                if w.tree
+                    .links_at(node)
+                    .iter()
+                    .any(|l| w.tree.ty(l) == ty && l.other == end)
+                {
+                    return Err(Refusal {
+                        name: "already_linked",
+                        detail: format!(
+                            "{} is already a {} of {}",
+                            show(end),
+                            ty.as_str(),
+                            show(node)
+                        ),
+                    });
+                }
+            }
         }
         let reserves = node != body && !self.shared.contains(&node);
         // The body's own run, which this act preempts, holds nothing against it.
@@ -1211,6 +1327,7 @@ impl Forms {
             self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
         if !known {
             may(w.tree, audiences, names, body, node, entry, form)?;
+            other_slots(w, &self.slots_of, body, entry, form, args)?;
         }
         match bound {
             Ok((steps, effects)) => self.start(w, body, node, intent, steps, effects, limits, now),
@@ -1229,6 +1346,17 @@ impl Forms {
             .filter_map(|def| {
                 let (n, _) = def.state.iter().find(|(_, f)| f.name.as_str() == POSTURE)?;
                 Some((def.name.as_str().to_owned(), *n))
+            })
+            .collect();
+        self.slots_of = kinds
+            .admits()
+            .keys()
+            .filter_map(|k| kinds.get(k))
+            .map(|def| {
+                (
+                    def.name.as_str().to_owned(),
+                    def.slots.keys().copied().collect(),
+                )
             })
             .collect();
     }
@@ -1730,19 +1858,44 @@ impl Forms {
         now: Micros,
     ) {
         self.planning.remove(&run);
+        let Some(fr) = self.runs.get_mut(&run) else {
+            return;
+        };
+        let body = fr.body;
+        if let Some(d) = fr.walk.take() {
+            self.walks.retain(|r| r.body != body);
+            let _ = w.controller.release(body, d);
+        }
+        // A seat's move ends through the places (E11b), as a cancel under it does in `Slots::fire`: a sit not yet in
+        // the slot gives the seat back, a body in the slot is left seated, never half sat with its seat held.
+        if let Some(n) = fr.mv.take() {
+            let sitting = matches!(fr.runner.step(), Some(Step::Sit { .. }));
+            let held = w.places.as_mut().and_then(|p| {
+                p.slots.cancel(
+                    w.controller,
+                    w.due,
+                    w.moves,
+                    p.floors,
+                    body,
+                    n,
+                    now,
+                    name("form-ended"),
+                )
+            });
+            match held {
+                Some(true) if sitting => self.seat_posture(w.tree, run, now),
+                Some(_) => {}
+                None => {
+                    w.moves
+                        .cancel(w.controller, w.due, n, now, name("form-ended"));
+                }
+            }
+        }
         let Some(fr) = self.runs.remove(&run) else {
             return;
         };
         self.by_body.remove(&fr.body);
         self.by_intent.remove(&fr.intent.id);
-        if let Some(d) = fr.walk {
-            self.walks.retain(|r| r.body != fr.body);
-            let _ = w.controller.release(fr.body, d);
-        }
-        if let Some(n) = fr.mv {
-            w.moves
-                .cancel(w.controller, w.due, n, now, name("form-ended"));
-        }
         let mine: Vec<Id> = self
             .by_timer
             .iter()
