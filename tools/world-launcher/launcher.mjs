@@ -126,7 +126,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence, routeOnlyId, withV2Stream } from './cutover.mjs';
+import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -769,15 +769,23 @@ export async function openLauncher(cfg = {}) {
    *  process gives (apps/server http.ts, god/routes.ts, god/context-views.ts), so none is a 404 (live: Mars's page
    *  logged one every poll, and its Explore said "Locations are temporarily unavailable"): visitors as a world without
    *  travel (`available: false`: the page stops asking, SoulTravel.tsx); seq from the published snapshot (the page then
-   *  never resyncs for nothing, WorldEntityLayer.ts); context as a listing with no places (WorldContextViews.ts). */
+   *  never resyncs for nothing, WorldEntityLayer.ts); context as Explore lists it, the places of the published snapshot (WorldContextViews.ts). */
   function coldRead(res, w, rest, url) {
     if (rest === '/v1/world/visitors') { json(res, 200, { contract: 'travel/1', world: worldIdOf(w), available: false, open: false, visitors: [], recent: [] }); return true; }
-    const seq = rest === '/v1/world/seq' || rest === '/v1/world/context' ? cutover?.publishedSeq(w) : null;
-    if (!seq) return false;
-    if (rest === '/v1/world/seq') { json(res, 200, seq); return true; }
-    const q = url.searchParams.get('q'), ref = url.searchParams.get('ref');
-    json(res, 200, { contract: 'world-context/1', revision: seq.seq, listingRevision: createHash('sha256').update(JSON.stringify([worldIdOf(w), seq.seq, q, ref])).digest('hex'),
-      source: 'authored-meaning', scope: ref ? 'exact' : q ? 'search-all' : 'semantic', targets: [], total: 0, nextCursor: null });
+    if (rest === '/v1/world/seq') { const seq = cutover?.publishedSeq(w); if (!seq) return false; json(res, 200, seq); return true; }
+    if (rest !== '/v1/world/context') return false;
+    // Explore's places, from the published snapshot (cutover.mjs snapshotPlaces), paged and searched as context-views.ts
+    // pages them: 100 a page, a cursor naming its listing, 409 when the listing it names is gone.
+    const pub = cutover?.publishedPlaces(w);
+    if (!pub) return false;
+    const q = searchText((url.searchParams.get('q') ?? '').trim()), ref = url.searchParams.get('ref'), cursor = url.searchParams.get('cursor');
+    const found = pub.places.filter((p) => (ref ? p.target.ref === ref : q ? p.text.includes(q) : p.shown)).map((p) => p.target);
+    const listing = createHash('sha256').update(JSON.stringify([worldIdOf(w), pub.seq, q, ref, found.map((t) => t.ref)])).digest('hex');
+    const at = cursor ? /^([a-f0-9]{64}):(\d+)$/.exec(cursor) : null;
+    if (cursor && at?.[1] !== listing) { json(res, 409, { ok: false, code: 'context.changed', message: 'Meaning or listing access changed; start a fresh context query' }, { 'cache-control': 'no-store' }); return true; }
+    const offset = at ? Number(at[2]) : 0, page = found.slice(offset, offset + 100);
+    json(res, 200, { contract: 'world-context/1', revision: pub.seq, listingRevision: listing, source: 'authored-meaning', scope: ref ? 'exact' : q ? 'search-all' : 'semantic',
+      targets: page, total: found.length, nextCursor: offset + page.length < found.length ? `${listing}:${offset + page.length}` : null }, { 'cache-control': 'no-store' });
     return true;
   }
   /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
