@@ -244,21 +244,28 @@ function vendorGroups() {
 
 /** W2 (0.135): fills `src/v2-engine/source/kind-bounds.ts` with the size of each content kind that is a thing
  *  (`content/kinds`; not an activity), by its name: the old page draws a placed thing no library def draws as a box that
- *  size (v2-engine/source/stream-scene.ts). Outside the build the table is empty. */
+ *  size (v2-engine/source/stream-scene.ts). Outside the build the table is empty. The kinds with their own shape
+ *  (`looks.shape`) go in one data file beside the bundle (`KIND_LOOKS_URL`, not code: fetched once, the first time the
+ *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none. */
 function kindBounds(): Plugin {
   const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
+  let build = false;
   return {
     name: 'souls-kind-bounds',
+    configResolved(c) { build = c.command === 'build'; },
     transform(_code, id) {
       if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
-      const out: Record<string, number[]> = {};
+      const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {};
       for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
         if (!f.endsWith('.json')) continue;
-        const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; geometry?: { bounds_mm?: unknown } };
+        const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; state?: unknown; geometry?: { bounds_mm?: unknown }; looks?: { shape?: { shapes?: unknown }; table?: unknown } };
         this.addWatchFile(file);
-        if (typeof e.kind === 'string' && e.owner === 'thing' && !e.roles && Array.isArray(e.geometry?.bounds_mm)) out[e.kind] = e.geometry.bounds_mm as number[];
+        if (typeof e.kind !== 'string' || e.owner !== 'thing' || e.roles || !Array.isArray(e.geometry?.bounds_mm)) continue;
+        out[e.kind] = e.geometry.bounds_mm as number[];
+        if (Array.isArray(e.looks?.shape?.shapes)) looks[e.kind] = { format: 'souls-entry/1', kind: e.kind, state: e.state ?? {}, geometry: { bounds_mm: e.geometry.bounds_mm }, looks: { shape: e.looks.shape, ...(e.looks.table ? { table: e.looks.table } : {}) } };
       }
-      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};`, map: null };
+      const url = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-looks.json', source: JSON.stringify(looks) })}` : 'null';
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};`, map: null };
     },
   };
 }
