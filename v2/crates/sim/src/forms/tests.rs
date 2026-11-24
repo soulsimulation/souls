@@ -1832,7 +1832,7 @@ fn e11c_a_rise_with_its_stand_point_off_the_floor_ends_at_once_by_name() {
     };
     assert_eq!(e.how.as_str(), "done", "the floor back: the rise completes");
     let slots = b.slots.as_ref().expect("slots");
-    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    assert_eq!(slots.holder_in(chair, slot), None, "the slot free");
     b.clean();
 }
 
@@ -1880,8 +1880,8 @@ fn e11c_a_sit_refused_into_its_slot_ends_by_name_and_frees_the_seat() {
         e.at - asked
     );
     let slots = b.slots.as_ref().expect("slots");
-    assert_eq!(slots.held_by(body), None, "the seat given back");
-    assert_eq!(slots.holder_in(chair, slot), None, "the seat free");
+    assert_eq!(slots.held_by(body), None, "the slot given back");
+    assert_eq!(slots.holder_in(chair, slot), None, "the slot free");
     b.clean();
 }
 
