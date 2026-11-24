@@ -20,8 +20,9 @@
 //! A sleeping world (O2, #2731): with a wake set ([`Link::set_wake`], the gateway's `--wake`), an intent that
 //! arrives while the world is away is held instead, and the gateway asks once for the world to be woken; the held
 //! intents go when it is reachable, as on any reconnect, and one whose deadline passes first is answered as below.
-//! Only an intent asks: a sync request is a read, and a reader (a viewer) wakes no world, so it is answered
-//! [`RESTARTING`] as before.
+//! A sync request asks too: only an agent sends one (viewers read the public stream, which wakes nothing), and an
+//! agent's client syncs before it sends its first intent, so without it a Soul arriving at a sleeping world waited
+//! forever. The sync request itself is still answered [`RESTARTING`]: the client asks again once the world is up.
 //!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
 //! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
@@ -368,6 +369,14 @@ impl Link {
     pub fn ask(&self, key: Vec<u8>, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
+            // Only an agent (a grant on a socket) asks here: a Soul's client syncs before it sends any intent, so a
+            // sleeping world that waited for an intent would never be woken by one. Asked awake once, as an intent
+            // asks; the request is still answered `world.restarting` and the client asks again.
+            if let Some(wake) = s.wake.clone()
+                && !std::mem::replace(&mut s.asked, true)
+            {
+                wake();
+            }
             return Sent::Restarting;
         };
         let ours = s.next;
