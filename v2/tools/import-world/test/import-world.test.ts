@@ -7,10 +7,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { exportArgv } from '../import-world.ts';
+import { fromBackup } from '../export/backup.ts';
 import { makeFixture, SLUG } from './fixture.ts';
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
@@ -122,4 +123,29 @@ test('A5: one command prints the row per world, and a backup that does not impor
   assert.match(table.find((l) => l.startsWith(`| ${SLUG} |`))!, new RegExp(`^\\| ${SLUG} \\| yes \\|`));
   assert.match(table.find((l) => l.startsWith('| not-a-backup.db |'))!, /^\| not-a-backup\.db \| \*\*no\*\* \|/);
   assert.match(r.stdout, /export: the backup did not export: /);
+});
+
+test('A6: a mesh with a footprint takes its walls from the asset store (--assets), and is refused footprint-missing without it', () => {
+  // The fixture's backup, with one mesh def added that names a footprint upload (verdelis-eden's dome, 24 Nov).
+  const copy = join(DIR, 'footprint.db');
+  copyFileSync(fx.backup, copy);
+  const fp = 'f'.repeat(64), mesh = 'e'.repeat(64);
+  const db = new DatabaseSync(copy);
+  const bench = db.prepare("SELECT world_id, body FROM world_defs_v1 WHERE ref = 'core-bench@1'").get() as { world_id: string; body: string };
+  const def = { ...JSON.parse(bench.body), name: 'fixture-domed', ref: 'fixture-domed@1', hash: 'd'.repeat(64), slots: [],
+    size: { box: [20, 6, 20], scale: [1, 1] }, make: { kind: 'mesh', asset: mesh, collide: 'box', footprint: fp } };
+  db.prepare('INSERT INTO world_defs_v1 (world_id, hash, ref, body) VALUES (?, ?, ?, ?)').run(bench.world_id, def.hash, def.ref, JSON.stringify(def));
+  for (const [sha, kind, ext] of [[fp, 'footprint', 'json'], [mesh, 'mesh', 'glb']])
+    db.prepare('INSERT INTO world_assets_v1 (world_id, sha, kind, ext, bytes, tris, textures, box, name, at) VALUES (?, ?, ?, ?, 1, 0, 0, ?, ?, 0)')
+      .run(bench.world_id, sha!, kind!, ext!, '[20,6,20]', 'domed');
+  db.close();
+  const map = join(ROOT, 'content/worlds/eden/map.json');
+  assert.throws(() => fromBackup(copy, SLUG, map), new RegExp(`footprint-missing: ${fp}`));
+  // One wall in the store's meta, as AssetStore keeps a footprint's physics.
+  const store = join(DIR, 'assets');
+  mkdirSync(store, { recursive: true });
+  const wall = { c: [9, 0], half: [0.5, 10], yaw: 0, y0: 0, y1: 4 };
+  writeFileSync(join(store, `${fp}.meta.json`), JSON.stringify({ kind: 'footprint', baked: { box: [20, 6, 20], colliders: [wall], slots: [] } }));
+  const { m } = fromBackup(copy, SLUG, map, store);
+  assert.deepEqual(m.bake(def, {}, 0).colliders, [wall], 'the footprint wall, not one box over the bounds');
 });

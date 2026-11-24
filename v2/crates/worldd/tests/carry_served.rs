@@ -763,6 +763,160 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
     );
 }
 
+/// 0.135 C7: the beam carried with no destination named, its two carriers walking east either side of a post that
+/// stands on the line between them. Each walks clear of the post, but the beam would sweep through it: the carry
+/// stops where the beam meets it, the beam set down at its last sample (`souls:carry-set-down`, why
+/// `souls:carry-blocked`), never past the post and never through it. The carriers are not held: their walks arrive,
+/// the beam is no longer carried, and both may leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carriers() {
+    use sim::activity::carry::{Fixed, outline};
+    let d = scratch("c7");
+    // The post: 0.2 m square and 1.5 m high, on the beam's middle line 7 m east of it.
+    let post = (beam_at().x + 7 * M, beam_at().z);
+    let mut f = json::parse(&world(&d)).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("things", json::Value::Arr(a)) = (k.as_str(), v) {
+            a.push(json::Value::Obj(vec![
+                ("id".into(), json::Value::s("post")),
+                ("def".into(), json::Value::s("testworld-box@1")),
+                ("ref".into(), json::Value::s("testworld-box@1")),
+                ("parent".into(), json::Value::Null),
+                (
+                    "pose".into(),
+                    json::Value::Arr([post.0 / 1000, 0, post.1 / 1000, 0].map(num).to_vec()),
+                ),
+                ("scale_ppm".into(), num(1_000_000)),
+                (
+                    "solids".into(),
+                    json::Value::Arr(vec![json::Value::Arr(
+                        [0, 0, 100, 100, 0, 0, 1500, 5, 0].map(num).to_vec(),
+                    )]),
+                ),
+                ("name".into(), json::Value::s("a post")),
+            ]));
+        }
+    }
+    let facts = f.to_json();
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+    let entry = construction("rack_beam.json");
+    let load = Load::of(&entry).unwrap();
+    let [back, front] = load.places();
+    let carry = gather(&mut a, &mut b, &dir, ground, beam, &entry, beam_at(), true).await;
+    a.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("lifted, with no destination named");
+    let east = |p: Vec3| Vec3::new(p.x + 12 * M, 0, p.z);
+    a.send(
+        "eden:walk",
+        ground,
+        point(east(spot(beam_at(), front, true))),
+    )
+    .await;
+    b.send(
+        "eden:walk",
+        ground,
+        point(east(spot(beam_at(), back, true))),
+    )
+    .await;
+    let (wa, wb) = (a.answer().await, b.answer().await);
+    wa.expect("the front walks on past the post");
+    wb.expect("the back walks on past the post");
+    let down = b.act("carry:set-down", carry, BTreeMap::new()).await;
+    assert_eq!(down, Err("not-carried".to_owned()), "the carry had stopped");
+    for s in [&mut a, &mut b] {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("each carrier leaves");
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+
+    let es = effects(&dir);
+    let why: Vec<String> = es
+        .iter()
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .filter_map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        why,
+        vec!["souls:carry-blocked".to_owned()],
+        "set down once, blocked"
+    );
+    // Every sample of the carry: the beam's outline on the plan, clear of the post.
+    let fixed = Fixed::new(vec![[
+        [post.0 - 100_000, post.1 - 100_000],
+        [post.0 + 100_000, post.1 - 100_000],
+        [post.0 + 100_000, post.1 + 100_000],
+        [post.0 - 100_000, post.1 + 100_000],
+    ]]);
+    // The beam as it is held: on its edge, 51 mm across.
+    let (held, _) = load.as_held().unwrap();
+    let mut samples = 0;
+    let mut east_most = i64::MIN;
+    for e in &es {
+        let Body::Changes(cs) = &e.body else { continue };
+        for c in cs {
+            let Change::Motion(h) = &c.change else {
+                continue;
+            };
+            if h.node != carry {
+                continue;
+            }
+            let p = h.pose.position;
+            let u = h
+                .pose
+                .orientation
+                .rotate(Vec3::new(1_000_000, 0, 0))
+                .unwrap();
+            let q = outline([p.x + u.x, p.z + u.z], [p.x - u.x, p.z - u.z], &held);
+            assert!(fixed.hit(&q).is_none(), "a sample through the post: {p:?}");
+            samples += 1;
+            east_most = east_most.max(p.x);
+        }
+    }
+    let moved = moves_of(&dir, beam);
+    let [lift, set] = moved[..] else {
+        panic!("lifted once and set down once: {moved:?}")
+    };
+    assert!(lift.frame.slot.is_some(), "held in the carry's slot");
+    let m = set.orientation.rotate(load.middle).unwrap();
+    let middle = set.position.x + m.x;
+    println!(
+        "C7: {samples} samples of the carry, none through the post; it stopped with the beam's middle at x {} mm, \
+         {} mm short of the post's west face; set down there, its middle at x {} mm (souls:carry-blocked); the \
+         carriers walked on and left",
+        east_most / 1000,
+        (post.0 - 100_000 - east_most) / 1000,
+        middle / 1000
+    );
+    assert!(samples > 10, "the carry moved before it stopped");
+    assert!(
+        east_most < post.0 - 100_000 && post.0 - 100_000 - east_most < 400_000,
+        "stopped at the post, not before it: {east_most}"
+    );
+    assert!(
+        (middle - east_most).abs() < 2_000,
+        "set down where its last sample had it, not moved: {middle} against {east_most}"
+    );
+}
+
 /// N2's test world with the 6.1 m upright (0.135 C6) standing loose where C4's upright stands, in its place, its kind
 /// given to the facts as the yard's are; the construction entries (its own among them) in `d`.
 fn tall_world(d: &Path) -> String {

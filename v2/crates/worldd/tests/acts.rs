@@ -1034,6 +1034,8 @@ fn e16_two_souls_take_a_slot_of_two_naming_it_through_the_gateway() {
     run.stop();
 }
 
+#[path = "acts/attend.rs"]
+mod attend;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]

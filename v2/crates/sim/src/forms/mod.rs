@@ -1335,6 +1335,19 @@ impl Forms {
         }
     }
 
+    /// [`other_slots`] for a caller that binds the arguments itself and starts with [`Forms::start`] (worldd's acts,
+    /// E14b): each slot argument on another thing is refused by name as [`Forms::commit`] refuses it.
+    pub fn other_slots<G: Geometry, R: Reach>(
+        &self,
+        w: &World<'_, G, R>,
+        body: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        args: &form_runner::Args,
+    ) -> Result<(), Refusal> {
+        other_slots(w, &self.slots_of, body, entry, form, args)
+    }
+
     /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
     /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
