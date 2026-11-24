@@ -16,6 +16,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request, start } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopAll } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
@@ -58,7 +59,7 @@ const current = () => waitFor(async () => { const s = await status(); return s.c
 
 after(async () => {
   if (rt) await request(rt.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
+  await stopAll(procs);
   rmSync(dir, { recursive: true, force: true, maxRetries: 10 }); // the stopped daemon may still be closing its files
 });
 

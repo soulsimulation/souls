@@ -323,6 +323,6 @@ export default defineConfig({
   // chunkSizeWarningLimit (kB, lane BUDGET 2026-10-22): just above the largest legitimate chunk, core-kit (1,491 kB raw /
   // 221 kB gzip on 3.62: the shared three.js + catalogue kit every world loads), so any chunk past it warns at build time.
   // The hard limit is the release gate's V3-bundle step (tools/test-harness/bundle-budget): +10% per chunk or total fails.
-  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', early: 'src/early-entry.ts' },
+  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', pairing: 'pair.html', early: 'src/early-entry.ts' },
     output: { codeSplitting: { groups: vendorGroups() } } } },
 });

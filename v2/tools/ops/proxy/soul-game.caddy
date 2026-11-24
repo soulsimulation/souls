@@ -5,7 +5,7 @@
 #
 # @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: today's launcher's loopback port, as in
 # today's file. The new system's loopback addresses are the install's (v2/docs/runbook/install.md): the directory on
-# 7310, the viewers' origin on 7320, the agents' relay on 7330, the page's files in /usr/local/lib/souls/web.
+# 7310, the viewers' origin on 7320, the agents' relay on 7330, the body files in /usr/local/lib/souls/web.
 #
 # Since 0.132 Core (F4): the front door keeps the old home. Today's launcher serves every page and every API it has
 # always served: /, sign-in and account (/v1/account/*, /v1/auth/config), the world list, the site's pages, sitemap,
@@ -19,10 +19,12 @@
 #   Every other address under /w/<slug>/ stays with today's launcher; an unmapped slug's v2 paths do too.
 # - A switched world's bootstrap, /w/<slug>/v1/bootstrap, to the viewers' origin (7320), under the same activation
 #   rule: the new Soul client reads it to pair with the world.
-# - Pairing, for the new Soul client: /pair (the pairing card, from the new page's files), /v1/pair/* and
-#   /v1/agent/account[/*] to the directory (7310), and /v1/account/view-token (the old page's sign-in exchanged for the
-#   owner's message box, #4250); every other /v1/account/* path and /v1/auth/config stay with today's launcher. The card's own /assets/* files come from the new page's folder where
-#   such a file exists, else today's.
+# - Pairing, for the new Soul client: /pair (the pairing card, built by the old page's build: pair.html in today's
+#   release, X2; its own script files from there too), /v1/pair/* and /v1/agent/account[/*] to the directory (7310),
+#   and /v1/account/view-token (the old page's sign-in exchanged for the owner's message box, #4250); every other
+#   /v1/account/* path and /v1/auth/config stay with today's launcher.
+# - Body files: /assets/* comes from the install's page folder (/usr/local/lib/souls/web: the body files under
+#   assets/bodies/, v2/tools/ops/release/bodies.ts) where such a file exists, else from today's launcher.
 # - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
 # - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
@@ -78,8 +80,20 @@ https://soul.game {
 	handle @pair {
 		header X-Souls-System v2
 		header X-Robots-Tag "noindex, nofollow"
-		rewrite * /src/pairing/card.html
-		root * /usr/local/lib/souls/web
+		rewrite * /pair.html
+		root * /srv/sim-worlds/production/apps/web/dist
+		file_server
+	}
+	# the card's own script files, from the same build, so the card works while today's launcher is down (X2)
+	@card {
+		path_regexp card ^/assets/(pairing|modulepreload-polyfill)-[A-Za-z0-9_-]+\.js$
+		file {
+			root /srv/sim-worlds/production/apps/web/dist
+		}
+	}
+	handle @card {
+		header X-Souls-System v2
+		root * /srv/sim-worlds/production/apps/web/dist
 		file_server
 	}
 	@v2file {

@@ -199,7 +199,7 @@ step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
 step client-check node --test client/src/check/*.test.mjs
 # A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
-step client-memory node --test client/src/memory/*.test.mjs
+step client-memory node --test client/src/memory/*.test.mjs client/src/soul/*.test.mjs
 # Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
 step client-history node --test client/src/history/*.test.mjs
 # A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
@@ -241,7 +241,14 @@ driver_served() {
 # refusal by name), the says with receipts, with no error and no socket closed; the report's minutes are printed.
 step driver-served bash -c 'set -euo pipefail
   cargo build -p gatewayd -p worldd -p testworld -p driver --locked --quiet
-  t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap "kill \$(jobs -p) 2>/dev/null; rm -rf $d" EXIT
+  # The folder goes only once worldd and gatewayd have ended (SIGKILL after 15 s): a stopping worldd still backs up its
+  # stream for up to 8 s (R15, #4469), as v2/tools/teardown/stop.mjs does for the Node tests.
+  stop() {
+    local p x; p=$(jobs -p); kill $p 2>/dev/null || true
+    for x in $p; do for _ in $(seq 150); do kill -0 "$x" 2>/dev/null || break; sleep 0.1; done; done
+    kill -9 $p 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$d"
+  }
+  t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap stop EXIT
   "$t"/testworld --out "$d" >/dev/null
   "$t"/worldd seed --facts "$d/testworld-s1-t0.facts.json" --dir "$d/w" --souls 10 --at -40,30 >/dev/null
   "$t"/worldd serve --dir "$d/w" --socket "$d/w.sock" >"$d/worldd.log" 2>&1 &
@@ -344,9 +351,6 @@ if on sim; then tests_sim; wasm_pkg; hatch; fi
 if on worldd; then tests_worldd; fi
 if on wasm; then wasm_pkg; wasm_loads; wasm_goldens; replica_equal; facts; fi
 if on client; then
-  # import-accounts: the pairing tests (client/src/pair/former.test.mjs) start target/debug/import-accounts, which the
-  # whole-workspace `cargo test` used to leave there.
-  step client-bins cargo build -p import-accounts --locked --quiet
   wasm_pkg; ops_health; web_steps; client_steps; driver_served
   [[ -z $full ]] || speed_bars
 fi
