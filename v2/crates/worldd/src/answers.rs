@@ -107,7 +107,9 @@
 //!
 //! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
 //! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
-//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. A
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick; the way
+//! thread sweeps a lift's way to its destination and searches one that turns its load (0.135 R2,
+//! [`engine::WayAsk`]), the lift answered when it comes back or refused `carry-way-late` at its deadline. A
 //! lockstep tick waits for the planner's answers to the last one as it waits for every check, so a run fed the same
 //! inputs repeats; a free-running one waits at most a tenth of a tick for each batch and reads a late one at a later
 //! tick, so the clock never stops for the planner.
@@ -394,6 +396,10 @@ pub enum Event {
     SetDown(Box<(Id, R<SetDownChecked>)>),
     /// A crew's take or seating with the walkers' maps prepared from its part (0.135 A2), or its refusal.
     Part(Box<PartChecked>),
+    /// A lift's way that turns its load, searched off the clock by the way thread (0.135 R2), or its refusal.
+    Way(Box<(engine::WayAsk, engine::Way)>),
+    /// The way thread ended, however it ended: the ways it held never come back (0.135 R2).
+    WaysGone,
     /// An undo or a redo checked off the clock thread (G4 served, #3694), or its refusal.
     Undone(Box<(Id, Result<crate::undo::Checked, Refused>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
@@ -453,6 +459,8 @@ pub struct Ran {
     pub seated: Vec<(Id, Id)>,
     /// Route searches the bodies' planner ran, off the clock (K18b).
     pub searched: u64,
+    /// What the engine keeps for lifts' ways (0.135 R2): lifts waiting for one, and ways back not yet read.
+    pub ways_kept: (usize, usize),
 }
 
 /// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
@@ -1111,6 +1119,14 @@ struct Clock {
     set_down: Vec<(Id, R<SetDownChecked>)>,
     /// Crews' takes and seatings with their maps, committed (or refused) at the next tick (0.135 A2).
     seated: Vec<PartChecked>,
+    /// Where lifts' way searches go, off the clock (0.135 R2): the way thread, with the engine.
+    ways: Option<Sender<engine::WayAsk>>,
+    /// Ways back since the last tick, in the order they were asked: their lifts run again at the next (0.135 R2).
+    ways_back: Vec<(engine::WayAsk, engine::Way)>,
+    /// Ways sent to the way thread and not yet back: each is outstanding.
+    ways_out: usize,
+    /// The way thread ended (`Event::WaysGone`): the lifts still waiting are refused `carry-way-off` at the next tick.
+    ways_gone: bool,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// The creator's edit history (G4, #3694): each committed edit's before-values, for undo and redo.
@@ -4232,7 +4248,37 @@ impl Clock {
             }
         }
         self.forms.release_sight();
-        for a in std::mem::take(&mut self.engine_acts) {
+        // Lifts whose ways came back run again first, in the order they were asked (0.135 R2); a lift whose deadline
+        // passed waits no longer, and its way is dropped, as is the way of a lift ended any other way since.
+        let mut acts = Vec::new();
+        if let Some(e) = self.engine.as_mut() {
+            for (ask, way) in std::mem::take(&mut self.ways_back) {
+                if !self.open.contains_key(&ask.intent) {
+                    e.way_late(ask.intent);
+                    continue;
+                }
+                acts.extend(e.way_back(ask, way));
+            }
+        }
+        // The way thread ended: every lift still waiting for a way is refused by name, and none waits again.
+        if std::mem::take(&mut self.ways_gone) {
+            let waiting = self
+                .engine
+                .as_ref()
+                .map(Engine::waiting_ids)
+                .unwrap_or_default();
+            for id in waiting {
+                if let Some(e) = self.engine.as_mut() {
+                    e.way_late(id);
+                }
+                if let Some(o) = self.open.get(&id) {
+                    let (actor, sequence) = (o.actor, o.sequence);
+                    self.end(id, |c| c.refusal(actor, sequence, "carry-way-off"));
+                }
+            }
+        }
+        acts.append(&mut self.engine_acts);
+        for a in acts {
             let Some(o) = self.open.get(&a.id) else {
                 continue;
             };
@@ -4250,11 +4296,35 @@ impl Clock {
                     detail: "the world has no rules or no bodies for them".into(),
                 }),
             };
+            let waits = self.engine.as_ref().is_some_and(|e| e.waits(a.id));
             match r {
-                // A take or a seating is answered at its commit through the walkers' maps (0.135 A2).
-                Ok(()) if a.verb.deferred() => {}
+                // A take or a seating is answered at its commit through the walkers' maps (0.135 A2); a lift that
+                // names where its front goes when its way comes back (0.135 R2).
+                Ok(()) if a.verb.deferred() || waits => {}
                 Ok(()) => self.engine_done.push(a.id),
                 Err(r) => self.end(a.id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+        // The ways the lifts asked for go to the way thread, each outstanding until it comes back, so lockstep waits
+        // for it before the next tick as for every check.
+        let asked = self
+            .engine
+            .as_mut()
+            .map(Engine::ways_asked)
+            .unwrap_or_default();
+        for ask in asked {
+            let id = ask.intent;
+            if self.ways.as_ref().is_some_and(|tx| tx.send(ask).is_ok()) {
+                self.outstanding += 1;
+                self.ways_out += 1;
+                continue;
+            }
+            if let Some(e) = self.engine.as_mut() {
+                e.way_late(id);
+            }
+            if let Some(o) = self.open.get(&id) {
+                let (actor, sequence) = (o.actor, o.sequence);
+                self.end(id, |c| c.refusal(actor, sequence, "carry-way-off"));
             }
         }
     }
@@ -4744,6 +4814,11 @@ impl Clock {
                 continue;
             };
             let (actor, sequence, body) = (o.actor, o.sequence, o.body);
+            // A lift still waiting for its way (0.135 R2) is refused by name; the way, when it comes, is dropped.
+            if self.engine.as_mut().is_some_and(|e| e.way_late(id)) {
+                self.end(id, |c| c.refusal(actor, sequence, "carry-way-late"));
+                continue;
+            }
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
             // A form's run whose act timed out is left: it ends at its next stable moment (F3). An act still waiting
             // on its body's run (#4187) is left alone, and never starts.
@@ -5081,6 +5156,7 @@ impl Clock {
             panicked,
             seated,
             searched: self.bodies.as_ref().map_or(0, Bodies::searched),
+            ways_kept: self.engine.as_ref().map_or((0, 0), Engine::ways_kept),
         }
     }
 }
@@ -5777,6 +5853,11 @@ pub fn start<S: Storage + 'static>(
             })
         })
         .transpose()?;
+    // The engine's lifts have their ways searched here, off the clock (0.135 R2).
+    let ways = match engine_parts {
+        Some(_) => Some(way_searcher(events.clone()).map_err(io)?),
+        None => None,
+    };
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
     thread::Builder::new()
@@ -5884,6 +5965,10 @@ pub fn start<S: Storage + 'static>(
         editing,
         set_down: Vec::new(),
         seated: Vec::new(),
+        ways,
+        ways_back: Vec::new(),
+        ways_out: 0,
+        ways_gone: false,
         edited: Vec::new(),
         history: sim::edit::undo::History::default(),
         steps: BTreeMap::new(),
@@ -6062,6 +6147,18 @@ pub fn start<S: Storage + 'static>(
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.seated.push(*k);
                     }
+                    // The way thread ended: the ways it had are never coming back, so lockstep waits no longer.
+                    Event::WaysGone => {
+                        c.outstanding = c.outstanding.saturating_sub(c.ways_out);
+                        c.ways_out = 0;
+                        c.ways = None;
+                        c.ways_gone = true;
+                    }
+                    Event::Way(k) => {
+                        c.ways_out = c.ways_out.saturating_sub(1);
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.ways_back.push(*k);
+                    }
                     Event::Undone(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.undone.push(*k);
@@ -6231,6 +6328,39 @@ fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
         }
     }
     Ok(())
+}
+
+/// The way thread (0.135 R2): each lift's way search ([`engine::WayAsk::search`]), off the clock, in the order asked;
+/// each answer goes back to the clock as [`Event::Way`]. However the thread ends, the clock is told
+/// ([`Event::WaysGone`]), so no lift waits for a way that never comes.
+fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>> {
+    /// Says [`Event::WaysGone`] when the thread ends, by a return or by a panic.
+    struct Gone(Sender<Event>);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let _ = self.0.send(Event::WaysGone);
+        }
+    }
+    let (tx, rx) = channel::<engine::WayAsk>();
+    thread::Builder::new()
+        .name("carry-way".into())
+        .spawn(move || {
+            let _gone = Gone(events.clone());
+            for ask in rx {
+                // A panic in one search refuses that lift; the thread goes on.
+                let way = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ask.search()))
+                    .unwrap_or_else(|_| {
+                        Err(Refusal {
+                            name: "carry-unproven",
+                            detail: "the way search failed".into(),
+                        })
+                    });
+                if events.send(Event::Way(Box::new((ask, way)))).is_err() {
+                    break;
+                }
+            }
+        })?;
+    Ok(tx)
 }
 
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan_on`,

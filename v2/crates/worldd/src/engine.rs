@@ -21,7 +21,8 @@
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
-//!   name (a take or a seating once its commit is written, below). A carry in progress is sampled each tick between
+//!   name (a take or a seating once its commit is written, below; a lift that names where its front goes once its way
+//!   comes back, [`WayAsk`]). A carry in progress is sampled each tick between
 //!   its carriers ([`Engine::tick`]). A carry that breaks off (a carrier's leave, carriers drifted apart, a restart)
 //!   sets its load down where it is and says why (0.135 C3).
 //! - **A restart keeps its activities** (E26, #3329): once the bodies are back, [`Engine::restore`] reads them from
@@ -35,6 +36,7 @@
 //! Not here: the view tier addressing an offer to the bodies asked (#3368's follow-up).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use replica::activity::ActivityKind;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal, read_id};
@@ -47,7 +49,7 @@ use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
-use sim::activity::carry::{Carry, Fixed, Load};
+use sim::activity::carry::{Carry, Fixed, Load, turn};
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
 use sim::moves::{Moves, Reach};
@@ -158,6 +160,47 @@ pub struct Engine {
     retried: BTreeMap<Id, u8>,
     /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
     fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
+    /// The way searches lifts asked since the last call to [`Engine::ways_asked`], in order.
+    asked: Vec<WayAsk>,
+    /// Each lift waiting for its way, by intent: the act, run again when the way comes back ([`Engine::way_back`]).
+    waiting: BTreeMap<Id, Act>,
+    /// Each way back and not yet read by its lift run again, by intent: what was asked, and the way or its refusal.
+    found: BTreeMap<Id, (WayAsk, Way)>,
+}
+
+/// A lift's way, found: none for a straight way, else the poses of one that turns the load, or its refusal.
+pub type Way = R<Option<Vec<turn::Ends>>>;
+
+/// A lift's way (0.135 R2, off the clock): a lift that names where its front goes has its way swept and, when the
+/// straight way clips, a way that turns the load searched ([`Load::way_to`]) on a thread of its own, never on the
+/// world's clock. The lift is answered when the way comes back, in the order the ways were asked; in lockstep the
+/// clock waits for it before the next tick, as for every check, so the same inputs land the lift at the same tick.
+/// The same inputs give the same way on any thread.
+#[derive(Clone, Debug)]
+pub struct WayAsk {
+    /// The lift's intent.
+    pub intent: Id,
+    pub load: Load,
+    pub fixed: Arc<Fixed>,
+    /// Where the front and the back carriers stand, and where the front goes, on the open ground's plan, µm.
+    pub front: [i64; 2],
+    pub back: [i64; 2],
+    pub to: [i64; 2],
+}
+
+impl WayAsk {
+    /// The sweep and the search, off the clock.
+    pub fn search(&self) -> Way {
+        self.load
+            .way_to(&self.fixed, self.front, self.back, self.to)
+    }
+
+    /// Whether `other` asks the same search.
+    fn same(&self, other: &WayAsk) -> bool {
+        (self.intent, self.load, self.front, self.back, self.to)
+            == (other.intent, other.load, other.front, other.back, other.to)
+            && *self.fixed == *other.fixed
+    }
 }
 
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
@@ -353,7 +396,44 @@ impl Engine {
             riding: Vec::new(),
             retried: BTreeMap::new(),
             fixed: BTreeMap::new(),
+            asked: Vec::new(),
+            waiting: BTreeMap::new(),
+            found: BTreeMap::new(),
         }
+    }
+
+    /// Whether act `id` waits for its way (a lift, [`WayAsk`]): it is answered when the way comes back.
+    pub fn waits(&self, id: Id) -> bool {
+        self.waiting.contains_key(&id)
+    }
+
+    /// The lifts waiting for their ways, by intent.
+    pub fn waiting_ids(&self) -> Vec<Id> {
+        self.waiting.keys().copied().collect()
+    }
+
+    /// Lifts waiting for ways and ways back not yet read: what the engine keeps between ticks for them (0.135 R2).
+    pub fn ways_kept(&self) -> (usize, usize) {
+        (self.waiting.len(), self.found.len())
+    }
+
+    /// The way searches asked since the last call, in order, to be searched off the clock.
+    pub fn ways_asked(&mut self) -> Vec<WayAsk> {
+        std::mem::take(&mut self.asked)
+    }
+
+    /// A way come back for `ask`: the lift waiting for it, to be run again, which reads the way; none when the lift
+    /// no longer waits (its deadline passed), and the way is dropped.
+    pub fn way_back(&mut self, ask: WayAsk, way: Way) -> Option<Act> {
+        let act = self.waiting.remove(&ask.intent)?;
+        self.found.insert(ask.intent, (ask, way));
+        Some(act)
+    }
+
+    /// Lift `id`'s deadline passed while it waited for its way: it waits no longer, and whether it was waiting.
+    pub fn way_late(&mut self, id: Id) -> bool {
+        self.found.remove(&id);
+        self.waiting.remove(&id).is_some()
     }
 
     /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
@@ -437,6 +517,9 @@ impl Engine {
         a: &Act,
         now: Micros,
     ) -> R<()> {
+        // A way this act asked for, come back (a lift run again, [`Engine::way_back`]): taken here, so however the act
+        // ends (refused before its way is read, say `carry-lifted`) nothing of it is kept.
+        let found = self.found.remove(&a.id);
         if let Some(ask) = match a.verb {
             Verb::Steer => Some(crate::carrier::Ask::Steer),
             Verb::Land => Some(crate::carrier::Ask::Land),
@@ -806,17 +889,35 @@ impl Engine {
                         None => None,
                     };
                     let xz = |v: Vec3| [v.x, v.z];
-                    let way = load.check(
-                        crew,
-                        xz(f),
-                        xz(k),
-                        xz(middle),
-                        axis,
-                        to.map(xz).zip(fixed.as_ref()),
-                    )?;
+                    load.check_lift(crew, xz(f), xz(k), xz(middle), axis)?;
                     let on_plan: Vec<(Id, [i64; 2])> =
                         sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
                     load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
+                    // 0.135 R2, off the clock: the way to a destination is swept, and when the straight way clips one
+                    // that turns the load is searched, on the way thread; the lift waits for it, nothing written, and
+                    // runs again when it comes back. A way asked for other inputs (a carrier moved since, the ground
+                    // changed) is asked again.
+                    let way = match (to, fixed) {
+                        (Some(to), Some(fixed)) => {
+                            let ask = WayAsk {
+                                intent: a.id,
+                                load,
+                                fixed: Arc::new(fixed),
+                                front: xz(f),
+                                back: xz(k),
+                                to: xz(to),
+                            };
+                            match found {
+                                Some((asked, way)) if asked.same(&ask) => way?,
+                                _ => {
+                                    self.waiting.insert(a.id, a.clone());
+                                    self.asked.push(ask);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        _ => None,
+                    };
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))

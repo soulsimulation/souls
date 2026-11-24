@@ -1598,4 +1598,36 @@ mod turning {
         let r = turn_way(&load, &fixed, [f, -M], [b, -M], [0, 5 * M], 20);
         assert_eq!(r.map_err(|e| e.name), Err("carry-unproven"));
     }
+
+    /// The search runs off the clock (the follow-up to #4564's review): searched on eight threads at once, the door's
+    /// way is the way searched here, pose for pose; on a thread marked as the world's clock it is a route search run
+    /// there, which panics in a debug build and is counted in a release build (`crate::commit::off_clock`).
+    #[test]
+    fn r2_the_search_gives_the_same_way_on_any_thread_and_never_on_the_clock() {
+        let (load, fixed) = (beam(), std::sync::Arc::new(room(1_200_000)));
+        let [b, f] = load.places();
+        let (front, back, to) = ([f, -M], [b, -M], [0, 5 * M]);
+        let here = turn_way(&load, &fixed, front, back, to, BUDGET).expect("a way");
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let fixed = std::sync::Arc::clone(&fixed);
+                std::thread::spawn(move || turn_way(&load, &fixed, front, back, to, BUDGET))
+            })
+            .collect();
+        for t in threads {
+            assert_eq!(t.join().unwrap().expect("a way"), here, "the same way");
+        }
+        let on_clock = std::thread::spawn(move || {
+            crate::commit::mark_clock_thread();
+            let before = crate::commit::checks_on_clock();
+            let _ = turn_way(&load, &fixed, front, back, to, BUDGET);
+            crate::commit::checks_on_clock() - before
+        })
+        .join();
+        if cfg!(debug_assertions) {
+            assert!(on_clock.is_err(), "panics on the clock in a debug build");
+        } else {
+            assert!(on_clock.is_ok_and(|n| n >= 1), "counted in a release build");
+        }
+    }
 }

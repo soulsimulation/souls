@@ -13,9 +13,12 @@
 //!   distance to the destination), in a fixed order, so the same world gives the same way. The middle stays within [`ROOM`] beyond half the span of
 //!   the straight way (from the back, to the front, to the destination). It ends when the front is within [`STEP`]
 //!   of the destination. Every pose of that band tried, none there: `carry-load-blocked`, before the lift. More than
-//!   `budget` poses tried: `carry-unproven`. It runs on the world's clock thread, so [`BUDGET`] is small: a way
-//!   through a door near the lift, not a long way round (a destination beyond it is refused unproven; lift for the
-//!   door's far side, then lift again).
+//!   `budget` poses tried: `carry-unproven`. [`BUDGET`] is small, so a lift is answered soon: a way through a door
+//!   near the lift, not a long way round (a destination beyond it is refused unproven; lift for the door's far side,
+//!   then lift again).
+//! - **Off the clock.** The search is a route search: it calls `crate::commit::off_clock`, so on the world's clock
+//!   thread it panics in a debug build and is counted in a release build. worldd's engine asks it of its own thread
+//!   and answers the lift when the way comes back; the same inputs give the same way on any thread.
 //! - **The way is the world's** ([`super::Carry::way`]): kept on the carry at the lift and said to its audience
 //!   (`souls:carry-way`), so its carriers walk it pose by pose; each tick is still checked by C7's check.
 //!
@@ -42,8 +45,8 @@ pub const MARGIN: i64 = 100_000;
 pub const BODY_HALF: i64 = 330_000;
 /// How far beyond half the span the middle may stray from the straight way, µm.
 pub const ROOM: i64 = 2_000_000;
-/// How many poses the search tries before it gives up as unproven. It runs on the world's clock thread inside the
-/// lift's check, so this bounds its time: measured in release at about 20 µs a pose on a ground of posts every 1.5 m
+/// How many poses the search tries before it gives up as unproven. It bounds how long a lift waits for its way, off
+/// the clock: measured in release at about 20 µs a pose on a ground of posts every 1.5 m
 /// (`r2_a_sealed_destination_never_holds_the_clock`), a few milliseconds at most. A door near the lift takes about a
 /// hundred.
 pub const BUDGET: usize = 200;
@@ -129,6 +132,7 @@ pub fn search(
     to: Xz,
     budget: usize,
 ) -> (R<Vec<Ends>>, usize) {
+    crate::commit::off_clock();
     let mut tried = 0usize;
     let r = search_counted(load, fixed, (front, back), to, budget, &mut tried);
     (r, tried)
