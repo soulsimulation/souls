@@ -12,7 +12,7 @@ import { addGodToken } from './worldops.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { appendFileSync } from 'node:fs';
 import { THUMB, intakeThumbnail, thumbnailRate } from './thumbnail.mjs';
-import { setUploadClassifier } from '../../apps/server/src/moderation/classifier.ts';
+import { setUploadClassifier } from './moderation/classifier.ts';
 import { testPort } from '../../apps/server/test/test-port.ts';
 const P0 = await testPort(8);
 

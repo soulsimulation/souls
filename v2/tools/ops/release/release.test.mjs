@@ -5,7 +5,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -77,6 +77,16 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   assert.match(check.stdout, new RegExp(`kind entries +${rel}/reseed/kinds \\(\\d+ entries\\)`));
   assert.match(check.stdout, /3 of the world's objects at their keys/);
   assert.match(check.stdout, /check only; nothing changed/);
+  // a fresh reseed refuses while a reseed to this build is not undone, and names the label to resume
+  const manifest = readFileSync(join(rel, 'manifest.json'), 'utf8');
+  const built = /"name":"worldd","hash":"(1220[0-9a-f]{64})"/.exec(manifest)[1];
+  mkdirSync(join(data, 'worlds/aside'), { recursive: true });
+  writeFileSync(join(data, 'worlds/aside', `${world}-20261124T000000Z.reseed`), `world=${world}\nold=1220${'0'.repeat(64)}\nnew=${built}\nlabel=20261124T000000Z\n`);
+  const again = run(['reseed', sha, 'check'], env);
+  assert.equal(again.status, 1, again.stdout + again.stderr);
+  assert.match(again.stderr, /reseed 20261124T000000Z to this build is not undone: resume it \(reseed=20261124T000000Z/);
+  writeFileSync(join(data, 'worlds/aside', `${world}-20261124T000000Z.reseed`), `world=${world}\nnew=${built}\nlabel=20261124T000000Z\nundone=20261124T010000Z\n`);
+  assert.equal(run(['reseed', sha, 'check'], env).status, 0, 'an undone reseed does not block a fresh one');
   // a label that is not one is refused before anything runs
   assert.equal(run(['reseed', sha, 'run', 'tomorrow'], env).status, 1);
   assert.equal(run(['reseed-undo', 'nope', 'check'], env).status, 2);

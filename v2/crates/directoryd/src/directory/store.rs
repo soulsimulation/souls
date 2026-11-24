@@ -57,6 +57,21 @@ pub trait Store {
             format!("{key}: this store does not delete"),
         )
     }
+
+    /// The object at `key`'s length and ETag, without its bytes, or `None` when there is none. A store with no cheaper
+    /// way reads the object.
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        Ok(self.get(key)?.map(|o| (o.bytes.len() as u64, o.etag)))
+    }
+
+    /// Copies the object at `from` to `to`, a key that has none, inside the store; returns the copy's ETag. A store
+    /// with no copy of its own reads the object and writes it create-only.
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        let Some(o) = self.get(from)? else {
+            return refuse("store-error", format!("{from}: no object to copy"));
+        };
+        self.put(to, &o.bytes, When::Absent)
+    }
 }
 
 /// Several machines' directories over one store.
@@ -75,6 +90,14 @@ impl<T: Store + ?Sized> Store for &T {
 
     fn delete(&self, key: &str) -> R<()> {
         (**self).delete(key)
+    }
+
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        (**self).head(key)
+    }
+
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        (**self).copy(from, to)
     }
 }
 

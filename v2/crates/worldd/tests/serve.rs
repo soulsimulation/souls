@@ -1020,6 +1020,85 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// R12 (0.133): a world whose public stream cannot recover from its store (as production's did on 23 Nov, a read past
+/// the client's cap) never ends for it, which systemd would only repeat: it listens degraded, with no public pointer
+/// (no viewers) and `health.json` naming the fault, and tries again with back-off. Once the store answers, the stream
+/// serves, the pointer is back and it names a valid stream.
+// A real process on the real clock: the back-off and the health file's writes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it_answers() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("r12");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/r12", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    let pointer = dir.join("views/world.json");
+    // Reads `health.json` until its stream says `state`; the deadline only stops a hung test.
+    let stream_until = |state: &str| -> String {
+        let want = format!("\"stream\":{{\"state\":\"{state}\"");
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(
+                Instant::now() < end,
+                "no stream {state} in health.json: {h}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // The first start writes the stream's recovery objects to the store.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    stream_until("serving");
+    w.kill();
+    assert!(
+        s.paths().iter().any(|p| p.contains("/stream-recovery/")),
+        "the first start wrote its stream's recovery objects"
+    );
+    // As on a new machine: no views, so the stream recovers from the store, and the store refuses those reads.
+    std::fs::remove_dir_all(dir.join("views")).expect("views");
+    let _ = std::fs::remove_file(&health);
+    s.refuse_reads(usize::MAX, 403, "stream-recovery");
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    let said = w.line("worldd: the public stream is degraded, no viewers: ");
+    assert!(said.contains("store-error"), "{said}");
+    w.line("listening");
+    let _ = connect(&socket);
+    let h = stream_until("degraded");
+    assert!(h.contains("\"fault\":\"store-error: "), "{h}");
+    assert!(!pointer.exists(), "no viewers while degraded");
+    // Tried again with back-off: a second refused try, a second apart or more.
+    let again = w.line("worldd: the public stream is degraded, no viewers: ");
+    assert!(again.contains("try 2 refused"), "{again}");
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+    // The store answers: the next try serves.
+    s.refuse_reads(0, 403, "");
+    w.line("worldd: the public stream recovered after ");
+    stream_until("serving");
+    assert!(pointer.is_file(), "the pointer is back");
+    let (_, files) = served_stream(&dir);
+    assert!(!files.is_empty(), "it names a valid stream");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// O3b's kill test over the store `spec` names, with `env` set for the world: every line the world printed.
 // A real process on the real clock: the waits for shipping are real time.
 #[allow(clippy::disallowed_methods)]

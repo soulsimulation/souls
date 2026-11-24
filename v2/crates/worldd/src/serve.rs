@@ -130,6 +130,7 @@ use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
+use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
 #[cfg(test)]
@@ -155,6 +156,8 @@ fn stamp(stage: &str) {
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
+/// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
+const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 #[cfg(test)]
 const BOUND: usize = 1 << 16;
@@ -2670,7 +2673,8 @@ fn serve(args: &[String]) -> R<()> {
     // for the stream's first flush, which on a fresh world has no history to replay.
     let pointer_path = views.join("world.json");
     let fresh = !pointer_path.exists();
-    let (ready_tx, ready_rx) = channel::<()>();
+    // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
+    let (ready_tx, ready_rx) = channel::<bool>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
     // What a closed container holds stays out of the public stream too (#3948).
@@ -2706,45 +2710,93 @@ fn serve(args: &[String]) -> R<()> {
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
-                let start = view_out::PublicStart {
-                    root: &views_dir,
-                    header: &stream_header,
-                    key,
-                    initial: stream_initial,
-                    record: stream_record,
-                    checkpoint: stream_checkpoint,
-                    text: stream_text,
-                    names: stream_names,
-                    clock_seed: stream_clock,
-                    history: Some(&*stream_found),
-                };
-                // Its recovery reads are the world's start: patient (#1960).
-                let mut writer = patiently(|| {
-                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)
-                })?;
-                // Both the pointer and placement bootstrap resolve the existing strict public history export.
-                let history = "history/";
-                let pointer = format!(
-                    "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
-                    stream::dir(&stream_header, &key)
-                );
-                view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
-                // Physical cursor includes input records; public effect versions are independently validated by the
-                // observer.
-                writer.bridge_to(stream_found.first)?;
-                for (offset, bytes) in stream_found.records.iter().enumerate() {
-                    let record = stream_found.first + offset as u64;
-                    if record >= writer.source_cursor() {
-                        writer.push(record, bytes)?;
+                let recover = || -> Result<_, Refusal> {
+                    let start = view_out::PublicStart {
+                        root: &views_dir,
+                        header: &stream_header,
+                        key,
+                        initial: stream_initial.frozen(),
+                        record: stream_record,
+                        checkpoint: stream_checkpoint.clone(),
+                        text: stream_text.clone(),
+                        names: stream_names.clone(),
+                        clock_seed: stream_clock,
+                        history: Some(&*stream_found),
+                    };
+                    // Its recovery reads are the world's start: patient (#1960).
+                    let mut writer = patiently(|| {
+                        view_out::PublicWriter::open_hiding(
+                            start,
+                            &stream_store,
+                            stream_closed.clone(),
+                        )
+                    })?;
+                    // Both the pointer and placement bootstrap resolve the existing strict public history export.
+                    let history = "history/";
+                    let pointer = format!(
+                        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
+                        stream::dir(&stream_header, &key)
+                    );
+                    view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
+                    // Physical cursor includes input records; public effect versions are independently validated by
+                    // the observer.
+                    writer.bridge_to(stream_found.first)?;
+                    for (offset, bytes) in stream_found.records.iter().enumerate() {
+                        let record = stream_found.first + offset as u64;
+                        if record >= writer.source_cursor() {
+                            writer.push(record, bytes)?;
+                        }
                     }
+                    writer.flush()?;
+                    Ok(writer)
+                };
+                // R12: a refused recovery (the store out of reach or refusing, as a read past its cap did on 23 Nov)
+                // never ends the world, which systemd would only start again into the same refusal. It stays up,
+                // degraded: no public pointer, so no viewers; `health.json` names the fault; tried again with back-off
+                // until the store answers. Records wait in `stream_rx` meanwhile.
+                measures::STREAM.recovering();
+                let mut tries = 0u64;
+                let mut writer = loop {
+                    match recover() {
+                        Ok(w) => break w,
+                        Err(e) => {
+                            tries += 1;
+                            let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                            let fault = refusal(e);
+                            // Degraded before the pointer goes: the main thread's check of it reads both.
+                            measures::STREAM.degraded(&fault, tries, wait);
+                            let _ = std::fs::remove_file(views_dir.join("world.json"));
+                            eprintln!(
+                                "worldd: the public stream is degraded, no viewers: {fault}; try {tries} refused, the next in {wait} ms"
+                            );
+                            let _ = ready_tx.send(false);
+                            // The wait, answering each ask to sleep meanwhile: a degraded stream writes no sleeping
+                            // pointer, so the world stays awake.
+                            for _ in 0..wait / 100 {
+                                if let Ok((_, answer)) =
+                                    sleep_rx.recv_timeout(std::time::Duration::from_millis(100))
+                                {
+                                    let _ = answer.send(Err(format!("stream-degraded: {fault}")));
+                                }
+                            }
+                        }
+                    }
+                };
+                // An ask made during the last try is as old as that try, its asker likely gone: answered no, never
+                // taken for a sleep the world would not make (the stream would stop with it).
+                while let Ok((_, answer)) = sleep_rx.try_recv() {
+                    let _ = answer.send(Err("stream-recovering: asked before it served".to_owned()));
                 }
-                writer.flush()?;
+                measures::STREAM.serving();
+                if tries > 0 {
+                    eprintln!("worldd: the public stream recovered after {tries} refused tries");
+                }
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };
                 published(&writer);
                 stamp("public stream");
-                let _ = ready_tx.send(());
+                let _ = ready_tx.send(true);
                 drop(stream_found);
                 loop {
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
@@ -2786,13 +2838,14 @@ fn serve(args: &[String]) -> R<()> {
                 }
             })();
             if let Err(e) = result {
-                eprintln!(
-                    "worldd: the public stream stopped, the world goes on: {}",
-                    refusal(e)
-                );
+                let fault = refusal(e);
+                measures::STREAM.stopped(&fault);
+                eprintln!("worldd: the public stream stopped, the world goes on: {fault}");
             }
         })
         .map_err(|e| e.to_string())?;
+    // A fresh world waits for its stream's first flush, or for its first refused try (R12): then it listens degraded,
+    // with no pointer, and the stream thread tries again until it serves.
     if fresh && ready_rx.recv().is_err() {
         return Err(
             "public-stream: stopped before its first flush; the world is not servable".into(),
@@ -2804,7 +2857,7 @@ fn serve(args: &[String]) -> R<()> {
     while world.beat.read().0 < 0 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    if !pointer_path.is_file() {
+    if !pointer_path.is_file() && !measures::STREAM.is_degraded() {
         return Err(format!(
             "public-pointer-missing: {}",
             pointer_path.display()
