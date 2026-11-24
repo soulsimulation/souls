@@ -392,10 +392,21 @@ impl Slots {
     /// The free slot of `thing` whose stand point is nearest where `body` stands (x and z), ties by slot number: the
     /// one a request naming only the thing takes (C19, #3457). None when every slot is held or it has none.
     pub fn free(&self, c: &Controller, body: Id, thing: Id) -> Option<u64> {
+        self.free_unless(c, body, thing, &|_| false)
+    }
+
+    /// [`Slots::free`], skipping each slot `taken` says is taken (#4575: every place of it reserved by other runs).
+    pub fn free_unless(
+        &self,
+        c: &Controller,
+        body: Id,
+        thing: Id,
+        taken: &dyn Fn(u64) -> bool,
+    ) -> Option<u64> {
         let from = c.body(body).map_or(Vec3::ZERO, |b| b.pose.position);
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
         self.places_of(thing)
-            .filter(|p| self.free_spot((thing, p.place.slot)).is_some())
+            .filter(|p| self.free_spot((thing, p.place.slot)).is_some() && !taken(p.place.slot))
             .filter_map(|p| {
                 let s = p.stand().ok()?;
                 Some((d(s.x, from.x) + d(s.z, from.z), p.place.slot))
