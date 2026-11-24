@@ -1132,3 +1132,29 @@ fn n14_a_rider_whose_legs_another_claim_takes_is_never_set_down_between_stops() 
     w.c.release(b, d).expect("the walk ends");
     rise_at(&mut w, b, 14_000_000).expect("rises at the next stop");
 }
+
+#[test]
+fn n14_a_trip_ends_at_the_next_stop_and_a_board_waits_for_the_cabin() {
+    use replica::encode::Value;
+    let mut w = world(chair());
+    cabin(&mut w);
+    w.slots.trip_ends(w.chair, vec![(28, Value::Uint(0))]);
+    // Asked at its stop first, as a start finds it: no trip ends.
+    assert!(w.slots.trip_ended(0).is_empty());
+    assert!(w.slots.trip_ended(11_000_000).is_empty(), "between stops");
+    // It comes to the far stop: the trip ends there, once.
+    assert_eq!(
+        w.slots.trip_ended(14_000_000),
+        vec![(w.chair, vec![(28, Value::Uint(0))])]
+    );
+    assert!(w.slots.trip_ended(15_000_000).is_empty());
+    // A form that sits is let walk to it only while the cabin waits at its own stop with a crossing's time left; else
+    // the refusal says when it is back (a lap of 26 s: 10 s there, 3 s on, 10 s at the far stop, 3 s back).
+    assert!(w.slots.boardable_seat(w.chair, 0).is_ok());
+    for t in [9_000_000, 11_000_000, 14_000_000] {
+        let r = w.slots.boardable_seat(w.chair, t).expect_err("away");
+        assert_eq!(r.name, "boarding-frame-away");
+        assert!(r.detail.contains("26000000"), "{r}");
+    }
+    assert!(w.slots.boardable_seat(w.chair, 26_000_000).is_ok());
+}

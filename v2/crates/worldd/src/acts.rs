@@ -2589,6 +2589,24 @@ impl Acts {
                 first.get_or_insert(e);
                 continue;
             }
+            // A form that sits in a ride's seat that moves with its cabin (N14) is refused before any walk while no cabin
+            // stands at its stop, saying when the next is back.
+            let sits = entry
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("steps"))
+                .and_then(Json::arr)
+                .unwrap_or(&[])
+                .iter()
+                .any(|s| matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")));
+            if sits
+                && let Some(Err(e)) = bodies
+                    .as_deref()
+                    .map(|b| b.slots.boardable_seat(*node, now))
+            {
+                first.get_or_insert(e);
+                continue;
+            }
             // The same complete arguments reach target resolution, step binding and effects.
             let (entry, thing) = match targets(entry, form, &all) {
                 Ok(t) => t,

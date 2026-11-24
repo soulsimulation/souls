@@ -1867,6 +1867,7 @@ fn bodies(
     }
     // The seats that move with their cabins (N14): boarded and left only where they stand at a stop.
     for (thing, r) in runs {
+        b.slots.trip_ends(thing, r.ends.clone());
         if let Err(e) = b.slots.run(thing, r.slot, &r.course, r.stops) {
             eprintln!("worldd: a ride's seat run did not load: {}", refusal(e));
         }

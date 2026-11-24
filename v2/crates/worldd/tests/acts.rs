@@ -504,6 +504,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     }
     let (cabin, r) = lift_place(ground);
     b.add_place(cabin)?;
+    b.slots.trip_ends(lift(), r.ends.clone());
     b.slots.run(lift(), r.slot, &r.course, r.stops)?;
     Ok(b)
 }
@@ -2434,7 +2435,8 @@ fn r2_two_carriers_lift_one_carry_in_one_tick_and_nothing_is_kept() {
 }
 
 /// N14: a lift whose one cabin runs across and back between its low stop (where it is declared, its stand point 800 mm
-/// south) and its high stop 4 m north, east of the walkers. It is boarded by its form and left by a rise.
+/// south) and its high stop 4 m north, east of the walkers. Its `board` sets it off (`under_way`, as the cable car's
+/// `ride`) and needs it not under way; it is left by a rise.
 fn lift() -> Id {
     id(12)
 }
@@ -2444,6 +2446,7 @@ fn lift_at() -> Vec3 {
 fn lift_entry() -> Json {
     parse(
         r#"{ "format": "souls-entry/1", "kind": "test:lift", "owner": "thing",
+      "state": { "under_way": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
       "points": { "low": { "role": "stand", "at_mm": [0, 0, -800], "yaw_mdeg": 0 },
         "high": { "role": "stand", "at_mm": [0, 0, 3200], "yaw_mdeg": 0 } },
       "slots": { "cabin": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "low" } },
@@ -2452,20 +2455,22 @@ fn lift_entry() -> Json {
         "board": { "who": "anyone", "starts": "act",
           "takes": { "seat": { "type": "slot",
             "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
-          "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+          "needs": [{ "need": "state", "field": "under_way", "is": false }, { "need": "slot_free", "slot": { "arg": "seat" } }],
           "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
-          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" }] },
+          "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "boarded" },
+            { "change": "set", "field": "under_way", "to": true, "event": "set_off" }] },
         "get_off": { "who": "anyone", "starts": "act", "steps": [{ "step": "rise" }] } },
       "ride": { "seats": ["cabin"], "stops": ["low", "high"], "returns": true, "start": "board",
         "speed_mm_s": 1000, "ground": "level" } }"#,
     )
     .unwrap()
 }
-/// How long the lift's cabin still waits at its low stop when the world starts, µs.
-const LIFT_LEFT: i64 = 10_000_000;
+/// How long the lift's cabin waits at each stop here, µs: 8 s, not a ride's 3 minutes, so a test sees a whole lap (8 s
+/// at the low stop from the world's start, 4 s up, 8 s at the high stop, 4 s down, and again).
+const LIFT_STOP: i64 = 8_000_000;
 /// The lift's cabin seat as a served world registers it, and its run (`sim::courses::rides::seat_runs`, as
-/// `worldd::places::runs` gives it) on the open ground, its clock set so the cabin leaves its low stop
-/// [`LIFT_LEFT`] after the world starts (world time is real time).
+/// `worldd::places::runs` gives it) on the open ground, from the world's start (world time is real time), each stop
+/// [`LIFT_STOP`] long.
 #[allow(clippy::disallowed_methods)]
 fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun) {
     let place = sim::slots::PlaceAt {
@@ -2484,7 +2489,6 @@ fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun)
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_micros() as i64;
-    let t0 = now - (sim::courses::rides::SEAT_STOP - LIFT_LEFT);
     let seats = BTreeMap::from([(1, place.clone())]);
     let at = lift_at();
     let mut runs = sim::courses::rides::seat_runs(
@@ -2492,26 +2496,48 @@ fn lift_place(ground: Id) -> (sim::slots::PlaceAt, sim::courses::rides::SeatRun)
         &seats,
         &|p: Vec3| p.plus(at).ok(),
         &|_, _| Some(0),
-        t0,
+        now,
     );
     assert_eq!(runs.len(), 1, "the cabin runs");
-    (place, runs.remove(0))
+    let mut r = runs.remove(0);
+    for s in &mut r.course.stations {
+        s.dwell = LIFT_STOP;
+    }
+    r.course.within = r.course.load().expect("a lap").period;
+    assert_eq!(r.ends.len(), 1, "its trip's end sets under_way back");
+    (place, r)
 }
 
-/// N14: a Soul boards a cabin at its stop through the gateway, is carried in its seat while the cabin is between stops
-/// (a rise is refused `boarding-frame-away` and it stays in the slot), and gets off at the far stop, on its feet at
-/// that stop's stand point, 4 m from where it got on: never set down mid-way, never left aloft.
+/// The lift's `under_way` (field 28) as the log has it: 1 set off, 0 not.
+fn under_way(r: &Replica) -> Option<Value> {
+    let t = r.tree();
+    t.node(t.handle(lift()).unwrap())
+        .unwrap()
+        .fields()
+        .get(&28)
+        .cloned()
+}
+
+/// N14: a Soul boards a cabin at its stop through the gateway, setting the lift off; another is refused while it is
+/// under way. The rider is carried in its seat while the cabin is between stops (a rise is refused `boarding-frame-away`
+/// and it stays in the slot), and gets off at the far stop, on its feet at that stop's stand point, 4 m from where it
+/// got on: never set down mid-way, never left aloft. The trip ended at that stop (`under_way` back to false), so the
+/// lift is never stuck under way: while the cabin is away a board is refused before any walk, saying when it is back,
+/// and once it is back the Soul boards it again.
 #[test]
-// The world's clock is real time: the test reads it to set the cabin's clock and to wait for it (#1926's way).
+// The world's clock is real time: the test reads it to wait for the cabin (#1926's way).
 #[allow(clippy::disallowed_methods)]
-fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
+fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_the_gateway() {
     let started = std::time::Instant::now();
-    let (run, mut a, _) = serve("n14");
+    let at =
+        |ms: u64| std::thread::sleep(Duration::from_millis(ms).saturating_sub(started.elapsed()));
+    let (run, mut a, mut b) = serve("n14");
     let boarded = a.act("test:board", Some(lift()), BTreeMap::new());
     println!("N14 board: {boarded:?} after {:?}", started.elapsed());
     boarded.expect("boarded at its stop");
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)));
+    assert_eq!(under_way(&r), Some(Value::Uint(1)), "set off");
     // The world wrote the cabin's course onto the lift at its start, for every copy and the page to read.
     let t = r.tree();
     let written = t
@@ -2526,8 +2552,11 @@ fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
     let course = replica::schedule::course::Course::read(&courses[&1]).expect("a course");
     assert_eq!(course.stations.len(), 2);
     assert_eq!(course.stations[1].at.z - course.stations[0].at.z, 4_000_000);
-    // On its way to the far stop (it leaves 10 s in and takes 4 s): carried, not set down.
-    std::thread::sleep(Duration::from_millis(12_000).saturating_sub(started.elapsed()));
+    let other = b.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 another board while under way: {other:?}");
+    assert!(other.is_err(), "its one seat is taken");
+    // On its way to the far stop (it leaves 8 s in and takes 4 s): carried, not set down.
+    at(10_000);
     let away = a.act("test:get_off", Some(lift()), BTreeMap::new());
     println!(
         "N14 get off on the way: {away:?} after {:?}",
@@ -2539,8 +2568,13 @@ fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
         (Some(lift()), Some(1)),
         "still in its seat"
     );
-    // At the far stop it gets off there.
-    std::thread::sleep(Duration::from_millis(16_000).saturating_sub(started.elapsed()));
+    // At the far stop the trip has ended, and it gets off there.
+    at(14_500);
+    assert_eq!(
+        under_way(&run.replay()),
+        Some(Value::Uint(0)),
+        "the trip ended at the stop"
+    );
     let off = a.act("test:get_off", Some(lift()), BTreeMap::new());
     println!(
         "N14 get off at the far stop: {off:?} after {:?}",
@@ -2562,5 +2596,29 @@ fn n14_a_soul_rides_a_cabin_and_gets_off_at_the_far_stop_through_the_gateway() {
         (p.x - high.x).abs() <= 300_000 && (p.z - high.z).abs() <= 300_000,
         "at the far stop's stand point"
     );
+    // While the cabin is on its way back, a board is refused before any walk, saying when it is back.
+    at(21_000);
+    let early = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board while the cabin is away: {early:?}");
+    assert_eq!(early, Err("boarding-frame-away".to_owned()));
+    let still = run.replay();
+    let t = still.tree();
+    assert_eq!(
+        t.node(t.handle(w1()).unwrap())
+            .unwrap()
+            .place()
+            .unwrap()
+            .position,
+        p,
+        "not walked toward a cabin that is away"
+    );
+    // Back at its stop: the Soul boards it again.
+    at(24_500);
+    let again = a.act("test:board", Some(lift()), BTreeMap::new());
+    println!("N14 board again: {again:?} after {:?}", started.elapsed());
+    again.expect("boards again once the cabin is back");
+    let r = run.replay();
+    assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)), "aboard again");
+    assert_eq!(under_way(&r), Some(Value::Uint(1)), "set off again");
     run.stop();
 }

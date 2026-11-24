@@ -266,6 +266,9 @@ pub struct Slots {
     >,
     /// The stop each rise from a moving seat was started at: where it stands the body.
     rising: BTreeMap<Spot, PlaceAt>,
+    /// What each ride's trip end sets back (`crate::courses::rides::trip_ends`), and whether its seats were between
+    /// stops when last asked ([`Slots::trip_ended`]).
+    trips: BTreeMap<Id, (Vec<(u64, replica::encode::Value)>, bool)>,
 }
 
 impl Slots {
@@ -313,6 +316,32 @@ impl Slots {
     /// Every seat that moves with its cabin (N14), by thing and slot, with its course in the thing's frame.
     pub fn seat_courses(&self) -> impl Iterator<Item = (Id, u64, &crate::courses::Course)> {
         self.runs.iter().map(|(k, (c, ..))| (k.0, k.1, c))
+    }
+
+    /// What the end of a trip of ride `thing` sets back (N14, `crate::courses::rides::trip_ends`): each field by number
+    /// and its default. Called with its seats' runs.
+    pub fn trip_ends(&mut self, thing: Id, ends: Vec<(u64, replica::encode::Value)>) {
+        self.trips.insert(thing, (ends, false));
+    }
+
+    /// The rides whose seats came to a stop since this was last asked at an earlier `now` (N14): a trip ends there.
+    /// Each with what its end sets back. A ride first asked about is taken as it stands, so a start ends no trip.
+    pub fn trip_ended(&mut self, now: Micros) -> Vec<(Id, Vec<(u64, replica::encode::Value)>)> {
+        let mut out = Vec::new();
+        let things: Vec<Id> = self.trips.keys().copied().collect();
+        for thing in things {
+            let away = self
+                .runs
+                .range((thing, 0)..=(thing, u64::MAX))
+                .any(|(_, (_, t, _))| !matches!(t.stopped(now), Ok(Some(_))));
+            if let Some((ends, was)) = self.trips.get_mut(&thing) {
+                if *was && !away && !ends.is_empty() {
+                    out.push((thing, ends.clone()));
+                }
+                *was = away;
+            }
+        }
+        out
     }
 
     /// Whether the seat of `thing` in `slot` moves with its cabin (N14).
@@ -363,6 +392,54 @@ impl Slots {
         self.at_home(thing, now, crate::links::boarding::CROSSING)
     }
 
+    /// `boarding-frame-away` unless a seat of `thing` that moves with its cabin (N14) stands at its own stop at `now`
+    /// with a crossing's time of it left (a thing with none is not asked): asked before a form that sits walks a body to
+    /// it, so nobody is walked to a cabin that is away. The refusal says when the next is back at its stop, world µs, so
+    /// a client can time itself.
+    pub fn boardable_seat(&self, thing: Id, now: Micros) -> R<()> {
+        let mut back: Option<Micros> = None;
+        let mut any = false;
+        for ((_, slot), (_, table, stops)) in self.runs.range((thing, 0)..=(thing, u64::MAX)) {
+            any = true;
+            let Some(own) = self
+                .places
+                .get(&(thing, *slot))
+                .and_then(|p| p.stand().ok())
+            else {
+                continue;
+            };
+            for (station, p) in stops {
+                if p.stand().ok() != Some(own) {
+                    continue;
+                }
+                for stop in table.next(now, Some(*station), 2) {
+                    let from = stop.arrives.max(now);
+                    if stop.leaves.saturating_sub(from) < crate::links::boarding::CROSSING {
+                        continue;
+                    }
+                    if from <= now {
+                        return Ok(());
+                    }
+                    back = Some(back.map_or(from, |b| b.min(from)));
+                    break;
+                }
+            }
+        }
+        if !any {
+            return Ok(());
+        }
+        refuse(
+            "boarding-frame-away",
+            match back {
+                Some(t) => format!(
+                    "{}: its cabins are away; the next is back at its stop at {t} us",
+                    show(thing)
+                ),
+                None => format!("{}: no cabin of it stops where it is boarded", show(thing)),
+            },
+        )
+    }
+
     /// Seat ownership changes, drained by the world to wake standing queues.
     pub fn changes(&mut self) -> Vec<Id> {
         std::mem::take(&mut self.changed)
@@ -395,6 +472,7 @@ impl Slots {
         }
         self.places.retain(|(id, _), _| *id != thing);
         self.runs.retain(|(id, _), _| *id != thing);
+        self.trips.remove(&thing);
         self.places.extend(next);
         Ok(())
     }

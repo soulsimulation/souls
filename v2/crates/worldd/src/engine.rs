@@ -1083,6 +1083,11 @@ impl Engine {
             self.seat_courses = true;
             self.out.extend(seat_courses(live, slots, now));
         }
+        // N14: a ride's trip ends when its seats next come to a stop: what its start form set goes back (a cable car's
+        // `under_way`), so a ride set off once is boarded again.
+        for (thing, ends) in slots.trip_ended(now) {
+            self.out.extend(trip_end(live, thing, &ends, now));
+        }
         let mut tree = None;
         while let Some(t) = self.due.fire(now) {
             let tr = tree.get_or_insert_with(|| live.frozen());
@@ -2522,6 +2527,27 @@ impl Engine {
     /// The entries written since the last call, in order, to be numbered and applied.
     pub fn out(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.out)
+    }
+}
+
+/// The entry that sets ride `thing`'s fields `ends` back (N14, a trip's end): those that hold another value; none when
+/// every one holds it already or is unset.
+fn trip_end(live: &Tree, thing: Id, ends: &[(u64, Value)], now: Micros) -> Option<Effect> {
+    let node = live.handle(thing).and_then(|h| live.node(h))?;
+    let changes: Vec<_> = ends
+        .iter()
+        .filter(|(n, to)| node.fields().get(n).is_some_and(|v| v != to))
+        .map(|(n, to)| crate::carrier::set(thing, *n, to.clone()))
+        .collect();
+    if changes.is_empty() {
+        return None;
+    }
+    match crate::carrier::entry(live, thing, changes, now, Cause::World, Actor::World) {
+        Ok(e) => Some(e),
+        Err(r) => {
+            eprintln!("worldd: {}'s trip does not end: {r}", show(thing));
+            None
+        }
     }
 }
 

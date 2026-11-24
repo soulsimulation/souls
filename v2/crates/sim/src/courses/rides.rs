@@ -136,6 +136,50 @@ pub struct SeatRun {
     pub slot: u64,
     pub course: Course,
     pub stops: Vec<(usize, PlaceAt)>,
+    /// What a trip's end sets back ([`trip_ends`]): the same for every seat of a ride.
+    pub ends: Vec<(u64, replica::encode::Value)>,
+}
+
+/// What a ride's trip set going and its end sets back (N14): each field its `start` form's effects `set` (a cable car's
+/// `under_way`), with that field's default, by field number. A trip ends when its seats next come to a stop
+/// (`crate::slots::Slots::trip_ended`), so a ride once set off is boardable again and never stays under way for good.
+/// A bool or whole-number field only; another kind of field is left as its form set it.
+pub fn trip_ends(entry: &Json) -> Vec<(u64, replica::encode::Value)> {
+    use replica::encode::Value;
+    let Some(start) = entry
+        .get("ride")
+        .and_then(|r| r.get("start"))
+        .and_then(Json::str)
+    else {
+        return Vec::new();
+    };
+    let effects = entry
+        .get("forms")
+        .and_then(|f| f.get(start))
+        .and_then(|f| f.get("effects"))
+        .and_then(Json::arr)
+        .unwrap_or(&[]);
+    effects
+        .iter()
+        .filter(|e| e.get("change").and_then(Json::str) == Some("set"))
+        .filter_map(|e| {
+            let def = entry.get("state")?.get(e.get("field")?.str()?)?;
+            let n = match def.get("n")? {
+                Json::Int(n) => u64::try_from(*n).ok()?,
+                _ => return None,
+            };
+            let to = match def.get("default")? {
+                Json::Bool(b) => Value::Uint(u64::from(*b)),
+                Json::Int(v) => match (u64::try_from(*v), i64::try_from(*v)) {
+                    (Ok(u), _) => Value::Uint(u),
+                    (_, Ok(i)) => Value::Nint(i.unsigned_abs() - 1),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            Some((n, to))
+        })
+        .collect()
 }
 
 /// A point of the entry, `[x, y, z]` mm, in µm.
@@ -215,6 +259,7 @@ pub fn seat_runs(
         let f = to_floor(Vec3::new(p.x, 0, p.z))?;
         Some(ground(f.x, f.z).unwrap_or(f.y))
     };
+    let ends = trip_ends(entry);
     let mut out = Vec::new();
     for (k, (name, point, own)) in declared.iter().enumerate() {
         let Some(base) = number(name).and_then(|n| seats.get(&n)) else {
@@ -309,6 +354,7 @@ pub fn seat_runs(
             slot: base.place.slot,
             course,
             stops: at_stops,
+            ends: ends.clone(),
         });
     }
     out

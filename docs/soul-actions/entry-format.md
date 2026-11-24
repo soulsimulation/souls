@@ -195,7 +195,10 @@ or more seats, a big wheel or a carousel) the seats turn one step at a time betw
 3 minutes at a stop. So a ride's seat is declared where it waits for riders, beside its stop and within standing reach.
 The old page draws a cabin at each seat that moves, unless the ride's def has cars of its own (a big wheel's gondolas). A rider
 boards only at its seat's own stop, gets off at any stop within reach, and is carried on between them (a rise there is
-refused `boarding-frame-away`). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+refused `boarding-frame-away`; a form that sits is refused before any walk while no cabin waits at its stop, saying
+when the next is back). A trip ends when the seats next come to a stop: the fields its `start` form `set` (a bool or a
+whole number, such as `under_way`) go back to their defaults, so a ride set off once is boarded again. A kind is a
+vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
 (SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
