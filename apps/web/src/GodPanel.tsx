@@ -25,6 +25,7 @@ import { approvalFromHash, landingHash } from './god-ui/join-api.ts';
 import { closeApproval, closedApprovals, pickWindowApproval, useWindowApprovals } from './god-ui/window-approvals.ts';
 import { OfferCard, offerFromHash } from './god-ui/OfferCard.tsx';
 import { countEvent } from './visitor-counts.ts';
+import { BuildBar } from './god-ui/BuildBar.tsx';
 import './god-ui/god-panel.css';
 
 const query = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -67,6 +68,8 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [ghost, setGhost] = useState<GhostSummary | null>(null);
+  const [build, setBuild] = useState<'place' | 'select' | null>(null);
+  const endBuild = useCallback(() => setBuild(null), []);
   const owner = status?.you === 'owner' || status?.you === 'god';
   const seq = status?.seq;
   // who is signed in on this page (Clerk in production, a local name in dev): auth-session.ts
@@ -150,6 +153,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   const claim = () => run('claim', G.claim, () => 'This world is yours.');
   // G1 (0.133): on a v2 world undo, redo and the weather are the creator's own edits on its socket; the note shows the
   // receipt's words or the refusal's name. Strike, flags and Forsake have no creator verb there and are not shown.
+  // 0.133 item 6: Build (BuildBar.tsx) places, moves and removes things with the same socket's edits.
   const v2 = G.v2Creator();
   const undoRedo = (which: 'undo' | 'redo') => v2 ? run(which, async () => (await v2).undo(which), (r) => r as string) : run(which, () => (which === 'undo' ? G.undo() : G.redo()), (r) => { const x = r as G.UndoResult; return x.accepted ? `${which === 'undo' ? 'Undid' : 'Redid'} edit ${x.reverted}.` : (x.failures?.[0]?.detail ?? `nothing to ${which}`); });
 
@@ -273,6 +277,10 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
       {!v2 && <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>}
       <button type="button" className="gm-tool" data-weather-kind="haze" disabled={!!busy} onClick={() => weather('haze')}>Haze</button>
     </div>
+    {v2 && <div className="gm-tool-group" role="group" aria-label="Build" data-build="1" title="Place, move and remove things yourself: each change is one edit">
+      <button type="button" className="gm-tool" data-build-open="place" onClick={() => { setBuild('place'); closeGod(); }}>Place</button>
+      <button type="button" className="gm-tool" data-build-open="select" onClick={() => { setBuild('select'); closeGod(); }}>Move or remove</button>
+    </div>}
   </>;
   // switched off by default (god-ui/features.ts); shown under the log when turned back on
   const more = <>
@@ -307,6 +315,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   return <>
     {approvalModal}
     {ghostBar}
+    {build && v2 && !god.open && <BuildBar creator={v2} start={build} onClose={endBuild} />}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
       forsake={v2 ? null : <ForsakeWorld name={name} />} />}
   </>;

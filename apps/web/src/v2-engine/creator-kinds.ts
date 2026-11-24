@@ -128,6 +128,9 @@ export class CreatorKinds {
     this.onModel = onModel;
   }
 
+  /** Every node the stream has shown, by id (read only: the panel's Build picks and places from it). */
+  get seen(): ReadonlyMap<string, NodeLike> { return this.nodes; }
+
   apply(nodes: NodeLike[], removed: string[]): void {
     for (const id of removed) {
       const o = this.nodes.get(id)?.origin;

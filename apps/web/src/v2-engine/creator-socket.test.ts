@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, creatorGrant, creatorToken, idOf, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { CreatorSession, creatorGrant, creatorToken, idOf, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
 const { MailBox, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -62,6 +62,27 @@ test('a refusal is answered by name; a stale weather is sent once more against t
   const undo = s.edit({ undo: 'undo' });
   s.frame(answer(102, 2, 12, 'undo.nothing'));
   assert.equal((await undo as { reason: string }).reason, 'undo.nothing', 'the panel\'s note shows the refusal\'s name');
+});
+
+test('Build\'s place, move and remove are the batch\'s operations 1, 2 and 4; the receipt names the placed thing', async () => {
+  const { s, sent } = signedIn();
+  const HASH = '1220' + 'ab'.repeat(32), GROUND = `${'1a'.repeat(16)}.3`, BENCH = `${'1a'.repeat(16)}.40`;
+  const built = s.edit({ ops: [{ op: 'place', name: 1, kind: `eden:bench@${HASH}`, parent: GROUND, at: { x: 1_000_000, y: 250_000.4, z: -2_000_000 } },
+    { op: 'move', node: BENCH, at: { x: 3, y: 0, z: 4 }, rot: [0, 0, 1 << 30, 0] }, { op: 'remove', node: BENCH }] });
+  const [place, move, remove] = (dec(sent.at(-1)!).get(4) as Map<number, unknown>).get(1) as Map<number, unknown>[];
+  assert.deepEqual([...place!.keys()], [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual([place!.get(1), place!.get(2), place!.get(3)], [1, 1, 'eden:bench'], 'the plain name, its hash apart');
+  assert.deepEqual(place!.get(4), Uint8Array.from(Buffer.from(HASH, 'hex')));
+  assert.deepEqual(place!.get(5), [Uint8Array.from(Buffer.from('1a'.repeat(16), 'hex')), 3]);
+  assert.deepEqual([...(place!.get(6) as Map<number, unknown>)], [[1, [1_000_000, 250_000, -2_000_000]], [2, [1 << 30, 0, 0, 0]], [3, new Map([[1, 0]])]], 'whole µm, facing as its parent, on nothing');
+  assert.deepEqual([move!.get(1), (move!.get(2) as unknown[])[1]], [2, 40]);
+  assert.deepEqual((move!.get(3) as Map<number, unknown>).get(2), [0, 0, 1 << 30, 0], 'a move keeps the thing\'s facing');
+  assert.deepEqual([...remove!], [[1, 4], [2, [Uint8Array.from(Buffer.from('1a'.repeat(16), 'hex')), 40]]]);
+  s.frame(encode(new Map<number, unknown>([[1, version(3)], [2, new Map<number, unknown>([[2, 100], [3, 1], [6, new Map([[1, [Uint8Array.from(Buffer.from('1a'.repeat(16), 'hex')), 41]]])]])]])));
+  const f = await built;
+  assert.equal(f.t === 'receipt' && f.names.get(1), `${'1a'.repeat(16)}.41`, 'the new thing\'s id, as the stream keys it');
+  assert.match(refusalText('edit.would-bury'), /^Refused: edit\.would-bury \(a Soul stands there now/, 'build safety\'s refusal by name, in plain words');
+  assert.equal(refusalText('edit.node-missing'), 'Refused: edit.node-missing');
 });
 
 test('the exchange posts the page\'s session to /v2/creator-token beside the gateway; a refusal is named', async () => {
