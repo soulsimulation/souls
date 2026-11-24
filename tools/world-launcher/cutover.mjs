@@ -124,6 +124,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   };
   load(true);
   return {
+    bound: () => !!load(),
     routeOnly: () => load()?.routeOnly() ?? [],
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
