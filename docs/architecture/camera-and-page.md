@@ -79,7 +79,8 @@ v2 beyond what the takes carry.
 A moved world's ground, buildings and things are drawn by the entity layer (`WorldEntityLayer.ts`) from the snapshot its
 old world published (`snapshot.json`, `v2/docs/cutover.md`). A world with no such snapshot (one made on the new engine),
 or any v2 world opened with `?scene=stream`, is drawn from its stream alone: `v2-engine/source/stream-scene.ts` builds the
-layer's snapshot from the stream's first copy of the world (the open ground's terrain tiles, waters, and each imported
+layer's snapshot from the stream's first copy of the world (the open ground's terrain tiles and ground palette, field 103, so a
+Mars camp's floor is desert and not the default grass; waters; and each imported
 thing at its world pose with its library def, or the world's own def, which the open ground keeps once (import-eden's field 102),
 and its def's params, field 19), and the layer takes it through `scene-offer.ts`. A rowing punt (on a course, no library
 def) is drawn by the takes as today's `rowing-punt` fixture (`takes.ts`). The page's layout then falls back to a plain

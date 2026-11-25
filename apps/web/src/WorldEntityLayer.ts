@@ -31,7 +31,7 @@ import {isGrowingDef, plantGroup, plantLookOf, posePlants, type PlantGroup, type
 import {itemDiffAhead} from './item-diff-clock.ts';
 import {beginOpeningMotion,stepOpeningMotion,type OpeningMotion} from './opening-motion.ts';
 import { EntityInstancer, instanceable } from './EntityInstancer.ts';
-import { terrainColorFor, terrainColorDeferred, groundRealismFor } from './gen-mesh/ground-palette.ts';
+import { terrainColorFor, terrainColorDeferred, groundRealismFor, horizonBaseFor } from './gen-mesh/ground-palette.ts';
 import { mottleSector } from './gen-mesh/terrain-mottle.ts';
 import { applyWorldRealism } from './WorldEdenRealism.ts';
 import { stepSurfaceKit } from './WorldEdenSurfaceKit.ts';
@@ -566,7 +566,7 @@ export class WorldEntityLayer {
     if (retargeted.size) for (const e of m.entities.values()) if (!upserted.has(e.id) && retargeted.has(e.def)) queue.push({ id: e.id, ease: false });
     if (lit) this.lightSeq++;
     if (delta.defs.some((d) => m.defs.get('sha:' + d.hash) === (d as unknown)) || retargeted.size || groundChanged || stateChanged || constantsChanged) changed = true;
-    if (groundChanged) { this.rebuildTerrain(); this.rebuildWater(); this.buildHorizon(); this.sites.refreshAll(true); } else if (paletteChanged) this.rebuildTerrain();
+    if (groundChanged) { this.rebuildTerrain(); this.rebuildWater(); this.buildHorizon(); this.sites.refreshAll(true); } else if (paletteChanged) { this.rebuildTerrain(); this.buildHorizon(); }
     const seen = new Set<string>();
     for (let i = 0; i < queue.length;) {
       const until = performance.now() + RESYNC_SLICE_MS;
@@ -1609,6 +1609,8 @@ export class WorldEntityLayer {
     const pos: number[] = [], col: number[] = [], idx: number[] = [];
     const c = new THREE.Color();
     const seed = hashSeed(m.seed);
+    // its near colour is the world's ground (a desert world's horizon is desert), fading into the sky's haze
+    const near = new THREE.Color(horizonBaseFor((m.state as { ground?: { palette?: string } }).ground?.palette)), haze = new THREE.Color(0x9fb3c8);
     // t4-phone: the inner ring's heights from the ground recipe at each point (no bake of every tile along the world's edge:
     // ~0.1 s of 4x CPU before a phone's poster); the same heights as the tiles' within their 1 m interpolation
     const edgeHeight = (x: number, z: number) => fixedTerrain(m.terrain) ? m.terrain.sample(x, z) : heightAt(groundForTile(m.terrain.ground, Math.floor(x / TILE_M), Math.floor(z / TILE_M)), x, z);
@@ -1617,7 +1619,7 @@ export class WorldEntityLayer {
       const f = r / rings, bump = Math.sin(a * 7 + seed) * 0.5 + Math.sin(a * 13 + seed * 1.7) * 0.3 + Math.sin(a * 29 + seed * 0.3) * 0.2;
       const h = r === 0 ? edgeHeight(cx + Math.cos(a) * (d - 1), cz + Math.sin(a) * (d - 1)) : m.constants.base + Math.max(0, bump) * half * 0.25 * Math.sin(Math.PI * f) + f * 8;
       pos.push(cx + Math.cos(a) * radius, h, cz + Math.sin(a) * radius);
-      c.set(0x6f8f6a).lerp(new THREE.Color(0x9fb3c8), f * 0.9); col.push(c.r, c.g, c.b);
+      c.set(near).lerp(haze, f * 0.9); col.push(c.r, c.g, c.b);
     }
     for (let r = 0; r < rings; r++) for (let s = 0; s < segs; s++) { const a = r * (segs + 1) + s, b = a + 1, cc = a + segs + 1, d = cc + 1; idx.push(a, b, cc, b, d, cc); }
     const g = new THREE.BufferGeometry();
