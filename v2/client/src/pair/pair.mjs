@@ -197,12 +197,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
     if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
-    const credFile = join(home, CREDENTIALS);
-    const creds = existsSync(credFile) ? readJson(credFile) : {};
-    creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
-    writePrivate(credFile, creds);
-    // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
     // #3760: the world's kinds, so the client's own checks know them; the Soul is paired whether or not they came.
+    // Fetched before the token is written: a daemon can start only once the token is there (an agent's `look` the
+    // moment its owner approves), and one started while these were still being written fetched them all again over
+    // the same files at its sign-in (first run, 0.135).
     let entries;
     try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
     // #1960: a creator's edits are checked against the world's kinds text.
@@ -210,6 +208,11 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (got.grant.startsWith('creator-')) {
       try { await refreshKindsText({ home, world, gateway, token: got.token }); kinds = 'kept'; } catch (e) { kinds = { failed: e.code ?? 'kinds-unreachable' }; }
     }
+    const credFile = join(home, CREDENTIALS);
+    const creds = existsSync(credFile) ? readJson(credFile) : {};
+    creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
+    writePrivate(credFile, creds);
+    // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
     // Its owner's page shows the same name; the Soul is paired whether or not the directory took it.
     let named;
     if (name) {
