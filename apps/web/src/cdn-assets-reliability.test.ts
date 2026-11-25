@@ -15,7 +15,7 @@ test('six native connections can queue healthy origin headers past12s; all heade
   const waiting: (() => void)[] = [], signals: AbortSignal[] = [];
   const pump = () => { while (active < 6 && waiting.length) waiting.shift()!(); };
   const raw: typeof fetch = (input, init) => {
-    if (String(input).startsWith('https://assets.')) return Promise.reject(Error('CDN unavailable'));
+    if (String(input).startsWith('https://cdn.soul.game/')) return Promise.reject(Error('CDN unavailable'));
     queued++; signals.push(init!.signal!);
     return new Promise(resolve => {
       waiting.push(() => {
@@ -45,7 +45,7 @@ test('six native connections can queue healthy origin headers past12s; all heade
 test('caller abort during a long queued origin header wait is immediate and discards a late response', async t => {
   setup(t); const caller = new AbortController(); let resolve!: (r: Response) => void, signal!: AbortSignal, cancelled = 0, calls = 0;
   const raw: typeof fetch = async (input, init) => {
-    calls++; if (String(input).startsWith('https://assets.')) throw Error('CDN unavailable');
+    calls++; if (String(input).startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable');
     signal = init!.signal!; return new Promise(r => { resolve = r; });
   };
   const result = transport(raw)(url, { signal: caller.signal }).then(() => null, e => e); await flush();
@@ -93,7 +93,7 @@ test('raw origin fallback headers and body each settle without retries, includin
 
 test('origin progress can take72s; no timeout while consumer is backpressured and zero chunks do not reset a pull', async t => {
   setup(t); let source!: ReadableStreamDefaultController<Uint8Array>, cancelled = 0;
-  const raw: typeof fetch = async input => { if (String(input).startsWith('https://assets.')) throw Error('CDN unavailable'); return new Response(new ReadableStream({ start(c) { source = c; }, cancel() { cancelled++; } })); };
+  const raw: typeof fetch = async input => { if (String(input).startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable'); return new Response(new ReadableStream({ start(c) { source = c; }, cancel() { cancelled++; } })); };
   const response = await transport(raw)(url); const reader = response.body!.getReader();
   // No consumer pull yet: no body deadline, even if the source has not produced bytes.
   t.mock.timers.tick(60000); await flush(); assert.equal(cancelled, 0);
@@ -116,7 +116,7 @@ test('caller cancellation owns headers, a backpressured response, and a pending 
   ctl.abort(); assert.equal((await header).name, 'AbortError'); assert.equal(calls, 1);
   for (const reading of [false, true]) {
     calls = 0; const owner = new AbortController();
-    const raw: typeof fetch = async input => { calls++; if (String(input).startsWith('https://assets.')) throw Error('CDN unavailable'); return new Response(new ReadableStream({ cancel() { cancelled++; } })); };
+    const raw: typeof fetch = async input => { calls++; if (String(input).startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable'); return new Response(new ReadableStream({ cancel() { cancelled++; } })); };
     const response = await transport(raw)(url, { signal: owner.signal });
     const result = reading ? response.text().then(() => null, e => e) : null; await flush(); owner.abort(); await flush();
     assert.equal((result ? await result : await response.text().catch(e => e)).name, 'AbortError'); assert.equal(calls, 2);
@@ -144,14 +144,14 @@ test('origin response keeps HTTP status, metadata, clone and request credentials
 test('no-body and opaque status-zero origin responses remain exact native responses', async t => {
   setup(t);
   for (const expected of [new Response(null, { status: 204 }), Response.error()]) {
-    const raw: typeof fetch = async input => { if (String(input).startsWith('https://assets.')) throw Error('CDN unavailable'); return expected; };
+    const raw: typeof fetch = async input => { if (String(input).startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable'); return expected; };
     assert.equal(await transport(raw)(url), expected); assert.equal(expected.body, null);
   }
 });
 
 test('fast non-ok origin hedge cannot beat valid CDN headers; terminal origin HTTP status survives both errors', async t => {
   setup(t); let resolve!: (r: Response) => void, calls = 0, cancelled = 0;
-  const raw: typeof fetch = input => { calls++; return String(input).startsWith('https://assets.') ? new Promise(r => resolve = r) : Promise.resolve(new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 503 })); };
+  const raw: typeof fetch = input => { calls++; return String(input).startsWith('https://cdn.soul.game/') ? new Promise(r => resolve = r) : Promise.resolve(new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 503 })); };
   const pending = transport(raw)(url); await flush(); t.mock.timers.tick(4000); await flush();
   resolve(new Response(data)); assert.deepEqual(new Uint8Array(await (await pending).arrayBuffer()), data); assert.equal(calls, 2); assert.equal(cancelled, 1);
   const failed = transport(raw)(url); await flush(); t.mock.timers.tick(4000); await flush();
@@ -160,7 +160,7 @@ test('fast non-ok origin hedge cannot beat valid CDN headers; terminal origin HT
 
 test('consumer cancel closes owned origin reader once and unlisted/range/nonGET preserve exact pass-through identity', async t => {
   setup(t); let cancelled = 0, signal!: AbortSignal;
-  const raw: typeof fetch = async (input, init) => { if (String(input).startsWith('https://assets.')) throw Error('CDN unavailable'); signal = init!.signal!; return new Response(new ReadableStream({ cancel() { cancelled++; } })); };
+  const raw: typeof fetch = async (input, init) => { if (String(input).startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable'); signal = init!.signal!; return new Response(new ReadableStream({ cancel() { cancelled++; } })); };
   const response = await transport(raw)(url); await response.body!.cancel('consumer done'); await flush(); assert.equal(cancelled, 1); assert.equal(signal.aborted, true);
   for (const [path, init] of [['/not-listed.png', {}], [url, { method: 'POST' }], [url, { headers: { range: 'bytes=0-2' } }]] as const) {
     const expected = new Response('unchanged');
@@ -175,7 +175,7 @@ test('failed CDN HTTP response plus failed origin hedge cannot start a fresh ori
   for (const failure of ['network', 'timeout']) {
     let resolve!: (r: Response) => void, reject!: (reason: unknown) => void, calls = 0, cancelled = 0;
     const originError = new TypeError('origin network failure');
-    const raw: typeof fetch = input => { calls++; return String(input).startsWith('https://assets.') ? new Promise(r => resolve = r) : new Promise((_r, j) => reject = j); };
+    const raw: typeof fetch = input => { calls++; return String(input).startsWith('https://cdn.soul.game/') ? new Promise(r => resolve = r) : new Promise((_r, j) => reject = j); };
     const result = transport(raw)(url).then(() => null, e => e); await flush();
     t.mock.timers.tick(4000); await flush(); t.mock.timers.tick(1000); await flush();
     resolve(new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 503 })); await flush();
