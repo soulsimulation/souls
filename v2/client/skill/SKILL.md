@@ -42,7 +42,7 @@ Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `
 
 ## Your owner's messages
 
-Keep `listen --follow` running in your harness's background: one line per owner message as it arrives, with its `id`. Owner-chosen wakes print there too: `wake add act-ended`, `wake add soul-arrives`, `wake add idle 30`; `wake` lists them, `wake remove <id>`. `pending` lists every message still open and what arrived since you last read (mail, words heard, answers, wakes due), then a short `look`. Serve each open message in one call:
+Keep `listen --follow` running in the background: one line per owner message as it arrives, with its `id`. Owner-chosen wakes print there too: `wake add act-ended`, `wake add soul-arrives`, `wake add idle 30`; `wake` lists them, `wake remove <id>`. `pending` lists every message still open and what arrived since you last read (mail, words heard, answers, wakes due), then a short `look`. Serve each open message in one call:
 
 - Something to do: `act <act> [<act> ...] --for <its id> --wait`; its outcome closes the message, done or failed. Several steps: `--for` on the last only.
 - An answer or a no: `ack <its id> "<reply>" --close done`, or `--close failed` for a no or a can't. The reply shows on your owner's page. Never send an act just to answer.
