@@ -13,9 +13,15 @@ test('the navbar lists this world\'s Souls, named, and none from another world',
   assert.deepEqual(accountSoulsOf({ souls: [{ soul: grant, world: 'eden', name: null }] }, 'eden', id), [{ id: id(grant), name: null }]);
 });
 
-test('the engine\'s name for the world comes from the page\'s stream, not its slug', async () => {
+test('the engine\'s name for the world is the launcher\'s, else the page\'s slug, never the stream\'s folder', async () => {
   const { v2WorldName } = await import('./owner-mailbox.ts');
-  assert.equal(v2WorldName('/s/w/eden/views/ab/ab-0/0/ab-0/1/everyone/'), 'eden');
-  assert.equal(v2WorldName('/s/other/'), null);
-  assert.equal(v2WorldName(null), null);
+  // soul.game's Eden (0.136.0): the stream's folder is the world's id, 67 characters, and the directory knows the world as
+  // `eden`; reading the folder gave no name, so the navbar asked for no Souls (first day, 25 Nov)
+  const id = '9eb7c3f6f6d48e1621571a4aacfa9688', prod = `/s/w/${id}-${id}-0/views/${id}/${id}-0/0/${id}-0/1/everyone/`;
+  assert.equal(v2WorldName(prod, {}, 'eden'), 'eden');
+  assert.equal(v2WorldName(prod, { v2World: 'eden' }, 'toy'), 'eden', 'the launcher names it');
+  assert.equal(v2WorldName(prod, { v2World: '../x' }, 'eden'), 'eden', 'a malformed name is not taken');
+  assert.equal(v2WorldName('/s/w/eden/views/ab/ab-0/0/ab-0/1/everyone/', undefined, 'eden'), 'eden', 'the local stack: folder and slug agree');
+  assert.equal(v2WorldName(prod), 'eden', 'this page (/w/eden/)');
+  assert.equal(v2WorldName(null, { v2World: 'eden' }, 'eden'), null, 'an old-engine world');
 });

@@ -9,6 +9,8 @@ import { useEffect, useState } from 'react';
 import type { AgentInbox } from '../AgentMessageBox.tsx';
 import { session as pageSession, useSession } from '../auth-session.ts';
 import { v2Stream } from './use-v2-souls.ts';
+import { BASE } from '../base-path.ts';
+import { worldKeyFrom } from '../snapshot-prefetch.ts';
 
 /** One message, as the v2 page's box keeps it (v2/web/src/owner/box.ts `Message`). */
 export type BoxMessage = {
@@ -305,9 +307,20 @@ export const v2World = (): string | null => PAGE_STREAM;
 /** The world's name as the page's inline config gives it (`worldName`), or null: what the page calls the world, never
  *  the tab's title (`<name> · Souls`). */
 export const v2PageWorldName = (): string | null => (typeof PAGE_CONFIG?.worldName === 'string' && PAGE_CONFIG.worldName.trim() ? PAGE_CONFIG.worldName.trim() : null);
-/** The new engine's name for this page's world, from its stream (`/s/w/<name>/views/…`): the name a Soul's pairing
- *  request and the owner's Soul list use, which need not be the page's slug. Null on an old-engine world. */
-export const v2WorldName = (stream: string | null = PAGE_STREAM): string | null => (stream ? /^\/s\/w\/([a-z0-9][a-z0-9-]{0,62})\//.exec(stream)?.[1] ?? null : null);
+const WORLD_NAME = /^[a-z0-9][a-z0-9-]{0,79}$/;
+/** The page's slug (`/w/<slug>/`), as world-path.ts `worldKey` reads it; read here when asked, so this module needs no
+ *  `location` when it loads. */
+const pageSlug = (): string | null => (typeof location === 'undefined' ? null : worldKeyFrom(location.pathname, BASE));
+/** The new engine's name for this page's world: the name a Soul's pairing request and the owner's Soul list use (the
+ *  directory's `world`, the world's routes key). The launcher's inline config names it (`v2World`); without it, the
+ *  page's slug, which is that key (tools/world-launcher/cutover.mjs `v2World`). Never the stream's folder: on soul.game
+ *  that is the world's id (`/s/w/<id>-<id>-0/…`), not its name, and a navbar asking the directory by it listed no Souls
+ *  (first day, 25 Nov). Null on an old-engine world. */
+export const v2WorldName = (stream: string | null = PAGE_STREAM, cfg: { v2World?: unknown } | undefined = PAGE_CONFIG, slug: string | null = pageSlug()): string | null => {
+  if (!stream) return null;
+  const named = typeof cfg?.v2World === 'string' ? cfg.v2World : null;
+  return named && WORLD_NAME.test(named) ? named : slug && WORLD_NAME.test(slug) ? slug : null;
+};
 /** R3b: where this page's view socket and directory are, as the box reaches them; null on an old-engine world. */
 export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof location !== 'undefined' ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null);
 
