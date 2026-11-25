@@ -92,6 +92,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
                     op: None,
+                    detail: None,
                 }
             } else if i.sequence >= 100 {
                 sequence += 1;
@@ -102,6 +103,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
                     op: None,
+                    detail: None,
                 }
             } else {
                 sequence += 1;

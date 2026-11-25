@@ -304,6 +304,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
         now: i.basis.clone(),
         changed: Vec::new(),
         op: None,
+        detail: None,
     };
     assert_eq!(keys(&receipt), [1, 2, 3, 4, 5]);
     assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);
@@ -524,4 +525,43 @@ fn a_creators_bulk_edit_is_read_over_the_frame_limit_and_nothing_else_is() {
             .err(),
         Some("intent.too-large")
     );
+}
+
+#[test]
+fn a_refusals_detail_is_printable_one_line_and_at_most_240_bytes_cut_at_a_character() {
+    use replica::intents::{Answer, DETAIL_MOST, answer_detail};
+    assert_eq!(answer_detail(""), None);
+    assert_eq!(answer_detail(" \n\t "), None, "nothing printable left");
+    assert_eq!(
+        answer_detail("too far:\nwalk\tup\u{7}first").as_deref(),
+        Some("too far: walk up first"),
+        "control characters are spaces"
+    );
+    // 239 ASCII bytes and a two-byte µ: the µ would end at byte 241, so it is left out whole.
+    let cut = answer_detail(&format!("{}µm", "a".repeat(DETAIL_MOST - 1))).unwrap();
+    assert_eq!(cut.len(), DETAIL_MOST - 1);
+    assert!(cut.chars().all(|c| c == 'a'));
+    // 238 bytes and a µ fit exactly.
+    let fits = answer_detail(&format!("{}µ", "a".repeat(DETAIL_MOST - 2))).unwrap();
+    assert_eq!(fits.len(), DETAIL_MOST);
+    // A refusal with one carries it as field 8, bytes; without one, no field 8.
+    let fields = |detail| match (Answer::Refused {
+        actor: replica::effects::Actor::World,
+        sequence: 1,
+        reason: replica::encode::Name::new("together.too-far").unwrap(),
+        now: Value::Uint(0),
+        changed: Vec::new(),
+        op: None,
+        detail,
+    })
+    .to_value()
+    {
+        Value::Map(m) => m,
+        _ => panic!("a map"),
+    };
+    assert_eq!(
+        fields(answer_detail("2 m apart")).get(&8),
+        Some(&Value::Bytes(b"2 m apart".to_vec()))
+    );
+    assert!(!fields(None).contains_key(&8));
 }
