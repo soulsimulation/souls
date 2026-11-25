@@ -293,14 +293,14 @@ impl Replica {
         })
     }
 
-    /// The nodes an entry changes, read before it applies: a node created, removed (with its subtree and the far
-    /// ends of its links), moved, set or sampled; a parent whose children change; a link's two ends. For T1's
-    /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
     /// The nodes entry `e` changes if it applies to this state now: what [`Replica::changed_since`] names for it.
     pub fn touches(&self, e: &Effect) -> Vec<Id> {
         self.touched(e)
     }
 
+    /// The nodes an entry changes, read before it applies: a node created, removed (with its subtree and the far
+    /// ends of its links), moved, set or sampled; a parent whose children change; a link's two ends. For T1's
+    /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
     fn touched(&self, e: &Effect) -> Vec<Id> {
         let mut out = vec![e.envelope.node];
         let mut new_links: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
