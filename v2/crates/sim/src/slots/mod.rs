@@ -798,7 +798,10 @@ impl Slots {
         facing: Quat,
         build: Build,
     ) -> Resumed {
-        if floor.place_built(id, frame, at, facing, build).is_ok() {
+        // A body the log had in ground sealed off from the main ground (a pocket no walk from outside reaches) is not
+        // left there: it is placed out of it like a body off its floor.
+        let sealed = |p: Vec3| floors.sealed(frame.node, p);
+        if floor.place_built(id, frame, at, facing, build).is_ok() && !sealed(at) {
             return Resumed::Stood;
         }
         let own: Vec<[[i64; 2]; 4]> = self
@@ -818,10 +821,11 @@ impl Slots {
             base: at.y - build.hover_mm * 1000,
             build,
         };
-        if let Some(l) = cl.nearest() {
+        if let Some(l) = cl.nearest().filter(|l| !sealed(*l)) {
             return Resumed::Climbs(l);
         }
-        if let Some((_, to)) = crate::ground::exits::nearest(floor.pieces(), at)
+        if let Some((_, to)) =
+            crate::ground::exits::nearest_where(floor.pieces(), at, &|p| !sealed(p))
             && let Ok(b) = floor.place_built(id, frame, to, facing, build)
             && cl.way_out(b.pose.position)
         {

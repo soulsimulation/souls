@@ -677,6 +677,12 @@ pub trait Floors {
     fn wet(&self, _node: Id, _at: Vec3) -> bool {
         false
     }
+
+    /// Whether `at` (µm, `node`'s frame) is ground sealed off from the main ground (a pocket no walk from the open
+    /// ground reaches, `crate::routes::Map::in_main_part`): a restart never places a body there. None known: never.
+    fn sealed(&self, _node: Id, _at: Vec3) -> bool {
+        false
+    }
 }
 impl Floors for std::collections::BTreeMap<Id, Surface> {
     fn for_build(

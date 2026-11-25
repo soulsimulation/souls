@@ -923,6 +923,49 @@ const PEN: &str = r#"{
   "byRef": {"core-fence@1": 1}
 }"#;
 
+/// A body the log had standing inside the walled pen (ground, but sealed off from the main ground) is never left
+/// there at a restart, nor placed in another pocket: it is placed at the nearest point of the main ground, outside
+/// the pen (`resume-placed`), and walks.
+#[test]
+fn a_restart_places_a_body_logged_in_a_sealed_pocket_outside_it_and_it_walks() {
+    let (town, nodes) = town_of(PEN);
+    let ground = nodes["ground"];
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let body = id(1);
+    let logged = Pose {
+        frame,
+        position: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: ground,
+            height: 0,
+        },
+    };
+    let placed = Placed::from([(body, (logged, None))]);
+    let added = town.surfaces[&ground]
+        .place(body, frame, Vec3::new(4_000_000, 0, 0), Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    b.add_body_at(humanoid(), added, &placed)
+        .expect("it starts");
+    b.begin(0);
+    let p = b.runner.controller.body(body).unwrap().pose.position;
+    println!("resumed {:?} at {p:?}", b.resumed);
+    assert_eq!(b.resumed, vec![(body, "resume-placed")]);
+    assert!(
+        p.x.abs() > 1_600_000 || p.z.abs() > 1_600_000,
+        "outside the pen: {p:?}"
+    );
+    assert!(on_after(&b, ground, p), "where it may stand: {p:?}");
+    let mut now = 0;
+    let (r, moved) = walk_east(&mut b, ground, body, id(100), &mut now);
+    r.expect("the walk is done");
+    assert!(moved, "it walks");
+}
+
 #[test]
 fn ground_sealed_off_from_the_main_ground_is_named_sealed() {
     let (mut town, nodes) = town_of(PEN);

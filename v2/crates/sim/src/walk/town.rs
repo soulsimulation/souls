@@ -1915,6 +1915,10 @@ impl crate::mover::Floors for Shared<'_> {
     fn wet(&self, node: Id, at: Vec3) -> bool {
         wet_on(self.map, node, at)
     }
+
+    fn sealed(&self, node: Id, at: Vec3) -> bool {
+        sealed_on(self.map, node, at)
+    }
 }
 impl crate::mover::Floors for Town {
     fn for_build(&self, build: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
@@ -1924,6 +1928,16 @@ impl crate::mover::Floors for Town {
     fn wet(&self, node: Id, at: Vec3) -> bool {
         wet_on(&self.map, node, at)
     }
+
+    fn sealed(&self, node: Id, at: Vec3) -> bool {
+        sealed_on(&self.map, node, at)
+    }
+}
+
+/// Whether `at` on `node` lies on a piece outside the map's main part ([`Map::in_main_part`]).
+fn sealed_on(map: &Map, node: Id, at: Vec3) -> bool {
+    map.spot_near(node, at, AT_EDGE)
+        .is_some_and(|s| !map.in_main_part(s.piece))
 }
 
 /// Whether `at` on `node` lies on a wet piece of the map: water or wading ground (E11d).
@@ -2979,9 +2993,7 @@ impl<'a> View<'a> {
     /// Whether `at` (µm, `node`'s frame) is ground sealed off from the main ground ([`Map::in_main_part`]): a pocket
     /// no walk from the open ground reaches. Off the ground, false.
     pub fn sealed(&self, node: Id, at: Vec3) -> bool {
-        self.map
-            .spot_near(node, at, AT_EDGE)
-            .is_some_and(|s| !self.map.in_main_part(s.piece))
+        sealed_on(self.map, node, at)
     }
 
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):

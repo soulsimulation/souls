@@ -2091,7 +2091,7 @@ fn recorded_body(
     // A body that sat stands at its seat's stand point until its seat is held again, or for good when the seat is gone
     // or taken: at a point it may stand on.
     let moved = if pose.support == replica::pose::Support::Slot {
-        worldd::bodies::legal_near(surface, id, frame, point, facing, build)?
+        worldd::bodies::legal_near(town, surface, id, frame, point, facing, build)?
     } else {
         sim::slots::placed_off(surface, id, frame, point, facing, build)?
     };
