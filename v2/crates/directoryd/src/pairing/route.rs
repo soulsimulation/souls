@@ -8,6 +8,9 @@
 //!   refuses any other `unknown-soul`.
 //! - `POST /v1/pair/poll` `{secret}` → `{pending: "authorization_pending" | "slow_down", interval?}`,
 //!   `{refused, device?}` or, once, `{token, grant}`, with `former` for a former Soul's request.
+//! - `POST /v1/pair/waiting` `{world}`, signed in → `{waiting: [{code, device, label, soul, age, former}]}`: the world's
+//!   Soul requests still pending, asked from this request's address in the last ten minutes (kept in memory only), so
+//!   the world page the owner has open shows the card (first day, 25 Nov).
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
 //! - `POST /v1/pair/show` and `POST /v1/pair/approve` `{code, confirm: true}`, signed in: W1's session token as
 //!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`. An approval records the Soul, and
@@ -103,6 +106,7 @@ pub fn route(
     path: &str,
     bearer: Option<&str>,
     body: &[u8],
+    from: Option<std::net::IpAddr>,
 ) -> Option<Answer> {
     let p = app.pairing.as_ref()?;
     if let Some(answer) = super::account::route(app, method, path, bearer, body) {
@@ -166,12 +170,17 @@ pub fn route(
                 {
                     // Refused by its own name: an unplaced world is the caller's (400), the store's is ours (500).
                     Err(e) => refuse(if e == "store" { 500 } else { 400 }, e),
-                    Ok(()) => json(
-                        200,
-                        json!({"code": a.code, "link": format!("{}/pair?code={}", p.public_url, a.code),
+                    Ok(()) => {
+                        if let Some(ip) = from {
+                            p.ask_from(&a.code, ip, now());
+                        }
+                        json(
+                            200,
+                            json!({"code": a.code, "link": format!("{}/pair?code={}", p.public_url, a.code),
                                "interval": a.interval}),
-                        "asked",
-                    ),
+                            "asked",
+                        )
+                    }
                 },
                 Err(e) => refuse(400, e),
             }
@@ -205,6 +214,30 @@ pub fn route(
                     }
                     json(200, answer, "delivered")
                 }
+            }
+        }
+        // First day (25 Nov): the world page the signed-in owner has open lists this world's pending Soul requests
+        // asked from the same address, so the card comes up there; the owner matches the code before approving.
+        ("POST", "/v1/pair/waiting") => {
+            let b = body();
+            if let Err(e) = signed_in(app, bearer, &b) {
+                return Some(refuse(401, e));
+            }
+            let Some(world) = text(&b, "world").filter(|w| super::souls::is_world(w)) else {
+                return Some(refuse(400, "world"));
+            };
+            let Some(ip) = from else {
+                return Some(json(200, json!({"waiting": []}), "waiting"));
+            };
+            match p.waiting(&world, ip, now()) {
+                Ok(list) => json(
+                    200,
+                    json!({"waiting": list.into_iter().map(|(code, device, label, soul, age, former)| json!({
+                        "code": code, "device": device, "label": label, "soul": soul, "age": age, "former": former,
+                    })).collect::<Vec<_>>()}),
+                    "waiting",
+                ),
+                Err(e) => refuse(500, e),
             }
         }
         ("POST", "/v1/pair/show" | "/v1/pair/approve") => {

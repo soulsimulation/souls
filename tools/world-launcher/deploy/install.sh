@@ -3,7 +3,8 @@
 #   bash install.sh            (release.sh copies it to /srv/sim-worlds/install.sh and runs it)
 # Creates the unprivileged user, its dirs, the systemd unit and per-stage settings. It never starts
 # anything, never edits an existing settings file, and never touches /opt/eden3, the sim or mars users,
-# the existing release's /srv/sim and /srv/sim-data*, Caddy, DNS or the firewall.
+# the existing release's /srv/sim and /srv/sim-data*, Caddy, DNS or the firewall (it only lets the caddy user traverse
+# its own release folders, for /pair).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -83,6 +84,27 @@ UNIT_SRC="${UNIT_SRC:-$HERE/sim-worlds@.service}"
 
 id simworlds >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/simworlds --shell /usr/sbin/nologin simworlds
 install -d -o simworlds -g simworlds -m 750 /srv/sim-worlds /srv/sim-worlds/releases
+# 25 Nov: Caddy (user caddy) serves /pair, the pairing card, straight from /srv/sim-worlds/production/apps/web/dist
+# (v2/tools/ops/proxy/soul-game*.caddy), so it must traverse /srv/sim-worlds, /srv/sim-worlds/releases and this release's
+# own folder, all 750 simworlds. Without it /pair answered 403. A traverse-only ACL (x, no read, no listing), set again on
+# every release, since each ship makes a new release folder. The chmod above leaves the entry (the mask stays r-x).
+# A missing setfacl or caddy user is said loudly and nothing else stops; the readability check below says the result.
+caddy_traverse() {
+  id caddy >/dev/null 2>&1 || { echo "WARNING caddy-traverse: no caddy user on this host; /pair (the pairing card) cannot be served from $*"; return 0; }
+  command -v setfacl >/dev/null 2>&1 || { echo "WARNING caddy-traverse: setfacl is missing (apt-get install acl); Caddy may get 403 on /pair: run setfacl -m u:caddy:x $* by hand"; return 0; }
+  local d; for d in "$@"; do
+    [ -d "$d" ] || continue
+    setfacl -m u:caddy:x "$d" || echo "WARNING caddy-traverse: setfacl -m u:caddy:x $d failed; Caddy may get 403 on /pair"
+  done
+}
+SELF_REL="$(cd "$HERE/../../.." && pwd)"   # this release's folder when run from it (release.sh runs $REL/.../install.sh)
+case "$SELF_REL" in /srv/sim-worlds/releases/?*) ;; *) SELF_REL="";; esac
+caddy_traverse /srv/sim-worlds /srv/sim-worlds/releases ${SELF_REL:+"$SELF_REL"}
+PAIR_CARD="${SELF_REL:-/srv/sim-worlds/production}/apps/web/dist/pair.html"
+if [ -f "$PAIR_CARD" ] && id caddy >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+  if runuser -u caddy -- test -r "$PAIR_CARD"; then echo "caddy-traverse: Caddy can read $PAIR_CARD"
+  else echo "WARNING caddy-traverse: Caddy CANNOT read $PAIR_CARD: /pair will answer 403. A folder on the way lacks x for caddy (ls -ld each; getfacl)"; fi
+fi
 install -d -o simworlds -g simworlds -m 750 /srv/sim-worlds-data /srv/sim-worlds-data/staging /srv/sim-worlds-data/production
 install -d -o root -g simworlds -m 750 /etc/sim-worlds
 
