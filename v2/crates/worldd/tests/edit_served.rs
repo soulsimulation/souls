@@ -2877,12 +2877,12 @@ fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() 
     }
 }
 
-/// 0.135: a dance for a while (`act dance for=3`) in a served world is one run whose move repeats back to back, and the
-/// log holds one record of it for viewers (`souls:form-move`), planned past the latest the dance can end, not one a
-/// move: an hour's dance is two entries for the page, not thousands. The run ends (`souls:form-ended`, where the page
-/// cuts it) once its 3 s have passed, at the end of its last whole move.
+/// 0.135: a dance for a while (`act dance for=20`) in a served world is one run whose move repeats back to back. The log
+/// holds a record of it for viewers (`souls:form-move`) at its first move and again 15 s on, so a viewer who comes in
+/// mid-dance draws it from the next, each planned to the latest the dance can end; not one a move (25 here). The run
+/// ends (`souls:form-ended`, where the page cuts it) once its 20 s have passed, at the end of its last whole move.
 #[test]
-fn a_dance_for_a_while_is_one_move_record_for_viewers_and_ends_after_its_length() {
+fn a_dance_for_a_while_is_a_move_record_every_15_s_for_viewers_and_ends_after_its_length() {
     let d = scratch("dance-for");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
@@ -2921,7 +2921,7 @@ fn a_dance_for_a_while_is_one_move_record_for_viewers_and_ends_after_its_length(
             1,
             Value::Array(vec![Value::Array(vec![
                 Value::Bytes(b"for".to_vec()),
-                Value::Uint(3),
+                Value::Uint(20),
             ])]),
         )]),
         sequence: 2,
@@ -2987,12 +2987,22 @@ fn a_dance_for_a_while_is_one_move_record_for_viewers_and_ends_after_its_length(
         .filter(|e| e.0 == "souls:form-ended")
         .collect();
     println!("dance events: {events:?}");
-    assert_eq!(moves.len(), 1, "one record for the whole dance, not one a move");
+    assert_eq!(moves.len(), 2, "a record at the start and 15 s on, not one a move");
     let (start, planned) = (moves[0].1, *moves[0].2.last().expect("planned ends"));
+    let again = moves[1].1 - start;
+    assert!(
+        (15_000_000..15_000_000 + 900_000).contains(&again),
+        "the record again at the first move 15 s on: {again}"
+    );
+    assert_eq!(
+        moves[1].2.last(),
+        Some(&planned),
+        "planned to the same end"
+    );
     let end = ended.last().expect("the run ended").1;
     assert!(
-        (start + 3_000_000..=start + 3_800_000 + 100_000).contains(&end),
-        "it dances its 3 s, to its last whole move: ended {} ms in",
+        (start + 20_000_000..=start + 20_800_000 + 100_000).contains(&end),
+        "it dances its 20 s, to its last whole move: ended {} ms in",
         (end - start) / 1000
     );
     assert!(

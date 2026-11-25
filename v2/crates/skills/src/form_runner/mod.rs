@@ -268,6 +268,10 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
     }
 }
 
+/// How often a repeated move's record for viewers is written again, µs: a viewer who comes in mid-dance draws it
+/// within this long, and an hour's dance is 240 records, not one a move.
+pub const REWRITE_US: Micros = 15_000_000;
+
 /// The most a repeated move may go on, s (an hour): a Soul asked to keep on until told to stop asks for this, and
 /// its `stop` ends it sooner.
 pub const FOR_MOST_S: i64 = 3_600;
@@ -1791,8 +1795,11 @@ pub struct Runner {
     /// When the step in progress began, µs: a repeated move ([`Step::Move`]'s `repeat`) goes on until its length
     /// has passed since then.
     since: Micros,
-    /// The move asked for last is a repeat of the step's move, not its first.
+    /// The move asked for last is a repeat of the step's move that writes no record for viewers: neither its first nor
+    /// one [`REWRITE_US`] after the last record ([`Runner::repeat`]).
     again_move: bool,
+    /// When the step's record for viewers was last written, µs.
+    recorded: Micros,
     /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
     /// body out again by a rise, then ends `left`.
     backing: bool,
@@ -1835,6 +1842,7 @@ impl Runner {
             again: false,
             since: 0,
             again_move: false,
+            recorded: 0,
             backing: false,
             rising_out: false,
         }
@@ -1867,14 +1875,15 @@ impl Runner {
         self.steps.get(self.at + 1)
     }
 
-    /// The step in progress is a repeated move (a dance for a minute): its length, µs, and whether the move asked for
-    /// last is a repeat rather than its first. The world writes one record for viewers at the first move, planned to
-    /// the step's end, and none for the repeats; the run's end cuts it (0.135).
-    pub fn repeat(&self) -> Option<(Micros, bool)> {
+    /// The step in progress is a repeated move (a dance for a minute): when the step began and its length, µs, and
+    /// whether the move asked for last writes no record for viewers. The world writes a record at the first move and
+    /// again at the first repeat [`REWRITE_US`] after the last one, each planned to the latest the step can end, and
+    /// none for the other repeats; the run's end cuts it (0.135).
+    pub fn repeat(&self) -> Option<(Micros, Micros, bool)> {
         match self.step()? {
             Step::Move {
                 repeat: Some(r), ..
-            } => Some((*r, self.again_move)),
+            } => Some((self.since, *r, self.again_move)),
             _ => None,
         }
     }
@@ -1975,6 +1984,7 @@ impl Runner {
             } => {
                 self.since = host.now();
                 self.again_move = false;
+                self.recorded = self.since;
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
@@ -2130,7 +2140,13 @@ impl Runner {
                 }
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
-                self.again_move = true;
+                // A record again once REWRITE_US have passed since the last, so a viewer who comes in mid-dance (a
+                // page opened, reloaded or caught up) is given it within that long; else none.
+                let now = host.now();
+                self.again_move = now.saturating_sub(self.recorded) < REWRITE_US;
+                if !self.again_move {
+                    self.recorded = now;
+                }
                 Next::Move {
                     name: mv,
                     node: on.unwrap_or(self.node),

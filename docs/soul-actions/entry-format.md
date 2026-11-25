@@ -407,8 +407,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4; `for_s` repeats it back to back, with
   no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`: the
-  humanoid's `dance for=60` dances a minute, and a leave or `stop` ends it at the move's next phase; the log holds one
-  record of it for viewers, planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
+  humanoid's `dance for=60` dances a minute, and a leave or `stop` ends it at the move's next phase; the log holds a
+  record of it for viewers at its start and every 15 s (a viewer who comes in mid-dance draws it from the next), each
+  planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
 - **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
