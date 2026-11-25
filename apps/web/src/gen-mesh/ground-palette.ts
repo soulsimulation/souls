@@ -26,6 +26,9 @@ const PAL: Record<GroundPalette, P> = {
 export const groundRealismFor = (palette: string | undefined) => palette === 'meadow';
 /** The level-ground colour of a palette (what a lawn's soft edge fades into). */
 export const groundBaseFor = (palette: string | undefined) => (PAL[(palette as GroundPalette) ?? 'grass'] ?? PAL.grass).base;
+/** The near colour of the generic horizon ring a world without a far-land thing gets (WorldEntityLayer.buildHorizon):
+ *  grass keeps the ring's own green; any other palette its level ground, so a desert world has a desert horizon. */
+export const horizonBaseFor = (palette: string | undefined) => (!palette || palette === 'grass' || !(palette in PAL) ? '#6f8f6a' : PAL[palette as GroundPalette].base);
 function n2(x: number, z: number) { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); }
 
 /** The palette's colour before the playa mottling (height, slope, rock, snow); returns whether the playa mottles it. */
