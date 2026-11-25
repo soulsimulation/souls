@@ -1,0 +1,662 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:counter_match",
+  "owner": "thing",
+  "state": {
+    "remaining": {
+      "n": 28,
+      "type": "int",
+      "default": 7,
+      "audience": {
+        "rule": "everyone"
+      },
+      "unit": "count",
+      "min": 0,
+      "max": 7
+    },
+    "turn": {
+      "n": 29,
+      "type": "enum",
+      "default": "first",
+      "audience": {
+        "rule": "everyone"
+      },
+      "values": [
+        "first",
+        "second"
+      ]
+    }
+  },
+  "links": {
+    "first": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "second": {
+      "n": 2,
+      "from": "body",
+      "most": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "first_stand": {
+      "role": "stand",
+      "at_mm": [
+        -550,
+        0,
+        450
+      ],
+      "yaw_mdeg": 90000
+    },
+    "second_stand": {
+      "role": "stand",
+      "at_mm": [
+        550,
+        0,
+        450
+      ],
+      "yaw_mdeg": -90000
+    },
+    "pile": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        760,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1500,
+      900,
+      1500
+    ]
+  },
+  "forms": {
+    "take_1_first": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "first",
+          "end": "actor",
+          "says": "join_first"
+        },
+        {
+          "need": "linked",
+          "link": "second",
+          "says": "other_side_missing"
+        },
+        {
+          "need": "state",
+          "field": "turn",
+          "is": "first",
+          "says": "second_to_play"
+        },
+        {
+          "need": "state",
+          "field": "remaining",
+          "at_least": 1,
+          "says": "not_enough"
+        },
+        {
+          "need": "within_reach",
+          "point": "pile"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "first_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pile"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining",
+          "by": -1,
+          "event": "counters_taken"
+        },
+        {
+          "change": "set",
+          "field": "turn",
+          "to": "second",
+          "event": "turn_passed"
+        }
+      ]
+    },
+    "take_2_first": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "first",
+          "end": "actor",
+          "says": "join_first"
+        },
+        {
+          "need": "linked",
+          "link": "second",
+          "says": "other_side_missing"
+        },
+        {
+          "need": "state",
+          "field": "turn",
+          "is": "first",
+          "says": "second_to_play"
+        },
+        {
+          "need": "state",
+          "field": "remaining",
+          "at_least": 2,
+          "says": "not_enough"
+        },
+        {
+          "need": "within_reach",
+          "point": "pile"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "first_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pile"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining",
+          "by": -2,
+          "event": "counters_taken"
+        },
+        {
+          "change": "set",
+          "field": "turn",
+          "to": "second",
+          "event": "turn_passed"
+        }
+      ]
+    },
+    "take_1_second": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "second",
+          "end": "actor",
+          "says": "join_second"
+        },
+        {
+          "need": "linked",
+          "link": "first",
+          "says": "other_side_missing"
+        },
+        {
+          "need": "state",
+          "field": "turn",
+          "is": "second",
+          "says": "first_to_play"
+        },
+        {
+          "need": "state",
+          "field": "remaining",
+          "at_least": 1,
+          "says": "not_enough"
+        },
+        {
+          "need": "within_reach",
+          "point": "pile"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "second_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pile"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining",
+          "by": -1,
+          "event": "counters_taken"
+        },
+        {
+          "change": "set",
+          "field": "turn",
+          "to": "first",
+          "event": "turn_passed"
+        }
+      ]
+    },
+    "take_2_second": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "second",
+          "end": "actor",
+          "says": "join_second"
+        },
+        {
+          "need": "linked",
+          "link": "first",
+          "says": "other_side_missing"
+        },
+        {
+          "need": "state",
+          "field": "turn",
+          "is": "second",
+          "says": "first_to_play"
+        },
+        {
+          "need": "state",
+          "field": "remaining",
+          "at_least": 2,
+          "says": "not_enough"
+        },
+        {
+          "need": "within_reach",
+          "point": "pile"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "second_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pile"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining",
+          "by": -2,
+          "event": "counters_taken"
+        },
+        {
+          "change": "set",
+          "field": "turn",
+          "to": "first",
+          "event": "turn_passed"
+        }
+      ]
+    },
+    "restart": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "first",
+          "end": "actor",
+          "says": "join_first"
+        },
+        {
+          "need": "state",
+          "field": "remaining",
+          "at_most": 0,
+          "says": "round_not_over"
+        },
+        {
+          "need": "within_reach",
+          "point": "pile"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "first_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pile"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining",
+          "to": 7,
+          "event": "round_restarted"
+        },
+        {
+          "change": "set",
+          "field": "turn",
+          "to": "first",
+          "event": "first_begins"
+        }
+      ]
+    }
+  },
+  "roles": {
+    "first": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 2000
+      }
+    },
+    "second": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 2000
+      }
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Seven-counter track: two sides take one or two in turn; the last counter wins.",
+    "rules": "The gold meter shows counters remaining; red means first side and blue means second side. First side: one player. Second side: one to three players sharing its turn. First begins. Take one or two; taking the last counter wins. At zero counters the side opposite turn won. An empty pile ends the round; first may restart with seven. Native activity role binding is required before play.",
+    "first_to_play": "First side\u2019s turn; wait for them to take counters.",
+    "second_to_play": "Second side\u2019s turn; wait for them to take counters.",
+    "join_first": "Join or accept the activity as the first side before taking counters.",
+    "join_second": "Join or accept the activity as the second side before taking counters.",
+    "other_side_missing": "Both sides must have a member before taking counters.",
+    "not_enough": "There are not enough counters for that take. An empty pile ends the round.",
+    "round_not_over": "Finish the current pile before restarting.",
+    "game": "game",
+    "counter": "counters"
+  },
+  "card": {
+    "text": "card",
+    "category": "game",
+    "synonyms": [
+      "game",
+      "counter"
+    ]
+  },
+  "looks": {
+    "model": "look:counter_match",
+    "shape": {
+      "round": 4,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            700,
+            0
+          ],
+          "size": [
+            950,
+            60,
+            650
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            335,
+            -250
+          ],
+          "size": [
+            60,
+            670,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            335,
+            250
+          ],
+          "size": [
+            60,
+            670,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            335,
+            -250
+          ],
+          "size": [
+            60,
+            670,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            335,
+            250
+          ],
+          "size": [
+            60,
+            670,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            748,
+            0
+          ],
+          "size": [
+            665,
+            36,
+            64
+          ],
+          "tint": "gold",
+          "role": "fill"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -332,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -238,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -142,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -48,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            142,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            238,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            332,
+            733,
+            -55
+          ],
+          "size": [
+            4,
+            6,
+            24
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            737,
+            200
+          ],
+          "size": [
+            100,
+            14,
+            80
+          ],
+          "tint": "red",
+          "role": "light"
+        }
+      ],
+      "palette": {
+        "wood": "#70482b",
+        "gold": "#d9b64c",
+        "red": "#bb493e",
+        "blue": "#3d6baf"
+      },
+      "tags": [
+        "game",
+        "table"
+      ]
+    },
+    "table": [
+      {
+        "part": "fill",
+        "field": "remaining",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          7
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "light",
+        "field": "turn",
+        "do": "tint",
+        "at": {
+          "first": "#bb493e",
+          "second": "#3d6baf"
+        }
+      }
+    ]
+  }
+}
