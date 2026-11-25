@@ -4465,3 +4465,117 @@ fn w10_everyday_takes_on_eden_need_reach() {
     }
     println!("W10 refusals by arm and reason: {refused:?}");
 }
+
+/// Each body born in the world's log in `dir` (the births' node creations), with its pose, in the order born.
+fn births(dir: &Path) -> Vec<(Id, replica::pose::Pose)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A Soul's first moment on Eden: a world that names its arrival place (`worldd arrival`, `world.json`'s `arrival`)
+/// has its joining Souls born round that place, not at its entry. Eden names the campus quad
+/// (`place-region-campus-quad`, its fountain at (-12, -97) m): two fresh joins land within 8 m of the fountain, on the
+/// open ground, at least two body radii apart, each facing the fountain (its +x within a degree of the way to it).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (ground, lineage) = (im.nodes["ground"], im.nodes["world"].scope());
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::temp_dir().join(format!("eden-arrival-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    // Seeded at the old entry (the open commons lawn), then named its arrival place, as production Eden is.
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .args(["--entries", &format!("{root}/content/kinds"), "--souls", "0", "--at", "0,0"])
+        .output()
+        .unwrap();
+    assert!(seeded.status.success(), "{}", String::from_utf8_lossy(&seeded.stderr));
+    let unknown = Command::new(worldd)
+        .args(["arrival", "--dir"])
+        .arg(&dir)
+        .args(["--place", "no-such-place"])
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success(), "a place the facts lack is refused");
+    let named = Command::new(worldd)
+        .args(["arrival", "--dir"])
+        .arg(&dir)
+        .args(["--place", "place-region-campus-quad"])
+        .output()
+        .unwrap();
+    println!("arrival: {}", String::from_utf8_lossy(&named.stdout).trim());
+    assert!(named.status.success(), "{}", String::from_utf8_lossy(&named.stderr));
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let _served = Served(child);
+    let (mut line, mut lines) = (String::new(), Vec::new());
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        lines.push(std::mem::take(&mut line));
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    assert!(
+        lines.iter().any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
+        "serve names the arrival place: {lines:?}"
+    );
+    let _a = join(&dir, 1, lineage);
+    let _b = join(&dir, 2, lineage);
+    let born = births(&dir);
+    assert_eq!(born.len(), 2, "two bodies born");
+    let fountain = (-12_000_000i64, -97_000_000i64);
+    for (body, pose) in &born {
+        let p = pose.position;
+        let (dx, dz) = (fountain.0 - p.x, fountain.1 - p.z);
+        let d = ((i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt()) as f64 / 1e6;
+        let ahead = pose.orientation.rotate(replica::pose::Vec3::new(1 << 20, 0, 0)).unwrap();
+        let dot = i128::from(ahead.x) * i128::from(dx) + i128::from(ahead.z) * i128::from(dz);
+        let len = (i128::from(ahead.x).pow(2) + i128::from(ahead.z).pow(2)).isqrt()
+            * (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+        println!(
+            "born {body:?} at ({:.2}, {:.2}) m, {d:.2} m from the fountain, facing it at cos {:.5}, on {:?}",
+            p.x as f64 / 1e6,
+            p.z as f64 / 1e6,
+            dot as f64 / len as f64,
+            pose.support
+        );
+        assert!(d <= 8.0, "born {d:.2} m from the quad's fountain");
+        assert_eq!(pose.frame.node, ground, "born on the open ground");
+        assert!(
+            matches!(pose.support, replica::pose::Support::Surface { height: 0, .. }),
+            "standing on walkable ground"
+        );
+        assert!(dot * 100_000 >= len * 99_985, "faces the fountain");
+    }
+    let (a, b) = (born[0].1.position, born[1].1.position);
+    let apart = ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
+    println!("the two births {apart:.2} m apart");
+    assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+    let _ = std::fs::remove_dir_all(&dir);
+}
