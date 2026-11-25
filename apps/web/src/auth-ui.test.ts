@@ -126,7 +126,7 @@ await test('P1, #2516: a Clerk world page loads its sign-in only when the page c
  assert.equal(clerkSignedInHint('__client_uat=1760000000'),true);assert.equal(clerkSignedInHint('x__client_uat=17'),false);assert.equal(clerkSignedInHint(''),false);assert.equal(clerkNow(u+'?__clerk_db_jwt=x#watch','#watch'),true);
  // main.tsx: the Shell renders beside the lazy bridge (never inside ClerkProvider), and no static Clerk import
  const main=readFileSync(new URL('./main.tsx',import.meta.url),'utf8');
- assert.doesNotMatch(main,/from '@clerk\/clerk-react'/);assert.doesNotMatch(main,/import \{[^}]*LauncherHome[^}]*\} from/);
+ assert.doesNotMatch(main,/from '@clerk\/(clerk-)?react'/);assert.doesNotMatch(main,/import \{[^}]*LauncherHome[^}]*\} from/);
  assert.match(main,/<Shell cfg=\{cfg\} auth=\{auth\}[^>]*\/>\s*\{load&&<Suspense fallback=\{null\}><ClerkBridge /);
 });
 test('lane PUX: the New Soul prompt carries the signed-in window code, and only a well-formed one',()=>{

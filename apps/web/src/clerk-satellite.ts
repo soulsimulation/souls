@@ -9,8 +9,8 @@ export function clerkSatelliteOptions(satellite: ClerkSatellite | undefined, cur
   } catch { return {}; }
 }
 /** Let Clerk add its session-sync parameters; a hand-built primary link loses the satellite handshake. */
-export function startClerkSignIn(clerk: { buildSignInUrl(options: { signInForceRedirectUrl: string; signUpForceRedirectUrl: string }): string; openSignIn(options: { afterSignInUrl: string; afterSignUpUrl: string }): void }, satellite: ClerkSatellite | undefined, href: string, navigate: (url: string) => void) {
+export function startClerkSignIn(clerk: { buildSignInUrl(options: { signInForceRedirectUrl: string; signUpForceRedirectUrl: string }): string; openSignIn(options: { forceRedirectUrl: string; signUpForceRedirectUrl: string }): void }, satellite: ClerkSatellite | undefined, href: string, navigate: (url: string) => void) {
   if (clerkSatelliteOptions(satellite, new URL(href).origin).isSatellite) {
     navigate(clerk.buildSignInUrl({ signInForceRedirectUrl: href, signUpForceRedirectUrl: href }));
-  } else clerk.openSignIn({ afterSignInUrl: href, afterSignUpUrl: href });
+  } else clerk.openSignIn({ forceRedirectUrl: href, signUpForceRedirectUrl: href });
 }

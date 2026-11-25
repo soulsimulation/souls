@@ -1,6 +1,6 @@
 // X2 (0.134): copied from v2/web/src/source/signin.ts for the pairing card the old page builds.
 // The page's sign-in (Engine v2 V13c, #3418): the same provider script today's site loads (clerk-js, as
-// `@clerk/clerk-react`'s loader builds its address), behind the same configuration (`window.__simConfig`, which the
+// `@clerk/react`'s loader builds its address), behind the same configuration (`window.__simConfig`, which the
 // server writes into the page: `authProvider: 'clerk'`, `clerkPublishableKey`, `clerkIssuer`, and `clerkSatellite` on
 // a satellite domain). Signed in, the page's session is the provider's, a fresh token asked of the script at each
 // exchange (`socket.ts`). Signed out, the provider's own sign-in opens and comes back to this page. Without that
@@ -16,11 +16,13 @@ export type SignInConfig = {
   clerkSatellite?: { domain: string; signInUrl: string };
 };
 
-/** The provider's script as the page loads it: its address and the attributes it is given. */
-export type ProviderScript = { src: string; attributes: Record<string, string> };
+/** The provider's script as the page loads it: its address, its UI's address and the attributes it is given. */
+export type ProviderScript = { src: string; uiSrc: string; attributes: Record<string, string> };
 
-/** The major version of clerk-js today's site loads (`@clerk/clerk-react` 5). */
-export const CLERK_JS_MAJOR = '5';
+/** The major version of clerk-js today's site loads (`@clerk/react` 6, Clerk Core 3). */
+export const CLERK_JS_MAJOR = '6';
+/** The major version of Clerk's UI (`@clerk/ui`), which Core 3 loads beside clerk-js for its sign-in modal. */
+export const CLERK_UI_MAJOR = '1';
 
 /** The provider's frontend host a publishable key names (`pk_test_…`/`pk_live_…`: base64 of `<host>$`). */
 export function frontendApi(key: string): string | null {
@@ -50,7 +52,7 @@ export function satelliteOptions(cfg: SignInConfig, origin: string): { isSatelli
 /**
  * The provider's script for this configuration, or null when the page has no provider (the same rule as today's
  * site: `authProvider` is `clerk` and both the publishable key and the issuer are set). On a satellite with a live key
- * the script comes from the satellite's own `clerk.` host, as clerk-react loads it.
+ * the script comes from the satellite's own `clerk.` host, as `@clerk/react` loads it.
  */
 export function providerScript(cfg: SignInConfig, origin: string): ProviderScript | null {
   if (cfg.authProvider !== 'clerk' || !cfg.clerkPublishableKey || !cfg.clerkIssuer) return null;
@@ -61,7 +63,8 @@ export function providerScript(cfg: SignInConfig, origin: string): ProviderScrip
   const host = sat && live ? `clerk.${sat.domain}` : api;
   const attributes: Record<string, string> = { 'data-clerk-publishable-key': cfg.clerkPublishableKey };
   if (sat) attributes['data-clerk-domain'] = sat.domain;
-  return { src: `https://${host}/npm/@clerk/clerk-js@${CLERK_JS_MAJOR}/dist/clerk.browser.js`, attributes };
+  return { src: `https://${host}/npm/@clerk/clerk-js@${CLERK_JS_MAJOR}/dist/clerk.browser.js`,
+    uiSrc: `https://${host}/npm/@clerk/ui@${CLERK_UI_MAJOR}/dist/ui.browser.js`, attributes };
 }
 
 type ProviderIdentity = { id?: string; user?: { id?: string }; getToken(): Promise<string | null> };
@@ -75,7 +78,7 @@ export type Provider = {
   session?: ProviderIdentity | null;
   user?: { id?: string } | null;
   addListener?(listener: (state: IdentityState) => void): () => void;
-  openSignIn(options: { afterSignInUrl: string; afterSignUpUrl: string }): void;
+  openSignIn(options: { forceRedirectUrl: string; signUpForceRedirectUrl: string }): void;
   buildSignInUrl(options: { signInForceRedirectUrl: string; signUpForceRedirectUrl: string }): string;
 };
 
@@ -83,7 +86,7 @@ export type Provider = {
 export type PageEnv = {
   document: { createElement(tag: 'script'): HTMLScriptElement; head: { appendChild(n: Node): unknown } };
   href: string;
-  global: { Clerk?: Provider };
+  global: { Clerk?: Provider; __internal_ClerkUICtor?: unknown };
   navigate(url: string): void;
 };
 
@@ -95,22 +98,22 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
   const origin = new URL(env.href).origin;
   const script = providerScript(cfg, origin);
   if (!script) return null;
-  if (!env.global.Clerk) {
+  const add = (src: string, attributes: Record<string, string>) => new Promise<void>((ok, fail) => {
     const el = env.document.createElement('script');
-    el.src = script.src;
+    el.src = src;
     el.async = true;
     el.crossOrigin = 'anonymous';
-    for (const [k, v] of Object.entries(script.attributes)) el.setAttribute(k, v);
-    await new Promise<void>((ok, fail) => {
-      el.addEventListener('load', () => ok());
-      el.addEventListener('error', () => fail(new Error('no sign-in: the provider script did not load')));
-      env.document.head.appendChild(el);
-    });
-  }
+    for (const [k, v] of Object.entries(attributes)) el.setAttribute(k, v);
+    el.addEventListener('load', () => ok());
+    el.addEventListener('error', () => fail(new Error('no sign-in: the provider script did not load')));
+    env.document.head.appendChild(el);
+  });
+  // Clerk Core 3: the sign-in modal lives in Clerk's UI script, handed to load beside clerk-js.
+  await Promise.all([env.global.Clerk ? null : add(script.src, script.attributes), env.global.__internal_ClerkUICtor ? null : add(script.uiSrc, {})]);
   const clerk = env.global.Clerk;
   if (!clerk) throw new Error('no sign-in: the provider script did not start');
   const sat = satelliteOptions(cfg, origin);
-  await clerk.load(sat ?? {});
+  await clerk.load({ ...(sat ?? {}), ui: { ClerkUI: env.global.__internal_ClerkUICtor } });
   const session = clerk.session;
   if (session) {
     const identityOf = ({ session, user }: IdentityState) => session ? String(session.id) + '/' + String(user?.id ?? session.user?.id ?? '') : null;
@@ -132,7 +135,7 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
   }
   // Signed out: the provider's sign-in, back to this page. A satellite leaves for the primary's, as today's site does.
   if (sat) env.navigate(clerk.buildSignInUrl({ signInForceRedirectUrl: env.href, signUpForceRedirectUrl: env.href }));
-  else clerk.openSignIn({ afterSignInUrl: env.href, afterSignUpUrl: env.href });
+  else clerk.openSignIn({ forceRedirectUrl: env.href, signUpForceRedirectUrl: env.href });
   return null;
 }
 
