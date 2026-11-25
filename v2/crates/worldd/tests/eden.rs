@@ -518,13 +518,66 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
         .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
         .map_or(0, <[_]>::len);
     println!("{punts} rowing punts added by the world, {riders} seats each");
+    // The world gives each ride that flies a loop its course (`with_rides`, #4795), and a ride on its course whose own
+    // def declares no seats takes its entry's seats as they are (Eden's launch balloon, an `eden:balloon` by Eden's
+    // map): the facts read here have no course, so `body_slots` gives it none.
+    let (mut aloft, mut aloft_things) = (0, 0);
+    let all = replica::rules::json::parse(&text).unwrap();
+    let kind_of: BTreeMap<&str, String> = all
+        .get("kinds")
+        .and_then(|k| k.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?,
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    for t in all.get("things").and_then(|t| t.arr()).unwrap_or(&[]) {
+        let on_ground = t.get("parent").is_none_or(|p| p.str().is_none());
+        let own_slots = t
+            .get("slots")
+            .and_then(|s| s.arr())
+            .is_some_and(|s| !s.is_empty());
+        let (Some(entry), Some(def)) = (
+            t.get("entry").and_then(|e| e.str()),
+            t.get("def").and_then(|d| d.str()),
+        ) else {
+            continue;
+        };
+        let Some((_, e)) = found.iter().find(|(k, _)| k == entry) else {
+            continue;
+        };
+        if !on_ground
+            || own_slots
+            || kind_of.get(def).is_some_and(|k| k == entry)
+            || !sim::courses::rides::Ride::of(e).is_some_and(|r| r.loops_aloft())
+        {
+            continue;
+        }
+        let seats = e.get("slots").and_then(|s| s.obj()).unwrap_or(&[]);
+        aloft += seats
+            .iter()
+            .filter(|(_, d)| d.get("admits").and_then(|a| a.str()) == Some("body"))
+            .count();
+        aloft_things += 1;
+    }
+    println!(
+        "{aloft} seats on {aloft_things} rides that take their entry's seats on the course the world gives them"
+    );
     assert_eq!(
-        mine.len() + punts * riders,
+        mine.len() + punts * riders + aloft,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len() + punts, "the things they are on");
+    assert_eq!(
+        on,
+        on_things.len() + punts + aloft_things,
+        "the things they are on"
+    );
     assert_eq!(registered, declared, "every declared body slot registered");
     // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
     // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).

@@ -346,7 +346,7 @@
       }
     },
     {
-      "name": "bookshelf_take_a_book_straighten_dust",
+      "name": "bookshelf_take_a_book_straighten_dust_put_it_back",
       "state": {
         "actor": "b1",
         "nodes": {
@@ -465,6 +465,34 @@
             "changes": [],
             "events": []
           }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "put_back",
+            "args": {
+              "book": "rb1.0"
+            }
+          },
+          "receipt": "rb4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "rb1.0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:put_back",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
         }
       ],
       "after": {
@@ -475,19 +503,16 @@
             "neat": 1
           }
         },
-        "rb1.0": {
-          "kind": "eden:book"
-        },
         "b1": {
           "hands": {
-            "left": "rb1.0",
+            "left": null,
             "right": null
           }
         }
       }
     },
     {
-      "name": "bookcase_take_a_book_straighten_dust",
+      "name": "bookcase_take_a_book_straighten_dust_put_it_back",
       "state": {
         "actor": "b1",
         "nodes": {
@@ -606,6 +631,34 @@
             "changes": [],
             "events": []
           }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "put_back",
+            "args": {
+              "book": "rc1.0"
+            }
+          },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "rc1.0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:put_back",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
         }
       ],
       "after": {
@@ -616,12 +669,9 @@
             "neat": 1
           }
         },
-        "rc1.0": {
-          "kind": "eden:book"
-        },
         "b1": {
           "hands": {
-            "left": "rc1.0",
+            "left": null,
             "right": null
           }
         }
@@ -1412,6 +1462,117 @@
           "kind": "eden:book",
           "fields": {
             "open": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "book_stack_take_a_book_and_put_it_back",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:book_stack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "take"
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rc1.0",
+                "kind": "eden:book",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                },
+                "stock": "books",
+                "carries": [
+                  "title",
+                  "first_page"
+                ]
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "books",
+                "n": 28,
+                "to": 5,
+                "by": -1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "x1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "put_back",
+            "args": {
+              "book": "rc1.0"
+            }
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "rc1.0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:put_back",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:book_stack",
+          "fields": {
+            "books": 5
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
           }
         }
       }
