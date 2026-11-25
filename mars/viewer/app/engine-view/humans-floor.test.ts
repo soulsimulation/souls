@@ -102,5 +102,6 @@ test('actual rig plants both push-up feet throughout entry, repetitions and exit
   assert.ok(distance(moving(1.25-1e-12),moving(1.25+1e-12))<.015,'a rise rounded to phase one holds the terminal clip frame rather than wrapping to lying');
   for(const end of [.25,1.25,1.55]){const a=moving(end-1e-5),b=moving(end+1e-5),d=distance(a,b);if(d>=.015){const i=a.findIndex((p,i)=>Math.hypot(...p.p.map((x,j)=>x-b[i].p[j]))===d);console.log('MOVING_PHASE',end,d,a[i],b[i]);}assert.ok(d<.015,'moving-root get-up phase '+end+' surface '+d+'m');}
   for(const end of [.25,1.25,1.55])assert.ok(distance(moving(end-1e-5,0,0,true),moving(end+1e-5,0,0,true))<.015,'short idle gap retains floor-to-motion phase continuity '+end);
+  for(const walk of [.05,.103,.25,.49]){const p:[number,number,number]=[1.067,0,-.019];views.setFrame([{id:'contact-rig',p,yaw:-.274,walk,walkDist:.067,activity:'stargaze',activityAge:2.115}],82+walk);views.render(1);assert.deepEqual(p,[1.067,0,-.019],'native input root remains authoritative');const points=views.meshPoints('contact-rig',1);for(const part of ['leg','foot']){const skin=points.filter(x=>x.part===part);assert(skin.length>0);assert(Math.min(...skin.map(x=>x.p[1]))>=-.015,'free floor '+part+' remains above penetration tolerance while movement weight ramps '+walk);}}
   views.clear();setHumanGround(null);
 });

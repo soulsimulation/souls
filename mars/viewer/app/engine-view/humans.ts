@@ -1643,7 +1643,8 @@ export class HumanViews {
     // uses an isolated skeleton/mixer with the same immutable template; it never samples the previous frame.
     const pc = v.postureChange;
     const floorToMove=!!pc&&['back','front'].includes(postureKind(pc.from,pc.fromBase))&&GAIT_ACTS.has(v.activity);
-    const noOwner = POSTURE_ORIGINS.has(pc?.from ?? v.activity) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove);
+    const freeFloor=['back','front'].includes(postureKind(v.activity,v.base))&&POSTURE_ORIGINS.has(v.activity);
+    const noOwner = POSTURE_ORIGINS.has(pc?.from ?? v.activity) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
     const phase = pc ? posturePhaseEnds(pc,v.base,v.activity).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
     if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
       this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
