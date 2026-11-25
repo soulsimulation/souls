@@ -1626,6 +1626,59 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
     }
 }
 
+/// #4143: a gesture whose move claims the legs (`content/moves/stretch.json`, `slump.json`) on a seated body. The
+/// client's form rules say yes (the form has no posture need); the seat's hold on the legs refused the move
+/// `resource-held`. Made from the seat, its legs left to it: the run ends `done` and the body is still seated.
+#[test]
+fn a_seated_stretch_is_made_from_the_seat_never_refused_resource_held() {
+    use replica::bodies::Want;
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // A stretch: a hand move that also claims and blocks the legs, reaching anywhere the test's reach says (5 m).
+    let mut stretch = b
+        .library
+        .iter()
+        .find(|m| m.name.as_str() == "souls:press")
+        .expect("press")
+        .clone();
+    stretch.name = Name::new("test:stretch").expect("a name");
+    stretch.claims.push(Want::All(Class::Locomotion));
+    stretch.blocks.push(Class::Locomotion);
+    stretch.reach = 20_000_000;
+    b.library.push(stretch);
+    b.snap.far = true;
+    let mv = Step::Move {
+        name: Name::new("test:stretch").expect("a name"),
+        at: None,
+        on: None,
+        repeat: None,
+    };
+    b.steps(body, body, vec![mv], intent(body, 1), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+    println!(
+        "#4143: a seated stretch ended {}, body in {held:?}",
+        e.how.as_str()
+    );
+    assert_eq!(e.how.as_str(), "done", "not resource-held");
+    assert_eq!(held, Some(chair), "still seated");
+}
+
 /// 0.135 E17: a form's own `walk_to` while the body is in a slot of the thing. A form that leaves the body there (a
 /// phone box's `open` from inside: no rise, no sit) is done from inside: its own walk is dropped and the run ends
 /// `done` with the body still in the slot, never refused `resource-held`. A form that moves the actor starts with the

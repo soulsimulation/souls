@@ -166,7 +166,9 @@ slot) with the stance the request named. Postures are the controller's stance in
   standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
   body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
-  controller keeps it apart from the bodies it steps, so a tick never visits it.
+  controller keeps it apart from the bodies it steps, so a tick never visits it. A form's move on a body in a slot
+  (a seated stretch or slump) leaves the legs to the slot: it neither claims nor blocks them, so the seat's hold never
+  refuses it `resource-held`; a move that needs the body standing says so by its form's posture need (#4143).
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
