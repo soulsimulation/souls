@@ -144,6 +144,7 @@ ENTRY=$(sed -n 's/.*"entry": *\[\(-\{0,1\}[0-9]*\), *\(-\{0,1\}[0-9]*\)\].*/\1 \
 AT=$(awk -v e="$ENTRY" 'BEGIN { split(e, p, " "); printf "%.3f,%.3f", p[1] / 1000, p[2] / 1000 }')
 # The place its Souls arrive at, when world.json names one (`worldd arrival`): kept by the fresh seed.
 ARRIVAL=$(sed -n 's/.*"arrival": *"\([A-Za-z0-9_.:-]*\)".*/\1/p' "$SRC_DIR/world.json")
+if grep -q '"arrival"' "$SRC_DIR/world.json" && [ -z "$ARRIVAL" ]; then die "world.json names an arrival place this cannot read"; fi
 BODIES=''
 [ -f "$SRC_DIR/bodies.json" ] && BODIES=bodies.json
 if [ -n "${DIRECTORY_STORE_URL:-}${DIRECTORY_STORE_ENDPOINT:-}" ]; then STORE_WHAT="the directory's bucket (DIRECTORY_STORE_*)"; else STORE_WHAT="the folder $ROOT/directory"; fi

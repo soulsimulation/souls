@@ -383,13 +383,16 @@ impl Life {
                 continue;
             }
             let frame = Frame { node, slot: None };
-            let facing = standing
-                .faces(b.entry, i)
-                .and_then(|c| crate::controller::facing_toward(at, c))
-                .unwrap_or(Quat::IDENTITY);
+            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone.
             if let Some(s) = surfaces.get(&node)
-                && let Ok(m) = s.place_built(body, frame, at, facing, build)
+                && let Ok(mut m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
             {
+                if let Some(q) = standing
+                    .faces(b.entry, i)
+                    .and_then(|c| crate::controller::facing_toward(at, c))
+                {
+                    m.pose.orientation = q;
+                }
                 placed = Some(m);
                 break;
             }

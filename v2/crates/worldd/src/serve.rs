@@ -1768,8 +1768,8 @@ fn seed_in(args: &[String]) -> R<String> {
 
 /// The point Souls arrive at in a world whose `world.json` names an `arrival` place (a place of its facts, by its
 /// `name` or its `id`): the middle of that place's outline (or line), mm. None when the world names none, and the
-/// world's `entry` stands. A named place the facts do not hold is refused, so a world never silently arrives
-/// elsewhere.
+/// world's `entry` stands. A named place the facts do not hold is refused by name (`seed` and `worldd arrival` refuse
+/// it; a start says so and births at the entry).
 fn arrival(meta: &Json, facts: &str) -> R<Option<(i64, i64)>> {
     let Some(name) = meta.get("arrival") else {
         return Ok(None);
@@ -1797,7 +1797,9 @@ fn arrival_of(facts: &Json, name: &str) -> R<(i64, i64)> {
         .unwrap_or(&[])
         .iter()
         .filter_map(|p| match p.arr()? {
-            [Json::Int(x), Json::Int(z), ..] => Some((i64::try_from(*x).ok()?, i64::try_from(*z).ok()?)),
+            [Json::Int(x), Json::Int(z), ..] => {
+                Some((i64::try_from(*x).ok()?, i64::try_from(*z).ok()?))
+            }
             _ => None,
         })
         .collect();
@@ -1837,11 +1839,16 @@ fn set_arrival_in(args: &[String]) -> R<String> {
         return Err(usage.into());
     }
     let meta_path = dir.join("world.json");
-    let Json::Obj(mut meta) =
-        json::parse(&std::fs::read_to_string(&meta_path).map_err(io(&meta_path))?)?
-    else {
+    let parsed = json::parse(&std::fs::read_to_string(&meta_path).map_err(io(&meta_path))?)?;
+    let Json::Obj(mut meta) = parsed else {
         return Err("world.json is not souls/world/1".into());
     };
+    if !meta
+        .iter()
+        .any(|(k, v)| k == "format" && v.str() == Some("souls/world/1"))
+    {
+        return Err("world.json is not souls/world/1".into());
+    }
     meta.retain(|(k, _)| k != "arrival");
     let line = match place {
         Some(place) => {
@@ -1860,9 +1867,11 @@ fn set_arrival_in(args: &[String]) -> R<String> {
         }
         None => "arrival: cleared; Souls arrive at the entry from the next start".into(),
     };
-    let tmp = meta_path.with_extension("json.tmp");
-    std::fs::write(&tmp, format!("{}\n", Json::Obj(meta).to_json())).map_err(io(&tmp))?;
-    std::fs::rename(&tmp, &meta_path).map_err(io(&meta_path))?;
+    view_out::write_whole(
+        &meta_path,
+        format!("{}\n", Json::Obj(meta).to_json()).as_bytes(),
+    )
+    .map_err(refusal)?;
     Ok(line)
 }
 
@@ -3827,7 +3836,18 @@ fn serve(args: &[String]) -> R<()> {
         Json::Int(n) => i64::try_from(*n).ok(),
         _ => None,
     };
-    let arrived = arrival(&meta, &std::fs::read_to_string(&facts).map_err(io(&facts))?)?;
+    // A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the entry, and
+    // the start says why.
+    let arrived = match meta.get("arrival") {
+        None => None,
+        Some(_) => std::fs::read_to_string(&facts)
+            .map_err(|e| e.to_string())
+            .and_then(|text| arrival(&meta, &text))
+            .unwrap_or_else(|e| {
+                eprintln!("worldd: arrival-refused: {e}; Souls arrive at the entry");
+                None
+            }),
+    };
     if let Some((x, z)) = arrived {
         println!(
             "worldd: Souls arrive at {} ({:.3},{:.3} m)",
@@ -3842,7 +3862,7 @@ fn serve(args: &[String]) -> R<()> {
             _ => None,
         })
         .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
-    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+        .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     cfg.join = Some(Join {
         entry: (ground, entry),
         family: humanoid()?,

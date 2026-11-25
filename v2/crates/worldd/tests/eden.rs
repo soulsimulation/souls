@@ -4509,17 +4509,31 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
     let seeded = Command::new(worldd)
         .args(["seed", "--facts", &facts, "--dir"])
         .arg(&dir)
-        .args(["--entries", &format!("{root}/content/kinds"), "--souls", "0", "--at", "0,0"])
+        .args([
+            "--entries",
+            &format!("{root}/content/kinds"),
+            "--souls",
+            "0",
+            "--at",
+            "0,0",
+        ])
         .output()
         .unwrap();
-    assert!(seeded.status.success(), "{}", String::from_utf8_lossy(&seeded.stderr));
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
     let unknown = Command::new(worldd)
         .args(["arrival", "--dir"])
         .arg(&dir)
         .args(["--place", "no-such-place"])
         .output()
         .unwrap();
-    assert!(!unknown.status.success(), "a place the facts lack is refused");
+    assert!(
+        !unknown.status.success(),
+        "a place the facts lack is refused"
+    );
     let named = Command::new(worldd)
         .args(["arrival", "--dir"])
         .arg(&dir)
@@ -4527,7 +4541,11 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
         .output()
         .unwrap();
     println!("arrival: {}", String::from_utf8_lossy(&named.stdout).trim());
-    assert!(named.status.success(), "{}", String::from_utf8_lossy(&named.stderr));
+    assert!(
+        named.status.success(),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
     let mut child = Command::new(worldd)
         .args(["serve", "--dir"])
         .arg(&dir)
@@ -4542,7 +4560,9 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
     }
     std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
     assert!(
-        lines.iter().any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
+        lines
+            .iter()
+            .any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
         "serve names the arrival place: {lines:?}"
     );
     let _a = join(&dir, 1, lineage);
@@ -4554,7 +4574,10 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
         let p = pose.position;
         let (dx, dz) = (fountain.0 - p.x, fountain.1 - p.z);
         let d = ((i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt()) as f64 / 1e6;
-        let ahead = pose.orientation.rotate(replica::pose::Vec3::new(1 << 20, 0, 0)).unwrap();
+        let ahead = pose
+            .orientation
+            .rotate(replica::pose::Vec3::new(1 << 20, 0, 0))
+            .unwrap();
         let dot = i128::from(ahead.x) * i128::from(dx) + i128::from(ahead.z) * i128::from(dz);
         let len = (i128::from(ahead.x).pow(2) + i128::from(ahead.z).pow(2)).isqrt()
             * (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
@@ -4568,13 +4591,17 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
         assert!(d <= 8.0, "born {d:.2} m from the quad's fountain");
         assert_eq!(pose.frame.node, ground, "born on the open ground");
         assert!(
-            matches!(pose.support, replica::pose::Support::Surface { height: 0, .. }),
+            matches!(
+                pose.support,
+                replica::pose::Support::Surface { height: 0, .. }
+            ),
             "standing on walkable ground"
         );
         assert!(dot * 100_000 >= len * 99_985, "faces the fountain");
     }
     let (a, b) = (born[0].1.position, born[1].1.position);
-    let apart = ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
+    let apart =
+        ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
     println!("the two births {apart:.2} m apart");
     assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
     let _ = std::fs::remove_dir_all(&dir);
