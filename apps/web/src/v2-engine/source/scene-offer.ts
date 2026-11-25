@@ -10,6 +10,12 @@ const BOUND = typeof window !== 'undefined' && typeof (window as unknown as { __
 
 /** Whether this page reads a v2 stream. */
 export const streamBound = (): boolean => BOUND;
+/** Whether this page asks for the old world's views (`/v1/world/snapshot`, `/v1/scene`, `/v1/edge/items`,
+ *  `/v1/edge/platforms`, `/v1/kernel`): always on an old-engine world; on a v2 world unless its inline config says none
+ *  are published (`v2Views: false`, tools/world-launcher/cutover.mjs v2Fields), where each would answer 404 and the
+ *  page draws the world from its stream. */
+const VIEWS = typeof window !== 'undefined' ? (window as unknown as { __simConfig?: { v2Views?: unknown } }).__simConfig?.v2Views : undefined;
+export const oldViews = (): boolean => !BOUND || VIEWS !== false;
 
 let offer: { promise: Promise<StreamSnapshot>; resolve(s: StreamSnapshot): void } | null = null;
 const theOffer = () => {

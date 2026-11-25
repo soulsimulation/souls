@@ -134,6 +134,19 @@ test('0.134 T2: a held hand let go (its record again, ended) ends that hold then
   assert.equal(other.end, t0 + 900_000, 'another move is left as it was');
 });
 
+test('0.135: a dance for a while is one record planned to its latest end; it dances throughout and stops where its run ended', () => {
+  // `act dance for=60`: one record, its contact 0.4 s in, planned to 60 s and one more move; the run ends at 60.8 s.
+  const g = [gestureFrom({ name: 'eden:dance', start: 0, ends: [400_000, 61_600_000], target: 'v2_a', run: 'run-1' })!];
+  for (let t = 0; t < 60_800_000; t += 100_000) assert.equal(gestureAt(g, t), 'dance', `dancing at ${t / 1e6} s`);
+  cut(g, 60_800_000);
+  assert.equal(gestureAt(g, 60_800_000), null, 'standing once its run ended');
+  // A stop 20.1 s into an hour's dance ends its run at the next phase, 20.4 s: the dance stops there.
+  const h = [gestureFrom({ name: 'eden:dance', start: 0, ends: [400_000, 3_600_800_000], run: 'run-2' })!];
+  assert.equal(gestureAt(h, 20_300_000), 'dance');
+  cut(h, 20_400_000);
+  assert.equal(gestureAt(h, 20_400_000), null);
+});
+
 test('a move at a book the body holds is reading it: the old read pose with the book, to the run\'s end or the let-go', () => {
   assert.equal(readingFrom({ start: t0 }, 'cup'), null, 'a look at a cup in the hand is a look');
   assert.equal(readingFrom({ start: t0 }, null), null, 'a look at a book on a shelf is a look');

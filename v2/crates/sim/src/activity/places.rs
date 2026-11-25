@@ -78,12 +78,16 @@ impl Frame {
         })
     }
 
-    /// Where a place `p` with facing `yaw` (in the activity's frame) is: a point on the ground and a facing.
+    /// Where a place `p` with facing `yaw` (in the activity's frame) is: a point on the ground and a facing. A stand's
+    /// `yaw` turns the frame's +z, the way the member looks, as a kind's stand point's does; a body's facing turns its
+    /// +x to look there (the one rule, `crate::controller::facing_toward`; the page draws +x ahead), so a quarter turn
+    /// less.
     pub fn place(&self, p: Vec3, yaw: i64) -> R<(Vec3, Quat)> {
         let q = Quat::from_yaw_mdeg(self.yaw).map_err(pose)?;
         let d = q.rotate(Vec3::new(p.x, 0, p.z)).map_err(pose)?;
         let at = Vec3::new(self.origin.x + d.x, self.origin.y, self.origin.z + d.z);
-        let facing = Quat::from_yaw_mdeg((self.yaw + yaw).rem_euclid(360_000)).map_err(pose)?;
+        let facing =
+            Quat::from_yaw_mdeg((self.yaw + yaw - 90_000).rem_euclid(360_000)).map_err(pose)?;
         Ok((at, facing))
     }
 }
