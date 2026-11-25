@@ -38,6 +38,9 @@ export const FOLLOW_NEAR=1;
  *  ×1.5 (at least `least` m) plus `margin` m, and sooner once the Soul has moved `margin` m or the camera outgrows it. */
 export const SCENE={refresh:.5,least:20,margin:3};
 const SIGHT_FRAMES=3;
+/** First-day round 2: how often (s) the follow camera asks again whether the Soul is indoors, how far (m) its walls may
+ *  be, and how many of eight level rays must meet one. */
+const INSIDE={refresh:.5,reach:9,walls:5};
 const NEAR=FOLLOW_NEAR;
 export class WorldFollow {
   private requested:THREE.Vector3|null=null;
@@ -50,7 +53,7 @@ export class WorldFollow {
   private cast=0;
   rays=0;
   reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();this.near.at=-Infinity;this.drawnBlocked=null;this.clearAll=false;
-    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
+    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;this.inside=false;this.insideAt.at=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
   /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
@@ -134,8 +137,45 @@ export class WorldFollow {
       if(classify&&still<Infinity)fixed=Math.min(fixed,Math.max(0,still-.25));
       if((classify?fixed:allowed)<need)break;
     }
+    // First-day round 2: a Soul indoors is framed from inside. A view through a window or a doorway is clear to the
+    // sightline rays, so the camera stayed outside the house looking in; indoors, the camera comes no farther out along
+    // the offset than it stays under a roof (in the room, not in the garden beyond the window).
+    if(this.inside){const cap=this.roofedReach(target,direction,Math.max(allowed,fixed,every));allowed=Math.min(allowed,cap);fixed=Math.min(fixed,cap);every=Math.min(every,cap);}
     this.reachStatic=classify?fixed:allowed;this.reachAll=every;
     return allowed;
+  }
+  /** Whether something opaque is overhead within 8 m of `point` (cast both ways, for one-sided ceilings and roofs). */
+  private roofed(point:THREE.Vector3){
+    const up=new THREE.Vector3(0,1,0);
+    for(const [origin,direction] of [[point,up],[point.clone().addScaledVector(up,8),up.clone().negate()]] as const){
+      this.cast++;this.ray.set(origin,direction);this.ray.near=0;this.ray.far=8;this.hits.length=0;
+      for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
+      const hit=this.hits.some(h=>this.opaque(h.object));this.hits.length=0;if(hit)return true;
+    }
+    return false;
+  }
+  /** First-day round 2: indoors is a roof over the Soul's head and walls round it (at least INSIDE.walls of eight level
+   *  rays at chest height meet something within INSIDE.reach m). A porch, a tree or a pavilion is roofed, not walled. */
+  private inside=false;
+  private insideAt={at:-Infinity,target:new THREE.Vector3()};
+  private indoors(target:THREE.Vector3){
+    const n=this.insideAt;if(this.clock-n.at<INSIDE.refresh&&target.distanceTo(n.target)<.5)return this.inside;
+    n.at=this.clock;n.target.copy(target);
+    if(!this.roofed(target.clone().add(new THREE.Vector3(0,.6,0))))return this.inside=false;
+    let walls=0;const chest=target.clone().add(new THREE.Vector3(0,.3,0));
+    for(let i=0;i<8;i++){
+      const direction=new THREE.Vector3(Math.cos(i*Math.PI/4),0,Math.sin(i*Math.PI/4));
+      this.cast++;this.ray.set(chest,direction);this.ray.near=0;this.ray.far=INSIDE.reach;this.hits.length=0;
+      for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
+      if(this.hits.some(h=>this.opaque(h.object)&&!transient(h.object)))walls++;this.hits.length=0;
+    }
+    return this.inside=walls>=INSIDE.walls;
+  }
+  /** The farthest length up to `length` along `direction` at which a camera is still under a roof (stepping in), at
+   *  least NEAR. */
+  private roofedReach(target:THREE.Vector3,direction:THREE.Vector3,length:number){
+    for(let l=length;l>NEAR;l-=Math.max(.5,l*.2))if(this.roofed(target.clone().addScaledVector(direction,l)))return l;
+    return Math.min(length,NEAR);
   }
   /** QA2 F11: a camera that sees the Soul only through an opening (a doorway, a window) in a wall across the view
    * frames that wall, not the Soul. Two rays a frame-width apart (left and right of the sightline, at torso and head
@@ -373,6 +413,7 @@ export class WorldFollow {
     const wanted=this.requested!.clone();
     // #1316: decoupled, the viewer's view is the camera, exactly as they left it, carried along with the Soul.
     if(this.decoupled){this.rendered=wanted.clone();this.rule={name:'held'};this.still();return wanted;}
+    this.indoors(target);
     // While the viewer's hand is on the camera, show their view; only a wall between camera and Soul pulls it in
     // (a collision camera). Their requested distance survives, and the search resumes from their angle after.
     if(this.userActive&&this.rendered){
