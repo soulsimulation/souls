@@ -42,12 +42,20 @@ test('a standing body plays the gesture from the move start to its end, then sta
   assert.equal(gestureAt(body.gestures, t0 + 250_000), 'clap');
 });
 
-test('a seated body keeps sitting through a gesture', () => {
+test('a seated overlay keeps its authoritative seat and heading', () => {
   const g = gestureFrom({ name: 'eden:nod', start: t0, ends: [t0 + 900_000] })!;
   const body: Body = { entity: 'v2_a_2', soul: 'soul-a-2', name: 'Bo', heading: 0, gestures: [g],
     samples: [{ at: t0 - 1_000_000, p: [0, 0, 0], seat: { height: 450, lie: false } }] };
   const take = chunkOf([body], FROM, frame).take as unknown as Take;
-  assert.equal(sampleTake(take, 0.5).entities.v2_a_2.activity, 'sit');
+  const drawn = sampleTake(take, 0.5).entities.v2_a_2;
+  assert.equal(drawn.activity, 'nod');
+  assert.equal(drawn.state.baseActivity, 'sit');
+  assert.equal(drawn.state.seatHeight, .45);
+  assert.deepEqual(drawn.p, [0, 0, 0]);
+  assert.equal(drawn.yaw, 0);
+  body.gestures = [gestureFrom({ name: 'eden:push_ups', start: t0, ends: [t0 + 900_000] })!];
+  const floor = chunkOf([body], FROM, frame).take as unknown as Take;
+  assert.equal(sampleTake(floor, .5).entities.v2_a_2.activity, 'sit', 'a floor gesture cannot replace the seat');
 });
 
 test('0.134 B4: a handshake aimed at another body faces it and names it the partner; a held hand is a hand hold', () => {
@@ -163,4 +171,17 @@ test('a move at a book the body holds is reading it: the old read pose with the 
   const put = [readingFrom({ start: t0 }, 'book')!];
   endReading(put, t0 + 700_000);
   assert.equal(gestureAt(put, t0 + 800_000), null, 'the book put down ends the reading');
+});
+
+
+test('run-owned ends preserve a different run at the same tick, but cut their own same-tick start', () => {
+  const gestures = [gestureFrom({ name: 'eden:stargaze', start: 0, ends: [2_000_000], run: 'old' })!, gestureFrom({ name: 'eden:sit_ups', start: 1_000_000, ends: [2_000_000], run: 'new' })!];
+  cut(gestures, 1_000_000, 'old');
+  assert.equal(gestures[0].end, 1_000_000);
+  assert.equal(gestures[1].end, 2_000_000);
+  cut(gestures, 1_000_000, 'new');
+  assert.equal(gestures[1].end, 1_000_000);
+  const legacy = [gestureFrom({ name: 'eden:wave', start: 0, ends: [2_000_000] })!];
+  cut(legacy, 500_000);
+  assert.equal(legacy[0].end, 500_000, 'an old stream without run identity retains its body-wide behavior');
 });

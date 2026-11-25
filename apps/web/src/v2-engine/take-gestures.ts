@@ -55,13 +55,13 @@ export function endReading(gestures: Gesture[], at: number): void {
 }
 
 /** Ends the gesture of the move that started at `start` at `at` (a held move let go, 0.134 T2). */
-export function endGesture(gestures: Gesture[], start: number, at: number): void {
-  for (const g of gestures) if (g.start === start && at < g.end) g.end = Math.max(g.start, at);
+export function endGesture(gestures: Gesture[], start: number, at: number, run?: string): void {
+  for (const g of gestures) if ((run === undefined || g.run === run) && g.start === start && at < g.end) g.end = Math.max(g.start, at);
 }
 
 /** Ends a body's gesture running at `at` (its run ended early); one that has not begun or is over stays as it is. */
-export function cut(gestures: Gesture[], at: number): void {
-  for (const g of gestures) if (g.start <= at && at < g.end) g.end = at;
+export function cut(gestures: Gesture[], at: number, run?: string): void {
+  for (const g of gestures) if ((run === undefined || g.run === run) && g.start <= at && at < g.end) g.end = at;
 }
 
 /** The gesture playing at world time t (the newest begun), or null. */

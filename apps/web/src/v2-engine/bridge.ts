@@ -30,7 +30,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[];
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number; run?: string }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces;
   /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
@@ -251,13 +251,13 @@ export class V2Bridge {
     for (const m of p.moves ?? []) {
       const t = this.tracks.get(m.body);
       if (!t) continue;
-      if (m.ended) { endGesture(t.gestures, m.start, m.ended.at); continue; }
+      if (m.ended) { endGesture(t.gestures, m.start, m.ended.at, m.run); continue; }
       // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
       const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
       const g = readingFrom(m, heldProp) ?? gestureFrom(m, this.toward(m.target));
       if (g) t.gestures.push(g);
     }
-    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at, e.run); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
       if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });

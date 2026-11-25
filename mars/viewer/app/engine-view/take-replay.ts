@@ -5,7 +5,7 @@ import {WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 // and whether the engine camera is on can never change what is shown at a
 // given t (spec §18: the take plays identically with any camera).
 import {PIANO_FADE} from './activity-poses.ts';
-import {ACT_HISTORY,lastPostureChange} from './posture-transition.ts';
+import {lastPostureChange} from './posture-transition.ts';
 import {recordedBody,admittedBodyUrl} from './recorded-body.ts';
 import {recordedGame} from './recorded-games.ts';
 import {projectPlatformFrame} from './recorded-platforms.ts';
@@ -183,7 +183,7 @@ export class TakePeople {
   private waveOwners = new Map<string,number[]>();
   private waveActs = new Map<string,{t:number[];v:string[]}>();
   private waveTakes = new WeakMap<Take,boolean>();
-  private acts = new Map<string, { t: number[]; v: string[]; bt: number[]; bv: (string | null)[]; it?:number[];iv?:(string|null)[] }>();
+  private acts = new Map<string, { t: number[]; v: string[]; pt: number[]; pv: string[]; bt: number[]; bv: (string | null)[]; it?:number[];iv?:(string|null)[] }>();
   private base: SpatialScene;
   private stairKey = '';
   private supplementalStairs:readonly SupplementalStair[]=[];
@@ -308,7 +308,7 @@ export class TakePeople {
       const samples:WaveSample[]=[];
       for(let j=0;j<=wk;j++)if(wa.v[j]==='wave'){
         if(this.waveOwners.get(id)?.some(t=>t>=wa.t[j]&&t<=tick))continue;
-        if(wa.v.slice(j+1,wk+1).some(v=>v!=='idle'&&v!=='wave'&&!GAIT_ACTS.has(v)))continue;
+        if(wa.v.slice(j+1,wk+1).some(v=>v!=='idle'&&v!=='sit'&&v!=='wave'&&!GAIT_ACTS.has(v)))continue;
         const next=wa.t[j+1],end=next!==undefined&&next<=tick?next:undefined,released=end===undefined?undefined:(tick-end)*this.take.dt;
         if(released!==undefined&&released>=WAVE_BLEND_SECONDS)continue;
         samples.push(end===undefined?{...(j>0?{age:(tick-wa.t[j])*this.take.dt}:{})}:{released,...(j>0?{duration:(end-wa.t[j])*this.take.dt}:{})});
@@ -320,13 +320,18 @@ export class TakePeople {
         if(hypothetical!==undefined)wave.waveRestAge=hypothetical;
       }else if(a&&k>0&&a.v[k-1]==='wave')wave.waveSamples=[];
     }else if(a&&k>0&&a.v[k-1]==='wave')wave.waveSamples=[];
-    if(!a||k<1)return {...rest,...wave};
-    let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
-    const age=(tick-a.t[k])*this.take.dt;
-    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'|'postureChange'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
+    const posture:Pick<SampledHuman,'postureChange'>={};
+    if(a){
     // posture-transition.ts: the latest change of posture (an idle tick between sit-ups and jumping jacks keeps it)
     const baseAt=(at:number,before:boolean)=>{for(let i=a.bt.length-1;i>=0;i--)if(before?a.bt[i]<at:a.bt[i]<=at)return a.bv[i]??undefined;return undefined;};
-    const change=lastPostureChange(a.t,a.v,k,tick,this.take.dt,baseAt);if(change)history.postureChange=change;
+    let pk=a.pt.length-1;while(pk>=0&&a.pt[pk]>tick)pk--;
+    const change=lastPostureChange(a.pt,a.pv,pk,tick,this.take.dt,baseAt);if(change)posture.postureChange=change;
+    }
+    if(!a||k<1)return {...rest,...wave,...posture};
+    let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
+    const age=(tick-a.t[k])*this.take.dt;
+    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'|'postureChange'>={ ...wave, ...posture, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
+
     if(age<PIANO_FADE&&(history.prevActivity==='play-piano'||history.prevActivity==='play-music'&&a.it)){
       let instrument:string|null=null;for(let i=(a.it?.length??0)-1;i>=0;i--)if(a.it![i]<a.t[k]){instrument=a.iv![i];break;}
       if(history.prevActivity==='play-piano'||instrument==='piano'||instrument==='keyboard'){
@@ -365,26 +370,33 @@ export class TakePeople {
   /** Each body's activity changes on this take's tick axis, the previous adjacent take window's first (entry 36: an
    *  activity that began in the previous live window, or as this window's first change, has its age and what came before
    *  it; the singer's hand eased onto the mic, then jumped when the next window arrived with no age). Further adjacent
-   *  windows of the history are read back until ACT_HISTORY is covered: the new engine's live windows are half a second,
+   *  the retained adjacent windows preserve interrupted transition origins (the live bridge retains twelve seconds): the new engine's live windows are half a second,
    *  and a posture change (posture-transition.ts) or a crossfade lost its age at the next window but one. */
   private indexActs() {
     this.acts.clear();
     const windows: [Take, number][] = [[this.take, 0]];
-    for (let first = this.neighbours.prev; first && (this.take.startTick - first.startTick - first.ticks) * this.take.dt < ACT_HISTORY; ) {
+    const ending = new Map<number, Take[]>();
+    for (const take of this.history) { const end = take.startTick + take.ticks; const list = ending.get(end) ?? []; list.push(take); ending.set(end, list); }
+    for (let first = this.neighbours.prev; first; ) {
       windows.unshift([first, first.startTick - this.take.startTick]);
       const at: Take = first;
-      first = this.history.find((t) => t !== at && t.ticks > 0 && adjacentTakes(t, at) && t.rulesVersion === at.rulesVersion) ?? null;
+      first = (ending.get(at.startTick) ?? []).find((t) => t !== at && t.ticks > 0 && adjacentTakes(t, at) && t.rulesVersion === at.rulesVersion) ?? null;
     }
     const add=(take:Take,offset:number)=>{
       let found=false;
+      const activityAt=new Set(take.changes.filter(c=>c[2]==='activity').map(c=>c[1]+'@'+c[0]));
       for(const [tick,id,field,value]of take.changes){
         if(field!=='activity'&&field!=='baseActivity'&&field!=='instrument')continue;
         if(field==='instrument'&&value!=='piano'&&value!=='keyboard'&&!this.acts.get(id)?.it)continue;
-        let a=this.acts.get(id);if(!a)this.acts.set(id,(a={t:[],v:[],bt:[],bv:[]}));
+        let a=this.acts.get(id);if(!a)this.acts.set(id,(a={t:[],v:[],pt:[],pv:[],bt:[],bv:[]}));
         if(field==='activity'){
           if(value==='wave')found=true;
-          if(typeof value==='string'&&a.v[a.v.length-1]!==value){a.t.push(tick+offset);a.v.push(value);}
-        }else if(field==='baseActivity'){a.bt.push(tick+offset);a.bv.push(typeof value==='string'?value:null);}
+          if(typeof value==='string'&&a.v[a.v.length-1]!==value){a.t.push(tick+offset);a.v.push(value);a.pt.push(tick+offset);a.pv.push(value);}
+        }else if(field==='baseActivity'){
+          const next=typeof value==='string'?value:null, prior=a.bv.at(-1);
+          if(prior!==next&&a.v.length&&a.t.at(-1)!==tick+offset&&!activityAt.has(id+'@'+tick)){a.pt.push(tick+offset);a.pv.push(a.v.at(-1)!);}
+          a.bt.push(tick+offset);a.bv.push(next);
+        }
         else{(a.it??=[]).push(tick+offset);(a.iv??=[]).push(typeof value==='string'?value:null);}
       }
       this.waveTakes.set(take,found);

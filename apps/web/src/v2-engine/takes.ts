@@ -7,6 +7,7 @@
 // body is sampled at every tick between its own samples (never past its newest, as the v2 page draws it: no
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
+import { ACTIVITY_OVERLAYS } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
 import { LOOPS, gestureNow, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
@@ -105,7 +106,8 @@ export function motionAt(s: readonly WorldSample[], t: number, heading: number, 
  *  ride), the pose of the gesture playing (dance, read, jumping-jacks, …), else idle. */
 export function activityAt(b: Body, t: number): string {
   if (motionAt(b.samples, t, b.heading, b.turns).speed >= WALKING) return 'walk';
-  return postureOf(seatAt(b.samples, t)) ?? gestureNow(b.gestures, t)?.activity ?? 'idle';
+  const posture = postureOf(seatAt(b.samples, t)), gesture = gestureNow(b.gestures, t)?.activity;
+  return posture === 'sit' ? gesture && ACTIVITY_OVERLAYS.has(gesture) ? gesture : posture : posture ?? gesture ?? 'idle';
 }
 
 /** The heading of the last step that moved before t, and when that step ended (µs; -Infinity: none, `fallback`). */
@@ -192,6 +194,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
   for (const b of bodies) {
     if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
     const track: number[][] = [];
+    let baseActivity: string | null | undefined;
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
     let seatH: number | null | undefined, prop: string | null | undefined, partner: string | null | undefined, hold: string | null | undefined;
     for (let k = 0; k <= ticks; k++) {
@@ -222,7 +225,10 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < ticks && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
       // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
-      const nextActivity = walking ? 'walk' : postureOf(seat) ?? g?.activity ?? 'idle';
+      const posture = postureOf(seat);
+      const nextBase = posture === 'sit' ? 'sit' : null;
+      if (k < ticks && nextBase !== baseActivity) { changes.push([k, b.entity, 'baseActivity', nextBase]); baseActivity = nextBase; }
+      const nextActivity = walking ? 'walk' : posture === 'sit' ? g?.activity && ACTIVITY_OVERLAYS.has(g.activity) ? g.activity : posture : posture ?? g?.activity ?? 'idle';
       if (nextActivity !== activity && k < ticks) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
       const q = walking ? Math.round(m.speed * SPEED_Q) : null;
       if (k < ticks && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }

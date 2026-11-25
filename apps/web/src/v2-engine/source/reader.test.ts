@@ -42,7 +42,7 @@ export class StreamPlayer {
   query(q) { return w().query(q); }
   snapshot() { return w().snapshot(); }
   samples() { return '[]'; }
-  events() { return new Uint8Array([0x80]); }
+  events() { return w().eventBytes ?? new Uint8Array([0x80]); }
   publicHash() { return ''; }
   free() {}
 }
@@ -62,6 +62,7 @@ class World {
   readonly changed = new Map<number, number>();
   version = 0;
   asked7 = 0;
+  eventBytes?: Uint8Array;
   drawableAfter: Set<string>[] = [];
   readonly steps: Step[];
   readonly refuse7: boolean;
@@ -269,4 +270,22 @@ test('25 Nov: a pointer read that never answers is given up, and the next poll r
     assert.equal(errors.length, 1, `the hung read is given up as an error: ${errors}`);
     assert.ok((seen.get(POLLS) ?? 0) > (seen.get(40) ?? Infinity), `and the polls after it read the pointer again: ${seen.get(40)} then ${seen.get(POLLS)}`);
   } finally { AbortSignal.timeout = timeout; clearInterval(awake); }
+});
+
+
+test('move and end envelopes retain run ownership, including legacy ends without an id', async () => {
+  const world = new World([[0,null],[1,0]], [{}]);
+  const text = (s:string)=>new TextEncoder().encode(s);
+  const move = new Map<number,unknown>([[1,idv(1)],[2,text('souls:sit_ups')],[7,100],[8,[200,300]],[5,idv(1)]]);
+  world.eventBytes=encode([
+    new Map<number,unknown>([[1,'souls:form-move'],[2,new Map<number,unknown>([[1,8],[2,idv(1)],[3,move]])],[4,100]]),
+    new Map<number,unknown>([[1,'souls:form-ended'],[2,new Map<number,unknown>([[1,7],[2,idv(1)],[3,text('done')]])],[4,100]]),
+    new Map<number,unknown>([[1,'souls:form-ended'],[2,new Map<number,unknown>([[2,idv(1)],[3,text('done')]])],[4,100]]),
+  ]);
+  await run(world,0,0,0,messages=>{
+    const parts=messages.filter((m):m is {t:'part';p:PartRec}=>m.t==='part');
+    assert.equal(parts.length,1);
+    assert.equal(parts[0].p.moves?.[0].run,'8');
+    assert.deepEqual(parts[0].p.runEnds?.map(e=>e.run),['7',undefined]);
+  },'run-ownership');
 });

@@ -16,7 +16,7 @@ test('posture kinds of the exercise and rest activities', () => {
 
 test('sit-ups to jumping jacks: the sit-up flattens, the body gets up from its back (LayToIdle 0 → 1), then the jacks ease in', () => {
   const at = (age: number) => postureNow(change('situps', 'jumping-jacks', age), 'jumping-jacks');
-  assert.deepEqual(at(0)!.flat, { act: 'situps', k: 1 });
+  assert.deepEqual(at(0)!.flat, { act: 'situps', k: 1, ago: 0 });
   assert.ok(at(FLATTEN - 0.01)!.flat!.k < 0.01);
   let last = 0;
   for (let age = FLATTEN; age < FLATTEN + GET_UP; age += 0.05) { const r = at(age)!.rise!; assert.ok(r >= last && r - last < 0.12, `rise ${r} after ${last}`); last = r; }
@@ -38,14 +38,24 @@ test('standing to sit-ups lies down, then the sit-up eases in; standing to push-
   assert.deepEqual(postureNow(change('pushups', 'idle', 0), 'idle')!.tilt, { act: 'pushups', k: 1 });
 });
 
-test('a change that comes while the one before is drawn waits for it: up off the back, then down onto the hands', () => {
-  // sit-ups → idle (0.6 s) → push-ups: at the push-ups' start the getting-up is 0.6 s in and goes on to its end
-  const at = (sincePushups: number) => postureNow(change('idle', 'pushups', sincePushups, change('situps', 'idle', 0.6 + sincePushups)), 'pushups');
-  assert.ok(at(0)!.rise! > 0 && at(0)!.rise! < 1);
-  const left = FLATTEN + GET_UP - 0.6;
-  assert.ok(at(left - 0.05)!.rise! > 0.99);
-  assert.ok(at(left + TILT / 2)!.tilt);
-  assert.equal(at(left + TILT + 0.01), null);
+test('an interruption retargets from the attained phase and is independent of sample order', () => {
+  const at = (age: number) => postureNow(change('idle', 'pushups', age, change('situps', 'idle', .6 + age)), 'pushups');
+  const original = postureNow(change('situps', 'idle', .6), 'idle')!;
+  assert.equal(at(0)!.rise, original.rise);
+  assert.ok(at(.2)!.rise! > at(0)!.rise!, 'retarget proceeds from the attained get-up');
+  assert.deepEqual([.1, .5, .3].map(at), [.3, .5, .1].map(at).reverse());
+});
+
+test('dense interruptions retain their source origin across the old history boundary', () => {
+  const t = [0, 100, 102, 104, 105], v = ['situps', 'idle', 'pushups', 'idle', 'situps'];
+  for (const tick of [135.98, 136.02]) {
+    const c = lastPostureChange(t, v, 4, tick, .05, () => undefined)!;
+    assert.ok(c.before?.before?.before);
+    assert.equal(postureNow(c, 'situps'), null, 'the attained transition has completed on both sides of the old cutoff');
+  }
+  const sample = (tick: number) => postureNow(lastPostureChange(t, v, 4, tick, .05, () => undefined)!, 'situps');
+  assert.deepEqual(sample(110), sample(110));
+  assert.deepEqual([110, 112, 115].map(sample), [115, 112, 110].map(sample).reverse());
 });
 
 test('a seat: straight from standing to sit draws sit-down, from sit to standing stand-up; the old engine phases are left alone', () => {
@@ -68,7 +78,7 @@ test('the latest posture change in a history survives an idle tick between two e
   assert.deepEqual({ from: c.from, to: c.to }, { from: 'situps', to: 'idle' });
   assert.ok(Math.abs(c.age - 0.25) < 1e-9);
   assert.ok(postureNow(c, 'jumping-jacks'));
-  assert.equal(lastPostureChange(t, v, 2, 40 + 40, 0.05, () => undefined), null); // 2 s later: over
+  assert.equal(postureNow(lastPostureChange(t, v, 2, 40 + 40, 0.05, () => undefined)!, 'jumping-jacks'), null); // 2 s later: over
   const two = lastPostureChange([0, 40, 52], ['situps', 'idle', 'pushups'], 2, 55, 0.05, () => undefined)!;
   assert.deepEqual([two.from, two.to, two.before?.from, two.before?.to], ['idle', 'pushups', 'situps', 'idle']);
 });
