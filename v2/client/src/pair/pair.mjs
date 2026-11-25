@@ -12,6 +12,9 @@
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
 //        --label <agent label> [--soul <grant> | --creator <creator grant>] [--force] [--advert <url of world.json>]
+//        [--name <the Soul's name>] [--start]
+//   --name is what the new Soul is called: kept in config.json and on its owner's page, and carried by the daemon's own
+//   first `life:join`, so it is born named. --start starts the Soul's daemon once approved, so it joins the world then.
 //   With --creator (G7, #2796) it asks for the world's creator scope: `creator-<scope hex>-<n>`, kept as `c_<...>`.
 //   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
@@ -165,7 +168,7 @@ export const localId = (grant) => grant.startsWith('creator-') ? `c_${grant.slic
  * given the code; `unit` is the milliseconds in a second of polling interval (tests shorten it). Resolves to
  * `{soul, grant}`; rejects with a `Refused` naming why (and the device, for `soul-connected`).
  */
-export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert }) {
+export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert, name }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   // The token comes back in the poll's answer: over https, or plain http to this machine only.
   const at = new URL(directory);
@@ -199,6 +202,8 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     const configFile = join(home, 'config.json');
     const config = readJson(configFile);
     config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}) } };
+    // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
+    if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
     const credFile = join(home, CREDENTIALS);
     const creds = existsSync(credFile) ? readJson(credFile) : {};
@@ -213,10 +218,15 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (got.grant.startsWith('creator-')) {
       try { await refreshKindsText({ home, world, gateway, token: got.token }); kinds = 'kept'; } catch (e) { kinds = { failed: e.code ?? 'kinds-unreachable' }; }
     }
+    // Its owner's page shows the same name; the Soul is paired whether or not the directory took it.
+    let named;
+    if (name) {
+      try { const r = await post('/v1/pair/profile', { token: got.token, name }); named = r?.profile?.name ? 'kept' : { failed: r?.refused ?? 'profile' }; } catch { named = { failed: 'profile-unreachable' }; }
+    }
     let guide;
     try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
     // #3702: the world's welcome, shown to the Soul as it arrives.
-    return { soul: id, grant: got.grant, history, entries, ...(kinds ? { kinds } : {}), guide, ...(typeof got.welcome === 'string' ? { welcome: got.welcome } : {}) };
+    return { soul: id, grant: got.grant, history, entries, ...(kinds ? { kinds } : {}), ...(name ? { name, named } : {}), guide, ...(typeof got.welcome === 'string' ? { welcome: got.welcome } : {}) };
   }
 }
 
@@ -231,10 +241,16 @@ if (isMain(import.meta.url)) {
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
-      soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'),
+      soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'), name: opt('--name')?.trim() || undefined,
       onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: `Open the link while signed in to ${new URL(link, opt('--directory')).host}, check the code matches, and approve. The card also appears on the world page if it is open.` }),
     });
     say({ ok: true, ...out });
+    // Approved: the Soul's daemon starts now, syncs and joins the world by itself, with no command from its agent.
+    if (args.includes('--start')) {
+      const { call, DEFAULT_PKG } = await import('../daemon/client.mjs');
+      const s = await call(home, out.soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }).catch((e) => ({ ok: false, code: e.code ?? 'daemon-not-started' }));
+      say({ ok: s.ok !== false, step: 'started', soul: out.soul, ...(s.ok === false ? { code: s.code } : {}) });
+    }
   } catch (e) {
     say({ ok: false, code: e.code ?? 'failed', ...(e.device ? { device: e.device } : {}), detail: String(e.message ?? e).slice(0, 200) });
     process.exitCode = 1;

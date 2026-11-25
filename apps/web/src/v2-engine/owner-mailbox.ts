@@ -302,6 +302,9 @@ const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unkno
 const PAGE_STREAM = typeof window === 'undefined' ? null : v2Stream();
 /** This page's v2 stream as its inline config named it when the page loaded; null on an old-engine world. */
 export const v2World = (): string | null => PAGE_STREAM;
+/** The new engine's name for this page's world, from its stream (`/s/w/<name>/views/…`): the name a Soul's pairing
+ *  request and the owner's Soul list use, which need not be the page's slug. Null on an old-engine world. */
+export const v2WorldName = (stream: string | null = PAGE_STREAM): string | null => (stream ? /^\/s\/w\/([a-z0-9][a-z0-9-]{0,62})\//.exec(stream)?.[1] ?? null : null);
 /** R3b: where this page's view socket and directory are, as the box reaches them; null on an old-engine world. */
 export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof location !== 'undefined' ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null);
 
@@ -324,6 +327,49 @@ export function useV2OwnedSouls(): readonly string[] {
   }, [s.authed, s.mode, s.label]);
   return owned;
 }
+/** One of the signed-in person's Souls on this world, as the navbar lists it (the directory's `/v1/account/souls`). */
+export type V2AccountSoul = { id: string; name: string | null };
+/** The rows of `/v1/account/souls` for `world`: its page id and its name; other worlds' Souls are left out. */
+export function accountSoulsOf(body: unknown, world: string, soulIdOf: (grant: string) => string): V2AccountSoul[] {
+  const rows = (body as { souls?: unknown } | null)?.souls;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((r) => r && typeof r === 'object' && typeof r.soul === 'string' && r.soul.startsWith('soul-') && r.world === world
+    ? [{ id: soulIdOf(r.soul), name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 60) : null }] : []);
+}
+
+/** First day (25 Nov): the signed-in person's Souls on this v2 world, named, whether or not their body is here yet (the
+ *  navbar's "your Souls"); asked again when this page approves one. Empty on an old-engine world or signed out. */
+export function useV2AccountSouls(world: string | null = v2WorldName()): readonly V2AccountSoul[] {
+  const s = useSession();
+  const [souls, setSouls] = useState<readonly V2AccountSoul[]>([]);
+  const [asked, setAsked] = useState(0);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const again = () => setAsked((n) => n + 1);
+    window.addEventListener(OWNED_CHANGED_EVENT, again);
+    return () => window.removeEventListener(OWNED_CHANGED_EVENT, again);
+  }, []);
+  useEffect(() => {
+    const place = PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
+    if (!place || !world || (!s.authed && !('testName' in place.session))) { setSouls([]); return; }
+    let live = true;
+    void (async () => {
+      try {
+        let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
+        if (!name) { const t = await pageSession().getToken().catch(() => null); if (!t) return; if (t.startsWith('dev:')) name = t.slice(4); else bearer = t; }
+        const [{ soulIdOf }, res] = await Promise.all([import('./bridge.ts'), fetch(`${place.directory}/v1/account/souls`, { method: 'POST',
+          headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+          body: JSON.stringify(name ? { test_person: name } : {}), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })]);
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (live && body) setSouls(accountSoulsOf(body, world, soulIdOf));
+      } catch { /* the directory is unreachable now: keep the last list */ }
+    })();
+    return () => { live = false; };
+  }, [s.authed, s.mode, s.label, asked, world]);
+  return souls;
+}
+/** Said on the window when this page approved a Soul: the owned list is asked again (useV2OwnedSouls). */
+export const OWNED_CHANGED_EVENT = 'sim:v2-owned-changed';
 
 const boxes = new Map<string, V2OwnerMailbox>();
 /** The page's box for `soulId` on this v2 world (one per Soul a page), or null on an old-engine world. */
