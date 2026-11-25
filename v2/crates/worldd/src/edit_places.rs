@@ -13,13 +13,15 @@ use sim::edit::Planned;
 use sim::ground::scene::FLOOR;
 use sim::slots::{PlaceAt, Slots};
 
-/// One affected thing: its places, each with its floor, its own boxes (E11d), and the runs of those that move with
-/// their cabins (N14).
+/// One affected thing: its places, each with its floor, its own boxes (E11d), the runs of those that move with
+/// their cabins (N14), and what its trip's end sets back when it is a ride that flies a loop from its stop (a balloon:
+/// its seats do not move, the thing does).
 type Delta = (
     Ref,
     Vec<(PlaceAt, Ref)>,
     sim::slots::Footprint,
     Vec<sim::courses::rides::SeatRun>,
+    Vec<(u64, replica::encode::Value)>,
 );
 
 /// Each affected thing's places, boxes and runs (N14: a god edit that moves a ride, or what it stands on, registers its
@@ -124,6 +126,7 @@ impl Projection {
             let mut places = Vec::new();
             let mut own = Vec::new();
             let mut runs = Vec::new();
+            let mut trips = Vec::new();
             if let Some(n) = preview
                 .tree()
                 .handle(thing)
@@ -164,6 +167,13 @@ impl Projection {
                             named(floor),
                         ));
                     }
+                    // A balloon on its course ends its trips at home again (`places::ride_trips`, as at start-up).
+                    if !places.is_empty()
+                        && n.fields().contains_key(&replica::schedule::F_COURSE)
+                        && sim::courses::rides::Ride::of(entry).is_some_and(|r| r.loops_aloft())
+                    {
+                        trips = sim::courses::rides::trip_ends(entry);
+                    }
                     // A ride's slots run again from where it now stands, over the ground's heights there.
                     if entry.get("ride").is_some() && !places.is_empty() {
                         let tree = preview.tree();
@@ -196,7 +206,7 @@ impl Projection {
                     }
                 }
             }
-            deltas.push((named(thing), places, own, runs));
+            deltas.push((named(thing), places, own, runs, trips));
         }
         Ok(Self(deltas, refresh))
     }
@@ -234,7 +244,7 @@ impl Projection {
                 slots.footprint(thing, own);
             }
         }
-        for (thing, places, own, runs) in self.0 {
+        for (thing, places, own, runs, trips) in self.0 {
             let thing = id(thing);
             slots.footprint(thing, own);
             let floor = places.first().map(|(_, f)| id(*f));
@@ -247,6 +257,9 @@ impl Projection {
                 })
                 .collect();
             slots.replace(thing, places)?;
+            if !trips.is_empty() {
+                slots.trip_ends(thing, trips);
+            }
             // N14: its runs again (`replace` retired them), and its trips' ends; the world writes its courses again.
             for r in runs {
                 slots.trip_ends(thing, r.ends.clone());
@@ -340,6 +353,7 @@ mod tests {
                     vec![(place, Ref::Node(ground))],
                     Vec::new(),
                     runs,
+                    Vec::new(),
                 )],
                 Vec::new(),
             )

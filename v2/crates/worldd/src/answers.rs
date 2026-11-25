@@ -4735,7 +4735,7 @@ impl Clock {
                     if let Some(b) = self.bodies.as_mut() {
                         b.took(id);
                     }
-                    self.settle(id, Err(r.name.to_owned()), now);
+                    self.settle_with(id, Err(r.name.to_owned()), Some(&r), now);
                 }
             }
         }
@@ -4744,6 +4744,18 @@ impl Clock {
     /// Ends open move `id` as it ended: its entry, then its answer. A move whose act's deadline passed while it
     /// went ends `act.timed-out`, however it ended.
     fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
+        self.settle_with(id, how, None, now);
+    }
+
+    /// [`Self::settle`], a move refused as it started answered with its refusal's words (`said`: a rise from a balloon
+    /// away from its stop says when it is back).
+    fn settle_with(
+        &mut self,
+        id: Id,
+        how: Result<(), String>,
+        said: Option<&Refusal>,
+        now: Micros,
+    ) {
         // A walk that ended as near its goal as the crowd there allows says so (A2-4); taken off first, so a move no
         // longer open leaves nothing behind.
         let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
@@ -4770,7 +4782,10 @@ impl Clock {
             }
             Err(reason) => {
                 self.note(id, MOVE_ENDED, Some(&reason), now);
-                self.end(id, |c| c.refusal(actor, sequence, &reason));
+                match said.filter(|r| r.name == reason) {
+                    Some(r) => self.end(id, |c| c.refused(actor, sequence, r)),
+                    None => self.end(id, |c| c.refusal(actor, sequence, &reason)),
+                }
             }
         }
     }

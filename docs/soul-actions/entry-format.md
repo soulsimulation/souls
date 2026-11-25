@@ -192,7 +192,11 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
 `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
-stops). On Engine v2 a ride whose stops differ moves its seats, never the thing (N14, `sim::courses::rides::seat_runs`):
+stops). On Engine v2 a ride whose stops are one point, that does not return and whose ground is `air` (a balloon) flies a
+loop from its stop and back, the thing and its riders together (`sim::courses::rides::course`, from the entry the thing
+names, its world's map's included): it waits a minute at its stop each lap, a rider boards and leaves only there, a
+form asked while it is away is refused `boarding-frame-away` saying in how many seconds it is back, and its trip ends
+when it is home again (below). A ride whose stops differ moves its seats, never the thing (N14, `sim::courses::rides::seat_runs`):
 across and back (`returns` true, a cable car) each seat waits at the stop its `stand` names, then runs to each other stop
 keeping its offset from the stop's stand point and its height over the floor there; round a ring (`returns` false, three
 or more seats, a big wheel or a carousel) the seats turn one step at a time between their declared points. Each waits
