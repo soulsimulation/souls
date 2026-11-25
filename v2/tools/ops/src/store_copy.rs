@@ -4,7 +4,7 @@
 //! another provider, the old one only read.
 //!
 //! ```text
-//! store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--manifest <file>] [--dry-run]
+//! store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--skip <prefix>]... [--manifest <file>] [--dry-run]
 //! store-copy probe --settings <settings> --setting <NAME>
 //! ```
 //!
@@ -23,7 +23,8 @@
 //! whose target ETag has changed since is the target's own newer write (a world already moved, writing there): it is
 //! kept, never replaced, and counted. It then reads the target back and prints the source's count and bytes against
 //! the target's for the same keys; exit 1 when they differ. The source is only read. Every call is tried again with back-off while a store is out of reach. `--dry-run` lists and compares
-//! by length and ETag only, writing nothing.
+//! by length and ETag only, writing nothing. `--skip <prefix>` (repeatable, under the setting's own prefix, e.g.
+//! `aside/`) leaves the keys under it out of the copy and of the count, and the result line says how many.
 //!
 //! `probe` writes one object under `probe/store-switch/<time>/`, reads it back, deletes it and lists the prefix
 //! empty. Exits 0 on success, 1 on a refusal or a check that failed, 2 on a usage or settings error.
@@ -50,7 +51,7 @@ const NAMES: [&str; 3] = [URL_ENV, "SOULS_BACKUP_URL", "WORLDD_STORE"];
 
 fn usage() -> ! {
     eprintln!(
-        "usage: store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--dry-run]\n       store-copy probe --settings <settings> --setting <NAME>"
+        "usage: store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--skip <prefix>]... [--dry-run]\n       store-copy probe --settings <settings> --setting <NAME>"
     );
     std::process::exit(2)
 }
@@ -161,6 +162,18 @@ fn source_keys(from: &dyn Store, worlds: &[World]) -> R<Vec<String>> {
         }
     }
     Ok(out)
+}
+
+/// `keys` without those under any of `skip` (prefixes under the setting's own, e.g. `aside/`): what is copied and
+/// counted, and how many were left out.
+pub fn without(keys: Vec<String>, skip: &[String]) -> (Vec<String>, u64) {
+    let before = keys.len() as u64;
+    let kept: Vec<String> = keys
+        .into_iter()
+        .filter(|k| !skip.iter().any(|p| k.starts_with(p.as_str())))
+        .collect();
+    let left = before - kept.len() as u64;
+    (kept, left)
 }
 
 /// What a copy did, and the check after it.
@@ -338,6 +351,18 @@ fn main() {
                     worlds.push(w);
                 }
             }
+            let mut skip = Vec::new();
+            for (i, a) in args.iter().enumerate() {
+                if a == "--skip" {
+                    let Some(p) = args
+                        .get(i + 1)
+                        .filter(|p| !p.is_empty() && !p.starts_with("--"))
+                    else {
+                        usage()
+                    };
+                    skip.push(p.clone());
+                }
+            }
             let dry = args.iter().any(|a| a == "--dry-run");
             let (src, dst) = (
                 open(&read_settings(&from), &name),
@@ -367,8 +392,12 @@ fn main() {
                     let _ = writeln!(f, "{e} {k}");
                 }
             };
-            let run = source_keys(&src, &worlds)
-                .and_then(|keys| copy(&src, &dst, &keys, dry, &seen, &mut note));
+            let mut left = 0;
+            let run = source_keys(&src, &worlds).and_then(|all| {
+                let (keys, n) = without(all, &skip);
+                left = n;
+                copy(&src, &dst, &keys, dry, &seen, &mut note)
+            });
             let c = run.unwrap_or_else(|e| {
                 println!("store-copy: {name}: refused: {}: {}", e.name, e.detail);
                 std::process::exit(1)
@@ -377,6 +406,11 @@ fn main() {
                 "every key".to_owned()
             } else {
                 format!("{} world(s)' keys", worlds.len())
+            };
+            let what = if skip.is_empty() {
+                what
+            } else {
+                format!("{what}, {left} skipped under {}", skip.join(" "))
             };
             if dry {
                 println!(
@@ -440,6 +474,39 @@ mod tests {
         settings(&format!(
             "# test\nexport DIRECTORY_STORE_URL=\"{url}\"\nAWS_ACCESS_KEY_ID={KEY_ID}\nAWS_SECRET_ACCESS_KEY='s=e'\n"
         ))
+    }
+
+    /// soul.game's move (25 Nov 2026): `--skip aside/ --skip stream-recovery/` copies the rest and leaves those
+    /// out of the copy and of its count, so the check compares only what was copied.
+    #[test]
+    fn skipped_prefixes_are_neither_copied_nor_counted() {
+        let (a, b) = (StandIn::start(2).unwrap(), StandIn::start(2).unwrap());
+        let src = store(&vars(&format!("{}/dir", a.url("old"))), URL_ENV).unwrap();
+        let dst = store(&vars(&format!("{}/dir", b.url("new"))), URL_ENV).unwrap();
+        for (k, v) in [
+            ("world/x", "r1"),
+            ("h/w/0", "aaaa"),
+            ("aside/reseed-1/h/w/0", "old"),
+            ("stream-recovery/x/head", "hd"),
+            ("stream-recovery/x/objects/00", "obj"),
+            ("aside-not/x", "kept: not under aside/"),
+        ] {
+            src.put(k, v.as_bytes(), When::Absent).unwrap();
+        }
+        let skip = ["aside/".to_owned(), "stream-recovery/".to_owned()];
+        let (keys, left) = without(source_keys(&src, &[]).unwrap(), &skip);
+        assert_eq!(left, 3);
+        assert_eq!(keys.len(), 3, "{keys:?}");
+        let none = BTreeMap::new();
+        let c = copy(&src, &dst, &keys, false, &none, &mut |_, _| {}).unwrap();
+        assert_eq!((c.objects, c.written, c.held), (3, 3, 3));
+        let mut there = dst.list("").unwrap();
+        there.sort();
+        assert_eq!(there, ["aside-not/x", "h/w/0", "world/x"]);
+        assert_eq!(
+            without(vec!["a/1".into()], &[]),
+            (vec!["a/1".to_owned()], 0)
+        );
     }
 
     #[test]

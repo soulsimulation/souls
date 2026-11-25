@@ -27,7 +27,9 @@
 # The new store file (default /etc/souls/store-new.env, root, mode 600) holds STORE_BASE, AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY and optionally AWS_DEFAULT_REGION (R2's `auto` when absent). Keys are read from files by path
 # and never printed or put on a command line; neither is a store's host. Root on the production host. The copy tool is
-# `store-copy` (v2/tools/ops/src/store_copy.rs), built by the release owner and placed at SWITCH_COPY. SWITCH_* stand in
+# `store-copy` (v2/tools/ops/src/store_copy.rs), built by the release owner and placed at SWITCH_COPY. SWITCH_SKIP names
+# key prefixes (space-separated, under each setting's own, e.g. "aside/ stream-recovery/") the copies leave behind in
+# the old store: every copy of the move passes them to store-copy as --skip, and plan says so. The other SWITCH_* stand in
 # for the host's folders and systemd in a test (v2/tools/ops/tests/store-switch-dry-run.sh).
 set -euo pipefail
 umask 077
@@ -46,6 +48,8 @@ NAMES=(DIRECTORY_STORE_URL SOULS_BACKUP_URL WORLDD_STORE)
 SERVICES=(souls-directory souls-alarms)
 DROPIN=50-store-switch.conf
 MANIFESTS=
+SKIP_ARGS=()
+for p in ${SWITCH_SKIP:-}; do SKIP_ARGS+=(--skip "$p"); done
 
 die() {
   echo "store-switch: $*" >&2
@@ -163,7 +167,7 @@ copy_all() {
   shift 2
   names=$(buckets "$from") || return 1
   for n in $names; do
-    "$COPY" copy --from "$from" --to "$to" --setting "$n" ${MANIFESTS:+--manifest "$MANIFESTS/manifest.$n"} "$@" || return 1
+    "$COPY" copy --from "$from" --to "$to" --setting "$n" ${MANIFESTS:+--manifest "$MANIFESTS/manifest.$n"} ${SKIP_ARGS[@]+"${SKIP_ARGS[@]}"} "$@" || return 1
   done
   return 0
 }
@@ -281,6 +285,7 @@ plan() {
   for n in $(buckets "$SECRETS"); do echo "  $n: to the new bucket, its own prefix kept"; done
   echo "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION: the new file's (region absent: auto)"
   echo "  backup of secrets.env (and directory.env) under $STATE/<time>/"
+  [ -z "${SWITCH_SKIP:-}" ] || echo "  left in the old store, not copied: keys under ${SWITCH_SKIP}"
   echo "  worlds, one at a time (stop, copy its writes, drop-in, start, $STEADY_S s up or switched back):"
   for w in $(worlds); do echo "    worldd@$w"; done
   echo "  then: ${SERVICES[*]} stopped, last copy, secrets.env installed, drop-ins removed, started"
@@ -402,7 +407,7 @@ case ${1:-} in
   check) check ;;
   undo) undo ;;
   *)
-    sed -n 2,31p "$0"
+    sed -n 2,33p "$0"
     exit 2
     ;;
 esac
