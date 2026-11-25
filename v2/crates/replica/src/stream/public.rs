@@ -1885,7 +1885,20 @@ impl PublicPlayer {
                 n.remove(&10);
                 Value::Bytes(Hash::of(Purpose::StatePublic, &encoded(&Value::Map(n))?).to_bytes())
             }
-            _ => return bad("query is 1 through 6"),
+            // Several nodes at once (the page's reader after a part, #4684): `[id, ...]` → the record of each that is a
+            // live public node, as query 1 answers it, in the order asked; one not here is left out. Its cost follows
+            // the ids asked, not the world (query 1's row search and link index), unlike a whole snapshot.
+            7 => {
+                let mut out = Vec::new();
+                for id in arr(arg)? {
+                    let id = read_id(id)?;
+                    if self.node_row(id)?.is_some() {
+                        out.push(self.node_value(id)?);
+                    }
+                }
+                Value::Array(out)
+            }
+            _ => return bad("query is 1 through 7"),
         };
         encoded(&out)
     }
@@ -2012,6 +2025,34 @@ mod w16_snapshot_tests {
                 .collect(),
         );
         assert_eq!(player.snapshot().unwrap(), encoded(&expected).unwrap());
+        // #4684: query 7 answers the asked nodes as query 1 does, in the order asked, leaving out one not here
+        let asked: Vec<Id> = values.keys().rev().copied().collect();
+        let many = player
+            .query(
+                &encoded(&Value::Map(BTreeMap::from([
+                    (1, Value::Uint(7)),
+                    (
+                        2,
+                        Value::Array(
+                            asked
+                                .iter()
+                                .map(|i| i.to_value())
+                                .chain([id(0).to_value()])
+                                .collect(),
+                        ),
+                    ),
+                ])))
+                .unwrap(),
+            )
+            .unwrap();
+        let Value::Array(all) = &expected else {
+            unreachable!()
+        };
+        assert_eq!(
+            many,
+            encoded(&Value::Array(all.iter().rev().cloned().collect())).unwrap(),
+            "the asked live nodes, as query 1 answers each; the private one left out"
+        );
         let Value::Array(rows) = expected else {
             panic!("snapshot")
         };
