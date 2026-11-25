@@ -82,6 +82,12 @@ offset from it; an entry seat the thing has no slot for is not offered. A ride o
 no slots at all (Eden's launch balloon, mapped to `eden:balloon`) takes the entry's seats as the entry places them; its
 course comes from the entry it names too (`worldd serve`'s `with_rides`), so a world seeded before that offers the
 balloon's seats only once it is seeded again.
+
+A map row's `with` names what a placed copy holds when the world starts, which today's def draws as part of it: the
+guitar in its stand's cradle, the bass in its stand, a piano's bench at its seat. The exporter makes each a thing of
+that entry's own kind (`export/with.ts`: kind `<entry>`, ref `entry:<entry>`, hash its entry file's): in the holder's
+slot (the slot added to the holder's facts at its entry's point, since its def bakes none), or beside it (`at_mm`,
+`yaw_mdeg` in its frame, a child of its own parent). The stand's `take` then finds a guitar there.
 A row may instead name the kind its copies are (`kind`): a kind that joins parts (a frame stand, a rack frame, a beam,
 a bay; `content/kinds/construction`) is read by its own name, so a copy that only borrowed its entry would never join.
 The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
