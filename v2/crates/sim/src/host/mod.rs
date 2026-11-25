@@ -1252,12 +1252,18 @@ impl Runner {
             self.granted.remove(&who);
             self.overflow.remove(&who);
         }
-        // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
+        // A walk sent to a point gets its route once its place is granted; a refusal ends it by name. A body the world
+        // carries by its own rule (a rise's step off its seat, a climb out) is asked for once it has landed: until then
+        // it stands nowhere a walk can start from.
         let running = self.running_bodies();
+        let world_carried =
+            |who: Id| self.controller.carried(who) && self.controller.carrying(who).is_none();
         let waiting: Vec<(Id, Target, Id)> = self
             .asks
             .iter()
-            .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
+            .filter(|(who, _)| {
+                running.contains(*who) && !self.granted.contains_key(who) && !world_carried(**who)
+            })
             .map(|(who, (t, o))| (*who, *t, *o))
             .collect();
         // Requests out at the planner are kept only while their walk waits on the same order, or the walker's

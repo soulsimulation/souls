@@ -402,15 +402,35 @@ fn stepped_off(w: &mut World, b: Id, from: i64) -> replica::pose::Pose {
 /// tick moving it farther than a brisk step.
 #[test]
 fn rising_steps_off_the_seat_over_its_recovery() {
+    steps_off(world(chair()));
+    // a step faster than a walk whose length does not divide into whole ticks (500.005 mm) lands by the rise's end
+    // all the same (a tick's reach is rounded down); the reach is the served world's, horizontal
+    let mut place = chair();
+    place.stand = [0, 500_000];
+    let point = Vec3::new(2_237, place.height, 0);
+    let mut w = world_with(place, point, -5_000, 300_000);
+    w.flat = true;
+    steps_off(w);
+}
+
+fn steps_off(mut w: World) {
     let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
-    let mut w = world(chair());
     let b = *w.bodies.iter().min().expect("bodies");
     w.sit(&[0, 1], &sit);
     w.run(i64::MAX);
     let geo = w.geo();
     let n = w
         .slots
-        .rise(&mut w.c, &mut w.due, &mut w.mint, &mut w.moves, &geo, b, &rise, 2_000_000)
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            b,
+            &rise,
+            2_000_000,
+        )
         .expect("rising");
     let (contact, end) = {
         let r = w.moves.record(n).expect("in progress");
@@ -426,7 +446,10 @@ fn rising_steps_off_the_seat_over_its_recovery() {
         "on its feet where it sat"
     );
     assert!(w.c.carried(b), "the world carries it off the seat");
-    assert!(w.slots.climbs().is_empty(), "a step, not a climb out (E11d)");
+    assert!(
+        w.slots.climbs().is_empty(),
+        "a step, not a climb out (E11d)"
+    );
     let (dt, mut t, mut last) = (50_000, contact, p.position);
     while t < end {
         t += dt;
@@ -437,7 +460,11 @@ fn rising_steps_off_the_seat_over_its_recovery() {
         last = q;
     }
     let p = w.c.body(b).expect("a body").pose;
-    assert_eq!((p.position.x, p.position.z), (stand.x, stand.z), "at the stand point by the rise's end");
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (stand.x, stand.z),
+        "at the stand point by the rise's end"
+    );
     assert!(!w.c.carried(b) && matches!(p.support, Support::Surface { .. }));
 }
 

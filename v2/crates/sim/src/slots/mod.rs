@@ -391,15 +391,26 @@ pub const STEP_OFF_MIN: i64 = 50_000;
 
 /// The world's carry of a rise's step off its seat: from where it sat (`from`, x and z) along a straight line to `to`
 /// on `floor`, the seat's exit ([`rise_point`] searches along it), within `within` µs and at no less than walking
-/// speed. It lands as the stand point always has, without waiting for a body standing near it (a taken spot is
-/// [`clear_spot`]'s). `None` for a step shorter than [`STEP_OFF_MIN`].
-pub fn step_track(floor: Id, from: Vec3, to: Vec3, within: Micros) -> Option<crate::controller::Track> {
+/// speed, at most four times it (a step longer than that, from a far place of a bench, outlasts the rise; a walk asked
+/// meanwhile waits for its landing, [`crate::host::Runner`]). It lands as the stand point always has, without waiting
+/// for a body standing near it. `None` for a step shorter than [`STEP_OFF_MIN`].
+pub fn step_track(
+    floor: Id,
+    from: Vec3,
+    to: Vec3,
+    within: Micros,
+) -> Option<crate::controller::Track> {
     let (dx, dz) = (i128::from(to.x - from.x), i128::from(to.z - from.z));
     let len = (dx * dx + dz * dz).isqrt() as i64;
     if len < STEP_OFF_MIN {
         return None;
     }
-    let speed = if within > 0 { (len.saturating_mul(1_000_000) + within - 1) / within } else { i64::MAX };
+    // 1 mm/s over the exact speed: a tick's reach is rounded down, so the exact speed could land a tick late.
+    let speed = if within > 0 {
+        (len.saturating_mul(1_000_000) + within - 1) / within + 1_000
+    } else {
+        i64::MAX
+    };
     Some(crate::controller::Track {
         speed: speed.clamp(crate::gaits::WALK.speed, 4 * crate::gaits::WALK.speed),
         hold: false,
@@ -1340,8 +1351,8 @@ impl Slots {
     }
 
     /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
-    /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
-    /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
+    /// handed into the slot, at a rise's onto the floor where it sat (its surface in `floors`) and carried to the stand
+    /// point by the rise's end ([`step_track`]), and the seat is released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
     /// did and the hand-off made, or why it could not be (the move is then cancelled by that name: a rise's body stays
     /// seated, a sit's seat is released).
     #[allow(clippy::too_many_arguments)]
@@ -1529,7 +1540,27 @@ impl Slots {
         }
         if let Some(p) = rise_point(floor, at, body, build)? {
             let placed = floor.place_built(body, frame, p, at.facing, build)?;
-            let Some(track) = step_off.and_then(|by| step_track(at.floor, here.point, placed.pose.position, by - now))
+            // The step's line is a way out, as a climb out's is: off the floor only over water or the seat's own thing,
+            // never through another cut (a table in front of the chair); else it stands at the stand point at once.
+            let own = self
+                .footprints
+                .get(&at.thing)
+                .map_or(&[][..], Vec::as_slice);
+            let clear = Climb {
+                floor,
+                floors: all,
+                own,
+                taken: &|_| false,
+                body,
+                node: at.floor,
+                facing: at.facing,
+                from: Vec3::new(here.point.x, 0, here.point.z),
+                base: here.point.y - at.place.height,
+                build,
+            };
+            let Some(track) = step_off
+                .and_then(|by| step_track(at.floor, here.point, placed.pose.position, by - now))
+                .filter(|_| clear.way_out(placed.pose.position))
             else {
                 return c.stand(body, driver, placed, now);
             };
