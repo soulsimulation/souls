@@ -49,6 +49,8 @@ import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
+/** A world's public history object that is rewritten in place: asked again each time, a 304 while its ETag holds. */
+export const REVALIDATE = 'public, no-cache, no-transform';
 export const MISS = 'no-store';
 /** Smaller immutable files (a part is a few hundred bytes, already packed) are always sent as they are. */
 export const COMPRESS_FROM = 16 * 1024;
@@ -105,6 +107,16 @@ const SLICE = 256 * 1024; // a response body is written this much at a time (cre
 
 /** A day's object of a world's public event index (`…/history/everyone/events/<day>`). */
 const EVENTS_DAY = /(?:^|\/)history\/everyone\/events\/-?\d+$/;
+
+/**
+ * Whether `path` is a world's public history object that worldd's mirror rewrites in place (`history_mutable_key`):
+ * the event index and counts, a day's bundle index and a numbered (open) bundle. A content-addressed bundle
+ * (`<start>-<sha256>`) and the header never change, and stay immutable.
+ */
+export function rewritten(path) {
+  return /(?:^|\/)history\/everyone\/(?:events|counts)\/[^/]+(?:\/[^/]+)*$/.test(path)
+    || /(?:^|\/)history\/bundles\/-?\d+\/(?:index|-?\d+)$/.test(path);
+}
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -212,7 +224,12 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     } catch {
       return miss();
     }
-    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE, etag };
+    const again = kind === 'immutable' && rewritten(file);
+    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : again ? REVALIDATE : IMMUTABLE, etag };
+    if (again && !req.headers.range && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
+      stats[kind]++;
+      return res.writeHead(304, { 'cache-control': REVALIDATE, etag }).end();
+    }
     let status = 200;
     if (kind === 'immutable') {
       headers['accept-ranges'] = 'bytes';

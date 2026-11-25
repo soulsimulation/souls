@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
-import { createOrigin } from './origin.mjs';
+import { IMMUTABLE, REVALIDATE, createOrigin } from './origin.mjs';
 import { readWorldRoutes } from './world-routes.mjs';
 import { localAddresses, worldAddress } from '../../web/src/source/address.ts';
 import { updateWorldRoute } from '../ops/proxy/route-config.mjs';
@@ -257,6 +257,35 @@ test('V4: a day\'s event index is served at the day\'s URL, as a file or beside 
   assert.deepEqual(await get('00020781/05'), [200, 'hour five']);
   assert.deepEqual(await get('00020782'), [200, 'whole day']);
   assert.equal((await get('00020783'))[0], 404);
+});
+
+test('V4: history objects rewritten in place are revalidated (no-cache, 304 on their ETag); content-addressed bundles and the header stay immutable', async () => {
+  const history = join(dir, 'w', 'cache-instance', 'history');
+  const files = {
+    'history/everyone/events/00020781/day': 'day', 'history/everyone/events/00020781/05': 'hour',
+    'history/everyone/events/00020782': 'whole day', 'history/everyone/counts/day/00020781': 'counts',
+    'history/everyone/counts/year/0057': 'year', 'bundles/00020781/index': 'bundle index', 'bundles/00020781/123': 'open bundle',
+    [`bundles/00020781/123-${'ab'.repeat(32)}`]: 'sealed bundle', header: 'header',
+  };
+  for (const [k, v] of Object.entries(files)) { mkdirSync(join(history, k, '..'), { recursive: true }); writeFileSync(join(history, k), v); }
+  const at = `${new URL(base).origin}/w/cache-instance/history/`;
+  for (const k of ['history/everyone/events/00020781', 'history/everyone/events/00020781/05', 'history/everyone/events/00020782',
+    'history/everyone/counts/day/00020781', 'history/everyone/counts/year/0057', 'bundles/00020781/index', 'bundles/00020781/123']) {
+    const r = await fetch(at + k);
+    assert.equal(r.status, 200, k); await r.arrayBuffer();
+    assert.equal(r.headers.get('cache-control'), REVALIDATE, k);
+    const again = await fetch(at + k, { headers: { 'if-none-match': r.headers.get('etag') } });
+    assert.equal(again.status, 304, k);
+    assert.equal(again.headers.get('etag'), r.headers.get('etag'), k);
+  }
+  writeFileSync(join(history, 'history/everyone/events/00020782'), 'whole day, later');
+  const later = await fetch(at + 'history/everyone/events/00020782', { headers: { 'if-none-match': `"${createHash('sha256').update('whole day').digest('hex')}"` } });
+  assert.equal(later.status, 200); assert.equal(await later.text(), 'whole day, later');
+  for (const k of [`bundles/00020781/123-${'ab'.repeat(32)}`, 'header']) {
+    const r = await fetch(at + k);
+    assert.equal(r.status, 200, k); await r.arrayBuffer();
+    assert.equal(r.headers.get('cache-control'), IMMUTABLE, k);
+  }
 });
 
 test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {
