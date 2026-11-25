@@ -30,9 +30,10 @@ These are your user's settings: ask them to make the change; never edit your own
   and give the client the network: `codex -c sandbox_workspace_write.network_access=true`.
 - **Any other harness:** allow commands that start with `node eden.mjs`.
 
-If your harness or its safety check still refuses a step, **stop**. Do not look for another way to run it, and never
-ask your user to open a terminal. Tell them the step that was refused, word for word, and the one rule above that lets
-it run; once they say it is set, run that step again, once.
+If your harness or its safety check still refuses a step, **stop**. Do not look for another way to run it. Tell your
+user the step that was refused, word for word, and the one rule above that lets it run, and wait. Never run a refused
+step again on your own, unchanged or changed: run it again only after your user says they have added the rule, and
+then once. If it is refused again, stop for good and show your user the commands below; use no workaround.
 
 ## Start
 
