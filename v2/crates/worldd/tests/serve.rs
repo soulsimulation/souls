@@ -1342,6 +1342,89 @@ fn r17_a_world_whose_store_times_out_at_start_listens_serves_and_ships_once_it_a
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// 0.136's Eden rehearsal: a world with a history and no public pointer (a rehearsal's scratch copy has no `views/`)
+/// rebuilt its whole public stream before it listened, and Eden's took over the deploy's 600 s. Here the rebuild is
+/// held by a store whose every read stalls past the client's timeout, with the stream's own folders gone: the world
+/// listens within the stream's first-flush bound, answers a walk with its stream `recovering` and no pointer, and
+/// once the store answers the stream serves and the pointer comes, with no restart.
+// A real process on the real clock: the stall and the bound are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn a_world_with_history_and_no_stream_listens_while_its_stream_recovers() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("nostream");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/nostream", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let (health, pointer) = (dir.join("health.json"), dir.join("views/world.json"));
+    let until = |field: &str, state: &str, within: Duration| -> String {
+        let want = format!("\"{field}\":{{\"state\":\"{state}\"");
+        let end = Instant::now() + within;
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(
+                Instant::now() < end,
+                "no {field} {state} in health.json: {h}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // The first start: a history, its stream served and backed up.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "the walk ends in a receipt");
+    until("stream", "serving", Duration::from_secs(30));
+    w.kill();
+    // The stream's folders gone, as in a rehearsal's scratch copy: its recovery must read the store, which stalls.
+    std::fs::remove_dir_all(dir.join("views")).expect("views removed");
+    let _ = std::fs::remove_dir_all(dir.join("stream-backup"));
+    let _ = std::fs::remove_file(&health);
+    s.stall_reads(usize::MAX, Duration::from_secs(6), "");
+    let begun = Instant::now();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let listened = begun.elapsed();
+    println!("listening {listened:?} with the stream's recovery held");
+    assert!(
+        listened < Duration::from_secs(25),
+        "listens before the stream recovers: {listened:?}"
+    );
+    let h = until("stream", "recovering", Duration::from_secs(5));
+    assert!(!pointer.exists(), "no pointer while recovering: {h}");
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 2, -33, 30);
+    assert_eq!(answer(&mut c).0, 1, "a walk is answered meanwhile");
+    // The store answers: the stream serves and its pointer comes, the world never restarted.
+    s.stall_reads(0, Duration::ZERO, "");
+    until("stream", "serving", Duration::from_secs(90));
+    assert!(pointer.is_file(), "the pointer once the stream serves");
+    assert!(
+        w.all
+            .lock()
+            .map(|a| !a.iter().any(|l| l.contains("public stream stopped")))
+            .unwrap_or(false)
+    );
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R17 (0.133): only a store that does not answer is waited for. A start whose directory mark is past its own log
 /// (`restart-gap`: its records would be numbered over ones already off the machine) still ends by name, as before,
 /// and never listens on with no claim.

@@ -47,7 +47,10 @@
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
-//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
+//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is. A start with no
+//! `views/world.json` waits at most 10 s for its public stream's first flush; a stream still rebuilding a long history
+//! then (a rehearsal's scratch copy) or held by a stalled store finishes after the world listens, its health
+//! `stream` `recovering` and no pointer, so no viewers, until it serves.
 //!
 //! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
 //! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
@@ -165,6 +168,10 @@ fn stamp(stage: &str) {
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
+/// How long a world with no public pointer waits for its stream's first flush before it listens with the stream still
+/// recovering. A new world's first flush takes well under a second; a long history rebuilt from record 0 (Eden's
+/// rehearsal copy, 77k records: over 600 s) or a stalled store never holds the world's start.
+const STREAM_FIRST_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 /// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
 const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 
@@ -3775,7 +3782,7 @@ fn serve(args: &[String]) -> R<()> {
     let views_dir = views.clone();
     // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
     // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
-    // for the stream's first flush, which on a fresh world has no history to replay.
+    // for the stream's first flush, which on a fresh world has no history to replay, at most STREAM_FIRST_WITHIN.
     let pointer_path = views.join("world.json");
     let fresh = !pointer_path.exists();
     // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
@@ -4000,8 +4007,14 @@ fn serve(args: &[String]) -> R<()> {
         })
         .map_err(|e| e.to_string())?;
     // A fresh world waits for its stream's first flush, or for its first refused try (R12): then it listens degraded,
-    // with no pointer, and the stream thread tries again until it serves.
-    if fresh && ready_rx.recv().is_err() {
+    // with no pointer, and the stream thread tries again until it serves. The wait is bounded ([`STREAM_FIRST_WITHIN`]):
+    // a world with a history and no pointer (a rehearsal's scratch copy, a folder whose views were lost) rebuilds its
+    // stream from record 0, which takes Eden minutes, and a stalled store holds the recovery's reads. Such a world
+    // listens with its stream still `recovering` (no pointer, so no viewers yet); the pointer comes when it serves.
+    if fresh
+        && let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =
+            ready_rx.recv_timeout(STREAM_FIRST_WITHIN)
+    {
         return Err(
             "public-stream: stopped before its first flush; the world is not servable".into(),
         );
@@ -4012,7 +4025,10 @@ fn serve(args: &[String]) -> R<()> {
     while world.beat.read().0 < 0 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    if !pointer_path.is_file() && !measures::STREAM.is_degraded() {
+    if !pointer_path.is_file()
+        && !measures::STREAM.is_degraded()
+        && !measures::STREAM.is_recovering()
+    {
         return Err(format!(
             "public-pointer-missing: {}",
             pointer_path.display()
