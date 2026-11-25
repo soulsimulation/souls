@@ -104,7 +104,10 @@ export function motionAt(s: readonly WorldSample[], t: number, heading: number, 
 /** The heading of the last step that moved before t, and when that step ended (µs; -Infinity: none, `fallback`). */
 function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): { heading: number; at: number } {
   for (let k = Math.min(upTo, s.length - 1); k > 0; k--) {
-    if (s[k - 1].at > t || s[k - 1].seat || s[k].seat) continue;
+    if (s[k - 1].at > t) continue;
+    // risen from a seat it faced out of: it stands facing that way, never back the way it walked up to the seat
+    if (s[k - 1].seat?.heading !== undefined && !s[k].seat) return { heading: s[k - 1].seat!.heading!, at: s[k].at };
+    if (s[k - 1].seat || s[k].seat) continue;
     const dx = s[k].p[0] - s[k - 1].p[0], dz = s[k].p[2] - s[k - 1].p[2];
     if (Math.hypot(dx, dz) >= 1) return { heading: Math.atan2(dz, dx), at: s[k].at };
   }

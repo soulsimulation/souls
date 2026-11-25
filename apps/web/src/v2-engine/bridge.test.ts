@@ -156,7 +156,10 @@ test('a Soul that walked up to a turned chair sits facing out of it, never the w
   // walks west to its stand point (1 m over 1 s), then sits at 1.5 s
   for (let n = 0; n < 12; n++) {
     const samples: [string, string, number | null, number, number, number, number][] = n <= 2 ? [['b.7', 'w.0', null, T0 + n * 500_000, 5_000_000 - n * 500_000, 0, 0]] : [];
-    b.receive(part(n, samples, n === 3 ? { nodes: [{ ...ada, parent: 'c.1', slot: 1, pos: [0, 0, 0], at: T0 + 1_000_000 }] } : {}));
+    const seated = { ...ada, parent: 'c.1', slot: 1, pos: [0, 0, 0], at: T0 + 1_000_000 };
+    // and rises at 4 s, back to its stand point
+    const risen = { ...ada, pos: [4_000_000, 0, 0], at: T0 + 4_000_000 };
+    b.receive(part(n, samples, n === 3 ? { nodes: [seated] } : n === 8 ? { nodes: [risen] } : {}));
   }
   const at = (s: number) => {
     const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
@@ -165,6 +168,8 @@ test('a Soul that walked up to a turned chair sits facing out of it, never the w
   assert.ok(Math.abs(Math.abs(at(0.5).yaw) - Math.PI) < 0.002, `walking west: ${at(0.5).yaw}`);
   assert.equal(at(3).activity, 'sit');
   assert.ok(Math.abs(at(3).yaw) < 0.002, `seated, it faces out of the chair (+x): ${at(3).yaw}`);
+  assert.equal(at(5).activity, 'idle');
+  assert.ok(Math.abs(at(5).yaw) < 0.002, `risen, it still faces out of the chair, never turning back to it: ${at(5).yaw}`);
 });
 
 test('a walk that ends with the world turning the body (to face what it walked to) is drawn turning there, smoothly', () => {
