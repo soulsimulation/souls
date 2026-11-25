@@ -67,6 +67,7 @@ import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLi
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
+import { ACT_BLEND, OWN_FADE, blendFrames, postureKind, postureNow, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -186,6 +187,9 @@ type View = {
    *  and base before it (crossfade), the paired-gesture partner and where it is, metres walked, speaking now. */
   since?: number;
   prevAct?: string;
+  /** posture-transition.ts: the latest change of posture (activity before it, its base, the activity after) and its age. */
+  postureChange?: { from: string; fromBase?: string; to: string; age: number };
+  postureTick?: number;
   waveSamples?: readonly WaveSample[];
   waveClock?: number;
   waveEvents?: {start:number;end?:number}[];
@@ -317,6 +321,9 @@ export type SampledHuman = {
   /** Seconds since `activity` began in this take, and the activity / base before it (library clip crossfades and
    *  one-shots); absent when the activity began before the take. */
   activityAge?: number;
+  /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
+   *  the activity it went into and its age (s); absent when there was none in the last second or so. */
+  postureChange?: { from: string; fromBase?: string; to: string; age: number };
   prevActivity?: string;
   /** Release-only shared-wave timing; derived from recorded activity history, never a renderer wall clock. */
   waveSamples?: readonly WaveSample[];
@@ -645,6 +652,8 @@ export class HumanViews {
       const inst = Math.hypot(e.pose.p[0] - c.p[0], e.pose.p[2] - c.p[2]) / DT;
       const ground = act === 'ride' || act === 'row' ? 0 : e.human.speed ?? inst; // a vehicle carries a rider: no gait from its motion
       v.speed += (ground - v.speed) * 0.6;
+      if (act !== v.activity && postureKind(act, base) !== postureKind(v.activity, v.base)) { v.postureChange = { from: v.activity, ...(v.base ? { fromBase: v.base } : {}), to: act, age: 0 }; v.postureTick = world.tick; }
+      else if (v.postureChange && v.postureTick !== undefined) v.postureChange.age = (world.tick - v.postureTick) * DT;
       if (act !== v.activity) {
         const clock=world.tick*DT;
         if(v.activity==='wave'&&v.waveEvents?.length)v.waveEvents[v.waveEvents.length-1].end=clock;
@@ -889,8 +898,10 @@ export class HumanViews {
     for (const f of frame) {
       if(f.bodyModel?!this.bodyTemplates.has(f.bodyModel):!templateFor(f.id,this.templates))continue;
       seen.add(f.id);
-      const act = f.activity ?? 'idle';
-      const base = baseOf(act, f.baseActivity);
+      // a record that goes straight between standing and a seat draws the old engine's own sit-down / stand-up phase
+      const pc = f.postureChange, seatMove = pc ? postureNow(pc.from, pc.fromBase, pc.to, f.activity ?? 'idle', f.baseActivity, pc.age) : null;
+      const act = seatMove?.activity ?? f.activity ?? 'idle';
+      const base = baseOf(act, seatMove?.activity ?? f.baseActivity);
       let v = this.views.get(f.id);
       const wanted=f.bodyModel?this.bodyTemplates.get(f.bodyModel):templateFor(f.id,this.templates);
       // A live arrival can finish many unique templates together. Defer only new rigs, keeping every existing actor
@@ -924,7 +935,8 @@ export class HumanViews {
       v.instrument=f.instrument;v.game=f.game;v.gameTick=f.gameTick;v.gameDt=f.gameDt;
       v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
-      v.since = f.activityAge;
+      v.since = seatMove?.activity ? seatMove.since : f.activityAge;
+      v.postureChange = seatMove?.activity ? undefined : f.postureChange;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
       v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
@@ -1048,12 +1060,23 @@ export class HumanViews {
     const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
     if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
     const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
-    const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
+    const act0: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+    // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
+    // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
+    const pn = lib.posture, own = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
+    const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity)
+      && postureKind(v.prevAct, v.prevBase) === 'stand' && postureKind(v.activity, v.base) === 'stand' ? v.prevAct : null;
+    const act: ActivityFrame | null = !own ? act0
+      : pn?.tilt ? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
+      : pn ? blendFrames(null, act0, pn.settle)
+      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name }), act0, smooth(v.since! / ACT_BLEND))
+      : act0;
+    const tilt = pn?.tilt ? pn.tilt.k : 1;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
     h.rotation.z = 0; h.rotation.x = 0;
     let lieFloor = h.position.y;
@@ -1064,7 +1087,7 @@ export class HumanViews {
       if (act.lying.face === 'back') { h.rotation.z = Math.PI / 2; h.position.x += c * hip; h.position.z += s * hip; const fit = lyingFloor(h.position.y, h.position.x, h.position.z, c, s); lieFloor = fit.y + (v.bench ?? 0); h.position.y = lieFloor + 0.1;
         // on a slope the whole body lies along the ground (head uphill or down), not level above its highest point
         if (fit.k !== 0 && !v.bench) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-s, 0, c), Math.atan(fit.k))); }
-      else { h.rotation.z = -(Math.PI / 2 - act.lying.raise); h.position.y += 0.06; }
+      else { h.rotation.z = -(Math.PI / 2 - act.lying.raise) * tilt; h.position.y += 0.06 * tilt; }
     } else if (act && act.hop > 0) h.position.y += act.hop;
     // leisure: a rider moves with the swing or the see-saw plank they sit on (play-motion.ts); the scenery seat follows
     if (act?.ride) { const seat = playSeatAt(act.ride.kind, h.position.x, h.position.z); if (seat) rideSeat(h, seat, act.ride.angle); }
@@ -1585,12 +1608,19 @@ export class HumanViews {
     const sh = v.shore, buoyant = sh?.mode === 'buoyant';
     const water = !engineHands && sh && buoyant ? (v.activity === 'swim' ? 'swim' as const : v.activity === 'tread' ? 'tread' as const : undefined) : undefined;
     const phaseId = v.partner && v.partner < v.rig.holder.name ? v.partner : v.rig.holder.name;
-    const one = (pick: LibraryPick | null, since: number | undefined): LibOne | null => {
+    const one = (pick: LibraryPick | null, since: number | undefined, phase = v.sleepPose?.standingFraction): LibOne | null => {
       if (!pick || (engineHands && pick.body !== 'seat' && pick.body !== 'ground-seat')) return null;
       const clip = pickClip(pick, v.rig.holder.name), act = libAction(v.rig, clip);
       if (!act) return null;
-      return { pick, act, clip, time: clipTime(pick, act.getClip().duration, t, phaseId, since, v.sleepPose?.standingFraction) };
+      return { pick, act, clip, time: clipTime(pick, act.getClip().duration, t, phaseId, since, phase) };
     };
+    // posture-transition.ts: a change of posture with no phase of its own in the record is drawn over the next second;
+    // getting up from the back or lying down on it is LayToIdle by phase in place of the activity's own frame
+    const pc = v.postureChange;
+    const pn = pc && !v.sleepPose && !engineHands && !water ? postureNow(pc.from, pc.fromBase, pc.to, v.activity, v.base, pc.age) : null;
+    out.posture = pn?.activity ? null : pn; // a seat's own phase is drawn as that activity (setFrame)
+    const rise = out.posture?.rise;
+    if (rise !== undefined && (out.cur = one({ clip: 'LayToIdle', mode: 'phase', body: 'lie' }, undefined, rise))) { out.rise = rise; out.still = true; return out; }
     const ctx = (activity: string, base: string, ground: boolean) => ({ activity, base, ground, seated: SEATED.has(base) && !ground, speaking: !!v.speaking, speed: v.speed, partner: !!v.partner });
     out.cur = one(libraryPick({ ...ctx(v.activity, v.base, !!v.groundSeat), ...(v.sleepPose ? { sleep: v.sleepPose.standingFraction } : {}), ...(water ? { water } : {}) }), v.since);
     if (v.since !== undefined && v.since < CLIP_FADE && v.prevAct !== undefined && v.prevAct !== v.activity) {
@@ -1635,12 +1665,14 @@ export class HumanViews {
       } else if (body === 'lie' && one === lib.cur) {
         const p0 = clipProbe(t, 'LayToIdle', 0);
         if (!p0) continue;
-        // rising (sleep → standing): keep the lying heading and hips-over-point layout, easing to the plain stance by the end
-        const up = one.pick.mode === 'phase' ? smooth(((v.sleepPose?.standingFraction ?? 0) - 0.55) / 0.45) : 0;
+        // rising (sleep → standing, or a posture change getting up from the back): keep the lying heading and hips-over-point
+        // layout, easing to the plain stance by the end; lying down (posture-transition.ts) is the same, run backwards
+        const frac = lib.rise ?? v.sleepPose?.standingFraction ?? 0;
+        const up = one.pick.mode === 'phase' ? smooth((frac - 0.55) / 0.45) : 0;
         const phi = Math.atan2(p0.head.z - p0.hip.z, p0.head.x - p0.hip.x);
         // lie / nap: hips over the body point, head along −yaw (as the procedural layout); a sleeper on a mat: feet at the
         // body point, head along +yaw (as the engine's prone sleep pose, so the body stays on its mat)
-        const sleeper = one.pick.mode === 'phase', want = sleeper ? 0 : Math.PI;
+        const sleeper = one.pick.mode === 'phase' && lib.rise === undefined, want = sleeper ? 0 : Math.PI;
         const turnBy = lerpAngle(want - phi, 0, up) * wgt, ly = yaw + turnBy;
         h.rotation.y = -ly;
         const c = Math.cos(ly), s = Math.sin(ly), k = (1 - up) * wgt;
@@ -1650,7 +1682,7 @@ export class HumanViews {
         h.position.x -= ox * k; h.position.z -= oz * k;
         const ec = Math.cos(yaw), es = Math.sin(yaw);
         const fit = lyingFloor(h.position.y, h.position.x + ox, h.position.z + oz, ec, es), bench = v.bench ?? 0, floor = fit.y + bench;
-        const rest = smooth(1 - (v.sleepPose?.standingFraction ?? 0) / 0.35) * wgt;
+        const rest = smooth(1 - frac / 0.35) * wgt;
         // on a slope the body lies along the ground (as the procedural lying layout, WN3-3b)
         if (fit.k !== 0 && !bench && rest > 0) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-es, 0, ec), Math.atan(fit.k) * rest));
         h.updateMatrixWorld(true);
@@ -1776,7 +1808,9 @@ export class HumanViews {
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 type LibOne = { pick: LibraryPick; act: THREE.AnimationAction; clip: string; time: number };
-type LibPlan = { cur: LibOne | null; prev: LibOne | null; fade: number; sleep: boolean; still: boolean; water: boolean };
+type LibPlan = { cur: LibOne | null; prev: LibOne | null; fade: number; sleep: boolean; still: boolean; water: boolean;
+  /** posture-transition.ts: the posture change drawn now, and LayToIdle's standing fraction while getting up or lying down. */
+  posture?: PostureNow | null; rise?: number };
 /** Playback rate of an idle variant clip. Idle_LookAround_Loop at the library's speed drops a hand from the head to the
  *  hip at up to 0.19 m per 50 ms (0.164–0.172 on 1.72 m bodies; entry 33, take 08: 0.158 m per 50 ms 1.2 s after a torch put-out; take 02:
  *  0.164), faster than any hand reach or release (≤ 0.15); at 0.7 it peaks at ≤ 0.14 on 1.65–1.85 m bodies (idle-gesture-speed.test.ts). */

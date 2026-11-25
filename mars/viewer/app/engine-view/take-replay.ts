@@ -5,6 +5,7 @@ import {WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 // and whether the engine camera is on can never change what is shown at a
 // given t (spec §18: the take plays identically with any camera).
 import {PIANO_FADE} from './activity-poses.ts';
+import {ACT_HISTORY,lastPostureChange} from './posture-transition.ts';
 import {recordedBody,admittedBodyUrl} from './recorded-body.ts';
 import {recordedGame} from './recorded-games.ts';
 import {projectPlatformFrame} from './recorded-platforms.ts';
@@ -297,7 +298,7 @@ export class TakePeople {
   }
 
   /** How long `id`'s current activity has run at `tick` and what it did before (absent when it began before the take). */
-  private activityHistory(id: string, tick: number, act: string, walk: number): Pick<SampledHuman, 'activityAge' | 'prevActivity' | 'prevBaseActivity' | 'prevActivityDuration' | 'prevInstrument' | 'restAge' | 'walkAge' | 'restAgeAtWalk' | 'prevWaveDuration' | 'waveRestAge' | 'waveSamples' | 'waveClock'> {
+  private activityHistory(id: string, tick: number, act: string, walk: number): Pick<SampledHuman, 'activityAge' | 'prevActivity' | 'postureChange' | 'prevBaseActivity' | 'prevActivityDuration' | 'prevInstrument' | 'restAge' | 'walkAge' | 'restAgeAtWalk' | 'prevWaveDuration' | 'waveRestAge' | 'waveSamples' | 'waveClock'> {
     const a = this.acts.get(id);
     const k = this.runAt(a, tick);
     const rest = { ...this.restAge(id, a, k, tick, act), ...(walk > 0.02 ? this.walkStart(id, tick) : {}) };
@@ -322,7 +323,10 @@ export class TakePeople {
     if(!a||k<1)return {...rest,...wave};
     let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
     const age=(tick-a.t[k])*this.take.dt;
-    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
+    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'|'postureChange'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
+    // posture-transition.ts: the latest change of posture (an idle tick between sit-ups and jumping jacks keeps it)
+    const baseAt=(at:number,before:boolean)=>{for(let i=a.bt.length-1;i>=0;i--)if(before?a.bt[i]<at:a.bt[i]<=at)return a.bv[i]??undefined;return undefined;};
+    const change=lastPostureChange(a.t,a.v,k,tick,this.take.dt,baseAt);if(change)history.postureChange=change;
     if(age<PIANO_FADE&&(history.prevActivity==='play-piano'||history.prevActivity==='play-music'&&a.it)){
       let instrument:string|null=null;for(let i=(a.it?.length??0)-1;i>=0;i--)if(a.it![i]<a.t[k]){instrument=a.iv![i];break;}
       if(history.prevActivity==='play-piano'||instrument==='piano'||instrument==='keyboard'){
@@ -360,10 +364,17 @@ export class TakePeople {
   }
   /** Each body's activity changes on this take's tick axis, the previous adjacent take window's first (entry 36: an
    *  activity that began in the previous live window, or as this window's first change, has its age and what came before
-   *  it; the singer's hand eased onto the mic, then jumped when the next window arrived with no age). */
+   *  it; the singer's hand eased onto the mic, then jumped when the next window arrived with no age). Further adjacent
+   *  windows of the history are read back until ACT_HISTORY is covered: the new engine's live windows are half a second,
+   *  and a posture change (posture-transition.ts) or a crossfade lost its age at the next window but one. */
   private indexActs() {
     this.acts.clear();
-    const prev = this.neighbours.prev, windows: [Take, number][] = [...(prev ? [[prev, prev.startTick - this.take.startTick] as [Take, number]] : []), [this.take, 0]];
+    const windows: [Take, number][] = [[this.take, 0]];
+    for (let first = this.neighbours.prev; first && (this.take.startTick - first.startTick - first.ticks) * this.take.dt < ACT_HISTORY; ) {
+      windows.unshift([first, first.startTick - this.take.startTick]);
+      const at: Take = first;
+      first = this.history.find((t) => t !== at && t.ticks > 0 && adjacentTakes(t, at) && t.rulesVersion === at.rulesVersion) ?? null;
+    }
     const add=(take:Take,offset:number)=>{
       let found=false;
       for(const [tick,id,field,value]of take.changes){
