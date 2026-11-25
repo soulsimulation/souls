@@ -13,6 +13,9 @@ const GESTURES: Readonly<Record<string, string>> = {
   // 0.134 B4: lane T's touches, aimed at the other member (the take faces it and names it the partner).
   handshake: 'handshake', hug: 'hug', high_five: 'high-five',
 };
+/** Only named upper-body moves may overlay an authoritative seat; this adapter stays independent of scene modules. */
+const WHOLE_BODY:ReadonlySet<string>=new Set(['dance','jump','stretch','jumping-jacks','yoga','pushups','situps','stargaze']);
+export const SEATED_GESTURES:ReadonlySet<string>=new Set([...Object.values(GESTURES).filter(a=>!WHOLE_BODY.has(a)),'read']);
 /** Moves drawn as the old renderer's hand hold (`human.handHold`) with the member they reach, not as a pose. */
 const HOLDS: ReadonlySet<string> = new Set(['hold_hand']);
 /** 0.134 T3: looped activities a dance on the beat repeats, one record a cycle, the next on the next whole beat after

@@ -91,6 +91,7 @@ test('actual rig plants both push-up feet throughout entry, repetitions and exit
   assert.ok(distance(seated(50,'sit',5),seated(50+1e-5,'wave',1e-5))<.015,'seated wave enters from actual seated pose');
   assert.ok(distance(seated(52-1e-5,'wave',2-1e-5),seated(52+1e-5,'sit',1e-5,1e-5))<.015,'seated wave release retains attained arm pose');
   assert.ok(distance(seated(55,'sit',3,3),seated(55,'sit',3))<.015,'seated wave returns to the seated library pose');
+  seated(55,'sit',3);const seatRoot=views.bodyObject('contact-rig')!.position.clone();seated(55,'cheer',3);assert.ok(seatRoot.distanceTo(views.bodyObject('contact-rig')!.position)<1e-5,'a seated overlay cannot add a whole-body hop');
   const native=(p:[number,number,number],yaw:number)=>{views.setFrame([{id:'contact-rig',p,yaw,walk:0,walkDist:0,activity:'pushups',activityAge:.1,postureChange:{from:'idle',to:'pushups',age:.1,fromAge:3}}],60.1);views.render(1);return views.meshPoints('contact-rig',1);};
   const first=native([1,0,0],0);native([4,0,-2],1.2);assert.ok(distance(first,native([1,0,0],0))<1e-5,'native root/yaw changes do not seed a stale cached origin');
   views.clear();setHumanGround(null);

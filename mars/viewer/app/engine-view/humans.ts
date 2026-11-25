@@ -1105,7 +1105,7 @@ export class HumanViews {
         // on a slope the whole body lies along the ground (head uphill or down), not level above its highest point
         if (fit.k !== 0 && !v.bench) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-s, 0, c), Math.atan(fit.k))); }
       else { h.rotation.z = -(Math.PI / 2 - act.lying.raise) * tilt; h.position.y += 0.06 * tilt; }
-    } else if (act && act.hop > 0) h.position.y += act.hop;
+    } else if (act && act.hop > 0 && b.sitW === 0) h.position.y += act.hop;
     // leisure: a rider moves with the swing or the see-saw plank they sit on (play-motion.ts); the scenery seat follows
     if (act?.ride) { const seat = playSeatAt(act.ride.kind, h.position.x, h.position.z); if (seat) rideSeat(h, seat, act.ride.angle); }
     // clips: Run replaces Walk while running; Wave / Interact / Idle_Neutral take Idle's share
