@@ -89,7 +89,7 @@ test('B3-3: a Soul\'s card fields from the stream: its description, and what it 
   // first day (25 Nov): what it says is what its body is drawn doing, never "seated" in a balloon or "standing" in a dance
   assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'ride'), 'riding');
   // first day, round 4: in a balloon still at its stop, aboard and when it takes off; riding once it is under way
-  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'ride', 42), 'aboard — takes off in 42\u00a0s');
+  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'ride', 42), 'aboard — takes off in\u00a042\u00a0s');
   assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'lie'), 'lying down');
   assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'dance'), 'dancing');
   assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'jumping-jacks'), 'exercising');
