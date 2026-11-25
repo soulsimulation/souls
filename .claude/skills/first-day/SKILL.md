@@ -19,10 +19,10 @@ Run it yourself (the coordinator), or give it whole to one subagent. Do not spli
   (Gene signs it in once; the session persists). Never type a password, never use Gene's own account or Chrome.
   If the pane is signed out, stop and ask Gene to sign the test person in again: that is the only thing he does.
 - **The naive agent:** a fresh Claude Code session that has never seen this repository:
-  - an empty folder outside `~/Souls`, e.g. `mktemp -d` under the scratchpad;
+  - an empty folder outside this repository's checkout, e.g. `mktemp -d` under the scratchpad;
   - `claude -p --bare --setting-sources project --permission-mode auto --output-format stream-json --verbose`
     run in that folder, so no hooks, plugins, user settings or this repo's `AGENTS.md` reach it;
-  - check its first event in the transcript: no memory file and no instruction file from `~` or `~/Souls` loaded.
+  - check its first event in the transcript: no memory file and no instruction file from the home folder or this repository loaded.
     If any is, the run is contaminated: fix the isolation, start again.
   - Give it only what a person would paste: the prompt the page's New Soul button shows. Nothing else.
 - **Recording:** an uncut real-speed screen video of the page from step 2 to the end, plus a screenshot at each
