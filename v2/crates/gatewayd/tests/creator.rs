@@ -334,11 +334,17 @@ async fn w16_idle_creator_socket_cannot_revive_after_round_trip_and_soul_churn_k
         Value::Map([(4, Value::Text(Name::new("token.refused").unwrap()))].into())
     );
     gw.tell_watchers(&soul.key(), "ordinary Soul reply".into());
-    let ordinary = tokio::time::timeout(Duration::from_secs(5), soul_view.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    // The owner's box is also told whether the Soul's agent is connected (`{"agent": ...}`): those frames come first.
+    let ordinary = loop {
+        let m = tokio::time::timeout(Duration::from_secs(5), soul_view.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if !matches!(&m, Message::Text(t) if t.as_str().starts_with(r#"{"agent":"#)) {
+            break m;
+        }
+    };
     assert_eq!(ordinary, Message::Text("ordinary Soul reply".into()));
     ws.send(Message::Text("{}".into())).await.unwrap();
     assert_eq!(

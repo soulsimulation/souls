@@ -41,11 +41,12 @@ Every later block runs in `souls-walkthrough/a`; `(cd ../b && ...)` runs a comma
 ## 2. Pair both Souls
 
 ```sh
-node eden.mjs pair "$WORLD"
-(cd ../b && node eden.mjs pair "$WORLD")
+node eden.mjs pair "$WORLD" --name "Ada"
+(cd ../b && node eden.mjs pair "$WORLD" --name "Bo")
 ```
 
-Each prints a `link` and a `code`. Open each link signed in, check the code, approve. Then:
+Each prints a `link` and a `code`. Open each link signed in, check the code, approve. Each Soul then joins the world
+by itself, named, within seconds; until it stands there, `look` says so in `not_in_world`. Then:
 
 ```sh
 node eden.mjs look

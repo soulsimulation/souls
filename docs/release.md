@@ -64,14 +64,25 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    probe and does one guarded reload, in that order (below).
 5. **healthz.** Each activation checks the stage's `/__sim/healthz` reports the new build and every registered world
    answers; afterwards `https://soul.game/__sim/healthz` shows `build`, `worlds`/`running` and `hostOk`.
-6. **Walks.** Real-Chrome arrivals on desktop and phone, the poster and stall checks.
+6. **Walks.** Real-Chrome arrivals on desktop and phone, the poster and stall checks. ship.sh's healthz step also asks
+   `<origin>/pair?code=TEST` and fails the run unless it is the pairing card (200 with its module; a 403 is Caddy unable
+   to traverse `/srv/sim-worlds`, which install.sh's `caddy_traverse` grants on every install).
+6a. **First day.** Before the release, the first-day journey runs on the local prod-like stack
+   ([`tools/release/first-day/steps.mjs`](../tools/release/first-day/steps.mjs), two recorded takes: the approval card on
+   the open world page, arriving, your Souls, follow; then a `#soul/<id>` link and a reload); after the deploy, the
+   `first-day` skill on soul.game with a naive agent. Any failed step stops the release.
 7. **cdn-walk.** `tools/cdn/cdn-walk.mjs` proves the live pages load mapped assets from the CDN.
 8. **Feed.** Once the activation and healthz pass, a real ship posts one `release` item to the site feed through the operator
    route on the host (`/__sim/op/feed-post`, loopback only): the client version, the changelog link
    (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
    is the release's id: a retry that finds it in the feed posts nothing. It posts before the browser checks' verdict
    and whatever that verdict is; a failed verdict still fails the run and prints the rollback command.
-9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
+9. **Explore's place pictures.** Once the release is live, on a machine with a GPU:
+   `tools/world-launcher/deploy/place-shots.sh --dry-run`, then `tools/world-launcher/deploy/place-shots.sh`. It draws
+   each moved world's places that have no kept picture from the public page and copies them to the host's
+   `<data>/place-shots/<slug>/` ([cutover](../v2/docs/cutover.md)); with nothing new it draws nothing. The launcher logs
+   `place-shots: <slug> has N of M places without a kept picture` while any are missing.
+10. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
 ## Shipping a pinned sha

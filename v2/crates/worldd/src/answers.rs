@@ -774,6 +774,8 @@ pub fn exit_on_halt() -> Box<dyn FnOnce(String) + Send> {
 pub struct Wearing {
     pub catalogue: skills::wear::Catalogue,
     pub born: BTreeMap<Id, [u8; 32]>,
+    /// A look each of these Souls' bodies is born wearing on the default body (`skills::wear::LOOK`): births.json's.
+    pub looks: BTreeMap<Id, Vec<u8>>,
 }
 
 /// Where and how Souls' bodies are born (C3, #3367).
@@ -3418,6 +3420,10 @@ impl Clock {
                         && let Some(hash) = self.wear.as_ref().and_then(|w| w.born.get(&x.soul))
                     {
                         fields.insert(skills::wear::BODY, Value::Bytes(hash.to_vec()));
+                    } else if *node == x.body
+                        && let Some(look) = self.wear.as_ref().and_then(|w| w.looks.get(&x.soul))
+                    {
+                        fields.insert(skills::wear::LOOK, Value::Bytes(look.clone()));
                     }
                 }
             }
@@ -4222,9 +4228,17 @@ impl Clock {
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
-            // A walk to a place no longer pending (its member left) ends here too.
-            let todo = e.pending_places(&b.runner.controller);
-            let done = b.take_places(&todo);
+            // A walk to a place no longer pending (its member left) ends here too. A member of any activity with
+            // places that is already acting on its own (a harvest's pick sent as the offer was accepted, a tea made
+            // while a hug is accepted) is placed where it stands: the place walk, a walk of its own Soul, would end
+            // that act (`claim-taken`, intents rule 10). Its moves, if any, begin from there or are left out, as for
+            // a seated member.
+            let (acting, todo): (Vec<_>, Vec<_>) = e
+                .pending_places(&b.runner.controller)
+                .into_iter()
+                .partition(|t| self.forms.acting(t.1));
+            let mut done = b.take_places(&todo);
+            done.extend(acting.iter().map(|t| (t.0, t.1)));
             e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
         }
     }

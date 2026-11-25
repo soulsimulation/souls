@@ -34,8 +34,13 @@ type IdValue = [Uint8Array, number];
 const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 
-async function get(url: URL): Promise<Uint8Array | null> {
-  const res = await fetch(url, { cache: 'no-store' });
+/** How long a pointer or part read may take before it is given up (25 Nov): a read that never answers would hold the
+ *  poll, which waits for it, for good; given up, it is an error like a failed read, and the next poll reads again. */
+const READ_MS = 5000;
+
+/** `timed`: given up after READ_MS. Baselines are not: a slow viewer's 9 MB baseline may well take longer. */
+async function get(url: URL, timed = false): Promise<Uint8Array | null> {
+  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) });
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -159,10 +164,10 @@ async function run(stream: URL) {
   const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
     for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
       const file = path(p, `${k}${suffix}`);
-      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream)).catch(() => null));
+      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream), true).catch(() => null));
     }
     const file = path(p, `${n}${suffix}`);
-    const bytes = fetching.get(file) ?? get(new URL(file, stream));
+    const bytes = fetching.get(file) ?? get(new URL(file, stream), true);
     fetching.delete(file);
     return bytes;
   };
@@ -364,7 +369,7 @@ async function run(stream: URL) {
     if (busy) return;
     busy = true;
     try {
-      const b = await get(new URL('pointer', stream));
+      const b = await get(new URL('pointer', stream), true);
       const latest = b ? readPtr(b) as StreamPointer : ptr;
       if (latest.generation !== active) {
         // #3825: the handoff names the generation it closes (none for the legacy stream). A viewer on it drains it and

@@ -118,6 +118,10 @@ pub struct Import {
     /// Things today's facts put in a slot another thing already holds: each stays a plain child of the same parent
     /// at its own place, out of the slot (one occupant per slot), with what holds the slot.
     pub left_out: Vec<String>,
+    /// Souls' bodies today's facts list as things (old Eden's residents, `core/humanoid@1`): each is left out of the
+    /// tree, by its origin id and name. A Soul is not a thing: it comes back through the directory, unpaired, and
+    /// stands when its own agent joins (`v2/tools/ops/cutover/eden-residents.mjs`).
+    pub residents: Vec<(String, String)>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
     /// Every kind line the rules were read from, in order: the world's kinds text a creator's client keeps (G7b).
@@ -812,6 +816,62 @@ fn joining_slots(entries: &[(String, String)]) -> Joining {
     out
 }
 
+/// Whether a def names a Soul's body (today's `core/humanoid@<n>`, also spelt `core-humanoid@<n>`), not a thing.
+pub fn is_body_def(def: &str) -> bool {
+    ["core/humanoid@", "core-humanoid@"].iter().any(|p| {
+        def.strip_prefix(p)
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// The facts' things less Souls' bodies (old Eden's 22 residents were exported as `core/humanoid@1` things): the
+/// things kept, each body left out as (origin id, name, def, ref), and what the bake counted for them. A thing that
+/// stood on a body (in its hands) would lose its parent, and is refused by name rather than placed somewhere new.
+type Residents = (
+    Vec<Json>,
+    Vec<(String, String, String, String)>,
+    Vec<(String, i64)>,
+);
+fn without_bodies(all: &[Json]) -> R<Residents> {
+    let body = |t: &Json| {
+        [t.get("def"), t.get("ref")]
+            .into_iter()
+            .flatten()
+            .filter_map(Json::str)
+            .any(is_body_def)
+    };
+    let mut gone: BTreeMap<String, i64> = BTreeMap::new();
+    let mut residents = Vec::new();
+    for t in all.iter().filter(|t| body(t)) {
+        let id = s(t, "id")?.to_owned();
+        let name = t
+            .get("name")
+            .and_then(Json::str)
+            .unwrap_or_default()
+            .to_owned();
+        let text = |k| t.get(k).and_then(Json::str).unwrap_or_default().to_owned();
+        residents.push((id, name, text("def"), text("ref")));
+        *gone.entry("things".into()).or_default() += 1;
+        *gone.entry("slots".into()).or_default() +=
+            t.get("slots").map_or(0, |v| v.arr().len() as i64);
+        *gone.entry("solids".into()).or_default() +=
+            t.get("solids").map_or(0, |v| v.arr().len() as i64);
+    }
+    let ids: BTreeSet<&str> = residents.iter().map(|r| r.0.as_str()).collect();
+    if let Some(t) = all.iter().find(|t| {
+        t.get("parent")
+            .and_then(Json::str)
+            .is_some_and(|p| ids.contains(p))
+    }) {
+        return Err(format!(
+            "{}: stands on a Soul's body, which is not a thing",
+            s(t, "id")?
+        ));
+    }
+    let kept = all.iter().filter(|t| !body(t)).cloned().collect();
+    Ok((kept, residents, gone.into_iter().collect()))
+}
+
 /// [`load`], with the world's entries (`(name, its souls-entry/1 text)`): a kind whose entry joins parts (it declares a
 /// link type, or slots naming the kinds they admit: a rack bay, a beam, a frame stand) takes its slots from its entry,
 /// numbered and admitting as the entry says, beside any slot only its things have. Every other kind is the facts'.
@@ -822,7 +882,8 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
     if s(&f, "format")? != "souls/import-eden/1" {
         return Err("not a souls/import-eden/1 file".into());
     }
-    let things = need(&f, "things")?.arr();
+    let (kept, residents, gone) = without_bodies(need(&f, "things")?.arr())?;
+    let things = &kept[..];
 
     // --- Kinds: T3's names, with what each admits (section 11) and in its slots (section 6). -------------------------
     let mut slots_of: BTreeMap<&str, BTreeSet<i64>> = BTreeMap::new();
@@ -1591,6 +1652,23 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             by_ref.insert(k.clone(), v.int().unwrap_or(0));
         }
     }
+    // The bake counted the bodies left out: they are not in the tree, so not in what it is compared with.
+    for (key, n) in gone {
+        if let Some(v) = bake.get_mut(&key) {
+            *v -= n;
+        }
+    }
+    for (_, _, def, r) in &residents {
+        let key = if by_ref.contains_key(def) { def } else { r };
+        if let Some(v) = by_ref.get_mut(key) {
+            *v -= 1;
+        }
+    }
+    by_ref.retain(|_, v| *v != 0);
+    let residents = residents
+        .into_iter()
+        .map(|(id, name, _, _)| (id, name))
+        .collect();
     Ok(Import {
         tree,
         rules,
@@ -1603,6 +1681,7 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         floor_flights,
         mesh_fills,
         left_out: b.left_out,
+        residents,
         forms,
         kind_lines,
         log: (

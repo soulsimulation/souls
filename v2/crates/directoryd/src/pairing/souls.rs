@@ -26,6 +26,8 @@ pub const PICTURE_BYTES: u64 = 262_144;
 pub const PICTURE_SIDE: u64 = 512;
 /// The most characters a description may have.
 pub const DESCRIPTION_MOST: usize = 280;
+/// How long a pending request shows on the world page of a signed-in person asking from its address (seconds).
+pub const WAITING_WITHIN: u64 = 600;
 
 /// The tables this module adds to the pairing store.
 pub(super) const SCHEMA: &str = "
@@ -150,6 +152,59 @@ impl Pairing {
             .ok()
             .flatten()
             .filter(|g| g.starts_with("creator-"))
+    }
+
+    /// Notes the address a pending request (by its code) was asked from (first day, 25 Nov: the approval card comes
+    /// up on the world page the owner already has open). Kept in memory, for [`WAITING_WITHIN`] seconds.
+    pub fn ask_from(&self, code: &str, from: std::net::IpAddr, now: u64) {
+        let mut a = self.askers.lock().expect("askers");
+        a.retain(|_, (_, at)| now.saturating_sub(*at) < WAITING_WITHIN);
+        // Only this card's hint is capped; a request past it is still answered by its link.
+        if a.len() < 4096 {
+            a.insert(code.to_string(), (from, now));
+        }
+    }
+
+    /// The Soul requests still pending for `world`, asked from `from` in the last [`WAITING_WITHIN`] seconds, newest
+    /// first: `(code, device, label, soul, age, former)`. The card shows the code for the owner to match.
+    #[allow(clippy::type_complexity)]
+    pub fn waiting(
+        &self,
+        world: &str,
+        from: std::net::IpAddr,
+        now: u64,
+    ) -> Result<Vec<(String, String, String, Option<String>, u64, Option<String>)>, &'static str>
+    {
+        let mut codes: Vec<(String, u64)> = {
+            let a = self.askers.lock().expect("askers");
+            a.iter()
+                .filter(|(_, (ip, at))| *ip == from && now.saturating_sub(*at) < WAITING_WITHIN)
+                .map(|(c, (_, at))| (c.clone(), *at))
+                .collect()
+        };
+        codes.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut out = Vec::new();
+        for (code, _) in codes {
+            let row: Option<(String, String, Option<String>, i64)> = {
+                let db = self.db.lock().expect("the store");
+                store(
+                    db.query_row(
+                        "SELECT r.device, r.label, r.soul, r.created_at FROM pair_requests_v1 r
+                           JOIN pair_request_worlds_v1 w ON w.code = r.code
+                          WHERE r.code = ?1 AND w.world = ?2 AND r.state = 'pending' AND r.scope = 'soul'",
+                        params![code, world],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    )
+                    .optional(),
+                )?
+            };
+            if let Some((device, label, soul, created)) = row {
+                let former = self.former_of(&code)?.map(|(_, f)| f);
+                let age = now.saturating_sub(created.max(0) as u64);
+                out.push((code, device, label, soul, age, former));
+            }
+        }
+        Ok(out)
     }
 
     /// Keeps the world a pending request (by its code) was made for.
