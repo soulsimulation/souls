@@ -50,7 +50,8 @@
 //! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is. A start with no
 //! `views/world.json` waits at most 10 s for its public stream's first flush; a stream still rebuilding a long history
 //! then (a rehearsal's scratch copy) or held by a stalled store finishes after the world listens, its health
-//! `stream` `recovering` and no pointer, so no viewers, until it serves.
+//! `stream` `recovering` until it serves: with no pointer while a stalled store holds it, and while a long history is
+//! rebuilt with a pointer that names the stream still being written.
 //!
 //! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
 //! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
@@ -4010,7 +4011,8 @@ fn serve(args: &[String]) -> R<()> {
     // with no pointer, and the stream thread tries again until it serves. The wait is bounded ([`STREAM_FIRST_WITHIN`]):
     // a world with a history and no pointer (a rehearsal's scratch copy, a folder whose views were lost) rebuilds its
     // stream from record 0, which takes Eden minutes, and a stalled store holds the recovery's reads. Such a world
-    // listens with its stream still `recovering` (no pointer, so no viewers yet); the pointer comes when it serves.
+    // listens with its stream still `recovering`: no pointer while the store holds it, or a pointer naming the stream
+    // still being rebuilt.
     if fresh
         && let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =
             ready_rx.recv_timeout(STREAM_FIRST_WITHIN)
