@@ -379,6 +379,20 @@ impl Replica {
                     moved(*node, &mut out);
                     out.insert(pose.frame.node);
                 }
+                // A subtree in flight now (its leave in an earlier part) lands here with its links, and a later entry
+                // can walk it (a remove, a leave, an unlink of a carried link).
+                Body::Transfer(
+                    TransferRec::Arrive { transfer, .. }
+                    | TransferRec::Return { transfer, .. }
+                    | TransferRec::Settle { transfer },
+                ) => {
+                    if let Some(f) = self.tree.flight(*transfer) {
+                        out.insert(f.root);
+                        out.insert(f.pose.frame.node);
+                        out.extend(f.nodes.keys());
+                        out.extend(f.links.values().flat_map(|l| l.ends));
+                    }
+                }
                 _ => {}
             }
         }
