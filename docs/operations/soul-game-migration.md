@@ -14,8 +14,8 @@ switch to the soul.game Clerk app ([Clerk satellite](clerk-satellite.md)).
 | soul.game DNS on Cloudflare | moved (the zone may show Pending for a few hours) |
 | `soul-game-assets` holds every CDN object | done: 2,360 objects, 1.38 GB, `verify --deep` passed (every SHA-256 and header read back) |
 | `cdn.soul.game` serves the bucket | yes: same bytes, Content-Type, Cache-Control and Content-Encoding as `assets.eden.art` |
-| `cdn.soul.game` CORS rule | **missing**: no `Access-Control-Allow-Origin`, so pages cannot load from it yet (step A2) |
-| uploads Worker on `cdn.soul.game/w/*` | **not deployed** (step A3) |
+| `cdn.soul.game` CORS rule | set: soul.game, souls.game and sim.eden.art allowed, Range preflight answered (step A2) |
+| uploads Worker on `cdn.soul.game/w/*` | deployed (step A3) |
 | code pointing at `cdn.soul.game` | this pull request, not merged |
 | worlds' bucket | still the old provider: 34,183 objects, 6.37 GB under one prefix (part C) |
 
