@@ -87,6 +87,7 @@ export function mergeRigBody(rig: Pick<Rig, 'model' | 'template'>): THREE.Skinne
   const first = parts[0], body = new THREE.SkinnedMesh(m.geometry, m.material);
   body.name = 'body'; body.userData[BODY_DRAW] = true; body.raycast = () => {};
   body.castShadow = first.castShadow; body.receiveShadow = first.receiveShadow; body.frustumCulled = first.frustumCulled;
+  if (first.boundingSphere) body.boundingSphere = first.boundingSphere.clone();   // a whole-body sphere set by createRig, when it sets one
   body.position.copy(first.position); body.quaternion.copy(first.quaternion); body.scale.copy(first.scale);
   first.parent!.add(body);
   body.bind(first.skeleton, first.bindMatrix);
