@@ -21,7 +21,7 @@ use replica::intents::{Fallback, Intent, Target};
 use replica::move_check::move_check;
 use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
-use replica::select::{Spot, resolve};
+use replica::select::{self, Spot, resolve};
 use replica::tree::Tree;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
@@ -2347,6 +2347,116 @@ fn q2_a_walk_ends_in_a_buildings_main_room_on_the_ground_or_beside_a_soul() {
     assert!(
         (at.x - h_mid.x).abs() <= 2_900_000 && (at.z - h_mid.z).abs() <= 5_900_000,
         "inside the stair hall: {at:?}"
+    );
+}
+
+/// 0.135: a walk to a thing or another Soul ends facing it, as a person turns to what they came to; a walk to the
+/// ground (a place it ends in) keeps the facing it had. The body's facing is the world's (its pose's orientation), not
+/// the drawing's: the page reads it from the stream.
+#[test]
+fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
+    use worldd::bodies::{Ask, Asked};
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    let walk = |b: &mut Bodies, i: u64, to: Id| {
+        b.start(vec![(
+            soul(i),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+        .remove(0)
+        .1
+    };
+    let run = |b: &mut Bodies, id: Id| -> Result<(), String> {
+        for _ in 0..8_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                // the turn is taken at the next step, as any input is
+                let _ = b.step(b.runner.now + b.runner.tick);
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    };
+    // How far (µm, on the level, at 1 m out) the body's facing (+x turned by its orientation) is from pointing at `to`.
+    let off = |b: &Bodies, to: Vec3| {
+        let m = b.runner.controller.body(body_id()).unwrap();
+        let f = m
+            .pose
+            .orientation
+            .rotate(Vec3::new(1_000_000, 0, 0))
+            .unwrap();
+        let (dx, dz) = (to.x - m.pose.position.x, to.z - m.pose.position.z);
+        let l = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() as i64;
+        let (ux, uz) = (dx * 1_000_000 / l, dz * 1_000_000 / l);
+        (i128::from(f.x - ux).pow(2) + i128::from(f.z - uz).pow(2)).isqrt() as i64
+    };
+    // A second Soul 6 m north-east of the walker, so the walk does not already end facing it by chance.
+    let other = Id::new(Scope([7; 16]), 9_020).unwrap();
+    let other_at = Vec3::new(-36_000_000, 0, 34_000_000);
+    let mut b = bodies().unwrap();
+    let (town, ground) = town();
+    let placed = town.surfaces[&ground]
+        .place(
+            other,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            other_at,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    b.add_body(humanoid(), placed).unwrap();
+    b.begin(0);
+
+    // To another Soul: it ends beside it, facing it (it started facing +x, and walking never turns the world's body).
+    walk(&mut b, 1, other).expect("the walk to the other Soul starts");
+    assert_eq!(run(&mut b, soul(1)), Ok(()));
+    let o = off(&b, other_at);
+    println!("to the other Soul: facing {o} um off it at 1 m");
+    assert!(o < 20_000, "faces the Soul it walked to: {o} um off at 1 m");
+
+    // To a thing (the yard's frame stand, its origin from the tree): it ends facing the thing's origin.
+    let stand = im.nodes["yard-stand"];
+    walk(&mut b, 2, stand).expect("the walk to the stand starts");
+    assert_eq!(run(&mut b, soul(2)), Ok(()));
+    let (frame, _) = b.pose(body_id()).unwrap();
+    let origin = select::origin_in(&im.tree, stand, frame).unwrap();
+    let o = off(&b, origin);
+    println!("to the stand: facing {o} um off its origin at 1 m");
+    assert!(
+        o < 20_000,
+        "faces the thing it walked to: {o} um off at 1 m"
+    );
+
+    // To the ground, a place it ends in: the facing it had is kept.
+    let before = b
+        .runner
+        .controller
+        .body(body_id())
+        .unwrap()
+        .pose
+        .orientation;
+    walk(&mut b, 3, ground).expect("the walk to the ground starts");
+    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    assert_eq!(
+        b.runner
+            .controller
+            .body(body_id())
+            .unwrap()
+            .pose
+            .orientation,
+        before,
+        "a walk to a place keeps its facing"
     );
 }
 

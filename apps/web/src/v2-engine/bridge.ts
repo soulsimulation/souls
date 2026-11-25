@@ -2,7 +2,7 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type WorldSample } from './takes.ts';
+import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type Turn, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
@@ -127,7 +127,7 @@ export class V2Bridge {
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
-  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[] }>();
+  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[]; turns?: Turn[] }>();
   /** Each held thing's holder (a body node id). */
   private readonly heldBy = new Map<string, string>();
   /** Saids kept (saidKey), and those not yet in a chunk; the talk lines' next id. */
@@ -279,6 +279,14 @@ export class V2Bridge {
         // them. Before them it dropped the part's earlier samples, and at a walk's end (no `at`) it put the end of the
         // walk at the part's start: a jog's burst of speed, then a step back.
         if (n.parent && (!t.node || !samePlace(t.node, n))) { if (defer && t.node && (defer === 'walk' || t.node.parent !== n.parent || t.node.slot !== n.slot)) moved.push(n); else this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos); }
+        // The world turned it where it stands (a walk to a thing ends facing it): the take turns it then, from its old
+        // facing to its new one (takes.ts turnedAt). A turn into or in a seat is the seat's.
+        const was = t.node;
+        if (was && was.parent === n.parent && was.slot === null && n.slot === null && was.rot.some((v, i) => v !== n.rot[i])) {
+          const up = this.world(n.parent);
+          const yaw = (r: NodeRec['rot']) => { const q = mul(up!.q, [r[0] / Q, r[1] / Q, r[2] / Q, r[3] / Q]); return -2 * Math.atan2(q[2], q[0]); };
+          if (up) (t.turns ??= []).push({ at: Math.max(n.at ?? at, at), from: yaw(was.rot), to: yaw(n.rot) });
+        }
         t.node = n; t.gone = null;
       }
       // A placed body with no motion yet stands where its record has it.
@@ -417,7 +425,16 @@ export class V2Bridge {
     const thing = slot !== null ? this.nodes.get(frame) : undefined;
     let seat: Seat | undefined;
     // a slot of a thing on a course is a ride's place: the body stands in it and rides (take-bodies.ts postureOf)
-    if (thing) { seat = thing.course ? { height: 0, lie: false, ride: true } : seatOf(thing.kind, thing.slots?.find((x) => x[0] === slot)); p[1] -= seat.height; }
+    if (thing) {
+      const row = thing.slots?.find((x) => x[0] === slot);
+      seat = thing.course ? { height: 0, lie: false, ride: true } : seatOf(thing.kind, row);
+      p[1] -= seat.height;
+      // A sitter faces out of its seat: the thing's +z turned by the slot's yaw (as a stand point lies in front of it)
+      if (!seat.lie && !seat.ride) {
+        const half = (row?.[4] ?? 0) / 1000 * Math.PI / 360, out = rotate(mul(f.q, [Math.cos(half), 0, Math.sin(half), 0]), [0, 0, 1]);
+        seat.heading = Math.atan2(out[2], out[0]);
+      }
+    }
     const on = moving ? (t: number) => { const q = placeAt(t); if (q && seat) q[1] -= seat.height; return q; } : undefined;
     const t = this.tracks.get(id) ?? this.tracks.set(id, { samples: [], node: this.nodes.get(id) ?? null, gone: null, held: [], said: [], gestures: [] }).get(id)!;
     const last = t.samples[t.samples.length - 1];
@@ -437,7 +454,7 @@ export class V2Bridge {
       // else the default person its id picks (on both pages alike).
       const own = n.body ? null : lookBodyOf(n.look);
       const look = legacyBodyOf(n.body, this.catalogue) ?? own, entity = n.body || own ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
-      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said, gestures: t.gestures,
+      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, ...(t.turns ? { turns: t.turns } : {}), held: t.held, said: t.said, gestures: t.gestures,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
@@ -479,6 +496,10 @@ export class V2Bridge {
       let h = 0;
       while (h + 1 < t.held.length && t.held[h + 1].at < cut) h++;
       if (h) t.held.splice(0, h);
+      // the newest turn before the cut still says how it stands
+      let r = 0;
+      while (t.turns && r + 1 < t.turns.length && t.turns[r + 1].at < cut) r++;
+      if (r) t.turns!.splice(0, r);
       t.said = t.said.filter((l) => l.tick >= first);
       t.gestures = t.gestures.filter((g) => g.end >= cut);
     }

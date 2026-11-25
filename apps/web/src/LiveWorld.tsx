@@ -1,6 +1,6 @@
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
-import {WorldContextViews} from './WorldContextViews.ts';
+import {WorldContextViews,contextLocation,type Target as ContextTarget} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
@@ -134,6 +134,7 @@ import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
 import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
 let oldKit:OldSceneKit|null=null,oldKitLoad:Promise<OldSceneKit>|null=null;
@@ -423,7 +424,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const seatSurvey=new URLSearchParams(location.search).get('survey')==='seats'?{done:false,since:null as number|null}:null;
     const waterDetail=new WorldWaterDetail(()=>!!reducedMotionQuery?.matches,()=>quality.tier==='phone'),waterDetailOff=new URLSearchParams(location.search).get('water')==='0';  // ?water=0: before/after comparisons
     waterDetail.boats=AFLOAT;(window as unknown as {__soulsWater?:unknown}).__soulsWater=waterDetail.stats;    const idleLife=new WorldIdleLife();const bodyPoses=new WorldBodyPoses();const idleSouls:IdleSoul[]=[];const idleSphere=new THREE.Sphere();let attentionTargets=new Map<string,readonly string[]>();
-    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld);
+    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld,place=>initialGate?.snapshot().stage==='ready'?placePreviews.captureLocation(place,sceneKey??''):Promise.resolve(null));  // a moved world's place with no kept picture is drawn here (tools/world-launcher/place-shots.mjs)
     const edgeItems=new WorldEdgeItems(apiPath('/v1/edge/items'));scene.add(edgeItems.group);edgeItems.start(abort.signal);  // things lying around (together/1)
     const early=newWorld?takeEarlyLayer():null;if(early)abort.signal.addEventListener('abort',()=>early.abort.abort());const entityLayer=early?.layer??new WorldEntityLayer(apiPath);entityLayerRef.current=entityLayer;{const q=new URLSearchParams(location.search);entityLayer.scatterPooling=q.get('scatterPools')!=='0';entityLayer.motionInstancing=q.get('motionPools')!=='0';entityLayer.scatterPools.cellSize=Number(q.get('scatterCell'))||(quality.tier==='phone'?192:Infinity);}  // P7b: a phone's layer may have started before this page's code was in (early-layer.ts)
     scene.add(entityLayer.group);entityLayer.cover.bindScene(scene);let entityWorldFramed=false,rideNames:string[]|null=null,rideNamesAt=0,rideCarriers:CarrierPose[]=[],rideCars:string[]=[],rideCarWheels=new Map<string,[number,number]>(),rideWheels=new Map<string,string>(),carrierIds:string[]=[],carrierRecords:object|null=null;
@@ -614,6 +615,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const placePreviews=new WorldPlacePreviews(renderer,()=>[geometry.group,...(expansion?[expansion.group]:[]),...(entityLayer.active?[entityLayer.group]:[])],()=>scene,()=>{  // Gene #13: every place shot in the same late-morning, clear, dry light, whatever the live clock and weather
       const at=shotClockAt(light.clock??'2026-06-21T12:00:00',PLACE_SHOT_MINUTES)!,undoLight=light.photo(at),undoAtmosphere=atmosphere.photo(at,light.daylight),night=nightLightStrength();setNightLightStrength(1);houseWindows?.setNight(0);
       return ()=>{undoLight();undoAtmosphere();setNightLightStrength(0,night);houseWindows?.setNight(night);};});  // E2 #7: a god world's landmarks are drawn by its entity layer
+    placePreviews.owner=id=>id.startsWith('context:')&&entityLayer.active?entityLayer.contextObjects(id.slice(8)):[];
+    // ?placeShots=1: tools/world-launcher/place-shots.mjs has this page draw each place of a moved world once, to keep
+    if(new URLSearchParams(location.search).get('placeShots')==='1'){placePreviews.forShots();(window as unknown as {__placeShots?:unknown}).__placeShots={ready:()=>initialGate?.snapshot().stage==='ready',draw:(t:ContextTarget)=>placePreviews.captureLocation(contextLocation(t,'shots'),'shots')};}
     const loader = new GLTFLoader(manager).setDRACOLoader(draco).setMeshoptDecoder(MeshoptDecoder);
     const releaseAssetLoader = setAssetLoader(loader);
     const releaseTexturePreparation = newWorld ? setTextureRenderer(renderer,scene,camera) : () => {};
@@ -774,7 +778,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
 
     const initialMotionHistory=new WorldMotionHistory(fetchChunks,abort.signal);
     const motionOwner=()=>JSON.stringify([context.current.sim.conn.welcome?.worldId,context.current.sim.conn.welcome?.epoch]);
-    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [], liveTick: number | null = null;
+    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [];
+    const liveClock = new LiveClock();
     const spot = new THREE.Vector3();
     const gaitContinuity=new RecordedGaitContinuity();
     let applied: Chunk | null = null, records: Record<string, Entity> = {}, frame = 0, last = performance.now(), labelAt = 0, brokenTake: string | null = null, frameGap = false;
@@ -784,7 +789,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (arr !== liveArr || key !== liveKey) { liveArr = arr; liveKey = key; live = validChunks(arr).filter((c) => c.fromTick <= (t?.serverTick ?? Infinity)); } // a restarted server starts its ticks again
       return live;
     };
-    const goLive = () => { past.current = null; liveTick = null; setMode('live'); setNote(null); };
+    const goLive = () => { past.current = null; liveClock.reset(); setMode('live'); setNote(null); };
+    // read-only, for checks and proof: the live tick drawn, its target and the newest chunk's end (live-clock.ts)
+    const liveProbe: { tick: number | null; target: number | null; newest: number | null } = { tick: null, target: null, newest: null };
+    (window as unknown as { __soulsLive?: typeof liveProbe }).__soulsLive = liveProbe;
 
     const pacer = new FramePacer();
     // #2260: where the public replica draws each Soul, place and thing now, so a client rendering on its own machine places a
@@ -812,7 +820,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // lane W1: while a new world's first build runs in slices nothing is drawn: look at the takes 4 times a second, no more
       if(entityLayer.building){const t=performance.now();if(t-buildingFrameAt<250)return;buildingFrameAt=t;}
       if(eyes&&!eyes.wake(performance.now()))return;  // VF1b: a slow frame leaves room for socket messages
-      const now = performance.now(), step = Math.min(0.1, (now - last) / 1000);
+      const now = performance.now(), real = (now - last) / 1000, step = Math.min(0.1, real);
       last = now;
       const rigBudget={remaining:1};  // one shared cap for this animate, including any repeated people updates
       const s = context.current.sim, dt = dtOf(s), liveList = liveChunks();
@@ -847,10 +855,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       } else {
         chunks = liveList;
         const target = (serverNow(s) ?? chunks.at(-1)?.toTick ?? 0) - liveDelayOf(s);
-        if (liveTick === null || Math.abs(target - liveTick) > 80) liveTick = target;
-        else liveTick += step * tpsOf(s) + (target - liveTick) * Math.min(1, step * 1.5); // run at the clock rate, drift gently toward the server
-        if (chunks.length) liveTick = Math.max(chunks[0].fromTick, Math.min(chunks.at(-1)!.toTick, liveTick));
-        tick = liveTick;
+        // live-clock.ts: by real time, not by frames (a slow frame never leaves it behind); a late chunk or a stalled
+        // frame is caught up at most MAX_RATE fast, never skipped; only far off (a hidden tab) is it one cut
+        tick = liveClock.step(real, target, tpsOf(s), chunks.length ? chunks[0].fromTick : null, chunks.at(-1)?.toTick ?? null);
+        liveProbe.tick = tick; liveProbe.target = target; liveProbe.newest = chunks.at(-1)?.toTick ?? null;
       }
 
       if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,liveDelayOf(s),motionOwner(),motionOwner);
