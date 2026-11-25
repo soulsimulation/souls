@@ -155,7 +155,8 @@ function geometryOnly(bytes: Buffer): ArrayBuffer {
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
 }
 
-export type Measure = { radius: number; height: number; hover: number; clips: string[]; mesh: LodMesh };
+/** `simple`: an already released simple mesh, kept byte for byte instead of simplifying `mesh` again. */
+export type Measure = { radius: number; height: number; hover: number; clips: string[]; mesh: LodMesh; simple?: Uint8Array };
 
 /** Measures the body: footprint radius and height (m), hover (m) and the clips posed, and its merged mesh. */
 export async function measure(bytes: Buffer, motion?: BodyMotion): Promise<Measure> {
@@ -255,7 +256,7 @@ export async function importBody(glb: string, manifest: string): Promise<Importe
 export function imported(bytes: Buffer, v: Report, m: Measure): Imported {
   const radiusMm = Math.ceil(m.radius * 1000), heightMm = Math.ceil(m.height * 1000), hoverMm = Math.round(m.hover * 1000);
   const size = sizeFor(radiusMm);
-  const simple = encodeMesh(simplify(m.mesh, SIMPLE_TRIANGLES));
+  const simple = m.simple ?? encodeMesh(simplify(m.mesh, SIMPLE_TRIANGLES));
   const profile = v.report.profile, res = resources(profile), actions = v.report.actions.supported.map((a) => a.action);
   const kind = `body:${slug(v.admitted.name ?? v.admitted.assetId)}`;
   const full = { hash: `sha256:${sha(bytes)}`, bytes, triangles: v.admitted.triangles };

@@ -18,7 +18,7 @@
 
 use crate::apply::Replica;
 use crate::edit::{OPS_MOST, Op, Ref, Spot};
-use crate::effects::{Actor, Body, Effect, read_id};
+use crate::effects::{Actor, Body, Change, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
@@ -258,9 +258,9 @@ fn json_value(v: &Value) -> Result<String, JsError> {
 
 /// An entry in a view item frame (R4's `{1: 1, 2: entry}` or an addressed activity notification's
 /// `{1: 9, 2: entry bytes}`) as JSON, for the
-/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
-/// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
-/// an entry.
+/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"removed"?:
+/// ["<id>",..],"events":[{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator, `removed`
+/// the nodes it removes (none, absent); empty when the item is not an entry.
 #[wasm_bindgen(js_name = wireEntry)]
 pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
@@ -292,11 +292,10 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
             .iter()
             .flatten()
             .any(|ev| ev.name.as_str() == crate::speech::SAID)
-            || !e
-                .events
-                .iter()
-                .flatten()
-                .any(|ev| crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()))
+            || !e.events.iter().flatten().any(|ev| {
+                crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()
+                    || crate::activity::to_members(ev.name.as_str())
+            }))
     {
         return Ok(String::new());
     }
@@ -307,6 +306,22 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let changes = match &e.body {
         Body::Changes(c) => c.len(),
         _ => 0,
+    };
+    // 0.135: the nodes the entry removes, so a member told of a leave knows when it ended its activity.
+    let removed: Vec<String> = match &e.body {
+        Body::Changes(c) => c
+            .iter()
+            .filter_map(|c| match c.change {
+                Change::Remove { node } => Some(format!("\"{}\"", id_text(node))),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let removed = if removed.is_empty() {
+        String::new()
+    } else {
+        format!(r#","removed":[{}]"#, removed.join(","))
     };
     let mut events = Vec::new();
     for ev in e.events.iter().flatten() {
@@ -321,7 +336,7 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
         ));
     }
     Ok(format!(
-        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes},"events":[{}]}}"#,
+        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes}{removed},"events":[{}]}}"#,
         e.envelope.sequence,
         e.envelope.at,
         id_text(e.envelope.node),

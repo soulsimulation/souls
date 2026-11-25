@@ -189,9 +189,19 @@ export function definedNames(copy) {
   return out;
 }
 
+/** An activity node's (`replica::activity`, a `<kind>_activity`, a conversation, a give) members and whether it has
+ *  started, as its fields hold them (2: 1 proposed, 2 started; 4: [[role, body, soul, link, intent], ...]):
+ *  `{members: [{role, body, soul}], started}`, or nothing for any other node. */
+function membersAt(kind, fields) {
+  if (!/_activity$|^souls:(conversation|give)$/.test(kind)) return {};
+  const ms = fields.get(4) ?? fields.get(4n), state = Number(fields.get(2) ?? fields.get(2n));
+  if (!Array.isArray(ms) || !ms.every((m) => Array.isArray(m) && m.length === 5 && typeof m[0] === 'string')) return {};
+  return { members: ms.map(([role, body, soul]) => ({ role, body: idText(body), soul: idText(soul) })), started: state === 2 };
+}
+
 /**
  * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, entry, parent, path, children, text, soul,
- * own }`, `soul` on a body that names its Soul, `entry` on a thing that borrows another kind's entry ([`entryKind`]).
+ * members, started, own }`, `soul` on a body that names its Soul, `members` and `started` on an activity ([`membersAt`]), `entry` on a thing that borrows another kind's entry ([`entryKind`]).
  * A node is named by its kind's plain name and its counter ("cup 7") unless a text field gives it one; text in its
  * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
  */
@@ -220,7 +230,8 @@ export function rowsOf(copy) {
     const hours = hoursText(fields.get(F_HOURS) ?? fields.get(BigInt(F_HOURS)));
     const pose = m.get(7) instanceof Map ? m.get(7) : m.get(8) instanceof Map && m.get(8).get(5) instanceof Map ? m.get(8).get(5) : null;
     const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
-    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
+    const members = membersAt(kind, fields);
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), ...members, own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   walk.done();
