@@ -26,7 +26,8 @@ test('the offerer hears another join, the start, a leave and the end, each by na
   assert.deepEqual(shown(entry('souls:activity-joined')), [{ kind: 'together', what: 'joined', activity: dance, touch: 'dance', who: 'Bo' }]);
   assert.deepEqual(shown(entry('souls:activity-joined', {}, { actor: me })), [], 'its own join has its receipt');
   assert.deepEqual(shown(entry('souls:activity-started', {}, { actor: null })), [{ kind: 'together', what: 'started', activity: dance, touch: 'dance' }]);
-  assert.deepEqual(shown(entry('souls:activity-left')), [{ kind: 'together', what: 'left', activity: dance, touch: 'dance', who: 'Bo' }]);
+  assert.deepEqual(shown(entry('souls:activity-left')), [{ kind: 'together', what: 'left', activity: dance, touch: 'dance', who: 'Bo',
+    note: `Bo left the dance; you are the only one left in it, and it holds you (other acts are refused) until you leave: together leave ${dance}` }]);
   // The leave that removes the activity is its end; one gone from the copy is still named by the kinds kept.
   const end = memberNotes(entry('souls:activity-left', {}, { actor: me, removed: [dance] }), mine)[0];
   assert.deepEqual(shownEvent(new Map(), end, { mine, kinds: new Map([[dance, KINDS.dance]]) }), { kind: 'together', what: 'ended', activity: dance, touch: 'dance' });
@@ -65,4 +66,35 @@ test('inspect on a bay shows each slot, what fills it, and what is left to build
     built: '1 of 3 slots filled', left: ['upright_b: a rack upright', 'beam_high_l: a rack beam'],
   });
   assert.equal(slotsCard(rows, rows.get(beam), { slots: { seat: { admits: 'body' } } }, () => null), null);
+});
+
+test('one asked is told its offer lapsed, by whom and what, and that nothing is left to accept', () => {
+  // The daemon's note: `from` the asker, `word` from the offer it was told of (its node gone from every copy).
+  const lapsed = { kind: 'conversation', what: 'lapsed', conversation: id(11), from: boBody, word: 'hug' };
+  assert.deepEqual(shownEvent(rows, lapsed, { mine }), {
+    kind: 'together', what: 'lapsed', activity: id(11), touch: 'hug', from: 'Bo', from_id: boBody,
+    note: "Bo's hug offer ran out before you answered: it is gone, so accept would be refused; ask Bo yourself if you still want to",
+  });
+  // An accepted pair that never started (the asker busy past its expiry): field 4, the pair.
+  const pair = shownEvent(rows, { ...lapsed, pair: id(12), word: 'high-five' }, { mine });
+  assert.equal(pair.note, "you accepted Bo's high-five, but it never started before it ran out: it is over, nothing to leave");
+  // The asker's own lapse is as it was: who did not answer, no note.
+  assert.deepEqual(shownEvent(rows, { kind: 'conversation', what: 'lapsed', conversation: dance, who: [boBody] }, { mine }),
+    { kind: 'together', what: 'lapsed', activity: dance, touch: 'dance', who: 'Bo' });
+});
+
+test('look says plainly why this Soul is alone in an activity and what it can do', () => {
+  const alone = (started) => new Map([...rows].filter(([k]) => k !== crew).map(([k, r]) => [k, k === dance ? { ...r, started, members: r.members.slice(0, 1) } : r]));
+  assert.deepEqual(doingLines(alone(false), mine), [`you offered dance and no one has accepted yet: wait for an answer, or take it back: together leave ${dance}`]);
+  assert.deepEqual(doingLines(alone(true), mine), [`you are alone in dance: the others left, and it holds you (other acts are refused) until you leave: together leave ${dance}`]);
+  // Another's leave, with one still in it besides this Soul.
+  const three = new Map(rows).set(dance, { ...rows.get(dance), members: [...rows.get(dance).members, { role: 'eden:two', body: id(13), soul: id(14) }] }).set(id(13), { id: id(13), name: 'Cy', kind: 'souls:body', soul: id(14) });
+  const [left] = memberNotes(entry('souls:activity-left'), mine).map((n) => shownEvent(three, n, { mine }));
+  assert.match(left.note, /^Bo left the dance; you are still in it with Cy, and it holds you/);
+  // A crew holds hands, not the whole body; read after this Soul is out of it, the note claims nothing about now.
+  const [crewLeft] = memberNotes(entry('souls:activity-left', {}, { node: crew }), mine).map((n) => shownEvent(rows, n, { mine }));
+  assert.equal(crewLeft.note, `Bo left the carry; you are the only one left in it; leave: carry leave ${crew}`);
+  const gone = new Map([...rows].filter(([k]) => k !== dance));
+  const [late] = memberNotes(entry('souls:activity-left'), mine).map((n) => shownEvent(gone, n, { mine, kinds: new Map([[dance, KINDS.dance]]) }));
+  assert.equal(late.note, 'Bo left the dance');
 });
