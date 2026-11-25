@@ -49,7 +49,8 @@ function setup() {
   script(join(fakebin, 'journalctl'), `[ -e ${t}/no-unload-log ] || { [ -e ${data}/launcher-settings.json ] && echo '[launcher] unload-still 1 (launcher-settings.json)' || echo '[launcher] unload-still 0 (the default)'; }`);
   script(join(fakebin, 'systemctl'),`case "$1" in start) printf 'systemctl\\t%s\\n' "$*" >> ${log}; [ ! -e ${t}/fail-refresh ] || exit 1; [ -e ${t}/still-halted ] || rm -f ${t}/host-codes;; *) echo 4242;; esac`);
   // host-codes (a JSON array) makes public healthz report hostOk false with those codes
-  script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
+  // /pair?code=TEST: the built pairing card (-o <file> -w %{http_code}); pair-403 plays Caddy unable to traverse the release
+  script(join(fakebin, 'curl'), `case "$*" in *"/pair?code=TEST"*) while [ $# -gt 0 ]; do [ "$1" = -o ] && o="$2"; shift; done\n  if [ -e ${t}/pair-403 ]; then echo forbidden > "$o"; printf 403; else printf '<button id="approve" disabled>Approve</button><script type="module" crossorigin src="/assets/pairing-abc123.js"></script>' > "$o"; printf 200; fi; exit 0;; esac\n[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
   if (spawnSync('sh', ['-c', 'command -v sha256sum']).status !== 0) script(join(fakebin, 'sha256sum'), 'exec shasum -a 256 "$@"');
   // ssh and scp: an empty environment on the far side, proving the remote block needs nothing from the operator
   script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; *host/meminfo*) ;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
@@ -238,6 +239,26 @@ test('a failed post-live verdict is recorded and the later evidence still runs',
   assert.equal(result.status, 'live-with-failures');
   assert.equal(result.detail, 'poster-verdict');
   assert.match(r.stdout, /is LIVE, with failed checks: poster-verdict/);
+});
+
+// 25 Nov: /pair answered 403 because Caddy could not traverse /srv/sim-worlds (750). install.sh (run on every release)
+// grants caddy traverse there; ship's healthz step checks the card through the front door.
+test('install.sh grants caddy traverse on the release folders on every run, outside the by-name subcommands', () => {
+  const sh = readFileSync(join(HERE, 'deploy/install.sh'), 'utf8'), main = sh.slice(sh.indexOf('\nUNIT_SRC='));
+  assert.match(main, /setfacl -m u:caddy:x "\$d"/);
+  assert.match(main, /^caddy_traverse \/srv\/sim-worlds \/srv\/sim-worlds\/releases \$\{SELF_REL:\+"\$SELF_REL"\}$/m);
+});
+
+test('a /pair that is not the pairing card (403) fails the release check and names the traverse cause; the later evidence still runs', () => {
+  let s = setup(), r = s.run(s.base);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^pair-card 0$/m);
+  s = setup(); writeFileSync(join(s.t, 'pair-403'), ''); r = s.run(s.base);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /answered 403: most likely Caddy \(user caddy\) cannot traverse/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^pair-card 1$/m);
+  assert.match(s.calls(), /cdn-walk\.mjs/);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).detail, 'pair-card');
 });
 
 test('the probe: a missed visitor bar is recorded and the run goes on; a rollback stops it', () => {

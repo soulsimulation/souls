@@ -9,7 +9,9 @@
 //!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
 //!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
-//!   lines for the creator's local checks of the existing boot registrations and admissions.
+//!   lines for the creator's local checks of the existing boot registrations and admissions. `activities.json`
+//!   (written at each start, [`served_activities`]): the activities as this start serves them, which the gateway
+//!   hands its clients with the entries.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its rules and the walkers' town.
 //! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
@@ -118,6 +120,7 @@ use replica::edit::World as Editing;
 use replica::effects::{Effect, Header, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
+use replica::moves::Move;
 use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
@@ -509,6 +512,116 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         );
     }
     Ok(by_kind.into_values().collect())
+}
+
+/// The served activities' file in a world's folder, beside `world.kinds`: `gatewayd --entries` serves it with the
+/// entries (`v2/crates/gatewayd/src/entries.rs`).
+pub const ACTIVITIES_FILE: &str = "activities.json";
+
+/// The activities a start serves from its entries, as an agent decides from them (`souls-activities/1`): for each,
+/// its entry's `kind`, the `name` it is served by (the engine's pin, the header's after [`adopt`]), its `word` (its
+/// plain name with dashes), its `card` (the entry's card text), its `roles` and how many each takes, the role the
+/// offerer plays (the first one member plays) and how many it asks; `near_m`, how close (m) two members stand for its
+/// moves to reach, the shortest reach among its roles' moves (none: no distance is checked); and `at`, the kind of
+/// thing it is played at when its entry plays it through forms (`crate::engine::at_its_thing`), else none: anywhere.
+fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: &[Move]) -> Json {
+    let by_kind: BTreeMap<&str, &Json> = entries.iter().map(|(k, e)| (k.as_str(), e)).collect();
+    let entries_obj = Json::Obj(entries.to_vec());
+    let mut out = Vec::new();
+    for a in kinds {
+        let Some(kind) = plain(a.name.as_str()).strip_suffix("_activity") else {
+            continue;
+        };
+        let Some(entry) = by_kind.get(kind) else {
+            continue;
+        };
+        let most = |r: &str| match entry
+            .get("links")
+            .and_then(|l| l.get(r))
+            .and_then(|l| l.get("most"))
+        {
+            Some(Json::Int(n)) => *n,
+            _ => 1,
+        };
+        let roles: Vec<(String, i128)> = a
+            .roles
+            .iter()
+            .map(|r| {
+                let n = r.name.as_str();
+                (n.to_owned(), most(n.split_once(':').map_or(n, |(_, r)| r)))
+            })
+            .collect();
+        let card = entry
+            .get("card")
+            .and_then(|c| c.get("text"))
+            .and_then(Json::str)
+            .and_then(|t| entry.get("text")?.get(t)?.str())
+            .or_else(|| entry.get("text")?.get("card")?.str())
+            .unwrap_or("");
+        // A dance's moves are each at its own body (on the beat): the engine checks no distance at its accept.
+        let reach = a
+            .roles
+            .iter()
+            .filter(|_| !a.beat)
+            .filter_map(|r| r.mv.as_ref())
+            .filter_map(|mv| moves.iter().find(|m| m.name == *mv))
+            .map(|m| m.reach)
+            .min();
+        // Offered (`activity:offer`) only as the engine takes an offer: a pair's kind, or a crew's three roles, the
+        // third taken by several (`sim::activity::offer`); any other is proposed at its thing, and has no offerer.
+        let crew = roles.len() == 3 && a.most > 3;
+        let offerer = (roles.len() == 2 || crew)
+            .then(|| {
+                roles
+                    .iter()
+                    .take(2)
+                    .find(|(_, m)| *m == 1)
+                    .map(|(n, _)| n.clone())
+            })
+            .flatten();
+        let asks: i128 = roles
+            .iter()
+            .filter(|(n, _)| Some(n) != offerer.as_ref())
+            .map(|(_, m)| m)
+            .sum();
+        let mut o = vec![
+            ("kind".to_owned(), Json::s(kind)),
+            ("name".to_owned(), Json::s(a.name.as_str())),
+            (
+                "word".to_owned(),
+                Json::s(&kind.rsplit(':').next().unwrap_or(kind).replace('_', "-")),
+            ),
+            ("card".to_owned(), Json::s(card)),
+            (
+                "roles".to_owned(),
+                Json::Arr(
+                    roles
+                        .iter()
+                        .map(|(n, m)| Json::object([("role", Json::s(n)), ("most", Json::Int(*m))]))
+                        .collect(),
+                ),
+            ),
+            ("asks".to_owned(), Json::Int(asks)),
+        ];
+        if let Some(r) = offerer {
+            o.push(("offerer".to_owned(), Json::Str(r)));
+        }
+        if let Some(r) = reach {
+            // µm to m, to the centimetre.
+            o.push((
+                "near_m".to_owned(),
+                Json::Num(format!("{}.{:02}", r / 1_000_000, (r % 1_000_000) / 10_000)),
+            ));
+        }
+        if let Some(at) = worldd::engine::at_its_thing(&entries_obj, &a.name) {
+            o.push(("at".to_owned(), Json::s(at)));
+        }
+        out.push(Json::Obj(o));
+    }
+    Json::object([
+        ("format", Json::s("souls-activities/1")),
+        ("activities", Json::Arr(out)),
+    ])
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
@@ -1678,12 +1791,16 @@ fn born(
     Ok(out)
 }
 
-/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body.
+/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body. A row
+/// with no body may carry `look`, a humanoid look's params as JSON text (#3998's, at most `skills::wear::LOOK_MOST`
+/// bytes, one object): the body is born wearing it, as if its Soul's first act had been `life:look` (old Eden's
+/// residents, each made in today's editor).
 fn imported_births(
     dir: &Path,
     header: &replica::effects::Header,
     catalogue: &skills::wear::Catalogue,
     born: &mut BTreeMap<Id, [u8; 32]>,
+    looks: &mut BTreeMap<Id, Vec<u8>>,
 ) -> R<()> {
     let path = dir.join("births.json");
     let metadata = match std::fs::symlink_metadata(&path) {
@@ -1738,12 +1855,13 @@ fn imported_births(
         return Err(bad.into());
     }
     let mut seen = BTreeMap::new();
+    let mut new_looks = BTreeMap::new();
     for row in rows {
         let fields = row.obj().ok_or(bad)?;
         if !(3..=4).contains(&fields.len())
             || fields
                 .iter()
-                .any(|(k, _)| !["soul", "entry", "asked", "body"].contains(&k.as_str()))
+                .any(|(k, _)| !["soul", "entry", "asked", "body", "look"].contains(&k.as_str()))
         {
             return Err(bad.into());
         }
@@ -1768,6 +1886,20 @@ fn imported_births(
             ),
             Some(_) => return Err("body-births-unknown".into()),
         };
+        let look = match row.get("look") {
+            None => None,
+            Some(Json::Str(text))
+                if choice.is_none()
+                    && text.len() <= skills::wear::LOOK_MOST
+                    && json::parse(text).is_ok_and(|v| v.obj().is_some()) =>
+            {
+                Some(text.as_bytes().to_vec())
+            }
+            Some(_) => return Err("body-births-look".into()),
+        };
+        if let Some(look) = look {
+            new_looks.insert(soul, look);
+        }
         if seen.insert(soul, choice).is_some() {
             return Err("body-births-duplicate".into());
         }
@@ -1782,6 +1914,7 @@ fn imported_births(
             born.insert(soul, hash);
         }
     }
+    looks.extend(new_looks);
     Ok(())
 }
 
@@ -3340,6 +3473,12 @@ fn serve(args: &[String]) -> R<()> {
         places.len(),
         things
     );
+    // The activities as served (after `adopt`, so by the header's pins), read before the entries become the rules.
+    let served = served_activities(
+        &kinds,
+        &built.activities,
+        &worldd::moves::library().map_err(refusal)?,
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -3400,7 +3539,8 @@ fn serve(args: &[String]) -> R<()> {
     };
     let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
     let (tx, synced) = channel();
-    imported_births(&dir, initial.header(), &catalogue, &mut born)?;
+    let mut looks = BTreeMap::new();
+    imported_births(&dir, initial.header(), &catalogue, &mut born, &mut looks)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
     cfg.closed = closed_kinds.clone();
@@ -3471,6 +3611,12 @@ fn serve(args: &[String]) -> R<()> {
     }
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
+    // The activities as this start serves them, which the gateway hands out with the entries (`activities.json`).
+    // Whole or not at all: the gateway may read it at any moment.
+    let served_path = dir.join(ACTIVITIES_FILE);
+    let tmp = served_path.with_extension("json.tmp");
+    std::fs::write(&tmp, served.to_json()).map_err(io(&tmp))?;
+    std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
 
@@ -3491,7 +3637,11 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
-    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.wear = Some(answers::Wearing {
+        catalogue,
+        born,
+        looks,
+    });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
         let b = bodies(
             town,
@@ -4048,13 +4198,54 @@ mod tests {
                 )),
             ),
         ];
-        for k in kinds.iter().chain(&activity_kinds(&more).unwrap()) {
-            assert!(
-                client.contains(k.name.as_str()),
-                "the client offers {}",
-                k.name.as_str()
-            );
+        // The client offers them by the names the world serves (`activities.json`), never its own copy of a pin.
+        let all: Vec<_> = entries.iter().chain(&more).cloned().collect();
+        let kinds: Vec<_> = kinds
+            .into_iter()
+            .chain(activity_kinds(&more).unwrap())
+            .collect();
+        let served = served_activities(&all, &kinds, &worldd::moves::library().unwrap());
+        assert_eq!(
+            served.get("format").and_then(Json::str),
+            Some("souls-activities/1")
+        );
+        let list = served.get("activities").and_then(Json::arr).unwrap();
+        assert_eq!(list.len(), kinds.len());
+        for (a, k) in list.iter().zip(&kinds) {
+            assert_eq!(a.get("name").and_then(Json::str), Some(k.name.as_str()));
+            assert!(!client.contains(k.name.as_str()), "no pin in the client");
         }
+        let one = |kind: &str| {
+            list.iter()
+                .find(|a| a.get("kind").and_then(Json::str) == Some(kind))
+                .unwrap()
+        };
+        let hug = one("eden:hug");
+        assert_eq!(hug.get("word").and_then(Json::str), Some("hug"));
+        assert_eq!(
+            hug.get("card").and_then(Json::str),
+            Some("A hug for two: offer it, and it starts when the other accepts.")
+        );
+        assert_eq!(hug.get("offerer").and_then(Json::str), Some("eden:one"));
+        assert_eq!(hug.get("asks"), Some(&Json::Int(1)));
+        assert!(
+            hug.get("near_m").is_some() && hug.get("at").is_none(),
+            "a hug is anywhere, within its reach"
+        );
+        assert_eq!(one("eden:dance_together").get("asks"), Some(&Json::Int(7)));
+        assert!(
+            one("eden:dance_together").get("near_m").is_none(),
+            "a dance checks no distance"
+        );
+        assert!(
+            one("eden:follow").get("near_m").is_none(),
+            "following checks no distance"
+        );
+        assert_eq!(
+            one("eden:harvest_together").get("at").and_then(Json::str),
+            Some("eden:harvest_together"),
+            "a harvest is played at its basket"
+        );
     }
 
     #[test]
@@ -4182,14 +4373,16 @@ mod tests {
         let digest = to_hex(&sha256(text.as_bytes()));
         let valid = make(&lineage, &zone, &digest, &row);
         let mut born = BTreeMap::new();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        let mut looks = BTreeMap::new();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert!(
             born.is_empty(),
             "absent private file leaves defaults unchanged"
         );
         std::fs::write(dir.join("births.json"), &valid).unwrap();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert_eq!(born.get(&soul), Some(&[0x11; 32]));
+        assert!(looks.is_empty(), "a row with a body carries no look");
         for invalid in [
             make(&"00".repeat(16), &zone, &digest, &row),
             make(&lineage, "invalid", &digest, &row),
@@ -4204,13 +4397,55 @@ mod tests {
         ] {
             std::fs::write(dir.join("births.json"), invalid).unwrap();
             let before = born.clone();
-            assert!(imported_births(&dir, &header, &catalogue, &mut born).is_err());
+            assert!(imported_births(&dir, &header, &catalogue, &mut born, &mut looks).is_err());
             assert_eq!(born, before, "no partial installation on refusal");
+        }
+        // Old Eden's residents: a row with no body may carry a look, and its body is born wearing it.
+        let other = Id::new(Scope([0x4c; 16]), 0).unwrap();
+        let other_text = directoryd::accounts::principal_text(other);
+        let look = r#"{"hair":"bob","height":1.7}"#;
+        let quoted = |t: &str| Json::Str(t.into()).to_json();
+        let looked = |l: &str| {
+            format!(
+                r#"{{"soul":"{other_text}","entry":"{zone}","asked":0,"look":{}}}"#,
+                quoted(l)
+            )
+        };
+        let both = format!("{row},{}", looked(look));
+        std::fs::write(
+            dir.join("births.json"),
+            make(&lineage, &zone, &digest, &both),
+        )
+        .unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
+        assert_eq!(looks.get(&other).map(Vec::as_slice), Some(look.as_bytes()));
+        assert!(!born.contains_key(&other));
+        let long = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+        for invalid in [
+            row.replace(
+                r#""asked":0"#,
+                &format!(r#""asked":0,"look":{}"#, quoted(look)),
+            ),
+            looked("[1]"),
+            looked(&long),
+        ] {
+            let mut fresh = BTreeMap::new();
+            std::fs::write(
+                dir.join("births.json"),
+                make(&lineage, &zone, &digest, &invalid),
+            )
+            .unwrap();
+            assert!(
+                imported_births(&dir, &header, &catalogue, &mut BTreeMap::new(), &mut fresh)
+                    .is_err(),
+                "{invalid}"
+            );
+            assert!(fresh.is_empty(), "no partial installation on refusal");
         }
         std::fs::write(dir.join("births.json"), valid).unwrap();
         let mut explicit = BTreeMap::from([(soul, [0x22; 32])]);
         assert!(
-            imported_births(&dir, &header, &catalogue, &mut explicit)
+            imported_births(&dir, &header, &catalogue, &mut explicit, &mut looks)
                 .unwrap_err()
                 .contains("contradictory")
         );

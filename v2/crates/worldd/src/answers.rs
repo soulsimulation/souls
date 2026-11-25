@@ -774,6 +774,8 @@ pub fn exit_on_halt() -> Box<dyn FnOnce(String) + Send> {
 pub struct Wearing {
     pub catalogue: skills::wear::Catalogue,
     pub born: BTreeMap<Id, [u8; 32]>,
+    /// A look each of these Souls' bodies is born wearing on the default body (`skills::wear::LOOK`): births.json's.
+    pub looks: BTreeMap<Id, Vec<u8>>,
 }
 
 /// Where and how Souls' bodies are born (C3, #3367).
@@ -1767,6 +1769,20 @@ impl Clock {
             now: self.version(),
             changed: Vec::new(),
             op: None,
+            detail: None,
+        }
+    }
+
+    /// A refusal with its detail, the words that say why (`together.too-far`: how far apart, how far it reaches).
+    fn refused(&self, actor: Actor, sequence: u64, r: &Refusal) -> Answer {
+        Answer::Refused {
+            actor,
+            sequence,
+            reason: name(r.name),
+            now: self.version(),
+            changed: Vec::new(),
+            op: None,
+            detail: replica::intents::answer_detail(&r.detail),
         }
     }
 
@@ -1779,6 +1795,7 @@ impl Clock {
             now: self.version(),
             changed: Vec::new(),
             op: r.op.map(|o| o as u64),
+            detail: replica::intents::answer_detail(&r.detail),
         }
     }
 
@@ -2172,7 +2189,7 @@ impl Clock {
                         names: BTreeMap::new(),
                     }
                 }
-                Err(r) => self.refusal(actor, sequence, r.name),
+                Err(r) => self.refused(actor, sequence, &r),
             };
             let accepted = matches!(answer, Answer::Receipt { .. }).then_some(id);
             return self.answered(
@@ -2494,7 +2511,7 @@ impl Clock {
                         names: BTreeMap::new(),
                     });
                 }
-                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(id, |c| c.refused(actor, sequence, &r)),
             }
         }
         if !kept.is_empty()
@@ -2513,7 +2530,7 @@ impl Clock {
         for (id, _, r) in refused {
             if let Some(o) = self.open.get(&id) {
                 let (actor, sequence) = (o.actor, o.sequence);
-                self.end(id, |c| c.refusal(actor, sequence, r.name));
+                self.end(id, |c| c.refused(actor, sequence, &r));
             }
         }
         for r in ready {
@@ -2658,7 +2675,7 @@ impl Clock {
                 Err(e) => {
                     eprintln!("worldd: a crew's part was not written: {e}");
                     if let Some((actor, sequence)) = open {
-                        self.end(r.intent, |c| c.refusal(actor, sequence, e.name));
+                        self.end(r.intent, |c| c.refused(actor, sequence, &e));
                     }
                 }
             }
@@ -3150,7 +3167,7 @@ impl Clock {
                         names: BTreeMap::new(),
                     });
                 }
-                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(id, |c| c.refused(actor, sequence, &r)),
             }
         }
     }
@@ -3403,6 +3420,10 @@ impl Clock {
                         && let Some(hash) = self.wear.as_ref().and_then(|w| w.born.get(&x.soul))
                     {
                         fields.insert(skills::wear::BODY, Value::Bytes(hash.to_vec()));
+                    } else if *node == x.body
+                        && let Some(look) = self.wear.as_ref().and_then(|w| w.looks.get(&x.soul))
+                    {
+                        fields.insert(skills::wear::LOOK, Value::Bytes(look.clone()));
                     }
                 }
             }
@@ -3599,7 +3620,7 @@ impl Clock {
         let (r, open) = match retired {
             Ok(x) => x,
             Err(r) => {
-                let a = self.refusal(actor, sequence, r.name);
+                let a = self.refused(actor, sequence, &r);
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
@@ -3665,7 +3686,7 @@ impl Clock {
                 entries: self.receipts.entries(id).to_vec(),
                 names: BTreeMap::new(),
             },
-            Err(e) => self.refusal(actor, sequence, e.name),
+            Err(e) => self.refused(actor, sequence, &e),
         };
         if let Some(i) = open
             && let Some(o) = self.open.get(&i)
@@ -4207,9 +4228,17 @@ impl Clock {
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
-            // A walk to a place no longer pending (its member left) ends here too.
-            let todo = e.pending_places(&b.runner.controller);
-            let done = b.take_places(&todo);
+            // A walk to a place no longer pending (its member left) ends here too. A member of any activity with
+            // places that is already acting on its own (a harvest's pick sent as the offer was accepted, a tea made
+            // while a hug is accepted) is placed where it stands: the place walk, a walk of its own Soul, would end
+            // that act (`claim-taken`, intents rule 10). Its moves, if any, begin from there or are left out, as for
+            // a seated member.
+            let (acting, todo): (Vec<_>, Vec<_>) = e
+                .pending_places(&b.runner.controller)
+                .into_iter()
+                .partition(|t| self.forms.acting(t.1));
+            let mut done = b.take_places(&todo);
+            done.extend(acting.iter().map(|t| (t.0, t.1)));
             e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
         }
     }
@@ -4248,7 +4277,7 @@ impl Clock {
                 Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), None, now),
                 Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
-                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(id, |c| c.refused(actor, sequence, &r)),
             }
         }
         self.forms.release_sight();
@@ -4306,7 +4335,7 @@ impl Clock {
                 // names where its front goes when its way comes back (0.135 R2).
                 Ok(()) if a.verb.deferred() || waits => {}
                 Ok(()) => self.engine_done.push(a.id),
-                Err(r) => self.end(a.id, |c| c.refusal(actor, sequence, r.name)),
+                Err(r) => self.end(a.id, |c| c.refused(actor, sequence, &r)),
             }
         }
         // The ways the lifts asked for go to the way thread, each outstanding until it comes back, so lockstep waits
@@ -4386,7 +4415,7 @@ impl Clock {
                         now,
                     );
                 }
-                self.end(id, |c| c.refusal(actor, sequence, r.name));
+                self.end(id, |c| c.refused(actor, sequence, &r));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {

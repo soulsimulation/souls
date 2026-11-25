@@ -327,6 +327,7 @@ fn joined_server(d: &Path, fault: ProbeFault) -> World {
                             now: i.basis.clone(),
                             changed: Vec::new(),
                             op: None,
+                            detail: None,
                         };
                         encode(&Value::Map(BTreeMap::from([
                             (1, i.basis.clone()),

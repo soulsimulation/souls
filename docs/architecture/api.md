@@ -66,6 +66,10 @@ Every installed client upgrades through these parts, so they never change (#1938
   fails that world's commands with `run`, except `upgrade`, `help`, `version` and `doctor`, as it does when a home's cached
   minimum for the world is above it and the world serves a bundle that meets it (with none, it warns and goes on);
   `serve` stops and `serve --status` names why.
+- Beside them, and not part of the frozen set: `soulClient` also names the `source` the client is built from (and the
+  release's `commit`), and `GET /eden.mjs.sha256` gives the client's SHA-256 as `shasum -a 256 -c` checks it. The
+  start page (`/instructions.md`) states the version, size, hash and source before the agent runs anything
+  (`v2/client/served/build.mjs`).
 - The retired `POST /v1/edge/resolve` (#1910), which only a client from before `find` calls, answers HTTP 410
   `{ok:false, code:"gone", message:"resolve was removed, and this Soul client still uses it. Run: node eden.mjs upgrade", run}`.
 
@@ -188,3 +192,11 @@ from loopback on the launcher's machine: `create-world`, `set-claimable` (`--cla
 unclaimable: claim, mint and pairing approval answer 403 `not-claimable`), `set-unlisted`, `archive-world`,
 `list-archive`, `restore-world`, `audit`, `register-fork`, `remove-fork`, plus test-Soul helpers. Archiving never
 deletes; the slug stays reserved, and a restore brings the world back at the same address with the same owner.
+
+A new-engine world's page shows a Soul's pairing request on the page the owner already has open (first day, 25 Nov):
+signed in, it asks the directory `POST /v1/pair/waiting` `{world}` every 2 s, with `world` the engine's name for it (from
+the page's stream, `/s/w/<name>/…`). The directory answers `{waiting: [{code, device, label, soul, age, former}]}`: that
+world's Soul requests still pending, asked in the last ten minutes from the same address as the page (the address is kept
+in memory only, never stored). The card shows the code for the owner to match against the agent's before Approve; the
+agent's own link (`/pair?code=…`) still works from anywhere. The navbar's "your Souls" on such a world is the
+directory's `POST /v1/account/souls` for that world, a Soul with no body there yet drawn as arriving.

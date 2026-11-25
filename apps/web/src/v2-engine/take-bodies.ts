@@ -27,6 +27,7 @@ const PROP_WORDS: [RegExp, string][] = [
   [/flower|bouquet|rose|tulip/, 'flower'], [/bread|loaf|bun/, 'bread'], [/letter|envelope|note|card/, 'letter'],
   [/pen|pencil|quill/, 'pen'], [/brush/, 'brush'], [/spoon|ladle/, 'spoon'], [/guitar/, 'guitar'], [/violin|fiddle/, 'violin'],
   [/flute/, 'flute'], [/frisbee/, 'frisbee'], [/boule|ball/, 'boule'], [/rod/, 'rod'], [/apple|fruit|food|sandwich|cake/, 'food'],
+  [/basket/, 'basket'], [/dumbbell/, 'dumbbell'],
 ];
 
 /** The prop the old page draws in the hand for a held thing of `kind`; a thing it has no prop for is drawn as a tool. */

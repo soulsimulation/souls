@@ -6,12 +6,13 @@
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.
 //
-//   together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body the touch (`activity:offer` of its kind,
-//                                                        this Soul in the first role)
+//   together offer <activity> <body id|name> [...]       an activity the world serves, by its word (`hug`, `dance`,
+//                                                        `group-jumping-jacks`): `together kinds` lists each with its
+//                                                        card, how many it asks, how close they stand and where it is
+//                                                        played. One played at a thing (a harvest's basket) is offered
+//                                                        at the nearest of that kind in the copy; any other where this
+//                                                        Soul stands
 //   together accept|decline <offer id>                   accepts, and both touch; or declines, and nobody moves
-//   together offer <activity> <body id|name> [...]       any other activity the world serves (0.135): its kind entry's
-//                                                        roles, the offerer in the first one member plays; to as many
-//                                                        as its other roles take. `together kinds` lists them
 //   together accept|decline <activity>                   the newest open offer of that activity to this Soul
 //   together leave <offer id | activity>                 leaves it (\`activity:leave\`, always taken): a touch, a dance,
 //                                                        any activity; by its word, the newest of that kind in the copy
@@ -25,71 +26,54 @@
 // the first to walk leads and the other walks beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or
 // act lets go, and both hands come free.
 
-import { CARRY_ENTRY, activityPin } from '../carry/carry.mjs';
-
-/** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
-export const KINDS = Object.freeze({
-  follow: 'eden:follow_activity@1220390b841bf789d26cfe815f2f44765945b061efce3c95e01c3f86ead53b5ea588',
-  dance: 'eden:dance_together_activity@1220543a9d3587368b26535d8be47d25e08f30ba23549b9adf3a312b91da91ad3731',
-  handshake: 'eden:handshake_activity@1220bd24bded16d8b48b25e9dfed2777dab8a8cbb3063062b81ce920f5ed22becc88',
-  'high-five': 'eden:high_five_activity@1220ba8315cc807df05a932b3dcf04344ea1d9dd1c011d93395a53dcb7f777eb1f2f',
-  'hold-hands': 'eden:hold_hands_activity@1220d816976cd152816a8a99114b15027bbde7395160da72bc07f5a621748126e70f',
-  hug: 'eden:hug_activity@12203c0411a7549ce250decf5b69406c2ecbff8057cebaf5ce41fa1bbe4471f13932',
-  // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
-  'fist-bump': 'eden:fist_bump_activity@1220155d17b8d8c9f78bb7579181ff553121e915ec38362be884f45815a17a6d78b9',
-  harvest: 'eden:harvest_together_activity@122070d31cf09790b76bf43d135b5f50e99f0ba68a528a22119ef70e5a451a44207f',
-});
-export const OFFERER = 'eden:one';
+import { CARRY_ENTRY } from '../carry/carry.mjs';
 
 /**
- * Every other activity the world serves (0.135): each kind entry held in `<home>/kinds/` (the world's own, fetched at
- * sign-in) whose roles name two or more is an activity the world runs, `<kind>_activity` pinned from its roles
- * (`carry/carry.mjs` `activityPin`). Its word is its plain name with dashes (`eden:group_jumping_jacks` is
- * `group-jumping-jacks`); the offerer takes its first role that one member plays, the others are asked into the rest.
- * → [{word, kind, pin, role, most}], by word
+ * The activities the world serves (0.135), as it serves them: its `souls-activities/1` record, fetched with its entries
+ * (`pair/pair.mjs` `activitiesServed`). Each is offered by its word (`group-jumping-jacks`), under the name the world
+ * serves it by (never one worked out here), the offerer in the role the world names, to as many as it asks; `card` is
+ * its entry's card, `near_m` how close two members stand for its moves to reach (none: no distance is checked), `at` the
+ * kind of thing it is played at (none: anywhere). The carry crew is `carry offer`'s; one with no offerer is proposed at
+ * its thing, not offered. → [{word, kind, pin, role, most, card, near_m, at}], by word
  */
-export function activitiesIn(kinds) {
-  const out = [];
-  for (const [kind, e] of Object.entries(kinds ?? {})) {
-    const roles = Object.entries(e?.roles ?? {}).filter(([n, v]) => n !== 'now' && v && typeof v === 'object' && !Array.isArray(v));
-    const pin = roles.length >= 2 ? activityPin(kind, e) : null;
-    if (!pin) continue;
-    // Played at its own thing, through the thing's forms (a lectern, a chess table, a frisbee pitch, B10's links), or a
-    // crew (`carry offer`): offered on the open ground it would hold its members with nothing to do (this audit, #4681).
-    if (Object.keys(e.forms ?? {}).length || kind === CARRY_ENTRY) continue;
-    const most = (n) => (Number.isInteger(e.links?.[n]?.most) ? e.links[n].most : 1);
-    const first = roles.find(([n]) => most(n) === 1);
-    if (!first) continue;
-    const ns = kind.split(':')[0];
-    out.push({ word: kind.replace(/^.*:/, '').replace(/_/g, '-'), kind, pin, role: `${ns}:${first[0]}`, most: roles.filter(([n]) => n !== first[0]).reduce((a, [n]) => a + most(n), 0) });
-  }
-  return out.sort((a, b) => a.word.localeCompare(b.word));
+export function activitiesIn(served) {
+  const list = Array.isArray(served?.activities) ? served.activities : [];
+  return list
+    .filter((a) => typeof a?.name === 'string' && typeof a.kind === 'string' && typeof a.word === 'string' && typeof a.offerer === 'string' && a.kind !== CARRY_ENTRY)
+    .map((a) => ({ word: a.word, kind: a.kind, pin: a.name, role: a.offerer, most: Number.isInteger(a.asks) ? a.asks : 1, card: typeof a.card === 'string' ? a.card : '', near_m: typeof a.near_m === 'number' ? a.near_m : null, at: typeof a.at === 'string' ? a.at : null }))
+    .sort((a, b) => a.word.localeCompare(b.word));
 }
 
-/** The activity a word names among `activitiesIn`: its word, its kind (`eden:hug`), or its plain name; null if none. */
+/** The activity a word names among `activitiesIn`: its word, its kind (`eden:hug`), its plain name, or the one word it
+ *  starts (`dance` for `dance-together`); null if none. */
 export function activityNamed(list, word) {
   const w = String(word ?? '').toLowerCase().replace(/_activity$/, '');
-  return list.find((a) => a.word === w.replace(/_/g, '-') || a.kind === w || a.kind.replace(/^.*:/, '') === w) ?? null;
+  const d = w.replace(/_/g, '-');
+  const exact = list.find((a) => a.word === d || a.kind === w || a.kind.replace(/^.*:/, '') === w);
+  if (exact) return exact;
+  const starts = list.filter((a) => a.word.startsWith(`${d}-`));
+  return starts.length === 1 ? starts[0] : null;
 }
 
 const ID = /^[0-9a-f]{32}-\d+$/;
-const USAGE = `together offer <${Object.keys(KINDS).join('|')}|any activity \`together kinds\` lists> <body id> [<body id> ...] | together accept|decline|leave|withdraw <offer id | activity>`;
+const USAGE = 'together offer <activity `together kinds` lists> <body id|name> [...] | together accept|decline|leave|withdraw <offer id | activity>';
 const no = (code, detail) => ({ code, detail });
 
-/** The intents a `together` request sends, or a refusal by name. `place` is the node the offer goes under. */
-export function togetherIntents(req, { place, kinds = {} }) {
+/** The intents a `together` request sends, or a refusal by name. `place` is the node an offer played anywhere goes
+ *  under; `thingAt(kind)`, the nearest thing of that kind in the copy, the one an offer played at a thing goes under. */
+export function togetherIntents(req, { place, served = null, thingAt = null }) {
   switch (req.do) {
     case 'offer': {
-      // A touch the client names, else any activity the world serves (its held entries).
-      const other = KINDS[req.touch] ? null : activityNamed(activitiesIn(kinds), req.touch);
-      const kind = KINDS[req.touch] ?? other?.pin, role = other?.role ?? OFFERER;
-      // A dance is offered to up to seven at once (0.134 T3); a touch to one; another activity to as many as it takes.
+      // An activity the world serves, by its word; one played at a thing goes under the nearest of that kind.
+      const a = activityNamed(activitiesIn(served), req.touch);
       const to = [req.to].flat();
-      const most = other ? other.most : req.touch === 'dance' ? 7 : 1;
-      if (!kind && req.touch !== undefined && !ID.test(String(req.touch))) return no('together-unknown', `no activity ${String(req.touch).slice(0, 40)} here: \`together kinds\` lists what this world serves`);
-      if (!kind || !to.length || to.length > most || !to.every((t) => ID.test(String(t ?? '')))) return no('together-usage', USAGE);
-      if (!ID.test(String(place ?? ''))) return no('together-no-place', 'this Soul stands nowhere in its copy yet: look first');
-      return [{ verb: 'activity:offer', target: place, params: { 1: kind, 2: role, 3: to } }];
+      if (!a && !(served?.activities)) return no('together-not-served', 'this world has served no list of its activities yet: `status`, then try again once the daemon has signed in');
+      if (!a && req.touch !== undefined && !ID.test(String(req.touch))) return no('together-unknown', `no activity ${String(req.touch).slice(0, 40)} here: \`together kinds\` lists what this world serves`);
+      if (!a || !to.length || to.length > a.most || !to.every((t) => ID.test(String(t ?? '')))) return no('together-usage', a ? `together offer ${a.word} <body id|name>${a.most > 1 ? ` [... up to ${a.most}]` : ''}` : USAGE);
+      const under = a.at ? thingAt?.(a.at) ?? null : place;
+      if (a.at && !ID.test(String(under ?? ''))) return no('together.at-its-thing', `${a.word} is played at a ${a.at.replace(/^.*:/, '').replace(/_/g, ' ')} (${a.at}): none is in this Soul's copy; \`find ${a.at.replace(/^.*:/, '').replace(/_/g, ' ')}\``);
+      if (!ID.test(String(under ?? ''))) return no('together-no-place', 'this Soul stands nowhere in its copy yet: look first');
+      return [{ verb: 'activity:offer', target: under, params: { 1: a.pin, 2: a.role, 3: to } }];
     }
     case 'accept': case 'decline': case 'leave': {
       if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', `together ${req.do} <offer id | activity>`);
@@ -104,10 +88,9 @@ export function togetherIntents(req, { place, kinds = {} }) {
   }
 }
 
-/** The touch an offer's kind (its event's field 2) is, or, for any other entry's activity (`<kind>_activity`), its
- *  word (`group-jumping-jacks`); null when it is neither (a conversation, a give). */
+/** The word an offer's kind (its event's field 2) is offered by, `<entry>_activity` with dashes (`hug`,
+ *  `group-jumping-jacks`); null when it is no entry's activity (a conversation, a give). */
 export function touchOf(kind) {
   const plain = String(kind ?? '').split('@')[0];
-  return Object.keys(KINDS).find((t) => KINDS[t].split('@')[0] === plain)
-    ?? (/^[^:]+:[a-z0-9_]+_activity$/.test(plain) ? plain.replace(/^.*:/, '').replace(/_activity$/, '').replace(/_/g, '-') : null);
+  return /^[^:]+:[a-z0-9_]+_activity$/.test(plain) ? plain.replace(/^.*:/, '').replace(/_activity$/, '').replace(/_/g, '-') : null;
 }

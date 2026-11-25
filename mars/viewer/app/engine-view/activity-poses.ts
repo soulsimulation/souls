@@ -17,7 +17,7 @@ export const FACE_DOWN: ReadonlySet<string> = new Set(['pushups']);
 export const CYCLES: ReadonlySet<string> = new Set(['dance', 'jumping-jacks', 'jump', 'stretch', 'yoga', 'pull-ups', 'dips', 'lift-weights', 'play-volleyball', 'play-frisbee', 'play-petanque']);
 /** Seat height used for sitting on the ground (pelvis on the grass). */
 export const GROUND_SEAT = 0.04;
-export const PROPS = ['book', 'brush', 'pen', 'letter', 'cup', 'plate', 'tool', 'cards', 'flower', 'food', 'frisbee', 'boule', 'dumbbell', 'rod', 'bread', 'spoon', 'guitar', 'bass', 'violin', 'viola', 'cello', 'flute', 'drumsticks'] as const;
+export const PROPS = ['book', 'tome', 'basket', 'brush', 'pen', 'letter', 'cup', 'plate', 'tool', 'cards', 'flower', 'food', 'frisbee', 'boule', 'dumbbell', 'rod', 'bread', 'spoon', 'guitar', 'bass', 'violin', 'viola', 'cello', 'flute', 'drumsticks'] as const;
 export type PropKind = (typeof PROPS)[number];
 const DEFAULT_PROP: Record<string, PropKind> = { read: 'book', browse: 'book', write: 'pen', paint: 'brush', eat: 'plate', drink: 'cup', cook: 'tool', 'play-game': 'cards', craft: 'tool', 'post-letter': 'letter', fish: 'rod', feed: 'bread', garden: 'tool', picnic: 'food' };
 
@@ -45,6 +45,14 @@ export type FrameOpts = { groundSeat?: boolean; since?: number; gap?: number;ins
 const GAP: Record<string, number> = { hug: 0.52, handshake: 0.85, 'high-five': 0.75, give: 0.9, take: 0.9 };
 /** #1977: a rider's hand on a basket's front rim, from the body root: [forward, outward, height above the floor]. */
 export const RIDE_RIM_HAND: HandGoal = [0.3, 0.16, 1.04];
+/** A thing carried in one hand (the engine's `human.prop` with no activity that poses the hands): that hand at the
+ *  engine's carry point (mars/viewer/engine/body/model.ts carryHand: 0.28 m ahead, 0.16 m out, 1.0 m up on a 1.75 m
+ *  body), as a goal from its shoulder like the frames below: the forearm forward, the elbow bent. */
+export const CARRY_HAND: HandGoal = [0.28, -0.03, -0.34];
+/** The hand a carried prop is in: a plate in the left (as placeProp puts it), everything else in the right. */
+export const carrySide = (kind: PropKind): 'left' | 'right' => (kind === 'plate' ? 'left' : 'right');
+/** The prop drawn for a carried `kind` outside the activities that use it: a book is carried closed, read open. */
+export const carriedProp = (kind: PropKind, activity: string): PropKind => (kind === 'book' && activity !== 'read' && activity !== 'browse' ? 'tome' : kind);
 /** Shoulder height and half width the hand goals below are written for (BODY_MODEL: shoulders at 1.34 m). */
 const SH = 1.34, HALF = 0.19;
 /** core/piano@1 highest keys: black centre .795 m + half thickness .01 m. */
@@ -321,6 +329,10 @@ export function makeProp(kind: PropKind): THREE.Group {
       const tilt = new THREE.Group(); tilt.rotation.z = -0.85; g.add(tilt); // top edge tipped away: the open pages face the reader's eyes
       for (const s of [-1, 1]) { const leaf = new THREE.Group(); leaf.rotation.y = s * 0.18; leaf.add(part(k.box, M.page, 0.014, 0.29, 0.2, 0, 0, s * 0.102)); leaf.add(part(k.box, M.cover, 0.01, 0.3, 0.208, 0.01, 0, s * 0.106)); tilt.add(leaf); }
       break; }
+    case 'tome': // a closed book carried in one hand, upright, its spine in the palm (held, not read: `book` is the open one)
+      g.add(part(k.box, M.cover, 0.17, 0.24, 0.045, 0.06, 0.07, 0)); g.add(part(k.box, M.page, 0.16, 0.23, 0.036, 0.066, 0.07, 0)); break;
+    case 'basket': // a small basket hanging from the hand by its handle
+      g.add(part(k.cyl, M.wood, 0.13, 0.14, 0.13, 0, -0.2, 0)); g.add(part(k.box, M.wood, 0.014, 0.2, 0.014, 0, -0.06, 0)); break;
     case 'cup': g.add(part(k.cyl, M.cup, 0.04, 0.1, 0.04, 0, 0.03, 0)); g.add(part(k.cyl, M.tea, 0.034, 0.005, 0.034, 0, 0.08, 0)); break;
     case 'plate': g.add(part(k.cyl, M.plate, 0.12, 0.015, 0.12, 0.04, -0.02, 0)); g.add(part(k.box, M.food, 0.09, 0.03, 0.07, 0.04, 0.0, 0)); break;
     case 'brush': g.add(part(k.cyl, M.wood, 0.008, 0.26, 0.008, 0.06, 0.06, 0, -0.9)); g.add(part(k.cyl, M.paint, 0.012, 0.04, 0.012, 0.16, 0.13, 0, -0.9)); break;

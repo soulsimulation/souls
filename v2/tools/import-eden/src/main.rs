@@ -126,6 +126,11 @@ fn main() {
     for l in &im.left_out {
         println!("  {l}");
     }
+    println!(
+        "Souls' bodies left out, not things ({}): {:?}",
+        im.residents.len(),
+        im.residents.iter().map(|(id, _)| id).collect::<Vec<_>>()
+    );
 
     // The ids the issue asks for, and one window.
     let t = &im.tree;
