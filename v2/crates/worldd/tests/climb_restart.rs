@@ -1161,7 +1161,12 @@ fn a_small_body_on_ground_only_small_bodies_reach_is_not_moved() {
         !sim::mover::Floors::sealed(&town, ground, Vec3::ZERO, small),
         "not for a small body"
     );
-    assert!(!town.view_for_size(Size::Small).unwrap().sealed(ground, Vec3::ZERO));
+    assert!(
+        !town
+            .view_for_size(Size::Small)
+            .unwrap()
+            .sealed(ground, Vec3::ZERO)
+    );
     let body = id(1);
     let frame = Frame {
         node: ground,
