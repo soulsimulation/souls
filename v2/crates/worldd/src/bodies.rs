@@ -1293,9 +1293,9 @@ impl Bodies {
         }
         // A landform or another place on the ground (a range, a sea, a lake, a wood, a square, a path): a walk to it
         // ends at its edge, on the open ground, wherever the walker stands (a floor too). First on it at the point of
-        // its edge nearest the walker: an area [`select::GAP`] inside its outline, a line on itself, so a walk to a
-        // square, a wood or a pier ends on it. Where that is no place to stand or the walker's walk cannot reach it (a
-        // sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
+        // its edge nearest the walker, when its middle is ground the walker may stand on and reach: an area
+        // [`select::GAP`] inside its outline, a line on itself, so a walk to a square, a wood or a path ends on it.
+        // Where that is no place to stand or the walker's walk cannot reach it (a sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
         // toward the walker a metre at a time to the first point a body may stand on that the walker's walk may reach
         // (`View::stand_reached`, no route search): the nearest walkable point at its edge on the walker's way there.
         // A walker already within it, or with no such point nearer it, is there.
@@ -1311,7 +1311,7 @@ impl Bodies {
             if gap <= half {
                 return Ok(Target::new(frame, at));
             }
-            let (edge, _) = select::nearest_in(tree, node, ground, here)?;
+            let (edge, middle) = select::nearest_in(tree, node, ground, here)?;
             let (dx, dz) = (here.x - edge.x, here.z - edge.z);
             let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
                 .isqrt()
@@ -1325,7 +1325,13 @@ impl Bodies {
             let on = if area { -i128::from(select::GAP) } else { 0 };
             let view = self.town.view_for(body)?;
             let from = (frame, at);
-            let mut tries = std::iter::once(on).chain((0..).map(|k| first + k * 1_000_000));
+            // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
+            // mountain's (its slopes may be on the map and still no way up).
+            let walkable = view.stand_reached(ground, middle, from).is_some();
+            let mut tries = walkable
+                .then_some(on)
+                .into_iter()
+                .chain((0..).map(|k| first + k * 1_000_000));
             while let Some(s) = tries.next().filter(|s| *s < len) {
                 if let Some(p) = view.stand_reached(ground, along(s), from) {
                     return Ok(Target::new(ground, p));

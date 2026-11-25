@@ -238,7 +238,7 @@ body at the thing it sits in. That point is fixed when the walk starts: a body t
 and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
 A walk to a place on the open ground (a child of the ground with an outline or a line and nothing built on it: a
 range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the walker, worked out on the ground's frame
-from wherever the walker stands: first on it there (an area 0.6 m inside its outline, a line on itself), else, where
+from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself), else, where
 that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
 stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
 walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on
