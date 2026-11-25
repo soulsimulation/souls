@@ -44,6 +44,7 @@ import { createRig, libAction, type Rig, type Template } from './people.ts';
 import { CLIP_BODY, CLIP_FADE, IDLE_VARIANTS, SPRINT_SPEED, clipTime, libraryPick, pickClip, type LibraryPick } from './clip-library.ts';
 import {HumanActorAppearance} from './human-appearance.ts';
 import {applyHumanFinish} from './content/details/human-presets/finish.ts';
+import {BODY_DRAW,mergeRigBody,setBodyMerged} from './body-merge.ts';
 import { disposeSkeletons } from '../../lib/three-resources.ts';
 import { seatHeight } from './fixtures.ts';
 import {blendWaterFoot} from './water-foot-blend.ts';
@@ -540,7 +541,9 @@ export class HumanViews {
   private syncAppearance(v:View,key:string|undefined){
     if(!this.humanPresets||v.appearance&&v.appearanceSoulKey===key)return;
     if(v.appearance&&!v.appearance.retire())return; // retain foreign-reference quarantine, never stack owners
-    v.appearanceSoulKey=key;v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    v.appearanceSoulKey=key;const a=v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    // a preset recolours the body's own primitives: draw those while it is attached (body-merge.ts)
+    void a.ready.then(()=>{if(v.appearance===a)setBodyMerged(v.rig,a.snapshot().state!=='attached');});
   }
 
   /** Stair flights people may be on (the Spatial scene's usable stairs links; call when they change). */
@@ -588,6 +591,7 @@ export class HumanViews {
 
   private make(id: string, s: Snap, activity: string,publicSoulKey?:string,bodyModel?:string): View {
     const rig = createRig(bodyModel?this.bodyTemplates.get(bodyModel)!:templateFor(id, this.templates)!);
+    mergeRigBody(rig);   // a classic body's primitives draw as one (body-merge.ts)
     rig.holder.name = id;
     rig.holder.traverse(o=>{
       o.userData.entity=id;const m=o as THREE.SkinnedMesh,p=THREE.SkinnedMesh.prototype;
@@ -1965,7 +1969,7 @@ function skinnedPoints(rig: Rig, stride: number, out: (p: THREE.Vector3, part: B
   const p = V(), idx = new THREE.Vector4(), wt = new THREE.Vector4();
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const indices=Array.from({length:Math.ceil(pos.count/stride)},(_,i)=>i*stride);let at=0;
     eachSkinnedWorld([{mesh:m,idx:indices}],p,p=>{
@@ -1991,7 +1995,7 @@ const standingShapes=new WeakMap<Template,StandingShape>();
  * Attribute replacement/version changes invalidate the cache (kit shape edits and geometry updates). */
 function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
  const meshes:THREE.SkinnedMesh[]=[];
- rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh)meshes.push(o as THREE.SkinnedMesh);});
+ rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh&&!o.userData[BODY_DRAW])meshes.push(o as THREE.SkinnedMesh);});
  const attributes=(m:THREE.SkinnedMesh)=>[...Object.values(m.geometry.attributes),...Object.values(m.geometry.morphAttributes).flat()];
  const version=(a:THREE.BufferAttribute|THREE.InterleavedBufferAttribute)=>'version'in a?a.version:a.data.version;
  const old=standingShapes.get(rig.template);
@@ -2022,7 +2026,7 @@ function surfaceRefs(rig: Rig) {
   rig.holder.updateMatrixWorld(true);
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const contacts:{i:number;part:'foot'|'hand'}[]=[];
     for (let i = 0; i < pos.count; i++) {

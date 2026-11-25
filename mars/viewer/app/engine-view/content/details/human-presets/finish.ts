@@ -131,6 +131,8 @@ const pristine=(m:T.Material)=>m.onBeforeCompile===T.Material.prototype.onBefore
 export function humanFinishRoleOf(m:unknown):HumanFinishRole|null{
  if(!(m instanceof T.Material)||m.onBeforeCompile!==humanFinishCompile||m.customProgramCacheKey!==humanFinishKey)return null;return roles.get(m)??null;
 }
+/** The shader's id of a finished material's role (the palette material takes it per vertex); null when not finished. */
+export function humanFinishRoleIdOf(m:unknown):number|null{const role=humanFinishRoleOf(m);return role?ROLE_ID[role]:null;}
 /** Exactly finished for this audited slot: hooks, role and roughness all as the table says. */
 export function isHumanFinished(m:unknown,template:unknown,name:unknown){const f=humanFinishFor(template,name);return!!f&&m instanceof T.MeshStandardMaterial&&humanFinishRoleOf(m)===f.role&&m.roughness===f.roughness;}
 
