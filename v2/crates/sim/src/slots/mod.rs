@@ -1662,10 +1662,8 @@ fn next_own(r: &Run, now: Micros) -> Option<Micros> {
         .min()
 }
 
-/// When a thing on the course `t` next stands at its home (station 0, where its course starts) with `left` of the stop
-/// to spare, world µs: now while it does.
-/// When the moving thing on `t` next stands at `home` (µm) with `left` of its stop to spare, from
-/// `now`: at any station of its course that is its home (its own loop's first; a steered course's last, where it
+/// When the moving thing on `t` next stands at `home` (µm) with `left` of its stop to spare, world µs (now while it
+/// does): at any station of its course that is its home (its own loop's first; a steered course's last, where it
 /// stands for good).
 fn home_back(t: &crate::courses::Table, home: Vec3, now: Micros, left: Micros) -> Option<Micros> {
     let homes: std::collections::BTreeSet<usize> = t

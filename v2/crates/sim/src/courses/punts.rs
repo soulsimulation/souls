@@ -498,14 +498,22 @@ pub fn once_through(
     Ok(c)
 }
 
-/// The points a course run once still goes through after world time `now`, its holds left out, ending at its last
-/// station: the way on from where it is. `None` for a course that is not run once, or before it starts.
+/// The points a course run once still goes through after world time `now`, the hold it stands in left out, ending at
+/// its last station: the way on from where it is. `None` for a course that is not run once, before it starts, or
+/// while a hold not yet begun lies ahead (on its way out to where a steer holds it, the way on is not the way home).
 pub fn rest_of(c: &Course, now: Micros) -> Option<Vec<Vec3>> {
     if c.shape != Shape::Once {
         return None;
     }
     let t = c.load().ok()?;
     let phase = now.checked_sub(t.t0).filter(|p| *p >= 0)?;
+    let last = t.legs.len().checked_sub(1)?;
+    if t.legs[..last]
+        .iter()
+        .any(|l| l.stop.is_some() && l.start > phase)
+    {
+        return None;
+    }
     let mut pts: Vec<Vec3> = t
         .legs
         .iter()

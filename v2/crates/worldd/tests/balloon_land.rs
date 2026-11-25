@@ -171,7 +171,7 @@ fn a_stop_steer_or_land_at_any_moment_of_the_flight_brings_the_balloon_to_its_st
         // Steered 20 m off its ring (as over a pond): held there, then home.
         let to = here(&own, t);
         let to = Vec3::new(to.x + 20_000_000, to.y, to.z);
-        let (steered, _) = plan(
+        let (steered, steer3) = plan(
             Ask::Steer,
             thing,
             &own,
@@ -186,6 +186,32 @@ fn a_stop_steer_or_land_at_any_moment_of_the_flight_brings_the_balloon_to_its_st
         s.moving(thing, &steered, home).unwrap();
         let steered_home = rises_when_it_says(&s, thing, &steered, home, t + S);
         assert!(steered_home <= t + HOLD + lap + 60 * S);
+        // Landed on its way out, before it reaches the steered point: it turns for home there and then, never on out
+        // to the point first.
+        let t4 = t + 3 * S;
+        let (out_land, _) = plan(
+            Ask::Land,
+            thing,
+            &steered,
+            Some(steer3),
+            body,
+            here(&steered, t4),
+            None,
+            t4,
+        )
+        .expect("a land on the way out");
+        assert!(
+            !out_land.stations.iter().any(|st| st.at == to),
+            "it does not go on to the steered point"
+        );
+        s.moving(thing, &out_land, home).unwrap();
+        let out_home = rises_when_it_says(&s, thing, &out_land, home, t4 + S);
+        assert!(
+            out_home + HOLD <= steered_home,
+            "home {} s after the land, against {} s steered",
+            (out_home - t4) / S,
+            (steered_home - t4) / S
+        );
         t += 23 * S;
     }
 }
