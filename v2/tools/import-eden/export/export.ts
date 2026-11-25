@@ -57,7 +57,10 @@ const entryOf = MAP ? backup.entryMap(MAP) : null;
 const kindOf = backup.kindMap(arg('--map', live ? 'content/worlds/eden/map.json' : ''));
 // What a placed copy holds when the world starts (the map's `with` rows: a stand's guitar, a piano's bench), each made a
 // thing of its entry's kind (with.ts).
-const withOf = MAP ? withMap(MAP) : null;
+// A backup's things hold them too (Eden's live stands and pianos): its map is the one `--map` names, Eden's by default.
+const WITH = arg('--map', live ? 'content/worlds/eden/map.json' : '');
+const withOf = WITH ? withMap(WITH) : null;
+const withEntry = WITH ? backup.entryMap(WITH) : null;
 const entries = withOf ? entriesIn('content/kinds') : new Map();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
@@ -335,7 +338,7 @@ for (const e of m.entities.values()) {
   // the map's `with` things it holds (with.ts): each a thing, and a slot its def does not bake is the holder's too
   for (const w of withOf?.(d.ref) ?? []) {
     add('things'); byRef[w.entry] = (byRef[w.entry] ?? 0) + 1;
-    const n = w.slot === undefined ? 0 : Object.keys(entries.get(entryOf?.(d.ref) ?? '')?.entry.slots ?? {}).indexOf(w.slot) + 1;
+    const n = w.slot === undefined ? 0 : Object.keys(entries.get(withEntry?.(d.ref) ?? '')?.entry.slots ?? {}).indexOf(w.slot) + 1;
     if (n > b.slots.filter((x) => x.kind !== 'room').length) add('slots');
   }
 }
