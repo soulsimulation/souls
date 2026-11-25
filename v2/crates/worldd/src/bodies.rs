@@ -1291,6 +1291,29 @@ impl Bodies {
         if tree.node(tree.root()).is_some_and(|n| n.id() == node) {
             return Err(refusal("move.whole-world", node));
         }
+        // A landform or another place on the ground (a range, a sea, a lake, a wood): its middle is no place to
+        // stand, so a walk to it ends at its edge, the point of its outline (or of a wide line's side) nearest the
+        // walker, stood back from it ([`select::GAP`]); the walk's own spots stand it on the nearest walkable ground
+        // there. A walker already within it is there.
+        if let Some(half) = place_half_width(tree, node)
+            && let Some((frame, at)) = self.pose(body)
+        {
+            let gap = select::gap(tree, node, frame, at)?;
+            if gap <= half {
+                return Ok(Target::new(frame, at));
+            }
+            let (edge, _) = select::nearest_in(tree, node, frame, at)?;
+            let (dx, dz) = (at.x - edge.x, at.z - edge.z);
+            let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
+                .isqrt()
+                .max(1);
+            let off = i128::from(half.saturating_add(select::GAP)).min(len);
+            let back = |d: i64| i64::try_from(i128::from(d) * off / len).unwrap_or(0);
+            return Ok(Target::new(
+                frame,
+                Vec3::new(edge.x + back(dx), 0, edge.z + back(dz)),
+            ));
+        }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
         match spot::once(&r) {
@@ -1384,7 +1407,9 @@ impl Bodies {
     /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
     /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
     /// (the ground, a room, a building's main room, a point on one) turns it to what is there instead: the nearest
-    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. One ending
+    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. A walk to a
+    /// place on the ground that ends outside it (at a range's or a sea's edge) turns it to the nearest point of that
+    /// place's shape, or its middle when it stands right at it. One ending
     /// within [`sim::controller::FACE_NEAR`] of what it faces keeps its facing ([`sim::controller::facing_toward`], the
     /// one rule a form's walk keeps too). The turn is its legs' facing input, set by a driver of them, as a place's
     /// facing is ([`Self::take_places`]).
@@ -1404,7 +1429,19 @@ impl Bodies {
         if target == body {
             return;
         }
-        let to = if place || main_room(tree, target).is_some() {
+        // A place it walked to from outside (a range, a sea): its edge, the nearest point of it, else its middle when
+        // it stands on that edge.
+        let edge = place_half_width(tree, target)
+            .filter(|half| select::gap(tree, target, frame, at).is_ok_and(|g| g > *half))
+            .and_then(|_| select::nearest_in(tree, target, frame, at).ok());
+        let to = if let Some((near, middle)) = edge {
+            let d = i128::from(near.x - at.x).pow(2) + i128::from(near.z - at.z).pow(2);
+            Some(if d > i128::from(sim::controller::FACE_NEAR).pow(2) {
+                near
+            } else {
+                middle
+            })
+        } else if place || main_room(tree, target).is_some() {
             let c = &self.runner.controller;
             notable_near(tree, frame, at, &|id| c.body(id).is_some())
         } else {
@@ -2594,6 +2631,28 @@ fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with
 /// the largest outline, the first by id on a tie; none when `node` holds no room, or is one, or is the ground or a named
 /// place (they hold buildings: a walk to them ends on them, never in a building's room).
+/// Whether `node` is a place on the ground of its own (a landform, a water, an area, a path: an `eden:place` with an
+/// outline or a line), which a walk goes to the edge of (`Bodies::goal`) and faces (`Bodies::face`): how far its edge
+/// lies from its shape, µm (0 for an outline, half a line's width).
+fn place_half_width(tree: &Tree, node: Id) -> Option<i64> {
+    use sim::ground::scene::{F_LINE_WIDTH, PLACE};
+    let n = tree.node(tree.handle(node)?)?;
+    if n.kind().as_str().split('@').next() != Some(PLACE) {
+        return None;
+    }
+    let f = n.fields();
+    if f.contains_key(&select::F_OUTLINE) {
+        return Some(0);
+    }
+    f.contains_key(&select::F_LINE).then(|| {
+        let mm = match f.get(&F_LINE_WIDTH) {
+            Some(Value::Uint(w)) => i64::try_from(*w).unwrap_or(0),
+            _ => 0,
+        };
+        mm.saturating_mul(500)
+    })
+}
+
 fn main_room(tree: &Tree, node: Id) -> Option<Id> {
     use sim::ground::scene::{GROUND, PLACE, ROOM};
     let is = |n: &replica::tree::NodeRef<'_>, kind: &str| {

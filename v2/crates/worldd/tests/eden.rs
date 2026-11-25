@@ -1553,6 +1553,159 @@ fn a_soul_boards_the_rowing_boat_from_the_quay_and_gets_off_onto_it() {
     boards_from_the_bank_and_rises_onto_it("11.5,167.0", "e_4b754b5c", "seatrow", 12.7);
 }
 
+/// The facts' id of the thing or the place named `name` (its `things`, then its `places`): today's ids change with
+/// each export, the names do not.
+fn facts_id(text: &str, name: &str) -> String {
+    let f = replica::rules::json::parse(text).unwrap();
+    ["things", "places"]
+        .iter()
+        .filter_map(|list| f.get(list).and_then(|v| v.arr()))
+        .flatten()
+        .find(|t| t.get("name").and_then(|v| v.str()) == Some(name))
+        .and_then(|t| t.get("id").and_then(|v| v.str()))
+        .unwrap_or_else(|| panic!("no {name} in the facts"))
+        .to_owned()
+}
+
+/// Boats on the water: Eden's harbour rowing boat (its entry's `vehicle` on `deep_water`,
+/// `content/kinds/vehicles/rowing_boat.json`) floats where it is moored, so `worldd serve` gives it a course that stands
+/// there. Born on the quay, a Soul takes the oars, rows it out over the harbour (`carrier:steer`), is refused a rise
+/// out on the water (`boarding-frame-away`), lands it (`carrier:land`: back along its wake to its mooring) and gets off
+/// at its landing, onto the quay. Before, the steer was refused `not-a-carrier` ("moves on no course").
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_rows_the_harbour_rowing_boat_out_and_gets_off_at_its_landing() {
+    use replica::sky::int;
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let boat = im.nodes[&facts_id(&text, "harbour-rowing-boat-1")];
+    let (served, mut soul, dir) = serve(&facts, "11.5,167.0", "rowboat", im.nodes["world"].scope());
+    let point = |x: f64, z: f64| {
+        BTreeMap::from([(
+            1,
+            Value::Array(vec![int((x * 1e6) as i64), int((z * 1e6) as i64)]),
+        )])
+    };
+    let rode = soul.act("eden:ride", Some(boat), BTreeMap::new());
+    println!("take the oars: {rode:?}");
+    let out = soul.act("carrier:steer", Some(boat), point(16.0, 182.0));
+    println!("row out: {out:?}");
+    std::thread::sleep(Duration::from_secs(8));
+    let away = punt_place(&dir, boat);
+    let offshore = soul.act("eden:rise", None, BTreeMap::new());
+    println!("out at {away:?} m, a rise: {offshore:?}");
+    let landed = soul.act("carrier:land", Some(boat), BTreeMap::new());
+    println!("land: {landed:?}");
+    let mut off = Err(String::new());
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_secs(3));
+        off = soul.act("eden:rise", None, BTreeMap::new());
+        if off.as_ref().is_ok() || off.as_ref().is_err_and(|e| e != "boarding-frame-away") {
+            break;
+        }
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    let home = punt_place(&dir, boat);
+    let end = last_places(&dir);
+    println!("off at its landing: {off:?}; the boat at {home:?} m; the body {end:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    rode.expect("took the oars from the quay");
+    out.expect("rowed out: a boat on the water is a carrier");
+    let (_, az) = away.expect("the boat's course");
+    assert!(az > 170.0, "out over the harbour, at z {az} m");
+    assert_eq!(offshore, Err("boarding-frame-away".to_owned()));
+    landed.expect("landed");
+    off.expect("got off at its landing");
+    let (hx, hz) = home.expect("the boat's course");
+    assert!(
+        (hx - 16.0).abs() < 0.01 && (hz - 166.0).abs() < 0.01,
+        "back at its mooring: ({hx}, {hz}) m"
+    );
+    let ground = im.nodes["ground"];
+    let (_, (frame, _, x, _)) = end.into_iter().next().expect("the body");
+    assert_eq!(frame, ground, "on the ground");
+    assert!(x <= 12.7, "set down on the quay (x <= 12.7 m), at x {x} m");
+}
+
+/// A walk to a landform or a region (a range drawn as a wide line, the sea, the northern mountains' region) goes to
+/// the nearest walkable point at its edge, not to its middle, and ends facing it: a step ahead of the body is nearer
+/// it than the body is. Before, each walk aimed at the shape's middle (out on the sea, the range's ridge) and was
+/// refused `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let ground = im.nodes["ground"];
+    let mut failed = Vec::new();
+    for (at, names, tag) in [
+        (
+            "20.0,-300.0",
+            ["place-region-northern-mountains", "land-ring-north-range"],
+            "lfnorth",
+        ),
+        (
+            "40.0,120.0",
+            ["land-southern-sea", "place-region-southern-sea"],
+            "lfsea",
+        ),
+    ] {
+        let (served, mut soul, dir) = serve(&facts, at, tag, lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        for name in names {
+            let place = im.nodes[&facts_id(&text, name)];
+            let walked = soul.act("eden:walk", Some(place), BTreeMap::new());
+            let bytes = std::fs::read(dir.join("log")).unwrap();
+            let mut last = None;
+            for r in sim::log::recover(&bytes).unwrap().records {
+                if sim::recorder::is_input(&r) {
+                    continue;
+                }
+                if let Ok(Value::Map(m)) = decode(&r).map(|d| d.value)
+                    && let Some(Value::Array(rows)) = m.get(&answers::BODIES)
+                {
+                    last = rows
+                        .iter()
+                        .filter_map(worldd::bodies::read_row)
+                        .last()
+                        .map(|(_, p, _)| p)
+                        .or(last);
+                }
+            }
+            let pose = last.expect("the body's pose");
+            let p = pose.position;
+            let gap = replica::select::gap(&im.tree, place, ground, p).unwrap();
+            let ahead = pose
+                .orientation
+                .rotate(replica::pose::Vec3::new(3_000_000, 0, 0))
+                .unwrap();
+            let step = replica::pose::Vec3::new(p.x + ahead.x, 0, p.z + ahead.z);
+            let gap_ahead = replica::select::gap(&im.tree, place, ground, step).unwrap();
+            println!(
+                "walk to {name}: {walked:?}, ends at ({:.1}, {:.1}) m, {:.1} m from it, {:.1} m a step ahead",
+                p.x as f64 / 1e6,
+                p.z as f64 / 1e6,
+                gap as f64 / 1e6,
+                gap_ahead as f64 / 1e6
+            );
+            if let Err(e) = &walked {
+                failed.push(format!("{name}: {e}"));
+            } else if gap > 0 && gap_ahead >= gap {
+                failed.push(format!("{name}: not facing it"));
+            }
+        }
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
 /// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
 /// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
 /// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
