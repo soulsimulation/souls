@@ -93,6 +93,57 @@ fn fixture_sit_dispatch_uses_only_the_declared_approach_without_explicit_args() 
     }
 }
 
+/// A bare lie in a bed, a bunk, a hammock or a sleeping mat (`eden:lie` naming the thing) is the entry's own `lie`
+/// form, walked to before it is lain in, as its `sleep` is: before, it was the bare lie move from where the body stood,
+/// refused `out-of-reach` everywhere but beside the bed. A bare sit on any of them (none declares a sit form) is not.
+#[test]
+fn a_bare_lie_in_a_bed_walks_to_it_by_its_own_form() {
+    use replica::encode::Value;
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let node = Id::new(Scope([0x74; 16]), 1).unwrap();
+    for kind in ["bed", "bunk", "hammock", "sleeping_mat"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/rest")
+            .join(format!("{kind}.json"));
+        let entry = replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let kind_name = entry.get("kind").and_then(Json::str).unwrap();
+        let tree = Tree::start(node, Name::new(kind_name).unwrap());
+        let acts = Acts::new(
+            Json::object([(kind_name, entry.clone())]),
+            Vec::new(),
+            header.clone(),
+            node.scope(),
+        );
+        let intent = |verb: &str, parameters| WireIntent {
+            actor: Actor::Soul(node),
+            verb: Name::new(verb).unwrap(),
+            target: Some(Target::Node(node)),
+            parameters,
+            sequence: 1,
+            basis: Value::Array(Vec::new()),
+            expiry: 10_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        assert!(fixture_seat(&entry, "lie").is_some(), "{kind}: its lie's shape");
+        assert!(
+            acts.fixture_sit(&tree, &intent("eden:lie", BTreeMap::new())),
+            "{kind}: a bare lie walks by its form"
+        );
+        assert!(!acts.fixture_sit(&tree, &intent("souls:lie", BTreeMap::new())));
+        assert!(!acts.fixture_sit(&tree, &intent("eden:sit", BTreeMap::new())));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &intent("eden:lie", BTreeMap::from([(1, Value::Array(Vec::new()))]))
+        ));
+    }
+}
+
 #[test]
 fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let generated = testworld::generate(1, 0).expect("the synthetic world");

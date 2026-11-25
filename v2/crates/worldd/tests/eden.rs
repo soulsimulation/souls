@@ -4536,24 +4536,33 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
             failed.push(format!("{what}: {on} {took:?}; {off} {left:?}"));
         }
     }
-    if wanted("swing during") {
-        let (served, mut soul, dir) = serve(&facts, "18.0,99.0", "seatswing", lineage);
+    // The swing is sent and not waited for: `after` s on, its get_off follows on the same socket; then both answers.
+    // Born 4 m off, 12 s on it swings; born 10 m off, 2 s on it is still walking there.
+    for (what, at, after) in [
+        ("swing during", "18.0,99.0", 12),
+        ("swing walking", "24.0,99.0", 2),
+    ] {
+        if !wanted(what) {
+            continue;
+        }
+        let (served, mut soul, dir) = serve(&facts, at, &format!("seat{after}"), lineage);
         soul.0
             .set_read_timeout(Some(Duration::from_secs(300)))
             .unwrap();
         let swings = im.nodes["e_7dacb4f7"];
-        // The swing is sent and not waited for: 12 s on, its get_off follows on the same socket; then both answers.
         soul.send("eden:swing", Some(swings), BTreeMap::new(), 120_000_000);
-        std::thread::sleep(Duration::from_secs(12));
+        std::thread::sleep(Duration::from_secs(after));
         soul.send("eden:get_off", Some(swings), BTreeMap::new(), 120_000_000);
         let first = soul.answer("first");
         let second = soul.answer("second");
-        println!("SEAT swing during: answers {first:?} then {second:?}");
+        let end = last_frames(&dir).into_values().next();
+        println!("SEAT {what}: answers {first:?} then {second:?}; last frame {end:?}");
         drop(served);
         let _ = std::fs::remove_dir_all(&dir);
-        let refused = |a: &Result<Vec<u64>, String>| a.as_ref().is_err_and(|e| e == "not-permitted");
+        let refused =
+            |a: &Result<Vec<u64>, String>| a.as_ref().is_err_and(|e| e == "not-permitted");
         if refused(&first) || refused(&second) || first.is_err() && second.is_err() {
-            failed.push(format!("swing during: {first:?} then {second:?}"));
+            failed.push(format!("{what}: {first:?} then {second:?}"));
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
