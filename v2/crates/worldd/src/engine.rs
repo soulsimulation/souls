@@ -172,6 +172,17 @@ pub struct Engine {
     entries: Json,
 }
 
+/// The kind of thing an activity of `kind` is played at (its entry's own, `<entry>_activity`), when its entry in
+/// `entries` plays it through forms; None for one played anywhere (a touch, a dance) or a kind of no entry.
+pub fn at_its_thing<'a>(entries: &'a Json, kind: &Name) -> Option<&'a str> {
+    let entry = plain(kind.as_str()).strip_suffix("_activity")?;
+    let (k, e) = entries.obj()?.iter().find(|(k, _)| k == entry)?;
+    e.get("forms")
+        .and_then(Json::obj)
+        .is_some_and(|f| !f.is_empty())
+        .then_some(k.as_str())
+}
+
 /// A lift's way, found: none for a straight way, else the poses of one that turns the load, or its refusal.
 pub type Way = R<Option<Vec<turn::Ends>>>;
 
@@ -604,6 +615,23 @@ impl Engine {
                     _ => BTreeSet::new(),
                 };
                 let place = target("offer-needs-a-place")?;
+                // An activity its entry plays through forms on its own thing (a harvest's picks) is offered at a thing
+                // of that kind: on the open ground no member would hold its role's link there, and every form refused.
+                if let Some(at) = at_its_thing(&self.entries, &kind)
+                    && tree
+                        .handle(place)
+                        .and_then(|h| tree.node(h))
+                        .is_none_or(|n| plain(n.kind().as_str()) != at)
+                {
+                    return Err(refusal(
+                        "together.at-its-thing",
+                        format!(
+                            "{} is played at a {at}, through its forms: offer it at one, not at {}",
+                            plain(kind.as_str()),
+                            show(place)
+                        ),
+                    ));
+                }
                 // A give (0.133 R4): 4 the thing the asker holds and hands over when the offer is accepted.
                 let given = match a.params.get(&4) {
                     None => None,
