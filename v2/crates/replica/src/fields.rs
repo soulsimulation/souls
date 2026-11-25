@@ -102,6 +102,7 @@ const RESERVED: &[Reserved] = &[
     // on the zone's root (#3879, #3913), and the owner and access marks any node may carry (#3913).
     r(101, "F_ALIASES (#3904)", On::Place),
     r(102, "import_eden::F_DEF_BODIES", On::Thing),
+    r(103, "import_eden::F_GROUND_PALETTE", On::Thing),
     r(140, "edit::claims F_DISTRICTS (#3879)", On::Place),
     r(141, "edit::claims F_CLAIMS (#3879)", On::Place),
     r(142, "F_ZONES (#3913)", On::Place),

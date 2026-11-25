@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STREAM_NOTICE, streamNotice, type StreamHealth } from './stream-health.ts';
+import { STREAM_CATCHING, STREAM_NOTICE, streamNotice, type StreamHealth } from './stream-health.ts';
 
 const base: StreamHealth = { failed: false, error: null, errorAtParts: null, parts: 0, startedAt: 1000, lastPartAt: null, now: 1000 };
 const at = (h: Partial<StreamHealth>) => streamNotice({ ...base, ...h });
@@ -8,6 +8,11 @@ const at = (h: Partial<StreamHealth>) => streamNotice({ ...base, ...h });
 test('no part 15 s after the start is unavailable; before that it is only loading', () => {
   assert.equal(at({ now: 15_999 }), null);
   assert.equal(at({ now: 16_000 }), STREAM_NOTICE);
+});
+test('#4684: a reader catching up says so while its words keep coming, and the notice only if they stop for 15 s', () => {
+  assert.equal(at({ parts: 40, lastPartAt: 30_000, now: 31_000, catching: true }), STREAM_CATCHING);
+  assert.equal(at({ parts: 40, lastPartAt: 30_000, now: 45_000, catching: true }), STREAM_NOTICE);
+  assert.equal(at({ parts: 41, lastPartAt: 46_000, now: 46_100, catching: false }), null);
 });
 test('a failed import or start, or a reader error, is unavailable at once', () => {
   assert.equal(at({ failed: true }), STREAM_NOTICE);

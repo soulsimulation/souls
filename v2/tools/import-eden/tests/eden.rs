@@ -5,9 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DEF_BODIES, F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE,
-    F_PARAMS, F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR,
-    Import, PLACE, ROOM, WINDOW, base64, count, load, world_of,
+    F_DEF_BODIES, F_DOORWAY, F_DOORWAYS, F_GROUND_PALETTE, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME,
+    F_OUTLINE, F_PARAMS, F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH,
+    FLOOR, Import, PLACE, ROOM, WINDOW, base64, count, load, world_of,
 };
 use replica::effects::{Header, Part};
 use replica::encode::{Name, Value};
@@ -575,6 +575,35 @@ fn the_worlds_own_defs_are_kept_once_on_the_open_ground() {
     assert!(
         !g.fields().contains_key(&F_DEF_BODIES),
         "no own defs, no field"
+    );
+}
+
+/// The facts' ground palette (today's `state.ground.palette`) is the open ground's F_GROUND_PALETTE, `souls:<palette>`,
+/// so a page drawing from the stream colours a desert world's ground as desert; a ground that names none has no field.
+#[test]
+fn the_ground_palette_is_kept_on_the_open_ground() {
+    let text = SMALL.replace(
+        r#""ground": {"tileM": 2,"#,
+        r#""ground": {"palette": "desert", "tileM": 2,"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    let g = im
+        .tree
+        .node(im.tree.handle(im.nodes["ground"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        g.fields().get(&F_GROUND_PALETTE),
+        Some(&Value::Text(Name::new("souls:desert").unwrap()))
+    );
+    let plain = load(SMALL).expect("loads");
+    let g = plain
+        .tree
+        .node(plain.tree.handle(plain.nodes["ground"]).unwrap())
+        .unwrap();
+    assert!(
+        !g.fields().contains_key(&F_GROUND_PALETTE),
+        "no palette, no field"
     );
 }
 
