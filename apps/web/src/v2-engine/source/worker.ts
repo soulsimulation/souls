@@ -87,6 +87,9 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const own = f.get(102);
   if (Array.isArray(own)) rec.defBodies = own.flatMap((r) => (Array.isArray(r) && r[0] instanceof Uint8Array && r[1] instanceof Uint8Array
     ? [[new TextDecoder().decode(r[0]), new TextDecoder().decode(r[1])] as [string, string]] : []));
+  // the open ground's palette (import-eden's field 103, `souls:<palette>`), which the page colours its ground by
+  const palette = f.get(103);
+  if (typeof palette === 'string' && f.has(25)) rec.groundPalette = palette;
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));

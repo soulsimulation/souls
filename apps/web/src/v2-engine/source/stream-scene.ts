@@ -4,7 +4,7 @@
 // stream's nodes, as import-eden wrote them:
 //
 // - the ground: the open ground's terrain tiles (fields 24, 25: heights in mm), drawn as the stream has them; the
-//   terrain keeps them instead of baking its recipe (`fixTerrain`);
+//   terrain keeps them instead of baking its recipe (`fixTerrain`); and its palette (field 103: a Mars camp's desert);
 // - water: each thing with a water level (field 18) and an outline (11) or a line (16, 17) is one of the recipe's waters;
 // - things, buildings, paths and areas: every node that is an imported thing (its `origin`, today's id, with no `/` or
 //   `.`: a building's floors, rooms and windows and a place derived from a thing are drawn by the thing), at its world
@@ -125,6 +125,12 @@ function buildingParams(origin: string, nodes: readonly NodeRec[]): Record<strin
   return { w: m(Math.max(...xs) - Math.min(...xs) + 440), d: m(Math.max(...zs) - Math.min(...zs) + 440), floors: floors.length };
 }
 
+/** The defs a thing's params name as a scatter's species (scatter/2's `palette: [{def: ref, …}]`). */
+export function speciesDefs(params: unknown): string[] {
+  const p = (params as { palette?: unknown } | undefined)?.palette;
+  return Array.isArray(p) ? p.flatMap((x) => (typeof (x as { def?: unknown } | null)?.def === 'string' ? [(x as { def: string }).def] : [])) : [];
+}
+
 /** The open ground's heights by tile (`tx,tz` -> TILE_N² metres), when its tiles are the page's own size. */
 export function tileHeights(ground: NodeRec | undefined): Map<string, Float32Array> {
   const out = new Map<string, Float32Array>();
@@ -178,22 +184,31 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
     // its recorded params (W3) by the def it was imported from; else, from an older import, a building's size from its floors
     if (n.params && !def.name.startsWith('v2-')) e.params = n.params as Entity['params'];
     else if (def.make.kind === 'gen' && def.make.gen === 'building/1') { const bp = buildingParams(o, nodes); if (bp) e.params = bp; }
+    // a scatter's species named by def (a Mars camp's rock-fields: grass tufts, rocks, cacti) are drawn by those defs,
+    // which the layer has only when the snapshot carries them: without, it draws each as an oak
+    for (const ref of speciesDefs(e.params)) { const d = own.get(ref) ?? lib.get(ref); if (d) defs.set(d.ref, d); }
     entities.push(e);
   }
   if (entities.length && !nodes.some((n) => n.params)) plain.add("params this world's import does not carry (before W3: colours, roofs, a door's size): the def's defaults");
   return {
     contract: 'world/1', worldId, seq: 0, counter: 0, seed: `v2:${worldId}`, constants: { extent: Math.max(ext[2] - ext[0], ext[3] - ext[1]), ground: 'land', base: 0 },
-    state: stateOf(nodes.find((n) => n.parent === null)), ground: { schema: 'ground/1', base: 0, extent: ext, landforms: [], waters } as Ground,
+    state: stateOf(nodes.find((n) => n.parent === null), ground), ground: { schema: 'ground/1', base: 0, extent: ext, landforms: [], waters } as Ground,
     defs: [...defs.values()], entities, tiles: {}, heights, plain: [...plain],
   };
 }
 
+/** The ground palettes the old page colours terrain by (world-compiler's `state.ground.palette`). */
+const GROUND_PALETTES = new Set(['grass', 'desert', 'dust', 'sand', 'snow', 'rock', 'garden', 'playa', 'meadow']);
+
 /** The world's state as the old page reads it, from the world node's sky fields (`sky-record.ts` F): how its sky is
- *  drawn (89, the palette) and whether its clock keeps the real day's pace (60, a day of 86,400 world seconds). */
-function stateOf(world: NodeRec | undefined): Record<string, unknown> {
+ *  drawn (89, the palette) and whether its clock keeps the real day's pace (60, a day of 86,400 world seconds); and from
+ *  the open ground, what its ground is made of (import-eden's field 103: a Mars camp's desert, not the default grass). */
+export function stateOf(world: NodeRec | undefined, ground?: NodeRec): Record<string, unknown> {
   const f = { ...world?.fields, ...world?.sky } as Record<number, unknown>;
   const palette = typeof f[89] === 'string' ? (f[89] as string).split(':').pop()! : 'clear-day';
-  return { sky: { palette }, ...(f[60] === undefined || Number(f[60]) === 86_400 ? { time: { clock: 'real' } } : {}) };
+  const floor = ground?.groundPalette?.split(':').pop();
+  return { sky: { palette }, ...(floor && GROUND_PALETTES.has(floor) ? { ground: { palette: floor } } : {}),
+    ...(f[60] === undefined || Number(f[60]) === 86_400 ? { time: { clock: 'real' } } : {}) };
 }
 
 /** Keeps the stream's nodes as the reader shows them, and offers the snapshot once the open ground is there. */

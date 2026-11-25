@@ -303,7 +303,8 @@ for (const e of m.entities.values()) {
 // How today's page draws this world's sky: the date it is drawn on (`state.time.calendar`), its palette
 // (`state.sky.palette`), and today's morning mist (`atmosphere/weather.ts` `morningMist`: peaking at 06:30, gone 2.5 h
 // either side, at full strength), which today's page draws on every world but the desert palette's.
-const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown } };
+const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown }; ground?: { palette?: unknown } };
+const groundPalette = ws.ground?.palette;
 const palette = typeof ws.sky?.palette === 'string' ? ws.sky.palette : null;
 const sky = {
   ...(typeof ws.time?.calendar === 'string' ? { calendar: ws.time.calendar } : {}),
@@ -319,7 +320,9 @@ const file = {
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
   things, doors: doorPairs,
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.
+  // its palette (`state.ground.palette`), which the page colours the ground and its cover by (the import's F_GROUND_PALETTE)
   ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles,
+    ...(typeof groundPalette === 'string' ? { palette: groundPalette } : {}),
     defs: [...ownDefs].sort(([a], [b]) => (a < b ? -1 : 1)).map(([ref, body]) => ({ ref, body })) },
   places: places.map((p) => ({ ...p, ...(p.polygon ? { polygon: p.polygon.map(pt) } : {}), ...(p.line ? { line: p.line.map(pt), width: mm(p.width ?? 0) } : {}) })),
 };

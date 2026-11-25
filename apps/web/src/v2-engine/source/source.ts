@@ -37,6 +37,8 @@ export type NodeRec = {
   params?: Record<string, unknown>;
   /** The open ground's: the defs the world defines itself (import-eden's field 102), `[ref, stored def's JSON text]`. */
   defBodies?: [string, string][];
+  /** The open ground's palette (import-eden's field 103, `souls:<palette>`: desert, playa, grass …), when it names one. */
+  groundPalette?: string;
   /** R4 (0.134): a creator's tint (replica `tint::F_TINT`, field 145): `[part, rgb]` rows, `tint:whole` for the whole
    *  thing and `part:<name>` for a part; empty once undone. Absent when the thing was never recoloured. */
   tint?: [string, number][];
