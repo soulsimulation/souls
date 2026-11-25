@@ -1,9 +1,9 @@
-//! Engine v2 C2 (#3366), with E8's offers: the view tier addresses an offer to each body asked and its decline to the
-//! asker, as it addresses speech to its hearers (`replica::activity::addressed`), and no one else.
+//! Engine v2 C2 (#3366), with E8's offers: the view tier addresses an offer to each body asked, its decline to the
+//! asker and its lapse to both, as it addresses speech to its hearers (`replica::activity::addressed`), and no one else.
 
 use std::collections::BTreeMap;
 
-use replica::activity::{OFFER, OFFER_DECLINED};
+use replica::activity::{OFFER, OFFER_DECLINED, OFFER_LAPSED};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Part, Rest,
 };
@@ -77,7 +77,7 @@ fn event(n: &str, offer: Id, asker: Id, asked: Id) -> Option<Vec<Event>> {
 }
 
 #[test]
-fn an_offer_reaches_the_bodies_asked_and_a_decline_the_asker() {
+fn an_offer_reaches_the_bodies_asked_a_decline_the_asker_and_a_lapse_both() {
     let (floor, asker, asked, third, offer) = (id(1), id(2), id(3), id(4), id(5));
     let create = |n: Id, x: i64| Change::Create {
         node: n,
@@ -141,6 +141,18 @@ fn an_offer_reaches_the_bodies_asked_and_a_decline_the_asker() {
     )]))
     .expect("the decline");
     assert_eq!(count(&hub), [1, 1, 0], "the decline: to the asker only");
+    hub.tick(&part(&[effect(
+        5,
+        floor,
+        Vec::new(),
+        event(OFFER_LAPSED, offer, asker, asked),
+    )]))
+    .expect("the lapse");
+    assert_eq!(
+        count(&hub),
+        [2, 2, 0],
+        "the lapse: to the asker and to the body that never answered, so neither waits on"
+    );
 }
 
 /// 0.135 (the audit of #4700): an activity's join, start, leave and end reach its members wherever they stand, the

@@ -41,12 +41,12 @@ export function LookPicker({initial, kit = pickerKit(), onSave, onState, saveLab
     return () => { renderer.dispose(); renderer.domElement.remove(); view.current = null; };
   }, []);
   const key = useMemo(() => lookKey(look), [look]);
-  useEffect(() => { let live = true; void kit.template(look).then(t => {
+  useEffect(() => { let live = true; void kit.template(look).then(async t => {
     const v = view.current; if (!live || !v) return;
     if (v.rig) v.scene.remove(v.rig.holder);
     const rig = createRig(t); rig.holder.rotation.y = -Math.PI / 2 + 0.35; rig.idle.time = 0.4; rig.mixer.update(0); v.scene.add(rig.holder); v.rig = rig; v.speed = look.walkSpeed;
     v.renderer.render(v.scene, v.camera);
-    v.avatars.capture('picker', key, rig.holder, false, (++v.n) * 1000); setIcon(soulAvatars.images.get('picker') ?? '');
+    await v.avatars.capture('picker', key, rig.holder, false, (++v.n) * 1000); if (!live) return; setIcon(soulAvatars.images.get('picker') ?? '');
     v.renderer.render(v.scene, v.camera);
     onState?.({ready: true, key, look, icon: !!soulAvatars.images.get('picker'), kitBytes: kit.bytes, height: +(t.bodyScale ?? 1) * 1.75, clipWalkSpeed: t.walkSpeed});
   }).catch(e => setNote(e instanceof Error ? e.message : String(e))); return () => { live = false; }; }, [key]);

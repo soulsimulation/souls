@@ -425,8 +425,9 @@ impl<S: ObjectStore> Worker<S> {
                 Err(e) if e.name == "precondition-failed" => {}
                 Err(e) => return Err(e.into()),
             }
-            // In the store now, and named by the spool's head or the next: out of the queue at once (a pass refused
-            // later resumes from here), and kept on this disk, where a restart reads it.
+            // In the store now, and named by the spool's head or the next: out of the queue at once, so a pass refused
+            // later resumes from here rather than sending the whole spool again, and kept on this disk, where a restart
+            // reads it.
             self.keep(&key);
         }
         let current = match head {
@@ -588,4 +589,94 @@ impl<S: ObjectStore> Worker<S> {
 /// The spool beside a world's `views/`: never under it, as the chunks hold the world's own records.
 pub fn beside(views: &Path) -> PathBuf {
     views.with_file_name("stream-backup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use directoryd::directory::store::{Memory, Object, R};
+    use std::cell::{Cell, RefCell};
+
+    /// A store that keeps the keys put to it and does not answer the `refuse`th put.
+    struct Counting {
+        store: Memory,
+        puts: Cell<usize>,
+        refuse: usize,
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl ObjectStore for Counting {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.puts.set(self.puts.get() + 1);
+            if self.puts.get() == self.refuse {
+                return Err(super::super::Refusal {
+                    name: "store-unreachable",
+                    detail: format!("{key}: timeout: receive response"),
+                });
+            }
+            self.sent.borrow_mut().push(key.to_owned());
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.store.list(prefix)
+        }
+    }
+
+    /// Eden, 24 Nov: a backup 14,101 objects (690 MB) behind sent its whole spool again on every pass, and each pass
+    /// was refused on one unanswered put before it reached the head, so it never caught up. A refused pass now leaves
+    /// off the spool what the store already holds: the next sends each object left once, and the head after them.
+    #[test]
+    fn a_refused_pass_resumes_where_it_stopped_and_sends_nothing_twice() {
+        let dir = std::env::temp_dir().join(format!("backup-resumes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let spool = Spool::new(dir.clone(), "test-store".into());
+        let prefix = "s/w/".to_owned();
+        for i in 0..10u8 {
+            let bytes = vec![i; 1000];
+            let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&bytes)));
+            spool.object(&key, &bytes).unwrap();
+        }
+        spool.write(&format!("{prefix}head"), b"head one").unwrap();
+        let store = Counting {
+            store: Memory::default(),
+            puts: Cell::new(0),
+            refuse: 6,
+            sent: RefCell::default(),
+        };
+        let mut worker = Worker {
+            store,
+            dir: dir.clone(),
+            prefix: prefix.clone(),
+            head_key: format!("{prefix}head"),
+            identity: "test-store".into(),
+            prunes: Arc::default(),
+            progress: Arc::default(),
+            confirmed: None,
+            known: true,
+            tried: Vec::new(),
+            deletes: std::collections::VecDeque::new(),
+            deleting: false,
+        };
+        assert!(worker.pass().is_err(), "the sixth put is not answered");
+        assert_eq!(
+            worker.objects().len(),
+            5,
+            "the five the store holds are off the spool"
+        );
+        assert!(
+            matches!(worker.pass(), Ok(true)),
+            "the next pass is current"
+        );
+        let sent = worker.store.sent.borrow().clone();
+        let objects: Vec<&String> = sent.iter().filter(|k| k.contains("/objects/")).collect();
+        let unique: BTreeSet<&String> = objects.iter().copied().collect();
+        assert_eq!(objects.len(), 10, "each object sent once: {sent:?}");
+        assert_eq!(unique.len(), 10);
+        assert_eq!(sent.last().map(String::as_str), Some("s/w/head"));
+        assert!(worker.objects().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

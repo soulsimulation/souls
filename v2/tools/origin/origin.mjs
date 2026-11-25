@@ -10,6 +10,16 @@
 //
 // Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks.
 //
+// An immutable file of at least COMPRESS_FROM bytes that packs well (a generation's baseline, 8.8 MB on Eden, 1.1 MB
+// as brotli) is served encoded to a reader that accepts it: br, else gzip, compressed once per file in each process
+// and held with its buffer (`encoded`), with `Vary: Accept-Encoding`. Its ETag is the decoded bytes' hash, which is
+// what a reader checks, made weak (`W/"…"`) on an encoded copy. A request with one valid `Range` (a crossing reader
+// asks for a baseline's first 16 bytes, worker.ts) gets those bytes of the decoded file, 206, never encoded.
+//
+// Memory, with stallMs: a stalled reader of an encoded copy pins only that copy (about 1.1 MB for Eden's 9 MB
+// baseline); a 206 is a view of the shared decoded buffer and pins it for up to stallMs; the packed copies add at most
+// about 0.32 times the held bytes in a process when both br and gzip are asked for (Eden: 1.11 + 1.83 MB a 9 MB file).
+//
 // An immutable file is read once and its one buffer is shared by every request for it (#4018: a join wave of 250
 // viewers, each with its own copy of a 9 MB baseline, took the origin past its unit's 256 MB). Requests in flight
 // share one read; the newest `cacheBytes` (ORIGIN_CACHE_MB, default 64) stay held after it, and a buffer a slow
@@ -28,6 +38,8 @@ import { createHash } from 'node:crypto';
 import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { availableParallelism } from 'node:os';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
@@ -38,6 +50,57 @@ import { worldRoutes } from './world-routes.mjs';
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
 export const MISS = 'no-store';
+/** Smaller immutable files (a part is a few hundred bytes, already packed) are always sent as they are. */
+export const COMPRESS_FROM = 16 * 1024;
+
+const brotli = promisify(brotliCompress), gz = promisify(gzip);
+// A baseline: brotli 5 packs Eden's 8.8 MB to 1.11 MB in 63 ms (quality 9: 1.09 MB in 167 ms); gzip 6 to 1.83 MB in 154 ms.
+const ENCODERS = {
+  br: (b) => brotli(b, { params: { [zlib.BROTLI_PARAM_QUALITY]: 5, [zlib.BROTLI_PARAM_SIZE_HINT]: b.length } }),
+  gzip: (b) => gz(b, { level: 6 }),
+};
+
+/** The encoding a request's Accept-Encoding takes: br, else gzip, else none (q=0 refuses one). */
+export function chooseEncoding(accept = '') {
+  const take = new Map();
+  for (const part of String(accept).toLowerCase().split(',')) {
+    const [name, ...params] = part.trim().split(';');
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith('q='));
+    take.set(name.trim(), q === undefined ? 1 : Number(q.slice(2)));
+  }
+  for (const e of ['br', 'gzip']) if ((take.get(e) ?? take.get('*') ?? 0) > 0) return e;
+  return null;
+}
+
+/**
+ * `body` encoded as `encoding`, once per buffer: every request for that buffer shares one compression, and the
+ * result lives as long as the buffer. Null when it does not pack to nine tenths or less (sent as it is).
+ */
+export function encoder(stats = {}) {
+  const held = new WeakMap(); // body -> { br: Promise<Buffer|null>, gzip: … }
+  stats.compressions = 0;
+  return (body, encoding) => {
+    let e = held.get(body);
+    if (!e) held.set(body, (e = {}));
+    if (!e[encoding]) stats.compressions++;
+    return (e[encoding] ??= ENCODERS[encoding](body).then((out) => (out.length <= body.length * 0.9 ? out : null), () => null));
+  };
+}
+
+/**
+ * The one byte range `range` names in a file of `size` bytes ({start, end} inclusive), 'unsatisfiable' (it starts past
+ * the end, or asks for the last 0 bytes), or null: no range, more than one, or an invalid one (first after last), which
+ * RFC 9110 14.1.1 treats as absent (the whole file).
+ */
+export function byteRange(range, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(range ?? '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] !== '' && m[2] !== '' && Number(m[1]) > Number(m[2])) return null;
+  let start, end;
+  if (m[1] === '') { start = Math.max(0, size - Number(m[2])); end = size - 1; }
+  else { start = Number(m[1]); end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1); }
+  return start > end || start >= size ? 'unsatisfiable' : { start, end };
+}
 const SLICE = 256 * 1024; // a response body is written this much at a time (createOrigin's stallMs)
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
@@ -107,6 +170,7 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
   const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
   const stats = { pointer: 0, immutable: 0, miss: 0, stalled: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const shared = sharedFiles(cacheBytes, stats);
+  const encode = encoder(stats);
   const server = createServer(async (req, res) => {
     const miss = () => {
       stats.miss++;
@@ -142,15 +206,33 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     } catch {
       return miss();
     }
+    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE, etag };
+    let status = 200;
+    if (kind === 'immutable') {
+      headers['accept-ranges'] = 'bytes';
+      const range = byteRange(req.headers.range, body.length);
+      if (range === 'unsatisfiable') {
+        stats.miss++;
+        return res.writeHead(416, { 'cache-control': MISS, 'content-range': `bytes */${body.length}`, 'content-length': 0 }).end();
+      }
+      if (range) {
+        status = 206;
+        headers['content-range'] = `bytes ${range.start}-${range.end}/${body.length}`;
+        body = body.subarray(range.start, range.end + 1);
+      } else if (body.length >= COMPRESS_FROM) {
+        headers.vary = 'accept-encoding';
+        const encoding = chooseEncoding(req.headers['accept-encoding']);
+        const packed = encoding && await encode(body, encoding);
+        // weak: a strong validator names one representation's bytes (RFC 9110 8.8.3), and a Range is answered from
+        // the decoded file, so an encoded copy's tag must never match a resumed download's If-Range
+        if (packed) { headers['content-encoding'] = encoding; headers.etag = `W/${etag}`; body = packed; }
+      }
+    }
     stats[kind]++;
     stats.perPath.set(rel, (stats.perPath.get(rel) ?? 0) + 1);
     if (req.method === 'GET') stats.bytes[rel.split('/')[0]] = (stats.bytes[rel.split('/')[0]] ?? 0) + body.length;
-    res.writeHead(200, {
-      'content-type': 'application/octet-stream',
-      'content-length': body.length,
-      'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE,
-      etag,
-    });
+    headers['content-length'] = body.length;
+    res.writeHead(status, headers);
     if (req.method === 'HEAD') return res.end();
     // A reader that takes nothing for stallMs is let go: its socket closes, and the page asks again from the newest
     // baseline. Without this a stalled connection held its socket, and the buffer of the file it asked for, for as long
