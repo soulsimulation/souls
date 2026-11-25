@@ -296,3 +296,63 @@ test('mailbox: plan shows, apply makes the key once (0600) and adds only the mis
   assert.equal(checked.status, 0, checked.stderr);
   assert.match(checked.stdout, /no gateway here to check/);
 });
+
+test('entries: plan lists each world\'s changes and changes nothing; the move applies a world\'s just before its deploy and puts them back when it fails', () => {
+  const root = join(dir, 'entries'), bins = join(root, 'bins'), page = join(root, 'page'), out = join(root, 'bundle');
+  const data = join(root, 'data'), etc = join(root, 'etc'), lib = join(root, 'lib'), worlds = join(data, 'worlds/worlds');
+  for (const d of [etc, lib, page]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(page, 'index.html'), '<!doctype html>');
+  // Stand-in worldd: `entries plan|apply --dir <w> --kinds <k> [--keep <p>]` says it changes the humanoid, and apply
+  // keeps the old file in <p> and writes "new"; deploy records what the world's humanoid holds when it restarts it.
+  exe(join(bins, 'worldd'), [
+    'case "$1" in schemas) exit 0 ;; entries) ;; *) exit 1 ;; esac',
+    '[ -d "$6/body" ] || exit 1',
+    'echo "ride: a ride line the world prints"',
+    'echo "entries: ${4##*/}: change eden:humanoid aaaaaaaaaaaa..bbbbbbbbbbbb (eden.humanoid.json)"',
+    'if [ "$2" = apply ]; then mkdir -p "$8"; cp "$4/entries/eden.humanoid.json" "$8/"; echo new > "$4/entries/eden.humanoid.json"; echo "entries: ${4##*/}: 1 changed, 0 unchanged"; fi',
+  ].join('\n'));
+  exe(join(bins, 'gatewayd'), 'exit 0');
+  exe(join(bins, 'directoryd'), 'exit 0');
+  const deployed = join(root, 'deployed');
+  exe(join(bins, 'deploy'), `f="$WORLDS_ROOT/worlds/$1/entries/eden.humanoid.json"; echo "$1 $([ -f "$f" ] && cat "$f" || echo none)" >> "${deployed}"; [ -z "$FAIL_DEPLOY" ]`);
+  exe(join(bins, 'gateway-upgrade'), 'exit 0');
+  exe(join(bins, 'world-aside'), 'exit 0');
+  exe(join(bins, 'assets-check'), 'exit 0');
+  const client = join(root, 'client'), pkg = join(root, 'pkg');
+  for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  mkdirSync(pkg, { recursive: true });
+  for (const w of ['none', 'up']) {
+    mkdirSync(join(worlds, w), { recursive: true });
+    writeFileSync(join(worlds, w, 'world.json'), '{"format":"souls/world/1"}');
+  }
+  mkdirSync(join(worlds, 'up/entries'));
+  writeFileSync(join(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
+  const bundled = run(['bundle', out, sha, '0.136.1', bins, page, client, pkg]);
+  assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc, RELEASE_SERVICES: '' };
+  const staged = run(['stage', out], env);
+  assert.equal(staged.status, 0, staged.stdout + staged.stderr);
+  const read = (...p) => readFileSync(join(...p), 'utf8');
+
+  const plan = run(['entries', 'plan', sha], env);
+  assert.equal(plan.status, 0, plan.stdout + plan.stderr);
+  assert.match(plan.stdout, /^entries: none: kept: no entries$/m);
+  assert.match(plan.stdout, /^entries: up: change eden:humanoid aaaaaaaaaaaa\.\.bbbbbbbbbbbb/m);
+  assert.doesNotMatch(plan.stdout, /ride:/, 'the build\'s own lines are left out');
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n', 'a plan changes nothing');
+
+  // A failed deploy puts the world's old entries back.
+  const failed = run(['move', sha, 'up'], { ...env, FAIL_DEPLOY: '1' });
+  assert.equal(failed.status, 3, failed.stdout + failed.stderr);
+  assert.match(failed.stdout, /entries: up: its old entries put back/);
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up new'], 'the deploy rehearsed and restarted it with the new entries');
+
+  rmSync(deployed);
+  const moved = run(['move', sha, 'up'], env);
+  assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+  assert.match(moved.stdout, /entries: up: 1 changed, 0 unchanged\nmove: deploy up \(the canary\)/);
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up new', 'none none']);
+  assert.equal(read(data, 'releases', sha, 'entries/up/eden.humanoid.json'), 'old\n', 'the old ones are kept with the release');
+});

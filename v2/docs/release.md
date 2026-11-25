@@ -95,6 +95,20 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    wearing it could not start). After the page moves, each world of the launcher's cutover binding that names no
    catalogue gets `bodiesDir` `/usr/local/lib/souls/web/assets/bodies`, served at `/w/<slug>/v2/bodies/` and named in
    its page's `v2Bodies` ([cutover.md](cutover.md)); the launcher reads the binding again within a second.
+   **The library entries** (`release.sh entries`, `worldd entries`): a world's kinds come from its own folder
+   (`<world>/entries/`, one `<kind>.json` each), which its seed wrote once and every start reads, so before this step
+   a content fix reached only a world that was reseeded. Before the move, `entries plan` lists for each world which
+   entries this release's `content/kinds` (staged as `reseed/kinds`) changes, and which change is refused and why; it
+   changes nothing and its output is in the summary, dry run or not. In the move, just before each world's deploy,
+   `entries apply` writes that world's changed entries (each repaired against its facts as a seed repairs them), the
+   old ones kept in `releases/<sha>/entries/<world>/`; the deploy's rehearsal then starts the new build on a copy of
+   the folder with them, and its one restart takes them under the world's own header (a changed entry's new revision
+   is paired with the one the header pins). A failed deploy puts the old ones back. A change the world's state may no
+   longer fit is refused by name and that world keeps all its entries: a state field gone or retyped, an enum value
+   gone, an int's range narrowed, a slot gone or renumbered, another owner, a world that would not build or would
+   leave a pinned revision with no definition (`entries.<name>`). A fork keeps its entries (its boot pins them); an
+   entry only the release has is not added (the world's header does not pin it: a reseed adds it); an entry only the
+   world has is kept.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already
