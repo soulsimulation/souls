@@ -114,7 +114,7 @@ type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'part'; p: PartRec } | { t: 
 /** Runs the worker on `world` (newest part `newest`, parts up to `served` served, the rest 404): its first poll, then
  *  `polls` more, each followed by `each(messages of that poll, poll index)`. */
 async function run(world: World, newest: number, served: number, polls: number, each: (m: Msg[], i: number) => void, tag: string,
-  still?: { quietAt: (i: number) => number; fails: (path: string, i: number) => boolean }) {
+  still?: { quietAt: (i: number) => number; fails: (path: string, i: number) => boolean; hangs?: (path: string, i: number) => boolean }) {
   (globalThis as { __world?: World }).__world = world;
   const baseline = encode(new Map([[3, new Map([[1, 0]])]]));
   const generation = createHash('sha256').update(baseline).digest('hex');
@@ -132,8 +132,12 @@ async function run(world: World, newest: number, served: number, polls: number, 
   const got: Msg[] = [], ticks: (() => Promise<void>)[] = [];
   const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
   try {
-    globalThis.fetch = (async (input: string | URL) => {
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
       if (still?.fails(new URL(String(input)).pathname, poll)) throw new TypeError('Failed to fetch');
+      // A read that never answers: only its signal, if it has one, ends it.
+      if (still?.hangs?.(new URL(String(input)).pathname, poll)) {
+        return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
+      }
       const body = files(new URL(String(input)).pathname);
       return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
     }) as typeof fetch;
@@ -241,4 +245,25 @@ test('25 Nov: in a still world one failed read of the pointer never shows the no
   assert.equal(errors.length, 1, 'the one failed read is an error');
   // At most the failed poll's own 250 ms (the status line waits 4 s before it shows a passing reason); none after it.
   assert.ok(notices.length <= 1 && notices.every((t) => t === 40 * POLL_MS), `no notice through two still minutes: ${notices}`);
+});
+
+test('25 Nov: a pointer read that never answers is given up, and the next poll reads the pointer again', { timeout: 10_000 }, async () => {
+  // The reader's read timeout, cut to 50 ms here so the test runs at its own pace.
+  const timeout = AbortSignal.timeout;
+  AbortSignal.timeout = () => timeout.call(AbortSignal, 50);
+  try {
+    const POLL_MS = 250, POLLS = 80, NEWEST = 3;
+    const world = new World(START, [{}, {}, {}, {}]);
+    const bridge = new V2Bridge({ rulesVersion: 'test/1' });
+    const errors: string[] = [], seen = new Map<number, number | null>();
+    await run(world, NEWEST, NEWEST, POLLS, (msgs, i) => {
+      for (const m of msgs) {
+        if (m.t === 'error') errors.push((m as { message: string }).message);
+        bridge.receive(m as Parameters<V2Bridge['receive']>[0]);
+      }
+      seen.set(i, bridge.view.newestTo);
+    }, 'hung', { quietAt: (i) => (NEWEST + 1) * PERIOD_US + i * POLL_MS * 1000, fails: () => false, hangs: (path, i) => i === 40 && path.endsWith('/pointer') });
+    assert.equal(errors.length, 1, `the hung read is given up as an error: ${errors}`);
+    assert.ok((seen.get(POLLS) ?? 0) > (seen.get(40) ?? Infinity), `and the polls after it read the pointer again: ${seen.get(40)} then ${seen.get(POLLS)}`);
+  } finally { AbortSignal.timeout = timeout; }
 });
