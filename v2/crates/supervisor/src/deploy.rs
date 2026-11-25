@@ -917,7 +917,18 @@ pub fn rehearse(
     } else {
         c.answer_within
     };
-    let checked = probe_once(&mut s, checking, first);
+    // Its intent expires 5 s after it is sent, in real time: one sent while the copy still catches up (Eden's 400k
+    // ticks) is refused `intent.expired` when the copy takes it. It is sent again, a new intent, until the copy answers
+    // one or the start bound ends; any other refusal, or no answer, fails as before, and only a receipt passes.
+    let caught_up = Instant::now() + first;
+    let checked = loop {
+        let left = caught_up.saturating_duration_since(Instant::now());
+        match probe_once(&mut s, checking, left.max(c.answer_within)) {
+            Err(e)
+                if fed.is_empty() && e == "canary.refused: intent.expired" && !left.is_zero() => {}
+            r => break r,
+        }
+    };
     let cleaned = cleanup_operator(&socket_path(scratch), c, checking, &mut || None);
     match (checked, cleaned) {
         (Ok(()), r) => r,
@@ -1313,6 +1324,11 @@ mod tests {
         if let Some(sock) = std::env::var_os(CHILD) {
             // The fake build: serves the socket, answers nothing for `delay` (catching up), then ends each intent.
             let delay = std::env::var("SOULS_REHEARSAL_DELAY_MS").unwrap();
+            // `<ms>x`: the first ask came while the copy caught up, so it expired before it was taken (0.136's Eden).
+            let (delay, mut expire) = match delay.strip_suffix('x') {
+                Some(d) => (d.to_owned(), true),
+                None => (delay, false),
+            };
             let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
             let (mut s, _) = listener.accept().unwrap();
             let Ok(ms) = delay.parse::<u64>() else {
@@ -1326,6 +1342,13 @@ mod tests {
                     panic!("a map")
                 };
                 let answer = match m.get(&wire::ASK) {
+                    Some(n) if std::mem::take(&mut expire) => Value::Map(BTreeMap::from([
+                        (wire::ASK, n.clone()),
+                        (
+                            wire::REFUSED,
+                            Value::Text(Name::new("intent.expired").unwrap()),
+                        ),
+                    ])),
                     Some(n) => Value::Map(BTreeMap::from([
                         (1, Value::Uint(1)),
                         (wire::ASK, n.clone()),
@@ -1409,6 +1432,11 @@ mod tests {
             rehearse_with(&quiet, "never").is_err(),
             "a quiet copy that never answers is still refused"
         );
+        // 0.136 on 02d99b61: the probe sent during the catch-up expired before the copy took it
+        // (`rehearsal.canary.refused: intent.expired`). It is sent again, and the copy caught up answers it.
+        let r =
+            rehearse_with(&quiet, "1500x").expect("a probe expired in the catch-up is sent again");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 0, 0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
