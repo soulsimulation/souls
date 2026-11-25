@@ -982,7 +982,15 @@ impl Forms {
             .get(&body)
             .and_then(|run| self.runs.get(run))
             .and_then(|fr| fr.runner.step())
-            .is_some_and(|s| matches!(s, Step::Move { repeat: Some(_), .. }))
+            .is_some_and(|s| {
+                matches!(
+                    s,
+                    Step::Move {
+                        repeat: Some(_),
+                        ..
+                    }
+                )
+            })
     }
 
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends

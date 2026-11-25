@@ -332,10 +332,7 @@ fn for_us(v: &Value, args: &Args) -> Result<Option<Micros>, Refusal> {
                 (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
                 (None, None) => return Ok(None),
                 (None, Some(_)) => {
-                    return refuse(
-                        "step-malformed",
-                        "move.for_s.default: whole seconds",
-                    );
+                    return refuse("step-malformed", "move.for_s.default: whole seconds");
                 }
             }
         }
@@ -517,7 +514,11 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
-                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?.flatten(),
+                        repeat: s
+                            .get("for_s")
+                            .map(|v| for_us(v, args))
+                            .transpose()?
+                            .flatten(),
                     })
                 }
                 "wait" => match s.get("us") {
