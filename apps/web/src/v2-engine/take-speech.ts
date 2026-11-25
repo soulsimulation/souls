@@ -41,6 +41,6 @@ export function hearersOf(speaker: readonly number[] | null, earshot: number, ot
  *  speech layer read it): said aloud, heard within its reach by `heardBy`. Not a talk line, which the old page shows as
  *  a private pairwise exchange. `reach` mm; `id` keeps it once. */
 export function speechOf(t: Talk, reach: number, heardBy: string[] = []) {
-  return { type: 'edge' as const, kind: 'speech', id: `v2:${t.id}`, tick: t.tick, at: t.at, from: { soulId: t.from, name: t.fromName }, text: t.text,
+  return { type: 'edge' as const, kind: 'speech', id: `v2:${t.from}:${t.tick}`, tick: t.tick, at: t.at, from: { soulId: t.from, name: t.fromName }, text: t.text,
     channel: { kind: 'earshot', radius: earshotOf(reach) }, heardBy };
 }

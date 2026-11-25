@@ -7,7 +7,7 @@
   },
   "points": {
     "logs": { "role": "contact", "at_mm": [0, 250, 0] },
-    "stand": { "role": "stand", "at_mm": [0, 0, 1100], "yaw_mdeg": 180000 }
+    "stand": { "role": "stand", "at_mm": [0, 0, 1250], "yaw_mdeg": 180000 }
   },
   "geometry": { "bounds_mm": [1100, 600, 1100] },
   "forms": {

@@ -148,6 +148,26 @@ export function ingestDialogue(store:DialogueStore,messages:readonly DialogueEdg
  return changed;
 }
 
+/** First-day round 2: a reload emptied the Soul card's thread, since the stream brings only lines said from then on. The
+ * aloud lines a tab has shown are kept for that tab (sessionStorage; public speech only, never private turns) for
+ * KEEP_MS, and folded back in when the page opens again, as replay (never announced as "speaking now"). */
+export const KEEP_MS=30*60_000,KEEP_LINES=120;
+const keepKey=(scope:string)=>'souls.dialogue.'+scope;
+const keepable=(m:unknown,now:number):m is DialogueEdgeMessage=>!!m&&typeof m==='object'&&(m as DialogueEdgeMessage).type==='edge'&&(m as DialogueEdgeMessage).kind==='speech'
+ &&typeof (m as DialogueEdgeMessage).id==='string'&&typeof (m as DialogueEdgeMessage).at==='number'&&now-((m as DialogueEdgeMessage).at as number)<KEEP_MS;
+/** The lines kept for `scope` (a world), marked replay. */
+export function keptDialogue(scope:string,now=Date.now()):DialogueEdgeMessage[]{
+ try{const v:unknown=JSON.parse(sessionStorage.getItem(keepKey(scope))??'[]');return Array.isArray(v)?v.filter(m=>keepable(m,now)).map(m=>({...m,replay:true})):[];}catch{return [];}
+}
+/** Keep `kept` plus the aloud lines in `messages` (newest KEEP_LINES within KEEP_MS) for `scope`; returns what is kept. */
+export function keepDialogue(scope:string,kept:readonly DialogueEdgeMessage[],messages:readonly DialogueEdgeMessage[],now=Date.now()):DialogueEdgeMessage[]{
+ const byId=new Map<string,DialogueEdgeMessage>();
+ for(const m of [...kept,...messages])if(keepable(m,now)){const {replay:_,...line}=m;byId.set(line.id as string,line as DialogueEdgeMessage);}
+ const out=[...byId.values()].sort((a,b)=>(a.at as number)-(b.at as number)).slice(-KEEP_LINES);
+ try{sessionStorage.setItem(keepKey(scope),JSON.stringify(out));}catch{/* storage off or full: the thread simply starts empty next time */}
+ return out;
+}
+
 /** "A & B", "A, B & C", "A, B, C +2". */
 export function joinNames(names:readonly string[],max=3){
  const shown=names.slice(0,max),rest=names.length-shown.length;
