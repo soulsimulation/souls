@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { ACT_WAIT_MS, actEnd, actWaitMs, lookParams, requestOf, worldOf } from './souls.mjs';
+import { ACT_WAIT_MS, actEnd, actWaitMs, lookParams, pairingState, requestOf, worldOf } from './souls.mjs';
 import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -115,9 +115,25 @@ test('the arguments: pair takes a world url, can and act take act words; a world
   assert.deepEqual([waited.req, waited.wait], [{ op: 'act', acts: ['sit:ab-1'], for: 'm1' }, true]);
   assert.equal(requestOf(['act', 'sit:ab-1']).wait, undefined);
   assert.deepEqual(requestOf(['pair', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden' });
+  // First run: the new Soul's name rides on pair, either side of the url.
+  assert.deepEqual(requestOf(['pair', 'https://soul.game/eden', '--name', 'Ada']).req, { op: 'pair', url: 'https://soul.game/eden', name: 'Ada' });
+  assert.deepEqual(requestOf(['pair', '--name', 'Ada', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden', name: 'Ada' });
   assert.deepEqual(worldOf('https://soul.game/eden'), { directory: 'https://soul.game', world: 'eden', gateway: 'wss://soul.game/v2/ws' });
   assert.deepEqual(worldOf('http://127.0.0.1:9/local?gateway=ws://127.0.0.1:8/v2/ws'), { directory: 'http://127.0.0.1:9', world: 'local', gateway: 'ws://127.0.0.1:8/v2/ws' });
   assert.throws(() => worldOf('eden'), { code: 'pair-names-a-world' });
+});
+
+test('first run: before approval, look and status say plainly where the pairing stands', () => {
+  const home = mkdtempSync(join(tmpdir(), 'souls-waiting-'));
+  assert.equal(pairingState(home), null); // no pairing started here
+  const line = (v) => JSON.stringify(v) + '\n';
+  writeFileSync(join(home, 'pairing.log'), line({ ok: true, step: 'approve', link: 'https://soul.game/pair?code=ABCD-EFGH', code: 'ABCD-EFGH' }));
+  const waiting = pairingState(home);
+  assert.deepEqual([waiting.in_world, waiting.pairing, waiting.code], [false, 'waiting', 'ABCD-EFGH']);
+  assert.match(waiting.say, /waiting for your owner to approve.*ABCD-EFGH/);
+  writeFileSync(join(home, 'pairing.log'), line({ ok: true, step: 'approve', code: 'ABCD-EFGH' }) + line({ ok: false, code: 'expired_token' }));
+  assert.deepEqual([pairingState(home).pairing, pairingState(home).code], ['refused', 'expired_token']);
+  rmSync(home, { recursive: true, force: true });
 });
 
 test('D1: act --wait returns the final phase, the refusal, or after its window a still-running line with how to check', async () => {

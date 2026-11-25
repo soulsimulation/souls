@@ -310,6 +310,10 @@ fn handle(mut stream: TcpStream, app: &App) {
                     &req.path,
                     req.bearer.as_deref(),
                     &req.body,
+                    stream
+                        .peer_addr()
+                        .ok()
+                        .map(|peer| rate_identity(peer.ip(), forwarded)),
                 )
             })
             .unwrap_or_else(|| {

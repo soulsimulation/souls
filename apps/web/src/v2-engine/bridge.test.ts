@@ -40,6 +40,16 @@ test('a body in a turned building is drawn in the world frame, with the page\'s 
   assert.ok(Math.abs(at(0.5).yaw - Math.atan2(-1, 0)) < 0.002, 'it faces the way it walks in the world (-z)');
 });
 
+test('first day: a body-kind figure with no Soul link is drawn but is not a Soul (the Souls panel, the navbar)', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const figure = node('b.9', 'w.2', [2_000_000, 0, 0], { kind: 'souls:body@1', at: T0 });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body, figure], removed: [] } });
+  for (let n = 0; n < 12; n++) b.receive(part(n, n === 0 ? [['b.7', 'w.2', null, T0, 1_000_000, 0, 0], ['b.9', 'w.2', null, T0, 2_000_000, 0, 0]] : []));
+  assert.deepEqual([...b.view.souls.keys()], ['s_abc-7']);
+  const drawn = Object.keys((b.view.takes.chunks.at(-1)!.take as unknown as { finalState: { entities: object } }).finalState.entities);
+  assert.ok(drawn.length >= 2, `both bodies are drawn: ${drawn}`);
+});
+
 test('no chunk until the world is past it by the v2 page\'s lag; a body the copy cannot place is hidden, not moved', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });

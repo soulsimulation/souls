@@ -4193,6 +4193,207 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
     );
 }
 
+/// A frame a creator places live stands on its two posts, as a seeded one does (its import's solids, one box a post),
+/// not on one box its whole width: a Soul walks through it, between the posts, to its middle and out the other side.
+#[test]
+fn a_soul_walks_between_the_posts_of_a_live_placed_frame() {
+    let d = scratch("liveposts");
+    let (facts, _) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 1, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa9);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let (x, z) = (48 * M, -24 * M);
+    let got = creator_edit(upright(&w, &rules, None, x, z));
+    assert_eq!(got.kind, 1, "the frame commits: {got:?}");
+    let frame = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let solids = t
+        .node(t.handle(frame).unwrap())
+        .unwrap()
+        .fields()
+        .get(&12)
+        .cloned();
+    drop(copy);
+    println!("the live-placed frame's solids: {solids:?}");
+    let mut hand = Hand::new(&socket, &w, w.souls[0]);
+    // To 3 m in front of the frame, then straight through it to 3 m behind: its way crosses the frame's line between
+    // the posts (572 mm either side of its middle, 38 mm thick), not round an end of one box 1219 mm wide.
+    for (at, what) in [
+        (v3(x, 0, z - 3_000_000), "in front of the frame"),
+        (v3(x, 0, z + 3_000_000), "through it, out behind"),
+    ] {
+        hand.walk_to(w.ground, at);
+        let end = socket_end(&mut hand.s);
+        assert_eq!(end.kind, 1, "the walk {what} ends done: {end:?}");
+    }
+    let body = body_of(&w, w.souls[0]);
+    let mut way = Vec::new();
+    for p in logged(&w) {
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            way.extend(
+                rows.iter()
+                    .filter_map(worldd::bodies::read_row)
+                    .filter(|(b, _, _)| *b == body)
+                    .map(|(_, pose, _)| pose.position),
+            );
+        }
+    }
+    let crossed = way
+        .windows(2)
+        .rev()
+        .find(|p| p[0].z < z && p[1].z >= z)
+        .map(|p| p[0].x + (p[1].x - p[0].x) * (z - p[0].z) / (p[1].z - p[0].z).max(1))
+        .expect("the Soul's way crosses the frame's line");
+    println!(
+        "the Soul crosses the frame's line {} mm from its middle",
+        (crossed - x) / 1000
+    );
+    assert!(
+        (crossed - x).abs() < 572_000 - 38_000,
+        "between the posts: {} mm from the middle",
+        (crossed - x) / 1000
+    );
+    let p = body_at(&w, body);
+    assert!(p.z > z + 2_500_000, "out behind the frame: {p:?}");
+}
+
+/// A frame goes back into a frame stand a creator placed live, as into one seeded from a world's facts: a crew of two
+/// takes frame A off the live-placed stand, carries it 4 m off and back, and puts it again in the stand's slot 1. The
+/// stand is the frames' rest (a seeded one is walked over); its walk box would stop the carry where the frame comes
+/// down into the stand, and the put would be refused `part.not-held` (the rack-bay run of 24 Nov 2026, staged live).
+#[test]
+fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
+    let d = scratch("livestand");
+    let (facts, _) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa8);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let placed = |got: Got, what: &str| {
+        assert_eq!(got.kind, 1, "{what} commits: {got:?}");
+        got.names[&1]
+    };
+    let stand_kind = rules
+        .kinds
+        .keys()
+        .find(|k| k.starts_with("mars:frame_stand@"))
+        .expect("the stand's kind")
+        .clone();
+    let stand = placed(
+        creator_edit(Op::Place {
+            name: 1,
+            kind: Name::new(&stand_kind).unwrap(),
+            parent: Ref::Node(g),
+            at: Spot {
+                slot: None,
+                position: Vec3::new(48 * M, 0, -24 * M),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: g,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        }),
+        "a frame stand",
+    );
+    let fa = placed(
+        creator_edit(upright(&w, &rules, Some((stand, 1)), 0, 0)),
+        "a frame in the stand's slot 1",
+    );
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let both = |hands: &mut [Hand], at: Vec3, what: &str| {
+        hands[0].walk_to(g, v3(at.x, 0, at.z - 2_200_000));
+        hands[1].walk_to(g, v3(at.x, 0, at.z + 2_200_000));
+        let x = socket_end(&mut hands[0].s);
+        let y = socket_end(&mut hands[1].s);
+        assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+    };
+    let rest = where_is(&w, fa).2;
+    both(&mut hands, rest, "the crew to frame A");
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    let got = hands[1].act("activity:accept", crew, BTreeMap::new());
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    let got = hands[0].act("part:take", crew, BTreeMap::from([(1, fa.to_value())]));
+    assert_eq!(got.kind, 1, "taken: {got:?}");
+    both(&mut hands, v3(rest.x + 4 * M, 0, rest.z), "frame A 4 m off");
+    both(&mut hands, rest, "frame A back to the stand");
+    assert_eq!(
+        where_is(&w, fa).0,
+        Some(crew),
+        "frame A still rides its crew"
+    );
+    let got = hands[0].act(
+        "part:put",
+        crew,
+        BTreeMap::from([(1, stand.to_value()), (2, Value::Uint(1))]),
+    );
+    println!("the crew puts frame A back into the live-placed stand: {got:?}");
+    assert_eq!(got.kind, 1, "put back: {got:?}");
+    assert_eq!(
+        (where_is(&w, fa).0, where_is(&w, fa).1),
+        (Some(stand), Some(1)),
+        "frame A back in the stand's slot 1"
+    );
+}
+
 /// 0.135 A3 (#3342's X17, narrowed): four Souls build one rack bay from the yard and take it down, each step its own
 /// intent on its own gateway connection, in a served world (N2's test world, a bay at the build site, the construction
 /// entries). A body plays in one activity at a time, and a crew of two starts it.
@@ -4733,12 +4934,22 @@ fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_b
         std::thread::sleep(Duration::from_millis(100));
     };
     assert_eq!(told, bodies.to_vec(), "each player told at its body");
-    // Let go at once: the same two start a game on the open ground.
-    let again = start_at(&mut hands, g);
-    let got = hands[0].act("activity:leave", again, BTreeMap::new());
-    assert_eq!(got.kind, 1, "left: {got:?}");
-    let got = hands[1].act("activity:leave", again, BTreeMap::new());
-    assert_eq!(got.kind, 1, "left: {got:?}");
+    // Let go at once: an offer from the same player is answered by where the game is played (at a board, through its
+    // forms), not by a body still held; on the open ground it is refused by name.
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, kind.clone()),
+            (2, Value::Text(Name::new("eden:first").unwrap())),
+            (3, Value::Array(vec![bodies[1].to_value()])),
+        ]),
+    );
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "together.at-its-thing"),
+        "a board game is played at its board: {got:?}"
+    );
 
     // The creator undoes the removal: the board alone comes back.
     let got = creator_asks(Asked::Undo);
@@ -4762,10 +4973,17 @@ fn b10_a_board_removed_mid_game_frees_its_players_and_its_undo_brings_back_the_b
         (2, "not-permitted"),
         "nobody holds the first side of the board that came back: {got:?}"
     );
+    // Both are free: they start a game at the board that came back.
+    let again = start_at(&mut hands, board);
+    for h in hands.iter_mut() {
+        let got = h.act("activity:leave", again, BTreeMap::new());
+        assert_eq!(got.kind, 1, "left: {got:?}");
+    }
     drop(s);
     println!(
-        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone and \
-         playing again on the ground at once), and its undo brought the board back with no game or role link"
+        "B10: a game at the board started, the board removed mid-game (both players told souls:thing-gone, and a game \
+         offered on the ground refused together.at-its-thing), and its undo brought the board back with no game or \
+         role link; the two then played at it again"
     );
 }
 

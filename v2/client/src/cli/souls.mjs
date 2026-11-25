@@ -11,8 +11,9 @@
 //   souls.mjs listen [--follow]               the owner's messages: those open now, else the next to arrive; with
 //                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
-//   souls.mjs pair <world url>                asks the world's directory for a Soul: prints a link and a code for the
-//                                             owner, and returns; the pairing finishes in the background (W2)
+//   souls.mjs pair <world url> --name "<Name>"   asks the world's directory for a Soul: prints a link and a code for
+//                                             the owner, and returns; the pairing finishes in the background (W2),
+//                                             and once approved the Soul joins the world by itself, named
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
@@ -37,17 +38,13 @@
 //   souls.mjs converse list                   the conversations in the copy
 //   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
-//   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
-//                                             one's move is aimed at the other (0.134 T1); holding hands, the first to walk leads the other
-//                                             beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or act lets go (T2)
-//   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
-//   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
-//   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
+//   souls.mjs together kinds                  the activities the world serves: each one's word, card, how many it asks,
+//                                             how near they stand and where it is played (anywhere, or at a thing)
+//   souls.mjs together offer <word> <body id|name> [...]   offers it (`hug`, `dance` to up to seven, `follow`, ...); one
+//                                             played at a thing is offered at the nearest of that kind (0.134 T1, 0.135)
+//   souls.mjs together accept|decline|leave <offer id | word>   answers the newest offer of it, or leaves it
 //   souls.mjs together withdraw <offer id | activity>   takes back your own offer before it is answered (#4700); an
 //                                             accept after it is refused offer-withdrawn
-//   souls.mjs together offer <activity> <body id|name> [...]   any other activity the world serves, by its word
-//                                             (`together kinds` lists them); accept|decline <activity> answers the
-//                                             newest offer of it (0.135)
 //   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
 //   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
@@ -142,7 +139,7 @@ import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/
 import { runShoot } from '../shoot/shoot.mjs';
 import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
-import { accountPair, hasAccount } from '../account/account.mjs';
+import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
@@ -208,21 +205,53 @@ const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
  * Starts W2's pairing detached, its lines in `<home>/pairing.log`, and gives its first: the link and code, or the
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
  */
-async function pairing(home, url, { within = 15_000 } = {}) {
+async function pairing(home, url, { within = 15_000, name } = {}) {
   const { directory, world, gateway } = await pairAddress(url);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
-  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls.mjs'], {
-    detached: true, stdio: ['ignore', out, out], env: { PATH: process.env.PATH ?? '', SOULS_HOME: home },
+  // --start: once approved, the pairing starts the Soul's daemon, which joins the world by itself (named by --name).
+  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls.mjs', '--start', ...(name ? ['--name', name] : [])], {
+    detached: true, stdio: ['ignore', out, out],
+    env: { PATH: process.env.PATH ?? '', SOULS_HOME: home, ...(process.env.SOULS_REPLICA_PKG ? { SOULS_REPLICA_PKG: process.env.SOULS_REPLICA_PKG } : {}) },
   }).unref();
   for (const until = Date.now() + within; Date.now() < until;) {
     const first = readFileSync(log, 'utf8').split('\n').find((l) => l.startsWith('{'));
-    if (first) return { ...JSON.parse(first), then: 'look, once your owner has approved' };
+    if (first) {
+      const asked = JSON.parse(first);
+      return { ...asked, then: 'look, once your owner has approved: the Soul then joins the world by itself',
+        ...(asked.ok !== false && !name ? { name: 'none given: ask your owner what to call this Soul (or choose one), then run: profile name "<Name>". It is not born without one.' } : {}) };
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
+}
+
+/**
+ * Where a pairing started here stands while this home holds no Soul yet, from `<home>/pairing.log`: waiting for the
+ * owner's approval (its link and code), refused (why), or approved and arriving; null when no pairing was started.
+ */
+export function pairingState(home) {
+  let lines;
+  try { lines = readFileSync(join(home, 'pairing.log'), 'utf8').split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)); } catch { return null; }
+  const ask = lines.find((l) => l.step === 'approve'), last = lines.at(-1);
+  if (!last) return null;
+  if (last.ok === false) return { ok: true, in_world: false, pairing: 'refused', code: last.code, say: `Not in the world: the pairing ended (${last.code}). Run pair again for a new link and code.` };
+  if (last.soul) return { ok: true, in_world: false, pairing: 'approved', soul: last.soul, say: 'Approved: your Soul is arriving. Look again in a few seconds.' };
+  return { ok: true, in_world: false, pairing: 'waiting', link: ask?.link, code: ask?.code,
+    say: `Not in the world yet: waiting for your owner to approve. They open ${ask?.link ?? 'the link pair printed'} signed in and check the code ${ask?.code ?? ''}; the card is also on the world page. Then your Soul joins by itself.` };
+}
+
+/**
+ * The approval as plain lines for the person (`pair` writes them to stderr beside its JSON answer): the link alone on
+ * its line, so a terminal or a chat shows it as a link, the site to be signed in to, the code, and where else the card is.
+ */
+export function approvalText({ link, code }) {
+  let site = 'the world\'s site';
+  try { site = new URL(link).host; } catch { /* a link that is not a url is still printed as it came */ }
+  return `Approve this Soul: open this link while signed in to ${site}, and check it shows the code ${code}:\n${link}\n` +
+    'The card also appears on the world page if it is open.\n';
 }
 
 /** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
@@ -327,7 +356,11 @@ export function requestOf(argv) {
     if (opts.close !== undefined && !['done', 'failed'].includes(opts.close)) return { refused: 'ack-close', detail: 'ack <message id> "<reply>" --close done|failed' };
     Object.assign(req, { id: rest[0], reply: rest.slice(1).join(' '), ...(opts.close !== undefined ? { close: opts.close } : {}) });
   }
-  if (op === 'pair') { req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true; }
+  if (op === 'pair') {
+    const n = rest.indexOf('--name');
+    if (n >= 0) { req.name = rest[n + 1]; rest.splice(n, 2); }
+    req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true;
+  }
   if (op === 'pray') req.words = rest.join(' ');
   if (op === 'say' || op === 'shout') {
     // C26: a shout is a say at a raised voice; --to names whom it is for, --gesture what the body does toward them.
@@ -492,6 +525,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
         const phase = end.answer === 'receipt' ? 'done' : end.answer;
         return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
           ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
+          // The world's own words for why (`together.too-far`: how far apart, how far its move reaches).
+          ...(phase === 'refused' && end.detail ? { detail: end.detail } : {}),
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
           // 0.133: a walk's end, how far from its target it stood, metres
@@ -697,8 +732,17 @@ if (isMain(import.meta.url)) {
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
-    else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
+    else if (req.op === 'pair') {
+      const paired = req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url, { name: req.name });
+      // Paired at once by the account: its name now, so its first join carries it.
+      if (paired?.paired && paired.soul && req.name) paired.profile = await soulProfile(home, paired.soul, ['name', req.name]).then((p) => p.profile, (e) => ({ failed: e.code ?? 'profile' }));
+      if (paired?.step === 'approve' && paired.link) process.stderr.write(approvalText(paired));
+      out(paired); process.exit(0);
+    }
     else {
+      // Before the owner approves there is no Soul here: look and status say where the pairing stands, plainly.
+      const waiting = ['look', 'status'].includes(req.op) && soulsWithTokens(home).length === 0 ? pairingState(home) : null;
+      if (waiting) { out(waiting); process.exit(0); }
       const { soul, resident } = await chooseCommandSoul(home, named);
       // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
