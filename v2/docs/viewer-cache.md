@@ -34,6 +34,8 @@ price are the owner's (C4 on #2636).
    |---|---|---|
    | A part (`<stream>/<n>`) or a bundle's header (`…/headers/<hash>`) | 200 | `public, max-age=31536000, immutable, no-transform` |
    | The pointer (`<stream>/pointer`) | 200 | `public, max-age=1, no-transform` |
+   | A world's history object rewritten in place: `history/everyone/events/…`, `history/everyone/counts/…`, `bundles/<day>/index`, an open bundle `bundles/<day>/<start>` | 200, or 304 when `If-None-Match` names its ETag | `public, no-cache, no-transform` |
+   | A sealed bundle (`bundles/<day>/<start>-<sha256>`) or a world's history `header` | 200 | `public, max-age=31536000, immutable, no-transform` |
    | One valid `Range` on an immutable file (a crossing reader asks for a baseline's first 16 bytes) | 206, those bytes of the decoded file, never encoded | `public, max-age=31536000, immutable, no-transform` |
    | A `Range` that starts past the end of an immutable file | 416, `Content-Range: bytes */<size>` | `no-store` |
    | Anything not there, a temporary file (`*.tmp`), a URL with a query string, a path outside the directory | 404 | `no-store` |

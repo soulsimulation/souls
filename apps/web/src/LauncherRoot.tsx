@@ -1,6 +1,6 @@
 // The launcher homepage (`<base>/`, new worlds): its own lazy chunk with its Clerk, so a world page never downloads
 // either (P1 phones: main.tsx loads it only on the homepage).
-import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/clerk-react';
+import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/react';
 import { useEffect, useRef, useState } from 'react';
 import { clerkSatelliteOptions, startClerkSignIn } from './clerk-satellite.ts';
 import { clerkHomeRoute, homeClerkNow } from './auth-ui.ts';
