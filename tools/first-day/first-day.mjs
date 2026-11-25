@@ -307,6 +307,7 @@ export async function firstDay(opts) {
         sd.shots.push(await capture(page, d.id, 'before'));
         const t = Date.now();
         const running = turn(d.id, d.ask, { maxSec: 300 });
+        let acted = false, acting0 = null;
         let done = null, reacted = null, mid = false, lastMove = Date.now(), last = mine(before, soul);
         running.then(() => { done = Date.now(); });
         const trailX = [];
@@ -320,6 +321,11 @@ export async function firstDay(opts) {
           if ((changed || spoke) && reacted == null) reacted = elapsed;
           if (changed) lastMove = Date.now();
           if (!mid && reacted != null && elapsed - reacted > 4) { sd.shots.push(await capture(page, d.id, 'mid')); mid = true; }
+          // a dance or a workout can be over between the mid and the after shot: the eye also sees it while it plays
+          if (!acted && m?.activity && !['idle', 'walk', 'posture', 'sit'].includes(m.activity)) {
+            acting0 ??= Date.now();
+            if (Date.now() - acting0 >= 1500) { sd.shots.push(await capture(page, d.id, 'activity')); acted = true; }
+          }
           last = m ?? last;
           const still = (Date.now() - lastMove) / 1000;
           if (done && elapsed >= minSec && ((still >= 5 && m?.doing !== 'walking') || Date.now() - done > settleSec * 1000)) break;
