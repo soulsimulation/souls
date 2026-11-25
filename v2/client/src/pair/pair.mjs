@@ -217,7 +217,7 @@ if (isMain(import.meta.url)) {
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
       soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'),
-      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: 'Open the link signed in, check the code matches, and approve.' }),
+      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: `Open the link while signed in to ${new URL(link, opt('--directory')).host}, check the code matches, and approve. The card also appears on the world page if it is open.` }),
     });
     say({ ok: true, ...out });
   } catch (e) {
