@@ -774,6 +774,8 @@ pub fn exit_on_halt() -> Box<dyn FnOnce(String) + Send> {
 pub struct Wearing {
     pub catalogue: skills::wear::Catalogue,
     pub born: BTreeMap<Id, [u8; 32]>,
+    /// A look each of these Souls' bodies is born wearing on the default body (`skills::wear::LOOK`): births.json's.
+    pub looks: BTreeMap<Id, Vec<u8>>,
 }
 
 /// Where and how Souls' bodies are born (C3, #3367).
@@ -3418,6 +3420,10 @@ impl Clock {
                         && let Some(hash) = self.wear.as_ref().and_then(|w| w.born.get(&x.soul))
                     {
                         fields.insert(skills::wear::BODY, Value::Bytes(hash.to_vec()));
+                    } else if *node == x.body
+                        && let Some(look) = self.wear.as_ref().and_then(|w| w.looks.get(&x.soul))
+                    {
+                        fields.insert(skills::wear::LOOK, Value::Bytes(look.clone()));
                     }
                 }
             }
