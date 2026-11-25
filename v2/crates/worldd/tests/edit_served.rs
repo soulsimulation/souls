@@ -6268,6 +6268,21 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
     }
     assert_eq!(ends[&2], (2, "left".to_owned()), "the wave ends the dance");
     assert_eq!(ends[&3].0, 1, "and is done: {:?}", ends[&3]);
+    // A walk is a next act too: it takes the legs the dance holds, ends the dance and gets there.
+    send(&mut souls, "eden:dance", 4);
+    assert_eq!(answer(&mut souls).1, 3, "the second dance is under way");
+    std::thread::sleep(Duration::from_secs(2));
+    walk(&mut souls, &w, w.souls[0], 5, -35 * M, 30 * M);
+    let mut ends = BTreeMap::new();
+    while ends.len() < 2 {
+        let (seq, kind, reason, _) = answer(&mut souls);
+        if kind != 3 {
+            ends.insert(seq, (kind, reason));
+        }
+    }
+    assert_eq!(ends[&5].0, 1, "the walk is done: {:?}", ends[&5]);
+    assert_eq!(ends[&4].0, 2, "and ended the dance: {:?}", ends[&4]);
+    println!("the walk ended the dance: {:?}", ends[&4]);
     let log = std::fs::read(w.dir.join("log")).unwrap();
     let mut events: Vec<(String, i64)> = Vec::new();
     for rec in sim::log::recover(&log).unwrap().records {
@@ -6286,7 +6301,7 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
     }
     println!("events: {events:?}");
     let moves: Vec<_> = events.iter().filter(|e| e.0 == "souls:form-move").collect();
-    let (dance, wave) = (moves[0].1, moves.last().expect("the wave").1);
+    let (dance, wave) = (moves[0].1, moves[1].1);
     let dance_end = events
         .iter()
         .find(|e| e.0 == "souls:form-ended")

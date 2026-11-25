@@ -89,10 +89,10 @@ export function offersOf(id, entry, { moving = false } = {}) {
 }
 
 /** Whether form `f` is a gesture `say --gesture` may play (C26): moves alone, taking at most `toward` and how long it
- *  keeps up (`for`, a move's `for_s`: a clap held for a while). */
+ *  keeps up (`for`, a move's `for_s`: a clap held for a while), never an activity held until the next act (a dance). */
 export function isGesture(f) {
   return Boolean(f?.steps?.length) && f.steps.every((x) => x.step === 'move')
-    && Object.keys(f.takes ?? {}).every((k) => k === 'toward' || f.steps.some((x) => x.for_s?.arg === k));
+    && Object.keys(f.takes ?? {}).every((k) => k === 'toward' || f.steps.some((x) => x.for_s?.arg === k && !(x.for_s.default >= FOR_MOST_S)));
 }
 
 /**
