@@ -4,6 +4,7 @@
  * is part of arriving, and a quick drop-and-reconnect (the browser was busy, the network blinked) is invisible
  * because playback runs a moment behind the server on frames it already holds. */
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
+import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 
 export const RECONNECT_GRACE_MS = 3000;
 
@@ -36,6 +37,14 @@ export function heldLabel(reason: string | null | undefined): string {
   if (/graphics|3D/i.test(reason)) return 'View paused';
   if (/covered by controls/i.test(reason)) return 'View hidden';
   return 'Catching up';
+}
+
+/** How long a reason must last before the status line shows it: at once for one that blocks the view, the controls
+ *  covering it, or (#4691) a reader catching up while the line says the stream is not available (the notice is then
+ *  wrong); otherwise 4 s, so a passing gap never flashes. */
+export function reasonDelayMs(reason: string, shown: string | null, blocked: boolean): number {
+  if (blocked || /covered by controls/.test(reason)) return 0;
+  return reason === STREAM_CATCHING && shown === STREAM_NOTICE ? 0 : 4000;
 }
 
 /** True while the viewer's initial-assets gate still hides the world (a failure shows its own Retry instead). */

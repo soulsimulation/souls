@@ -15,6 +15,10 @@
 //   together accept|decline <activity>                   the newest open offer of that activity to this Soul
 //   together leave <offer id | activity>                 leaves it (\`activity:leave\`, always taken): a touch, a dance,
 //                                                        any activity; by its word, the newest of that kind in the copy
+//   together withdraw <offer id | activity>              this Soul's own offer taken back before it is answered: the
+//                                                        asker's `activity:leave` of it ends it, and an accept after it
+//                                                        is refused `offer-withdrawn`; by its word, this Soul's newest
+//                                                        offer of that activity (#4700)
 //
 // The offer's id: the other's `wait` shows `{"kind":"together","what":"offered","touch":..,"offer":..,"from":..}`.
 // When the touch is done, either one leaves it with `together leave <id>` (`activity:leave`). Holding hands,
@@ -69,7 +73,7 @@ export function activityNamed(list, word) {
 }
 
 const ID = /^[0-9a-f]{32}-\d+$/;
-const USAGE = `together offer <${Object.keys(KINDS).join('|')}|any activity \`together kinds\` lists> <body id> [<body id> ...] | together accept|decline|leave <offer id | activity>`;
+const USAGE = `together offer <${Object.keys(KINDS).join('|')}|any activity \`together kinds\` lists> <body id> [<body id> ...] | together accept|decline|leave|withdraw <offer id | activity>`;
 const no = (code, detail) => ({ code, detail });
 
 /** The intents a `together` request sends, or a refusal by name. `place` is the node the offer goes under. */
@@ -90,6 +94,11 @@ export function togetherIntents(req, { place, kinds = {} }) {
     case 'accept': case 'decline': case 'leave': {
       if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', `together ${req.do} <offer id | activity>`);
       return [{ verb: `activity:${req.do}`, target: req.offer }];
+    }
+    // The asker leaving its own offer, nobody in it yet, ends it (`sim::activity` leave and withdraw).
+    case 'withdraw': {
+      if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', 'together withdraw <offer id | activity>');
+      return [{ verb: 'activity:leave', target: req.offer }];
     }
     default: return no('together-usage', USAGE);
   }

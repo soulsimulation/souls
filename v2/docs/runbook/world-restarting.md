@@ -49,10 +49,12 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
   `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
   holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
-  log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
-  so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
-  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first. Each object leaves the spool as soon
-  as the store holds it, so a refused pass resumes where it stopped and never sends the spool again.
+  log is (`behind_bytes` says how much). Each object the store holds moves to `stream-backup/kept/` at once, so a
+  refused pass resumes where it stopped and never sends the spool again, and a restart, even after a SIGKILL,
+  recovers the chain from this disk (the spool's head, its objects and `kept/`) and serves viewers without waiting on
+  the store, with the exact bytes they were shown; only a chain the machine did not write (no `stream-backup/`) is
+  read from the store, and what it reads is kept. Do not delete `stream-backup/` on a running machine. A stop
+  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
 - **A store that stalls after the archive opens.** A running history archiver never stops on a store that does not
   answer: the write (or read) it is on is tried again after 1, 2, 4 … s, then every 60 s, until the store answers,
   and the parts that come meanwhile wait in order: up to 64 MiB of them in memory, the rest in the log on the disk,

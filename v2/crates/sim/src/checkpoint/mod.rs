@@ -88,21 +88,44 @@ impl Blobs {
         self.0.is_empty()
     }
 
+    /// A node's record (`below_field` 10) also names its big fields' records below it (key 0, `[[field, hash],
+    /// ...]`, #4713).
     fn put(&mut self, hash: Vec<u8>, bytes: Vec<u8>, below_field: u64) -> R<()> {
         let below = match decode(&bytes)
             .or_else(|e| refuse("checkpoint-record", e.to_string()))?
             .value
         {
-            Value::Map(mut m) => match m.remove(&below_field) {
-                Some(Value::Array(a)) => a
-                    .into_iter()
-                    .map(|v| match v {
-                        Value::Bytes(b) => Ok(b),
-                        _ => refuse("checkpoint-record", "a hash is not bytes"),
-                    })
-                    .collect::<R<_>>()?,
-                _ => Vec::new(),
-            },
+            Value::Map(mut m) => {
+                let mut below: Vec<Vec<u8>> = match m.remove(&below_field) {
+                    Some(Value::Array(a)) => a
+                        .into_iter()
+                        .map(|v| match v {
+                            Value::Bytes(b) => Ok(b),
+                            _ => refuse("checkpoint-record", "a hash is not bytes"),
+                        })
+                        .collect::<R<_>>()?,
+                    _ => Vec::new(),
+                };
+                if below_field == 10
+                    && let Some(Value::Array(bigs)) = m.remove(&0)
+                {
+                    for p in bigs {
+                        match p {
+                            Value::Array(mut p) if p.len() == 2 => match p.pop() {
+                                Some(Value::Bytes(b)) => below.push(b),
+                                _ => return refuse("checkpoint-record", "a hash is not bytes"),
+                            },
+                            _ => {
+                                return refuse(
+                                    "checkpoint-record",
+                                    "a big field is not [field, hash]",
+                                );
+                            }
+                        }
+                    }
+                }
+                below
+            }
             _ => return refuse("checkpoint-record", "a record is not a map"),
         };
         self.0.insert(hash, Blob { bytes, below });
