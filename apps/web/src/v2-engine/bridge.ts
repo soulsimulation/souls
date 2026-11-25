@@ -450,7 +450,9 @@ export class V2Bridge {
     const first = Math.max(end - this.keep * this.chunk, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / this.chunk) * this.chunk);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
-    const souls = new Map(bodies.map((b) => {
+    // First day (25 Nov): a body-kind node with no Soul link (an imported resident figure) is drawn but is not a Soul:
+    // the Souls panel, the navbar and the card list only bodies a Soul drives.
+    const souls = new Map(bodies.filter((b) => !!this.nodes.get(b.node)?.soul).map((b) => {
       const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node));
       const state = doing === 'idle' || doing === 'zombie' || doing === 'asleep' ? doing : 'awake';
       return [b.soul, { id: b.soul, entityId: b.entity, name: b.name, description: b.description, doing, state } satisfies V2Soul];
