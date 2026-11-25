@@ -644,6 +644,24 @@ fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result
     }
 }
 
+/// The first probe of a world that has just started (or of a rehearsal's copy fed nothing): a world listens once its
+/// clock's first tick is done and then catches up, tick by tick, the time since its log's last record (world time never
+/// stops). A quiet world's catch-up is that whole quiet stretch: 1dad on 0.136.0's move, 144k ticks after two quiet
+/// hours, longer than a tick's 2 s (`canary.unanswered: operator act`); Eden's rehearsal copy over 400k. So the probe has
+/// the start bound, and one whose intent (5 s, real time) expired in the catch-up (`intent.expired`) is sent again, a new
+/// intent, until the world answers one or the bound ends. Any other refusal, or no answer, fails as before, and only a
+/// receipt passes.
+fn probe_after_start(s: &mut UnixStream, probe: &mut Probe, c: &Canary) -> Result<(), String> {
+    let until = Instant::now() + c.start_within;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        match probe_once(s, probe, left.max(c.answer_within)) {
+            Err(e) if e == "canary.refused: intent.expired" && !left.is_zero() => {}
+            r => return r,
+        }
+    }
+}
+
 /// Watches the world behind `socket` for the canary's window; `Ok` when it stayed healthy, else the first fault.
 /// With `until_healthy`, ends `Ok` at the first receipt instead (a rolled-back world serving again).
 pub fn watch(
@@ -704,14 +722,24 @@ fn watch_inner(
 ) -> Result<(), String> {
     let end = Instant::now() + c.window;
     let mut link: Option<UnixStream> = None;
+    // The first probe after each connect meets the start's catch-up ([`probe_after_start`]); later ones a tick's bound.
+    let mut started = false;
     loop {
         let s = match link.as_mut() {
             Some(s) => s,
-            None => link.insert(connect_or_exit(socket, c.start_within, exited)?),
+            None => {
+                started = false;
+                link.insert(connect_or_exit(socket, c.start_within, exited)?)
+            }
         };
-        match probe_once(s, probe, c.answer_within) {
+        let probed = if started {
+            probe_once(s, probe, c.answer_within)
+        } else {
+            probe_after_start(s, probe, c)
+        };
+        match probed {
             Ok(()) if until_healthy => return Ok(()),
-            Ok(()) => {}
+            Ok(()) => started = true,
             // A world that died after it served is reached again, within the start limit, or is not serving.
             Err(e) if e.starts_with("canary.not-serving") && Instant::now() < end => {
                 link = None;
@@ -911,23 +939,11 @@ pub fn rehearse(
     };
     let checking = own.as_mut().unwrap_or(probe);
     // With no recorded intent fed (a quiet window, as Eden's on 0.136), the probe is the copy's first ask and meets
-    // its catch-up: it has the start bound, as the first fed tick does. After a fed intent's answer it has a tick's.
-    let first = if fed.is_empty() {
-        c.start_within
+    // its catch-up ([`probe_after_start`]). After a fed intent's answer it has a tick's.
+    let checked = if fed.is_empty() {
+        probe_after_start(&mut s, checking, c)
     } else {
-        c.answer_within
-    };
-    // Its intent expires 5 s after it is sent, in real time: one sent while the copy still catches up (Eden's 400k
-    // ticks) is refused `intent.expired` when the copy takes it. It is sent again, a new intent, until the copy answers
-    // one or the start bound ends; any other refusal, or no answer, fails as before, and only a receipt passes.
-    let caught_up = Instant::now() + first;
-    let checked = loop {
-        let left = caught_up.saturating_duration_since(Instant::now());
-        match probe_once(&mut s, checking, left.max(c.answer_within)) {
-            Err(e)
-                if fed.is_empty() && e == "canary.refused: intent.expired" && !left.is_zero() => {}
-            r => break r,
-        }
+        probe_once(&mut s, checking, c.answer_within)
     };
     let cleaned = cleanup_operator(&socket_path(scratch), c, checking, &mut || None);
     match (checked, cleaned) {
@@ -1525,6 +1541,71 @@ mod tests {
             "the pin never moved"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 0.136.0's move: 1dad restarted on the new build catching up two quiet hours, and the live watch's first operator
+    /// act had a tick's 2 s (`canary.unanswered: operator act`); the old build, restarted from the new one's records,
+    /// had nothing to catch up. A world that answers its first ask only after catching up, and that ask expired, is
+    /// watched healthy; one that never answers still fails.
+    #[test]
+    fn a_watch_waits_out_a_restarted_worlds_catch_up_and_fails_a_silent_one() {
+        let dir = std::env::temp_dir().join(format!("catch-up-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = Canary {
+            window: Duration::from_millis(600),
+            start_within: Duration::from_secs(5),
+            answer_within: Duration::from_millis(200),
+            every: Duration::from_millis(100),
+        };
+        // A world that catches up for `delay` ms, then answers asks; its first ask expired in the catch-up.
+        let world = |sock: PathBuf, delay: Option<u64>| {
+            let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+            std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let Some(ms) = delay else {
+                    std::thread::sleep(Duration::from_secs(8));
+                    return;
+                };
+                std::thread::sleep(Duration::from_millis(ms));
+                let mut expire = true;
+                while let Ok(frame) = read_or_closed(&mut s, Duration::from_secs(10)) {
+                    let Value::Map(m) = decode(&frame).unwrap().value else {
+                        panic!("a map")
+                    };
+                    let n = m[&wire::ASK].clone();
+                    let answer = if std::mem::take(&mut expire) {
+                        Value::Map(BTreeMap::from([
+                            (wire::ASK, n),
+                            (
+                                wire::REFUSED,
+                                Value::Text(Name::new("intent.expired").unwrap()),
+                            ),
+                        ]))
+                    } else {
+                        Value::Map(BTreeMap::from([
+                            (1, Value::Uint(1)),
+                            (wire::ASK, n),
+                            (wire::IDS, Value::Array(vec![Value::Bytes(vec![1])])),
+                        ]))
+                    };
+                    if !send(&mut s, &encode(&answer).unwrap()) {
+                        return;
+                    }
+                }
+            })
+        };
+        let sock = dir.join("late.sock");
+        let t = world(sock.clone(), Some(1500));
+        watch(&sock, &c, &mut Probe::Ask(0), false).expect("healthy once caught up");
+        drop(t);
+        let sock = dir.join("silent.sock");
+        let _t = world(sock.clone(), None);
+        assert!(
+            watch(&sock, &c, &mut Probe::Ask(0), false).is_err(),
+            "a world that never answers still fails"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
