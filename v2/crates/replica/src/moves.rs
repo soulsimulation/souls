@@ -93,6 +93,10 @@ pub struct Move {
     /// µm.
     pub reach: i64,
     pub contact: Name,
+    /// Made from a seat (#4143): a body a slot holds (seated, lying, in a standing slot) makes it with its legs left to
+    /// the slot, which neither its claims nor its blocks take (`sim::forms`): a seated stretch or slump. Written
+    /// `{10: 1}`, and only when set, so a move without it keeps its hash.
+    pub seated: bool,
 }
 
 fn class(v: &Value) -> R<Class> {
@@ -139,7 +143,7 @@ impl Move {
         let Value::Map(m) = v else {
             return refuse("not-a-move", "a move is a map");
         };
-        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 9) {
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 10) {
             return refuse("not-a-move", format!("field {k}"));
         }
         let name = text(m.get(&1), "the name")?;
@@ -227,6 +231,11 @@ impl Move {
             );
         }
         let contact = text(m.get(&9), "the contact point")?;
+        let seated = match m.get(&10) {
+            None => false,
+            Some(Value::Uint(1)) => true,
+            Some(_) => return refuse("not-a-move", "a move made in a slot is {10: 1}"),
+        };
         Ok(Move {
             name,
             revision,
@@ -237,6 +246,7 @@ impl Move {
             effector,
             reach,
             contact,
+            seated,
         })
     }
 
@@ -282,7 +292,7 @@ impl Move {
                 Value::Map(m)
             })
             .collect();
-        Value::Map(BTreeMap::from([
+        let mut m = BTreeMap::from([
             (1, Value::Text(self.name.clone())),
             (2, Value::Uint(self.revision)),
             (3, Value::Array(self.claims.iter().map(want).collect())),
@@ -292,7 +302,11 @@ impl Move {
             (7, effector),
             (8, int(self.reach)),
             (9, Value::Text(self.contact.clone())),
-        ]))
+        ]);
+        if self.seated {
+            m.insert(10, Value::Uint(1));
+        }
+        Value::Map(m)
     }
 
     /// The move's revision: the hash of its meaning, `souls/move/1` over its encoded value (`v2/docs/ids.md`
@@ -376,6 +390,7 @@ impl Move {
             effector,
             reach: whole(e.get("reach_mm"), "reach_mm")?.saturating_mul(1000),
             contact: entry_name("souls:contact")?,
+            seated: matches!(e.get("seated"), Some(J::Bool(true))),
         };
         Move::from_value(&mv.to_value())
     }

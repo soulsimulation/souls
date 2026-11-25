@@ -1628,7 +1628,9 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
 
 /// #4143: a gesture whose move claims the legs (`content/moves/stretch.json`, `slump.json`) on a seated body. The
 /// client's form rules say yes (the form has no posture need); the seat's hold on the legs refused the move
-/// `resource-held`. Made from the seat, its legs left to it: the run ends `done` and the body is still seated.
+/// `resource-held`. A move made from a seat (`Move::seated`) leaves its legs to the seat: the run ends `done` and the
+/// body is still seated. Any other move that claims the legs (a jump) is still refused `resource-held` by the seat's
+/// hold, as a gateway sit writes no posture for the form's posture need to refuse it by.
 #[test]
 fn a_seated_stretch_is_made_from_the_seat_never_refused_resource_held() {
     use replica::bodies::Want;
@@ -1647,36 +1649,47 @@ fn a_seated_stretch_is_made_from_the_seat_never_refused_resource_held() {
         b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
         Some("done".into())
     );
-    // A stretch: a hand move that also claims and blocks the legs, reaching anywhere the test's reach says (5 m).
-    let mut stretch = b
+    // A stretch, made from a seat (`seated`), and a jump, not: hand moves that also claim and block the legs,
+    // reaching anywhere the test's reach says (5 m).
+    let press = b
         .library
         .iter()
         .find(|m| m.name.as_str() == "souls:press")
         .expect("press")
         .clone();
-    stretch.name = Name::new("test:stretch").expect("a name");
-    stretch.claims.push(Want::All(Class::Locomotion));
-    stretch.blocks.push(Class::Locomotion);
-    stretch.reach = 20_000_000;
-    b.library.push(stretch);
+    for (n, seated) in [("test:stretch", true), ("test:jump", false)] {
+        let mut mv = press.clone();
+        mv.name = Name::new(n).expect("a name");
+        mv.claims.push(Want::All(Class::Locomotion));
+        mv.blocks.push(Class::Locomotion);
+        mv.reach = 20_000_000;
+        mv.seated = seated;
+        b.library.push(mv);
+    }
     b.snap.far = true;
-    let mv = Step::Move {
-        name: Name::new("test:stretch").expect("a name"),
-        at: None,
-        on: None,
-        repeat: None,
-    };
-    b.steps(body, body, vec![mv], intent(body, 1), Limits::default())
-        .expect("started");
-    b.run(30_000_000);
-    let e = b.forms.ended.pop().expect("ended");
-    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
-    println!(
-        "#4143: a seated stretch ended {}, body in {held:?}",
-        e.how.as_str()
-    );
-    assert_eq!(e.how.as_str(), "done", "not resource-held");
-    assert_eq!(held, Some(chair), "still seated");
+    for (k, (n, how)) in [("test:jump", "resource-held"), ("test:stretch", "done")]
+        .into_iter()
+        .enumerate()
+    {
+        let mv = Step::Move {
+            name: Name::new(n).expect("a name"),
+            at: None,
+            on: None,
+            repeat: None,
+        };
+        let i = intent(body, 1 + k as u64);
+        b.steps(body, body, vec![mv], i, Limits::default())
+            .expect("started");
+        b.run(30_000_000);
+        let e = b.forms.ended.pop().expect("ended");
+        let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+        println!(
+            "#4143: seated, {n} ended {}, body in {held:?}",
+            e.how.as_str()
+        );
+        assert_eq!(e.how.as_str(), how, "{n}");
+        assert_eq!(held, Some(chair), "{n}: still seated");
+    }
 }
 
 /// 0.135 E17: a form's own `walk_to` while the body is in a slot of the thing. A form that leaves the body there (a

@@ -82,8 +82,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
     claim on the legs ends the run (`claim-taken`); in a hand move the run is left (`left`) at that move's next phase
     end, its contact or its end, never mid-contact, and the walk goes on (an effect landed at the contact stays; 0.134
     I4). Only a walk sent after the run does: a hand move sent while its Soul walks (a point, a look, a wave) is made
-    as the walk goes on, and both end by their own receipts (#4171). A walk whose legs a newer move of its Soul's takes
-    (a jump, a bow) ends `claim-taken`. `form-running` is left only for a run of another actor (#4187).
+    as the walk goes on, and both end by their own receipts (#4171). A walk whose legs a newer claim takes ends `claim-taken`:
+    a newer move of its Soul's (a jump, a bow), or any other driver the controller lets cancel it. `form-running` is left only for a run of another actor (#4187).
     An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
     between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
     answer leaves, so the logged answer never holds it.
