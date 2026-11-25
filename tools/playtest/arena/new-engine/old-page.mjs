@@ -11,6 +11,9 @@
 //      that world's page to the launcher and its stream, agents and pairing to run.sh's programs.
 //   4. `v2-switch.mjs` binds the world to the new engine's stream (run.sh's routes file gains its entry).
 //
+// run.sh's programs are release builds, as on soul.game (`releaseBin`: built once, or V2_BIN's): a debug world does not
+// keep real time on Eden on a busy laptop.
+//
 //   node tools/playtest/arena/new-engine/old-page.mjs [--template worlds/templates/hello-hamlet.json] [--dir <folder>] [--create] [--bodies <dir>]
 //
 // --bodies: a built body catalogue (`v2/tools/import-body/presets.ts --out <dir>`), served at the world's `v2/bodies/`
@@ -76,8 +79,21 @@ function start(name, cmd, args, ready, { dir, env = {} }) {
 }
 const safeRead = (f) => { try { return readFileSync(f, 'utf8'); } catch { return ''; } };
 
-/** The directory programs run.sh runs (its `BIN`: V2_BIN, else the Cargo target's debug folder). */
-const v2Bin = () => process.env.V2_BIN ?? join(process.env.CARGO_TARGET_DIR ?? join(REPO_ROOT, 'v2/target'), 'debug');
+/** The programs run.sh runs (its `BIN`): V2_BIN, else the Cargo target's release folder (`releaseBin`). */
+const v2Bin = () => process.env.V2_BIN ?? join(process.env.CARGO_TARGET_DIR ?? join(REPO_ROOT, 'v2/target'), 'release');
+
+/** run.sh's programs as soul.game runs them, optimised (PR #4790's finding): a debug `worldd` keeps a third to half of
+ *  real time on Eden on a laptop (its parts fall minutes behind the world's clock, and a 73 s walk is drawn over 150 to
+ *  270 s), where a release one keeps it. Built once into the Cargo target's release folder (incremental after); with
+ *  V2_BIN set, nothing is built and those are run. → the folder */
+export function releaseBin() {
+  if (process.env.V2_BIN) return process.env.V2_BIN;
+  const cargo = (...a) => execFileSync('cargo', ['build', '--release', '--locked', ...a], { cwd: join(REPO_ROOT, 'v2'), stdio: 'inherit' });
+  cargo('-p', 'worldd', '-p', 'gatewayd', '-p', 'directoryd', '-p', 'testworld');
+  cargo('-p', 'assets', '--bin', 'assets-check');
+  cargo('-p', 'directoryd', '--bin', 'register-world');
+  return v2Bin();
+}
 
 /** With history on, run.sh's world keeps its records in a folder store and reads its one creator from the directory's
  *  record there (worldd `serve.rs` `creator`), which nothing in a local run writes: every creator edit would be refused
@@ -175,7 +191,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   let creating = null;
   const stop = async () => { for (const p of procs.reverse()) kill(p); creating?.close(); if (world) await stopWorld(world); };
   try {
-    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history });
+    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history, env: { V2_BIN: releaseBin() } });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
     if (history) await registerCreator(world);
     const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;

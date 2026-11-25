@@ -933,8 +933,14 @@ function form(f, path, ctx, err) {
     if (s.step === 'walk_to') { only(s, ['step', 'point'], p, err); place(s.point, `${p}.point`); }
     else if (s.step === 'sit') { only(s, ['step', 'slot'], p, err); slot(s.slot, `${p}.slot`); }
     else if (s.step === 'move') {
-      only(s, ['step', 'move', 'at', 'toward'], p, err);
+      only(s, ['step', 'move', 'at', 'toward', 'for_s'], p, err);
       if (typeof s.move !== 'string' || !IDENT.test(s.move)) err(`${p}.move`, 'names a move (moves are data, SA-D4)');
+      // 0.135: the move repeats back to back for whole seconds (1 to 3600), written out or a `count` argument with a default
+      const secs = (n) => isInt(n) && n >= 1 && n <= 3600;
+      if (s.for_s !== undefined && !secs(s.for_s)) {
+        if (!(isObj(s.for_s) && typeof s.for_s.arg === 'string' && (s.for_s.default === undefined || secs(s.for_s.default)))) err(`${p}.for_s`, 'whole seconds from 1 to 3600, or {"arg": <a count it takes>, "default": <seconds>}');
+        else { only(s.for_s, ['arg', 'default'], `${p}.for_s`, err); arg(s.for_s, `${p}.for_s`, ['count']); }
+      }
       if (s.at !== undefined) place(s.at, `${p}.at`);
       if (s.toward !== undefined && !isArg(s.toward)) err(`${p}.toward`, 'an argument');
       else if (s.toward !== undefined) arg(s.toward, `${p}.toward`, ['thing', 'slot', 'part']);

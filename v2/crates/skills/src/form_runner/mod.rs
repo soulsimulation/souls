@@ -121,12 +121,19 @@ pub enum Step {
         at: Vec3,
         on: Option<Id>,
         approach: bool,
+        /// The way the body faces once there (0.135): its stand point's `yaw_mdeg` turning the node's +z, 1 m long,
+        /// in the node's axes and turned with `at` ([`turn`]). None: toward the point, or the thing's origin for a
+        /// body standing on the point (the world's turn, `sim::forms`).
+        face: Option<Vec3>,
     },
-    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
+    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact. With
+    /// `repeat`, µs, the move starts again as each ends, with no pause, until that long has passed since the step
+    /// began: the last whole move ends the step (a dance for a minute, [`for_us`]).
     Move {
         name: Name,
         at: Option<Name>,
         on: Option<Id>,
+        repeat: Option<Micros>,
     },
     /// A `take` or `put` that names no move: a hand step whose contact is its start.
     Hand,
@@ -256,6 +263,34 @@ fn point(entry: &Value, p: &str) -> Result<Vec3, Refusal> {
     }
 }
 
+/// The way a body standing at point `p` faces (0.135): the point's `yaw_mdeg` (a slot's: its stand point's) turning
+/// the kind's +z, 1 m long, in the kind's axes; none when the point names no yaw.
+fn facing(entry: &Value, p: &str) -> Result<Option<Vec3>, Refusal> {
+    let points = entry.get("points");
+    let stand = entry
+        .get("slots")
+        .and_then(|s| s.get(p))
+        .and_then(|s| s.get("stand"))
+        .and_then(Value::str);
+    let yaw = points
+        .and_then(|s| s.get(p))
+        .or_else(|| stand.and_then(|s| points.and_then(|x| x.get(s))))
+        .and_then(|x| x.get("yaw_mdeg"));
+    let Some(Value::Int(mdeg)) = yaw else {
+        return Ok(None);
+    };
+    let bad = |e: replica::pose::PoseRefusal| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: {e:?}"),
+    };
+    let mdeg = i64::try_from(*mdeg).map_err(|_| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: yaw_mdeg out of range"),
+    })?;
+    let q = Quat::from_yaw_mdeg(mdeg).map_err(bad)?;
+    q.rotate(Vec3::new(0, 0, 1_000_000)).map(Some).map_err(bad)
+}
+
 /// A move named in a form: a bare name is in the `souls` namespace, as the engine's moves are (B2).
 fn move_name(t: &str) -> Result<Name, Refusal> {
     if t.contains(':') {
@@ -263,6 +298,49 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
     } else {
         a_name(&format!("souls:{t}"))
     }
+}
+
+/// How often a repeated move's record for viewers is written again, µs: a viewer who comes in mid-dance draws it
+/// within this long, and an hour's dance is 240 records, not one a move.
+pub const REWRITE_US: Micros = 15_000_000;
+
+/// The most a repeated move may go on, s (an hour): a Soul asked to keep on until told to stop asks for this, and
+/// its `stop` ends it sooner.
+pub const FOR_MOST_S: i64 = 3_600;
+
+/// A move step's `for_s` (0.135): how long the move repeats, whole seconds from 1 to [`FOR_MOST_S`], as µs. Written
+/// out, or `{"arg": a, "default": n}`: the act's whole number `a` (a `count` it takes, or the same digits as a name,
+/// as `act dance for=60` sends them), else `default`. Refused `out-of-range`, `arg-not-a-number`, `arg-missing` (no
+/// argument and no default) or `step-malformed`.
+fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
+    let n = match v {
+        Value::Int(n) => i64::try_from(*n).unwrap_or(i64::MAX),
+        _ => {
+            let Some(a) = v.get("arg").and_then(Value::str) else {
+                return refuse(
+                    "step-malformed",
+                    "move.for_s: whole seconds or {\"arg\": name, \"default\": seconds}",
+                );
+            };
+            match (args.get(a), v.get("default")) {
+                (Some(Arg::Int(n)), _) => *n,
+                (Some(Arg::Name(t)), _) => match t.parse::<i64>() {
+                    Ok(n) if t.bytes().all(|b| b.is_ascii_digit()) => n,
+                    _ => return refuse("arg-not-a-number", format!("{a}: {t}")),
+                },
+                (Some(_), _) => return refuse("arg-not-a-number", a),
+                (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
+                (None, _) => return refuse("arg-missing", a),
+            }
+        }
+    };
+    if !(1..=FOR_MOST_S).contains(&n) {
+        return refuse(
+            "out-of-range",
+            format!("for: {n} s; from 1 to {FOR_MOST_S} s"),
+        );
+    }
+    Ok(n * 1_000_000)
 }
 
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
@@ -365,11 +443,16 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
+                    let face = match on {
+                        None => facing(entry, point.as_str())?,
+                        Some(_) => None,
+                    };
                     Ok(Step::WalkTo {
                         point,
                         at,
                         on,
                         approach: false,
+                        face,
                     })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
@@ -428,6 +511,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
+                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?,
                     })
                 }
                 "wait" => match s.get("us") {
@@ -498,6 +582,7 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
             at: Vec3::new(to.x, 0, to.z),
             on: None,
             approach: true,
+            face: None,
         };
         bound.insert(k, step);
     }
@@ -548,6 +633,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
                 approach: false,
+                face: None,
             };
             bound.insert(k, step);
             k += 1;
@@ -640,13 +726,18 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            face,
             ..
         } = s
         {
-            *at = q.rotate(*at).map_err(|e| Refusal {
+            let unturnable = |e: replica::pose::PoseRefusal| Refusal {
                 name: "point-unturnable",
                 detail: format!("{}: {e:?}", point.as_str()),
-            })?;
+            };
+            *at = q.rotate(*at).map_err(unturnable)?;
+            if let Some(f) = face {
+                *f = q.rotate(*f).map_err(unturnable)?;
+            }
         }
     }
     Ok(())
@@ -1745,6 +1836,14 @@ pub struct Runner {
     /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
     /// point again from the floor it came onto.
     again: bool,
+    /// When the step in progress began, µs: a repeated move ([`Step::Move`]'s `repeat`) goes on until its length
+    /// has passed since then.
+    since: Micros,
+    /// The move asked for last is a repeat of the step's move that writes no record for viewers: neither its first nor
+    /// one [`REWRITE_US`] after the last record ([`Runner::repeat`]).
+    again_move: bool,
+    /// When the step's record for viewers was last written, µs.
+    recorded: Micros,
     /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
     /// body out again by a rise, then ends `left`.
     backing: bool,
@@ -1785,6 +1884,9 @@ impl Runner {
             effected: false,
             leaving: false,
             again: false,
+            since: 0,
+            again_move: false,
+            recorded: 0,
             backing: false,
             rising_out: false,
         }
@@ -1815,6 +1917,19 @@ impl Runner {
     pub fn next_step(&self) -> Option<&Step> {
         self.step()?;
         self.steps.get(self.at + 1)
+    }
+
+    /// The step in progress is a repeated move (a dance for a minute): when the step began and its length, µs, and
+    /// whether the move asked for last writes no record for viewers. The world writes a record at the first move and
+    /// again at the first repeat [`REWRITE_US`] after the last one, each planned to the latest the step can end, and
+    /// none for the other repeats; the run's end cuts it (0.135).
+    pub fn repeat(&self) -> Option<(Micros, Micros, bool)> {
+        match self.step()? {
+            Step::Move {
+                repeat: Some(r), ..
+            } => Some((self.since, *r, self.again_move)),
+            _ => None,
+        }
     }
 
     /// The number of the step in progress, if the run has not ended.
@@ -1908,7 +2023,12 @@ impl Runner {
                 }
                 Next::Walk(Box::new(walk))
             }
-            Step::Move { name: mv, at, on } => {
+            Step::Move {
+                name: mv, at, on, ..
+            } => {
+                self.since = host.now();
+                self.again_move = false;
+                self.recorded = self.since;
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
@@ -2048,6 +2168,34 @@ impl Runner {
             {
                 self.effect_now();
                 Next::Sleep
+            }
+            // A repeated move that ran to its end starts again at once while its length has not passed.
+            (
+                Woke::Moved(how),
+                Some(Step::Move {
+                    name: mv,
+                    at,
+                    on,
+                    repeat: Some(r),
+                }),
+            ) if how.as_str() == "done" && host.now().saturating_sub(self.since) < r => {
+                if let Some(t) = self.timer.take() {
+                    host.clear_timer(t);
+                }
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                // A record again once REWRITE_US have passed since the last, so a viewer who comes in mid-dance (a
+                // page opened, reloaded or caught up) is given it within that long; else none.
+                let now = host.now();
+                self.again_move = now.saturating_sub(self.recorded) < REWRITE_US;
+                if !self.again_move {
+                    self.recorded = now;
+                }
+                Next::Move {
+                    name: mv,
+                    node: on.unwrap_or(self.node),
+                    at,
+                }
             }
             (
                 Woke::Moved(how),

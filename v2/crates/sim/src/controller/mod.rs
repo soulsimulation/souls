@@ -273,6 +273,20 @@ fn int(n: i64) -> Value {
     }
 }
 
+/// A body standing this near what it would turn to face, µm, keeps its facing: it is on it ([`facing_toward`]).
+pub const FACE_NEAR: i64 = 100_000;
+
+/// The facing (its +x turned on the level) of a body standing at `at` that faces `to`, both in its frame, µm; none
+/// within [`FACE_NEAR`] of it. The one rule for a body turning to what it came to (0.135): a walk's end at a thing or
+/// another Soul (worldd's `Bodies::face`) and a form's walk to its stand point (`crate::forms`).
+pub fn facing_toward(at: Vec3, to: Vec3) -> Option<Quat> {
+    let d = [to.x - at.x, to.z - at.z];
+    if i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2) <= i128::from(FACE_NEAR).pow(2) {
+        return None;
+    }
+    crate::activity::carry::yaw_toward(d).ok()
+}
+
 /// One part of an input, set by the driver that holds its resources.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Part {
