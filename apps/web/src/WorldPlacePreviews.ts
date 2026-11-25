@@ -21,7 +21,9 @@ export function fitPlacePreviewCamera(box:THREE.Box3,direction:THREE.Vector3,asp
 export class WorldPlacePreviews{
  private images=new Map<string,string|null>();private pending=new Map<string,Promise<string|null>>();private closed=false;private revision=0;private tail:Promise<unknown>=Promise.resolve();
  /** Every shot step waits for the visitor to be still and the browser idle (3.74 rollback: back-to-back shots starved clicks). */
- private pacer=new ShotPacer();private stopListening:()=>void;private warmed=false;
+ private pacer=new ShotPacer();private maxHidden=.4;
+ /** The drawn objects of a place that is one thing (LiveWorld: the entity layer's, for `context:<id>`); none: its region is sliced. */
+ owner:(id:string)=>readonly THREE.Object3D[]=()=>[];private stopListening:()=>void;private warmed=false;
  private renderer:THREE.WebGLRenderer;private live:()=>THREE.Scene|null;private roots:()=>readonly THREE.Object3D[];private pose:()=>()=>void;
  /** `pose` puts the live world in the shot light (PLACE_SHOT_MINUTES, clear, dry, still) and returns the undo; it wraps only
   * the one offscreen render, so the main view never draws it. */
@@ -92,13 +94,16 @@ export class WorldPlacePreviews{
    check.dispose(); output.dispose(); white.dispose(); black.dispose();
   }
  }
+ /** A headless page that only draws places (?placeShots=1, tools/world-launcher/place-shots.mjs) has no visitor to wait for,
+  * and keeps the clearest of the 8 views of a place mostly hidden (a house among trees) rather than none. */
+ forShots(){this.pacer=new ShotPacer({now:()=>performance.now(),wait:()=>Promise.resolve(),idle:()=>Promise.resolve()},0,0);this.maxHidden=.85;}
  invalidate(){this.revision++;this.images.clear();this.pending.clear();}
  private request(key:string,render:(alive:()=>boolean)=>Promise<string|null>):Promise<string|null>{
   if(this.closed)return Promise.resolve(null);if(this.images.has(key))return Promise.resolve(this.images.get(key)!);const pending=this.pending.get(key);if(pending)return pending;const revision=this.revision;
   const alive=()=>!this.closed&&revision===this.revision;
   const job=this.tail.then(()=>alive()?render(alive):null).catch(()=>null).then(image=>{if(this.closed||revision!==this.revision)return null;this.pending.delete(key);if(image)this.images.set(key,image);if(this.images.size>24)this.images.delete(this.images.keys().next().value!);return image;});this.pending.set(key,job);this.tail=job;return job;
  }
- private async render(id:string,key:string,alive:()=>boolean,location?:WorldLocation):Promise<string|null>{
+ private async render(id:string,key:string,alive:()=>boolean,location?:WorldLocation,whole=true):Promise<string|null>{
   const served=await cdnRoute(placeShotPath(key)).catch(()=>null);if(served)return served.url;  // published per build by the release (perf owns CDN): every visitor sees the same picture
   const kept=readKept(key);if(kept)return kept;
   const view=location??worldPlaceView(id as WorldPlaceId);if(!view||!await this.pacer.turn(alive))return null;const sliceStart=performance.now();  // the region slice below is its own paced step
@@ -108,7 +113,14 @@ export class WorldPlacePreviews{
   const point=new THREE.Vector3(),a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3(),matrix=new THREE.Matrix4();let triangles=0,visited=0;const worldBox=new THREE.Box3(),regionBox=new THREE.Box3(new THREE.Vector3(center.x-radius,-10000,center.z-radius),new THREE.Vector3(center.x+radius,10000,center.z+radius));
   try{
    const roots=this.roots(),owner=PREVIEW_OWNERS[id],selected=owner?roots.flatMap(root=>{const found=root.getObjectByName(owner);return found?[found]:[];}):roots;
-   for(const root of selected){root.updateWorldMatrix(true,true);root.traverse(object=>{
+   // a listed thing (Explore's `context:<id>`) is pictured from its own drawn meshes, whole, when the page draws it
+   try{for(const root of whole?this.owner(id):[]){root.updateWorldMatrix(true,true);root.traverse(object=>{
+    for(let parent:THREE.Object3D|null=object;parent&&parent!==root.parent;parent=parent.parent)if(!parent.visible)return;
+    if(!(object instanceof THREE.Mesh)||object instanceof THREE.SkinnedMesh||object instanceof THREE.BatchedMesh||Array.isArray(object.material))return;
+    const copy=object.clone(false);if(copy instanceof THREE.InstancedMesh)instances.push(copy);copy.matrixAutoUpdate=false;copy.matrix.copy(object.matrixWorld);copy.matrixWorldNeedsUpdate=true;scene.add(copy);
+   });}}catch{scene.clear();}  // a mesh that cannot be copied: its region instead
+   const owned=scene.children.length>0;
+   if(!owned)for(const root of selected){root.updateWorldMatrix(true,true);root.traverse(object=>{
     for(let parent:THREE.Object3D|null=object;parent&&parent!==root;parent=parent.parent)if(!parent.visible)return;
     if(!(object instanceof THREE.Mesh)||object instanceof THREE.SkinnedMesh||Array.isArray(object.material)||/terrain|ground|outside|sea|water|shore|rain|sky|cloud|marker|ring|label/i.test(object.name.startsWith('instances:')?'':object.name))return;  // a god thing's instanced parts are named by their def and palette ("water":…): always the thing itself
     const geometry=object.geometry,position=geometry.getAttribute('position');if(!position||triangles>24000||visited>=120000)return;
@@ -126,7 +138,8 @@ export class WorldPlacePreviews{
    const bare=!scene.children.length;if(bare&&!this.live())return null;  // nothing of the place drawn: with a live world it is still pictured (a lake that is only water), never kept
    scene.updateMatrixWorld(true);
    const inside=location?.inside;  // a one-room building: shot from inside its room at eye level, like the room cards
-   const shot=await this.shoot(scene,center,radius,inside??view,key,alive,!!inside||id.startsWith('room:')||Object.hasOwn(INTERIOR_PLACE_VIEWS,id));if(shot&&!bare)keep(key,shot);return shot;
+   const shot=await this.shoot(scene,center,radius,inside??view,key,alive,!!inside||id.startsWith('room:')||Object.hasOwn(INTERIOR_PLACE_VIEWS,id));if(!shot&&owned)return this.render(id,key,alive,location,false);  // a thing it cannot picture alone (a ground patch): its region
+   if(shot&&!bare)keep(key,shot);return shot;
   }finally{target.dispose();for(const mesh of instances)mesh.dispose();for(const g of geometries)g.dispose();for(const m of materials.values())m.dispose();scene.clear();}
  }
  /** Gene 2026-10-23 (#13): a full photogenic shot of the place in the real world (terrain, water, sky, neighbours), not a
@@ -176,7 +189,7 @@ export class WorldPlacePreviews{
     const d=camera.position.distanceTo(aim);camera.near=Math.max(.05,d/400);camera.far=Math.max(3000,d*20);camera.updateProjectionMatrix();
     const seen=await step('check'+k,()=>{
      renderer.setRenderTarget(check);renderer.setClearColor(0,1);renderer.autoClear=true;renderer.render(mask,camera);const all=count();if(!all||!world)return{all,blocked:0};
-     const seeThrough:THREE.Object3D[]=[];live.traverse(o=>{if(o.visible&&/water|sea|sky|cloud|rain|fog/i.test(o.name)&&!/marker|label/i.test(o.name))seeThrough.push(o);});
+     const seeThrough:THREE.Object3D[]=[];live.traverse(o=>{const m=(o as THREE.Mesh).material;if(o.visible&&(/water|sea|sky|cloud|rain|fog/i.test(o.name)||(!!m&&!Array.isArray(m)&&m.transparent&&m.opacity<.95))&&!/marker|label/i.test(o.name))seeThrough.push(o);});  // glass (Verdelis's dome) hides nothing under it
      const background=live.background,override=live.overrideMaterial;for(const o of seeThrough)o.visible=false;live.background=null;live.overrideMaterial=black;
      try{renderer.render(live,camera);renderer.autoClear=false;renderer.render(mask,camera);}finally{for(const o of seeThrough)o.visible=true;live.background=background;live.overrideMaterial=override;}
      return{all,blocked:1-Math.min(1,count()/all)};
@@ -185,7 +198,7 @@ export class WorldPlacePreviews{
     if(!seen.v.all){if(bare){best=camera;bestHidden=0;break;}continue;}if(!world){best=camera;bestHidden=0;break;}
     if(seen.v.blocked<bestHidden){bestHidden=seen.v.blocked;best=camera;turn=k;}
    }
-   if(!best||bestHidden>.4)return null;const shotCamera=best;
+   if(!best||bestHidden>this.maxHidden)return null;const shotCamera=best;
    const rendered=await step('shot',()=>{
     const pixels=new Uint8Array(W*H*4);renderer.setRenderTarget(target);if(!world)GRADE_A.x=0;  // the bare place-only picture stays ungraded
     // the live world in the shot light (Gene #13: never the visitor's night or storm); the shadow map is the main view's, left as it is

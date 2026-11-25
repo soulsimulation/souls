@@ -163,3 +163,22 @@ test('#2192: a reopened Explore reuses ready pictures without asking the server,
         ac.abort();
     }
 });
+test('25 Nov: a moved world\'s place with no kept picture is drawn by the page, once, and a kept one is never drawn', async () => {
+    const previous = globalThis.fetch, ac = new AbortController(), drawn: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+        if (init?.body) { const refs: string[] = JSON.parse(String(init.body)).refs; return Response.json({ views: refs.map(ref => ref === 'e_kept' ? { ref, status: 'ready', thumb: '/v1/world/context/shot/' + 'a'.repeat(64) + '.webp' } : { ref, status: 'unavailable', draw: 'page' }) }); }
+        return Response.json({ revision: 1, listingRevision: 'l1', targets: [{ ref: 'e_kept', title: 'Kept', point: [0, 0, 0], radius: 2 }, { ref: 'e_balloon', title: 'Eden balloon', point: [-20, 6, -9], radius: 5 }] });
+    };
+    try {
+        const client = new WorldContextViews(p => '/w/eden' + p, ac.signal, () => { }, true, async location => { drawn.push(location.id); return location.radius === 5 ? 'data:image/webp;base64,AAAA' : null; });
+        await client.refresh();
+        assert.equal(await client.picture('context:e_kept'), '/w/eden/v1/world/context/shot/' + 'a'.repeat(64) + '.webp');
+        assert.equal(await client.picture('context:e_balloon'), 'data:image/webp;base64,AAAA');
+        assert.equal(await client.picture('context:e_balloon'), 'data:image/webp;base64,AAAA');
+        assert.deepEqual(drawn, ['context:e_balloon'], 'drawn once; the kept picture is never drawn');
+    }
+    finally {
+        globalThis.fetch = previous;
+        ac.abort();
+    }
+});

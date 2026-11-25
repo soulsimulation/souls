@@ -54,8 +54,12 @@ for a world with no old twin), a crawler's too; each view from the published fil
 draws it from its stream); `/v1/me` with its sign-in; `/v1/world/visitors` as a world without travel (`available:
 false`); `/v1/world/seq` from the published snapshot (else seq 0); `/v1/world/context` (Explore's places) from the published snapshot
 too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search, paged as
-the old process pages them, and with nothing published a listing with no places; Explore's place pictures as each
-`unavailable` (a place stays text); writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
+the old process pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
+world's kept picture of the place as it is now, a small WebP served immutable at `/w/<slug>/v1/world/context/shot/<sha>.webp`,
+else `unavailable` with `draw: 'page'`, and the page draws that place itself from what it shows (kept in the browser per
+build). The kept pictures are made once per world, and again when its places change, by
+`node tools/world-launcher/place-shots.mjs --page <world page URL> --out <launcher data>/place-shots/<slug>`, which has
+the world's own page draw each place headless and draws only the ones missing; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
 an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)
