@@ -1,7 +1,24 @@
 // A refusal's detail as the daemon reads it from a `wireFrame` line, and the next step after an activity's refusal.
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
+import { encode } from '../history/day.mjs';
+import { DEFAULT_PKG } from './client.mjs';
 import { activityTry, answerParts, readableDetail } from './refusal.mjs';
+
+test('continuous activities: an act\'s progress answer reads as accepted with how long the world gives it, left_us', async () => {
+  const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  // worldd's `answers::progress`: {1: version, 2: {1: actor, 2: sequence, 3: 3 (accepted), 4: intent id, 5: µs left}}
+  const answer = (fields) => wire.wireFrame(encode(new Map([[1, [1, 2, 3, 4]], [2, new Map(fields)]])));
+  const p = answerParts(answer([[1, 0], [2, 9], [3, 3], [4, new Uint8Array(17)], [5, 3_610_000_000]]));
+  assert.deepEqual([p.kind, p.a, p.c, p.d, p.detail], ['answer', '9', '3', '-', 'left_us=3610000000']);
+  assert.equal(answerParts(answer([[1, 0], [2, 9], [3, 3], [4, new Uint8Array(17)]])).detail, '', 'a joint move\'s accept gives none');
+  assert.equal(answerParts(answer([[1, 0], [2, 9], [3, 1], [4, new Uint8Array(17)], [5, [1, 2]]])).detail, '', 'a receipt\'s entries are not time');
+});
 
 const ada = { id: `ab${'01'.repeat(15)}-7`, name: 'Ada', parent: `cd${'00'.repeat(15)}-1` };
 const ground = { id: `cd${'00'.repeat(15)}-1`, name: 'ground', kind: 'eden:ground@1220ff' };

@@ -6455,3 +6455,155 @@ fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
     assert_eq!(bytes[0], bytes[1], "the same entry on both");
     assert_eq!(starts[0], starts[1], "both start at the same state");
 }
+
+/// A Soul's next act ends its held dance (continuous activities): `act dance` with no `for` is one run that goes on
+/// until the Soul's next act or `stop`; its progress answer says the longest the world gives it (an hour and the
+/// step's own margin). The Soul's `wave` then ends the dance `left` at once and is done; the log's dance run ends where
+/// the wave's move begins.
+#[test]
+fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
+    let d = scratch("dance-held");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    std::fs::copy(root, entries.join("humanoid.json")).unwrap();
+    let w = seed_entries(
+        &d,
+        &testworld::generate(1, 0).unwrap().text,
+        1,
+        (-40, 30),
+        Some(&entries),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+    assert_eq!(socket_end(&mut souls).kind, 1, "the Soul's walk births it");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let body = t
+        .links_at(w.souls[0])
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's body");
+    let send = |souls: &mut UnixStream, verb: &str, sequence: u64| {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new(verb).unwrap(),
+            target: Some(Target::Node(body)),
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 7_200_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        souls
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        souls.write_all(&bytes).unwrap();
+    };
+    // Each answer: (sequence, kind, reason, the µs a progress answer gives the act).
+    let answer = |souls: &mut UnixStream| {
+        let mut len = [0u8; 4];
+        souls.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        souls.read_exact(&mut frame).expect("an answer");
+        let v = decode(&frame).expect("a frame").value;
+        let Value::Map(f) = v else { panic!("a frame") };
+        let Some(Value::Map(a)) = f.get(&2) else {
+            panic!("an answer")
+        };
+        let uint = |k| match a.get(&k) {
+            Some(Value::Uint(n)) => Some(*n),
+            _ => None,
+        };
+        let reason = match a.get(&4) {
+            Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        };
+        (
+            uint(2).expect("a sequence"),
+            uint(3).expect("a kind"),
+            reason,
+            uint(5),
+        )
+    };
+    send(&mut souls, "eden:dance", 2);
+    let (seq, kind, _, left) = answer(&mut souls);
+    assert_eq!((seq, kind), (2, 3), "the dance is answered in progress");
+    let left = left.expect("with how long it has");
+    assert!(
+        (3_600_000_000..3_600_000_000 + 30_000_000).contains(&left),
+        "a held dance may go on an hour: {left} µs"
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    send(&mut souls, "eden:wave", 3);
+    let mut ends = BTreeMap::new();
+    while ends.len() < 2 {
+        let (seq, kind, reason, _) = answer(&mut souls);
+        if kind != 3 {
+            ends.insert(seq, (kind, reason));
+        }
+    }
+    assert_eq!(ends[&2], (2, "left".to_owned()), "the wave ends the dance");
+    assert_eq!(ends[&3].0, 1, "and is done: {:?}", ends[&3]);
+    // A walk is a next act too: it takes the legs the dance holds, ends the dance and gets there.
+    send(&mut souls, "eden:dance", 4);
+    assert_eq!(answer(&mut souls).1, 3, "the second dance is under way");
+    std::thread::sleep(Duration::from_secs(2));
+    walk(&mut souls, &w, w.souls[0], 5, -35 * M, 30 * M);
+    let mut ends = BTreeMap::new();
+    while ends.len() < 2 {
+        let (seq, kind, reason, _) = answer(&mut souls);
+        if kind != 3 {
+            ends.insert(seq, (kind, reason));
+        }
+    }
+    assert_eq!(ends[&5].0, 1, "the walk is done: {:?}", ends[&5]);
+    assert_eq!(ends[&4].0, 2, "and ended the dance: {:?}", ends[&4]);
+    println!("the walk ended the dance: {:?}", ends[&4]);
+    let log = std::fs::read(w.dir.join("log")).unwrap();
+    let mut events: Vec<(String, i64)> = Vec::new();
+    for rec in sim::log::recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&rec).unwrap().effects {
+            for v in e.events.iter().flatten() {
+                if v.name.as_str().starts_with("souls:form-")
+                    && v.fields.get(&2) == Some(&body.to_value())
+                {
+                    events.push((v.name.as_str().to_owned(), e.envelope.at));
+                }
+            }
+        }
+    }
+    println!("events: {events:?}");
+    let moves: Vec<_> = events.iter().filter(|e| e.0 == "souls:form-move").collect();
+    let (dance, wave) = (moves[0].1, moves[1].1);
+    let dance_end = events
+        .iter()
+        .find(|e| e.0 == "souls:form-ended")
+        .expect("the dance's end")
+        .1;
+    assert!(
+        dance_end - dance >= 2_500_000,
+        "it danced until the wave: {} ms",
+        (dance_end - dance) / 1000
+    );
+    assert!(
+        wave >= dance_end && wave - dance_end <= 200_000,
+        "the dance ends where the wave begins: {dance_end} {wave}"
+    );
+}
