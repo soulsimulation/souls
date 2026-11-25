@@ -1642,9 +1642,15 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     let lineage = im.nodes["world"].scope();
     let ground = im.nodes["ground"];
     let mut failed = Vec::new();
-    // Walked onto: an area a body can stand on (the park's sand, the harbour's boardwalk) ends on it, at its edge.
-    let onto = ["park-playground-sand", "place-region-harbour-boardwalk"];
+    // Walked onto: an area of the open ground a body can stand on (the park's sand) ends on it, at its edge. (The
+    // harbour boardwalk's region lies over the boardwalk's own deck, not the open ground: a walk ends facing it.)
+    let onto = ["park-playground-sand"];
     for (at, names, tag) in [
+        (
+            "45.0,-78.0",
+            &["place-region-northern-mountains"][..],
+            "lftown",
+        ),
         (
             "-14.0,-296.0",
             &["place-region-northern-mountains", "land-ring-north-range"][..],

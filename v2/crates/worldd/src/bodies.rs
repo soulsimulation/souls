@@ -1298,7 +1298,7 @@ impl Bodies {
         // sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
         // toward the walker a metre at a time to the first point a body may stand on that the walker's walk may reach
         // (`View::stand_reached`, no route search): the nearest walkable point at its edge on the walker's way there.
-        // A walker already within it is there.
+        // A walker already within it, or with no such point nearer it, is there.
         if let Some((half, area)) = place_half_width(tree, node)
             && let Some((frame, at)) = self.pose(body)
             && let Some(ground) = tree
@@ -1331,7 +1331,8 @@ impl Bodies {
                     return Ok(Target::new(ground, p));
                 }
             }
-            return Ok(Target::new(ground, along(first)));
+            // None nearer it that the walker may reach: it stands as near as it can get.
+            return Ok(Target::new(frame, at));
         }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;

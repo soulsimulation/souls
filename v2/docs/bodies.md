@@ -241,7 +241,7 @@ range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the wal
 from wherever the walker stands: first on it there (an area 0.6 m inside its outline, a line on itself), else, where
 that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
 stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
-walker already within it is there. It ends facing the nearest point of the place, or its middle when it stands on
+walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on
 its edge.
 The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
 the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
