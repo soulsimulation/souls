@@ -373,8 +373,15 @@ pub fn effects_checked(
 /// A placed thing's solids field (N1's field 12) for a kind of this record: its walk outline, from `geometry.bounds_mm`
 /// as a boot kind's section 7 gives one ([`super::place::Geometry`]), so walkers go round it and the safety rule
 /// judges it. `None` for a record with no bounds, or a thing lower than [`super::place::FLAT`] (walked over).
+///
+/// A record whose `geometry.solids_mm` lists its own boxes (`[[cx, cz, hx, hz, yaw mdeg, y0, y1]]`, mm, the thing's
+/// frame: field 12's rows, as the import writes a seeded thing's from its model) gives those instead, so a thing with
+/// gaps (a rack frame's two posts) is walked through where a seeded one is. A list not of such rows gives the box.
 pub fn solids_of(entry: &Json) -> Option<Value> {
     let g = entry.get("geometry")?;
+    if let Some(rows) = g.get("solids_mm").and_then(own_solids) {
+        return Some(rows);
+    }
     let b: Vec<i64> = g
         .get("bounds_mm")?
         .arr()?
@@ -391,6 +398,33 @@ pub fn solids_of(entry: &Json) -> Option<Value> {
     }
     .outlines()
     .solids()
+}
+
+/// `geometry.solids_mm` as field 12's rows: each seven whole mm, its half sizes and heights none below 0, the top
+/// above the bottom. `None` for an empty list or any other row.
+fn own_solids(v: &Json) -> Option<Value> {
+    let int = |n: i64| match u64::try_from(n) {
+        Ok(u) => Value::Uint(u),
+        Err(_) => Value::Nint(n.unsigned_abs() - 1),
+    };
+    let rows = v
+        .arr()?
+        .iter()
+        .map(|r| {
+            let n: Vec<i64> = r
+                .arr()?
+                .iter()
+                .map(|x| match x {
+                    Json::Int(i) => i64::try_from(*i).ok(),
+                    _ => None,
+                })
+                .collect::<Option<_>>()?;
+            let [_, _, hx, hz, _, y0, y1] = <[i64; 7]>::try_from(n.clone()).ok()?;
+            (hx >= 0 && hz >= 0 && y0 >= 0 && y1 > y0)
+                .then(|| Value::Array(n.into_iter().map(int).collect()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!rows.is_empty()).then_some(Value::Array(rows))
 }
 
 /// A placed thing's slots field (field 13, `[[n, x, y, z, yaw mdeg, capacity]]` mm, the thing's frame) for a kind of
