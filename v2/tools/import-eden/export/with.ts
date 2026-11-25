@@ -10,7 +10,7 @@ import { join } from 'node:path';
 export type With = { entry: string; slot?: string; at_mm?: [number, number, number]; yaw_mdeg?: number; why?: string };
 type Row = { def: string; entry?: string; with?: With[] };
 /** A content entry, the fields read here. */
-type Entry = { kind: string; slots?: Record<string, { at_mm?: number[] }> };
+type Entry = { kind: string; slots?: Record<string, { at_mm?: number[]; admits?: string }> };
 
 const mapKey = (ref: string) => ref.replace(/^core\//, 'core-');
 
@@ -34,6 +34,39 @@ export function entriesIn(dir: string): Map<string, { entry: Entry; hash: string
       if (typeof e?.kind === 'string') out.set(e.kind, { entry: e, hash: createHash('sha256').update(text).digest('hex') });
     }
   }
+  return out;
+}
+
+/** How near (mm, each axis) a def's slot and an entry's slot must be to be one slot ([`slotNumbers`]). */
+export const SAME_SLOT_MM = 60;
+
+/**
+ * The number each of a def's slots (`{id, kind, p}`, metres, today's order) has in the facts, so the engine's slot `n`
+ * is the thing's own slot `n` (a picnic table's seat 1 was its top: a Soul sat on the table). The engine numbers a kind's slots by its entry (1, 2, ... in the
+ * entry's order: a form's `sit`, a seat's registration, a `with` thing's slot); the body that sits in seat `n` is put in
+ * the thing's own slot `n`, where the page draws it. So each def slot takes the number of the entry slot at its point
+ * (within [`SAME_SLOT_MM`]), else of the entry's next unmatched slot that admits what it holds (a seat or a bed: a body;
+ * anything else: not a body), in order; what is left is numbered after the entry's slots, in def order. A room slot is
+ * a room, not numbered. Only a kind with a seat or a bed (a place a body is put in) is numbered so; any other, and one
+ * with no entry or an entry with no slots, keeps today's numbers: the def's order, from 1.
+ */
+export function slotNumbers(slots: readonly { id: string; kind: string; p: readonly number[] }[], entry?: Entry): Map<string, number> {
+  const own = slots.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'room');
+  const listed = Object.entries(entry?.slots ?? {}) as [string, { at_mm?: number[]; admits?: string }][];
+  const body = (kind: string) => kind === 'seat' || kind === 'bed';
+  if (!listed.length || !own.some(({ s }) => body(s.kind))) return new Map(own.map(({ s, i }) => [s.id, i + 1]));
+  const out = new Map<string, number>(), taken = new Set<number>();
+  for (const { s } of own) {
+    const k = listed.findIndex(([, e], k) => !taken.has(k) && !!e.at_mm && e.at_mm.every((v, a) => Math.abs(v - (s.p[a] ?? 0) * 1000) <= SAME_SLOT_MM));
+    if (k >= 0) { out.set(s.id, k + 1); taken.add(k); }
+  }
+  for (const { s } of own) {
+    if (out.has(s.id)) continue;
+    const k = listed.findIndex(([, e], k) => !taken.has(k) && (e.admits === 'body') === body(s.kind));
+    if (k >= 0) { out.set(s.id, k + 1); taken.add(k); }
+  }
+  let next = listed.length;
+  for (const { s } of own) if (!out.has(s.id)) out.set(s.id, ++next);
   return out;
 }
 

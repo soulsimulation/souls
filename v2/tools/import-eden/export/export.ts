@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { WorldModel, applyBatch, coreLibrary, correctKitDefines, type Entity } from '../../../../packages/world-compiler/src/index.ts';
 import { TileSampler, mediaTile, tileOf } from '../../../../packages/ground/src/index.ts';
-import { entriesIn, withMap, withThings } from './with.ts';
+import { entriesIn, slotNumbers, withMap, withThings } from './with.ts';
 
 type V2 = [number, number];
 type Pose = { x: number; y: number; z: number; yaw: number };
@@ -87,6 +87,19 @@ const CORE = coreLibrary(), ownDefs = new Map<string, string>();
 const keepOwn = (d: { ref: string }) => { if (!CORE.get(d.ref) && !ownDefs.has(d.ref)) ownDefs.set(d.ref, JSON.stringify(d)); };
 const defOf = (e: Entity) => { const d = m.resolvedDef(e.def); if (!d) throw new Error(`${e.id}: def ${e.def} unresolved`); return d; };
 const bakeOf = (e: Entity) => m.bake(defOf(e), e.params ?? {}, e.seed ?? 0, e.shape);
+// Each thing's slots numbered as the entry it goes by numbers them (with.ts `slotNumbers`): the engine's seat `n` is the
+// thing's own slot `n`. Its entry: its map row's (a backup's, or the template's `--map`), else its kind's own name as
+// the loader keys entries (`core:<name>` and `eden:eden_<name>` as `eden:<name>`, import-eden's `kind_name`).
+const slotEntries = entriesIn('content/kinds'), numbered = new Map<string, Map<string, number>>();
+const slotNumbersOf = (e: Entity) => {
+  let n = numbered.get(e.id);
+  if (!n) {
+    const d = defOf(e), own = (kindOf(d.ref) ?? kindName(d.name)).replace(/^core:/, 'eden:').replace(/^eden:eden_(?=.)/, 'eden:');
+    const named = (live?.thing(e, d) as { entry?: string } | undefined)?.entry ?? entryOf?.(d.ref) ?? own;
+    numbered.set(e.id, (n = slotNumbers(m.slotsOf(e), slotEntries.get(named)?.entry)));
+  }
+  return n;
+};
 
 // --- World poses ---------------------------------------------------------------------------------------------------
 const world = new Map<string, Pose>();
@@ -138,7 +151,7 @@ for (const e of m.entities.values()) {
   const isWorldShape = d.form !== 'point' && e.in.parent === 'world';
   const rec: Record<string, unknown> = {
     id: e.id, def: e.def, ref, parent, pose: out(rel), world: out(wp), scale_ppm: Math.round(s * 1e6),
-    ...(slotRec ? { slot: slotRec.kind === 'room' ? { room: slotRec.id } : { n: pslot + 1, id: slotRec.id } } : e.in.slot ? { slot: { missing: e.in.slot } } : {}),
+    ...(slotRec ? { slot: slotRec.kind === 'room' ? { room: slotRec.id } : { n: slotNumbersOf(pe!).get(slotRec.id)!, id: slotRec.id } } : e.in.slot ? { slot: { missing: e.in.slot } } : {}),
     ...(e.name ? { name: e.name } : {}),
     // A path or area thing at the world root carries world-frame geometry, heights above the ground unless `abs`.
     ...(isWorldShape ? { worldShape: true } : {}),
@@ -192,7 +205,7 @@ for (const e of m.entities.values()) {
   });
   if (b.links?.length) rec.stairs = b.links.map((l) => ({ id: l.id, kind: l.kind, from: l.from, to: l.to, path: l.path.map(P), width: S(l.width), y0: S(l.y0), y1: S(l.y1) }));
   const slots = b.slots.filter((x) => x.kind !== 'room');
-  if (slots.length) rec.slots = b.slots.flatMap((x, i) => x.kind === 'room' ? [] : [{ n: i + 1, id: x.id, kind: x.kind, at: [S(x.p[0]), S(x.p[1]), S(x.p[2])], yaw: mdeg(x.yaw), ...(x.capacity !== undefined ? { capacity: x.capacity } : {}) }]);
+  if (slots.length) rec.slots = b.slots.flatMap((x) => x.kind === 'room' ? [] : [{ n: slotNumbersOf(e).get(x.id)!, id: x.id, kind: x.kind, at: [S(x.p[0]), S(x.p[1]), S(x.p[2])], yaw: mdeg(x.yaw), ...(x.capacity !== undefined ? { capacity: x.capacity } : {}) }]);
   if (b.water && WATER_KINDS.test(d.name)) rec.water = { level: mm(b.water.level), ...(b.water.area ? { area: b.water.area.map(pt) } : {}), ...(b.water.path ? { path: b.water.path.map(pt), width: mm(b.water.width ?? 0) } : {}), ...(b.water.levels ? { levels: b.water.levels.map(mm) } : {}) };
   things.push(rec);
   for (const w of withOf ? withThings({ id: e.id, name: e.name, entry: rec.entry as string | undefined, parent, slot: rec.slot, pose: rel, world: wp, scale: s }, withOf(ref), entries, out) : []) {
