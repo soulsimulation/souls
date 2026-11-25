@@ -2293,10 +2293,23 @@ impl Again {
                     name: "history-export",
                     detail: "public object disappeared".into(),
                 })?;
-                self.mirror(&key, &object.bytes)?;
+                self.mirrored(&key, &object.bytes);
             }
         }
         Ok(())
+    }
+    /// [`Again::mirror`], whose refusal ends nothing: the store holds the key, the public copy of it is skipped, and
+    /// the fault is logged by its key and counted in `health.json` (`history_export`). A local failure never stops
+    /// the world.
+    fn mirrored(&self, key: &str, bytes: &[u8]) {
+        if let Err(e) = self.mirror(key, bytes) {
+            let fault = refusal(e);
+            measures::HISTORY_EXPORT.fault(key, &fault);
+            let _ = writeln!(
+                std::io::stderr(),
+                "worldd: the public history skips {key}, the world goes on: {fault}"
+            );
+        }
     }
 }
 std::thread_local! {
@@ -2385,7 +2398,7 @@ impl Store for Again {
             }
             tried
         })?;
-        self.mirror(key, bytes)?;
+        self.mirrored(key, bytes);
         Ok(result)
     }
 }
@@ -4904,6 +4917,96 @@ mod tests {
         handover.hand(&tx, 1, 1, b"two");
         let h = handover.lock();
         assert_eq!((h.queued, h.queued_bytes, h.end, h.next), (1, 3, 2, 2));
+    }
+
+    /// Eden, 25 Nov: a day's event index is a file in the public mirror, and an hour of that day split off (V4, 1,000
+    /// events or more) wants the same path as a directory. The mirror refuses that key, and that refusal ends nothing:
+    /// the store holds both, the archiver's write answers, the fault is counted by its key, and the restore at a start
+    /// goes on past it.
+    #[test]
+    fn a_day_index_and_its_split_hour_never_end_the_world() {
+        use directoryd::directory::store::Store;
+        use replica::history::events::{EventIndex, events_key};
+        let header =
+            Header::read(&fixture_bytes(replica::effects::FIXTURE_HEADER).unwrap()).unwrap();
+        let dir = std::env::temp_dir().join(format!("split-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bucket = Shared(Arc::new(Patient::new(
+            supervisor::bucket::Bucket::parse(
+                &format!("folder:{}", dir.join("store").display()),
+                |_| String::new(),
+            )
+            .unwrap(),
+        )));
+        let public = dir.join("public");
+        let adapter = Again {
+            store: Under {
+                store: bucket.clone(),
+                prefix: "w/".into(),
+            },
+            public: public.clone(),
+            header: header.stored().to_vec(),
+        };
+        let (day, hour) = (20781, 5);
+        let day_bytes = EventIndex {
+            day,
+            hour: None,
+            split: vec![hour],
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let hour_bytes = EventIndex {
+            day,
+            hour: Some(hour),
+            split: Vec::new(),
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let (day_key, hour_key) = (events_key(day, None), events_key(day, Some(hour)));
+        // Eden's mirror: the day's index already a file (the folder store here cannot hold both keys either, so the
+        // mirror's state is set by hand; the bucket behind a world is an object store).
+        std::fs::create_dir_all(public.join(&day_key).parent().unwrap()).unwrap();
+        std::fs::write(public.join(&day_key), &day_bytes).unwrap();
+        let before = measures::HISTORY_EXPORT.count();
+        // The refusal that ended Eden's process 49 times, by name: the mirror itself still refuses the key.
+        assert_eq!(
+            adapter.mirror(&hour_key, &hour_bytes).unwrap_err().detail,
+            "directory symlink or type mismatch"
+        );
+        // The archiver's write answers: the store holds the hour, the mirror skips it and counts it.
+        adapter.put(&hour_key, &hour_bytes, When::Absent).unwrap();
+        let counted = measures::HISTORY_EXPORT.count();
+        assert!(counted > before);
+        assert_eq!(adapter.get(&hour_key).unwrap().unwrap().bytes, hour_bytes);
+        assert_eq!(std::fs::read(public.join(&day_key)).unwrap(), day_bytes);
+        // A start restores the mirror from the store and goes on past the key it cannot hold.
+        adapter.restore_public().unwrap();
+        let counted = {
+            let now = measures::HISTORY_EXPORT.count();
+            assert!(now > counted);
+            now
+        };
+        // The other order: the hours' directory first, then the day's file.
+        let day2 = day + 1;
+        std::fs::create_dir_all(public.join(events_key(day2, None))).unwrap();
+        let other_day = EventIndex {
+            day: day2,
+            hour: None,
+            split: vec![hour],
+            rows: Vec::new(),
+        };
+        adapter
+            .put(
+                &events_key(day2, None),
+                &other_day.to_bytes().unwrap(),
+                When::Absent,
+            )
+            .unwrap();
+        assert!(measures::HISTORY_EXPORT.count() > counted);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
