@@ -145,6 +145,7 @@ import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
 import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
+import { bookText, isBook } from './books.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
@@ -926,11 +927,21 @@ async function closing(out, f, { now = false, age = null } = {}) {
   return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...age, changed: changedBlock(changes) };
 }
 
-/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind; `{}` for none. */
+/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind, and a book's
+ *  title and first page; `{}` for none. */
 function holdingOf(rows) {
   const body = [...rows.values()].find((r) => r.soul === ME)?.id;
-  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => ({ id: r.id, name: r.name, kind: r.kind })) : [];
+  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => ({ id: r.id, name: r.name, kind: r.kind, ...(isBook(r.kind) ? bookOf(r.id) : {}) })) : [];
   return held.length ? { holding: held } : {};
+}
+
+/** A book's title and first page, from its fields as this Soul's copy holds them (books.mjs). */
+const bookOf = (id) => bookText(id, heldState(heldKinds()).nodes[id]?.fields);
+
+/** `{read}`: what a done `read` of a book read, its title and first page, for the Soul to tell; `{}` for any other act. */
+function readOf(rows, r) {
+  const id = String(r.target ?? '').split(' ')[0], row = rows.get(id);
+  return r.verbs.some((v) => /:read$/.test(v)) && row && isBook(row.kind) ? { read: { id, ...bookOf(id) } } : {};
 }
 
 /** The copy brought current unless `now`, and its age fields (R10). */
@@ -1957,7 +1968,7 @@ async function answer(req, conn = null) {
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
-      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r), hand = holdingOf(rows); return { ...(h ? { receipt: { ...got.receipt, held: h } } : {}), ...hand }; } : null, { now: !done });
+      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r), hand = holdingOf(rows); return { ...(h ? { receipt: { ...got.receipt, held: h } } : {}), ...hand, ...readOf(rows, r) }; } : null, { now: !done });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.

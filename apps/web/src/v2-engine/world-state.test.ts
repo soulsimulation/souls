@@ -18,6 +18,7 @@ function layer(entities: { id: string; state?: Record<string, unknown> }[], weat
     if (!d) return;
     assert.equal(d.seq, l.seq + 1, 'next in the layer\'s sequence: never a gap (a resync)');
     l.seq = d.seq;
+    for (const id of d.diff.removes) l.model.entities.delete(id);
     for (const e of d.diff.upserts as { id: string }[]) l.model.entities.set(e.id, e);
     if (d.diff.world) l.model.state = { ...l.model.state, ...d.diff.world };
   };
@@ -140,9 +141,14 @@ test('a cup taken from one table and put on another is drawn on the second, wher
   const { l, apply } = layer([{ id: 'e_cup', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0.25, state: { tea: 1 } } as never]);
   ws.receive({ t: 'snapshot', s: { nodes: [...ROOM, { ...CUP, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }], removed: [] } });
   assert.equal(ws.diff(l, 0), null, 'as captured: the layer draws it where it is');
-  // taken: in the Soul's hand (the bodies' adapter draws what is held), so the layer is left as it is
+  // taken: in the Soul's hand (the bodies' adapter draws what is held), so the layer's copy on the table goes
   ws.receive(part([{ ...CUP, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }]));
-  assert.equal(ws.diff(l, 0), null, 'a thing in a hand is not moved here');
+  const taken = ws.diff(l, 0)!;
+  assert.deepEqual(taken.diff.removes, ['e_cup'], 'a thing in a hand is not also drawn where it was taken from');
+  assert.deepEqual(taken.diff.upserts, []);
+  assert.equal(taken.tick, 500_000 / TICK_US, 'gone from the table when the picture reaches the part that takes it');
+  apply(taken);
+  assert.equal(ws.diff(l, 0), null, 'once gone, no diff again while it is held');
   // put down on the other table, half a metre along its top and turned a quarter more
   ws.receive(part([{ ...CUP, parent: 't.2', slot: null, pos: [500_000, 760_000, 0], rot: yawQ(Math.PI / 2) }]));
   const d = ws.diff(l, 0)!;
@@ -159,11 +165,42 @@ test('a cup taken from one table and put on another is drawn on the second, wher
   assert.equal(ws.diff(l, 0), null, 'once drawn there, no diff again');
   // taken again and put back on the first table's slot
   ws.receive(part([{ ...CUP, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }]));
-  assert.equal(ws.diff(l, 0), null, 'in the hand again: left where it was last at rest');
+  const again = ws.diff(l, 0)!;
+  assert.deepEqual(again.diff.removes, ['e_cup'], 'in the hand again: not drawn on the second table');
+  apply(again);
   ws.receive(part([{ ...CUP, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }]));
   apply(ws.diff(l, 0));
   const back = l.model.entities.get('e_cup') as unknown as { p: number[]; r: number };
   assert.ok(near(back.p, [1, 0.75, 2]) && Math.abs(back.r) < 1e-6, `back on the first table's slot: ${back.p}`);
+});
+
+test('a book picked up and put back where it was is drawn there again; one the stream no longer holds is removed', () => {
+  const ws = new WorldState();
+  const { l, apply } = layer([{ id: 'e_book', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0 }, { id: 'e_cup', in: { parent: 'world' }, p: [1, 0, 2], r: 0 }] as never);
+  const BOOK = { id: 'k.1', kind: 'eden:book', origin: 'e_book' };
+  ws.receive({ t: 'snapshot', s: { nodes: [...ROOM, { ...BOOK, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }, { ...CUP, parent: 'g.1', slot: null, pos: [1_000_000, 0, 2_000_000], rot: ID }], removed: [] } });
+  assert.equal(ws.diff(l, 0), null);
+  ws.receive(part([{ ...BOOK, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }]));
+  apply(ws.diff(l, 0));
+  assert.equal(l.model.entities.has('e_book'), false, 'held: not drawn on the table');
+  ws.receive(part([{ ...BOOK, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }]));
+  const back = ws.diff(l, 0)!;
+  assert.deepEqual(back.diff.upserts, [{ id: 'e_book', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0 }], 'put back on its captured spot: drawn as captured');
+  apply(back);
+  assert.equal(ws.diff(l, 0), null, 'drawn again: nothing more');
+  // eaten, put away: the stream no longer holds it
+  ws.receive(part([], ['c.1']));
+  const gone = ws.diff(l, 0)!;
+  assert.deepEqual(gone.diff.removes, ['e_cup']);
+  apply(gone);
+  assert.equal(ws.diff(l, 0), null);
+});
+
+test('a thing already in a hand in the first state the page receives is not drawn where the scene has it', () => {
+  const ws = new WorldState(), { l } = layer([{ id: 'e_cup', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0 }] as never);
+  // the body comes after the cup in the snapshot: the hand is judged once every frame is in
+  ws.receive({ t: 'snapshot', s: { nodes: [{ ...CUP, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }, ...ROOM], removed: [] } });
+  assert.deepEqual(ws.diff(l, 0)!.diff.removes, ['e_cup']);
 });
 
 test('a moved thing keeps its tilt and its door or lamp state goes in the same upsert; things that never moved make no diff', () => {

@@ -43,7 +43,7 @@ Tell your human: approving gives this one agent control of this one Soul, and pa
 
 Every turn is the same loop. The skill has the exact commands.
 
-1. **Look.** `here` shows who and what is near, the exits, and the offers by verb. `inspect <id>` drills into a place or thing. `find "<words>"` searches this machine's copy of the whole world: places, acts and things, best match then nearest, each with its metres and where it is. A shelf's `take` puts a book in hand, and the answer's `holding` names it for the next act (`read:<its id>`).
+1. **Look.** `here` shows who and what is near, the exits, and the offers by verb. `inspect <id>` drills into a place or thing. `find "<words>"` searches this machine's copy of the whole world: places, acts and things, best match then nearest, each with its metres and where it is. A shelf's `take` puts a book in hand, and the answer's `holding` names it for the next act (`read:<its id>`). A held book in `holding` carries its `title` and `first_page`, and a done `read` answers them as `read`, so the Soul can say what it read.
 2. **Choose an offered id.** `act` takes only an id the world offered. Your human writes in English and you turn it into an id. `find "<words>"` lists candidates, and you send a row's `act` id.
 3. **Act.** `act walk:library --wait` waits for the receipt.
 4. **Read how it ended.** `started` isn't `completed`. A sit or lie without a duration returns once the Soul is settled, still `started`, and that's expected.
