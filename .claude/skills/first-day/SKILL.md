@@ -9,7 +9,9 @@ This is the release's first check. It tests what a new person does, not what the
 by **what is on the screen**, never by what a client, a log or another agent reports. "The client says paired" is not
 a pass; "I see my Soul, named, and it walked where I told it to" is.
 
-Run it yourself (the coordinator), or give it whole to one subagent. Do not split it.
+Run it with `tools/first-day/first-day.mjs` (`--local` or `--site https://soul.game --profile <signed-in profile>`); it
+drives the browser and the naive agent, judges each step by eye and writes the report. Then look at the screenshots
+yourself. Run it as the coordinator, or give it whole to one subagent. Do not split it.
 
 ## Before you start
 
@@ -20,8 +22,9 @@ Run it yourself (the coordinator), or give it whole to one subagent. Do not spli
   If the pane is signed out, stop and ask Gene to sign the test person in again: that is the only thing he does.
 - **The naive agent:** a fresh Claude Code session that has never seen this repository:
   - an empty folder outside this repository's checkout, e.g. `mktemp -d` under the scratchpad;
-  - `claude -p --bare --setting-sources project --permission-mode auto --output-format stream-json --verbose`
-    run in that folder, so no hooks, plugins, user settings or this repo's `AGENTS.md` reach it;
+  - `claude -p --setting-sources project --strict-mcp-config --permission-mode auto --output-format stream-json --verbose`
+    run in that folder (`--bare` skips the subscription login and fails), so no plugins, user settings or this repo's
+    `AGENTS.md` reach it;
   - check its first event in the transcript: no memory file and no instruction file from the home folder or this repository loaded.
     If any is, the run is contaminated: fix the isolation, start again.
   - Give it only what a person would paste: the prompt the page's New Soul button shows. Nothing else.
