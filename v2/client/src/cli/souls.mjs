@@ -201,6 +201,16 @@ export const LOCAL = [
 ];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
+/** The harnesses an agent may run in, by an environment variable each sets for the commands it runs. */
+const HARNESSES = [['CLAUDECODE', 'Claude Code'], ['CODEX_SANDBOX', 'Codex'], ['CODEX_THREAD_ID', 'Codex'], ['CURSOR_AGENT', 'Cursor'],
+  ['CURSOR_TRACE_ID', 'Cursor'], ['GEMINI_CLI', 'Gemini CLI']];
+/** The label the owner's approval card shows for this agent (first day, 25 Nov: it said "souls.mjs" and the computer's
+ *  name): the harness it runs in, "on this computer"; never the host's name. */
+export function agentLabel(env = process.env) {
+  const named = HARNESSES.find(([k]) => env[k])?.[1];
+  return `${named ?? 'An agent'} on this computer`;
+}
+
 /**
  * Starts W2's pairing detached, its lines in `<home>/pairing.log`, and gives its first: the link and code, or the
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
@@ -212,7 +222,7 @@ async function pairing(home, url, { within = 15_000, name } = {}) {
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
   // --start: once approved, the pairing starts the Soul's daemon, which joins the world by itself (named by --name).
-  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls.mjs', '--start', ...(name ? ['--name', name] : [])], {
+  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', agentLabel(), '--start', ...(name ? ['--name', name] : [])], {
     detached: true, stdio: ['ignore', out, out],
     env: { PATH: process.env.PATH ?? '', SOULS_HOME: home, ...(process.env.SOULS_REPLICA_PKG ? { SOULS_REPLICA_PKG: process.env.SOULS_REPLICA_PKG } : {}) },
   }).unref();

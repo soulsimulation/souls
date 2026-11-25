@@ -101,6 +101,13 @@ export function motionAt(s: readonly WorldSample[], t: number, heading: number, 
   return { speed, heading: speed < WALKING ? turnedAt(turns, t, h) : h.heading };
 }
 
+/** The activity the body is drawn with at world time t, by `chunkOf`'s rule: walking, its seat's posture (sit, lie,
+ *  ride), the pose of the gesture playing (dance, read, jumping-jacks, …), else idle. */
+export function activityAt(b: Body, t: number): string {
+  if (motionAt(b.samples, t, b.heading, b.turns).speed >= WALKING) return 'walk';
+  return postureOf(seatAt(b.samples, t)) ?? gestureNow(b.gestures, t)?.activity ?? 'idle';
+}
+
 /** The heading of the last step that moved before t, and when that step ended (µs; -Infinity: none, `fallback`). */
 function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): { heading: number; at: number } {
   for (let k = Math.min(upTo, s.length - 1); k > 0; k--) {
