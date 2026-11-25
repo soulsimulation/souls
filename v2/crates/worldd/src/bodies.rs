@@ -1291,20 +1291,28 @@ impl Bodies {
         if tree.node(tree.root()).is_some_and(|n| n.id() == node) {
             return Err(refusal("move.whole-world", node));
         }
-        // A landform or another place on the ground (a range, a sea, a lake, a wood): its middle is no place to
-        // stand, so a walk to it ends at its edge. From the point of its outline (or of a wide line's side) nearest the
-        // walker, stood back from it by [`select::GAP`], it steps back toward the walker a metre at a time to the first
-        // point a body may stand on that the walker's walk may reach (`View::stand_reached`, no route search): the
-        // nearest walkable point at its edge on the walker's way there. A walker already within it is there.
-        if let Some(half) = place_half_width(tree, node)
+        // A landform or another place on the ground (a range, a sea, a lake, a wood, a square, a path): a walk to it
+        // ends at its edge, on the open ground, wherever the walker stands (a floor too). First on it at the point of
+        // its edge nearest the walker: an area [`select::GAP`] inside its outline, a line on itself, so a walk to a
+        // square, a wood or a pier ends on it. Where that is no place to stand or the walker's walk cannot reach it (a
+        // sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
+        // toward the walker a metre at a time to the first point a body may stand on that the walker's walk may reach
+        // (`View::stand_reached`, no route search): the nearest walkable point at its edge on the walker's way there.
+        // A walker already within it is there.
+        if let Some((half, area)) = place_half_width(tree, node)
             && let Some((frame, at)) = self.pose(body)
+            && let Some(ground) = tree
+                .handle(node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent())
         {
-            let gap = select::gap(tree, node, frame, at)?;
+            let here = select::point_in(tree, frame, at, ground)?;
+            let gap = select::gap(tree, node, ground, here)?;
             if gap <= half {
                 return Ok(Target::new(frame, at));
             }
-            let (edge, _) = select::nearest_in(tree, node, frame, at)?;
-            let (dx, dz) = (at.x - edge.x, at.z - edge.z);
+            let (edge, _) = select::nearest_in(tree, node, ground, here)?;
+            let (dx, dz) = (here.x - edge.x, here.z - edge.z);
             let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
                 .isqrt()
                 .max(1);
@@ -1314,15 +1322,16 @@ impl Bodies {
                 Vec3::new(edge.x + k(dx), 0, edge.z + k(dz))
             };
             let first = i128::from(half.saturating_add(select::GAP));
+            let on = if area { -i128::from(select::GAP) } else { 0 };
             let view = self.town.view_for(body)?;
-            let mut s = first;
-            while s < len {
-                if let Some(p) = view.stand_reached(frame, along(s), (frame, at)) {
-                    return Ok(Target::new(frame, p));
+            let from = (frame, at);
+            let mut tries = std::iter::once(on).chain((0..).map(|k| first + k * 1_000_000));
+            while let Some(s) = tries.next().filter(|s| *s < len) {
+                if let Some(p) = view.stand_reached(ground, along(s), from) {
+                    return Ok(Target::new(ground, p));
                 }
-                s += 1_000_000;
             }
-            return Ok(Target::new(frame, along(first)));
+            return Ok(Target::new(ground, along(first)));
         }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
@@ -1442,7 +1451,7 @@ impl Bodies {
         // A place it walked to from outside (a range, a sea): its edge, the nearest point of it, else its middle when
         // it stands on that edge.
         let edge = place_half_width(tree, target)
-            .filter(|half| select::gap(tree, target, frame, at).is_ok_and(|g| g > *half))
+            .filter(|(half, _)| select::gap(tree, target, frame, at).is_ok_and(|g| g > *half))
             .and_then(|_| select::nearest_in(tree, target, frame, at).ok());
         let to = if let Some((near, middle)) = edge {
             let d = i128::from(near.x - at.x).pow(2) + i128::from(near.z - at.z).pow(2);
@@ -2641,8 +2650,8 @@ fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> 
 /// Whether `node` is a place on the open ground of its own (a landform, a water, an area, a path: a child of the ground
 /// with an outline or a line and no solids, seats or floors, nor rooms within it), which a walk goes to the edge of
 /// (`Bodies::goal`) and faces (`Bodies::face`): how far its edge lies from its shape, µm (0 for an outline, half a
-/// line's width when the walkers' tree keeps it, else 0).
-fn place_half_width(tree: &Tree, node: Id) -> Option<i64> {
+/// line's width when the walkers' tree keeps it, else 0), and whether it is an area (an outline) rather than a line.
+fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
     use sim::ground::scene::{F_LINE_WIDTH, GROUND};
     let n = tree.node(tree.handle(node)?)?;
     let on_ground = n
@@ -2657,14 +2666,14 @@ fn place_half_width(tree: &Tree, node: Id) -> Option<i64> {
         return None;
     }
     if f.contains_key(&select::F_OUTLINE) {
-        return Some(0);
+        return Some((0, true));
     }
     f.contains_key(&select::F_LINE).then(|| {
         let mm = match f.get(&F_LINE_WIDTH) {
             Some(Value::Uint(w)) => i64::try_from(*w).unwrap_or(0),
             _ => 0,
         };
-        mm.saturating_mul(500)
+        (mm.saturating_mul(500), false)
     })
 }
 
