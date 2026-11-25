@@ -2340,6 +2340,10 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
         .iter()
         .map(|s| match s {
             Step::WalkTo { .. } => limits.walk,
+            // A repeated move (a dance for a minute) runs its length and its last move past it.
+            Step::Move {
+                repeat: Some(r), ..
+            } => r.saturating_add(limits.step_move),
             Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. } => {
                 limits.step_move
             }

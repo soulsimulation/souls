@@ -122,11 +122,14 @@ pub enum Step {
         on: Option<Id>,
         approach: bool,
     },
-    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
+    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact. With
+    /// `repeat`, µs, the move starts again as each ends, with no pause, until that long has passed since the step
+    /// began: the last whole move ends the step (a dance for a minute, [`for_us`]).
     Move {
         name: Name,
         at: Option<Name>,
         on: Option<Id>,
+        repeat: Option<Micros>,
     },
     /// A `take` or `put` that names no move: a hand step whose contact is its start.
     Hand,
@@ -263,6 +266,45 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
     } else {
         a_name(&format!("souls:{t}"))
     }
+}
+
+/// The most a repeated move may go on, s (an hour): a Soul asked to keep on until told to stop asks for this, and
+/// its `stop` ends it sooner.
+pub const FOR_MOST_S: i64 = 3_600;
+
+/// A move step's `for_s` (0.135): how long the move repeats, whole seconds from 1 to [`FOR_MOST_S`], as µs. Written
+/// out, or `{"arg": a, "default": n}`: the act's whole number `a` (a `count` it takes, or the same digits as a name,
+/// as `act dance for=60` sends them), else `default`. Refused `out-of-range`, `arg-not-a-number`, `arg-missing` (no
+/// argument and no default) or `step-malformed`.
+fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
+    let n = match v {
+        Value::Int(n) => i64::try_from(*n).unwrap_or(i64::MAX),
+        _ => {
+            let Some(a) = v.get("arg").and_then(Value::str) else {
+                return refuse(
+                    "step-malformed",
+                    "move.for_s: whole seconds or {\"arg\": name, \"default\": seconds}",
+                );
+            };
+            match (args.get(a), v.get("default")) {
+                (Some(Arg::Int(n)), _) => *n,
+                (Some(Arg::Name(t)), _) => match t.parse::<i64>() {
+                    Ok(n) if t.bytes().all(|b| b.is_ascii_digit()) => n,
+                    _ => return refuse("arg-not-a-number", format!("{a}: {t}")),
+                },
+                (Some(_), _) => return refuse("arg-not-a-number", a),
+                (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
+                (None, _) => return refuse("arg-missing", a),
+            }
+        }
+    };
+    if !(1..=FOR_MOST_S).contains(&n) {
+        return refuse(
+            "out-of-range",
+            format!("for: {n} s; from 1 to {FOR_MOST_S} s"),
+        );
+    }
+    Ok(n * 1_000_000)
 }
 
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
@@ -428,6 +470,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
+                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?,
                     })
                 }
                 "wait" => match s.get("us") {
@@ -1745,6 +1788,9 @@ pub struct Runner {
     /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
     /// point again from the floor it came onto.
     again: bool,
+    /// When the step in progress began, µs: a repeated move ([`Step::Move`]'s `repeat`) goes on until its length
+    /// has passed since then.
+    since: Micros,
     /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
     /// body out again by a rise, then ends `left`.
     backing: bool,
@@ -1785,6 +1831,7 @@ impl Runner {
             effected: false,
             leaving: false,
             again: false,
+            since: 0,
             backing: false,
             rising_out: false,
         }
@@ -1908,7 +1955,10 @@ impl Runner {
                 }
                 Next::Walk(Box::new(walk))
             }
-            Step::Move { name: mv, at, on } => {
+            Step::Move {
+                name: mv, at, on, ..
+            } => {
+                self.since = host.now();
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
@@ -2048,6 +2098,27 @@ impl Runner {
             {
                 self.effect_now();
                 Next::Sleep
+            }
+            // A repeated move that ran to its end starts again at once while its length has not passed.
+            (
+                Woke::Moved(how),
+                Some(Step::Move {
+                    name: mv,
+                    at,
+                    on,
+                    repeat: Some(r),
+                }),
+            ) if how.as_str() == "done" && host.now().saturating_sub(self.since) < r => {
+                if let Some(t) = self.timer.take() {
+                    host.clear_timer(t);
+                }
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                Next::Move {
+                    name: mv,
+                    node: on.unwrap_or(self.node),
+                    at,
+                }
             }
             (
                 Woke::Moved(how),
