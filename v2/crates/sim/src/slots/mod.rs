@@ -717,13 +717,13 @@ impl Slots {
         };
         let here = t.at(now).map(|(p, _)| p);
         match (t.stopped(now), here) {
-            (Ok(Some(s)), Ok(p)) if s.left >= left && p.x == home.x && p.z == home.z => Ok(()),
+            (Ok(Some(s)), Ok(p)) if s.left >= left && p == *home => Ok(()),
             _ => refuse(
                 "boarding-frame-away",
                 format!(
                     "{} is not at its stop{}",
                     show(thing),
-                    home_back(t, now, left).map_or(String::new(), |b| format!(
+                    home_back(t, *home, now, left).map_or(String::new(), |b| format!(
                         "; back at its stop at {b} us, in {} s",
                         (b - now + 999_999) / 1_000_000
                     ))
@@ -737,6 +737,12 @@ impl Slots {
     /// is never walked toward a boat that has left.
     pub fn boardable(&self, thing: Id, now: Micros) -> R<()> {
         self.at_home(thing, now, crate::links::boarding::CROSSING)
+    }
+
+    /// `boarding-frame-away` unless `thing`, when it moves on a course, stands at its home at `now`: where its riders
+    /// rise from it. The refusal says when it is back there.
+    pub fn leavable(&self, thing: Id, now: Micros) -> R<()> {
+        self.at_home(thing, now, 0)
     }
 
     /// `boarding-frame-away` unless a seat of `thing` that moves with its cabin (N14) stands at its own stop at `now`
@@ -1273,7 +1279,7 @@ impl Slots {
         let State::Seated(driver) = hold.state else {
             return not_seated();
         };
-        self.at_home(key.0, now, 0)?;
+        self.leavable(key.0, now)?;
         // From a seat that moves with its cabin, only at a stop, with time to stand up before it leaves (N14).
         let stop = self
             .stop_now(seat_of(key), now, crate::links::boarding::CROSSING)?
@@ -1656,14 +1662,26 @@ fn next_own(r: &Run, now: Micros) -> Option<Micros> {
         .min()
 }
 
-/// When a thing on the course `t` next stands at its home (station 0, where its course starts) with `left` of the stop
-/// to spare, world µs: now while it does.
-fn home_back(t: &crate::courses::Table, now: Micros, left: Micros) -> Option<Micros> {
-    t.next(now, Some(0), 2)
+/// When the moving thing on `t` next stands at `home` (µm) with `left` of its stop to spare, world µs (now while it
+/// does): at any station of its course that is its home (its own loop's first; a steered course's last, where it
+/// stands for good).
+fn home_back(t: &crate::courses::Table, home: Vec3, now: Micros, left: Micros) -> Option<Micros> {
+    let homes: std::collections::BTreeSet<usize> = t
+        .legs
+        .iter()
+        .filter(|l| l.from == home)
+        .filter_map(|l| l.stop)
+        .collect();
+    homes
         .into_iter()
-        .map(|stop| (stop.arrives.max(now), stop.leaves))
-        .find(|(from, leaves)| leaves.saturating_sub(*from) >= left)
-        .map(|(from, _)| from)
+        .filter_map(|i| {
+            t.next(now, Some(i), 2)
+                .into_iter()
+                .map(|stop| (stop.arrives.max(now), stop.leaves))
+                .find(|(from, leaves)| leaves.saturating_sub(*from) >= left)
+                .map(|(from, _)| from)
+        })
+        .min()
 }
 
 /// The words a refusal adds for a run away from its own stop: when it is back there, world µs, so a client can time
