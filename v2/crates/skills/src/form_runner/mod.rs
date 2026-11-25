@@ -104,6 +104,9 @@ use replica::time::Micros;
 
 use crate::route::{Leg, Route};
 
+#[cfg(test)]
+mod reach_tests;
+
 /// One step of a form, bound. The closed list is SA-F1's (`walk_to`, `sit`, `rise`, `move`, `take`, `put`,
 /// `use_held`, `wait`, `settle`), every one built (C25, #3496): F4's `take` and `put` are bound as a `move` (their
 /// transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or as a [`Step::Hand`] when they name no move.
@@ -2059,10 +2062,12 @@ impl Runner {
                 let mut walk = Route::new(legs, self.limits.speed, self.limits.tick);
                 // A walk right before a move ends on the point the move is reached from, as a walk to a granted
                 // standing spot does (0.135 E20): AT_GOAL short of it, the move's point can be out of its reach.
-                if matches!(
-                    self.steps.get(self.at + 1),
-                    Some(Step::Move { .. } | Step::Hand)
-                ) {
+                // An approach to a hand step's thing ends on its place too, so the body is within the world's reach
+                // ([`HAND_REACH`]); a form's own walk before a bare hand step arrives as it did.
+                let next = self.steps.get(self.at + 1);
+                if matches!(next, Some(Step::Move { .. }))
+                    || approach && matches!(next, Some(Step::Hand))
+                {
                     walk.arrive = crate::route::AT_SPOT;
                 }
                 Next::Walk(Box::new(walk))

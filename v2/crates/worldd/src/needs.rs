@@ -24,8 +24,9 @@
 //! no move, [`Step::Hand`]) has no walk and no move before it is done where the body stands, and nothing after commit
 //! measures a reach. So the world measures it at commit, for every such form: a thing beyond the body's reach (a
 //! form's reach, `crate::acts::within_reach`) is refused `out_of_reach`, the walk to it named as what would work.
-//! A bare `take` is never one now (#4118): its binding walks to the thing first, and the runner measures the reach again
-//! at the hand step's contact (`out-of-reach`), so what is left here is a bare `put`.
+//! A bare `take` of a thing not in the hand is never one now (#4118): its binding walks to the thing first, and the
+//! runner measures the reach again at the hand step's contact (`out-of-reach`), so what is left here is a bare `put`
+//! and a form done on a thing already held.
 //!
 //! Deterministic: ordered maps only, no clock but the world's `now`, no float.
 

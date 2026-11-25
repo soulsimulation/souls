@@ -1124,7 +1124,8 @@ impl Geometry for Sight<'_> {
         let seen = self.read(body)?;
         let b = carried(self.tree, seen.parent, seen.position)?;
         let n = self.tree.node(self.tree.handle(node)?)?;
-        let entry = self.kinds.get(entry_of(&n)).unwrap_or(&Json::Null);
+        let entry = entry_in(self.kinds, self.tree, &n);
+        let entry = entry.as_deref().unwrap_or(&Json::Null);
         Some(reach_between(entry, b, world_at(self.tree, node)?))
     }
 }
