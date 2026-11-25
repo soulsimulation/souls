@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { WorldModel, applyBatch, coreLibrary, correctKitDefines, type Entity } from '../../../../packages/world-compiler/src/index.ts';
 import { TileSampler, mediaTile, tileOf } from '../../../../packages/ground/src/index.ts';
+import { entriesIn, withMap, withThings } from './with.ts';
 
 type V2 = [number, number];
 type Pose = { x: number; y: number; z: number; yaw: number };
@@ -54,6 +55,10 @@ const MAP = live ? '' : arg('--map', '');
 const entryOf = MAP ? backup.entryMap(MAP) : null;
 // A row may name the kind its copies are (`kind`): the rack yard's stand, frames, beams and bay are the construction kinds.
 const kindOf = backup.kindMap(arg('--map', live ? 'content/worlds/eden/map.json' : ''));
+// What a placed copy holds when the world starts (the map's `with` rows: a stand's guitar, a piano's bench), each made a
+// thing of its entry's kind (with.ts).
+const withOf = MAP ? withMap(MAP) : null;
+const entries = withOf ? entriesIn('content/kinds') : new Map();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -190,6 +195,12 @@ for (const e of m.entities.values()) {
   if (slots.length) rec.slots = b.slots.flatMap((x, i) => x.kind === 'room' ? [] : [{ n: i + 1, id: x.id, kind: x.kind, at: [S(x.p[0]), S(x.p[1]), S(x.p[2])], yaw: mdeg(x.yaw), ...(x.capacity !== undefined ? { capacity: x.capacity } : {}) }]);
   if (b.water && WATER_KINDS.test(d.name)) rec.water = { level: mm(b.water.level), ...(b.water.area ? { area: b.water.area.map(pt) } : {}), ...(b.water.path ? { path: b.water.path.map(pt), width: mm(b.water.width ?? 0) } : {}), ...(b.water.levels ? { levels: b.water.levels.map(mm) } : {}) };
   things.push(rec);
+  for (const w of withOf ? withThings({ id: e.id, name: e.name, entry: rec.entry as string | undefined, parent, slot: rec.slot, pose: rel, world: wp, scale: s }, withOf(ref), entries, out) : []) {
+    if (!kinds.has(w.kind.ref)) kinds.set(w.kind.ref, w.kind);
+    const held = (rec.slots ??= []) as { n: number }[];
+    if (w.slot && !held.some((x) => x.n === w.slot!.n)) held.push(w.slot);
+    things.push(w.thing);
+  }
 }
 /** The room on the opening's floor with the wall edge nearest its centre (def frame), or undefined if none is within 0.5 m. */
 function wallRoom(rooms: { id: string; floor: number; polygon: V2[] }[], o: Opening): string | undefined {
@@ -308,6 +319,12 @@ for (const e of m.entities.values()) {
   add('slots', b.slots.filter((x) => x.kind !== 'room').length);
   for (const o of b.openings ?? []) add(o.kind === 'window' ? 'windows' : 'doorways');
   for (const l of b.links ?? []) add(`stairs:${l.kind}`);
+  // the map's `with` things it holds (with.ts): each a thing, and a slot its def does not bake is the holder's too
+  for (const w of withOf?.(d.ref) ?? []) {
+    add('things'); byRef[w.entry] = (byRef[w.entry] ?? 0) + 1;
+    const n = w.slot === undefined ? 0 : Object.keys(entries.get(entryOf?.(d.ref) ?? '')?.entry.slots ?? {}).indexOf(w.slot) + 1;
+    if (n > b.slots.filter((x) => x.kind !== 'room').length) add('slots');
+  }
 }
 
 // --- Sky (V19c, #3521) ---------------------------------------------------------------------------------------------

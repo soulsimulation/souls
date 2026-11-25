@@ -102,3 +102,43 @@ fn a_joining_kind_takes_its_slots_from_its_entry() {
     );
     assert_eq!(kind(&bare, "eden:chair").0, kind(&joined, "eden:chair").0);
 }
+
+/// A world map's `with` row (export/with.ts): today's guitar stand bakes no slot, so the facts give it its entry's
+/// cradle and a guitar of the entry's own kind in it. The import admits it there, so the stand's `take` finds it.
+#[test]
+fn a_with_thing_sits_in_its_holders_slot() {
+    const WITH: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [
+    {"ref": "eden-guitar-stand@1", "hash": "aa", "name": "eden:guitar_stand", "form": "point"},
+    {"ref": "entry:eden:guitar", "hash": "bb", "name": "eden:guitar", "form": "point"}
+  ],
+  "things": [
+    {"id": "e_stand", "def": "eden-guitar-stand@1", "ref": "eden-guitar-stand@1", "parent": null, "pose": [0, 0, 0, 0],
+     "world": [0, 0, 0, 0], "scale_ppm": 1000000, "entry": "eden:guitar_stand",
+     "slots": [{"n": 1, "id": "cradle", "kind": "thing", "at": [0, 300, 0], "yaw": 0}]},
+    {"id": "e_stand-with-1", "def": "eden:guitar", "ref": "entry:eden:guitar", "parent": "e_stand",
+     "slot": {"n": 1, "id": "cradle"}, "pose": [0, 300, 0, 0], "scale_ppm": 1000000, "entry": "eden:guitar"}
+  ],
+  "doors": [],
+  "places": [],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+  "bake": {"things": 2},
+  "byRef": {"eden-guitar-stand@1": 1, "entry:eden:guitar": 1}
+}"#;
+    let im = load(WITH).expect("loads");
+    let h = im
+        .tree
+        .handle(im.nodes["e_stand-with-1"])
+        .expect("the guitar");
+    let guitar = im.tree.node(h).expect("live");
+    assert_eq!(plain(guitar.kind().as_str()), "eden:guitar");
+    assert_eq!(guitar.parent(), Some(im.nodes["e_stand"]), "in the stand");
+    assert_eq!(guitar.slot(), Some(1), "in its cradle");
+    assert!(
+        im.left_out.is_empty() && im.notes.is_empty(),
+        "{:?} {:?}",
+        im.left_out,
+        im.notes
+    );
+}
