@@ -188,3 +188,11 @@ from loopback on the launcher's machine: `create-world`, `set-claimable` (`--cla
 unclaimable: claim, mint and pairing approval answer 403 `not-claimable`), `set-unlisted`, `archive-world`,
 `list-archive`, `restore-world`, `audit`, `register-fork`, `remove-fork`, plus test-Soul helpers. Archiving never
 deletes; the slug stays reserved, and a restore brings the world back at the same address with the same owner.
+
+A new-engine world's page shows a Soul's pairing request on the page the owner already has open (first day, 25 Nov):
+signed in, it asks the directory `POST /v1/pair/waiting` `{world}` every 2 s, with `world` the engine's name for it (from
+the page's stream, `/s/w/<name>/…`). The directory answers `{waiting: [{code, device, label, soul, age, former}]}`: that
+world's Soul requests still pending, asked in the last ten minutes from the same address as the page (the address is kept
+in memory only, never stored). The card shows the code for the owner to match against the agent's before Approve; the
+agent's own link (`/pair?code=…`) still works from anywhere. The navbar's "your Souls" on such a world is the
+directory's `POST /v1/account/souls` for that world, a Soul with no body there yet drawn as arriving.

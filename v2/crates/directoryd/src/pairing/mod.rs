@@ -117,6 +117,9 @@ pub struct Pairing {
     guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
     polls: Mutex<BTreeMap<[u8; 32], (u64, u64)>>,
+    /// Per pending request's code, the address it was asked from and when, in memory only: the world page of a
+    /// signed-in person on the same address shows it ([`Pairing::waiting`]).
+    askers: Mutex<BTreeMap<String, (std::net::IpAddr, u64)>>,
     /// The most unretired Souls one account may hold (#3720): today's `MAX_SOULS_PER_USER`, 20 unless
     /// `DIRECTORYD_SOULS_PER_ACCOUNT` says otherwise. A new Soul past it is refused `too-many`, as today.
     pub(crate) soul_cap: usize,
@@ -223,6 +226,7 @@ impl Pairing {
             owed: Mutex::default(),
             guesses: Mutex::default(),
             polls: Mutex::default(),
+            askers: Mutex::default(),
             soul_cap: std::env::var("DIRECTORYD_SOULS_PER_ACCOUNT")
                 .ok()
                 .and_then(|v| v.parse().ok())
