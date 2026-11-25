@@ -17,9 +17,13 @@
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
-//                                             gait=walk|jog|run sets its pace (0.135 G1)
+//                                             gait=walk|jog|run sets its pace (0.135 G1). An activity (dance, yoga,
+//                                             push_ups...) goes on unbroken until the next act or `stop`; for=<s>
+//                                             (90s, 2m, 1h) sets its time, and keeps a gesture (wave, clap) up that long
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
-//                                             reason, resolved) or, after 60 s, a still-running line saying how to check
+//                                             reason, resolved) or, after 60 s (a declared for=, up to 5 min), a
+//                                             still-running line saying how to check; at once, with when the world
+//                                             ends it, for an act it gives longer (a held dance)
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
 //                                             and the act that sends it; asks the world nothing (#3686)
 //   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
@@ -338,7 +342,7 @@ export function requestOf(argv) {
   }
   if (op === 'context') { req.words = rest.join(' '); if (opts.cursor !== undefined) req.cursor = Number(opts.cursor); }
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
-  if (op === 'act' || op === 'can') req.acts = rest;
+  if (op === 'act' || op === 'can') req.acts = rest.map(forSeconds);
   if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
   if (op === 'inspect') req.this = rest[0];
   if (op === 'object') {
@@ -506,11 +510,24 @@ export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
 export const ACT_WAIT_MS = 60_000;
 /** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
 export const ACT_WAIT_MARGIN_MS = 15_000;
+/** The most a repeated move goes on, s (`skills::form_runner::FOR_MOST_S`): an act that asks for it is held. */
+export const FOR_MOST_S = 3600;
+/** The longest `act --wait` waits, however long the act: past it, the answer says when the act ends and returns. */
+export const ACT_WAIT_LONGEST_MS = 300_000;
 
-/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer. */
+/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer,
+ *  at most ACT_WAIT_LONGEST_MS. */
 export function actWaitMs(req) {
   const declared = (req?.acts ?? []).map((a) => /^for=(\d+)$/.exec(String(a))?.[1]).find((n) => n !== undefined);
-  return declared === undefined ? ACT_WAIT_MS : Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS);
+  return declared === undefined ? ACT_WAIT_MS : Math.min(ACT_WAIT_LONGEST_MS, Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS));
+}
+
+/** How long an act's `for=` says, as whole seconds: `60`, `90s`, `2m`, `1h` (`for=1m` is `for=60`); else the word as given. */
+export function forSeconds(word) {
+  const m = /^for=(\d+)(s|sec|secs|seconds?|m|min|mins|minutes?|h|hours?)?$/i.exec(String(word));
+  if (!m) return word;
+  const unit = (m[2] ?? 's').toLowerCase()[0];
+  return `for=${Number(m[1]) * (unit === 'h' ? 3600 : unit === 'm' ? 60 : 1)}`;
 }
 /** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
 const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
@@ -523,10 +540,15 @@ const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
 export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
   const until = now() + ms;
+  // An activity whose moves keep up longer than this wait (`lasts_s`, the daemon's: a dance held until the next act,
+  // an hour at most, or a long `for=`) is said once the world has it under way, with when the world ends it at the
+  // latest. Any other act (a walk, a sit, whose deadline may be long) is waited for as before.
+  const outlastsWait = sent.lasts_s !== undefined && sent.lasts_s * 1000 + ACT_WAIT_MARGIN_MS > ms;
   for (;;) {
     const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
     const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
-    const over = now() >= until;
+    const outlasts = outlastsWait && last?.answer === 'accepted';
+    const over = now() >= until || outlasts;
     if (ENDED(last) || over) {
       // The last read closes the answer as any command does: the copy's version and what changed since the act.
       const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
@@ -547,6 +569,11 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
           // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).
           ...(phase === 'refused' && r?.receipt?.why ? { why: r.receipt.why } : {}) };
+      }
+      if (outlasts) {
+        const held = sent.lasts_s >= FOR_MOST_S;
+        return { ...sent, ...(r?.ok ? r : {}), phase: 'running', stillRunning: true, ...(last.ends_by ? { ends_by: last.ends_by } : {}),
+          detail: `running: ${held ? 'it goes on until your next act' : `it goes on ${sent.lasts_s} s, or until your next act`} or \`stop ${sent.sequence}\`${last.ends_by ? `; the world ends it by ${last.ends_by} at the latest` : ''}` };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };

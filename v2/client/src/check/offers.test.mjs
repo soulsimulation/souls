@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from './offers.mjs';
+import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from './offers.mjs';
 import { argsOf, requestOf } from '../cli/souls.mjs';
 
 const ID = `${'ab'.repeat(16)}-7`;
@@ -95,9 +95,22 @@ test('#3603: a thing moving on a course with seats offers its rider steer, stop 
     ['walk', 'brush', 'fill', 'rake'], 'a moving thing with no seat has no rider');
 });
 
-test('0.135: a dance\'s `for` shows its step\'s default, 10 s, and is left out of the usage\'s required words', () => {
+test('continuous activities: a held activity says it goes on until the next act, a gesture that it is done once, each with `for=<seconds>`', () => {
   const humanoid = JSON.parse(readFileSync(new URL('../../../../content/kinds/body/humanoid.json', import.meta.url), 'utf8'));
-  const dance = offersOf(ID, humanoid).find((o) => o.name === 'dance');
-  assert.equal(dance.params.for.default, 10);
-  assert.match(dance.usage, /\[for=<count>\]/);
+  const offers = offersOf(ID, humanoid), of = (n) => offers.find((o) => o.name === n);
+  for (const held of ['dance', 'yoga', 'jumping_jacks', 'push_ups', 'sit_ups', 'stargaze']) {
+    assert.match(of(held).lasts, /^unbroken until your next act or `stop` \(an hour at most\); for=<seconds> for a set time$/, held);
+    assert.match(of(held).usage, /\[for=<seconds>\]$/, held);
+    assert.equal(of(held).params.for.default, undefined, `${held}: the world's own default, not sent`);
+  }
+  for (const once of ['wave', 'clap', 'jump', 'stretch', 'sing', 'listen']) assert.match(of(once).lasts, /^once; for=<seconds> keeps it up/, once);
+  assert.equal(of('exercise').lasts, '10 s for each of its 3 moves, back to back, unless each=<seconds>');
+  assert.equal(of('bow').lasts, undefined, 'a bow is a bow');
+  // `say --gesture` still plays each, though it now takes how long it lasts; never a walk or a form taking a thing.
+  for (const g of ['clap', 'jump', 'stretch', 'sing', 'listen', 'wave', 'wave_at', 'bow']) assert.ok(isGesture(humanoid.forms[g]), g);
+  for (const g of ['dance', 'yoga', 'go_to', 'touch', 'pick_up', 'stand']) assert.ok(!isGesture(humanoid.forms[g]), g);
+  // How long each keeps up, s, as `act --wait` reads it: held, a set time, once, a workout's three, nothing repeated.
+  const f = humanoid.forms;
+  assert.deepEqual([repeatsOf(f.dance), repeatsOf(f.dance, { for: 60 }), repeatsOf(f.wave), repeatsOf(f.wave, { for: 20 }), repeatsOf(f.exercise), repeatsOf(f.exercise, { each: 5 }), repeatsOf(f.bow), repeatsOf(f.go_to)],
+    [3600, 60, 0, 20, 30, 15, undefined, undefined]);
 });

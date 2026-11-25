@@ -310,9 +310,9 @@ pub const FOR_MOST_S: i64 = 3_600;
 
 /// A move step's `for_s` (0.135): how long the move repeats, whole seconds from 1 to [`FOR_MOST_S`], as µs. Written
 /// out, or `{"arg": a, "default": n}`: the act's whole number `a` (a `count` it takes, or the same digits as a name,
-/// as `act dance for=60` sends them), else `default`. Refused `out-of-range`, `arg-not-a-number`, `arg-missing` (no
-/// argument and no default) or `step-malformed`.
-fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
+/// as `act dance for=60` sends them), else `default`. With no default, a move the act gives no `a` is done once
+/// (None: a wave, unless asked to keep on waving). Refused `out-of-range`, `arg-not-a-number` or `step-malformed`.
+fn for_us(v: &Value, args: &Args) -> Result<Option<Micros>, Refusal> {
     let n = match v {
         Value::Int(n) => i64::try_from(*n).unwrap_or(i64::MAX),
         _ => {
@@ -330,7 +330,10 @@ fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
                 },
                 (Some(_), _) => return refuse("arg-not-a-number", a),
                 (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
-                (None, _) => return refuse("arg-missing", a),
+                (None, None) => return Ok(None),
+                (None, Some(_)) => {
+                    return refuse("step-malformed", "move.for_s.default: whole seconds");
+                }
             }
         }
     };
@@ -340,7 +343,7 @@ fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
             format!("for: {n} s; from 1 to {FOR_MOST_S} s"),
         );
     }
-    Ok(n * 1_000_000)
+    Ok(Some(n * 1_000_000))
 }
 
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
@@ -511,7 +514,11 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
-                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?,
+                        repeat: s
+                            .get("for_s")
+                            .map(|v| for_us(v, args))
+                            .transpose()?
+                            .flatten(),
                     })
                 }
                 "wait" => match s.get("us") {

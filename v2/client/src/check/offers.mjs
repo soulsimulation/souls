@@ -28,6 +28,16 @@ function slotNames(entry, form) {
 /** A parameter's placeholder in `usage`: its choices when the entry lists them, else its type. */
 const placeholder = (t) => (Array.isArray(t?.of) ? t.of.join('|') : t?.type === 'thing' ? 'id' : String(t?.type ?? 'value'));
 
+/** The most a repeated move goes on, s (`skills::form_runner::FOR_MOST_S`): a step defaulting to it is held. */
+const FOR_MOST_S = 3600;
+
+/** How long an offer whose move repeats lasts, in words, from its step's `for_s` default and the argument `n` it takes. */
+function lastsOf(n, def, moves = 1) {
+  if (def === undefined) return `once; ${n}=<seconds> keeps it up, unbroken, that long`;
+  if (def >= FOR_MOST_S) return `unbroken until your next act or \`stop\` (an hour at most); ${n}=<seconds> for a set time`;
+  return moves > 1 ? `${def} s for each of its ${moves} moves, back to back, unless ${n}=<seconds>` : `${def} s, unbroken, unless ${n}=<seconds>`;
+}
+
 /** The engine's verbs for a rider of a thing on a course (#3603), as `act`'s words: `carrier:<verb>:<id>`. */
 export const CARRIER_VERBS = Object.freeze(['steer', 'stop', 'land']);
 const METRES = { type: 'metres' };
@@ -58,21 +68,45 @@ export function offersOf(id, entry, { moving = false } = {}) {
     // A form named as a move (`sit` on a picnic table) is that form only when it is given its arguments; bare, the
     // word is the move, which does not walk there first. So its slot is not left to the world: the first is named.
     const moveNamed = MOVE_NAMES.has(name);
+    let lasts = null;
     const params = Object.fromEntries(Object.entries(takes).map(([n, t]) => {
       const slots = t?.type === 'slot' && !Array.isArray(t.of) ? slotNames(entry, name) : null;
       const p = { ...t, ...(slots?.length ? { of: slots } : {}) };
-      // 0.135: a repeated move's length (`for_s: {"arg": n, "default": s}`, a dance's `for`) has the step's default
-      const stepDefault = (f?.steps ?? []).find((st) => st?.for_s?.arg === n)?.for_s?.default;
+      // 0.135: a repeated move's length (`for_s: {"arg": n, "default": s}`, a dance's `for`), whole seconds. Left out,
+      // the step's default: an hour is held until the next act or `stop`; none is the move done once.
+      const repeats = (f?.steps ?? []).filter((st) => st?.for_s?.arg === n), repeat = repeats[0]?.for_s;
+      if (repeat) { p.type = 'seconds'; lasts ??= lastsOf(n, repeat.default, repeats.length); }
       if (moveNamed && slots?.length) p.default = slots[0];
-      else if (stepDefault !== undefined) p.default = stepDefault;
+      else if (repeat) p.optional = true;
       else if (t?.select) p.optional = true;
       return [n, p];
     }));
     const words = Object.entries(params).map(([n, t]) => (t.optional || t.default !== undefined ? `[${n}=<${placeholder(t)}>]` : `${n}=<${placeholder(t)}>`));
-    out.push({ name, act: `${name}:${id}`, form: name, who: f?.who ?? 'anyone', ...(Object.keys(params).length ? { params } : {}), usage: ['act', `${name}:${id}`, ...words].join(' ') });
+    out.push({ name, act: `${name}:${id}`, form: name, who: f?.who ?? 'anyone', ...(Object.keys(params).length ? { params } : {}), usage: ['act', `${name}:${id}`, ...words].join(' '), ...(lasts ? { lasts } : {}) });
   }
   if (moving && slotNames(entry, 'sit').length) out.push(...carrierOffers(id));
   return out;
+}
+
+/** Whether form `f` is a gesture `say --gesture` may play (C26): moves alone, taking at most `toward` and how long it
+ *  keeps up (`for`, a move's `for_s`: a clap held for a while), never an activity held until the next act (a dance). */
+export function isGesture(f) {
+  return Boolean(f?.steps?.length) && f.steps.every((x) => x.step === 'move')
+    && Object.keys(f.takes ?? {}).every((k) => k === 'toward' || f.steps.some((x) => x.for_s?.arg === k && !(x.for_s.default >= FOR_MOST_S)));
+}
+
+/**
+ * Continuous activities: how long form `f` keeps its moves up, s: each repeated move step's (`for_s`) count from the
+ * act's `args` (`for=60`) or the step's default (3600: held until the next act or `stop`), summed; a step with neither
+ * is one move (0). Undefined for a form that repeats no move.
+ */
+export function repeatsOf(f, args = {}) {
+  const reps = (f?.steps ?? []).filter((st) => st?.for_s !== undefined);
+  if (!reps.length) return undefined;
+  return reps.reduce((sum, { for_s: r }) => {
+    const n = Number(typeof r === 'number' ? r : args?.[r?.arg] ?? r?.default ?? 0);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
 }
 
 /** The offer's words for `act`: given arguments, then each parameter's `default` the arguments leave out. */

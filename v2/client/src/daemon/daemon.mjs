@@ -158,7 +158,7 @@ import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptOne } from '../check/kept.mjs';
-import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
+import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
@@ -302,7 +302,10 @@ function receiptSent(sequence, ranked, { target, replaces, words }) {
 }
 function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
-  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
+  // An accepted act the world gave a deadline (a form's run, a walk): when it ends at the latest, by this machine's clock.
+  const at = new Date();
+  const ends = e.left_ms !== undefined ? { ends_by: new Date(at.getTime() + e.left_ms).toISOString(), left_s: Math.round(e.left_ms / 1000) } : {};
+  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.version ? { version: e.version } : {}), ...ends, at: at.toISOString() });
   const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
   // R5: an act of this Soul's that ends (not words, not a progress answer) is the client's `client:act-ended`, which a
   // wake rule (`wake add act-ended`) or a reflex can match: field 1 its sequence, 2 how it ended, 3 the reason.
@@ -719,8 +722,10 @@ function connect() {
       // G7: an edit's receipt carries the ids its names became; its refusal, the operation that failed.
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
       // A refusal's own words (the world's detail: how far apart, what it reaches), after the seven fields.
-      const detail = said ? readableDetail(said, rowsOf(copy).values()) : '';
-      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...(detail ? { detail } : {}), ...edit };
+      // An act's progress answer (accepted) says how long the world gives it at most, `left_us=<µs>`: a dance's minute.
+      const left = Number(c) === 3 ? /^left_us=(\d+)$/.exec(said) : null;
+      const detail = said && !left ? readableDetail(said, rowsOf(copy).values()) : '';
+      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...(detail ? { detail } : {}), ...(left ? { left_ms: Math.round(Number(left[1]) / 1000) } : {}), ...edit };
       note(answered);
       keyAnswered(answered);
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
@@ -1238,7 +1243,7 @@ function towardOf(req) {
   if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
   const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
-  const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
+  const gestures = Object.entries(forms).filter(([, f]) => isGesture(f));
   // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
   const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
@@ -1323,6 +1328,12 @@ function actsOf(words) {
     }
   }
   return out;
+}
+
+/** Continuous activities: how long candidate `c`'s form keeps its moves up, s (`repeatsOf`), from its target's kind. */
+function repeatsFor(c) {
+  const r = c?.form ? rowsOf(copy).get(c.this) : null;
+  return r ? repeatsOf(heldKinds()[r.entry ?? r.kind]?.forms?.[c.form], c.args) : undefined;
 }
 
 /** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
@@ -1708,6 +1719,7 @@ async function answer(req, conn = null) {
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      const lasts = repeatsFor(keep[0]);
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
       // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
       // otherwise it carries the Soul's given name, so no join of this client births a nameless body.
@@ -1716,7 +1728,7 @@ async function answer(req, conn = null) {
       const words = plainJoin ? givenName() ?? undefined : undefined;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, words, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
-      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
+      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(lasts !== undefined ? { lasts_s: lasts } : {}), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
     case 'set-down': {
