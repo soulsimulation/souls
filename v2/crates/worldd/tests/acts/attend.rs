@@ -329,7 +329,7 @@ fn e14b_a_soul_attends_the_halls_lecture_on_a_bench_seat_through_the_gateway() {
     let client = |soul| {
         let s = UnixStream::connect(&path).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-        Client(s, soul, 0, Vec::new())
+        Client(s, soul, 0, Vec::new(), Vec::new())
     };
     let (mut a, mut b) = (client(w1()), client(w2()));
 

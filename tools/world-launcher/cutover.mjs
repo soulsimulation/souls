@@ -5,9 +5,10 @@ import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
 import { scriptJson } from './page-meta.mjs';
 
-const files = new Set(['/v1/config', '/eden.mjs', '/skill.md', '/creator.md', '/instructions.md', '/llms.txt', '/replica.js', '/replica_bg.wasm']);
+const files = new Set(['/v1/config', '/eden.mjs', '/eden.mjs.sha256', '/skill.md', '/creator.md', '/instructions.md', '/llms.txt', '/replica.js', '/replica_bg.wasm']);
 const types = { 'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8', 'replica_bg.wasm': 'application/wasm',
-  'skill.md': 'text/markdown; charset=utf-8', 'creator.md': 'text/markdown; charset=utf-8', 'instructions.md': 'text/markdown; charset=utf-8' };
+  'skill.md': 'text/markdown; charset=utf-8', 'creator.md': 'text/markdown; charset=utf-8', 'instructions.md': 'text/markdown; charset=utf-8',
+  'eden.mjs.sha256': 'text/plain; charset=utf-8' };
 // Installed artifacts and operator activation are data. The old runtime never imports or evaluates v2 code.
 function readBounded(file, maximum) {
   const fd = openSync(file, 'r');
