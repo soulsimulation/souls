@@ -7,7 +7,7 @@ import { BASE } from '../base-path.ts';
 import { whenVisible } from '../poll-pace.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
-import { useSession, userAuthHeaders } from '../auth-session.ts';
+import { useSession, userAuthHeaders, type Session } from '../auth-session.ts';
 import { AccountPicture } from '../AccountPicture.tsx';
 import { HomeSouls } from './HomeSouls.tsx';
 
@@ -41,6 +41,13 @@ function AccountMenu({ label, avatarUrl, onSignOut }: { label: string | null; av
   );
 }
 
+/** Sign in from the homepage and come back to it. Only "+ New world" marks the return (?new=1) so New world opens then; "Sign in" alone opens nothing. */
+export function homeSignIn(session: Pick<Session, 'signInUrl' | 'login'>, newWorld: boolean) {
+  const then = newWorld ? '?new=1' : '';
+  if (session.signInUrl) location.assign(session.signInUrl + then);
+  else { if (newWorld) history.replaceState(null, '', location.pathname + then); session.login(); }
+}
+
 export function LauncherHome({ initial }: { initial: LauncherList }) {
   const [list, setList] = useState(initial);
   const [dialog, setDialogRaw] = useState(() => new URLSearchParams(location.search).has('new'));
@@ -49,11 +56,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
   const needsSignIn = (session.mode === 'clerk' || session.mode === 'dev') && !session.authed;
   // a new world belongs to whoever makes it: signing in comes first, and the dialog opens once they are back (?new)
   const setDialog = (open: boolean) => {
-    if (open && needsSignIn) {
-      if (session.signInUrl) location.assign(session.signInUrl + '?new=1');
-      else { history.replaceState(null, '', location.pathname + '?new=1'); session.login(); }
-      return;
-    }
+    if (open && needsSignIn) return homeSignIn(session, true);
     setDialogRaw(open);
   };
   useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
@@ -75,7 +78,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <div className="lh-actions">
           {session.authed ? <AccountMenu label={session.label} avatarUrl={session.avatarUrl} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
-              : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
+              : <button className="lh-signin" data-home-signin="1" onClick={() => homeSignIn(session, false)}>Sign in</button>)
             : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
         </div>
       </header>
