@@ -36,7 +36,7 @@ import {OldWorldApprovals} from './OldWorldApprovals.tsx';
 import {useV2AccountSouls,v2World} from './v2-engine/owner-mailbox.ts';  // a moved world's Soul requests are the directory's (V2PairDialog.tsx)
 import {answerApprovalTabs,approvalChannelName,approvalFromHash,askOpenTab} from './approval-link.ts';
 import {useApprovalFollow} from './useApprovalFollow.ts';
-import {FOLLOW_SOUL_WAIT_MS,onFollowSoulRequest,onSoulPresentQuery,requestFollowSoul} from './follow-soul-request.ts';
+import {FOLLOW_SOUL_WAIT_MS,cameraOnSoul,onFollowSoulRequest,onSoulPresentQuery,requestFollowSoul} from './follow-soul-request.ts';
 import {onLookAtRequest} from './look-at-request.ts';
 import {worldClockAt,worldMinutes,worldTimeText} from './world-clock.ts';
 import type { WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
@@ -254,7 +254,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
         <button className="panel-close" aria-label="Close panel" title="Close" onClick={() => setPanelOpen(false)}>×</button>
         {lessonOpen&&localClassroomPresentation&&<ClassroomPresentation worldId={localClassroomPresentation.worldId} screenEntityId={localClassroomPresentation.screenEntityId} index={lessonIndex} onSelect={setLessonIndex}/>}
         {pairCode&&<button onClick={()=>{setAdvanced(false);setTab('my soul');revealPanel();}}>Finish assistant approval</button>}
-        <SoulFocus key={`${selected}:${sim.me?.userId ?? 'public'}`} sim={sim} api={api} auth={auth} selected={selected} select={inspect} camera={selected&&viewerHandle?{following:viewerState?.cameraMode==='follow'&&viewerState.selection.soulId===selected&&!viewerState.followHeld,follow:()=>{requestFollowSoul(selected);},stop:()=>{viewerHandle.setManualNavigation?.('orbit');viewerHandle.setCameraMode('manual');}}:undefined} manage={openAccount} active={!advanced&&panelOpen&&tab!=='my soul'} />
+        <SoulFocus key={`${selected}:${sim.me?.userId ?? 'public'}`} sim={sim} api={api} auth={auth} selected={selected} select={inspect} camera={selected&&viewerHandle?{following:cameraOnSoul(viewerState,selected)==='following',held:cameraOnSoul(viewerState,selected)==='held',follow:()=>{requestFollowSoul(selected);},stop:()=>{viewerHandle.setManualNavigation?.('orbit');viewerHandle.setCameraMode('manual');}}:undefined} manage={openAccount} active={!advanced&&panelOpen&&tab!=='my soul'} />
       </aside>
       <aside id="account-panel" className="human-panel account-panel" hidden={advanced||tab!=='my soul'||!panelOpen} aria-label="Soul and account tools">
         <button onClick={() => setTab('watch')}>← Back to the world</button><div className="grid"><SoulAccount sim={sim} auth={auth} api={api} select={id=>{inspect(id);setTab('watch');}} pairCode={pairCode} clearPair={()=>setPairCode(null)}/></div>

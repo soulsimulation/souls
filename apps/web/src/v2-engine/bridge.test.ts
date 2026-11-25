@@ -85,7 +85,16 @@ test('B3-3: a Soul\'s card fields from the stream: its description, and what it 
   for (let n = 17; n < 20; n++) b.receive(part(n, []));
   assert.deepEqual([soul().doing, soul().state], ['standing', 'awake']);
   // seated while it is in a slot
-  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined), 'seated');
+  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined), 'sitting');
+  // first day (25 Nov): what it says is what its body is drawn doing, never "seated" in a balloon or "standing" in a dance
+  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'ride'), 'riding');
+  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined, 'lie'), 'lying down');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'dance'), 'dancing');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'jumping-jacks'), 'exercising');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'read'), 'reading');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'walk'), 'walking');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined, 'idle'), 'standing');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, true, undefined, 'dance'), 'speaking', 'its words first');
   assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined), 'standing', 'one placement is not a walk');
 });
 

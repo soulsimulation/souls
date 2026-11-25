@@ -68,6 +68,9 @@ export function useV2WaitingPair(place: Directory | null, enabled: boolean): Wai
 }
 
 const clip = (s: string, fallback: string) => s.trim().slice(0, 60) || fallback;
+/** The agent as its client names itself ("Claude Code on this computer"); an older client's script name ("souls.mjs",
+ *  "agent") reads as "An agent". The device's name is never shown: it is the computer's host name (first day, 25 Nov). */
+export const agentWords = (label: string) => (/^(agent|[\w.-]+\.m?js)$/i.test(label.trim()) ? 'An agent' : clip(label, 'An agent'));
 const ago = (s: number) => (s < 90 ? `${Math.max(0, Math.round(s))} s ago` : `${Math.round(s / 60)} min ago`);
 
 /** A Soul's page id from its grant (v2-engine/bridge.ts `soulIdOf`, not imported: that module is the viewer's). */
@@ -125,7 +128,7 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       <button type="button" className="ap-close" aria-label="Close" onClick={close}>×</button>
       <div className="ap-head"><div className="ap-who">
         <span className="ap-kicker">{request.soul ? 'Connect your Soul' : 'New Soul'}</span>
-        <b className="ap-name">{soul && name.trim() ? clip(name, 'Your Soul') : clip(request.label, 'An unnamed agent')}</b>
+        <b className="ap-name">{soul && name.trim() ? clip(name, 'Your Soul') : agentWords(request.label)}</b>
       </div></div>
       {soul ? <>
         <p className="ap-line ap-wait" role="status" data-pair-arriving={soul}><span className="ap-spinner" aria-hidden="true" />Approved. Your Soul is arriving…</p>
@@ -137,10 +140,10 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       </> : <>
         <p className="ap-state"><span className="ap-pairing"><i aria-hidden="true" />Pairing</span><span className="ap-dim">asked {ago(request.age)}</span></p>
         <p className="ap-ask ap-code" data-pair-code={request.code}>Code <b>{request.code}</b>: check it matches the one your terminal shows.</p>
-        <p className="ap-ask">An agent calling itself <b>{clip(request.label, 'an unnamed agent')}</b> on <b>{clip(request.device, 'an unnamed device')}</b> asks to {what} and control it.</p>
+        <p className="ap-ask"><b>{agentWords(request.label)}</b> asks to {what} and control it.</p>
         <p className="ap-warn">Approve only if you started it yourself, just now.</p>
         {fresh && <label className="ap-ask">Name (optional) <input type="text" data-pair-name="1" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} placeholder="its agent can name it later" /></label>}
-        <label className="ap-ask"><input type="checkbox" data-pair-match="1" checked={match} onChange={(e) => setMatch(e.target.checked)} /> The code matches the one on my screen</label>
+        <label className="ap-ask ap-check"><input type="checkbox" data-pair-match="1" checked={match} onChange={(e) => setMatch(e.target.checked)} /> The code matches the one on my screen</label>
         <div className="ap-actions">
           <button type="button" className="ap-btn ap-primary" data-pair-approve={request.code} disabled={!match || busy} onClick={() => void approve()}>Approve</button>
           <button type="button" className="ap-btn" data-pair-decline={request.code} disabled={busy} onClick={close}>Decline</button>

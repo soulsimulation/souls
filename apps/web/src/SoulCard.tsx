@@ -27,7 +27,8 @@ type Rec=PublicRecord|'loading'|'unavailable';
  *  Read when this module loads: the page's main takes the inline config, and deletes it, when it mounts. */
 const V2=typeof window!=='undefined'&&!!v2Stream();
 const doingNow=(soul:PublicSoul)=>V2&&soul.doing?doingText(soul.doing,null,soul.id)||null:null;
-type Camera={following:boolean;follow():void;stop():void};
+/** `held`: the viewer pulled out of following this Soul; the button says "Follow again", as the chip's hint does. */
+type Camera={following:boolean;held?:boolean;follow():void;stop():void};
 
 /** The old process's per-Soul record. A world the new engine runs has none (the launcher answers it 404
  *  world.new-engine): the card is the stream's Soul (name, look, what it is doing), and nothing is asked. */
@@ -121,7 +122,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   <div className="soul-card-thread" data-soul-thread={soul.id}/>
   {(connected||(owner&&mailbox))&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
   {followShown&&<div className="soul-actions">
-   <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':'Follow'}</button>
+   <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':camera.held?'Follow again':'Follow'}</button>
   </div>}
   {owner&&retire&&<RetireRow name={soul.name} retire={retire}/>}
  </article>;

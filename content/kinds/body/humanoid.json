@@ -808,6 +808,49 @@
       ],
       "effects": []
     },
+    "exercise": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "each": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jumping_jacks",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "push_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "sit_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        }
+      ],
+      "effects": []
+    },
     "sing": {
       "who": "anyone",
       "starts": "act",
