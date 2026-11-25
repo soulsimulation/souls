@@ -36,6 +36,8 @@
 //          If the journey runs past it the clip is cut at the cap and the script exits 3: shorten the journey.
 // --local-storage key=value: set in the page's localStorage before any page script runs (repeatable), e.g.
 //          `sim.dev=admin` to arrive signed in as a local dev user, the way the dev sign-in form leaves it.
+// SIM_PROOF_CHROMIUM_ARGS: extra Chromium flags for the take, e.g. a local stand-in served under a real origin:
+//          `--host-resolver-rules=MAP soul.game:443 127.0.0.1:8443 --ignore-certificate-errors` (#4892).
 // GPU (#2294): SIM_PROOF_GPU=hardware uses a hardware GL renderer: each candidate set of Chromium flags is launched once
 //          and its WebGL renderer read; the first that is not software (SwiftShader, llvmpipe) records the take. None:
 //          exit 5, with every renderer seen. Unset: SwiftShader, as before. Either way the sidecar's `gl` names the
@@ -320,7 +322,7 @@ async function main() {
   }
   const work = mkdtempSync(join(tmpdir(), 'proof-'));
   const { chromium, args, from } = await loadChromium();
-  const taken = await launchForTake(chromium, args, clip.forceScale ? [`--force-device-scale-factor=${clip.forceScale}`] : []), { browser } = taken;
+  const taken = await launchForTake(chromium, args, [...(clip.forceScale ? [`--force-device-scale-factor=${clip.forceScale}`] : []), ...(process.env.SIM_PROOF_CHROMIUM_ARGS ?? '').split(/\s+(?=--)/).filter(Boolean)]), { browser } = taken;
   const gl = { ...taken.gl, software: softwareGl(taken.gl.renderer) };
   console.log(`gl renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
   const { width, height } = clip.world;                // the recorded page, in output pixels
