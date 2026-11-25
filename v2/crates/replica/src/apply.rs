@@ -345,6 +345,46 @@ impl Replica {
         out
     }
 
+    /// Every node `part`'s entries can change when they apply one at a time from this state: a superset, read now,
+    /// of what [`Replica::changed_since`] gives after them (each entry's nodes are read before that entry, from a
+    /// state the part's earlier entries changed). Besides each entry's nodes read now: for each node removed, moved
+    /// or leaving, its subtree with its links' far ends and its parent now, and each frame a node is put in. A node
+    /// an entry reads from the state as it is then (a subtree, a parent, a link's end) is one of those, or one the
+    /// part names itself. The public stream reads who was visible before a part from it (no copy of the whole tree).
+    pub fn may_change(&self, part: &Part) -> BTreeSet<Id> {
+        let mut out = BTreeSet::new();
+        let moved = |node: Id, out: &mut BTreeSet<Id>| {
+            out.extend(self.subtree_and_ends(node));
+            out.extend(self.node_parent(node));
+        };
+        for e in &part.effects {
+            out.extend(self.touched(e));
+            match &e.body {
+                Body::Changes(cs) => {
+                    for c in cs {
+                        match &c.change {
+                            Change::Create { pose, .. } => {
+                                out.insert(pose.frame.node);
+                            }
+                            Change::Remove { node } => moved(*node, &mut out),
+                            Change::Reparent { node, pose, .. } => {
+                                moved(*node, &mut out);
+                                out.insert(pose.frame.node);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Body::Transfer(TransferRec::Leave { node, pose, .. }) => {
+                    moved(*node, &mut out);
+                    out.insert(pose.frame.node);
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
     fn node_parent(&self, id: Id) -> Option<Id> {
         self.tree
             .handle(id)
