@@ -460,14 +460,9 @@ fn yaw(mdeg: i64) -> Result<Quat, String> {
 /// a campfire's ring of logs (4.5 m), a swing set or a hammock between its posts stay walkable among their own boxes.
 pub const UNDER_MOST: i64 = 3_000_000;
 
-/// The kinds (their plain names, any namespace) never given a box under their slots ([`under_slots`]): a rack's parts.
-pub const UNDER_NEVER: &[&str] = &[
-    "rack_bay",
-    "rack_beam",
-    "rack_upright",
-    "frame_stand",
-    "pallet_rack",
-];
+/// The kinds never given a box under their slots ([`under_slots`]), by the start of their plain name (any namespace):
+/// the rack family (`rack_bay`, `rack_beam`, `rack_upright`, `rack_upright_6m`, …), frame stands and pallet racks.
+pub const UNDER_NEVER: &[&str] = &["rack_", "frame_stand", "pallet_rack"];
 
 thread_local! {
     /// Set only by [`without_under_boxes`]: the ground as it was before the boxes under slots, to measure them.
@@ -547,7 +542,8 @@ fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64;
     // A rack's parts (a bay, its frames and beams, a frame stand) hold joined parts in their slots, never a seat or a
     // top, and Souls build and take them down from inside: never a box under them, whatever their slots' heights.
     let k = kind_of(tree, h);
-    if UNDER_NEVER.contains(&k.rsplit(':').next().unwrap_or("")) || UNDER_OFF.with(|c| c.get()) {
+    let name = k.rsplit(':').next().unwrap_or("");
+    if UNDER_NEVER.iter().any(|n| name.starts_with(n)) || UNDER_OFF.with(|c| c.get()) {
         return None;
     }
     let slots: Vec<Vec3> = tree
