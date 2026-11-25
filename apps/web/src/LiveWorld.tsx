@@ -134,6 +134,7 @@ import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
 import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
 let oldKit:OldSceneKit|null=null,oldKitLoad:Promise<OldSceneKit>|null=null;
@@ -777,7 +778,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
 
     const initialMotionHistory=new WorldMotionHistory(fetchChunks,abort.signal);
     const motionOwner=()=>JSON.stringify([context.current.sim.conn.welcome?.worldId,context.current.sim.conn.welcome?.epoch]);
-    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [], liveTick: number | null = null;
+    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [];
+    const liveClock = new LiveClock();
     const spot = new THREE.Vector3();
     const gaitContinuity=new RecordedGaitContinuity();
     let applied: Chunk | null = null, records: Record<string, Entity> = {}, frame = 0, last = performance.now(), labelAt = 0, brokenTake: string | null = null, frameGap = false;
@@ -787,7 +789,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (arr !== liveArr || key !== liveKey) { liveArr = arr; liveKey = key; live = validChunks(arr).filter((c) => c.fromTick <= (t?.serverTick ?? Infinity)); } // a restarted server starts its ticks again
       return live;
     };
-    const goLive = () => { past.current = null; liveTick = null; setMode('live'); setNote(null); };
+    const goLive = () => { past.current = null; liveClock.reset(); setMode('live'); setNote(null); };
+    // read-only, for checks and proof: the live tick drawn, its target and the newest chunk's end (live-clock.ts)
+    const liveProbe: { tick: number | null; target: number | null; newest: number | null } = { tick: null, target: null, newest: null };
+    (window as unknown as { __soulsLive?: typeof liveProbe }).__soulsLive = liveProbe;
 
     const pacer = new FramePacer();
     // #2260: where the public replica draws each Soul, place and thing now, so a client rendering on its own machine places a
@@ -815,7 +820,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // lane W1: while a new world's first build runs in slices nothing is drawn: look at the takes 4 times a second, no more
       if(entityLayer.building){const t=performance.now();if(t-buildingFrameAt<250)return;buildingFrameAt=t;}
       if(eyes&&!eyes.wake(performance.now()))return;  // VF1b: a slow frame leaves room for socket messages
-      const now = performance.now(), step = Math.min(0.1, (now - last) / 1000);
+      const now = performance.now(), real = (now - last) / 1000, step = Math.min(0.1, real);
       last = now;
       const rigBudget={remaining:1};  // one shared cap for this animate, including any repeated people updates
       const s = context.current.sim, dt = dtOf(s), liveList = liveChunks();
@@ -850,10 +855,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       } else {
         chunks = liveList;
         const target = (serverNow(s) ?? chunks.at(-1)?.toTick ?? 0) - liveDelayOf(s);
-        if (liveTick === null || Math.abs(target - liveTick) > 80) liveTick = target;
-        else liveTick += step * tpsOf(s) + (target - liveTick) * Math.min(1, step * 1.5); // run at the clock rate, drift gently toward the server
-        if (chunks.length) liveTick = Math.max(chunks[0].fromTick, Math.min(chunks.at(-1)!.toTick, liveTick));
-        tick = liveTick;
+        // live-clock.ts: by real time, not by frames (a slow frame never leaves it behind); a late chunk or a stalled
+        // frame is caught up at most MAX_RATE fast, never skipped; only far off (a hidden tab) is it one cut
+        tick = liveClock.step(real, target, tpsOf(s), chunks.length ? chunks[0].fromTick : null, chunks.at(-1)?.toTick ?? null);
+        liveProbe.tick = tick; liveProbe.target = target; liveProbe.newest = chunks.at(-1)?.toTick ?? null;
       }
 
       if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,liveDelayOf(s),motionOwner(),motionOwner);
