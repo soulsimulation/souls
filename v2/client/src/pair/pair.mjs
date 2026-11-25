@@ -76,13 +76,19 @@ export function entriesOf(gateway) {
  * The world's kind entries (#3760): fetched from the gateway's `GET /v2/entries` with the Soul's token, sent with the
  * tag of the last copy kept (`<home>/kinds/.entries-<world>.json`), so an unchanged world sends nothing. Each entry is
  * written as `<home>/kinds/<kind, : as .>.json`, where the checks read them (`check/state.mjs` `kindsIn`), and an
- * entry this world sent before and no longer does is removed. Resolves to `{entries, changed}`; rejects on a refusal.
+ * entry this world sent before and no longer does is removed. The world's activities as it serves them (one
+ * `souls-activities/1` record after the entries: each one's served name, card, distance and place) go to
+ * `<home>/kinds/.activities-<world>.json` (`activitiesServed`), removed when the world sends none. Resolves to
+ * `{entries, changed}`; rejects on a refusal.
  */
 export async function refreshEntries({ home, world, gateway, token, within = 10000 }) {
   const dir = join(home, 'kinds'), mark = join(dir, `.entries-${encodeURIComponent(world)}.json`);
   let held = {};
   try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
   if (!(held.files ?? []).every((f) => existsSync(join(dir, f)))) held = { files: held.files }; // a file gone: fetch all
+  // The served activities are in the same answer: a mark from before they were kept (no `activities`), or one whose
+  // activities file is gone, is fetched again whole, not revalidated by its tag.
+  if (held.activities === undefined || (held.activities && !existsSync(activitiesFile(home, world)))) held = { files: held.files };
   const r = await fetch(entriesOf(gateway), {
     headers: { authorization: `Bearer ${token}`, ...(held.etag ? { 'if-none-match': held.etag } : {}) },
     signal: AbortSignal.timeout(within),
@@ -99,8 +105,10 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   // Off the daemon's thread of control (fs/promises), and only the entries whose bytes changed: a world's 449 entries
   // written and renamed one by one, synchronously, held a new daemon's clock, sync and answers for 6 to 18 s on its
   // first sign-in, right after its pairing had written the same files (first run, 0.135).
-  const files = [];
+  const files = [], served = activitiesFile(home, world);
   let written = 0;
+  const activities = list.find((e) => e?.format === 'souls-activities/1' && Array.isArray(e.activities));
+  if (activities) { await writeFile(`${served}.tmp`, JSON.stringify(activities)); await rename(`${served}.tmp`, served); } else await rm(served, { force: true });
   for (const e of list) {
     if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
     const f = `${e.kind.replaceAll(':', '.')}.json`, text = JSON.stringify(e);
@@ -112,9 +120,16 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const now = new Set(files);
   for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) await rm(join(dir, f), { force: true });
-  await writeFile(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  await writeFile(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
   await rename(`${mark}.tmp`, mark);
   return { entries: files.length, changed: true, written };
+}
+
+const activitiesFile = (home, world) => join(home, 'kinds', `.activities-${encodeURIComponent(world)}.json`);
+
+/** The world's activities as it serves them (`refreshEntries`), `{format, activities}`; null when none are kept. */
+export function activitiesServed(home, world) {
+  try { return JSON.parse(readFileSync(activitiesFile(home, world), 'utf8')); } catch { return null; }
 }
 
 /**

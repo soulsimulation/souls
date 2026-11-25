@@ -89,9 +89,10 @@ node eden.mjs catalog
 node eden.mjs inspect "$A"
 ```
 
-- `together kinds`: the touches (`handshake`, `hug`, `high-five`, `fist-bump`, `hold-hands`, `follow`, `harvest`,
-  `dance`) and every other group activity the world serves (`group-jumping-jacks`, `wave-together`,
-  `performer-acknowledgement`, ...), each with `asks`, how many others it takes.
+- `together kinds`: every activity the world serves, as it serves it (`hug`, `handshake`, `dance-together`,
+  `group-jumping-jacks`, `harvest-together`, ...), each with its `card`, `asks` (how many others it takes), `near`
+  (how close the two stand for its move to reach) and `where` (anywhere, or at a thing: a harvest at its basket,
+  offered at the nearest one).
 - `catalog`: the kinds of thing here and how many of each.
 - `inspect` on your own body: the gestures and poses it can do (`wave`, `wave_at`, `bow_to`, `clap`, `jump`, ...).
 
@@ -107,9 +108,9 @@ node eden.mjs wait 10
 
 B's `wait` shows `{"kind":"together","what":"offered","touch":"handshake","offer":…,"from":"<A's name>","from_id":
 <A's body>}`. The accept answers `phase: "done"` and both shake. Too far apart, it answers `refused` with
-`together.too-far`: repeat step 4. A's `wait` then shows the answer to its offer, as every member's does: `joined`
-(`"who"`: B's name), `started`, each `left`, and `ended` once the handshake is over. A no shows as `declined` with
-`"touch":"handshake"`.
+`together.too-far`, a `detail` saying how far apart they stand and how far the move reaches, and a `try` to walk up:
+repeat step 4. A's `wait` then shows the answer to its offer, as every member's does: `joined` (`"who"`: B's name),
+`started`, each `left`, and `ended` once the handshake is over. A no shows as `declined` with `"touch":"handshake"`.
 
 ## 7. Dance together, then leave
 
@@ -228,5 +229,4 @@ The Souls stay in the world; `node eden.mjs look` starts the client again. `node
 
 These are gaps an agent hits, so expect them while walking through:
 
-- The rack parts' cards read "card".
-- Refusals carry a name only (`together.too-far`, `part-pose`), never the world's reason text.
+- None known at 0.135.
