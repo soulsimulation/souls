@@ -297,24 +297,30 @@ test('mailbox: plan shows, apply makes the key once (0600) and adds only the mis
   assert.match(checked.stdout, /no gateway here to check/);
 });
 
-test('entries: plan lists each world\'s changes and changes nothing; the move applies a world\'s just before its deploy and puts them back when it fails', () => {
+test('entries: plan lists each world\'s changes and changes nothing; the move stages a world\'s just before its deploy, which takes them, and a failed deploy leaves none', () => {
   const root = join(dir, 'entries'), bins = join(root, 'bins'), page = join(root, 'page'), out = join(root, 'bundle');
   const data = join(root, 'data'), etc = join(root, 'etc'), lib = join(root, 'lib'), worlds = join(data, 'worlds/worlds');
   for (const d of [etc, lib, page]) mkdirSync(d, { recursive: true });
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
-  // Stand-in worldd: `entries plan|apply --dir <w> --kinds <k> [--keep <p>]` says it changes the humanoid, and apply
-  // keeps the old file in <p> and writes "new"; deploy records what the world's humanoid holds when it restarts it.
+  // Stand-in worldd: `entries plan|stage --dir <w> --kinds <k>` says it changes the humanoid, and stage writes "new"
+  // as <w>/entries.next. Stand-in deploy: records what it rehearses on and, unless FAIL_DEPLOY, swaps it in as the
+  // real one does between the pin and the restart.
   exe(join(bins, 'worldd'), [
     'case "$1" in schemas) exit 0 ;; entries) ;; *) exit 1 ;; esac',
     '[ -d "$6/body" ] || exit 1',
     'echo "ride: a ride line the world prints"',
     'echo "entries: ${4##*/}: change eden:humanoid aaaaaaaaaaaa..bbbbbbbbbbbb (eden.humanoid.json)"',
-    'if [ "$2" = apply ]; then mkdir -p "$8"; cp "$4/entries/eden.humanoid.json" "$8/"; echo new > "$4/entries/eden.humanoid.json"; echo "entries: ${4##*/}: 1 changed, 0 unchanged"; fi',
+    'if [ "$2" = stage ]; then mkdir -p "$4/entries.next"; echo new > "$4/entries.next/eden.humanoid.json"; echo "entries: ${4##*/}: 1 staged, 0 unchanged"; fi',
   ].join('\n'));
   exe(join(bins, 'gatewayd'), 'exit 0');
   exe(join(bins, 'directoryd'), 'exit 0');
   const deployed = join(root, 'deployed');
-  exe(join(bins, 'deploy'), `f="$WORLDS_ROOT/worlds/$1/entries/eden.humanoid.json"; echo "$1 $([ -f "$f" ] && cat "$f" || echo none)" >> "${deployed}"; [ -z "$FAIL_DEPLOY" ]`);
+  exe(join(bins, 'deploy'), [
+    'f="$WORLDS_ROOT/worlds/$1"',
+    `if [ -d "$f/entries.next" ]; then echo "$1 rehearsed $(cat "$f/entries.next/eden.humanoid.json")" >> "${deployed}"; else echo "$1 rehearsed own" >> "${deployed}"; fi`,
+    '[ -z "$FAIL_DEPLOY" ] || exit 1',
+    'if [ -d "$f/entries.next" ]; then mv "$f/entries" "$f/entries.before"; mv "$f/entries.next" "$f/entries"; fi',
+  ].join('\n'));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
@@ -328,6 +334,8 @@ test('entries: plan lists each world\'s changes and changes nothing; the move ap
   }
   mkdirSync(join(worlds, 'up/entries'));
   writeFileSync(join(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
+  // a stale staging in a world with no entries is never taken
+  mkdirSync(join(worlds, 'none/entries.next'));
   const bundled = run(['bundle', out, sha, '0.136.1', bins, page, client, pkg]);
   assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
   const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc, RELEASE_SERVICES: '' };
@@ -341,18 +349,20 @@ test('entries: plan lists each world\'s changes and changes nothing; the move ap
   assert.match(plan.stdout, /^entries: up: change eden:humanoid aaaaaaaaaaaa\.\.bbbbbbbbbbbb/m);
   assert.doesNotMatch(plan.stdout, /ride:/, 'the build\'s own lines are left out');
   assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n', 'a plan changes nothing');
+  assert.equal(existsSync(join(worlds, 'up/entries.next')), false, 'a plan stages nothing');
 
-  // A failed deploy puts the world's old entries back.
+  // A failed deploy leaves the world's own entries and nothing staged.
   const failed = run(['move', sha, 'up'], { ...env, FAIL_DEPLOY: '1' });
   assert.equal(failed.status, 3, failed.stdout + failed.stderr);
-  assert.match(failed.stdout, /entries: up: its old entries put back/);
+  assert.match(failed.stdout, /entries: up: 1 staged, 0 unchanged\nmove: deploy up \(the canary\)/);
   assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
-  assert.deepEqual(read(deployed).trim().split('\n'), ['up new'], 'the deploy rehearsed and restarted it with the new entries');
+  assert.equal(existsSync(join(worlds, 'up/entries.next')), false);
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new'], 'the deploy rehearsed the release\'s entries');
 
   rmSync(deployed);
   const moved = run(['move', sha, 'up'], env);
   assert.equal(moved.status, 0, moved.stdout + moved.stderr);
-  assert.match(moved.stdout, /entries: up: 1 changed, 0 unchanged\nmove: deploy up \(the canary\)/);
-  assert.deepEqual(read(deployed).trim().split('\n'), ['up new', 'none none']);
-  assert.equal(read(data, 'releases', sha, 'entries/up/eden.humanoid.json'), 'old\n', 'the old ones are kept with the release');
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new', 'none rehearsed own']);
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'new\n', 'the deploy took them');
+  assert.equal(read(worlds, 'up/entries.before/eden.humanoid.json'), 'old\n', 'the world\'s own kept beside them');
 });

@@ -6313,10 +6313,17 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
         seeded,
         "a plan changes nothing"
     );
-    let (status, out) = entries_cmd("apply", &w.dir, &release);
-    println!("apply: {out}");
+    let (status, out) = entries_cmd("stage", &w.dir, &release);
+    println!("stage: {out}");
     assert_eq!(status, 0, "{out}");
-    assert!(out.contains("1 changed, 0 unchanged"), "{out}");
+    assert!(out.contains("1 staged, 0 unchanged"), "{out}");
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        seeded,
+        "a stage leaves the world's own entries"
+    );
+    // What the release's deploy does between the pin and the restart.
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
     let now = json::parse(&std::fs::read_to_string(&file).unwrap()).unwrap();
     let takes = now
         .get("forms")
@@ -6326,10 +6333,11 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
         takes.and_then(|t| t.get("for")).is_some(),
         "dance takes for"
     );
-    let (_, again) = entries_cmd("apply", &w.dir, &release);
+    let (_, again) = entries_cmd("stage", &w.dir, &release);
     assert!(
-        again.contains("0 changed, 1 unchanged"),
-        "applied again: {again}"
+        again.contains("0 would change, 1 unchanged (nothing to stage)")
+            && !w.dir.join("entries.next").exists(),
+        "staged again: {again}"
     );
     let socket = d.join("s2");
     let s = serve_with(&w, &socket, None);
@@ -6348,8 +6356,9 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
 }
 
 /// A change the world's state may no longer fit is refused by name, and nothing of that world changes: the release's
-/// humanoid without its `posture` state, which every body holds. Applied to two copies of one world, the upgrade gives
-/// the same bytes, and each copy starts at the same state.
+/// humanoid without its `posture` state, which every body holds; so is a world that keeps no header, and a fork keeps
+/// its own. Staged and swapped in on two copies of one world, the upgrade gives the same bytes, and each copy starts at
+/// the same state.
 #[test]
 fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
     let d = scratch("entries-no");
@@ -6369,7 +6378,7 @@ fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
     let w = seeded_with(&d, &old);
     let file = w.dir.join("entries/eden.humanoid.json");
     let seeded = std::fs::read(&file).unwrap();
-    let (status, out) = entries_cmd("apply", &w.dir, &gone);
+    let (status, out) = entries_cmd("stage", &w.dir, &gone);
     println!("refused: {out}");
     assert_eq!(status, 3, "{out}");
     let name = w.dir.file_name().unwrap().to_str().unwrap();
@@ -6384,22 +6393,51 @@ fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
         seeded,
         "refused: nothing changed"
     );
+    assert!(
+        !w.dir.join("entries.next").exists(),
+        "refused: nothing staged"
+    );
+    // A world that keeps no header, and a fork, each by name.
+    let cp = |to: &Path| {
+        assert!(
+            Command::new("cp")
+                .arg("-R")
+                .arg(&w.dir)
+                .arg(to)
+                .status()
+                .unwrap()
+                .success()
+        )
+    };
+    let (bare, fork) = (d.join("bare"), d.join("fork"));
+    cp(&bare);
+    std::fs::remove_file(bare.join("header")).unwrap();
+    let (status, out) = entries_cmd("stage", &bare, &release);
+    assert_eq!(status, 3, "{out}");
+    assert!(
+        out.contains("refused: entries.header-missing: bare: "),
+        "{out}"
+    );
+    cp(&fork);
+    let meta = std::fs::read_to_string(fork.join("world.json")).unwrap();
+    let (fields, _) = meta.rsplit_once('}').unwrap();
+    std::fs::write(
+        fork.join("world.json"),
+        format!("{fields}, \"fork\": true}}"),
+    )
+    .unwrap();
+    let (status, out) = entries_cmd("stage", &fork, &release);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains("entries: fork: kept: a fork"), "{out}");
     // Two copies, one upgrade each: the same bytes, and the same state at their starts.
     let mut starts = Vec::new();
     let mut bytes = Vec::new();
     for c in ["a", "b"] {
         let copy = d.join(c);
-        assert!(
-            Command::new("cp")
-                .arg("-R")
-                .arg(&w.dir)
-                .arg(&copy)
-                .status()
-                .unwrap()
-                .success()
-        );
-        let (status, out) = entries_cmd("apply", &copy, &release);
+        cp(&copy);
+        let (status, out) = entries_cmd("stage", &copy, &release);
         assert_eq!(status, 0, "{out}");
+        supervisor::deploy::swap_entries(&copy, true).unwrap();
         bytes.push(std::fs::read(copy.join("entries/eden.humanoid.json")).unwrap());
         let served = Seeded {
             dir: copy,

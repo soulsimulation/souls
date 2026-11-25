@@ -27,14 +27,14 @@
 #                                  and the viewers' origin (souls-origin), each restarted once on the release's program
 #                                  and unit and checked healthy, else put back on its previous ones; each step done
 #                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`.
-#                                  Just before each world's deploy, `entries apply` for that world: the deploy's
-#                                  rehearsal starts the new build on a copy of its folder with the new entries and its
-#                                  one restart takes them; a failed deploy puts the world's old entries back
-#   entries plan|apply <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
+#                                  Just before each world's deploy, `entries stage` for that world: its deploy rehearses
+#                                  the new build on them and swaps them in between the pin and the restart, so only the
+#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged
+#   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
 #                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
 #                                  at its commit) by this release's `worldd entries`, every world when none is named:
 #                                  plan lists per world which entries change and which change is refused and why,
-#                                  changing nothing; apply writes them, the old ones kept in releases/<sha>/entries/<w>/.
+#                                  changing nothing; stage writes them as <world>/entries.next, never entries/ itself.
 #                                  A refused world, a fork (its boot pins its entries) and a world with none keep theirs
 #   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
 #                                  folder (every world when none is named) that has none, or whose own it admits
@@ -287,41 +287,27 @@ bodies_worlds() {
   rm -rf "$tmp"
 }
 
-# One world's `worldd entries <plan|apply>`, by this release's worldd on this release's kinds; its status (3: refused).
+# One world's `worldd entries <plan|stage>`, by this release's worldd on this release's kinds; its status (3: refused).
+# A stage writes <world>/entries.next only; the world's deploy swaps it in (or a stage that finds nothing removes it).
 entries_world() {
   local act=$1 rel=$2 w=$3 f=$WORLDS_ROOT/worlds/$3 bin out s=0
   bin=$WORLDS_ROOT/builds/$(artifact "$rel/manifest.json" worldd)/worldd
-  if [ ! -d "$f/entries" ]; then
-    echo "entries: $w: kept: no entries"
+  if [ ! -d "$f/entries" ] || [ ! -d "$rel/reseed/kinds" ]; then
+    [ "$act" != stage ] || rm -rf "$f/entries.next"
+    if [ ! -d "$f/entries" ]; then echo "entries: $w: kept: no entries"; else echo "entries: $w: kept: this release carries no kinds (staged by an older release-v2)"; fi
     return 0
   fi
-  if [ ! -d "$rel/reseed/kinds" ]; then
-    echo "entries: $w: kept: this release carries no kinds (staged by an older release-v2)"
-    return 0
-  fi
-  if [ "$act" = apply ]; then
-    out=$("$bin" entries apply --dir "$f" --kinds "$rel/reseed/kinds" --keep "$rel/entries/$w" 2>&1) || s=$?
-  else
-    out=$("$bin" entries plan --dir "$f" --kinds "$rel/reseed/kinds" 2>&1) || s=$?
-  fi
+  out=$("$bin" entries "$act" --dir "$f" --kinds "$rel/reseed/kinds" 2>&1) || s=$?
   # the build's own lines (its rides, punts, stand points and header) are the world's start's to print, not this
   grep -E '^(entries|refused|worldd entries)' <<< "$out" || true
   [ "$s" = 0 ] || [ "$s" = 3 ] || echo "entries: $w: not upgraded: worldd entries $act exited $s"
   return "$s"
 }
 
-# A world's old entries, as `entries apply` kept them, put back (after its deploy failed).
-entries_back() {
-  local rel=$1 w=$2
-  [ -d "$rel/entries/$w" ] && [ -n "$(ls -A "$rel/entries/$w")" ] || return 0
-  cp -p "$rel/entries/$w"/* "$WORLDS_ROOT/worlds/$w/entries/"
-  echo "entries: $w: its old entries put back"
-}
-
-# entries plan|apply <sha> [<world>...]: entries_world for each world; a refused or failed world never stops the rest.
+# entries plan|stage <sha> [<world>...]: entries_world for each world; a refused or failed world never stops the rest.
 library() {
   local act=${1:-} sha=${2:-} rel w
-  { [ "$act" = plan ] || [ "$act" = apply ]; } && [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "entries plan|apply <sha> [<world>...]"
+  { [ "$act" = plan ] || [ "$act" = stage ]; } && [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "entries plan|stage <sha> [<world>...]"
   rel=$DATA/releases/$sha
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
   shift 2
@@ -484,14 +470,15 @@ move() {
       echo "move: $w already moved by this release"
       continue
     fi
-    # its entries just before its deploy, which rehearses the new build with them and restarts it once; a refused
-    # upgrade leaves the world's entries as they were and the move goes on
-    entries_world apply "$rel" "$w" || true
+    # its entries staged just before its deploy, which rehearses the new build on them and swaps them in at its
+    # restart; a refused or failed stage stages none, and the world deploys on its own entries
+    entries_world stage "$rel" "$w" || true
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
     if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
       touch "$rel/moved/$w"
     else
-      entries_back "$rel" "$w"
+      # never left for a later deploy to take
+      rm -rf "$WORLDS_ROOT/worlds/$w/entries.next"
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done

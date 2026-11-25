@@ -1,12 +1,11 @@
-//! A running world's library entries brought up to a release's (`worldd entries plan|apply`).
+//! A running world's library entries brought up to a release's (`worldd entries plan|stage`).
 //!
 //! `worldd seed` copies the entries it is given into the world's folder (`<world>/entries/`, one `<kind>.json` each,
 //! after C13's stand-point repair) and every start reads them from there ([`crate::serve`]'s module notes). Nothing
 //! after the seed wrote them again, so a release's content fix never reached a world that was not reseeded. This is
-//! that step, for the release's move (`v2/tools/ops/release/release.sh`, before each world's deploy, so the deploy's
-//! rehearsal starts the new build on a copy of the folder with the new entries and its one restart takes them):
+//! that step, for the release's move (`v2/tools/ops/release/release.sh`):
 //!
-//! `worldd entries plan|apply --dir <world folder> --kinds <the release's content/kinds> [--keep <folder>]`
+//! `worldd entries plan|stage --dir <world folder> --kinds <the release's content/kinds>`
 //!
 //! - An entry of the world whose kind the release has, repaired as the seed repairs it against the world's own facts,
 //!   is changed when its text differs. One the release lacks is the world's own and is kept; one only the release has
@@ -14,18 +13,22 @@
 //!   them (`served-fork-support-mismatch` otherwise).
 //! - A change is refused, by name, where the world's state may no longer fit it: a state field gone
 //!   (`entries.state-removed`), given another number or type (`entries.state-retyped`), an enum value gone
-//!   (`entries.state-value-removed`), an int's range narrowed (`entries.state-narrowed`), a slot gone or renumbered
-//!   (`entries.slot-removed`, `entries.slot-renumbered`) or another owner (`entries.owner-changed`); and where the
-//!   world, built from its facts with the new entries under its own header (as a start builds it, [`crate::serve`]'s
-//!   `adopt`), would not start (`entries.build-refused`) or would leave a revision it pins of a changed kind with no
-//!   definition (`entries.kind-unpaired`). A world that keeps no header (seeded before K16) is refused
-//!   `entries.header-missing`: its start would rebuild the header and refuse the log.
-//! - One refusal and nothing of that world changes. `plan` changes nothing; `apply` writes each changed file whole
-//!   (a new file renamed over the old, its mode and owner kept), each old one first copied into `--keep`, so a failed
-//!   deploy can put them back. Every line printed is the log: `entries: <world>: change <kind> <old>..<new>`, with the
-//!   entry's SHA-256 (first 12 hex) before and after, or `refused: entries.<name>: <world>: <kind>: <why>`.
+//!   (`entries.state-value-removed`), an int's range narrowed (`entries.state-narrowed`), a slot gone, renumbered or
+//!   admitting less (`entries.slot-removed`, `entries.slot-renumbered`, `entries.slot-narrowed`), a role gone
+//!   (`entries.role-removed`) or another owner (`entries.owner-changed`); and where the world, built from its facts
+//!   with the new entries under its own header (as a start builds it, [`crate::serve`]'s `adopt`), would not build
+//!   (`entries.build-refused`) or would leave a revision it pins of a changed kind with no definition
+//!   (`entries.kind-unpaired`). A world that keeps no header (seeded before K16) is refused `entries.header-missing`:
+//!   its start would rebuild the header and refuse the log.
+//! - One refusal and nothing of that world is staged. `plan` changes nothing. `stage` writes the world's whole
+//!   entries with the changes as `<world>/entries.next` (built beside it, then renamed in; owned as `entries/` is),
+//!   and never touches `entries/` itself: the release's `deploy` rehearses the new build on `entries.next` and swaps it
+//!   in between the pin and the restart (`supervisor::deploy::swap_entries`), so the build that reads the new entries
+//!   is the one that was checked with them. With nothing to change it removes a stale `entries.next`. Every line
+//!   printed is the log: `entries: <world>: change <kind> <old>..<new>`, with the entry's SHA-256 (first 12 hex)
+//!   before and after, or `refused: entries.<name>: <world>: <kind>: <why>`.
 //!
-//! Exits 0 when the world changes or has nothing to change, 3 when refused, 1 on an error.
+//! Exits 0 when the world has changes (staged) or nothing to change, 3 when refused, 1 on an error.
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::MetadataExt as _;
@@ -35,6 +38,8 @@ use replica::encode::to_hex;
 use replica::ids::sha256;
 use replica::rules::json::{self, Value as Json};
 use replica::world_model::plain;
+
+use supervisor::deploy::ENTRIES_NEXT;
 
 use crate::serve;
 
@@ -173,9 +178,9 @@ pub(crate) fn unfit(kind: &str, old: &Json, new: &Json) -> Vec<String> {
         }
     }
     // Slots are numbered in the entry's order (1, 2, ...): one gone or moved renumbers what a body or a thing holds.
-    let new_slots: Vec<&str> = obj(new, "slots").iter().map(|(s, _)| s.as_str()).collect();
-    for (k, (slot, _)) in obj(old, "slots").iter().enumerate() {
-        match new_slots.iter().position(|s| s == slot) {
+    let new_slots = obj(new, "slots");
+    for (k, (slot, was)) in obj(old, "slots").iter().enumerate() {
+        match new_slots.iter().position(|(s, _)| s == slot) {
             None => out.push(format!(
                 "entries.slot-removed: {kind}: slot {slot} is gone, and a body or thing may hold it"
             )),
@@ -184,10 +189,69 @@ pub(crate) fn unfit(kind: &str, old: &Json, new: &Json) -> Vec<String> {
                 k + 1,
                 at + 1
             )),
-            Some(_) => {}
+            Some(at) => {
+                if let Some(why) = slot_narrowed(was, &new_slots[at].1) {
+                    out.push(format!(
+                        "entries.slot-narrowed: {kind}: slot {slot} {why}, and a body or thing may hold it"
+                    ));
+                }
+            }
+        }
+    }
+    // An activity's members each hold a role: one gone leaves them holding nothing.
+    let new_roles = obj(new, "roles");
+    for (role, _) in obj(old, "roles") {
+        if !new_roles.iter().any(|(r, _)| r == role) {
+            out.push(format!(
+                "entries.role-removed: {kind}: role {role} is gone, and an open activity's member may hold it"
+            ));
         }
     }
     out
+}
+
+/// How slot `now` admits less than `was` did, if it does: what it admits, which kinds, how many, how large.
+fn slot_narrowed(was: &Json, now: &Json) -> Option<String> {
+    let text = |v: &Json, key: &str| v.get(key).map(Json::to_json);
+    if text(was, "admits") != text(now, "admits") {
+        return Some(format!(
+            "admits {}, now {}",
+            text(was, "admits").unwrap_or_default(),
+            text(now, "admits").unwrap_or_default()
+        ));
+    }
+    let list = |v: &Json, key: &str| -> Option<Vec<String>> {
+        Some(v.get(key)?.arr()?.iter().map(Json::to_json).collect())
+    };
+    match (list(was, "kinds"), list(now, "kinds")) {
+        (None, Some(_)) => return Some("now admits only some kinds".into()),
+        (Some(a), Some(b)) if a.iter().any(|k| !b.contains(k)) => {
+            return Some("admits fewer kinds".into());
+        }
+        _ => {}
+    }
+    match (int(was, "most"), int(now, "most")) {
+        (None, Some(_)) => return Some("now holds a most".into()),
+        (Some(a), Some(b)) if b < a => return Some(format!("holds at most {b}, was {a}")),
+        _ => {}
+    }
+    let size = |v: &Json| -> Option<Vec<i128>> {
+        v.get("fits_mm")?
+            .arr()?
+            .iter()
+            .map(|x| match x {
+                Json::Int(n) => Some(*n),
+                _ => None,
+            })
+            .collect()
+    };
+    match (size(was), size(now)) {
+        (None, Some(_)) => Some("now fits only a size".into()),
+        (Some(a), Some(b)) if a.len() != b.len() || a.iter().zip(&b).any(|(x, y)| y < x) => {
+            Some("fits a smaller size".into())
+        }
+        _ => None,
+    }
 }
 
 /// What `apply` would change in the world at `dir`, from the release's entries under `kinds`.
@@ -291,26 +355,49 @@ pub(crate) fn plan(dir: &Path, kinds: &Path) -> R<Plan> {
     Ok(p)
 }
 
-/// Writes `text` over `path` whole: a new file beside it with the old one's mode and owner, renamed over it.
-fn replace(path: &Path, text: &str) -> R<()> {
-    let meta = std::fs::metadata(path).map_err(io(path))?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("an entry's file name")?;
-    let new = path.with_file_name(format!(".{name}.new"));
-    std::fs::write(&new, text).map_err(io(&new))?;
-    std::fs::set_permissions(&new, meta.permissions()).map_err(io(&new))?;
-    // As root (the release), the file stays the world's account's; as that account, it already is.
-    let _ = std::os::unix::fs::chown(&new, Some(meta.uid()), Some(meta.gid()));
-    let f = std::fs::File::open(&new).map_err(io(&new))?;
-    f.sync_all().map_err(io(&new))?;
-    std::fs::rename(&new, path).map_err(io(path))
+/// Copies the folder `from` to `to`, each folder and file with its mode and owned by `uid`:`gid` (as root, the
+/// release, the world's account keeps its files; as that account, they already are its).
+fn copy_owned(from: &Path, to: &Path, uid: u32, gid: u32) -> R<()> {
+    std::fs::create_dir_all(to).map_err(io(to))?;
+    let mode = std::fs::metadata(from).map_err(io(from))?.permissions();
+    std::fs::set_permissions(to, mode).map_err(io(to))?;
+    let _ = std::os::unix::fs::chown(to, Some(uid), Some(gid));
+    for e in std::fs::read_dir(from).map_err(io(from))? {
+        let e = e.map_err(io(from))?;
+        let (p, t) = (e.path(), to.join(e.file_name()));
+        if p.is_dir() {
+            copy_owned(&p, &t, uid, gid)?;
+        } else {
+            std::fs::copy(&p, &t).map_err(io(&t))?;
+            let _ = std::os::unix::fs::chown(&t, Some(uid), Some(gid));
+        }
+    }
+    Ok(())
 }
 
-/// `worldd entries plan|apply --dir <world> --kinds <dir> [--keep <folder>]`.
+/// The world's whole entries with `p`'s changes, as `<dir>/entries.next`: built beside it, then renamed in.
+fn stage(dir: &Path, p: &Plan) -> R<PathBuf> {
+    let (live, next) = (dir.join("entries"), dir.join(ENTRIES_NEXT));
+    let building = dir.join(format!(".{ENTRIES_NEXT}.new"));
+    let meta = std::fs::metadata(&live).map_err(io(&live))?;
+    let _ = std::fs::remove_dir_all(&building);
+    copy_owned(&live, &building, meta.uid(), meta.gid())?;
+    for c in &p.changes {
+        let at = building.join(c.path.strip_prefix(&live).map_err(|e| e.to_string())?);
+        // Over the copy: its mode and owner stay the world's file's.
+        std::fs::write(&at, c.new.to_json()).map_err(io(&at))?;
+        std::fs::File::open(&at)
+            .and_then(|f| f.sync_all())
+            .map_err(io(&at))?;
+    }
+    let _ = std::fs::remove_dir_all(&next);
+    std::fs::rename(&building, &next).map_err(io(&next))?;
+    Ok(next)
+}
+
+/// `worldd entries plan|stage --dir <world> --kinds <dir>`.
 pub fn run(args: &[String]) -> i32 {
-    let usage = "usage: worldd entries plan|apply --dir <world folder> --kinds <content/kinds> [--keep <folder>]";
+    let usage = "usage: worldd entries plan|stage --dir <world folder> --kinds <content/kinds>";
     let (Some(act), Some(dir), Some(kinds)) = (
         args.get(2).map(String::as_str),
         arg(args, "--dir"),
@@ -319,7 +406,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!("{usage}");
         return 2;
     };
-    if act != "plan" && act != "apply" {
+    if act != "plan" && act != "stage" {
         eprintln!("{usage}");
         return 2;
     }
@@ -329,6 +416,10 @@ pub fn run(args: &[String]) -> i32 {
         .and_then(|n| n.to_str())
         .unwrap_or("world")
         .to_owned();
+    // A stage replaces what an earlier one left: only this release's entries go with this release's deploy.
+    if act == "stage" {
+        let _ = std::fs::remove_dir_all(dir.join(ENTRIES_NEXT));
+    }
     let p = match plan(dir, Path::new(kinds)) {
         Ok(p) => p,
         Err(e) => {
@@ -374,37 +465,35 @@ pub fn run(args: &[String]) -> i32 {
         );
         return 3;
     }
-    if act == "plan" {
+    if act == "plan" || p.changes.is_empty() {
         println!(
-            "entries: {world}: {} would change, {} unchanged (plan: nothing changed)",
+            "entries: {world}: {} would change, {} unchanged ({})",
             p.changes.len(),
-            p.unchanged
+            p.unchanged,
+            if act == "plan" {
+                "plan: nothing changed"
+            } else {
+                "nothing to stage"
+            }
         );
         return 0;
     }
-    let keep = arg(args, "--keep").map(PathBuf::from);
-    for c in &p.changes {
-        let done = keep
-            .as_ref()
-            .map_or(Ok(()), |k| {
-                std::fs::create_dir_all(k).map_err(io(k))?;
-                let to = k.join(c.path.file_name().ok_or("an entry's file name")?);
-                std::fs::copy(&c.path, &to).map(|_| ()).map_err(io(&to))
-            })
-            .and_then(|()| replace(&c.path, &c.new.to_json()));
-        if let Err(e) = done {
-            eprintln!("worldd entries: {world}: {}: {e}", c.kind);
-            return 1;
+    match stage(dir, &p) {
+        Ok(next) => {
+            println!(
+                "entries: {world}: {} staged, {} unchanged, in {} (the deploy swaps them in at its restart)",
+                p.changes.len(),
+                p.unchanged,
+                next.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(ENTRIES_NEXT)
+            );
+            0
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(dir.join(ENTRIES_NEXT));
+            eprintln!("worldd entries: {world}: not staged: {e}");
+            1
         }
     }
-    println!(
-        "entries: {world}: {} changed, {} unchanged{}",
-        p.changes.len(),
-        p.unchanged,
-        keep.map_or(String::new(), |k| format!(
-            " (the old ones kept in {})",
-            k.display()
-        ))
-    );
-    0
 }
