@@ -445,7 +445,7 @@ fn steps_off(mut w: World) {
         (at.point.x, at.point.z),
         "on its feet where it sat"
     );
-    assert!(w.c.carried(b), "the world carries it off the seat");
+    assert!(w.c.carried(b), "the world carries it off where it sat");
     assert!(
         w.slots.climbs().is_empty(),
         "a step, not a climb out (E11d)"
