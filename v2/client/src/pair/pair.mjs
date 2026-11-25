@@ -23,6 +23,7 @@ import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeGuide } from '../home/guide.mjs';
 import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
@@ -94,20 +95,26 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const list = await r.json();
   if (!Array.isArray(list)) throw new Refused('entries-answer', 'the entries are not a list');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Off the daemon's thread of control (fs/promises), and only the entries whose bytes changed: a world's 449 entries
+  // written and renamed one by one, synchronously, held a new daemon's clock, sync and answers for 6 to 18 s on its
+  // first sign-in, right after its pairing had written the same files (first run, 0.135).
   const files = [];
+  let written = 0;
   for (const e of list) {
     if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
-    const f = `${e.kind.replaceAll(':', '.')}.json`;
-    writeFileSync(join(dir, `${f}.tmp`), JSON.stringify(e));
-    renameSync(join(dir, `${f}.tmp`), join(dir, f));
+    const f = `${e.kind.replaceAll(':', '.')}.json`, text = JSON.stringify(e);
     files.push(f);
+    if (await readFile(join(dir, f), 'utf8').then((t) => t === text, () => false)) continue;
+    await writeFile(join(dir, `${f}.tmp`), text);
+    await rename(join(dir, `${f}.tmp`), join(dir, f));
+    written++;
   }
   const now = new Set(files);
-  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
-  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
-  renameSync(`${mark}.tmp`, mark);
-  return { entries: files.length, changed: true };
+  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) await rm(join(dir, f), { force: true });
+  await writeFile(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  await rename(`${mark}.tmp`, mark);
+  return { entries: files.length, changed: true, written };
 }
 
 /**

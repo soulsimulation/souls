@@ -632,7 +632,7 @@ function arrival() {
  *  its creator the world's kinds text (#1960), which a restart on a new build may change. */
 function refreshKinds() {
   refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
-    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
+    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world, ${r.written} changed`); })
     .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
   if (seat.grant.actor !== 'creator') return;
   refreshKindsText({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
