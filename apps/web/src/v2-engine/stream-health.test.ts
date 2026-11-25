@@ -29,3 +29,10 @@ test('an error is cleared by a part that arrives after it', () => {
   assert.equal(at({ error: 'x', errorAtParts: 40, parts: 40, lastPartAt: 5000, now: 6000 }), STREAM_NOTICE);
   assert.equal(at({ error: 'x', errorAtParts: 40, parts: 41, lastPartAt: 6000, now: 6100 }), null);
 });
+test('25 Nov: an error in a still world is cleared once its pointer moves on, with no part (Eden showed the notice for 10 minutes)', () => {
+  // A pointer read that failed once at 6 s; the world writes no part, but its quiet time moves on at 6.25 s.
+  const still = { error: 'TypeError: Failed to fetch', errorAtParts: 40, errorAt: 6000, parts: 40 };
+  assert.equal(at({ ...still, lastPartAt: 5900, now: 6100 }), STREAM_NOTICE, 'nothing since the error');
+  assert.equal(at({ ...still, lastPartAt: 6250, now: 6300 }), null, 'the pointer moved on after it');
+  assert.equal(at({ ...still, lastPartAt: 6250, now: 21_250 }), STREAM_NOTICE, 'and silence still shows after 15 s');
+});

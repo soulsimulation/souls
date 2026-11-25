@@ -75,8 +75,8 @@
 //   page and its owner's, set the same way through the gateway:
 //     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
 //                                         holding an open owner's message is refused (`now.owner-words`)
-//   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
-//   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`
+//   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, a decline or lapse of
+//   its own offer, or the lapse of one it was asked (with `from` and a `note`), is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`
 //   (0.135: an answer to an offer of another activity goes by that activity's kind and word, `together` and `touch`;
 //   each word of an activity this Soul is in, which the world addresses to its members, is `joined`, `started`,
 //   `left`, `ended`, `expired` or a carry's `set-down` with its `why`, every Soul by name: `../together/members.mjs`):
@@ -172,12 +172,13 @@ import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
-import { KINDS as TOUCHES, activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
+import { activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
 import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
-import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
+import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair.mjs';
+import { activityTry, answerParts, readableDetail } from './refusal.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -300,7 +301,7 @@ function receiptSent(sequence, ranked, { target, replaces, words }) {
 }
 function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
-  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
+  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
   const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
   // R5: an act of this Soul's that ends (not words, not a progress answer) is the client's `client:act-ended`, which a
   // wake rule (`wake add act-ended`) or a reflex can match: field 1 its sequence, 2 how it ended, 3 the reason.
@@ -591,15 +592,49 @@ function syncAnswer(sock, n, refused, bytes) {
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
   note({ ...done, kind: 'synced', sync: done.kind }); // its own kind, which wakes no `wait`; `sync` is snapshot or resync
+  firstSynced = true;
+  arrive();
   current();
+}
+
+/** The name its owner's agent gave this Soul at pairing (`pair --name`) or since (`profile name`), or null. */
+function givenName() {
+  try { const n = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).souls?.[soul]?.name; return typeof n === 'string' && n.trim() ? n.trim() : null; } catch { return null; }
+}
+const hasBody = () => [...rowsOf(copy).values()].some((r) => r.soul === ME);
+let firstSynced = false;
+
+/** A Soul newly paired stands in the world without being told to (C3 births a body only on a Soul's first intent):
+ *  once the copy is synced, a Soul seat with no body linked to it in the copy that has never sent an intent sends
+ *  `life:join` once, carrying its name, so it is born named. Once only, kept in the state: a Soul that later leaves
+ *  (`life:leave`) is not joined again by a restart. With no name yet it waits (`look` says so); a creator's seat has
+ *  no body. Called after a sync and on `look` and `status`, so a name given later is joined with at once. */
+function arrive() {
+  if (!firstSynced || state.arrived || seat.grant.actor === 'creator') return;
+  if (state.sequence > 0 || hasBody()) { state.arrived = true; save(); return; } // born by its own first intent, or left
+  const name = givenName();
+  if (!name) return;
+  state.arrived = true;
+  state.arrival = sendIntent(['life:join'], { words: name }).sequence;
+  log(`arrived: life:join sent as ${JSON.stringify(name)}: the Soul had no body in the world`);
+  save();
+}
+
+/** Where this Soul stands, in plain words, while it has no body here: null once it stands in the world. */
+function arrival() {
+  if (seat.grant.actor === 'creator' || hasBody()) return null;
+  if (!firstSynced) return { in_world: false, say: 'Approved: your Soul is arriving. The client is getting the world; it stands in it within seconds. Look again.' };
+  if (state.arrival && state.sequence === state.arrival) return { in_world: false, say: 'Approved: your Soul is arriving. It was sent into the world and stands there within seconds. Look again.' };
+  if (!state.arrived && !givenName()) return { in_world: false, say: 'Your Soul is not in the world yet: it needs a name first. Ask your owner what to call it (or choose one), then run: profile name "<Name>". It arrives at once.' };
+  return { in_world: false, say: 'Your Soul is not in the world. Run: act life:join, to come in.' };
 }
 
 /** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304), and for
  *  its creator the world's kinds text (#1960), which a restart on a new build may change. */
 function refreshKinds() {
   refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
-    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
-    .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
+    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world, ${r.written} changed`); })
+    .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'}: ${String(e.message ?? e).slice(0, 160)})`));
   if (seat.grant.actor !== 'creator') return;
   refreshKindsText({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
     .then((r) => { if (r.changed) log('kinds: the world\'s kinds text'); })
@@ -629,7 +664,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const [kind, a, b, c, d, names = '-', op = '-'] = wire.wireFrame(bytes).split(' ');
+      const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -640,7 +675,10 @@ function connect() {
         refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
-        if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
+        // Resumed at the stream's cursor, the world holds that version: it is owed, so a follow that hashes an older seal
+        // follows again, and a recent copy behind it is not taken as current (R10: a copy one version behind after a
+        // resume was called current until a beat, and a later sync then took the old write for a new one).
+        if (a === 'stream.resumed' && !copy.empty()) { if (state.cursor) owe(sequenceOf(state.cursor)); followWanted = true; current(); }
         else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
       }
@@ -679,7 +717,9 @@ function connect() {
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
       // G7: an edit's receipt carries the ids its names became; its refusal, the operation that failed.
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
-      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...edit };
+      // A refusal's own words (the world's detail: how far apart, what it reaches), after the seven fields.
+      const detail = said ? readableDetail(said, rowsOf(copy).values()) : '';
+      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...(detail ? { detail } : {}), ...edit };
       note(answered);
       keyAnswered(answered);
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
@@ -819,8 +859,10 @@ function onEntry(e) {
     keepKinds(rows);
     for (const ev of offers) {
       const n = offerNote(ev, body);
-      // Who declined, or did not answer (the event's field 3), for the offerer.
-      if (n) note({ ...n, ...((n.what === 'declined' || n.what === 'lapsed') && ev.fields?.[3] !== undefined ? { who: ev.fields[3] } : {}), sequence: e.sequence });
+      // Who declined, or did not answer (the event's field 3), for the offerer. One asked is told its offer's `from`,
+      // and the offer's word from the offer it was told of (its node may never have been in this Soul's copy).
+      const was = n?.from ? logged.findLast((x) => (x.what === 'offered' ? x.offer : x.what === 'invited' ? x.conversation : null) === n.conversation) : null;
+      if (n) note({ ...n, ...((n.what === 'declined' || n.what === 'lapsed') && !n.from && ev.fields?.[3] !== undefined ? { who: ev.fields[3] } : {}), ...(was ? { word: was.kind === 'together' ? was.touch : was.kind } : {}), sequence: e.sequence });
     }
     for (const n of memberNotes(e, mine)) note({ ...n, sequence: e.sequence });
   }
@@ -1527,6 +1569,7 @@ async function answer(req, conn = null) {
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
         // The Soul's own body in the copy, once born (a joined body is minted, not the Soul's id): `act wave:<body>`.
         body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
+        ...((arrive(), arrival()) ?? { in_world: seat.grant.actor !== 'creator' }),
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
@@ -1534,6 +1577,9 @@ async function answer(req, conn = null) {
       const heard = named(rows, heardSince.splice(0));
       const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
+      // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
+      const away = (arrive(), arrival());
+      if (away) b.not_in_world = away.say;
       return b;
     });
     case 'find': {
@@ -1641,7 +1687,12 @@ async function answer(req, conn = null) {
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
+      // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
+      // otherwise it carries the Soul's given name, so no join of this client births a nameless body.
+      const plainJoin = keep.length === 1 && keep[0].verb === 'life:join' && !args && !params && !target;
+      if (plainJoin && state.arrival && state.sequence === state.arrival && !hasBody()) return closing({ ok: true, sequence: state.arrival, sent: true, arriving: true, basis: sequenceOf(basis) }, null, { now: true });
+      const words = plainJoin ? givenName() ?? undefined : undefined;
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, words, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -1917,6 +1968,9 @@ async function answer(req, conn = null) {
  */
 function suggestionFor(r) {
   const target = String(r.target ?? '').split(' ')[0];
+  // Held by an activity, or an activity's own verb: the activity's next step (`refusal.mjs`), not another offer.
+  const held = activityTry(r, { rows: rowsOf(copy), logged });
+  if (held !== undefined) return held;
   if (!ID.test(target)) return null;
   const t = thingOf(target);
   if (!t.ok) return null;
@@ -2106,10 +2160,19 @@ async function give(req) {
   // The copy brought current first (a daemon just started has none yet): the offer goes on the ground it holds.
   await ageAfter();
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); await ageAfter(); }
-  const rows = [...rowsOf(copy).values()], kinds = heldKinds();
+  const rows = [...rowsOf(copy).values()], kinds = heldKinds(), served = activitiesServed(home, seat.world), list = activitiesIn(served);
   const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
-  // 0.135: the activities this world serves, by the words `together offer` takes.
-  if (req.do === 'kinds') return closing({ ok: true, touches: Object.keys(TOUCHES), activities: activitiesIn(kinds).map(({ word, kind, most }) => ({ word, kind, asks: most })) }, null, { now: true });
+  // 0.135: the activities this world serves, as it serves them, by the words `together offer` takes.
+  if (req.do === 'kinds') {
+    if (!served) return closing({ ok: false, code: 'together-not-served', detail: 'this world has served no list of its activities yet: `status`, then try again once the daemon has signed in' }, null, { now: true });
+    return closing({ ok: true, activities: list.map(({ word, card, most, near_m: near, at }) => ({ word, ...(card ? { card } : {}), asks: most, near: near === null ? 'any distance' : `within ${near} m`, where: at ? `at a ${at.replace(/^.*:/, '').replace(/_/g, ' ')} (${at})` : 'anywhere' })) }, null, { now: true });
+  }
+  // The nearest thing of a kind in the copy, where an activity played at it is offered.
+  const poses = posesOf(copy), at = placer(rowsOf(copy), (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
+  const mine = rows.find((r) => r.soul === ME)?.id, from = mine && at(mine)?.pos;
+  const thingAt = (kind) => rows.filter((r) => String(r.entry ?? r.kind ?? '').split('@')[0] === kind)
+    .map((r) => ({ id: r.id, d: from && at(r.id) ? Math.hypot(at(r.id).pos[0] - from[0], at(r.id).pos[2] - from[2]) : Infinity }))
+    .sort((a, b) => a.d - b.d)[0]?.id ?? null;
   // A Soul named by its name (a body's name in the copy), not only by its body's id.
   if (req.touch !== undefined && req.to !== undefined) {
     const named = (w) => (ID.test(String(w)) ? w : rows.find((r) => r.soul && r.id !== ME && r.soul !== ME && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w);
@@ -2117,14 +2180,13 @@ async function give(req) {
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
   if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
-    const w = String(req.offer).toLowerCase().replace(/_/g, '-');
+    const named = activityNamed(list, req.offer), w = named?.word ?? String(req.offer).toLowerCase().replace(/_/g, '-');
     // A leave by word is of the newest activity of that kind in the copy (this Soul may have made it); an answer is of
     // the newest offer of it to this Soul, else, offered while this daemon was not running, the newest in the copy.
     const e = (req.do === 'leave' ? null : logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w)))
       ?? (() => {
-        const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null);
         // A leave is of the one this Soul is in, when the copy shows it a member of one (0.135).
-        const of = a ? rows.filter((x) => x.kind === `${a.kind}_activity`) : [], mine = mineIn(rowsOf(copy));
+        const of = named ? rows.filter((x) => x.kind === `${named.kind}_activity`) : [], mine = mineIn(rowsOf(copy));
         const r = (req.do === 'leave' && of.findLast((x) => x.members?.some((m) => mine.includes(m.body)))) || of.at(-1);
         return r ? { offer: r.id } : null;
       })();
@@ -2135,15 +2197,15 @@ async function give(req) {
   // in the copy when it was sent), else the newest of that kind in the copy.
   if (req.do === 'withdraw' && req.offer !== undefined && !ID.test(String(req.offer))) {
     const w = String(req.offer).toLowerCase().replace(/_/g, '-');
-    const kind = (TOUCHES[w] ?? activityNamed(activitiesIn(kinds), w)?.pin ?? (w === 'give' ? GIVE_KIND : ''))?.split('@')[0];
-    // An activity the home holds no entry for is known by its node's kind (`<ns>:<word>_activity`).
+    const kind = (activityNamed(list, w)?.pin ?? (w === 'give' ? GIVE_KIND : ''))?.split('@')[0];
+    // An activity the world serves no entry for is known by its node's kind (`<ns>:<word>_activity`).
     const mine = (state.offersMade ?? []).findLast((o) => (kind ? o.kind === kind : touchOf(o.kind) === w));
     const of = rows.filter((r) => (kind ? r.kind === kind : touchOf(r.kind) === w));
     const r = of.filter((x) => mine && !mine.before.includes(x.id)).at(-1) ?? of.at(-1);
     if (!r) return { ok: false, code: 'together-no-offer', detail: `no offer of ${w.slice(0, 40)} of yours here: together withdraw <offer id>`, ...ageNow() };
     req = { ...req, offer: r.id };
   }
-  const intents = giveIntents(req, { place, kinds });
+  const intents = giveIntents(req, { place, served, thingAt });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;
   // An offer's kind and the nodes of it the copy holds now, so a later withdraw by its word finds the node it made.
@@ -2191,7 +2253,7 @@ async function carry(req) {
     return p ? [p.pos[0], p.pos[2]] : null;
   };
   const ground = groundIn(rows);
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle });
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.

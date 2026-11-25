@@ -1509,3 +1509,26 @@ fn e21_reach_to_a_seated_body_is_from_its_seat() {
     assert_eq!(seen.parent, Some(bench));
     assert_eq!(seen.position, Vec3::new(end_x * 1000, 450_000, 0));
 }
+
+/// A harvest's basket keeps its count (`picked`, field 28) for F4's sets: its entry's roles are left out with its
+/// forms, as the structure's reader leaves them, so the kind loads. Kept, the loader refused the whole entry, and
+/// `eden:pick` and `eden:pick_too` were refused `field-unknown` after their press.
+#[test]
+fn a_harvests_basket_loads_its_count_with_its_roles_left_out() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds/together/harvest_together.json");
+    let entry = replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert!(entry.get("roles").is_some(), "the entry has roles");
+    let kinds = loaded(&Json::object([("eden:harvest_together", entry)]));
+    let names = kinds.admits().into_keys().collect::<Vec<_>>();
+    assert_eq!(
+        names.len(),
+        1,
+        "the basket's kind loaded: {:?}",
+        kinds.refused()
+    );
+    let def = kinds.get(&names[0]).expect("its kind");
+    let picked = def.state.get(&28).expect("field 28");
+    println!("loaded {} with field 28 {}", names[0], picked.name.as_str());
+    assert!(picked.name.as_str().ends_with("picked"));
+}

@@ -80,18 +80,44 @@ export function shownEvent(rows, e, { mine = [], kinds = new Map() } = {}) {
   const kindOf = (id) => rows.get(id)?.kind ?? kinds.get(id);
   const named = (id) => nameIn(rows, id, mine);
   if (e.what === 'offered' || e.what === 'invited') return e.from ? { ...e, from: named(e.from), from_id: e.from } : e;
-  // An answer to an offer of this Soul's: the conversation's id names any offer (`../converse/converse.mjs`).
+  // An answer to an offer of this Soul's, or the lapse of one it was asked (`from`, and `word` from that offer's own
+  // event): the conversation's id names any offer (`../converse/converse.mjs`).
   const answer = e.kind === 'conversation' && (e.what === 'declined' || e.what === 'lapsed');
   if (e.kind !== 'activity' && !answer) return e;
-  const id = answer ? e.conversation : e.activity, word = activityWord(kindOf(id));
+  const id = answer ? e.conversation : e.activity, word = activityWord(kindOf(id)) ?? e.word ?? null;
   const kind = word ? kindOfWord(word) : e.kind;
-  const { kind: _, conversation: __, activity: ___, ...rest } = e;
+  const { kind: _, conversation: __, activity: ___, word: ____, ...rest } = e;
+  const from = e.from ? named(e.from) : null, who = e.who !== undefined ? idsOf(e.who).map(named).join(', ') : null;
   return {
     kind, ...rest, ...(kind === 'conversation' ? { conversation: id } : { activity: id }),
     ...(kind === 'together' ? { touch: word } : {}),
-    ...(e.who !== undefined ? { who: idsOf(e.who).map(named).join(', ') } : {}),
+    ...(from ? { from, from_id: e.from } : {}),
+    ...(who !== null ? { who } : {}),
     ...(e.load ? { load: named(e.load), load_id: e.load } : {}),
+    ...noteOf(e, { word: word ?? 'activity', id, from, who, still: inIt(rows, id, mine), others: othersIn(rows, id, [...mine, ...(e.who !== undefined ? idsOf(e.who) : [])]) }),
   };
+}
+
+/** The members of activity `id` the copy holds now, by name, but those in `not` (this Soul, and one who just left). */
+/** Whether the copy shows this Soul still in activity `id` (an event may be read long after it came). */
+const inIt = (rows, id, mine) => Boolean(rows.get(id)?.members?.some((m) => mine.includes(m.body) || mine.includes(m.soul)));
+/** Only a `together` activity's roles claim the body; a conversation's or a give's claim a voice, a crew's its hands. */
+const holds = (word) => (kindOfWord(word) === 'together' ? ', and it holds you (other acts are refused) until you leave' : '; leave');
+const othersIn = (rows, id, not) => (rows.get(id)?.members ?? []).filter((m) => !not.includes(m.body) && !not.includes(m.soul)).map((m) => nameIn(rows, m.body));
+
+/** What happened and what this Soul can do next, in plain words, for a lapse of an offer it was asked and for another
+ *  member's leave; nothing for the rest, whose fields say it. */
+function noteOf(e, { word, id, from, who, still, others }) {
+  if (e.what === 'lapsed' && from) {
+    return { note: e.pair
+      ? `you accepted ${from}'s ${word}, but it never started before it ran out: it is over, nothing to leave`
+      : `${from}'s ${word} offer ran out before you answered: it is gone, so accept would be refused; ask ${from} yourself if you still want to` };
+  }
+  if (e.what === 'left' && who && who !== 'you') {
+    if (!still) return { note: `${who} left the ${word}` };
+    return { note: `${who} left the ${word}; ${others.length ? `you are still in it with ${others.join(', ')}` : 'you are the only one left in it'}${holds(word)}: ${leaveOf(word, id)}` };
+  }
+  return {};
 }
 
 /** The activities the copy shows this Soul in (`mine`: its Soul's id and its body's): `[{id, word, started, role,
@@ -107,9 +133,18 @@ export function activitiesOf(rows, mine) {
   return out;
 }
 
-/** `look`'s lines for them: "you are in dance with Bo (started); leave: together leave <id>". */
+/** `look`'s lines for them: "you are in dance with Bo (started); leave: together leave <id>". Alone in one, the line
+ *  says plainly why and what to do: an offer of this Soul's no one has taken yet, or one the others have left. */
 export function doingLines(rows, mine) {
-  return activitiesOf(rows, mine).map((a) => `you are in ${a.word}${a.with.length ? ` with ${a.with.map((m) => m.name).join(', ')}` : ', alone'} (${a.started ? 'started' : 'not started yet'}); leave: ${leaveOf(a.word, a.id)}`);
+  return activitiesOf(rows, mine).map((a) => {
+    const leave = leaveOf(a.word, a.id);
+    if (!a.with.length) {
+      return a.started
+        ? `you are alone in ${a.word}: the others left${holds(a.word)}: ${leave}`
+        : `you offered ${a.word} and no one has accepted yet: wait for an answer, or take it back: ${leave}`;
+    }
+    return `you are in ${a.word} with ${a.with.map((m) => m.name).join(', ')} (${a.started ? 'started' : 'not started yet'}); leave: ${leave}`;
+  });
 }
 
 /** `inspect` of an activity: its word, state, members with their roles, and the act that leaves it. */

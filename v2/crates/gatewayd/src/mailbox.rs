@@ -191,6 +191,15 @@ pub fn on_view_text(gw: &Arc<Gateway>, grants: &[Grant], text: &str, reply: mpsc
     });
 }
 
+/// The owner's box's presence frame: whether a socket is signed in for `grant` (its agent's client is connected),
+/// `{"agent":{"grant":"<grant>","connected":true}}`. Told only to view sockets whose token holds the grant.
+pub fn agent(grant: Grant, connected: bool) -> String {
+    format!(
+        r#"{{"agent":{{"grant":"{}","connected":{connected}}}}}"#,
+        grant.to_text()
+    )
+}
+
 /// Text as a JSON string: quotes, backslashes and control characters escaped.
 pub fn json_string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);

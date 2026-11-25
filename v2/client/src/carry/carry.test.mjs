@@ -1,12 +1,11 @@
 // Carrying together and building with parts (0.135 C, A): what each `carry` and `part` command sends, read from the
 // copy's poses and the kind entries, and what the asked Soul's `wait` shows.
 import { strict as assert } from 'node:assert';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { KINDS } from '../together/together.mjs';
 import { activityPin, byName, carryIntents, crewsIn, gripSpot, loadOf, placer, slotPoint } from './carry.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
@@ -16,13 +15,13 @@ const kinds = Object.fromEntries(['carry', 'rack_beam', 'rack_upright', 'rack_ba
 const ONE = 2 ** 30, YAW90 = [Math.round(ONE * Math.SQRT1_2), 0, Math.round(ONE * Math.SQRT1_2), 0];
 const near = (a, b, what) => a.forEach((v, k) => assert.ok(Math.abs(v - b[k]) < 2, `${what}: ${a} vs ${b}`));
 
-test('an activity kind is pinned as the world pins it: every touch the client already names', () => {
-  for (const f of readdirSync(join(ROOT, 'together'))) {
-    const e = entry('together', f);
-    assert.equal(activityPin(e.kind, e), Object.values(KINDS).find((k) => k.startsWith(`${e.kind}_activity@`)), f);
-  }
+test('a crew is offered by the name the world serves it by; worked out from its entry only when it serves none', () => {
   assert.match(activityPin('mars:carry', kinds['mars:carry']), /^mars:carry_activity@1220[0-9a-f]{64}$/);
   assert.equal(activityPin('mars:rack_beam', kinds['mars:rack_beam']), null, 'no roles: no activity');
+  const ctx = { ns: 'mars', ground: id(1), kinds, me: id(2), placeOf: () => null, kindOf: () => null };
+  const served = { format: 'souls-activities/1', activities: [{ kind: 'mars:carry', name: `mars:carry_activity@1220${'cd'.repeat(32)}` }] };
+  assert.equal(carryIntents({ do: 'offer', to: [id(3)] }, { ...ctx, served })[0].params[1], served.activities[0].name);
+  assert.equal(carryIntents({ do: 'offer', to: [id(3)] }, ctx)[0].params[1], activityPin('mars:carry', kinds['mars:carry']));
 });
 
 // A copy: the ground, a beam lying along z at (2, 6) m, a stand at (0, 6) holding a frame in its first slot, a bay at

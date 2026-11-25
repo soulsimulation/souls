@@ -5,7 +5,7 @@
 import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
-import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
+import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
 import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
@@ -230,7 +230,9 @@ export class V2Bridge {
       const t = this.tracks.get(m.body);
       if (!t) continue;
       if (m.ended) { endGesture(t.gestures, m.start, m.ended.at); continue; }
-      const g = gestureFrom(m, this.toward(m.target));
+      // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
+      const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
+      const g = readingFrom(m, heldProp) ?? gestureFrom(m, this.toward(m.target));
       if (g) t.gestures.push(g);
     }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
@@ -286,6 +288,7 @@ export class V2Bridge {
     this.heldBy.delete(id);
     const t = this.tracks.get(holder);
     if (!t) return;
+    endReading(t.gestures, at);
     const other = [...this.heldBy].find(([, h]) => h === holder)?.[0];
     t.held.push({ at, prop: other ? propOf(this.nodes.get(other)?.kind ?? '') : null });
   }
@@ -444,7 +447,9 @@ export class V2Bridge {
     const first = Math.max(end - this.keep * this.chunk, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / this.chunk) * this.chunk);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
-    const souls = new Map(bodies.map((b) => {
+    // First day (25 Nov): a body-kind node with no Soul link (an imported resident figure) is drawn but is not a Soul:
+    // the Souls panel, the navbar and the card list only bodies a Soul drives.
+    const souls = new Map(bodies.filter((b) => !!this.nodes.get(b.node)?.soul).map((b) => {
       const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node));
       const state = doing === 'idle' || doing === 'zombie' || doing === 'asleep' ? doing : 'awake';
       return [b.soul, { id: b.soul, entityId: b.entity, name: b.name, description: b.description, doing, state } satisfies V2Soul];

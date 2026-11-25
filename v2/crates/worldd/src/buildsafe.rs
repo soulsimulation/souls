@@ -80,9 +80,11 @@ pub fn open_ground(copy: &Replica) -> Option<Id> {
 ///
 /// Its slot points (field 13) too, unless the batch gives its own, as the import writes a seeded thing's
 /// ([`replica::kinds::defined::slots_of`]): without them a part on a stand or in a bay placed live has no point to
-/// stand from, so a crew's `part:take` of it is refused `part-pose` and a `part:put` into it `slot.unknown`. A bay
-/// (`structure`'s: its slots take standing and bearing parts) gets no walk box: it is the frame its seated parts make,
-/// and they cut the ground once seated, as in a bay seeded from a world's facts; a box would keep its builders out.
+/// stand from, so a crew's `part:take` of it is refused `part-pose` and a `part:put` into it `slot.unknown`. A thing
+/// whose slots take parts (`structure`'s, ones that stand or bear) gets no walk box. A bay is the frame its seated
+/// parts make, and they cut the ground once seated, as in a bay seeded from a world's facts; a box would keep its
+/// builders out. A frame stand is the low rest its parts stand on, walked over as a seeded one is; a box would stop a
+/// crew's carry (`carry-load-blocked`) where the part comes down into it, and the put would be refused `part.not-held`.
 pub fn stand_as_kinds(
     edit: &mut replica::edit::Edit,
     entries: &Json,
@@ -100,7 +102,7 @@ pub fn stand_as_kinds(
             replica::kinds::defined::slots_of(entry),
         );
         if let Some(s) = solids
-            && !structure.is_bay(kind.as_str())
+            && !holds_parts(entry, structure)
         {
             fields.entry(F_SOLIDS).or_insert(s);
         }
@@ -108,6 +110,20 @@ pub fn stand_as_kinds(
             fields.entry(F_SLOTS).or_insert(s);
         }
     }
+}
+
+/// Whether a kind's entry has a slot that takes a part `structure` reads (one that stands or one that bears): a bay's,
+/// a frame stand's.
+fn holds_parts(entry: &Json, structure: &sim::structure::Structure) -> bool {
+    entry
+        .get("slots")
+        .and_then(Json::obj)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|(_, s)| s.get("kinds").and_then(Json::arr))
+        .flatten()
+        .filter_map(Json::str)
+        .any(|k| structure.is_part(k))
 }
 
 /// Every Soul's body on `copy`, in the tree's order (breadth first), as G2 judges it.

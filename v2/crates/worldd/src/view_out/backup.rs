@@ -33,7 +33,9 @@ use std::time::{Duration, Instant};
 use directoryd::directory::store::{Store as ObjectStore, When};
 use replica::encode::to_hex;
 
-/// The waits between refused passes: 1, 2, 4 … 32 s, then every 60 s.
+/// The waits between refused passes that put nothing: 1, 2, 4 … 32 s, then every 60 s. A refused pass that put objects
+/// first waits the shortest again: the store is answering, and one unanswered put in a few hundred (the offsite bucket
+/// holds about one request in a hundred past 5 s, 25 Nov 2026) must not hold a backlog of thousands at a pass a minute.
 pub const BACKOFF_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 /// Old generations' recovery objects deleted from the store in one pass (#3833).
 const DELETES_PER_PASS: usize = 64;
@@ -272,12 +274,23 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
         tried,
         deletes: std::collections::VecDeque::new(),
         deleting: true,
+        moved: 0,
     };
     std::thread::Builder::new()
         .name("stream-backup".into())
         .spawn(move || worker.run(&woken, &*report))
         .map_err(super::io)?;
     Ok(())
+}
+
+/// After a refused pass that put `moved` objects, with `stuck` refused passes before it in a row that put nothing: the
+/// new count of those, and the wait before the next pass ([`BACKOFF_MS`]).
+fn backoff(stuck: usize, moved: u64) -> (usize, u64) {
+    let stuck = if moved > 0 { 0 } else { stuck + 1 };
+    (
+        stuck,
+        BACKOFF_MS[stuck.saturating_sub(1).min(BACKOFF_MS.len() - 1)],
+    )
 }
 
 /// Heads, each as its length (4 bytes, big-endian) and bytes.
@@ -332,12 +345,16 @@ struct Worker<S> {
     tried: Vec<Vec<u8>>,
     deletes: std::collections::VecDeque<String>,
     deleting: bool,
+    /// Objects the current pass has put (or found there).
+    moved: u64,
 }
 
 impl<S: ObjectStore> Worker<S> {
     #[allow(clippy::disallowed_methods)] // The backup's waits are real time, off the world's clock.
     fn run(mut self, woken: &Receiver<()>, report: &dyn Fn(State)) {
         let mut tries = 0u64;
+        // Refused passes in a row that put nothing: the back-off's step.
+        let mut stuck = 0usize;
         loop {
             let pass = self.pass();
             self.progress
@@ -353,6 +370,7 @@ impl<S: ObjectStore> Worker<S> {
                         report(State::Current);
                     }
                     tries = 0;
+                    stuck = 0;
                     if let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =
                         woken.recv_timeout(Duration::from_secs(1))
                     {
@@ -371,7 +389,8 @@ impl<S: ObjectStore> Worker<S> {
                 }
                 Err(Short::Refused(e)) => {
                     tries += 1;
-                    let wait = BACKOFF_MS[(tries as usize - 1).min(BACKOFF_MS.len() - 1)];
+                    let wait;
+                    (stuck, wait) = backoff(stuck, self.moved);
                     let fault = format!("{}: {}", e.name, e.detail);
                     let objects = self.objects();
                     let behind = objects.len() as u64;
@@ -417,6 +436,7 @@ impl<S: ObjectStore> Worker<S> {
     fn pass(&mut self) -> Result<bool, Short> {
         // The head first: every object it names was in the spool before it, or is already in the store.
         let head = std::fs::read(self.dir.join(&self.head_key)).ok();
+        self.moved = 0;
         for key in self.objects() {
             let bytes = std::fs::read(self.dir.join(&key)).map_err(super::io)?;
             match self.store.put(&key, &bytes, When::Absent) {
@@ -425,9 +445,11 @@ impl<S: ObjectStore> Worker<S> {
                 Err(e) if e.name == "precondition-failed" => {}
                 Err(e) => return Err(e.into()),
             }
-            // In the store now, and named by the spool's head or the next: out of the queue at once (a pass refused
-            // later resumes from here), and kept on this disk, where a restart reads it.
+            // In the store now, and named by the spool's head or the next: out of the queue at once, so a pass refused
+            // later resumes from here rather than sending the whole spool again, and kept on this disk, where a restart
+            // reads it.
             self.keep(&key);
+            self.moved += 1;
         }
         let current = match head {
             Some(head) if self.confirmed.as_ref().map(|c| &c.0) != Some(&head) => {
@@ -588,4 +610,121 @@ impl<S: ObjectStore> Worker<S> {
 /// The spool beside a world's `views/`: never under it, as the chunks hold the world's own records.
 pub fn beside(views: &Path) -> PathBuf {
     views.with_file_name("stream-backup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use directoryd::directory::store::{Memory, Object, R};
+    use std::cell::{Cell, RefCell};
+
+    /// A store that keeps the keys put to it and does not answer the `refuse`th put.
+    struct Counting {
+        store: Memory,
+        puts: Cell<usize>,
+        refuse: usize,
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl ObjectStore for Counting {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.puts.set(self.puts.get() + 1);
+            if self.puts.get() == self.refuse {
+                return Err(super::super::Refusal {
+                    name: "store-unreachable",
+                    detail: format!("{key}: timeout: receive response"),
+                });
+            }
+            self.sent.borrow_mut().push(key.to_owned());
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.store.list(prefix)
+        }
+    }
+
+    /// Eden, 24 Nov: a backup 14,101 objects (690 MB) behind sent its whole spool again on every pass, and each pass
+    /// was refused on one unanswered put before it reached the head, so it never caught up. A refused pass now leaves
+    /// off the spool what the store already holds: the next sends each object left once, and the head after them.
+    #[test]
+    fn a_refused_pass_resumes_where_it_stopped_and_sends_nothing_twice() {
+        let dir = std::env::temp_dir().join(format!("backup-resumes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let spool = Spool::new(dir.clone(), "test-store".into());
+        let prefix = "s/w/".to_owned();
+        for i in 0..10u8 {
+            let bytes = vec![i; 1000];
+            let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&bytes)));
+            spool.object(&key, &bytes).unwrap();
+        }
+        spool.write(&format!("{prefix}head"), b"head one").unwrap();
+        let store = Counting {
+            store: Memory::default(),
+            puts: Cell::new(0),
+            refuse: 6,
+            sent: RefCell::default(),
+        };
+        let mut worker = Worker {
+            store,
+            dir: dir.clone(),
+            prefix: prefix.clone(),
+            head_key: format!("{prefix}head"),
+            identity: "test-store".into(),
+            prunes: Arc::default(),
+            progress: Arc::default(),
+            confirmed: None,
+            known: true,
+            tried: Vec::new(),
+            deletes: std::collections::VecDeque::new(),
+            deleting: false,
+            moved: 0,
+        };
+        assert!(worker.pass().is_err(), "the sixth put is not answered");
+        assert_eq!(
+            worker.objects().len(),
+            5,
+            "the five the store holds are off the spool"
+        );
+        assert_eq!(worker.moved, 5, "the refused pass put five");
+        assert!(
+            matches!(worker.pass(), Ok(true)),
+            "the next pass is current"
+        );
+        let sent = worker.store.sent.borrow().clone();
+        let objects: Vec<&String> = sent.iter().filter(|k| k.contains("/objects/")).collect();
+        let unique: BTreeSet<&String> = objects.iter().copied().collect();
+        assert_eq!(objects.len(), 10, "each object sent once: {sent:?}");
+        assert_eq!(unique.len(), 10);
+        assert_eq!(sent.last().map(String::as_str), Some("s/w/head"));
+        assert!(worker.objects().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Eden, 25 Nov: 20,702 objects (870 MB) behind, 67 refused passes in a row, the next a minute after each, though
+    /// every pass put objects before one went unanswered. A refused pass that put objects waits the shortest step
+    /// again; passes that put nothing back off 1, 2, 4 … 60 s as before.
+    #[test]
+    fn a_refused_pass_that_put_objects_waits_the_shortest_step_again() {
+        let mut stuck = 0;
+        let mut waits = Vec::new();
+        for _ in 0..8 {
+            let wait;
+            (stuck, wait) = backoff(stuck, 0);
+            waits.push(wait);
+        }
+        assert_eq!(
+            waits,
+            [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]
+        );
+        assert_eq!(
+            backoff(stuck, 300),
+            (0, 1_000),
+            "it put 300: the store answers"
+        );
+        assert_eq!(backoff(0, 0), (1, 1_000));
+        assert_eq!(backoff(1, 0), (2, 2_000));
+    }
 }

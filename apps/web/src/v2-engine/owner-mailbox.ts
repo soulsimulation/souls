@@ -54,11 +54,20 @@ export function mailboxPlace(href: string, cfg: { v2Stream?: unknown; v2Gateway?
   return gateway && directory ? { directory, gateway, session: name ? { testName: name } : { page: true } } : null;
 }
 
-/** The old box's inbox for the v2 box's messages: the newest one (refusals are thrown at send, not kept). */
-export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<BoxMessage, number>, connected: boolean): AgentInbox {
+/** The card's one owner state from the gateway's `{"agent"}` frame: whether a socket is signed in for the Soul (its
+ *  agent's client is connected now); null until the gateway said. */
+export function linkOf(agent: boolean | null): AgentInbox['link'] {
+  if (agent === null) return undefined;
+  return agent ? { state: 'connected', reason: 'listening', since: null, holder: null } : { state: 'disconnected', reason: 'stopped-listening', since: null, holder: null };
+}
+
+/** The old box's inbox for the v2 box's messages: the newest one (refusals are thrown at send, not kept). `agent` is
+ *  whether the Soul's agent is connected (null: not told yet), which the card's status line shows. */
+export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<BoxMessage, number>, agent: boolean | null): AgentInbox {
+  const connected = agent === true, link = linkOf(agent), linked = link ? { link } : {};
   const shown = messages.filter((m) => m.state !== 'refused');
   const m = shown.at(-1);
-  if (!m) return { connected, lastSeenAt: null, latest: null, queued: 0 };
+  if (!m) return { connected, lastSeenAt: null, latest: null, queued: 0, ...linked };
   const closed = m.state === 'done' || m.state === 'failed';
   const state = m.state === 'sending' || m.state === 'waiting' ? 'sent' : OPEN.has(m.state) ? 'delivered' : 'acknowledged';
   const doing = m.state === 'thinking' ? { phase: 'thinking' }
@@ -74,6 +83,7 @@ export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<Box
     },
     queued: shown.filter((x) => WAITING.has(x.state)).length,
     ...(doing ? { doing } : {}),
+    ...linked,
   };
 }
 
@@ -89,6 +99,8 @@ const clip = (s: string) => [...s].slice(0, REPLY_MOST).join('');
  */
 export class MailBox {
   readonly messages: BoxMessage[] = [];
+  /** Whether each grant's agent is connected, as the gateway last said (`{"agent": {"grant", "connected"}}`). */
+  readonly agents = new Map<string, boolean>();
   private readonly picked = new Set<string>();
   onChange: () => void = () => {};
 
@@ -108,7 +120,11 @@ export class MailBox {
     if (!f || typeof f !== 'object') return false;
     const str = (v: unknown) => (typeof v === 'string' ? v : null);
     const byId = (id: unknown) => this.messages.find((m) => m.id !== null && m.id === id);
-    if (f.sent) {
+    if (f.agent) {
+      const grant = str(f.agent.grant);
+      if (!grant || typeof f.agent.connected !== 'boolean') return true;
+      this.agents.set(grant, f.agent.connected);
+    } else if (f.sent) {
       const m = this.messages.find((x) => x.state === 'sending');
       if (!m) return true;
       const id = str(f.sent.id);
@@ -142,7 +158,7 @@ export class MailBox {
   }
 }
 
-type Box = Pick<MailBox, 'messages' | 'onChange' | 'put' | 'text'>;
+type Box = Pick<MailBox, 'messages' | 'agents' | 'onChange' | 'put' | 'text'>;
 type Sock = { onText: ((t: string) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
 
 /** One Soul's box on the gateway mailbox. */
@@ -164,10 +180,13 @@ export class V2OwnerMailbox {
     sock.start();
   }
 
+  /** Whether the Soul's agent is connected now, as the gateway said; null until it did. */
+  private agent(): boolean | null { return this.box!.agents.get(this.grant!) ?? null; }
+
   /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). */
   async read(): Promise<AgentInbox> {
     await this.ready;
-    return inboxOf(this.box!.messages, this.sentAt, true);
+    return inboxOf(this.box!.messages, this.sentAt, this.agent());
   }
 
   /** Puts `text` for the Soul's agent; resolves once the mailbox took it, throws if it was refused. */
@@ -191,7 +210,7 @@ export class V2OwnerMailbox {
       m.state = 'refused'; m.outcome = 'no-answer';
       throw new Error('The mailbox did not answer. Try again.');
     }
-    return inboxOf(box.messages, this.sentAt, true);
+    return inboxOf(box.messages, this.sentAt, this.agent());
   }
 
   stop(): void { this.sock?.stop(); }
@@ -283,6 +302,9 @@ const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unkno
 const PAGE_STREAM = typeof window === 'undefined' ? null : v2Stream();
 /** This page's v2 stream as its inline config named it when the page loaded; null on an old-engine world. */
 export const v2World = (): string | null => PAGE_STREAM;
+/** The new engine's name for this page's world, from its stream (`/s/w/<name>/views/…`): the name a Soul's pairing
+ *  request and the owner's Soul list use, which need not be the page's slug. Null on an old-engine world. */
+export const v2WorldName = (stream: string | null = PAGE_STREAM): string | null => (stream ? /^\/s\/w\/([a-z0-9][a-z0-9-]{0,62})\//.exec(stream)?.[1] ?? null : null);
 /** R3b: where this page's view socket and directory are, as the box reaches them; null on an old-engine world. */
 export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof location !== 'undefined' ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null);
 
@@ -305,6 +327,49 @@ export function useV2OwnedSouls(): readonly string[] {
   }, [s.authed, s.mode, s.label]);
   return owned;
 }
+/** One of the signed-in person's Souls on this world, as the navbar lists it (the directory's `/v1/account/souls`). */
+export type V2AccountSoul = { id: string; name: string | null };
+/** The rows of `/v1/account/souls` for `world`: its page id and its name; other worlds' Souls are left out. */
+export function accountSoulsOf(body: unknown, world: string, soulIdOf: (grant: string) => string): V2AccountSoul[] {
+  const rows = (body as { souls?: unknown } | null)?.souls;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((r) => r && typeof r === 'object' && typeof r.soul === 'string' && r.soul.startsWith('soul-') && r.world === world
+    ? [{ id: soulIdOf(r.soul), name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 60) : null }] : []);
+}
+
+/** First day (25 Nov): the signed-in person's Souls on this v2 world, named, whether or not their body is here yet (the
+ *  navbar's "your Souls"); asked again when this page approves one. Empty on an old-engine world or signed out. */
+export function useV2AccountSouls(world: string | null = v2WorldName()): readonly V2AccountSoul[] {
+  const s = useSession();
+  const [souls, setSouls] = useState<readonly V2AccountSoul[]>([]);
+  const [asked, setAsked] = useState(0);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const again = () => setAsked((n) => n + 1);
+    window.addEventListener(OWNED_CHANGED_EVENT, again);
+    return () => window.removeEventListener(OWNED_CHANGED_EVENT, again);
+  }, []);
+  useEffect(() => {
+    const place = PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
+    if (!place || !world || (!s.authed && !('testName' in place.session))) { setSouls([]); return; }
+    let live = true;
+    void (async () => {
+      try {
+        let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
+        if (!name) { const t = await pageSession().getToken().catch(() => null); if (!t) return; if (t.startsWith('dev:')) name = t.slice(4); else bearer = t; }
+        const [{ soulIdOf }, res] = await Promise.all([import('./bridge.ts'), fetch(`${place.directory}/v1/account/souls`, { method: 'POST',
+          headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+          body: JSON.stringify(name ? { test_person: name } : {}), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })]);
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (live && body) setSouls(accountSoulsOf(body, world, soulIdOf));
+      } catch { /* the directory is unreachable now: keep the last list */ }
+    })();
+    return () => { live = false; };
+  }, [s.authed, s.mode, s.label, asked, world]);
+  return souls;
+}
+/** Said on the window when this page approved a Soul: the owned list is asked again (useV2OwnedSouls). */
+export const OWNED_CHANGED_EVENT = 'sim:v2-owned-changed';
 
 const boxes = new Map<string, V2OwnerMailbox>();
 /** The page's box for `soulId` on this v2 world (one per Soul a page), or null on an old-engine world. */

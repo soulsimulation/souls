@@ -5,6 +5,7 @@
 //   node checks.mjs walks <expected entries> <walk.json>...   every page arrived, 0 errors, 0 resync, every Explore pick ok
 //   node checks.mjs poster <poster.log> <poster-count.txt>    every run reached a world frame and never went blank after it, 0 page errors
 //   node checks.mjs stall <stall.log> [runs]                  every run reported, no frame gap over 1 s, 0 page errors
+//   node checks.mjs pair-card <status.txt> <body.html>        GET <origin>/pair?code=TEST is 200 and is the pairing card
 import { isMain } from '../../../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -73,6 +74,18 @@ export function checkStall(logText, runs) {
   return { ok: !problems.length, lines, problems };
 }
 
+/** 25 Nov: /pair, the owner's pairing card (apps/web/pair.html, built), served by Caddy from the live release's web build.
+ *  The card is its approve button and its module script (vite: assets/pairing-<hash>.js). `status` is curl's %{http_code}. */
+export function checkPairCard(status, body) {
+  const code = String(status).trim(), problems = [];
+  const card = /id="approve"/.test(body);
+  const module = [...body.matchAll(/<script\b[^>]*>/g)].some(([t]) => /type="module"/.test(t) && /src="[^"]*pairing[^"]*\.js"/.test(t));
+  if (code === '403') problems.push('GET /pair?code=TEST answered 403: most likely Caddy (user caddy) cannot traverse /srv/sim-worlds, /srv/sim-worlds/releases or the release folder. Run install.sh again, or on the host: setfacl -m u:caddy:x on each (getfacl to check)');
+  else if (code !== '200') problems.push(`GET /pair?code=TEST answered ${code || 'nothing'}, not 200`);
+  else if (!card || !module) problems.push(`GET /pair?code=TEST answered 200 but not with the pairing card (${[!card && 'no id="approve"', !module && 'no pairing module script'].filter(Boolean).join(', ')})`);
+  return { ok: !problems.length, lines: [`/pair?code=TEST: ${code || 'no answer'}, ${body.length} bytes, card ${card}, module ${module}`], problems };
+}
+
 if (isMain(import.meta.url)) {
   const [kind, ...a] = process.argv.slice(2), read = (f) => readFileSync(f, 'utf8');
   let r;
@@ -80,7 +93,8 @@ if (isMain(import.meta.url)) {
   else if (kind === 'walks') r = checkWalks(a.slice(1).map((f) => ({ name: f.split('/').slice(-2, -1)[0], entries: JSON.parse(read(f)) })), Number(a[0]));
   else if (kind === 'poster') r = checkPoster(read(a[0]), read(a[1]), Number(a[2] ?? 3));
   else if (kind === 'stall') r = checkStall(read(a[0]), Number(a[1] ?? 4));
-  else { console.error('usage: checks.mjs quick-check|walks|poster|stall …'); process.exit(2); }
+  else if (kind === 'pair-card') r = checkPairCard(read(a[0]), read(a[1]));
+  else { console.error('usage: checks.mjs quick-check|walks|poster|stall|pair-card …'); process.exit(2); }
   for (const l of r.lines) console.log(l);
   for (const p of r.problems) console.log(`PROBLEM ${p}`);
   for (const x of r.notes ?? []) console.log(`NOTE ${x}`);
