@@ -14,7 +14,7 @@ import { readChanged } from './changed.ts';
 import { skyFields } from './sky-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
-import { coursePlaces, type CoursePlaces } from '../course-samples.ts';
+import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
@@ -241,7 +241,9 @@ async function run(stream: URL) {
     // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
     const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, onCourse(), rest.from, rest.to) : {};
     if (rest) coursedTo = Math.max(coursedTo, rest.to);
-    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => drawn.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
+    // First-day round 4: when each still thing on a course moves on (a balloon at its stop takes off)
+    const leaves = rest && replica.courseAt ? courseLeaves(replica.courseAt, onCourse(), rest.to) : {};
+    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => drawn.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
   // #4535: a baseline in a format this page's bundle cannot read is never played: the page reloads for the new one
@@ -357,12 +359,13 @@ async function run(stream: URL) {
     const now = ptr.anchorWorld + (Date.now() - ptr.anchorWallMs) * 1000;
     const sleep = ptr as StreamPointer & { asleep?: true; stillUntil?: number | null };
     const to = sleep.asleep ? Math.max(quiet ?? -Infinity, sleep.stillUntil == null ? now : Math.min(now, sleep.stillUntil)) : quiet;
-    let courses: CoursePlaces = {};
+    let courses: CoursePlaces = {}, leaves: Record<string, number> = {};
     if (to !== null && to > coursedTo && Number.isFinite(coursedTo) && replica.courseAt) {
       courses = coursePlaces(replica.courseAt, onCourse(), coursedTo, to);
+      leaves = courseLeaves(replica.courseAt, onCourse(), to);
       coursedTo = to;
     }
-    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}) } });
+    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } });
   };
   await install(ptr);
   const poll = async () => {

@@ -247,6 +247,8 @@ export function rowsOf(copy) {
     const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
     const members = membersAt(kind, fields);
     rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), ...members, own: d.own });
+    // First-day round 4: its course as the record holds it, for `check/aboard.mjs` (not enumerable: never printed)
+    if (moving) Object.defineProperty(rows.get(id), 'course', { value: fields.get(F_COURSE) ?? fields.get(BigInt(F_COURSE)) });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   walk.done();
