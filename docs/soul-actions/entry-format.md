@@ -410,8 +410,11 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4; `for_s` repeats it back to back, with
-  no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`: the
-  humanoid's `dance for=60` dances a minute, and a leave or `stop` ends it at the move's next phase; the log holds a
+  no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`
+  (with no default, a move the act gives no such count is done once: a wave, unless asked to keep waving): the
+  humanoid's `dance for=60` dances a minute, `dance` alone (default 3600) until the Soul's next act or `stop` (a
+  stop or a walk ends it at the move's next phase, another form at once); its held activities and gestures are listed in `content/kinds/body/humanoid.json`;
+  the log holds a
   record of it for viewers at its start and every 15 s (a viewer who comes in mid-dance draws it from the next), each
   planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;

@@ -95,9 +95,15 @@ test('#3603: a thing moving on a course with seats offers its rider steer, stop 
     ['walk', 'brush', 'fill', 'rake'], 'a moving thing with no seat has no rider');
 });
 
-test('0.135: a dance\'s `for` shows its step\'s default, 10 s, and is left out of the usage\'s required words', () => {
+test('continuous activities: a held activity says it goes on until the next act, a gesture that it is done once, each with `for=<seconds>`', () => {
   const humanoid = JSON.parse(readFileSync(new URL('../../../../content/kinds/body/humanoid.json', import.meta.url), 'utf8'));
-  const dance = offersOf(ID, humanoid).find((o) => o.name === 'dance');
-  assert.equal(dance.params.for.default, 10);
-  assert.match(dance.usage, /\[for=<count>\]/);
+  const offers = offersOf(ID, humanoid), of = (n) => offers.find((o) => o.name === n);
+  for (const held of ['dance', 'yoga', 'jumping_jacks', 'push_ups', 'sit_ups', 'stargaze']) {
+    assert.match(of(held).lasts, /^unbroken until your next act or `stop` \(an hour at most\); for=<seconds> for a set time$/, held);
+    assert.match(of(held).usage, /\[for=<seconds>\]$/, held);
+    assert.equal(of(held).params.for.default, undefined, `${held}: the world's own default, not sent`);
+  }
+  for (const once of ['wave', 'clap', 'jump', 'stretch', 'sing', 'listen']) assert.match(of(once).lasts, /^once; for=<seconds> keeps it up/, once);
+  assert.equal(of('exercise').lasts, '10 s for each of its 3 moves, back to back, unless each=<seconds>');
+  assert.equal(of('bow').lasts, undefined, 'a bow is a bow');
 });
