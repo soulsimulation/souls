@@ -61,7 +61,10 @@ export function offersOf(id, entry, { moving = false } = {}) {
     const params = Object.fromEntries(Object.entries(takes).map(([n, t]) => {
       const slots = t?.type === 'slot' && !Array.isArray(t.of) ? slotNames(entry, name) : null;
       const p = { ...t, ...(slots?.length ? { of: slots } : {}) };
+      // 0.135: a repeated move's length (`for_s: {"arg": n, "default": s}`, a dance's `for`) has the step's default
+      const stepDefault = (f?.steps ?? []).find((st) => st?.for_s?.arg === n)?.for_s?.default;
       if (moveNamed && slots?.length) p.default = slots[0];
+      else if (stepDefault !== undefined) p.default = stepDefault;
       else if (t?.select) p.optional = true;
       return [n, p];
     }));

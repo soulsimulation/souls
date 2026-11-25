@@ -229,6 +229,11 @@
     "dance": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -239,15 +244,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "dance"
-        },
-        {
-          "step": "wait",
-          "us": 3000000
-        },
-        {
-          "step": "move",
-          "move": "dance"
+          "move": "dance",
+          "for_s": {
+            "arg": "for",
+            "default": 10
+          }
         }
       ],
       "effects": []

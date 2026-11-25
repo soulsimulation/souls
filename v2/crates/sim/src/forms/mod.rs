@@ -2031,9 +2031,23 @@ impl Forms {
                 ) {
                     Ok(n) => {
                         fr.mv = Some(n);
-                        // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
-                        if let Some(r) = w.moves.record(n) {
+                        // A repeated move (a dance for a minute) is a record for viewers at its first move and again
+                        // every `REWRITE_US` (a viewer who comes in mid-dance draws it from the next), each planned to
+                        // the latest its step can end (its start, its length and one more move); the other repeats
+                        // write nothing, and the run's end (`souls:form-ended`) is where it stopped (0.135).
+                        let repeat = fr.runner.repeat();
+                        if let Some(r) = w
+                            .moves
+                            .record(n)
+                            .filter(|_| !repeat.is_some_and(|(_, _, again)| again))
+                        {
                             let mut r = r.clone();
+                            let one = r.ends.last().map_or(0, |l| l.saturating_sub(r.start));
+                            if let (Some((since, length, _)), Some(last)) =
+                                (repeat, r.ends.last_mut())
+                            {
+                                *last = since.saturating_add(length).saturating_add(one);
+                            }
                             if let Some(t) = w.reach.aimed(body, &r.contact) {
                                 r.target = t;
                             }
@@ -2402,6 +2416,10 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
         .iter()
         .map(|s| match s {
             Step::WalkTo { .. } => limits.walk,
+            // A repeated move (a dance for a minute) runs its length and its last move past it.
+            Step::Move {
+                repeat: Some(r), ..
+            } => r.saturating_add(limits.step_move),
             Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. } => {
                 limits.step_move
             }

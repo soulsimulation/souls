@@ -156,6 +156,33 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
   assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
 });
 
+test('0.135: a page that opens mid-dance draws the dance from the next record the world writes again, to the run\'s end', () => {
+  // The dance (`act dance for=60`) began 20 s before this page's first part, so the page never saw its first record. The
+  // world writes it again every 15 s, each planned to the latest the dance can end; the run ends 60.8 s after it began.
+  const began = T0 - 20_000_000, planned = began + 60_000_000 + 800_000, again = T0 + 10_000_000, ended = began + 60_800_000;
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  // What the page draws each half second, read from each chunk as it is made (the bridge keeps only the last few).
+  const drawn = new Map<number, string | undefined>();
+  const N = 100; // 50 s of parts
+  for (let n = 0; n < N; n++) {
+    const from = T0 + n * 500_000, extra: Record<string, unknown> = {};
+    if (again >= from && again < from + 500_000) extra.moves = [{ body: 'b.7', name: 'souls:dance', start: again, ends: [again + 400_000, planned], target: 'b.7', run: '9' }];
+    if (ended >= from && ended < from + 500_000) extra.runEnds = [{ body: 'b.7', at: ended, how: 'done' }];
+    b.receive(part(n, n === 0 ? [['b.7', 'w.2', null, T0, 1_000_000, 0, 0]] : [], extra));
+    for (const c of b.view.takes.chunks) for (let tick = c.fromTick; tick < c.toTick; tick++) {
+      const s = Math.round((tick * TICK_US - T0) / 100_000) / 10;
+      if (s * 2 !== Math.round(s * 2) || drawn.has(s)) continue;
+      const e = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+      if (e) drawn.set(s, e.activity);
+    }
+  }
+  const at = (s: number) => drawn.get(s);
+  assert.equal(at(5), 'idle', 'before the record comes again the page has nothing to draw');
+  for (let s = 10.5; s < 40.5; s += 0.5) assert.equal(at(s), 'dance', `dancing ${s} s after the page opened`);
+  assert.equal(at(42), 'idle', 'standing once the run ended');
+});
+
 test('a Soul that walked up to a turned chair sits facing out of it, never the way it walked (its back to the back)', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
