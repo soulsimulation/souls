@@ -95,6 +95,24 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    wearing it could not start). After the page moves, each world of the launcher's cutover binding that names no
    catalogue gets `bodiesDir` `/usr/local/lib/souls/web/assets/bodies`, served at `/w/<slug>/v2/bodies/` and named in
    its page's `v2Bodies` ([cutover.md](cutover.md)); the launcher reads the binding again within a second.
+   **The library entries** (`release.sh entries`, `worldd entries`): a world's kinds come from its own folder
+   (`<world>/entries/`, one `<kind>.json` each), which its seed wrote once and every start reads, so before this step
+   a content fix reached only a world that was reseeded. Before the move, `entries plan` lists for each world which
+   entries this release's `content/kinds` (staged as `reseed/kinds`) changes, and which change is refused and why; it
+   changes nothing and its output is in the summary, dry run or not. In the move, just before each world's deploy,
+   `entries stage` writes that world's whole entries with the changes (each repaired against its facts as a seed
+   repairs them) as `<world>/entries.next`, never touching `entries/`. The deploy rehearses the new build on a copy of
+   the folder with them and swaps them in between the pin and the restart (the world's own kept as
+   `entries.before`), so only the new build ever reads them, and its one restart takes them under the world's own
+   header (a changed entry's new revision is paired with the one the header pins). A deploy that fails before the pin
+   leaves the world's own; one rolled back by its canary puts the world's own back only when the new build wrote
+   nothing under the release's (data never rolls back), and the move removes what it staged. A change the world's
+   state may no longer fit is refused by name and nothing of that world is staged: a state field gone or retyped, an
+   enum value gone, an int's range narrowed, a slot gone, renumbered or admitting less, a role gone, another owner, a
+   world that would not build or would leave a pinned revision with no definition (`entries.<name>`). A fork keeps its
+   entries (its boot pins them); an entry only the release has is not added (the world's header does not pin it: a
+   reseed adds it); an entry only the world has is kept. A later `rollback-v2.yml` moves code only: the release's
+   entries stay, the world's earlier ones are in `entries.before` for a hand put-back while the world is stopped.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already

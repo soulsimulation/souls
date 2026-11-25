@@ -6259,6 +6259,296 @@ async fn a4_a_carrier_leaves_mid_carry_and_nobody_is_stuck() {
     );
 }
 
+/// `v`'s field `key`, to change.
+fn field<'a>(v: &'a mut json::Value, key: &str) -> &'a mut json::Value {
+    match v {
+        json::Value::Obj(o) => &mut o.iter_mut().find(|(k, _)| k == key).expect(key).1,
+        _ => panic!("{key}: not an object"),
+    }
+}
+
+/// The humanoid as a world seeded before #4774 holds it: `dance` takes no `for` and its move has no `for_s`.
+fn humanoid_before_4774() -> json::Value {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    let mut h = json::parse(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let json::Value::Obj(dance) = field(field(&mut h, "forms"), "dance") else {
+        panic!("dance")
+    };
+    dance.retain(|(k, _)| k != "takes");
+    for (k, v) in dance.iter_mut() {
+        if let ("steps", json::Value::Arr(steps)) = (k.as_str(), v) {
+            for s in steps {
+                if let json::Value::Obj(s) = s {
+                    s.retain(|(k, _)| k != "for_s");
+                }
+            }
+        }
+    }
+    h
+}
+
+/// `worldd entries <act> --dir <world> --kinds <kinds>`: its status and its output.
+fn entries_cmd(act: &str, dir: &Path, kinds: &Path) -> (i32, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["entries", act, "--dir"])
+        .arg(dir)
+        .arg("--kinds")
+        .arg(kinds)
+        .output()
+        .expect("worldd entries runs");
+    (
+        out.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    )
+}
+
+/// A dance of `secs` on the Soul's own body, sent on `souls`: its first answer (kind 3 is accepted, running).
+fn dance(souls: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, secs: u64) -> Got {
+    let i = Intent {
+        actor: Actor::Soul(w.souls[0]),
+        verb: Name::new("eden:dance").unwrap(),
+        target: Some(Target::Node(body)),
+        parameters: BTreeMap::from([(
+            1,
+            Value::Array(vec![Value::Array(vec![
+                Value::Bytes(b"for".to_vec()),
+                Value::Uint(secs),
+            ])]),
+        )]),
+        sequence,
+        basis: basis(w.root.scope(), 0),
+        expiry: answers::now() + 120_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    souls
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    souls.write_all(&bytes).unwrap();
+    socket_answer(souls)
+}
+
+/// A world seeded with the entries in `entries` (N2's test world, one Soul).
+fn seeded_with(d: &Path, entries: &Path) -> Seeded {
+    seed_entries(
+        d,
+        &testworld::generate(1, 0).unwrap().text,
+        1,
+        (-40, 30),
+        Some(entries),
+    )
+}
+
+/// A release's content fix reaches a running world (`worldd entries`): a world seeded with the humanoid from before
+/// #4774 refuses `dance for=60` (`slot-unknown`, as production Eden did on 0.136.0); `plan` lists the change and
+/// changes nothing; `apply` writes it; after its restart the same world takes `dance for=60`.
+#[test]
+fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
+    let d = scratch("entries-up");
+    let (old, release) = (d.join("entries"), d.join("release"));
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::create_dir_all(release.join("body")).unwrap();
+    std::fs::write(old.join("humanoid.json"), humanoid_before_4774().to_json()).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json"),
+        release.join("body/humanoid.json"),
+    )
+    .unwrap();
+    let w = seeded_with(&d, &old);
+    let file = w.dir.join("entries/eden.humanoid.json");
+    let seeded = std::fs::read(&file).unwrap();
+    let body = {
+        let socket = d.join("s1");
+        let s = serve_with(&w, &socket, None);
+        s.line("listening ", 60);
+        let mut souls = connect_socket(&socket);
+        souls
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .unwrap();
+        walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+        assert_eq!(socket_end(&mut souls).kind, 1, "the Soul's walk births it");
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let body = t
+            .links_at(w.souls[0])
+            .iter()
+            .filter(|e| t.ty(e).as_str() == "souls:body-of")
+            .find_map(|e| Some(t.link(e.link)?.1[0]))
+            .expect("the Soul's body");
+        let got = dance(&mut souls, &w, body, 2, 60);
+        println!("before: kind {} {:?}", got.kind, got.reason);
+        assert!(
+            got.kind != 1 && got.kind != 3 && got.reason.contains("slot-unknown"),
+            "before: refused slot-unknown, as production Eden: kind {} {:?}",
+            got.kind,
+            got.reason
+        );
+        drop(s);
+        body
+    };
+    let (status, out) = entries_cmd("plan", &w.dir, &release);
+    println!("plan: {out}");
+    assert_eq!(status, 0, "{out}");
+    assert!(
+        out.contains("change eden:humanoid ") && out.contains("1 would change, 0 unchanged"),
+        "{out}"
+    );
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        seeded,
+        "a plan changes nothing"
+    );
+    let (status, out) = entries_cmd("stage", &w.dir, &release);
+    println!("stage: {out}");
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains("1 staged, 0 unchanged"), "{out}");
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        seeded,
+        "a stage leaves the world's own entries"
+    );
+    // What the release's deploy does between the pin and the restart.
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let now = json::parse(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let takes = now
+        .get("forms")
+        .and_then(|f| f.get("dance"))
+        .and_then(|f| f.get("takes"));
+    assert!(
+        takes.and_then(|t| t.get("for")).is_some(),
+        "dance takes for"
+    );
+    let (_, again) = entries_cmd("stage", &w.dir, &release);
+    assert!(
+        again.contains("0 would change, 1 unchanged (nothing to stage)")
+            && !w.dir.join("entries.next").exists(),
+        "staged again: {again}"
+    );
+    let socket = d.join("s2");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let got = dance(&mut souls, &w, body, 3, 60);
+    println!("after: kind {} {:?}", got.kind, got.reason);
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (3, ""),
+        "after: dance for=60 is accepted and runs"
+    );
+}
+
+/// A change the world's state may no longer fit is refused by name, and nothing of that world changes: the release's
+/// humanoid without its `posture` state, which every body holds; so is a world that keeps no header, and a fork keeps
+/// its own. Staged and swapped in on two copies of one world, the upgrade gives the same bytes, and each copy starts at
+/// the same state.
+#[test]
+fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
+    let d = scratch("entries-no");
+    let (old, gone, release) = (d.join("entries"), d.join("gone"), d.join("release"));
+    for f in [&old, &gone, &release] {
+        std::fs::create_dir_all(f).unwrap();
+    }
+    std::fs::write(old.join("humanoid.json"), humanoid_before_4774().to_json()).unwrap();
+    let content =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    std::fs::copy(&content, release.join("humanoid.json")).unwrap();
+    let mut h = json::parse(&std::fs::read_to_string(&content).unwrap()).unwrap();
+    if let json::Value::Obj(o) = &mut h {
+        o.retain(|(k, _)| k != "state");
+    }
+    std::fs::write(gone.join("humanoid.json"), h.to_json()).unwrap();
+    let w = seeded_with(&d, &old);
+    let file = w.dir.join("entries/eden.humanoid.json");
+    let seeded = std::fs::read(&file).unwrap();
+    let (status, out) = entries_cmd("stage", &w.dir, &gone);
+    println!("refused: {out}");
+    assert_eq!(status, 3, "{out}");
+    let name = w.dir.file_name().unwrap().to_str().unwrap();
+    assert!(
+        out.contains(&format!(
+            "refused: entries.state-removed: {name}: eden:humanoid: state field posture is gone"
+        )) && out.contains("refused, nothing changed"),
+        "{out}"
+    );
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        seeded,
+        "refused: nothing changed"
+    );
+    assert!(
+        !w.dir.join("entries.next").exists(),
+        "refused: nothing staged"
+    );
+    // A world that keeps no header, and a fork, each by name.
+    let cp = |to: &Path| {
+        assert!(
+            Command::new("cp")
+                .arg("-R")
+                .arg(&w.dir)
+                .arg(to)
+                .status()
+                .unwrap()
+                .success()
+        )
+    };
+    let (bare, fork) = (d.join("bare"), d.join("fork"));
+    cp(&bare);
+    std::fs::remove_file(bare.join("header")).unwrap();
+    let (status, out) = entries_cmd("stage", &bare, &release);
+    assert_eq!(status, 3, "{out}");
+    assert!(
+        out.contains("refused: entries.header-missing: bare: "),
+        "{out}"
+    );
+    cp(&fork);
+    let meta = std::fs::read_to_string(fork.join("world.json")).unwrap();
+    let (fields, _) = meta.rsplit_once('}').unwrap();
+    std::fs::write(
+        fork.join("world.json"),
+        format!("{fields}, \"fork\": true}}"),
+    )
+    .unwrap();
+    let (status, out) = entries_cmd("stage", &fork, &release);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains("entries: fork: kept: a fork"), "{out}");
+    // Two copies, one upgrade each: the same bytes, and the same state at their starts.
+    let mut starts = Vec::new();
+    let mut bytes = Vec::new();
+    for c in ["a", "b"] {
+        let copy = d.join(c);
+        cp(&copy);
+        let (status, out) = entries_cmd("stage", &copy, &release);
+        assert_eq!(status, 0, "{out}");
+        supervisor::deploy::swap_entries(&copy, true).unwrap();
+        bytes.push(std::fs::read(copy.join("entries/eden.humanoid.json")).unwrap());
+        let served = Seeded {
+            dir: copy,
+            souls: w.souls.clone(),
+            root: w.root,
+            zone: w.zone,
+            ground: w.ground,
+            wall: w.wall.clone(),
+        };
+        let s = serve_with(&served, &d.join(format!("s{c}")), None);
+        // The tick is the real clock's at the start; the state is the log's.
+        let line = s.line("worldd: started at tick", 60);
+        starts.push(line.split_once(" state ").expect("a state").1.to_owned());
+    }
+    assert_eq!(bytes[0], bytes[1], "the same entry on both");
+    assert_eq!(starts[0], starts[1], "both start at the same state");
+}
+
 /// A Soul's next act ends its held dance (continuous activities): `act dance` with no `for` is one run that goes on
 /// until the Soul's next act or `stop`; its progress answer says the longest the world gives it (an hour and the
 /// step's own margin). The Soul's `wave` then ends the dance `left` at once and is done; the log's dance run ends where

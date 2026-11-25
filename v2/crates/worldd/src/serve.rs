@@ -325,7 +325,7 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
 
 /// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
 /// by `serve` from the world as its log leaves it, once (#3672).
-struct Built {
+pub(crate) struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
     ground: Id,
@@ -1053,7 +1053,11 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 }
 
 /// [`build`] with its facts' courses kept in `cache` (S5).
-fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
+pub(crate) fn build_with(
+    cache: Option<&Path>,
+    facts: &str,
+    entries: &[(String, Json)],
+) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
     // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
@@ -1193,7 +1197,7 @@ fn owners_text(built: &Built) -> String {
 }
 
 /// [`owners_text`] read back. A missing or unreadable file gives none, and then no kind is paired.
-fn owners(dir: &Path) -> BTreeMap<String, String> {
+pub(crate) fn owners(dir: &Path) -> BTreeMap<String, String> {
     std::fs::read_to_string(dir.join("header.kinds"))
         .unwrap_or_default()
         .lines()
@@ -1273,10 +1277,15 @@ fn own_header(
 /// targets keep this build's defined pins, so the creator's client still loads it. Any other unmatched revision is not
 /// guessed: one only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per
 /// act); one only the header pins has no rules (`kind-unknown`, per act). When the header is this build's, nothing
-/// changes. Prints what differs, each paired pin in full.
-fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
+/// changes. Prints what differs, each paired pin in full, and returns the world's pins with no definition here (the
+/// entries upgrade refuses a change that leaves one, `entries_upgrade`).
+pub(crate) fn adopt(
+    built: &mut Built,
+    header: Header,
+    owners: &BTreeMap<String, String>,
+) -> Vec<String> {
     if header.stored() == built.header.stored() {
-        return;
+        return Vec::new();
     }
     let unmatched = |of: &Header, by: &Header| -> BTreeMap<String, Vec<String>> {
         let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1351,6 +1360,7 @@ fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
         unknown.join(", ")
     );
     built.header = header;
+    unknown
 }
 
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
@@ -1498,7 +1508,7 @@ fn instance(root: Id) -> String {
 }
 
 /// Every `souls-entry/1` file under `dir`, by kind.
-fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
+pub(crate) fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(io(dir))?
         .filter_map(|e| Some(e.ok()?.path()))
@@ -3425,7 +3435,7 @@ fn serve(args: &[String]) -> R<()> {
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
         let (header, owners) = own_header(&dir, &built, &found.records)?;
-        adopt(&mut built, header, &owners);
+        let _ = adopt(&mut built, header, &owners);
     }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
