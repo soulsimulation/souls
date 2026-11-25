@@ -1632,7 +1632,7 @@ fn a_soul_rows_the_harbour_rowing_boat_out_and_gets_off_at_its_landing() {
 /// A walk to a landform or a region (a range drawn as a wide line, the sea, the northern mountains' region) goes to
 /// the nearest walkable point at its edge, not to its middle, and ends facing it: a step ahead of the body is nearer
 /// it than the body is. Before, each walk aimed at the shape's middle (out on the sea, the range's ridge) and was
-/// refused `souls:no-way`.
+/// refused. An area a body can stand on (the park's sand, the harbour boardwalk) is still walked onto.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
@@ -1642,15 +1642,22 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     let lineage = im.nodes["world"].scope();
     let ground = im.nodes["ground"];
     let mut failed = Vec::new();
+    // Walked onto: an area a body can stand on (the park's sand, the harbour's boardwalk) ends on it, at its edge.
+    let onto = ["park-playground-sand", "place-region-harbour-boardwalk"];
     for (at, names, tag) in [
         (
             "-14.0,-296.0",
-            ["place-region-northern-mountains", "land-ring-north-range"],
+            &["place-region-northern-mountains", "land-ring-north-range"][..],
             "lfnorth",
         ),
         (
             "40.0,120.0",
-            ["land-southern-sea", "place-region-southern-sea"],
+            &[
+                "park-playground-sand",
+                "place-region-harbour-boardwalk",
+                "land-southern-sea",
+                "place-region-southern-sea",
+            ][..],
             "lfsea",
         ),
     ] {
@@ -1698,6 +1705,8 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
             );
             if let Err(e) = &walked {
                 failed.push(format!("{name}: {e}"));
+            } else if onto.contains(name) && gap > 0 {
+                failed.push(format!("{name}: not on it"));
             } else if gap > 0 && gap_ahead >= gap {
                 failed.push(format!("{name}: not facing it"));
             }
