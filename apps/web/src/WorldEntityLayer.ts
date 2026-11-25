@@ -10,7 +10,7 @@ import { noteModeration, noteSnapshotVersion } from './moderation-hidden.ts';
 import { godFeature, isFlagDef } from './god-ui/features.ts';
 import { loadSnapshot } from './snapshot-wire.ts';
 import { snapshotModel } from './snapshot-model.ts';
-import { fixTerrain, fixedTerrain, streamScene, streamSceneAsked } from './v2-engine/source/scene-offer.ts';
+import { fixTerrain, fixedTerrain, oldViews, streamScene, streamSceneAsked } from './v2-engine/source/scene-offer.ts';
 import type { StreamSnapshot } from './v2-engine/source/stream-scene.ts';
 import type { SnapshotDecoder, SnapshotDelta } from './snapshot-delta.ts';
 import * as THREE from 'three';
@@ -586,7 +586,7 @@ export class WorldEntityLayer {
     // lane L3h: the first start takes the snapshot GET index.html sent at page entry (snapshot-prefetch.ts), one request
     // lane W1/O2: the page's edge-cacheable snapshot URL when the server named one (its `now` is then as old as the copy)
     // lane W3: in its wire form (snapshot-wire.ts: defs and ground as cached content-addressed parts)
-    try { if(frozen){this.immutable=true;snap=structuredClone(frozen);onSnapshot?.();}else{ const decoder = await this.snapshotDecoder(); const got = streamSceneAsked() ? null : await loadSnapshot(this.api('/v1/world/snapshot'), signal, true, async (pieces) => { arrivalMark('snapshot-received'); const snapshot = await decoder.initial(pieces, signal); arrivalMark('snapshot-decoded'); return snapshot; });
+    try { if(frozen){this.immutable=true;snap=structuredClone(frozen);onSnapshot?.();}else{ const decoder = await this.snapshotDecoder(); const got = streamSceneAsked() || !oldViews() ? null : await loadSnapshot(this.api('/v1/world/snapshot'), signal, true, async (pieces) => { arrivalMark('snapshot-received'); const snapshot = await decoder.initial(pieces, signal); arrivalMark('snapshot-decoded'); return snapshot; });
       // W2 (0.135): a world with no captured snapshot (made on the new engine) is drawn from its stream (stream-scene.ts)
       const fromStream = got ? null : await streamScene(signal); this.fromStream = !!fromStream; onSnapshot?.(); if (fromStream) snap = fromStream as unknown as EntitySnapshot; else {
       if (!got || signal.aborted) return; const r = got.response; noteSnapshotVersion(r.headers.get('x-moderation-version')); snap = got.snap as unknown as EntitySnapshot;

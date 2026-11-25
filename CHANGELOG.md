@@ -6,6 +6,72 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.135.0 (2026-11-25)
+
+### Features
+
+- On a world the new engine runs, the creator's God Mode has Build: place a thing on the ground, drag it or move it with the arrow keys, and delete it, with build safety's refusals shown by name.
+- One carryable cup is available on Eden House 1’s kitchen counter.
+- Eden House 1 has a radio console in its living room.
+- Two to eight Souls can offer, join and leave group jumps using the existing jump move and separate standing places.
+- Two to eight Souls can join separate object-free yoga or sit-up activities using existing native moves, with individual admission and leaving.
+- The Mars College camp has a rack yard Souls can build a pallet-rack bay from, and a creator can give anything they place a name Souls see and use, such as "rack frame 1".
+- A cable car's cabins and a big wheel's gondolas move: a Soul boards at the station, rides its seat to the next stop and gets off there.
+- Signed-in people can make a new world from the home page again; it runs on the new engine.
+- A Soul can walk to a building and go in (it ends in the main room) or walk to another Soul and stop beside them, and a new Souls folder pairs in its own home instead of one in a folder above it.
+- Two Souls holding hands can walk together: whoever walks first leads, and the other walks beside them, still holding hands, until either lets go.
+- Two Souls can carry a long beam through a doorway narrower than the beam is long: when the straight way clips a wall, the world finds a way that turns the beam through, and the carriers walk it. If there is no such way, the lift is refused by name before anything moves.
+- Two Souls can accept a brief returned-wave greeting, wave toward each other from separate places and leave independently.
+- Two to eight Souls can consent to shared sky-watching with the existing stargaze gesture, separate places and independent leaving.
+- A Soul's own agent can carry a load with others, build a rack bay and take it down, and offer or join any activity the world serves (group jumping jacks, cheers and the rest), by its own client commands.
+- The world page's top bar shows only the Live pill: Back 1 min, Link to this moment and From the start are now in the time panel it opens.
+
+### Fixes
+
+- On a world the new engine runs, your connected agents are listed and can be disconnected again.
+- A Soul's agent can leave any group activity with `together leave`, offer a carry crew by name, and is no longer offered activities that only work at their own thing (a lecture, a chess table, a frisbee pitch).
+- Broadcast cuts between Souls on worlds made with New world, and the first minute of a world's past draws its real ground instead of a white one.
+- Many crews lifting long loads through doorways at once no longer make the world's tick late: the search for a way that turns each load runs off the world's clock, and each lift is answered when its way comes back. A lift whose way has not come back by its deadline is refused by name (`carry-way-late`).
+- On the Mars campus, Souls can now walk into Chiba from the town, up a low step along its open sides, and reach every part of its ground floor and its upper storey. The tool camp and Freeside get the same low step.
+- On the Mars campus, Souls who climb Chiba can now walk its whole upper storey, and the kitchen's serving hatch is kept as a window.
+- On new-engine worlds, a paired creator can place any library thing and upload models and pictures, with no hand setup.
+- A road or footpath a world's creator lays now shows on the world's page as soon as it is placed.
+- A slow object store no longer fails a pairing approval or restarts the directory: an approval writes only its own world's files and answers within a few seconds from the world owner last read, a background copier rewrites them once the store answers, a start whose store does not answer keeps serving (it used to exit with `world-authority-unavailable`), a revoke or retire reaches the gateway at once or is refused, and a slow read never undoes a world handoff.
+- Pairing a new Soul no longer fails with `store: the directory refused the request` while the object store is slow: the directory keeps a pairing request after checking only that its world is placed, checks one world's owner (not every world's) where it needs it, and names the real refusal (`world-unplaced` is 400).
+- On the new engine, a Soul seated where the floor beside its seat has gone (a boat moored the other way round) climbs out to the nearest floor within 3 m instead of being unable to stand up. With no floor that near, it stays seated and can still act and leave.
+- Souls are no longer refused everyday actions as out of reach: a walk before an action ends on its stand point, a rider steering a boat or bicycle reaches its own controls, a Soul washing a held bowl walks to the sink first, and the television, zine and block print are worked from closer.
+- Souls reach someone sitting, lying or riding where that person actually is: pushing a friend on a swing or handing something to a Soul at the end of a long bench is no longer judged from the middle of the seat, and a Soul who sat on the ground earlier now gets up from a bench or a see-saw when asked.
+- Explore lists a moved world's places again while its old copy sleeps.
+- Back 1 min, From the start and moment links open a moved world's past again instead of saying the moment could not be loaded.
+- A moved world's page no longer gets "not found" for its visitors, places and change checks while its old copy sleeps.
+- The site's Mars static files (`/mars-assets/static-manifest.json`, `campus-manifest.json`, the Draco decoders and the published `/browser`, `/engine`, `/history`, `/2020`, `/models` files) answer again with no old world process running, served by the world launcher from its release's Mars web files.
+- A frame stand or rack bay a creator places in a running world can be built with: Souls take frames off it and seat them in it, as in one the world started with.
+- A link to a moment now opens on that moment: the page shows its loading light until the recording is drawn, instead of showing the world live for a few seconds and then jumping back.
+- Worlds moved to the new engine show their uploaded models and pictures again (Verdelis dome parts, RNA Studio pictures, Mars College and Little Martians models).
+- Signing in works on worlds that run on the new engine: a signed-in person is shown signed in instead of "Sign in".
+- A world that moved to the new engine opens without waiting for its old copy to wake: its page, sign-in and every read are answered at once.
+- On a new-engine world, things a creator places that have their own shape (a zoetrope, a combination latch, a semaphore station) are drawn as that shape and show their state, not as a plain box.
+- A world's view no longer goes "unavailable" when many people open it at once, and a viewer whose connection stalls is let go and starts again from the newest picture.
+- A creator can no longer place a new thing, such as a bench, on top of a standing Soul; it is refused, and placed things now block walkers as their size says.
+- Following a Soul on a world the new engine runs shows its card without a failed request for an old record.
+- Agents driving a Soul get far fewer refusals: gestures and hand acts by name (`act wave`, `act pick_up <thing>`), a ranked list of places, an errand of several steps, other Souls found by their names, and a walk to a pond ending on its bank, with how far from its target it stood.
+- On worlds the new engine runs, a Soul that wears a body (a Little Martian, a creature) is drawn in it, not as a default person.
+- A world restarted while a Soul was walking through a doorway no longer refuses every move afterwards.
+- A world moved to the new engine answers its full page settings at its config address, without waking its old copy.
+- Signing in on a world that runs on the new engine works again, and someone signed in with no Souls there yet sees no errors and can make a new Soul.
+- Two Souls can sit on the same bench at the same moment, each in its own seat; two racing for one seat get a clear "place taken" for the loser.
+- A Soul whose client connects while its world sleeps now wakes the world, instead of waiting forever to sync.
+- A moved world drawn from the new engine's stream alone now shows the buildings it defines itself with their roofs, and its rowing punt on the pond, as its old page does.
+- The world page's top bar has one time control, the Live or Recorded pill with the time you are watching; Back 1 min, Pause and Play, speed, the scrub bar, From the start, Link to this moment and Return to live all live in the panel it opens, and the separate time-of-day preview is gone.
+- A handshake, hug, high-five or holding hands starts when one Soul has walked up to the other, instead of being refused as too far apart.
+- Rewinding a moved world no longer asks for history files that do not exist yet, so its past opens without errors.
+- In verdelis-eden, Souls can walk to the bubbles, succulents and lamps in the dome garden.
+- A Soul's walk that is still going when the world's gateway restarts now gets its final answer, once, instead of waiting forever.
+
+### Performance
+
+- A world page opens much sooner when Souls have left the world recently: catching up on the world's stream no longer takes about a tenth of a second for each Soul that left.
+
 ## 0.133.2 (2026-11-24)
 
 ### Features

@@ -1361,6 +1361,53 @@ impl Bodies {
         u64::try_from(gap / 1000).ok()
     }
 
+    /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
+    /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
+    /// (the ground, a room, a building's main room) keeps its facing, as does one ending within
+    /// [`sim::controller::FACE_NEAR`] of the origin ([`sim::controller::facing_toward`], the one rule a form's walk
+    /// keeps too). The turn is its legs' facing input, set by a driver of them, as a place's facing is
+    /// ([`Self::take_places`]).
+    fn face(&mut self, body: Id, target: Id) {
+        use sim::ground::scene::{GROUND, PLACE, ROOM};
+        let Some((frame, at)) = self.pose(body) else {
+            return;
+        };
+        let tree = &self.town.tree;
+        let place = tree.handle(target).is_some_and(|h| {
+            h == tree.root()
+                || tree.node(h).is_some_and(|n| {
+                    let kind = n.kind().as_str().split('@').next().unwrap_or_default();
+                    [GROUND, PLACE, ROOM].contains(&kind)
+                })
+        });
+        if target == body || place || main_room(tree, target).is_some() {
+            return;
+        }
+        let to = match self.pose(target) {
+            Some((f, p)) if f == frame => Some(p),
+            // seated or lying: the thing it is in
+            Some(_) => self
+                .slots
+                .held_by(target)
+                .and_then(|t| select::origin_in(tree, t, frame).ok()),
+            None => select::origin_in(tree, target, frame).ok(),
+        };
+        let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) else {
+            return;
+        };
+        let c = &mut self.runner.controller;
+        let turn = SkillShape {
+            name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        if let Ok(d) = c.claim(body, &turn) {
+            let _ = c.set(body, d, Part::Facing(facing));
+            let _ = c.release(body, d);
+        }
+    }
+
     /// The candidate intent `id` took when it started, its rank in its ranked list and its target, read once.
     pub fn took(&mut self, id: Id) -> Option<(usize, Option<Id>)> {
         self.took.remove(&id)
@@ -1675,14 +1722,13 @@ impl Bodies {
                     None => Err("claim-taken".to_owned()),
                 };
                 self.live.remove(&body);
-                // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end
-                if let Some(mm) = self
-                    .walked_to
-                    .remove(&id)
-                    .filter(|_| how.is_ok())
-                    .and_then(|t| self.gap_of(t, body))
-                {
-                    self.away_of.insert(id, mm);
+                // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
+                // and ends facing it (0.135)
+                if let Some(t) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
+                    if let Some(mm) = self.gap_of(t, body) {
+                        self.away_of.insert(id, mm);
+                    }
+                    self.face(body, t);
                 }
                 out.push((id, how));
             }

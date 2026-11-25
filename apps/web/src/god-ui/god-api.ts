@@ -7,7 +7,8 @@ import { apiPath, worldKey } from '../world-path.ts';
 import { isFlagDef } from './checklist.ts';
 import { userAuthHeaders, watchSession, session } from '../auth-session.ts';
 import { statusPoll } from './status-poll.ts';
-import { v2World } from '../v2-engine/owner-mailbox.ts';
+import { v2PageWorldName, v2World } from '../v2-engine/owner-mailbox.ts';
+import { worldTitle } from '../world-title.ts';
 import type { V2Creator } from '../v2-engine/creator-socket.ts';
 export { isFlagDef };
 
@@ -71,7 +72,7 @@ export function v2Creator(): Promise<V2Creator> | null {
 /** The panel's status on a v2 world: the owner's view for the world's creator (the session exchange says so). */
 async function v2Status(c: Promise<V2Creator>): Promise<Status> {
   const s = session(), who = s.authed ? await (await c).who() : null;
-  return { worldId: worldKey, name: document.title, hasOwner: true, you: who?.creator ? 'owner' : s.authed ? 'visitor' : 'anonymous', pending: [], entities: 0, seq: 0, base: '', agents: 1 };
+  return { worldId: worldKey, name: worldTitle(v2PageWorldName(), worldKey), hasOwner: true, you: who?.creator ? 'owner' : s.authed ? 'visitor' : 'anonymous', pending: [], entities: 0, seq: 0, base: '', agents: 1 };
 }
 
 const status = statusPoll<Status | null>(async () => {

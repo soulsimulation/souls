@@ -1,6 +1,6 @@
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
-import {WorldContextViews} from './WorldContextViews.ts';
+import {WorldContextViews,contextLocation,type Target as ContextTarget} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
@@ -92,7 +92,7 @@ import { WorldSceneHistory } from './WorldSceneHistory.ts';
 import { apiPath, worldKey } from './world-path.ts';
 import { BASE } from './base-path.ts';
 import { newWorld } from './world-kind.ts';
-import { streamBound } from './v2-engine/source/scene-offer.ts';
+import { oldViews, streamBound } from './v2-engine/source/scene-offer.ts';
 import { sceneOwner, type SceneOwnerMemory } from './scene-owner.ts';
 import { marsFork } from './mars-fork.ts';
 import type { ForkLand } from './WorldMarsForkLand.ts';
@@ -134,6 +134,7 @@ import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
 import { buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
 let oldKit:OldSceneKit|null=null,oldKitLoad:Promise<OldSceneKit>|null=null;
@@ -169,7 +170,7 @@ const HOUR_SECONDS = 3600;
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
 type Shown = { tick: number; datetime: string | null; take: Take | null; entities: Record<string, SampledEntity> };
-type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
+type Label = { obj: CSS2DObject; head: THREE.Vector3; /** The speech bubble, anchored above the head, apart from the name tag. */ bubble: CSS2DObject; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
   /** #2195: the card's eased opacity, whether it is emphasised, and its last sightline check (performance.now ms). */
   shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
 
@@ -423,8 +424,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const seatSurvey=new URLSearchParams(location.search).get('survey')==='seats'?{done:false,since:null as number|null}:null;
     const waterDetail=new WorldWaterDetail(()=>!!reducedMotionQuery?.matches,()=>quality.tier==='phone'),waterDetailOff=new URLSearchParams(location.search).get('water')==='0';  // ?water=0: before/after comparisons
     waterDetail.boats=AFLOAT;(window as unknown as {__soulsWater?:unknown}).__soulsWater=waterDetail.stats;    const idleLife=new WorldIdleLife();const bodyPoses=new WorldBodyPoses();const idleSouls:IdleSoul[]=[];const idleSphere=new THREE.Sphere();let attentionTargets=new Map<string,readonly string[]>();
-    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld);
-    const edgeItems=new WorldEdgeItems(apiPath('/v1/edge/items'));scene.add(edgeItems.group);edgeItems.start(abort.signal);  // things lying around (together/1)
+    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld,place=>initialGate?.snapshot().stage==='ready'?placePreviews.captureLocation(place,sceneKey??''):Promise.resolve(null));  // a moved world's place with no kept picture is drawn here (tools/world-launcher/place-shots.mjs)
+    const edgeItems=new WorldEdgeItems(apiPath('/v1/edge/items'));scene.add(edgeItems.group);if(oldViews())edgeItems.start(abort.signal);  // things lying around (together/1); none on a v2 world without old views
     const early=newWorld?takeEarlyLayer():null;if(early)abort.signal.addEventListener('abort',()=>early.abort.abort());const entityLayer=early?.layer??new WorldEntityLayer(apiPath);entityLayerRef.current=entityLayer;{const q=new URLSearchParams(location.search);entityLayer.scatterPooling=q.get('scatterPools')!=='0';entityLayer.motionInstancing=q.get('motionPools')!=='0';entityLayer.scatterPools.cellSize=Number(q.get('scatterCell'))||(quality.tier==='phone'?192:Infinity);}  // P7b: a phone's layer may have started before this page's code was in (early-layer.ts)
     scene.add(entityLayer.group);entityLayer.cover.bindScene(scene);let entityWorldFramed=false,rideNames:string[]|null=null,rideNamesAt=0,rideCarriers:CarrierPose[]=[],rideCars:string[]=[],rideCarWheels=new Map<string,[number,number]>(),rideWheels=new Map<string,string>(),carrierIds:string[]=[],carrierRecords:object|null=null;
     // E2 #3: shy animals in a god world run from where the Souls' figures are now; ANI: every animal (god worlds and old Eden) gives way to them
@@ -614,6 +615,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const placePreviews=new WorldPlacePreviews(renderer,()=>[geometry.group,...(expansion?[expansion.group]:[]),...(entityLayer.active?[entityLayer.group]:[])],()=>scene,()=>{  // Gene #13: every place shot in the same late-morning, clear, dry light, whatever the live clock and weather
       const at=shotClockAt(light.clock??'2026-06-21T12:00:00',PLACE_SHOT_MINUTES)!,undoLight=light.photo(at),undoAtmosphere=atmosphere.photo(at,light.daylight),night=nightLightStrength();setNightLightStrength(1);houseWindows?.setNight(0);
       return ()=>{undoLight();undoAtmosphere();setNightLightStrength(0,night);houseWindows?.setNight(night);};});  // E2 #7: a god world's landmarks are drawn by its entity layer
+    placePreviews.owner=id=>id.startsWith('context:')&&entityLayer.active?entityLayer.contextObjects(id.slice(8)):[];
+    // ?placeShots=1: tools/world-launcher/place-shots.mjs has this page draw each place of a moved world once, to keep
+    if(new URLSearchParams(location.search).get('placeShots')==='1'){placePreviews.forShots();(window as unknown as {__placeShots?:unknown}).__placeShots={ready:()=>initialGate?.snapshot().stage==='ready',draw:(t:ContextTarget)=>placePreviews.captureLocation(contextLocation(t,'shots'),'shots')};}
     const loader = new GLTFLoader(manager).setDRACOLoader(draco).setMeshoptDecoder(MeshoptDecoder);
     const releaseAssetLoader = setAssetLoader(loader);
     const releaseTexturePreparation = newWorld ? setTextureRenderer(renderer,scene,camera) : () => {};
@@ -623,7 +627,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const bodyModels=new WorldBodyModels(loader,problem);bodyModels.held=peopleLater;
     let capturedPlatforms:readonly PlatformFloor[]|null=null;
     let currentPlatforms:{worldId:string;platforms:PlatformFloor[]}|null=null;
-    void fetch(apiPath('/v1/edge/platforms'),{signal:abort.signal}).then(r=>r.ok?r.json():null).then(meta=>{
+    if(oldViews())void fetch(apiPath('/v1/edge/platforms'),{signal:abort.signal}).then(r=>r.ok?r.json():null).then(meta=>{
       if(!abort.signal.aborted&&meta?.contract==='eden-edge/1'&&meta.active===true&&meta.provenance?.contract==='render-platforms/1'&&typeof meta.worldId==='string')currentPlatforms={worldId:meta.worldId,platforms:parsePlatformFloors(meta.platforms)};
     }).catch(()=>{});
     const kin = new KinScenery(scene, { baseUrl: '/world-assets/littlemartians/characters/', loader, prepareModel: fitTextures });
@@ -696,7 +700,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       for(const [index,building] of info.buildings.entries())gate.require('Building '+(index+1)+': '+building.file,async()=>{const assetRoot=await buildingRoot();if(assetRoot)owner.setAssetRoot(assetRoot);const failed=await owner.addBuildings([building],loader,assetBytes);if(failed.length)throw Error('Required building could not be loaded.');});}
     };
     let currentScene:Promise<ReturnType<typeof parseSceneInfo>>|null=null;
-    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(response.status===404&&streamBound())return parseSceneInfo({scene:null,ground:'grass'});if(!response.ok)throw Error('Layout unavailable');  // W2: a world made on the new engine has no old layout: its ground and things come from its stream (stream-scene.ts)
+    const currentLayout=()=>currentScene??=(async()=>{if(!oldViews())return parseSceneInfo({scene:null,ground:'grass'});const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(response.status===404&&streamBound())return parseSceneInfo({scene:null,ground:'grass'});if(!response.ok)throw Error('Layout unavailable');  // W2: a world made on the new engine has no old layout: its ground and things come from its stream (stream-scene.ts)
     return parseSceneInfo(await response.json());})();
     const failLayout=(reason:string)=>{initialGate?.cancel();sceneSettled=false;sceneRetryAt=Infinity;renderer.domElement.dataset.sceneBinding='unavailable';sceneryStatus(reason);setInitialProgress({generation:initialGeneration,stage:'failed',required:1,completed:0,failed:['World layout'],bytesLoaded:0,bytesTotal:null});retryInitial.current=()=>{sceneRequest++;sceneKey=null;currentScene=null;sceneRetryAt=0;setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});};};
     const ensureScene=(chunk:Chunk,history:boolean,now:number)=>{
@@ -716,7 +720,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       clearSocialPaths();
       clearConnectedDressing();
       sceneHistory.cancel();planting?.dispose();planting=null;plantingFailed=false;clearNewcomerMarkers();restMarkers?.dispose();restMarkers=null;publication=null;expansionSceneInfo=null;people?.dispose();people=null;applied=null;floaters.sync(new Map());kin.place([]);standIns.clear();
-      for(const label of labels.values()){labelScene.remove(label.obj);label.obj.element.remove();}labels.clear();
+      for(const label of labels.values()){labelScene.remove(label.obj,label.bubble);label.obj.element.remove();label.bubble.element.remove();}labels.clear();
       clearExpansion();geometry.dispose();geometry=new WorldGeometry(null);scene.add(geometry.group);base=null;nativeBoat=undefined;light.setCommonsReadability(false);
       capturedPlatforms=null;
       platformDraw.set([],0,false);
@@ -767,14 +771,18 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       obj.center.set(0.5, 0);  // C2: the plate hangs below its anchor under the body
       labelScene.add(obj);
       el.style.opacity = '0';
-      l = { obj, head: new THREE.Vector3(), name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
+      // A said line pops up above the head, never in the name tag (which hangs under the body, C2).
+      const bubbleEl = document.createElement('div'); bubbleEl.className = 'world-speech-bubble'; bubbleEl.dataset.soulId = soul.id;
+      const bubble = new CSS2DObject(bubbleEl); bubble.center.set(0.5, 1); labelScene.add(bubble);
+      l = { obj, head: new THREE.Vector3(), bubble, name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
       labels.set(soul.id, l);
       return l;
     };
 
     const initialMotionHistory=new WorldMotionHistory(fetchChunks,abort.signal);
     const motionOwner=()=>JSON.stringify([context.current.sim.conn.welcome?.worldId,context.current.sim.conn.welcome?.epoch]);
-    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [], liveTick: number | null = null;
+    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [];
+    const liveClock = new LiveClock();
     const spot = new THREE.Vector3();
     const gaitContinuity=new RecordedGaitContinuity();
     let applied: Chunk | null = null, records: Record<string, Entity> = {}, frame = 0, last = performance.now(), labelAt = 0, brokenTake: string | null = null, frameGap = false;
@@ -784,7 +792,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (arr !== liveArr || key !== liveKey) { liveArr = arr; liveKey = key; live = validChunks(arr).filter((c) => c.fromTick <= (t?.serverTick ?? Infinity)); } // a restarted server starts its ticks again
       return live;
     };
-    const goLive = () => { past.current = null; liveTick = null; setMode('live'); setNote(null); };
+    const goLive = () => { past.current = null; liveClock.reset(); setMode('live'); setNote(null); };
+    // read-only, for checks and proof: the live tick drawn, its target and the newest chunk's end (live-clock.ts)
+    const liveProbe: { tick: number | null; target: number | null; newest: number | null } = { tick: null, target: null, newest: null };
+    (window as unknown as { __soulsLive?: typeof liveProbe }).__soulsLive = liveProbe;
 
     const pacer = new FramePacer();
     // #2260: where the public replica draws each Soul, place and thing now, so a client rendering on its own machine places a
@@ -812,7 +823,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // lane W1: while a new world's first build runs in slices nothing is drawn: look at the takes 4 times a second, no more
       if(entityLayer.building){const t=performance.now();if(t-buildingFrameAt<250)return;buildingFrameAt=t;}
       if(eyes&&!eyes.wake(performance.now()))return;  // VF1b: a slow frame leaves room for socket messages
-      const now = performance.now(), step = Math.min(0.1, (now - last) / 1000);
+      const now = performance.now(), real = (now - last) / 1000, step = Math.min(0.1, real);
       last = now;
       const rigBudget={remaining:1};  // one shared cap for this animate, including any repeated people updates
       const s = context.current.sim, dt = dtOf(s), liveList = liveChunks();
@@ -847,10 +858,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       } else {
         chunks = liveList;
         const target = (serverNow(s) ?? chunks.at(-1)?.toTick ?? 0) - liveDelayOf(s);
-        if (liveTick === null || Math.abs(target - liveTick) > 80) liveTick = target;
-        else liveTick += step * tpsOf(s) + (target - liveTick) * Math.min(1, step * 1.5); // run at the clock rate, drift gently toward the server
-        if (chunks.length) liveTick = Math.max(chunks[0].fromTick, Math.min(chunks.at(-1)!.toTick, liveTick));
-        tick = liveTick;
+        // live-clock.ts: by real time, not by frames (a slow frame never leaves it behind); a late chunk or a stalled
+        // frame is caught up at most MAX_RATE fast, never skipped; only far off (a hidden tab) is it one cut
+        tick = liveClock.step(real, target, tpsOf(s), chunks.length ? chunks[0].fromTick : null, chunks.at(-1)?.toTick ?? null);
+        liveProbe.tick = tick; liveProbe.target = target; liveProbe.newest = chunks.at(-1)?.toTick ?? null;
       }
 
       if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,liveDelayOf(s),motionOwner(),motionOwner);
@@ -1020,6 +1031,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if((refresh||!soulAvatars.images.has(soul.id))&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
+        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : 1.9), pos[2]); l.bubble.visible = true;   // its tail just over the head
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
         l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
         l.obj.visible = true;
@@ -1057,11 +1069,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         cardSpeakers=new Set(latest.keys());
         for(const [id,l] of labels){
           // DLG2: in dock mode the dialogue dock carries the words and who can hear; the tag only gets a small speaking dot.
-          paintSpeakingDot(l.obj.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head));
+          const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');
           const chip=l.obj.element.querySelector('[data-channel-chip]') as HTMLElement|null;if(!chip)continue;const sp=latest.get(id);
           if(!sp||context.current.publishSpeechAnchors){chip.style.display='none';continue;}const c=channelChip(sp,nameOf);chip.textContent=c.text;chip.style.color=c.colour;chip.style.display='';}}
       speechLayer.update(speeches,Date.now(),soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,e=id?at.entities[id]:null;if(!id||!e)return null;const body=recordedBody(records[id]?.body,e.state),b=body?.family==='floater'?floaterBody(body):null;return speechHead.set(e.p[0],e.p[1]+(b?b.hoverHeight+b.radius+.05:1.95),e.p[2]).clone();});
-      for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj); l.obj.element.remove(); labels.delete(id); } }
+      for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
       if (!focus && thingId) {
         const q = thingId.startsWith('kin:') ? kin.view.object(thingId)?.position.toArray() : at.entities[thingId]?.p;
         if (q) focus = spot.set(q[0], q[1], q[2]);
@@ -1351,7 +1363,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       navigation?.dispose();
       controls.dispose();
       controlsApi.current = null;
-      for (const l of labels.values()) { labelScene.remove(l.obj); l.obj.element.remove(); }
+      for (const l of labels.values()) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); }
       labels.clear();
       people?.dispose();
       if(entityWorldFramed)entityView.current={eye:camera.position.toArray(),target:controls.target.toArray(),pending:!!arrivalPending,broadcast:context.current.cameraMode==='broadcast'};  // entity worlds only: the camera survives the scene re-mount
