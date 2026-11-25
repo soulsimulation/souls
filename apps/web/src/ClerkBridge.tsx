@@ -2,7 +2,7 @@
 // screen: it mounts ClerkProvider beside the world's Shell (a sibling, so the Shell never remounts when it arrives) and
 // hands the signed-in state up through onAuth once Clerk has loaded. The world's socket never waited for Clerk (useSouls
 // re-hellos when a session lands).
-import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/clerk-react';
+import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiPath } from './world-path.ts';
 import { signOutAndReturn } from './clerk-sign-out.ts';
