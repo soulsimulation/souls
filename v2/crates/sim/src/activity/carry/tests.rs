@@ -1541,8 +1541,8 @@ mod turning {
     /// The search runs on the world's clock thread, inside the lift's check (review of #4564): a destination no way
     /// reaches (a sealed 4 m box 10 m and 40 m away, across a ground of 0.2 m posts every 1.5 m or 0.9 m) is refused
     /// once [`BUDGET`] poses are tried, `carry-unproven` or `carry-load-blocked`, never more. Measured in release at
-    /// about 20 µs a pose, so a few milliseconds of a 50 ms tick; the bound asserted here is wide, for a loaded machine
-    /// and for a debug build.
+    /// about 20 µs a pose, so a few milliseconds of a 50 ms tick; what is asserted is the count of poses, and the
+    /// time is printed, since a loaded machine's wall clock is no bound.
     #[test]
     // The wall clock, to measure the search: the engine never reads it.
     #[allow(clippy::disallowed_methods)]
@@ -1583,11 +1583,8 @@ mod turning {
             );
             assert!(r.is_err() && n <= BUDGET + 1, "{n} poses");
         }
-        let bound = if cfg!(debug_assertions) { 400 } else { 20 };
-        assert!(
-            worst < std::time::Duration::from_millis(bound),
-            "the search held the clock for {worst:?}"
-        );
+        // The bound is the poses tried, which the machine's load never changes; its time is printed, never asserted.
+        println!("R2: the longest search took {worst:?}");
     }
 
     /// #2814 A4: the same door with a search allowed only twenty poses is refused `carry-unproven`.

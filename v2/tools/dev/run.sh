@@ -55,7 +55,8 @@ PKG=${V2_REPLICA_PKG:-$TARGET/wasm-load/pkg}
 for b in worldd gatewayd directoryd testworld assets-check; do
   [ -x "$BIN/$b" ] && continue
   [ -z "${V2_BIN:-}" ] || die "V2_BIN has no $b"
-  (cd "$V2" && cargo build --locked -p worldd -p gatewayd -p directoryd -p testworld -p assets --bin assets-check)
+  # Two builds: `--bin` narrows a build to that binary alone, so one command with it would build only assets-check.
+  (cd "$V2" && cargo build --locked -p worldd -p gatewayd -p directoryd -p testworld && cargo build --locked -p assets --bin assets-check)
   break
 done
 if [ ! -f "$PKG/replica.js" ]; then

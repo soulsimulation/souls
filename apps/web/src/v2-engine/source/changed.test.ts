@@ -44,3 +44,19 @@ test('both paths give the same nodes and removals', () => {
   assert.ok(ids.length > BULK);
   assert.deepEqual(big, small);
 });
+
+test('#4684: a replica that reads several nodes at once is asked once, whatever the part, never for a snapshot', () => {
+  const live = world(10_000);
+  for (const ids of [['n1', 'n3', 'x'], [...live.keys()].slice(0, BULK * 4).concat(['x'])]) {
+    const { calls, one, snapshot } = counted(live);
+    let asked = 0;
+    const many = (want: readonly string[]) => { asked++; return new Map(want.flatMap((id) => (live.has(id) ? [[id, live.get(id)!] as const] : []))); };
+    const r = readChanged(ids, (id) => id, one, snapshot, (v) => v.id, many);
+    assert.deepEqual({ ...calls, asked }, { one: 0, snapshot: 0, asked: 1 });
+    assert.deepEqual(r, readChanged(ids, (id) => id, one, snapshot, (v) => v.id), 'the same nodes and removals as without it');
+  }
+  // a replica that cannot answer it (null) is read as before
+  const { calls, one, snapshot } = counted(live);
+  readChanged([...live.keys()], (id) => id, one, snapshot, (v) => v.id, () => null);
+  assert.deepEqual(calls, { one: 0, snapshot: 1 });
+});

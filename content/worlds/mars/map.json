@@ -5,7 +5,8 @@
  "about": [
   "One row per kind and revision placed in the template: the existing Soul Actions entry (content/kinds) each placed copy names (field 27), or waiting.",
   "A copy keeps its own kind, name, model and solids; the entry gives its forms. A seat or bed of the entry is set at the copy's own slot with the same number (the def's own geometry), its stand point kept at the entry's offset from it; an entry seat the def has no slot for is not offered.",
-  "Read by the template export: node v2/tools/import-eden/export/export.ts --template worlds/templates/mars-two.json --map content/worlds/mars/map.json."
+  "Read by the template export: node v2/tools/import-eden/export/export.ts --template worlds/templates/mars-two.json --map content/worlds/mars/map.json.",
+  "A row's `kind` names the kind its copies are, not an entry they borrow: a kind that joins parts (content/kinds/construction) is read by its own name. The rack yard of worlds/templates/mars-camp.json is such (export it with this map)."
  ],
  "rows": [
   {
@@ -857,6 +858,34 @@
    "entry": "eden:pond",
    "forms": "own",
    "note": "placed as an area"
+  },
+  {
+   "def": "mars-frame-stand@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
+   "kind": "mars:frame_stand",
+   "forms": "own"
+  },
+  {
+   "def": "mars-rack-frame@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
+   "kind": "mars:rack_upright",
+   "forms": "own"
+  },
+  {
+   "def": "mars-rack-beam@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
+   "kind": "mars:rack_beam",
+   "forms": "own"
+  },
+  {
+   "def": "mars-rack-bay@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
+   "kind": "mars:rack_bay",
+   "forms": "own"
   }
  ]
 }

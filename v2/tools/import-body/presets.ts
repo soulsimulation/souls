@@ -20,7 +20,6 @@ import { MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET } from '../../../apps/serv
 import { HUMANOID2_DEF } from '../../../packages/world-compiler/src/core-kit/humanoid2.ts';
 import { sha256Hex, stableStringify } from '../../../packages/world-compiler/src/hash.ts';
 import { BODY_SOURCE_FILES } from '../../web/body-assets.ts';
-import { bakeCreature, encodeBaked } from '../../web/src/crowd/bake.ts';
 import { decodeBaked } from '../../web/src/crowd/bake.ts';
 import { decoderBytes } from './decode-draco.ts';
 import { imported, measure, measured, validate, write, type Report, type Imported } from './import-body.ts';
@@ -59,6 +58,24 @@ export function pinnedScan(preset: string, bytes: Buffer): Buffer {
   const source = JSON.parse(readFileSync(join(REPO, 'worlds/littlemartians/characters/manifest.json'), 'utf8')).models.find((m: { id: string }) => m.id === preset);
   if (!source || !FLOATER_MODELS.some((m) => m.id === preset && m.file === source.file) || source.bytes !== bytes.length || sha(bytes) !== source.sha256) throw Error('body.released-source-pin');
   return bytes;
+}
+
+/** A released creature's models, byte for byte: its bake (`<id>.json`) and its simple mesh (`<id>.simple.bin`). The
+ *  procedural source is not baked again here. The rig and three.js call Math.sin, Math.cos and Math.exp, whose last bit
+ *  differs between machines (macOS arm64 bakes dog and duck to other bytes than the Linux x64 release build did), and
+ *  JSON keeps no -0, so a simple mesh made from a decoded bake differs too. A changed byte is a changed preset hash, so
+ *  both files are the released ones, pinned in tools/assets/manifest.json. A new creature, or a changed rig, is baked
+ *  once (encodeBaked(bakeCreature(id))), pinned, and released as a new preset; a pinned one never changes. */
+export function releasedCreature(species: string, media = REPO): { bake: Buffer; simple: Uint8Array } {
+  const files = JSON.parse(readFileSync(join(REPO, 'tools/assets/manifest.json'), 'utf8')).files as { path: string; sha256: string; bytes: number }[];
+  const pinned = (path: string) => {
+    const pin = files.find((f) => f.path === path);
+    let bytes: Buffer; try { bytes = readFileSync(join(media, path)); } catch { throw Error('body.released-source-pin'); }
+    if (!pin || bytes.length !== pin.bytes || sha(bytes) !== pin.sha256) throw Error('body.released-source-pin');
+    return bytes;
+  };
+  const at = `v2/tools/import-body/released/${species}`;
+  return { bake: pinned(at + '.json'), simple: new Uint8Array(pinned(at + '.simple.bin')) };
 }
 
 export async function importPresets(out: string, media = REPO) {
@@ -101,15 +118,13 @@ export async function importPresets(out: string, media = REPO) {
     }
     for (const species of CREATURE_IDS) {
       stage = species;
-      const model = bakeCreature(species), bytes = Buffer.from(encodeBaked(model));
+      const { bake: bytes, simple } = releasedCreature(species, media), model = decodeBaked(bytes);
       const geometry = model.lods[0];
       const mesh = { position: new Float32Array(geometry.getAttribute('position').array), normal: new Float32Array(geometry.getAttribute('normal').array), color: new Float32Array(geometry.getAttribute('color').array), uv: new Float32Array(geometry.getAttribute('uv').array), material: new Uint16Array(geometry.getAttribute('position').count), skinIndex: new Uint16Array(geometry.getAttribute('skinIndex').array), skinWeight: new Float32Array(geometry.getAttribute('skinWeight').array), index: new Uint32Array(geometry.index!.array) };
       for (const group of geometry.groups) for (let i = group.start; i < group.start + group.count; i++) mesh.material[mesh.index[i]] = group.materialIndex ?? 0;
       const report: Report = { admitted: { assetId: 'body_' + sha(bytes), name: species, type: 'creature', bytes: bytes.length, triangles: model.triangles[0] }, report: { profile: 'rigid', actions: { supported: rigidActions.map((action) => ({ action })) } } };
-      const body = imported(bytes, report, { radius: model.radius!, height: model.height, hover: 0, clips: model.clips.map((c) => c.name), mesh });
+      const body = imported(bytes, report, { radius: model.radius!, height: model.height, hover: 0, clips: model.clips.map((c) => c.name), mesh, simple });
       body.full.format = 'baked'; install(species, body);
-      // Keep the encoded artifact's validation on the producer boundary too.
-      decodeBaked(bytes);
     }
     writeFileSync(join(out, 'bodies.json'), JSON.stringify({ format: 'souls/bodies/1', bodies, legacyDefaults }) + '\n');
     stage = 'default-assets';

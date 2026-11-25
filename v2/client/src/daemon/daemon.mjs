@@ -75,7 +75,10 @@
 //     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
 //                                         holding an open owner's message is refused (`now.owner-words`)
 //   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
-//   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`:
+//   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`
+//   (0.135: an answer to an offer of another activity goes by that activity's kind and word, `together` and `touch`;
+//   each word of an activity this Soul is in, which the world addresses to its members, is `joined`, `started`,
+//   `left`, `ended`, `expired` or a carry's `set-down` with its `why`, every Soul by name: `../together/members.mjs`):
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
 //     {"op":"converse","do":"accept|decline|leave","conversation":"<id>"} | {"do":"say",...,"words":"..","private":bool}
 //     {"op":"converse","do":"list"}       the conversations in the copy
@@ -94,7 +97,8 @@
 //       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
 //   and #3686's, today's inspect and object, from the copy as it is and the kind entries in `<home>/kinds/`
 //   (`../check/offers.mjs`), asking the world nothing; an unknown id or offer is refused with `did_you_mean`:
-//     {"op":"inspect","this":"<id>"}      what the thing is, its state, and its own offers with their parameters
+//     {"op":"inspect","this":"<id>"}      what the thing is, its state, and its own offers with their parameters; an
+//                                         activity's members and leave, a bay's slots (0.135: the copy brought current)
 //     {"op":"object","this":"<id>"}       the same; with "action":"<offer>","args":["<name>=<value>",..] that offer
 //                                         goes through `act` (`acts: ["<offer>:<id>", ...args]`)
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
@@ -167,7 +171,8 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { giveIntents } from '../give/give.mjs';
 import { KINDS as TOUCHES, activitiesIn, activityNamed } from '../together/together.mjs';
-import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
@@ -792,17 +797,50 @@ function onEntry(e) {
     const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
     if (s) { stuckSeen.push({ ...s, seenAt: Date.now() }); if (stuckSeen.length > 8) stuckSeen.shift(); }
   }
-  // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
+  // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`; so does (0.135) each word
+  // of an activity this Soul is in, which the world addresses to its members: a join, the start, a leave, the end.
   const offers = events.filter((ev) => OFFER_EVENTS[ev.name]);
-  if (offers.length) {
-    const body = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.id ?? ME;
-    for (const ev of offers) { const n = offerNote(ev, body); if (n) note({ ...n, sequence: e.sequence }); }
+  if ((offers.length || events.some((ev) => MEMBER_EVENTS[ev.name])) && !notedEntry(e.sequence)) {
+    const rows = rowsOf(copy), mine = mineIn(rows), body = mine[1] ?? ME;
+    keepKinds(rows);
+    for (const ev of offers) {
+      const n = offerNote(ev, body);
+      // Who declined, or did not answer (the event's field 3), for the offerer.
+      if (n) note({ ...n, ...((n.what === 'declined' || n.what === 'lapsed') && ev.fields?.[3] !== undefined ? { who: ev.fields[3] } : {}), sequence: e.sequence });
+    }
+    for (const n of memberNotes(e, mine)) note({ ...n, sequence: e.sequence });
   }
   if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
 /** Heard utterances for an answer: the speaker's name from the copy beside its id. */
 const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? { name: rows.get(e.from).name } : {}) }));
+/** This Soul's ids in the copy: its Soul's, and its body's once born (a joined body is minted, not the Soul's id). */
+const mineIn = (rows) => [ME, ...[...rows.values()].filter((r) => r.soul === ME && r.id !== ME).map((r) => r.id)];
+/** 0.135: the kinds of the activities seen in the copy, by id, so an event of one gone since is still named. */
+const activityKinds = new Map(), ACTIVITY_KINDS_KEPT = 500;
+function keepKinds(rows) {
+  for (const r of rows.values()) {
+    if (!r.members || activityKinds.has(r.id)) continue;
+    activityKinds.set(r.id, r.kind);
+    if (activityKinds.size > ACTIVITY_KINDS_KEPT) activityKinds.delete(activityKinds.keys().next().value);
+  }
+}
+/** An entry's answers are noted once, however it came (addressed, and as a body's entry near this Soul). */
+const notedEntries = new Set();
+function notedEntry(sequence) {
+  if (notedEntries.has(sequence)) return true;
+  notedEntries.add(sequence);
+  if (notedEntries.size > 1000) notedEntries.delete(notedEntries.values().next().value);
+  return false;
+}
+/** An event as an answer shows it: what was heard with its speaker's name; an offer, an answer or an activity's word
+ *  with its activity's word and each Soul's name (`../together/members.mjs`). */
+function shownOf(rows, e) {
+  if (e.kind === 'heard') return named(rows, [e])[0];
+  keepKinds(rows);
+  return shownEvent(rows, e, { mine: mineIn(rows), kinds: activityKinds });
+}
 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
@@ -1413,9 +1451,9 @@ async function answer(req, conn = null) {
       (rows, changes) => {
         // #3782: the brief `look` gives, after the messages and arrivals (today's `pending` carries it, N-C18), so the
         // turn needs no `look` first. What was heard is in `events` above, so not again in the brief.
-        const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+        const b = brief(rows, { me: ME, changes, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
         delete b.changed; // the answer's own closes it
-        return { events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)), brief: b };
+        return { events: got.map((e) => shownOf(rows, e)), brief: b };
       }, { now: true });
     }
     case 'ack': {
@@ -1464,7 +1502,7 @@ async function answer(req, conn = null) {
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
       const heard = named(rows, heardSince.splice(0));
-      const b = brief(rows, { me: ME, changes, heard, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       return b;
     });
@@ -1493,7 +1531,7 @@ async function answer(req, conn = null) {
       heardSince.length = 0; // shown here, so not again in the next brief
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
-        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
+        (rows) => ({ events: got.map((e) => shownOf(rows, e)) }));
     }
     case 'listen': {
       // D2: the owner's messages as they arrive, read from the numbered events, so nothing is taken from `wait`. No
@@ -1835,7 +1873,7 @@ async function answer(req, conn = null) {
       const after = Math.max(Number(req.since ?? 0) || 0, 0), got = logged.filter((e) => e.n > after);
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, since: after, cursor: eventN, events: got, ...said, ...(logged.length && logged[0].n > after + 1 ? { older: `events before ${logged[0].n} are no longer kept` } : {}) },
-        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? { ...named(rows, [e])[0], n: e.n } : e)) }), { now: true });
+        (rows) => ({ events: got.map((e) => ({ ...shownOf(rows, e), n: e.n })) }), { now: true });
     }
     default: return { ok: false, code: 'unknown-op' };
   }
@@ -1890,17 +1928,25 @@ const readable = (fields) => Object.fromEntries(Object.entries(fields).map(([k, 
 }));
 
 /** `inspect <id>`: what the thing is, where, its state as the copy holds it, and its own offers with their parameters. */
-function inspect(req) {
-  const seen = thingOf(req.this);
+async function inspect(req) {
+  let seen = thingOf(req.this);
   if (!seen.ok) return closing(seen, null, { now: true });
+  // 0.135: an activity's members, roles and leave; a bay's slots, what fills each and what is left to build. Those
+  // change while others act far from this Soul, so the copy is brought current first.
+  const live = seen.row.members || Object.values(seen.entry?.slots ?? {}).some((s) => s?.admits === 'thing');
+  const age = live ? await ageAfter() : null;
+  if (live) seen = thingOf(req.this);
+  if (!seen.ok) return closing(seen, null, { age });
   const { row, entry, offers, fields } = seen;
+  const rows = rowsOf(copy), poses = posesOf(copy);
+  const activity = activityCard(rows, row, mineIn(rows)), slots = slotsCard(rows, row, entry, (id) => poses.get(id)?.slot ?? null);
   return closing({
-    ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}),
+    ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}), ...activity, ...slots,
     ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
     ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
     ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}), offers,
-    ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
-  }, null, { now: true });
+    ...(entry || activity ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
+  }, null, live ? { age } : { now: true });
 }
 
 /**
@@ -2040,12 +2086,19 @@ async function give(req) {
     req = { ...req, to: Array.isArray(req.to) ? req.to.map(named) : named(req.to) };
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
-  if ((req.do === 'accept' || req.do === 'decline') && req.offer !== undefined && !ID.test(String(req.offer))) {
+  if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
     const w = String(req.offer).toLowerCase().replace(/_/g, '-');
-    const e = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w))
-      // offered while this daemon was not running: the newest activity of that kind in the copy
-      ?? (() => { const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null); const r = a && rows.filter((x) => x.kind === `${a.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
-    if (!e) return { ok: false, code: 'together-no-offer', detail: `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
+    // A leave by word is of the newest activity of that kind in the copy (this Soul may have made it); an answer is of
+    // the newest offer of it to this Soul, else, offered while this daemon was not running, the newest in the copy.
+    const e = (req.do === 'leave' ? null : logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w)))
+      ?? (() => {
+        const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null);
+        // A leave is of the one this Soul is in, when the copy shows it a member of one (0.135).
+        const of = a ? rows.filter((x) => x.kind === `${a.kind}_activity`) : [], mine = mineIn(rowsOf(copy));
+        const r = (req.do === 'leave' && of.findLast((x) => x.members?.some((m) => mine.includes(m.body)))) || of.at(-1);
+        return r ? { offer: r.id } : null;
+      })();
+    if (!e) return { ok: false, code: 'together-no-offer', detail: req.do === 'leave' ? `no ${w.slice(0, 40)} here: \`find activity\` lists the activities in the copy` : `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
     req = { ...req, offer: e.offer };
   }
   const intents = giveIntents(req, { place, kinds });
@@ -2065,27 +2118,27 @@ async function carry(req) {
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
   const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
   const me = all.find((r) => r.soul === ME)?.id ?? null;
-  // Who is in each crew, as this Soul knows it: the bodies it offered the crew to, or the one that offered it.
-  state.crews ??= {};
-  const crews = crewsIn(rows);
-  for (const c of crews) {
-    if (state.crews[c.id]) continue;
-    const mine = state.crewOffer && !state.crewOffer.before.includes(c.id) ? state.crewOffer : null;
-    if (mine) { state.crews[c.id] = [me, ...mine.to]; state.crewOffer = null; }
+  // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
+  if (req.do === 'offer' && Array.isArray(req.to)) {
+    req = { ...req, to: req.to.map((w) => (ID.test(String(w)) ? w : all.find((r) => r.soul && r.id !== me && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w)) };
   }
-  if (req.do === 'accept') {
-    const from = logged.findLast((e) => e.kind === 'carry' && e.offer === req.crew)?.from;
-    if (from) state.crews[req.crew] = [from, me];
+  // Who is in each crew: its members as the world's node holds them in the copy (0.135), front and back first.
+  const crews = crewsIn(rows), mine = mineIn(rows);
+  const ends = (crew) => ['front', 'back'].map((end) => rows.get(crew)?.members?.find((m) => m.role.endsWith(`:${end}`))?.body);
+  if (req.do === 'list') {
+    return closing({ ok: true, crews: crews.map((c) => ({ ...c, with: (rows.get(c.id)?.members ?? []).map((m) => ({ name: nameIn(rows, m.body, mine), role: m.role.replace(/^[^:]*:/, ''), body: m.body })), started: Boolean(rows.get(c.id)?.started) })) }, null, { age });
   }
-  for (const id of Object.keys(state.crews)) if (!rows.has(id)) delete state.crews[id];
-  if (req.do === 'list') return closing({ ok: true, crews: crews.map((c) => ({ ...c, ...(state.crews[c.id] ? { with: state.crews[c.id] } : {}) })) }, null, { age });
+  // A thing named by its name ("rack frame 1"), as look and find show it, is that thing's id.
+  const named = byName(req, rows);
+  if (named.code) return closing({ ok: false, code: named.code, detail: named.detail }, null, { age });
+  req = named;
   const kindOf = (id) => rows.get(id)?.entry ?? rows.get(id)?.kind;
   const at = placer(rows, (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
   // Where a crew's load is now: between its front and its back (it is carried at their middle), else where the copy
   // places its load or its node (a lifted crew's node is placed by the carry's samples only once it moves).
   const crewMiddle = (crew) => {
-    const ends = (state.crews[crew] ?? []).slice(0, 2).map(at);
-    if (ends.length === 2 && ends.every(Boolean)) return [(ends[0].pos[0] + ends[1].pos[0]) / 2, (ends[0].pos[2] + ends[1].pos[2]) / 2];
+    const both = ends(crew).map((b) => (b ? at(b) : null));
+    if (both.every(Boolean)) return [(both[0].pos[0] + both[1].pos[0]) / 2, (both[0].pos[2] + both[1].pos[2]) / 2];
     const load = all.find((r) => r.parent === crew), p = load ? at(load.id) : rows.has(crew) ? at(crew) : null;
     return p ? [p.pos[0], p.pos[2]] : null;
   };
@@ -2095,7 +2148,6 @@ async function carry(req) {
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.
   const before = req.do === 'offer' ? crews.map((c) => c.id) : null;
-  if (before) state.crewOffer = { before, to: [req.to].flat() };
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   const walked = intents.find((i) => /:walk$/.test(i.verb));
   return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}) }, null, { now: true });

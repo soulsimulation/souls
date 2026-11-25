@@ -6414,6 +6414,7 @@ fn edit_checker(
         .name("edit-check".into())
         .spawn(move || {
             let mut town = buildsafe::TownCopy::new(kinds.clone());
+            let structure = sim::structure::Structure::from_entries(&entries);
             loop {
                 // The tick whose bodies the job is checked against (S10).
                 let (need, next) = match rx.recv_timeout(EDIT_IDLE) {
@@ -6701,7 +6702,7 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries);
+                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
                             edit::check(e, &copy, world)
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }

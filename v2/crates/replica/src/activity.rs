@@ -428,6 +428,24 @@ pub fn addressed(name: &str, fields: &BTreeMap<u64, Value>) -> Option<BTreeSet<I
     }
 }
 
+/// The events of an activity its members are told wherever they stand (0.135): a join (an offer's answer of yes), its
+/// start, a leave, its end (`souls:activity-ended`, at a member's body), its expiry and a carry's set-down, each with
+/// the activity in field 1 or as the node it is written at. The view tier addresses each to the bodies that were
+/// members as it was written and those it made members (`worldd`'s hub keeps the membership links).
+pub const TO_MEMBERS: [&str; 6] = [
+    "souls:activity-joined",
+    "souls:activity-started",
+    "souls:activity-left",
+    "souls:activity-ended",
+    "souls:activity-expired",
+    "souls:carry-set-down",
+];
+
+/// Whether an event named `name` is one an activity's members are told ([`TO_MEMBERS`]).
+pub fn to_members(name: &str) -> bool {
+    TO_MEMBERS.contains(&name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

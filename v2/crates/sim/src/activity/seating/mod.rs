@@ -23,6 +23,12 @@
 //!   would be committed, and `site.occupied` when a body stands where the part would be (N19, #3341). Every commit
 //!   here goes through [`Seating::write`], the structure rule's guarded write, which asks for G3's rebuild of the
 //!   ground when one is kept ([`Seating::rebuild`]): a seated part is fixed geometry to walkers.
+//! - **A way out is G2's, not this check's.** [`Seating::check`] finds only a body standing where the part would be.
+//!   Whether the seating would leave a Soul with no way out (a bay's last beam closing round it) is judged where the
+//!   walkers' ground is: a running world commits every take and seating through the walkers' maps, and G2's rule
+//!   (`crate::edit::safety::check_on`, the one creator edits use) refuses it there by name, `edit.would-cut-off`
+//!   naming the Soul, before it commits (`worldd::answers`, the part check; worldd's
+//!   `a2_souls_take_put_and_unseat_rack_parts_by_intents`).
 //!
 //! Not here: ladders, raising from lying, three carriers, decks and stairs, the gathering walk, a crew member who leaves
 //! between steps (B5's leave; a new member joins the next activity).
@@ -261,7 +267,7 @@ impl Seating {
 
     /// The refusals before anyone moves, for `part` to go to `target` with `activity`'s crew, whose standing reach is
     /// `reach` µm: `crew.size`, `crew.over-most` (B19's bound, section 11), `slot.occupied`, `reach.too-high`, `site.occupied` (a body stands where the part would
-    /// be, N19), then B18's on the seating as it would be committed.
+    /// be, N19), then B18's on the seating as it would be committed. Not a way out: G2 judges that at the commit.
     #[allow(clippy::too_many_arguments)]
     pub fn check(
         &self,

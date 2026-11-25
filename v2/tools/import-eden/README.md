@@ -60,7 +60,9 @@ world defines itself (a template's `define`, which no page's library has: hello-
 the open ground as field 102, `[[ref, def] …]` with each whole stored def as JSON text (the exporter's `ground.defs`, the
 defs the world places), so that page draws it as the world's own page does (its roof) and not from the thing's solids.
 On the ground and not on a thing, removing any thing of the def never loses it. It is in every baseline: Eden-2026's
-31 such defs are about 64 KB of a baseline of about 9 MB.
+31 such defs are about 64 KB of a baseline of about 9 MB. The open ground also keeps the world's ground palette as field
+103, `souls:<palette>` (today's `state.ground.palette`, the exporter's `ground.palette`: a Mars camp's `desert`), which
+that page colours the ground and its cover by; facts exported without one leave it out and the page draws grass.
 
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for
@@ -68,6 +70,10 @@ a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entr
 (`content/worlds/mars/map.json`). worldd and the client look an entry up by that name, else by the kind's own. A
 borrowed seat or bed is set at the thing's own slot of the same number (its def's geometry), with the entry's stand
 offset from it; an entry seat the thing has no slot for is not offered.
+A row may instead name the kind its copies are (`kind`): a kind that joins parts (a frame stand, a rack frame, a beam,
+a bay; `content/kinds/construction`) is read by its own name, so a copy that only borrowed its entry would never join.
+The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
+`--map content/worlds/mars/map.json` it is a yard a crew builds from; without the map it is plain things.
 
 Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
 own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a

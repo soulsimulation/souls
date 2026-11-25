@@ -76,6 +76,9 @@ deploy.env
 # The importers' kept outputs (R9a): the template worlds' facts and baked models, exported once with v1's exporters
 # and pulled with `pnpm assets:pull --set import` (v2/tools/import-world/README.md)
 /v2/tools/import-world/kept/
+# The released creature bakes and simple meshes (dog, duck, snail): the body catalogue installs these exact bytes, as a bake
+# made again differs in the last bit between machines (v2/tools/import-body/presets.ts)
+/v2/tools/import-body/released/
 # the small own-work binaries that stay in git (tools/assets/manifest.test.mjs holds the same list)
 !/apps/web/pwa/icon-*.png
 !/apps/web/src/media/gallery-loop.mp4

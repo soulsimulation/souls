@@ -393,6 +393,38 @@ pub fn solids_of(entry: &Json) -> Option<Value> {
     .solids()
 }
 
+/// A placed thing's slots field (field 13, `[[n, x, y, z, yaw mdeg, capacity]]` mm, the thing's frame) for a kind of
+/// this record, as the import writes a seeded thing's: each slot numbered 1, 2, ... in the record's order (as the kind
+/// numbers them), at its `at_mm`, turned `yaw_mdeg` (else 0), holding `most` (else 1). A slot with no `at_mm` gives no
+/// point (a hand, a carry). `None` for a record whose slots give no point, so a stand or a bay placed live seats parts
+/// at the points one seeded from a world's facts does.
+pub fn slots_of(entry: &Json) -> Option<Value> {
+    let whole = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let int = |n: i64| match u64::try_from(n) {
+        Ok(u) => Value::Uint(u),
+        Err(_) => Value::Nint(n.unsigned_abs() - 1),
+    };
+    let rows: Vec<Value> = (1i64..)
+        .zip(entry.get("slots")?.obj()?)
+        .filter_map(|(n, (_, s))| {
+            let at = s.get("at_mm")?.arr()?;
+            let [x, y, z] = [0, 1, 2].map(|k| whole(at.get(k)));
+            Some(Value::Array(vec![
+                int(n),
+                int(x?),
+                int(y?),
+                int(z?),
+                int(whole(s.get("yaw_mdeg")).unwrap_or(0)),
+                int(whole(s.get("most")).unwrap_or(1)),
+            ]))
+        })
+        .collect();
+    (!rows.is_empty()).then_some(Value::Array(rows))
+}
+
 /// The solids each creator kind gives what is placed of it ([`solids_of`]), by full name: kinds with none left out.
 pub fn solids_in(tree: &Tree) -> BTreeMap<String, Value> {
     nodes(tree)

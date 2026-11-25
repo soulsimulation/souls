@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
-import { arrivalFraction, heldLabel, initialPending } from './viewer-arrival.ts';
+import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -138,9 +138,9 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const [settledReason, setSettledReason] = useState<string | null>(null);
   useEffect(() => {
     if (!reason || arriving) { setSettledReason(null); return; }
-    const id = setTimeout(() => setSettledReason(reason), blocked || /covered by controls/.test(reason) ? 0 : 4000);
+    const id = setTimeout(() => setSettledReason(reason), reasonDelayMs(reason, settledReason, blocked));
     return () => clearTimeout(id);
-  }, [reason, arriving, blocked]);
+  }, [reason, arriving, blocked]); // eslint-disable-line react-hooks/exhaustive-deps -- the line shown when the reason changed
   // The card also carries the initial-assets progress (the world stays hidden until those assets are ready), so it
   // stays until they are, and steps aside when they fail: the viewer's own Retry is then the only thing to show.
   // Without such a gate (world-engine worlds) the bar follows the actual asset downloads while the card shows.

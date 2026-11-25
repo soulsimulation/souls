@@ -36,7 +36,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <body id> [<body id> ...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -158,6 +158,26 @@ export function slotPoint(at, entry, slot) {
 export function pointOf(word) {
   const m = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(String(word ?? ''));
   return m ? [Math.round(Number(m[1]) * M), Math.round(Number(m[2]) * M)] : null;
+}
+
+/**
+ * The request with each thing it names by its name rather than its id (a creator's title for it: `part take <crew>
+ * "rack frame 1"`) as that thing's id, from the copy's rows (`rowsOf`). Crews and bodies stay ids. A name is matched
+ * whole, in any case, against each row's name and aliases; a refusal by name when no thing or several go by it.
+ */
+export function byName(req, rows) {
+  const out = { ...req }, all = [...rows.values()];
+  for (const k of ['part', 'into', 'thing', 'load', 'where', 'on']) {
+    const v = out[k];
+    if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
+    const want = String(v).trim().toLowerCase();
+    const hits = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    if (hits.length === 1) { out[k] = hits[0].id; continue; }
+    return hits.length
+      ? no('carry-name-ambiguous', `${hits.length} things go by "${v}": ${hits.map((r) => r.id).join(', ')}; name one by its id`)
+      : no('carry-name-unknown', `nothing in the copy goes by "${v}": look or find, then name it as shown or by its id`);
+  }
+  return out;
 }
 
 const walk = (ns, ground, [x, z]) => ({ verb: `${ns}:walk`, target: ground, params: { 1: [Math.round(x), 0, Math.round(z)] } });

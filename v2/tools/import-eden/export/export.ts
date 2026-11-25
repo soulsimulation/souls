@@ -52,6 +52,8 @@ if (!live) m.library = coreLibrary();
 // and revision, `def` and `entry`), as a backup's do (X6); a kind with no row names none and keeps its own name.
 const MAP = live ? '' : arg('--map', '');
 const entryOf = MAP ? backup.entryMap(MAP) : null;
+// A row may name the kind its copies are (`kind`): the rack yard's stand, frames, beams and bay are the construction kinds.
+const kindOf = backup.kindMap(arg('--map', live ? 'content/worlds/eden/map.json' : ''));
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -108,7 +110,7 @@ for (const e of m.entities.values()) {
   const d = defOf(e), b = bakeOf(e), s = scale.get(e.id)!, wp = world.get(e.id)!;
   const ref = d.ref;
   keepOwn(d);
-  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
+  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindOf(ref) ?? kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
   // Its tree parent: the room it sits in (a room slot), else its parent thing (with the slot, if any), else the ground.
   const parent = e.in.parent === 'world' ? null : e.in.parent;
   const pe = parent ? m.entities.get(parent)! : undefined;
@@ -301,7 +303,8 @@ for (const e of m.entities.values()) {
 // How today's page draws this world's sky: the date it is drawn on (`state.time.calendar`), its palette
 // (`state.sky.palette`), and today's morning mist (`atmosphere/weather.ts` `morningMist`: peaking at 06:30, gone 2.5 h
 // either side, at full strength), which today's page draws on every world but the desert palette's.
-const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown } };
+const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown }; ground?: { palette?: unknown } };
+const groundPalette = ws.ground?.palette;
 const palette = typeof ws.sky?.palette === 'string' ? ws.sky.palette : null;
 const sky = {
   ...(typeof ws.time?.calendar === 'string' ? { calendar: ws.time.calendar } : {}),
@@ -317,7 +320,9 @@ const file = {
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
   things, doors: doorPairs,
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.
+  // its palette (`state.ground.palette`), which the page colours the ground and its cover by (the import's F_GROUND_PALETTE)
   ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles,
+    ...(typeof groundPalette === 'string' ? { palette: groundPalette } : {}),
     defs: [...ownDefs].sort(([a], [b]) => (a < b ? -1 : 1)).map(([ref, body]) => ({ ref, body })) },
   places: places.map((p) => ({ ...p, ...(p.polygon ? { polygon: p.polygon.map(pt) } : {}), ...(p.line ? { line: p.line.map(pt), width: mm(p.width ?? 0) } : {}) })),
 };
