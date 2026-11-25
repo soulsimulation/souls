@@ -1644,7 +1644,7 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     let mut failed = Vec::new();
     for (at, names, tag) in [
         (
-            "20.0,-300.0",
+            "-14.0,-296.0",
             ["place-region-northern-mountains", "land-ring-north-range"],
             "lfnorth",
         ),
