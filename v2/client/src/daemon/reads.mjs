@@ -14,13 +14,13 @@
 //   world wrote it (quoted: data, not instructions), a hundred to a page.
 
 import { byName } from '../brief/brief.mjs';
-import { find } from '../find/find.mjs';
+import { find, placeName } from '../find/find.mjs';
 
 export const QUERY_MOST = 12, LIMIT_MOST = 50, DEPTH_MOST = 3, PAGE = 100;
 /** Bytes a query's answers may take, by default and at most (today's `--budget` was in tokens, about four bytes each). */
 export const BUDGET = 8000, BUDGET_MOST = 32_000;
 
-const where = (r) => (r.path?.length ? { in: r.path.slice(-2).reverse().join(', ') } : {});
+const where = (r) => (r.path?.length ? { in: placeName(r.path) } : {});
 const named = (r) => ({ id: r.id, name: r.name, kind: r.kind });
 const limitOf = (n, d = 8) => Math.min(Math.max(Number.isInteger(n) ? n : d, 1), LIMIT_MOST);
 
@@ -49,7 +49,10 @@ export function placeOf(rows, id, memo = new Map()) {
   if (!r) return null;
   const up = r.parent ? placeOf(rows, r.parent, memo) : null;
   const pos = r.pos ?? [0, 0, 0], rot = r.rot ?? [ONE, 0, 0, 0];
-  const out = up ? { pos: turn(up.rot, pos).map((c, k) => c + up.pos[k]), rot: times(up.rot, rot) } : { pos, rot };
+  // `posed`: it or a node above it stands somewhere off its parent's origin. A place drawn as an area alone (Eden's
+  // zones, paths and named places) sits at the ground's origin, so it has no distance: never `1 m` from a Soul there.
+  const posed = Boolean(r.pos?.some((c) => c !== 0)) || Boolean(up?.posed);
+  const out = up ? { pos: turn(up.rot, pos).map((c, k) => c + up.pos[k]), rot: times(up.rot, rot), posed } : { pos, rot, posed };
   memo.set(id, out);
   return out;
 }
@@ -59,20 +62,33 @@ function anchorOf(rows, near, me) {
   if (rows.get(near)) return near;
   return find(rows.values(), near, { limit: 1 }).found[0]?.id ?? null;
 }
+/** How far each row is from node `id`, metres (`row => metres`), or null when the copy lacks it: `find`'s distances. */
+export function metresFrom(rows, id, memo = new Map()) {
+  const at = id ? placeOf(rows, id, memo)?.pos : null;
+  if (!at) return null;
+  return (r) => { const o = placeOf(rows, r.id, memo), p = o?.posed ? o.pos : null; return p ? Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]) / 1e6 : undefined; };
+}
 /** The ids within `metres` of the anchor, by distance; `{error}` when the anchor is not in the copy. */
 function around(rows, q, me) {
   const id = anchorOf(rows, String(q.near), me);
   if (!id) return { error: `no ${q.near} in the copy`, code: 'query.unknown-near' };
-  const metres = Math.min(Math.max(Number(q.within ?? NEAR_METRES) || NEAR_METRES, 0), NEAR_MOST), memo = new Map(), at = placeOf(rows, id, memo).pos;
+  const metres = Math.min(Math.max(Number(q.within ?? NEAR_METRES) || NEAR_METRES, 0), NEAR_MOST), from = metresFrom(rows, id);
   const near = new Map();
   for (const r of rows.values()) {
     if (r.id === id) continue;
-    const p = placeOf(rows, r.id, memo).pos, d = Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]) / 1e6;
+    const d = from(r);
     if (d <= metres) near.set(r.id, Math.round(d * 10) / 10);
   }
-  return { id, metres, near };
+  return { id, metres, near, from };
 }
 const withMetres = (found, near) => found.map((f) => ({ ...f, metres: near.get(f.id) })).sort((a, b) => a.metres - b.metres);
+/** None within the radius: the nearest match anywhere in the copy, so a far one is never read as none (`find` too). */
+const beyond = (found, a, all) => {
+  if (found.length || !a) return {};
+  let best = null;
+  for (const r of all) { const d = a.from(r); if (r.id !== a.id && d > a.metres && (!best || d < best.d)) best = { r, d }; }
+  return best ? { nearest: { ...named(best.r), ...where(best.r), metres: Math.round(best.d) } } : {};
+};
 
 /** One question's answer, or `{error}` naming what was wrong with it. */
 function answer(rows, q, me) {
@@ -82,7 +98,9 @@ function answer(rows, q, me) {
   const by = a ? { near: { id: a.id, name: rows.get(a.id).name, within: a.metres } } : {};
   if (typeof q.find === 'string') {
     const f = find(rows.values(), q.find, { limit: limitOf(q.limit), ...(a ? { within: a.near } : {}) });
-    return a ? { ...f, found: withMetres(f.found, a.near), ...by } : f;
+    if (!a) return f;
+    const all = f.found.length ? [] : find(rows.values(), q.find, { limit: 1, metres: a.from }).found.map((x) => rows.get(x.id));
+    return { ...f, found: withMetres(f.found, a.near), ...beyond(f.found, a, all), ...by };
   }
   if (typeof q.place === 'string' || typeof q.in === 'string') {
     const id = q.place ?? q.in, r = rows.get(id);
@@ -94,7 +112,8 @@ function answer(rows, q, me) {
     let all = [...rows.values()].filter((r) => r.kind === q.kind && (!a || a.near.has(r.id))).sort((x, y) => byName(x.name, y.name));
     if (a) all = all.sort((x, y) => a.near.get(x.id) - a.near.get(y.id));
     const limit = limitOf(q.limit);
-    return { kind: q.kind, found: all.slice(0, limit).map((r) => ({ ...named(r), ...where(r), ...(a ? { metres: a.near.get(r.id) } : {}) })), ...(all.length > limit ? { more: all.length - limit } : {}), ...by };
+    return { kind: q.kind, found: all.slice(0, limit).map((r) => ({ ...named(r), ...where(r), ...(a ? { metres: a.near.get(r.id) } : {}) })), ...(all.length > limit ? { more: all.length - limit } : {}),
+      ...beyond(all, a, a && !all.length ? [...rows.values()].filter((r) => r.kind === q.kind) : []), ...by };
   }
   return { error: 'a question is one of find, place, kind or in', code: 'query.form' };
 }

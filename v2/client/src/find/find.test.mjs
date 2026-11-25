@@ -1,7 +1,7 @@
 // The ported scoring (Engine v2 R7, #2701): catalog.mjs's cases, on the copy's rows.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { find, nameIn, score, tokensOf } from './find.mjs';
+import { find, kindWordsOf, nameIn, placeName, score, tokensOf } from './find.mjs';
 
 const row = (id, name, kind, path = ['World']) => ({ id, name, kind, path });
 const rows = [
@@ -44,7 +44,7 @@ test('a kind finds its things; the limit cuts, and says how many more', () => {
   assert.equal(r.found.length, 5);
   assert.equal(r.more, 7);
   assert.deepEqual(r.found.map((x) => x.name), ['library/chair-0', 'library/chair-1', 'library/chair-2', 'library/chair-3', 'library/chair-4']);
-  assert.equal(r.found[0].in, 'Reading Room, Eden Library');
+  assert.equal(r.found[0].in, 'Reading Room, Eden Library, Eden Village');
   assert.equal(find(rows, 'bench').found[0].id, 'e_b1');
 });
 
@@ -57,4 +57,26 @@ test('one search over whatever the copy holds: a set of ids narrows it, nothing 
 test('a joined body keeps its Soul and parent through the search projection', () => {
   const body = { ...row('body-1', 'body 1', 'souls:body'), soul: 'soul-1', parent: 'ground-1' };
   assert.deepEqual(find([body], 'body').found[0], { id: body.id, name: body.name, kind: body.kind, soul: body.soul, parent: body.parent, in: 'World' });
+});
+
+test('first-day E5: equal matches nearest first, each with its metres from the asker, anywhere in the world', () => {
+  const far = { ...row('b-far', 'library-book', 'eden:book'), m: 400 }, near = { ...row('b-near', 'cottage-book', 'eden:book'), m: 12.4 };
+  const shelf = { ...row('s', 'cottage-bookcase', 'eden:bookcase'), m: 3 };
+  const r = find([far, near, shelf], 'book', { metres: (x) => x.m });
+  assert.deepEqual(r.found.map((x) => [x.id, x.metres]), [['s', 3], ['b-near', 12], ['b-far', 400]]);
+  assert.equal(find([far], 'book').found[0].metres, undefined, 'no asker: no metres');
+});
+
+test('a place by its names, never the copy\'s nameless kind-and-number ones', () => {
+  assert.equal(placeName(['place 0', 'ground 1', 'eden-house-1', 'floor 844', 'Living']), 'Living, eden-house-1');
+  assert.equal(placeName(['place 0', 'ground 1']), 'ground 1, place 0');
+});
+
+test('a kind entry\'s category, synonyms and forms find its things, below every name', () => {
+  const piano = { card: { category: 'instrument', synonyms: ['keys'] }, text: { keys: 'keyboard' }, forms: { play: {} } };
+  assert.deepEqual(kindWordsOf(piano), ['instrument', 'keyboard', 'play']);
+  const rows2 = [row('p', 'hall-piano', 'eden:piano'), row('i', 'instrument-shop', 'eden:shop')];
+  const kinds = { 'eden:piano': piano };
+  assert.deepEqual(find(rows2, 'instrument', { kinds }).found.map((x) => x.id), ['i', 'p']);
+  assert.deepEqual(find(rows2, 'instrument').found.map((x) => x.id), ['i'], 'without the entries, names alone');
 });

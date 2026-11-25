@@ -85,6 +85,10 @@ test('#3851: near keeps what is within its metres of an id, a name or me, from t
   assert.deepEqual(q.answers[0].near, { id: 'sq', name: 'the square', within: 80 });
   assert.deepEqual(q.answers[1].found.map((r) => [r.id, r.metres]), [['f', 2]]);
   assert.deepEqual(q.answers[2].found, []);
+  // first-day E5: none within the radius names the nearest anywhere, so far is never read as none
+  assert.deepEqual(q.answers[2].nearest, { id: 'b', name: 'bench', kind: 'eden:bench', metres: 51 });
+  assert.equal(q.answers[0].nearest, undefined, 'found within: no nearest beyond');
+  assert.deepEqual(query(posed, [{ kind: 'eden:bench', near: 'me', within: 10 }], { me: 'me' }).answers[0].nearest.id, 'b');
   assert.equal(q.answers[3].code, 'query.unknown-near');
   assert.equal(query(posed, [{ find: 'fountain', near: 'me' }]).answers[0].code, 'query.unknown-near', 'no body: me is not placed');
 });

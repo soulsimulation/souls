@@ -9,7 +9,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { sleep } from '../../lib/clock.mjs';
 
@@ -26,6 +26,13 @@ export function exportFacts(template, out, map = null) {
   mkdirSync(resolve(out, '..'), { recursive: true });
   execFileSync(process.execPath, [EXPORT, '--template', t, '--out', out, ...(map ? ['--map', resolve(REPO_ROOT, map)] : [])], { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
   return out;
+}
+
+/** The world map soul.game's world of this template was imported with (`content/worlds/<world>/map.json`), or null:
+ *  Eden's names its things' entries (a cafe's `cup_of_coffee`, not a nameless `cup_of_coffee_pack`, whose offers no
+ *  client knows). Only Eden's for now: the other maps are not known to be how their worlds are made. */
+export function mapFor(template) {
+  return basename(String(template ?? '')) === 'eden-2026.json' ? join(REPO_ROOT, 'content/worlds/eden/map.json') : null;
 }
 
 const portFree = (port) => new Promise((ok) => { const s = createServer().once('error', () => ok(false)).listen(port, '127.0.0.1', () => s.close(() => ok(true))); });
@@ -55,7 +62,7 @@ export async function startWorld({ template = null, facts = null, dir, port = nu
   dir = resolve(dir);
   mkdirSync(dir, { recursive: true });
   const seeded = existsSync(join(dir, 'world/world.json'));
-  if (!facts && template && !seeded) facts = exportFacts(template, join(dir, 'genesis.facts.json'));
+  if (!facts && template && !seeded) facts = exportFacts(template, join(dir, 'genesis.facts.json'), mapFor(template));
   port ??= await freePorts();
   const at = addresses(port);
   const out = openSync(log ?? join(dir, 'run.log'), 'a');
