@@ -5,6 +5,7 @@
 //   give <thing id> --to <body id>    offers that body the thing this Soul holds (`activity:offer` of the give's kind,
 //                                     replica/fixtures/activities/give.diag, this Soul the giver, parameter 4 the thing)
 //   give accept|decline <offer id>    takes it into a free hand, or declines; the giver hears a decline or a lapse
+//   give withdraw <offer id>          the giver takes its offer back before it is answered; the thing stays held
 //
 // The offer's id: the taker's `wait` shows `{"kind":"give","what":"offered","offer":..,"thing":..,"from":..}`. A
 // refused accept names why (`give.no-free-hand`, `give.too-far`, `give.not-held`) and leaves the offer open.
@@ -35,7 +36,9 @@ export function giveIntents(req, { place, kinds }) {
     }
     // `together leave <id>` comes here too: leaving the activity an offer made (`activity:leave`).
     case 'leave': return togetherIntents(req, { place, kinds });
-    default: return no('give-usage', 'give <thing id> --to <body id> | give accept|decline <offer id>');
+    // #4700: a give or a touch taken back by its asker (`together withdraw`), as `togetherIntents` sends it.
+    case 'withdraw': return togetherIntents(req, { place, kinds });
+    default: return no('give-usage', 'give <thing id> --to <body id> | give accept|decline|withdraw <offer id>');
   }
 }
 

@@ -36,7 +36,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 - Use a kind the world already has when one offers what Souls should do with it; when none does, define your own
   (below). `describe` lists every kind's full name, including its hash: copy a full name when several revisions share
   a name. A short name works only when it identifies one kind.
-- Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
+- Positions and lengths are metres, everywhere the command takes or prints them (`--at x,y,z`, `--gap`, `--dist`,
+  zones, claims, a batch's `at`, `describe`): `x` east, `y` up, `z` south, in the parent's frame. A room's floor is `y` 0.
 - Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
 
 ## Verbs
@@ -61,11 +62,11 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
-| `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist mm]` | beside another, in the same parent (default east, 1000 mm; north is -z) |
+| `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist m]` | beside another, in the same parent (default east, 1 m; north is -z) |
 | `place <kind> --on <id>` | in or on another, in its first free slot a thing may take |
 | `place ... --facing <id\|n\|e\|s\|w>`, `move <id> --facing ...` | turned to face another thing or a compass point |
-| `place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x\|z]` | a row of `n`, `--gap` mm apart, centred on `--at` (along x unless `--along z`): one batch, all or none; `names` are `1..n` west to east |
-| `place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <mm>[,<mm>]` | a grid, `C` along x and `R` along z, centred on `--at`; at most 64 things. With `--facing n\|e\|s\|w` they all face it. If any spot is refused, nothing is placed and the refusal names the op (`check` first to see) |
+| `place <kind> --in <id> --at x,y,z --row <n> --gap <m> [--along x\|z]` | a row of `n`, `--gap` metres apart, centred on `--at` (along x unless `--along z`): one batch, all or none; `names` are `1..n` west to east |
+| `place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <m>[,<m>]` | a grid, `C` along x and `R` along z, centred on `--at`; at most 64 things. With `--facing n\|e\|s\|w` they all face it. If any spot is refused, nothing is placed and the refusal names the op (`check` first to see) |
 | `undo` | the newest edit taken back; the answer's `changed` says what changed |
 | `redo` | the newest undo done again, with the same ids; a new edit clears it |
 | `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
@@ -79,6 +80,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 | `event <room or ground id> '<words>' --when HH:MM [--for <minutes>] [--at x,y,z]` | an event on the world's calendar there, beside its notice board (not under it): its words are kept for everyone, and `whatson` lists it. HH:MM is its next one in world time |
 | `time <HH:MM \| live>` | the hour the page shows the sky at, for a staged scene (`time 18:30` for a sunset); `live` shows the world's own time. Display only: world time never stops or changes speed, and Souls' clocks and calendars are unchanged |
+| `status` · `quit` | your daemon: where it is (connected, its copy); ended, until your next command starts it again |
 | `trace [n]` | your last `n` commands here (20, at most 200), newest first: time, verb, result and refusal. If you see the same refusal again and again, stop and read its `fix` |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
@@ -100,7 +102,7 @@ A batch is a JSON list. Each operation is one of:
 
 ```json
 {"op": "place", "name": 1, "kind": "room", "in": "<id>", "at": [0, 0, 0]}
-{"op": "move", "node": "<id or name>", "at": [1000, 0, 500]}
+{"op": "move", "node": "<id or name>", "at": [1, 0, 0.5]}
 {"op": "set", "node": "<id or name>", "field": 4, "value": {"words": "the old mill"}}
 {"op": "remove", "node": "<id or name>"}
 ```
@@ -220,6 +222,6 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 
 - `describe` first; `check` anything unsure; then send. A `check` costs nothing.
 - Build a room and its contents in one batch, so it never stands half built.
-- Space things at least 500 mm apart, inside the room, on the floor (`y` 0), unless a slot holds them.
+- Space things at least 0.5 m apart, inside the room, on the floor (`y` 0), unless a slot holds them.
 - After building, `describe` once and confirm each id you were given is where you meant.
 - Report what you built: each thing's kind and id.
