@@ -253,8 +253,9 @@ pub struct Bodies {
     /// What a restart did with each body the log had where it may not stand (E11d, killed during a climb out), or
     /// could not place again where the log had it, by name: `climb-out` or `resume-nearest` (carried on along a clean
     /// way), `resume-seated` (back in the place it was climbing out of), `resume-seated-other` (that place taken:
-    /// another free place of its thing), `resume-placed` (standing at its floor's nearest legal point) or
-    /// `resume-entry` (standing at the world's entry). Each is also an entry on the body ([`crate::unstick::restarted`]).
+    /// another free place of its thing), `resume-placed` (standing at its floor's nearest free legal point),
+    /// `resume-stood` (logged seated, its seat taken or gone: standing) or `resume-entry` (standing at the world's entry).
+    /// Each is also an entry on the body ([`crate::unstick::restarted`]).
     pub resumed: Vec<(Id, &'static str)>,
     /// The restart's entries the next step writes: body, how, node, from and to ([`Bodies::restarted_as`]).
     restarts: Vec<(Id, &'static str, Id, Vec3, Vec3)>,
@@ -695,7 +696,9 @@ impl Bodies {
                             _ => resume = clean.map(|to| (surface, Some(to), r)),
                         }
                         if matches!(r, sim::slots::Resumed::Held) {
-                            legal_near(s, body.id, p.frame, p.position, p.orientation, build)?
+                            let m =
+                                legal_near(s, body.id, p.frame, p.position, p.orientation, build)?;
+                            self.free_near(s, m, build)
                         } else {
                             sim::slots::placed_off(
                                 s,
@@ -725,7 +728,7 @@ impl Bodies {
             _ => body.pose,
         };
         self.logged.insert(id, logged);
-        self.add_body_built(family, body, build)?;
+        self.add_body_built(family.clone(), body, build)?;
         let from = logged.position;
         match resume {
             Some((floor, Some(to), r)) => {
@@ -735,12 +738,29 @@ impl Bodies {
                     .carry(id, sim::slots::climb_track(floor, to))
                 {
                     Ok(()) => self.restarted_as(id, r.name(), floor, from, to),
-                    // Not carried after all: never left where it may not stand. Taken out again and refused, so the
-                    // restart places it by its last resort ([`Bodies::add_body_at_entry`]).
+                    // Not carried after all: never left where it may not stand. Placed at its floor's nearest free
+                    // legal point, as with no clean way on; with none, taken out again and refused, so the restart
+                    // places it by its last resort ([`Bodies::add_body_at_entry`]).
                     Err(e) => {
+                        let near = self
+                            .runner
+                            .controller
+                            .body(id)
+                            .map(|b| b.pose)
+                            .and_then(|p| {
+                                let s = self.town.surfaces_for(build.size)?.get(&floor)?;
+                                let m =
+                                    legal_near(s, id, p.frame, p.position, p.orientation, build)
+                                        .ok()?;
+                                Some(self.free_near(s, m, build))
+                            });
                         self.runner.controller.remove(id);
-                        self.logged.remove(&id);
-                        return Err(e);
+                        let Some(m) = near else {
+                            self.logged.remove(&id);
+                            return Err(e);
+                        };
+                        self.add_body_built(family, m, build)?;
+                        self.held_off.push((id, floor, from, build));
                     }
                 }
             }
@@ -828,8 +848,60 @@ impl Bodies {
     /// What a restart did with `body`, by name `how` (`resumed`), and the entry on it the next tick writes: on `node`,
     /// from where the log had it to where it is placed or carried.
     fn restarted_as(&mut self, body: Id, how: &'static str, node: Id, from: Vec3, to: Vec3) {
+        eprintln!(
+            "worldd: restart: {} {how}: from ({}, {}) to ({}, {}) µm",
+            replica::world_model::show(body),
+            from.x,
+            from.z,
+            to.x,
+            to.z
+        );
         self.resumed.push((body, how));
         self.restarts.push((body, how, node, from, to));
+    }
+
+    /// `moved`, a body a restart places on `floor` (not yet added), moved to the nearest point of that floor at least
+    /// [`RESTART_APART`] from every body standing there (`sim::slots::clear_spot`, within 5 m), so two bodies placed
+    /// at one nearest point never stand in each other; left where it is when no such point is near.
+    fn free_near(&self, floor: &sim::mover::Surface, moved: Moved, build: Build) -> Moved {
+        let p = moved.pose;
+        let taken: Vec<[i64; 2]> = self
+            .runner
+            .controller
+            .bodies()
+            .filter(|b| b.id != moved.id && b.pose.frame == p.frame)
+            .map(|b| [b.pose.position.x, b.pose.position.z])
+            .collect();
+        let apart = |q: &[i64; 2]| {
+            let (dx, dz) = (
+                i128::from(q[0] - p.position.x),
+                i128::from(q[1] - p.position.z),
+            );
+            dx * dx + dz * dz >= i128::from(RESTART_APART).pow(2)
+        };
+        if taken.iter().all(apart) {
+            return moved;
+        }
+        sim::slots::clear_spot(
+            floor,
+            [p.position.x, p.position.z],
+            &taken,
+            RESTART_APART,
+            100_000,
+            5_000_000,
+        )
+        .and_then(|q| {
+            floor
+                .place_built(
+                    moved.id,
+                    p.frame,
+                    Vec3::new(q[0], 0, q[1]),
+                    p.orientation,
+                    build,
+                )
+                .ok()
+        })
+        .unwrap_or(moved)
     }
 
     /// A restart's last resort for a body it cannot place again on its own ground (its floor or seat gone, no legal
@@ -858,6 +930,7 @@ impl Bodies {
                 detail: "the ground for its build".into(),
             })?;
         let moved = legal_near(s, id, frame, entry, logged.orientation, build)?;
+        let moved = self.free_near(s, moved, build);
         let to = moved.pose.position;
         self.logged.insert(id, *logged);
         self.add_body_built(family, moved, build)?;
@@ -889,7 +962,22 @@ impl Bodies {
                         self.logged.insert(body, b.pose);
                     }
                 }
-                Err(e) => out.push((body, e)),
+                // Its seat gone or taken: it stands where it was added, its seat's stand point or the nearest legal
+                // point to it (`serve`'s `recorded_body`), named `resume-stood` on the body. Logged as the log had it
+                // (seated), so its next row heals the log.
+                Err(e) => {
+                    if let Some(b) = self.runner.controller.body(body).map(|b| b.pose) {
+                        self.logged.insert(body, *pose);
+                        self.restarted_as(
+                            body,
+                            "resume-stood",
+                            b.frame.node,
+                            pose.position,
+                            b.position,
+                        );
+                    }
+                    out.push((body, e));
+                }
             }
         }
         out
@@ -1782,6 +1870,8 @@ struct WindGround<'a> {
 
 /// How near another body a spot may be, µm: room to stand, and room to lie down.
 const ROOM: i64 = 800_000;
+/// How far apart a restart places two bodies, µm: two bodies' width (`sim::slots::clear_spot`'s apart for a rise).
+const RESTART_APART: i64 = 560_000;
 const ROOM_LYING: i64 = 1_500_000;
 
 impl Ground for WindGround<'_> {

@@ -97,12 +97,15 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    seat, an edit since) is resumed by one rule, in order: carried on along a clean way, never through a cut, to a
    landing or the floor's nearest legal point (`climb-out`, `resume-nearest`); else seated again in the seat it was
    climbing out of when that seat is free and, moving with a cabin, at its own stop (`resume-seated`,
-   `resume-seated-other`); else placed at once at its floor's nearest legal point (`resume-placed`). A body that
-   cannot be placed on its own ground at all (its floor or seat gone, no legal point on it) is placed at the world's
-   entry, where Souls are born (`resume-entry`). None is silent: each is an entry on the body, `souls:restarted`
-   (fields 1 body, 2 how, 3 node, 4 from, 5 to), written with the first tick, which its Soul's client reads as it
-   reads the ladder's; the next row heals the log. Only a body with no recorded build is left out, by name, and the
-   others start: one bad row never leaves a world refusing every move.
+   `resume-seated-other`); else placed at once at its floor's nearest legal point at least a body's width from every
+   other body there (`resume-placed`). A body logged seated whose seat is still there sits in it again; with its seat
+   taken it stands at the seat's stand point, or the nearest legal point to it (`resume-stood`). A body that cannot be
+   placed on its own ground at all (its floor or seat gone, no legal point on it) is placed at the world's entry, where
+   Souls are born (`resume-entry`). None is silent: each is an entry on the body, `souls:restarted` (fields 1 body,
+   2 how, 3 node, 4 from, in the frame the log had it in, 5 to), written with the first tick, which its Soul's client
+   reads as it reads the ladder's; the next row heals the log. Left out, by name, while the others start: only a body
+   with no recorded build, or one whose ground holds no legal point for its build at all (a world with no ground).
+   One bad row never leaves a world refusing every move.
 
 ## The controller (B1)
 

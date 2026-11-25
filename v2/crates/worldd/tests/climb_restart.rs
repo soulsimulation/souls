@@ -693,3 +693,151 @@ fn a_restart_beside_an_away_cabin_places_the_body_out_of_it_and_it_walks() {
     let q = b.runner.controller.body(body).unwrap().pose.position;
     assert!(q != p.position, "it moved: {q:?}");
 }
+
+/// Walks `body` 1 m east of where it stands and steps until the walk ends: its answer, and whether it moved.
+fn walk_east(
+    b: &mut Bodies,
+    ground: Id,
+    body: Id,
+    order: Id,
+    now: &mut i64,
+) -> (Result<(), String>, bool) {
+    let from = b.runner.controller.body(body).unwrap().pose.position;
+    let walk = Asked {
+        body,
+        actor: Actor::Soul(body),
+        ask: Ask::Walk {
+            node: ground,
+            point: Some(Vec3::new(from.x + 1_000_000, 0, from.z)),
+            gait: None,
+        },
+        fallbacks: Vec::new(),
+    };
+    let started = b.start(vec![(order, walk)]);
+    assert!(
+        started.iter().all(|(_, r)| r.is_ok()),
+        "accepted: {started:?}"
+    );
+    let until = *now + 30 * S;
+    while *now < until {
+        *now += TICK;
+        if let Some((_, r)) = b.step(*now).into_iter().find(|(i, _)| *i == order) {
+            let to = b.runner.controller.body(body).unwrap().pose.position;
+            return (r, to != from);
+        }
+    }
+    panic!("the walk of {body:?} was not answered in 30 s");
+}
+
+/// Two bodies the log had at one point where neither may stand: each is placed at a legal point, never on the
+/// other (at least a body's width apart), each named and told, and both walks are done.
+#[test]
+fn a_restart_places_two_bodies_logged_at_one_spot_apart_and_both_walk() {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let off = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| !on(&town, ground, p) && on(&town, ground, Vec3::new(p.x + 1_000_000, 0, p.z)))
+        .expect("a point off the ground beside it");
+    let near = Vec3::new(off.x + 1_000_000, 0, off.z);
+    let logged = Pose {
+        frame,
+        position: off,
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: ground,
+            height: 0,
+        },
+    };
+    let (a, c) = (id(1), id(2));
+    let placed = Placed::from([(a, (logged, None)), (c, (logged, None))]);
+    let first = |n| {
+        town.surfaces[&ground]
+            .place(n, frame, near, Quat::IDENTITY)
+            .unwrap()
+    };
+    let (a0, c0) = (first(a), first(c));
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    b.add_body_at(humanoid(), a0, &placed)
+        .expect("the first starts");
+    b.add_body_at(humanoid(), c0, &placed)
+        .expect("the second starts");
+    b.begin(0);
+    assert_eq!(b.resumed, vec![(a, "resume-placed"), (c, "resume-placed")]);
+    let (pa, pc) = (
+        b.runner.controller.body(a).unwrap().pose.position,
+        b.runner.controller.body(c).unwrap().pose.position,
+    );
+    assert!(
+        on_after(&b, ground, pa) && on_after(&b, ground, pc),
+        "{pa:?} {pc:?}"
+    );
+    let d = ((pa.x - pc.x).pow(2) + (pa.z - pc.z).pow(2)).isqrt();
+    assert!(d >= 560_000, "a body's width apart: {d} µm");
+    b.step(TICK);
+    assert_eq!(restarted(&mut b).len(), 2, "each told");
+    let mut now = TICK;
+    for (n, body) in [(1, a), (2, c)] {
+        let (r, moved) = walk_east(&mut b, ground, body, id(100 + n), &mut now);
+        r.expect("the walk is done");
+        assert!(moved, "body {n} moved");
+    }
+}
+
+/// A body the log had seated in a seat that is gone at the restart stands at a point it may stand on, named
+/// `resume-stood` with an entry on it, is logged as the log had it (its next row heals the log), and its next walk is
+/// done.
+#[test]
+fn a_restart_with_a_seat_gone_stands_the_body_says_so_and_it_walks() {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let stand = (0..400)
+        .flat_map(|i| (0..400).map(move |j| Vec3::new(-40_000_000 + i * 200_000, 0, j * 200_000)))
+        .find(|&p| (0..=5).all(|k| on(&town, ground, Vec3::new(p.x + k * 200_000, 0, p.z))))
+        .expect("open ground");
+    let body = id(1);
+    let gone = id(50);
+    let seated = Pose {
+        frame: Frame {
+            node: gone,
+            slot: Some(1),
+        },
+        position: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        support: Support::Slot,
+    };
+    let placed = Placed::from([(body, (seated, Some(sim::controller::Stance::Sit)))]);
+    let added = town.surfaces[&ground]
+        .place(body, frame, stand, Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    b.add_body_at(humanoid(), added, &placed)
+        .expect("it starts");
+    b.begin(0);
+    let refused = b.seat_placed(&placed, 0);
+    assert_eq!(refused.len(), 1, "its seat is gone: {refused:?}");
+    assert_eq!(b.resumed, vec![(body, "resume-stood")]);
+    let p = b.runner.controller.body(body).unwrap().pose;
+    assert!(
+        on_after(&b, ground, p.position),
+        "standing where it may: {p:?}"
+    );
+    b.step(TICK);
+    let said = restarted(&mut b);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!((said[0].0, said[0].1.as_str()), (body, "resume-stood"));
+    assert!(
+        b.moved().iter().any(|row| row.0 == body),
+        "its row is written again"
+    );
+    let mut now = TICK;
+    let (r, moved) = walk_east(&mut b, ground, body, id(100), &mut now);
+    r.expect("the walk is done");
+    assert!(moved, "it moved");
+}

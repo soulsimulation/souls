@@ -191,7 +191,7 @@ pub const RESTARTED: &str = "souls:restarted";
 /// The world's entry for what a restart did with a body the log had where it may not stand, or that it could not place
 /// again where the log had it (`crate::bodies::Bodies::add_body_at_built`): on the body, at `at`, changing nothing, so
 /// its Soul's client reads it as it reads the ladder's entries on its body. Its event's fields: 1 the body, 2 how, by
-/// name (`climb-out`, `resume-nearest`, `resume-seated`, `resume-seated-other`, `resume-placed`, `resume-entry`), 3 the
+/// name (`climb-out`, `resume-nearest`, `resume-seated`, `resume-seated-other`, `resume-placed`, `resume-stood`, `resume-entry`), 3 the
 /// node it is on now, 4 where the log had it, 5 where it is placed (carried on: where it lands).
 pub fn restarted(at: Micros, body: Id, how: &str, node: Id, from: Vec3, to: Vec3) -> Effect {
     Effect {
