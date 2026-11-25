@@ -1682,7 +1682,7 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
                     last = rows
                         .iter()
                         .filter_map(worldd::bodies::read_row)
-                        .last()
+                        .next_back()
                         .map(|(_, p, _)| p)
                         .or(last);
                 }
