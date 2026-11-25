@@ -54,6 +54,7 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   exe(join(lib, 'supervisor'), 'if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
@@ -112,6 +113,7 @@ test('move: the directory and the origin go on the release once, after the world
   exe(join(bins, 'gateway-upgrade'), 'echo "gateway-upgrade" >> "$LOG"');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -221,6 +223,7 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   const client = join(root, 'client'), pkg = join(root, 'pkg');
   for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
   writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");

@@ -60,8 +60,9 @@ ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
 # The two services the move restarts after the worlds and the gateway; the scratch machine runs neither (scratch.sh).
 SERVICES=${RELEASE_SERVICES-directory origin}
 # What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
-# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
-TOOLS=(deploy gateway-upgrade world-aside assets-check)
+# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves; store-copy is
+# store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it.
+TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy)
 # A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
