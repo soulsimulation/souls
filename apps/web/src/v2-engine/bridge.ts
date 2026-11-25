@@ -2,7 +2,7 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type Turn, type WorldSample } from './takes.ts';
+import { activityAt, chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type Turn, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
@@ -77,18 +77,27 @@ type TurnLine = { type: 'edge'; conversation: string; tick: number; at: number }
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
 export type V2Soul = { id: string; entityId: string; name: string; description: string; doing: Doing; state: 'awake' | Wound };
 /** What a Soul is doing, derived from the copy as the v2 page derives its status (v2/web/src/souls/souls.ts), never sent. */
-export type Doing = 'speaking' | 'seated' | 'walking' | 'standing' | Wound;
+export type Doing = 'speaking' | 'walking' | 'standing' | Wound | (typeof DOING)[keyof typeof DOING];
 type Wound = 'idle' | 'zombie' | 'asleep';
 const WOUND = new Map<string, Wound | 'awake'>([['souls:awake', 'awake'], ['souls:idle', 'idle'], ['souls:zombie', 'zombie'], ['souls:asleep', 'asleep']]);
 /** Walking while its track has a sample within this long of the time shown (souls.ts WALKING_US). */
 const WALKING_US = 1_000_000;
+/** What the card and label say for the activity the body is drawn with (takes.ts `activityAt`): first day, 25 Nov, they
+ *  said "Seated" for a rider standing in a balloon's basket and "Standing" for a dancer. */
+const DOING = {
+  sit: 'sitting', lie: 'lying down', ride: 'riding', dance: 'dancing', read: 'reading', 'jumping-jacks': 'exercising',
+  pushups: 'exercising', situps: 'exercising', yoga: 'doing yoga', stretch: 'stretching',
+} as const;
 
-/** Speaking while a sentence of its own is on at `t`; then the world's wind-down word (B16); seated while in a slot;
- *  walking while it has a sample ahead of `t` or within the last second; else standing (souls.ts `status`). */
-export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t: number, speaking: boolean, wound: { at: number; word: Wound | 'awake' } | undefined): Doing {
+/** Speaking while a sentence of its own is on at `t`; then the world's wind-down word (B16); then what its drawn
+ *  `activity` at `t` is (riding, sitting, lying down, dancing, exercising, reading…; sitting while in a slot when no
+ *  activity is given); walking while it has a sample ahead of `t` or within the last second; else standing. */
+export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t: number, speaking: boolean, wound: { at: number; word: Wound | 'awake' } | undefined, activity?: string): Doing {
   if (speaking) return 'speaking';
   if (wound && wound.at <= t && wound.word !== 'awake') return wound.word;
-  if (n && n.slot !== null) return 'seated';
+  const shown = activity !== undefined ? DOING[activity as keyof typeof DOING] : n && n.slot !== null ? DOING.sit : undefined;
+  if (shown) return shown;
+  if (activity === 'walk') return 'walking';
   const last = samples[samples.length - 1];
   return samples.length > 1 && last && last.at > t - WALKING_US ? 'walking' : 'standing';
 }
@@ -473,7 +482,7 @@ export class V2Bridge {
     // First day (25 Nov): a body-kind node with no Soul link (an imported resident figure) is drawn but is not a Soul:
     // the Souls panel, the navbar and the card list only bodies a Soul drives.
     const souls = new Map(bodies.filter((b) => !!this.nodes.get(b.node)?.soul).map((b) => {
-      const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node));
+      const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node), activityAt(b, shown));
       const state = doing === 'idle' || doing === 'zombie' || doing === 'asleep' ? doing : 'awake';
       return [b.soul, { id: b.soul, entityId: b.entity, name: b.name, description: b.description, doing, state } satisfies V2Soul];
     }));
