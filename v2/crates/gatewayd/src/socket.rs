@@ -169,6 +169,7 @@ pub fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8>
         now,
         changed: Vec::new(),
         op: None,
+        detail: None,
     })
 }
 
@@ -190,6 +191,7 @@ fn refuse(
         now: now.clone(),
         changed: Vec::new(),
         op: None,
+        detail: None,
     };
     let Some(at) = Cursor::from_value(&now) else {
         return Some(own_answer(answer));
