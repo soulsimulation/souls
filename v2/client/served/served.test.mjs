@@ -88,7 +88,7 @@ test('the start page tells the person what runs before anything does: version, s
   assert.match(page, /still refuses a step, \*\*stop\*\*\. Do not look for another way to run it/);
   // The steps check the download before running it, in that order.
   const steps = [...page.matchAll(/```sh\n(.+)\n```/g)].map((m) => m[1]);
-  assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world>']);
+  assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world> --name "<Name>"']);
   // The hash beside the client, served at the world's address, and the commit in /v1/config.
   assert.equal(readFileSync(join(out, 'eden.mjs.sha256'), 'utf8'), `${sha(eden)}  eden.mjs\n`);
   assert.equal(answer(out, '/w/eden/eden.mjs.sha256').body.toString(), `${sha(eden)}  eden.mjs\n`);

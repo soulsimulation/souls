@@ -67,7 +67,10 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
      connection, a stall or a 5xx with back-off (world-aside's `tried`).
 4. **Move.** The canary world (input `canary`, default the first by name) by `deploy`: rehearsal, pin, restart, the
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
-   `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
+   `gateway-upgrade` (never in the same step as a world's deploy: the step lock), after `mailbox apply` gave the
+   owner's messages their settings where missing (the mailbox key, made once; `--mailbox-key` in `directory.args`;
+   `--mailbox <directory> --mailbox-key` in each `gateway-<world>.env`; a rerun restarts a gateway or the directory
+   that had already moved when its file changed); then the page (`/usr/local/lib/souls/web`);
    then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`);
    last the directory (`souls-directory`), then the viewers' origin (`souls-origin`). For each, the release's program
    (`/usr/local/lib/souls/directoryd`, the folder `/usr/local/lib/souls/origin`) and unit file go in beside the old ones
@@ -77,6 +80,9 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    (`/w/<world>/<views/world.json stream>pointer`, or `/v1/feed` when no world has a stream). When it does not, its
    previous program and unit go back, it is restarted on them, and the release stops with
    `release.directory-unhealthy` or `release.origin-unhealthy`, saying what the previous one answers.
+   Then `mailbox check`: one owner's message, for a grant no Soul holds (nothing reads it; it expires unread), sent
+   through each world's gateway with a view token minted from the install's view key, must be accepted; any refusal
+   (`no-mailbox`, `not-taken`, unreachable) stops the release with `release.mailbox-unreachable`.
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
    enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
    so a release never drives a user's Soul

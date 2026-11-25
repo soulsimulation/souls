@@ -77,6 +77,22 @@ test('a failed close reads as "Could not do it"', () => {
   assert.equal(inbox.latest?.outcome, 'failed');
 });
 
+test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"agent"} frame), and nothing before', async () => {
+  const sock = fakeSocket(() => null);
+  const box = new OwnerBox();
+  const mb = new V2OwnerMailbox(async (self) => self.attach(box, sock, GRANT));
+  const before = await mb.read();
+  assert.equal(before.link, undefined, 'not told yet: no claim, the card says Checking…');
+  assert.equal(before.connected, false);
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.deepEqual((await mb.read()).link, { state: 'connected', reason: 'listening', since: null, holder: null });
+  assert.equal((await mb.read()).connected, true);
+  sock.onText!(JSON.stringify({ agent: { grant: `soul-${'9'.repeat(32)}-0`, connected: false } }));
+  assert.equal((await mb.read()).connected, true, 'another grant\'s word is not this Soul\'s');
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: false } }));
+  assert.equal(((await mb.read()).link as { state?: string } | undefined)?.state, 'disconnected');
+});
+
 test('a mailbox that cannot be reached makes the read throw (the card shows nothing, no claim)', async () => {
   const mb = new V2OwnerMailbox(async () => { throw new Error('no view'); });
   await assert.rejects(mb.read(), /no view/);

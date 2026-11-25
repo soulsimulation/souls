@@ -157,9 +157,13 @@ export function useWindowCode() {
 /** The owner card's inbox: read every 2 s while the page is shown (this also feeds the page's presence and link record), and send one message. */
 export function useSoulInbox(api: Api, soulId: string) {
   const request = useCallback<Transport>(async text => {
-    // #4178: on a world the new engine runs, the gateway mailbox (no presence claim: the mailbox gives none)
+    // #4178: on a world the new engine runs, the gateway mailbox; its `link` says whether the Soul's agent is connected
     const v2 = v2OwnerMailbox(soulId);
-    if (v2) return text === undefined ? v2.read() : v2.send(text);
+    if (v2) {
+      const inbox = await (text === undefined ? v2.read() : v2.send(text));
+      if (inbox.link) reportAgentPresence(soulId, inbox);
+      return inbox;
+    }
     let r;
     try {r = await api(`/v1/edge/owner/${encodeURIComponent(soulId)}/inbox`, text === undefined ? undefined : {text});}
     catch (e) {if (text === undefined) reportAgentPresence(soulId, null); throw e;}

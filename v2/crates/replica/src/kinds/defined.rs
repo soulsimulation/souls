@@ -13,7 +13,8 @@
 //!
 //! - `kind.invalid`: not a `souls-entry/1` record the kind loader reads (its numbered kind must load), a section it
 //!   cannot hold, or a number that is not whole;
-//! - `kind.too-large`: over [`ENTRY_MOST`] bytes as stored, or `geometry.bounds_mm` over [`BOUNDS_MOST_MM`];
+//! - `kind.too-large`: over [`ENTRY_MOST`] bytes as stored, or `geometry.bounds_mm` or a `geometry.solids_mm` value over
+//!   [`BOUNDS_MOST_MM`];
 //! - `kind.namespace`: `souls:` and `eden:`, and every namespace a boot kind uses, are not the creator's;
 //! - `kind.field-reserved`: a state field numbered like a field the engine keeps on things ([`crate::fields`]: the
 //!   owner and access marks, a tint, a schedule), which a form could then write past the engine's own checks;
@@ -183,6 +184,9 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
             "kind.too-large",
             format!("geometry.bounds_mm {big:?} is over {BOUNDS_MOST_MM} mm"),
         ));
+    }
+    if let Some(v) = entry.get("geometry").and_then(|g| g.get("solids_mm")) {
+        own_solids(v)?;
     }
     let bytes = entry.to_json().into_bytes();
     if bytes.len() > ENTRY_MOST {
@@ -373,8 +377,16 @@ pub fn effects_checked(
 /// A placed thing's solids field (N1's field 12) for a kind of this record: its walk outline, from `geometry.bounds_mm`
 /// as a boot kind's section 7 gives one ([`super::place::Geometry`]), so walkers go round it and the safety rule
 /// judges it. `None` for a record with no bounds, or a thing lower than [`super::place::FLAT`] (walked over).
+///
+/// A record whose `geometry.solids_mm` lists its own boxes (`[[cx, cz, hx, hz, yaw mdeg, y0, y1]]`, mm, the thing's
+/// frame: field 12's rows, as the import writes a seeded thing's from its model) gives those instead, so a thing with
+/// gaps (a rack frame's two posts) is walked through where a seeded one is. A list [`read`] would refuse gives none:
+/// a creator's record with one is never committed, and a content entry's are checked by its tests.
 pub fn solids_of(entry: &Json) -> Option<Value> {
     let g = entry.get("geometry")?;
+    if let Some(v) = g.get("solids_mm") {
+        return own_solids(v).ok();
+    }
     let b: Vec<i64> = g
         .get("bounds_mm")?
         .arr()?
@@ -391,6 +403,66 @@ pub fn solids_of(entry: &Json) -> Option<Value> {
     }
     .outlines()
     .solids()
+}
+
+/// `geometry.solids_mm` as field 12's rows. Each row is seven whole mm, `[cx, cz, hx, hz, yaw mdeg, y0, y1]`, its half
+/// sizes and heights none below 0 and its top above its bottom, else `kind.invalid`. That is the seven a kind gives:
+/// a seeded thing's nine (the import's tag and `abs` after them) are refused by name, not read as seven. A value
+/// past [`BOUNDS_MOST_MM`] either way is `kind.too-large`, as a bound past it is, so the µm arithmetic stays in `i64`.
+fn own_solids(v: &Json) -> Result<Value, Why> {
+    let int = |n: i64| match u64::try_from(n) {
+        Ok(u) => Value::Uint(u),
+        Err(_) => Value::Nint(n.unsigned_abs() - 1),
+    };
+    const ROW: &str = "[cx, cz, hx, hz, yaw_mdeg, y0, y1]";
+    let rows = v.arr().filter(|a| !a.is_empty()).ok_or((
+        "kind.invalid",
+        format!("geometry.solids_mm is a list of rows {ROW}"),
+    ))?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (k, r) in rows.iter().enumerate() {
+        let n: Vec<i128> = r
+            .arr()
+            .and_then(|a| {
+                a.iter()
+                    .map(|x| match x {
+                        Json::Int(i) => Some(*i),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .ok_or((
+                "kind.invalid",
+                format!("geometry.solids_mm row {k} is whole mm {ROW}"),
+            ))?;
+        if n.len() == 9 {
+            return invalid(format!(
+                "geometry.solids_mm row {k} has nine values, a seeded thing's (its tag and abs): a kind's row is {ROW}"
+            ));
+        }
+        let Ok([cx, cz, hx, hz, yaw, y0, y1]) = <[i128; 7]>::try_from(n) else {
+            return invalid(format!("geometry.solids_mm row {k} is seven values {ROW}"));
+        };
+        let row = [cx, cz, hx, hz, yaw, y0, y1];
+        if let Some(big) = row.iter().find(|v| v.abs() > i128::from(BOUNDS_MOST_MM)) {
+            return Err((
+                "kind.too-large",
+                format!("geometry.solids_mm row {k}: {big} is over {BOUNDS_MOST_MM} mm"),
+            ));
+        }
+        if hx < 0 || hz < 0 || y0 < 0 || y1 <= y0 {
+            return invalid(format!(
+                "geometry.solids_mm row {k}: half sizes and heights none below 0, the top above the bottom"
+            ));
+        }
+        // Each is within ±BOUNDS_MOST_MM, so an i64.
+        out.push(Value::Array(
+            row.iter()
+                .map(|v| int(i64::try_from(*v).unwrap_or(0)))
+                .collect(),
+        ));
+    }
+    Ok(Value::Array(out))
 }
 
 /// A placed thing's slots field (field 13, `[[n, x, y, z, yaw mdeg, capacity]]` mm, the thing's frame) for a kind of
@@ -524,4 +596,102 @@ pub fn namespaces<'a>(names: impl Iterator<Item = &'a str>) -> std::collections:
     names
         .filter_map(|n| plain(n).split_once(':').map(|(ns, _)| ns.to_owned()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn solids(text: &str) -> Result<Value, Why> {
+        own_solids(&json::parse(text).unwrap())
+    }
+
+    /// A creator's record with `solids_mm` as given, through [`read`].
+    fn record(solids_mm: &str) -> Result<Defined, Why> {
+        let text = format!(
+            r#"{{"format": "souls-entry/1", "kind": "yard:frame", "owner": "thing",
+                "geometry": {{"bounds_mm": [1219, 2438, 76], "solids_mm": {solids_mm}}}}}"#
+        );
+        read(text.as_bytes(), &|_| false)
+    }
+
+    #[test]
+    fn a_kinds_own_solids_are_field_12s_rows() {
+        let rows = solids("[[-572, 0, 38, 38, 0, 0, 2438], [572, 0, 38, 38, 0, 0, 2438]]").unwrap();
+        let u = Value::Uint;
+        assert_eq!(
+            rows,
+            Value::Array(vec![
+                Value::Array(vec![
+                    Value::Nint(571),
+                    u(0),
+                    u(38),
+                    u(38),
+                    u(0),
+                    u(0),
+                    u(2438)
+                ]),
+                Value::Array(vec![u(572), u(0), u(38), u(38), u(0), u(0), u(2438)]),
+            ])
+        );
+        // The rack frame's content entry gives its two posts, as the import gives a seeded frame's.
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../content/kinds/construction/rack_upright.json"
+        );
+        let entry = json::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(solids_of(&entry), Some(rows));
+        assert!(record("[[-572, 0, 38, 38, 0, 0, 2438], [572, 0, 38, 38, 0, 0, 2438]]").is_ok());
+    }
+
+    #[test]
+    fn a_value_past_a_kilometre_is_too_large() {
+        for row in [
+            "[[1000001, 0, 1, 1, 0, 0, 1]]",
+            "[[-1000001, 0, 1, 1, 0, 0, 1]]",
+            "[[0, 0, 1, 1, 0, 0, 1000001]]",
+        ] {
+            assert_eq!(solids(row).unwrap_err().0, "kind.too-large", "{row}");
+            assert_eq!(
+                record(row).err().map(|e| e.0),
+                Some("kind.too-large"),
+                "{row}"
+            );
+        }
+        assert!(
+            solids("[[1000000, 0, 1, 1, 0, 0, 1000000]]").is_ok(),
+            "a kilometre is the most"
+        );
+    }
+
+    #[test]
+    fn a_list_not_of_rows_is_refused_not_the_box() {
+        for bad in [
+            "7",
+            "[]",
+            "[7]",
+            "[[0, 0, 1, 1, 0, 0]]",
+            "[[0, 0, 1, 1, 0, 0, \"tall\"]]",
+            "[[0, 0, -1, 1, 0, 0, 10]]",
+            "[[0, 0, 1, 1, 0, -1, 10]]",
+            "[[0, 0, 1, 1, 0, 10, 10]]",
+        ] {
+            assert_eq!(solids(bad).unwrap_err().0, "kind.invalid", "{bad}");
+            assert_eq!(
+                record(bad).err().map(|e| e.0),
+                Some("kind.invalid"),
+                "{bad}"
+            );
+        }
+        // A seeded thing's nine (the import's tag and abs) are named, not read as seven.
+        let nine = solids("[[-572, 0, 38, 38, 0, 0, 2438, 0, 0]]").unwrap_err();
+        assert_eq!(nine.0, "kind.invalid");
+        assert!(nine.1.contains("nine values"), "{}", nine.1);
+        // A content entry with such a list gives no solids, not the bounds' box.
+        let entry = json::parse(
+            r#"{"geometry": {"bounds_mm": [1219, 2438, 76], "solids_mm": [[0, 0, 1]]}}"#,
+        )
+        .unwrap();
+        assert_eq!(solids_of(&entry), None);
+    }
 }

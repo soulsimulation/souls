@@ -20,3 +20,17 @@ export function onFollowSoulRequest(cb: (soulId: string, approved: boolean) => v
   target.addEventListener(FOLLOW_SOUL_EVENT, listener);
   return () => target.removeEventListener(FOLLOW_SOUL_EVENT, listener);
 }
+
+/** Whether a Soul's body is in this window's picture now: the approval card asks it (V2PairDialog.tsx, the Soul is
+ *  arriving…) and the Shell, which holds the world's copy, answers. False when nothing answers. */
+export const SOUL_PRESENT_EVENT = 'sim:soul-present';
+export function soulPresent(soulId: string, target: Pick<EventTarget, 'dispatchEvent'> | null = typeof window === 'undefined' ? null : window): boolean {
+  let seen = false;
+  target?.dispatchEvent(new CustomEvent(SOUL_PRESENT_EVENT, { detail: { soulId, answer: (v: boolean) => { seen = v; } } }));
+  return seen;
+}
+export function onSoulPresentQuery(present: (soulId: string) => boolean, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
+  const listener = (e: Event) => { const d = (e as CustomEvent<{ soulId?: unknown; answer?: unknown }>).detail; if (isSoulId(d?.soulId) && typeof d.answer === 'function') d.answer(present(d.soulId)); };
+  target.addEventListener(SOUL_PRESENT_EVENT, listener);
+  return () => target.removeEventListener(SOUL_PRESENT_EVENT, listener);
+}
