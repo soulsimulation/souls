@@ -1,7 +1,9 @@
 //! A Soul dances for as long as it is asked (0.135 fix): the humanoid's `dance` form, as content declares it, is one
 //! dance move repeated back to back for its `for` seconds, with no pause between moves, then a clean end; with no
-//! `for`, its default. A leave (the Soul's `stop`) ends it at the next phase boundary. Run on a fake host whose moves
-//! last the dance move's own phases (`content/moves/dance.json`).
+//! `for`, until the Soul's next act or `stop` (an hour at most). A leave (the Soul's `stop`, or its next act) ends it
+//! at the next phase boundary. The other activities a body holds (yoga, jumping jacks, push-ups, sit-ups, stargazing)
+//! are the same; a gesture (a wave, a clap, a jump, a stretch, singing, listening) is done once, or back to back for
+//! its `for`. Run on a fake host whose moves last each move's own phases (`content/moves`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -23,9 +25,9 @@ fn content(path: &str) -> Value {
     parse(&std::fs::read_to_string(f).expect("read")).expect("JSON")
 }
 
-/// The dance move's length, µs: its phases' sum.
-fn dance_us() -> Micros {
-    let m = content("moves/dance.json");
+/// A move's phases, µs (`content/moves/<mv>.json`).
+fn phases(mv: &str) -> Vec<Micros> {
+    let m = content(&format!("moves/{mv}.json"));
     m.get("phases")
         .and_then(Value::obj)
         .expect("phases")
@@ -34,7 +36,17 @@ fn dance_us() -> Micros {
             Value::Int(n) => i64::try_from(*n).expect("µs"),
             _ => panic!("a phase is µs"),
         })
-        .sum()
+        .collect()
+}
+
+/// A move's length, µs: its phases' sum.
+fn move_us(mv: &str) -> Micros {
+    phases(mv).iter().sum()
+}
+
+/// The dance move's length, µs.
+fn dance_us() -> Micros {
+    move_us("dance")
 }
 
 fn me() -> Id {
@@ -89,23 +101,44 @@ impl Host for Fake {
 /// What a run of the humanoid's `dance` with `args` did: each move's start and end, µs, how it ended and when. A
 /// leave is sent at `leave_at` when given. Moves last [`dance_us`]; their contact is the end of their start-up.
 fn dance(args: &Args, leave_at: Option<Micros>) -> (Vec<(Micros, Micros)>, String, Micros) {
-    let steps = bind_with(&content("kinds/body/humanoid.json"), "dance", args).expect("binds");
+    run("dance", "dance", args, leave_at)
+}
+
+/// The same for the humanoid's form `form`, one move `mv` (repeated or not).
+fn run(
+    form: &str,
+    mv: &str,
+    args: &Args,
+    leave_at: Option<Micros>,
+) -> (Vec<(Micros, Micros)>, String, Micros) {
+    let steps = bind_with(&content("kinds/body/humanoid.json"), form, args).expect("binds");
     let mut h = Fake::default();
     let mut r = Runner::new(steps, me(), Limits::default());
     let mut next = r.wake(&mut h, Woke::Start);
-    let (len, up) = (dance_us(), 400_000);
+    let (len, up) = (move_us(mv), phases(mv)[0]);
+    let want = format!("souls:{mv}");
     let mut moves = Vec::new();
     let mut left = leave_at;
     for _ in 0..10_000 {
         match next {
             Next::End(how) => return (moves, how.as_str().to_owned(), h.now),
             Next::Move { ref name, .. } => {
-                assert_eq!(name.as_str(), "souls:dance");
+                assert_eq!(name.as_str(), want);
                 let start = h.now;
                 moves.push((start, start + len));
                 // A leave during the move is taken at its next phase boundary: its contact, or its end.
                 if let Some(at) = left.filter(|&at| at < start + len) {
                     left = None;
+                    // After its contact: the move runs to its end, where the run is left.
+                    if at >= start + up {
+                        h.now = start + up;
+                        let _ = r.wake(&mut h, Woke::Contact);
+                        h.now = at;
+                        assert!(matches!(r.wake(&mut h, Woke::Leave), Next::Sleep));
+                        h.now = start + len;
+                        next = r.wake(&mut h, Woke::Moved(Name::new("done").expect("n")));
+                        continue;
+                    }
                     h.now = at.max(start);
                     assert!(matches!(r.wake(&mut h, Woke::Leave), Next::Sleep));
                     if h.now < start + up {
@@ -163,17 +196,69 @@ fn a_dance_for_a_minute_is_one_unbroken_dance_of_a_minute_then_done() {
 }
 
 #[test]
-fn the_same_minute_given_as_a_whole_number_and_a_dance_with_no_for_dances_its_default() {
+fn the_same_minute_given_as_a_whole_number_and_a_dance_with_no_for_goes_on_until_stopped() {
     let int = Args::from([("for".to_owned(), Arg::Int(60))]);
     assert_eq!(dance(&int, None), dance(&secs("60"), None));
-    let (moves, how, _) = dance(&Args::new(), None);
-    assert_eq!(how, "done");
+    // No `for`: the dance goes on, unbroken, until the Soul's next act or `stop` (here a leave at 90.1 s)...
+    let (moves, how, end) = dance(&Args::new(), Some(90_100_000));
+    assert_eq!(how, "left");
     assert_eq!(widest_gap(&moves), 0, "{moves:?}");
-    let last = moves.last().expect("moves").1;
+    assert!(end >= 90_100_000 && end - 90_100_000 <= 400_000, "{end}");
+    // ...and, never stopped, for the most a held move goes on: an hour, to its last whole move.
+    let (moves, how, end) = dance(&Args::new(), None);
+    assert_eq!(how, "done");
+    assert_eq!(widest_gap(&moves), 0);
     assert!(
-        (10_000_000..10_000_000 + dance_us()).contains(&last),
-        "{last}"
+        (3_600_000_000..3_600_000_000 + dance_us()).contains(&end),
+        "{end}"
     );
+}
+
+#[test]
+fn every_held_activity_goes_on_unbroken_until_stopped_or_for_its_time() {
+    for (form, mv) in [
+        ("yoga", "yoga"),
+        ("jumping_jacks", "jumping_jacks"),
+        ("push_ups", "push_ups"),
+        ("sit_ups", "sit_ups"),
+        ("stargaze", "stargaze"),
+    ] {
+        let (moves, how, end) = run(form, mv, &Args::new(), Some(120_000_000));
+        assert_eq!(how, "left", "{form}");
+        assert_eq!(widest_gap(&moves), 0, "{form}: {moves:?}");
+        assert!(moves.len() > 1 && end >= 120_000_000, "{form}: {end}");
+        let (moves, how, end) = run(form, mv, &secs("30"), None);
+        assert_eq!((how.as_str(), widest_gap(&moves)), ("done", 0), "{form}");
+        assert!(
+            (30_000_000..30_000_000 + move_us(mv)).contains(&end),
+            "{form}: {end}"
+        );
+    }
+}
+
+#[test]
+fn a_gesture_is_done_once_unless_asked_to_keep_it_up_for_a_time() {
+    for (form, mv) in [
+        ("wave", "wave"),
+        ("clap", "clap"),
+        ("jump", "jump"),
+        ("stretch", "stretch"),
+        ("sing", "sing"),
+        ("listen", "listen"),
+    ] {
+        let (moves, how, end) = run(form, mv, &Args::new(), None);
+        assert_eq!(
+            (moves.len(), how.as_str(), end),
+            (1, "done", move_us(mv)),
+            "{form}: once"
+        );
+        let (moves, how, end) = run(form, mv, &secs("20"), None);
+        assert_eq!((how.as_str(), widest_gap(&moves)), ("done", 0), "{form}");
+        assert!(
+            moves.len() > 1 && (20_000_000..20_000_000 + move_us(mv)).contains(&end),
+            "{form}: {end}"
+        );
+    }
 }
 
 #[test]

@@ -17,7 +17,7 @@ The checkout can live independently of any strategy workspace. Use repository-re
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm assets:pull                      # media from assets.eden.art; pnpm assets:check verifies without network
+pnpm assets:pull                      # media from cdn.soul.game; pnpm assets:check verifies without network
 cp .env.example .env
 pnpm build
 BRAIN_MODE=fake DEV_AUTH=1 DATA_DIR=.local/dev node --env-file=.env apps/server/src/main.ts

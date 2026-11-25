@@ -111,7 +111,7 @@ jobs:
           dir="$RUNNER_TEMP/campus"; mkdir -p "$dir"
           node --input-type=module - "$dir" <<'JS'
           import { createHash } from 'node:crypto'; import { existsSync, readFileSync, writeFileSync } from 'node:fs'; import { extname, join } from 'node:path';
-          const dir = process.argv[2], cdn = 'https://assets.eden.art', pins = JSON.parse(readFileSync('tools/test-harness/campus-assets.json', 'utf8')).files;
+          const dir = process.argv[2], cdn = 'https://cdn.soul.game', pins = JSON.parse(readFileSync('tools/test-harness/campus-assets.json', 'utf8')).files;
           const keys = existsSync('apps/web/src/cdn-manifest.json') ? readFileSync('apps/web/src/cdn-manifest.json', 'utf8').match(/assets\/[a-z0-9/_-]+\.[a-z0-9]+/g) ?? [] : [];
           for (const [name, pin] of Object.entries(pins)) {
             const urls = [...new Set([...keys.filter(k => k.includes(pin.sha256)), `assets/br/${pin.sha256.slice(0, 2)}/${pin.sha256}${extname(name)}`])].map(k => `${cdn}/${k}`);

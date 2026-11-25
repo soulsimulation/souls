@@ -8,8 +8,8 @@ import {
 
 const policy = loadChecks();
 // tools/proof/upload.mjs hosts a PR's proof on the proof CDN; proof moved off the old GitHub releases sits under legacy/.
-const VIDEO = 'https://assets.eden.art/proofs/pr-7/desktop.mp4';
-const PROOF = 'https://assets.eden.art/proofs/pr-7/proof.json';
+const VIDEO = 'https://cdn.soul.game/proofs/pr-7/desktop.mp4';
+const PROOF = 'https://cdn.soul.game/proofs/pr-7/proof.json';
 /** Where proof moved from the old GitHub release `proofs-7` keeps its asset name (pr-7.<file>). */
 const LEGACY = url => url.replace('/proofs/pr-7/', '/proofs/legacy/proofs-7/pr-7.');
 
@@ -347,16 +347,18 @@ test('proofHostProblem: the proof CDN, GitHub attachments and SIM_PROOF_PUBLIC_U
   ok('https://github.com/user-attachments/files/123456/run.log');
   ok('https://cdn.example.test/proofs/pr-7/clip.mp4', { cdn: 'https://cdn.example.test/proofs' });
   // look-alike hosts and paths
-  no('https://assets.eden.art.evil.test/proofs/pr-7/x.mp4', /not a proof host/);
-  no('https://evil.test/assets.eden.art/proofs/pr-7/x.mp4', /not a proof host/);
-  no('https://assets.eden.art/proofsx/pr-7/x.mp4', /not a proof host/);
+  no('https://cdn.soul.game.evil.test/proofs/pr-7/x.mp4', /not a proof host/);
+  no('https://evil.test/cdn.soul.game/proofs/pr-7/x.mp4', /not a proof host/);
+  no('https://cdn.soul.game/proofsx/pr-7/x.mp4', /not a proof host/);
+  no('https://cdn.soul.game/w/world/assets/x.mp4', /not a proof host/);
+  no('https://cdn.soul.game/proofs/x.mp4', /not a proof host/, 'a file straight under proofs/ is no PR\'s');
+  ok('https://assets.eden.art/proofs/pr-7/desktop.mp4');   // proof from before the move to soul.game's bucket still counts
   no('https://assets.eden.art/w/world/assets/x.mp4', /not a proof host/);
-  no('https://assets.eden.art/proofs/x.mp4', /not a proof host/, 'a file straight under proofs/ is no PR\'s');
   no('https://cdn.example.test.evil.test/proofs/x.mp4', /not a proof host/, { cdn: 'https://cdn.example.test/proofs' });
   no('https://cdn.example.test/other/x.mp4', /not a proof host/, { cdn: 'https://cdn.example.test/proofs' });
   // userinfo, ports, queries, fragments, plain http
-  no('https://user:pw@assets.eden.art/proofs/pr-7/x.mp4', /userinfo/);
-  no('https://assets.eden.art:8443/proofs/pr-7/x.mp4', /port/);
+  no('https://user:pw@cdn.soul.game/proofs/pr-7/x.mp4', /userinfo/);
+  no('https://cdn.soul.game:8443/proofs/pr-7/x.mp4', /port/);
   no(`${VIDEO}?x=1`, /query/); no(`${VIDEO}#t=3`, /fragment/);
   no(VIDEO.replace('https:', 'http:'), /not https/);
   // GitHub releases, any repository, are no longer proof hosts

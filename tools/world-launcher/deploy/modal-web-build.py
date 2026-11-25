@@ -49,7 +49,7 @@ def build(base: str = '/worlds/'):
         return result.returncode == 0
 
     env = {**os.environ, 'CI': '1', 'SIM_ASSETS_CDN_ENABLED': '1',
-           'SIM_ASSETS_CDN_ORIGIN': 'https://assets.eden.art', 'SIM_GOD_UPLOADS_CDN': '1',
+           'SIM_ASSETS_CDN_ORIGIN': 'https://cdn.soul.game', 'SIM_GOD_UPLOADS_CDN': '1',
            'SIM_GOATCOUNTER': 'simeden', 'SIM_ARRIVAL_UI_ENABLED': '0',
            'VITE_EDEN_EXPERIENCE_WORLD_IDS': 'pm-preview-eden-20261005'}
     ok = run('install', ['pnpm', 'install', '--frozen-lockfile'], env)

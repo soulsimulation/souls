@@ -15,7 +15,7 @@ import { BUCKET, SCOPED_KEY, loadCredentials, signRequest } from './publish.mjs'
 import { withNewReceipt } from './receipt.mjs';
 
 export const RECORDS = new URL('./world-scoped.json', import.meta.url);
-export const ORIGIN = 'https://sim.eden.art';
+export const ORIGIN = 'https://soul.game';
 export const LICENCE = 'world-scoped';
 const WORLD = /^(?:\/worlds)?\/w\/[a-z][a-z0-9-]{0,31}$/;
 const CLIENT = /\.(glb|bin|ktx2|png|jpe?g|webp|avif|hdr|exr)$/i;

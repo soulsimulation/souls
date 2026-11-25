@@ -293,6 +293,11 @@ impl Replica {
         })
     }
 
+    /// The nodes entry `e` changes if it applies to this state now: what [`Replica::changed_since`] names for it.
+    pub fn touches(&self, e: &Effect) -> Vec<Id> {
+        self.touched(e)
+    }
+
     /// The nodes an entry changes, read before it applies: a node created, removed (with its subtree and the far
     /// ends of its links), moved, set or sampled; a parent whose children change; a link's two ends. For T1's
     /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
@@ -342,6 +347,60 @@ impl Replica {
         }
         out.sort();
         out.dedup();
+        out
+    }
+
+    /// Every node `part`'s entries can change when they apply one at a time from this state: a superset, read now,
+    /// of what [`Replica::changed_since`] gives after them (each entry's nodes are read before that entry, from a
+    /// state the part's earlier entries changed). Besides each entry's nodes read now: for each node removed, moved
+    /// or leaving, its subtree with its links' far ends and its parent now, and each frame a node is put in. A node
+    /// an entry reads from the state as it is then (a subtree, a parent, a link's end) is one of those, or one the
+    /// part names itself. The public stream reads who was visible before a part from it (no copy of the whole tree).
+    pub fn may_change(&self, part: &Part) -> BTreeSet<Id> {
+        let mut out = BTreeSet::new();
+        let moved = |node: Id, out: &mut BTreeSet<Id>| {
+            out.extend(self.subtree_and_ends(node));
+            out.extend(self.node_parent(node));
+        };
+        for e in &part.effects {
+            out.extend(self.touched(e));
+            match &e.body {
+                Body::Changes(cs) => {
+                    for c in cs {
+                        match &c.change {
+                            Change::Create { pose, .. } => {
+                                out.insert(pose.frame.node);
+                            }
+                            Change::Remove { node } => moved(*node, &mut out),
+                            Change::Reparent { node, pose, .. } => {
+                                moved(*node, &mut out);
+                                out.insert(pose.frame.node);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Body::Transfer(TransferRec::Leave { node, pose, .. }) => {
+                    moved(*node, &mut out);
+                    out.insert(pose.frame.node);
+                }
+                // A subtree in flight now (its leave in an earlier part) lands here with its links, and a later entry
+                // can walk it (a remove, a leave, an unlink of a carried link).
+                Body::Transfer(
+                    TransferRec::Arrive { transfer, .. }
+                    | TransferRec::Return { transfer, .. }
+                    | TransferRec::Settle { transfer },
+                ) => {
+                    if let Some(f) = self.tree.flight(*transfer) {
+                        out.insert(f.root);
+                        out.insert(f.pose.frame.node);
+                        out.extend(f.nodes.keys());
+                        out.extend(f.links.values().flat_map(|l| l.ends));
+                    }
+                }
+                _ => {}
+            }
+        }
         out
     }
 

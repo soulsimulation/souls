@@ -31,9 +31,9 @@ class FakeCtx implements CtxLike {
   resume() { this.resumed++; this.state = 'running'; return Promise.resolve(); }
 }
 const INDEX: FileIndex = { version: 1, format: 'audio/mp4', seconds: 240, pieces: {
-  a: { url: 'https://assets.eden.art/assets/aa/aaaa.m4a', seconds: 240, seed: 1, bytes: 10, sha256: 'aaaa' },
-  b: { url: 'https://assets.eden.art/assets/bb/bbbb.m4a', seconds: 240, seed: 2, bytes: 10, sha256: 'bbbb' },
-  c: { url: 'https://assets.eden.art/assets/cc/cccc.m4a', seconds: 240, seed: 3, bytes: 10, sha256: 'cccc' },
+  a: { url: 'https://cdn.soul.game/assets/aa/aaaa.m4a', seconds: 240, seed: 1, bytes: 10, sha256: 'aaaa' },
+  b: { url: 'https://cdn.soul.game/assets/bb/bbbb.m4a', seconds: 240, seed: 2, bytes: 10, sha256: 'bbbb' },
+  c: { url: 'https://cdn.soul.game/assets/cc/cccc.m4a', seconds: 240, seed: 3, bytes: 10, sha256: 'cccc' },
 } };
 function rig(index: FileIndex = INDEX, rolls: number[] = []) {
   const ctx = new FakeCtx(), els: FakeEl[] = [], log: Omit<MusicEvent, 't'>[] = [];
@@ -206,13 +206,13 @@ test('play() while a piece sounds crossfades it out; has() and a missing piece',
 });
 
 test('fileUrl rebases a CDN key onto the ?musicAudio origin, flat by file name', () => {
-  assert.equal(fileUrl('https://assets.eden.art/assets/aa/aaaa.m4a', ''), 'https://assets.eden.art/assets/aa/aaaa.m4a');
-  assert.equal(fileUrl('https://assets.eden.art/assets/aa/aaaa.m4a', '?musicAudio=http://localhost:5213'), 'http://localhost:5213/aaaa.m4a');
-  assert.equal(fileUrl('https://assets.eden.art/assets/aa/aaaa.m4a', '?x=1&musicAudio=http://localhost:5213/files/'), 'http://localhost:5213/files/aaaa.m4a');
+  assert.equal(fileUrl('https://cdn.soul.game/assets/aa/aaaa.m4a', ''), 'https://cdn.soul.game/assets/aa/aaaa.m4a');
+  assert.equal(fileUrl('https://cdn.soul.game/assets/aa/aaaa.m4a', '?musicAudio=http://localhost:5213'), 'http://localhost:5213/aaaa.m4a');
+  assert.equal(fileUrl('https://cdn.soul.game/assets/aa/aaaa.m4a', '?x=1&musicAudio=http://localhost:5213/files/'), 'http://localhost:5213/files/aaaa.m4a');
 });
 
 // perf-music-seeds: several performances (seeds) per piece; each start picks one at random, a resume keeps its own
-const perf = (id: string, k: number) => ({ seed: k, url: `https://assets.eden.art/assets/${id}${k}/${id}${k}.m4a`, bytes: 10, sha256: `${id}${k}` });
+const perf = (id: string, k: number) => ({ seed: k, url: `https://cdn.soul.game/assets/${id}${k}/${id}${k}.m4a`, bytes: 10, sha256: `${id}${k}` });
 const INDEX2: FileIndex = { version: 2, format: 'audio/mp4', seconds: 240, pieces: {
   a: { seconds: 240, performances: [perf('a', 0), perf('a', 1), perf('a', 2)] },
   b: { seconds: 240, performances: [perf('b', 0), perf('b', 1), perf('b', 2)] },

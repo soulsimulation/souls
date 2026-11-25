@@ -532,7 +532,7 @@ export class WorldEntityLayer {
       m.delete(id); this.undraw(id); last.removes++; changed = true;
     }
     if (stale) { if (lit) this.lightSeq++; if (changed) this.onContextChanged?.(); return; }
-    noteUploadSizes(delta.assetBytes);   // CDN4: god uploads may come from assets.eden.art (cdn-assets.ts)
+    noteUploadSizes(delta.assetBytes);   // CDN4: god uploads may come from cdn.soul.game (cdn-assets.ts)
     // defs: new revisions by hash, then every ref to the content the snapshot names (a ref moved back to an older revision too)
     // (a def we already hold keeps its object: content is named by hash, and a full delta repeats every def)
     for (const d of delta.defs) if (!m.defs.has('sha:' + d.hash)) m.defs.set('sha:' + d.hash, d as unknown as StoredDef);

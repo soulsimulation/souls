@@ -231,7 +231,11 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
         }]
     ));
     let grab = bind_with(&e, "grab", &Args::new()).expect("binds");
-    assert_eq!(grab, vec![Step::Hand]);
+    assert_eq!(
+        &grab[1..],
+        &[Step::Hand],
+        "after the walk to its thing (#4086)"
+    );
     // A hand step with no move: its contact, the effect's instant, is its start, and the run ends done.
     let mut h = Fake {
         places: BTreeMap::from([(node(), Vec3::ZERO)]),
@@ -239,7 +243,8 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
         reads: RefCell::default(),
     };
     let mut r = Runner::new(grab, node(), Limits::default());
-    let next = r.wake(&mut h, Woke::Start);
+    assert!(matches!(r.wake(&mut h, Woke::Start), Next::Walk(_)));
+    let next = r.wake(&mut h, Woke::Walked(replica::host::Progress::Done));
     assert!(matches!(next, Next::End(n) if n.as_str() == "done"));
     assert!(r.take_effect(), "the effect's instant came");
     assert!(!r.take_effect(), "once");

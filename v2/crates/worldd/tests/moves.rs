@@ -2438,7 +2438,64 @@ fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
         "faces the thing it walked to: {o} um off at 1 m"
     );
 
-    // To the ground, a place it ends in: the facing it had is kept.
+    // To a point on the ground, a place, 3.5 m out from the stand on the side it stands, the body first turned to face
+    // away from the stand (its legs' facing, as any driver sets it): it ends facing the stand, the nearest thing there
+    // (0.136: a walk to a place faces what is there, not empty space).
+    let (_, here) = b.pose(body_id()).unwrap();
+    let (dx, dz) = (here.x - origin.x, here.z - origin.z);
+    let l = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() as i64;
+    let out = Vec3::new(
+        origin.x + dx * 3_500_000 / l,
+        0,
+        origin.z + dz * 3_500_000 / l,
+    );
+    {
+        let away = sim::controller::facing_toward(origin, here).unwrap();
+        let c = &mut b.runner.controller;
+        let shape = replica::bodies::SkillShape {
+            name: name("souls:test-turn"),
+            claims: vec![replica::bodies::Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let d = c.claim(body_id(), &shape).unwrap();
+        c.set(body_id(), d, sim::controller::Part::Facing(away))
+            .unwrap();
+        c.release(body_id(), d).unwrap();
+        let _ = b.step(b.runner.now + b.runner.tick);
+        let o = off(&b, origin);
+        assert!(
+            o > 1_900_000,
+            "turned away from the stand: {o} um off at 1 m"
+        );
+    }
+    let point = |b: &mut Bodies, i: u64, p: Vec3| {
+        b.start(vec![(
+            soul(i),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: ground,
+                    point: Some(p),
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+        .remove(0)
+        .1
+    };
+    point(&mut b, 3, out).expect("the walk out from the stand starts");
+    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    let o = off(&b, origin);
+    println!("to a point beside the stand: facing {o} um off the stand at 1 m");
+    assert!(
+        o < 20_000,
+        "a walk to a place ends facing the nearest thing there: {o} um off at 1 m"
+    );
+
+    // To a point on the open ground with nothing standing within a few steps: the facing it had is kept.
     let before = b
         .runner
         .controller
@@ -2446,17 +2503,18 @@ fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
         .unwrap()
         .pose
         .orientation;
-    walk(&mut b, 3, ground).expect("the walk to the ground starts");
-    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    point(&mut b, 4, start()).expect("the walk back to the start starts");
+    assert_eq!(run(&mut b, soul(4)), Ok(()));
+    let after = b.runner.controller.body(body_id()).unwrap().pose;
+    println!(
+        "to the open ground at {:?}: facing kept {}",
+        after.position,
+        after.orientation == before
+    );
+    // the walk itself never turns the world's body (above), so a kept facing is the one it had at the stand
     assert_eq!(
-        b.runner
-            .controller
-            .body(body_id())
-            .unwrap()
-            .pose
-            .orientation,
-        before,
-        "a walk to a place keeps its facing"
+        after.orientation, before,
+        "a walk to a place with nothing near keeps its facing"
     );
 }
 

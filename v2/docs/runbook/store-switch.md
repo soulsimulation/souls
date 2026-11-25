@@ -41,8 +41,11 @@ alone (object read and write). Creating it and the token is the release owner's 
 1. Create the R2 bucket `soul-game-worlds` and a token for it alone (object read and write).
 2. On the production host, write `/etc/souls/store-new.env` (root, mode 600) with three lines: `STORE_BASE=` the
    bucket's `s3:https://<account>.r2.cloudflarestorage.com/soul-game-worlds` (no prefix: each setting keeps its own),
-   `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` the token's. Write it with an editor, never with the key on a
-   command line.
+   `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` the token's. Never put the key on a command line. From the
+   operator's machine, `bash v2/tools/ops/store-new-env.sh plan` shows the file with its keys hidden and
+   `bash v2/tools/ops/store-new-env.sh apply` writes it on the host over ssh's stdin, from the main checkout's
+   `.local/project/team/secrets/r2-soul-game.env` (`R2_ENDPOINT`, `WORLDS_ACCESS_KEY_ID`, `WORLDS_SECRET_ACCESS_KEY`);
+   `undo` removes it.
 3. Build the copy tool from the release's commit, `cargo build --release --locked -p ops --bin store-copy` in `v2/`,
    and put it at `/var/lib/souls/oneoff/store-copy` (root, 755), its SHA-256 noted in the release record.
 4. Run the install from this release (`install.sh apply`). Production has no `souls-alarms` unit yet: this step

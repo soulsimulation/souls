@@ -28,7 +28,7 @@ pnpm --filter mars-campus-viewer dev     # Vite dev server: /studio, /lab
 pnpm test:mars                           # engine tests
 ```
 
-3D models and other media are not stored in git; they are served from assets.eden.art. The building names used in the
+3D models and other media are not stored in git; they are served from cdn.soul.game. The building names used in the
 scenes (Chiba and the other assemblies) are scene data.
 
 ## Credits

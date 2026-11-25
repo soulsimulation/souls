@@ -18,7 +18,7 @@ const data = Buffer.from('synthetic GLB test asset'), sha256 = hash(data);
 const credentials = { accessKeyId: 'SYNTHETIC_TEST_KEY', secretAccessKey: 'SYNTHETIC_TEST_SECRET' };
 const object = { key: keyFor(sha256, '.glb'), sha256, bytes: data.length, contentType: 'model/gltf-binary', cacheControl: CACHE, licence: 'CC0-1.0' };
 const objectHeaders = { 'content-length': String(data.length), 'content-type': object.contentType, 'cache-control': CACHE, 'x-amz-meta-sha256': sha256, 'x-amz-meta-licence': object.licence };
-const publicHeaders = { ...objectHeaders, 'access-control-allow-origin': 'https://sim.eden.art', etag: '"fixture"' };
+const publicHeaders = { ...objectHeaders, 'access-control-allow-origin': 'https://soul.game', etag: '"fixture"' };
 // The canonical licence evidence (SOURCES.csv) is private and lives outside the repo (EDEN_ASSETS_SOURCES).
 const NO_SOURCES = existsSync(DEFAULT_SOURCES) ? false : 'needs the private SOURCES.csv (EDEN_ASSETS_SOURCES)';
 async function fixture(fn) {
@@ -27,7 +27,7 @@ async function fixture(fn) {
   try {
     const file = join(dir, 'asset.glb'), sources = join(dir, 'SOURCES.csv');
     await writeFile(file, data); await writeFile(sources, `path,url,author,licence,date_utc,sha256,bytes,note\nfixture.glb,https://example.test/source,Fixture,CC0-1.0,2026-10-15,${sha256},${data.length},synthetic fixture\n`);
-    return await fn({ dir, file, sources, plan: { version: 1, bucket: 'eden-assets', sources, objects: [{ ...object, file }] } });
+    return await fn({ dir, file, sources, plan: { version: 1, bucket: 'soul-game-assets', sources, objects: [{ ...object, file }] } });
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
@@ -166,7 +166,7 @@ test('hash aliases carry the bytes the origin route sends: a rendition under its
 
 test('SigV4 signs immutable precondition, payload, date, target and metadata without leaking secret', () => {
   const signed = signRequest({ method: 'PUT', key: object.key, credentials, body: data, now: new Date('2026-10-15T00:01:02Z'), headers: { 'if-none-match': '*', 'content-type': object.contentType, 'cache-control': CACHE, 'x-amz-meta-sha256': sha256 } });
-  assert.equal(signed.url, ENDPOINT + '/eden-assets/' + object.key);
+  assert.equal(signed.url, ENDPOINT + '/soul-game-assets/' + object.key);
   assert.equal(signed.headers['x-amz-date'], '20261015T000102Z'); assert.equal(signed.headers['x-amz-content-sha256'], sha256);
   assert.match(signed.headers.authorization, /Credential=SYNTHETIC_TEST_KEY\/20261015\/auto\/s3\/aws4_request/);
   assert.match(signed.headers.authorization, /SignedHeaders=cache-control;content-type;host;if-none-match;x-amz-content-sha256;x-amz-date;x-amz-meta-sha256/);
@@ -215,7 +215,7 @@ test('publish uses canonical sources despite a forged or absent plan.sources and
   const headers = { ...objectHeaders, 'content-length': String(d.bytes), 'x-amz-meta-sha256': d.sha256 };
   const objects = [{ ...object, key: keyFor(d.sha256, '.glb'), sha256: d.sha256, bytes: d.bytes, file }];
   for (const sourceField of [{ sources }, {}]) {
-    const result = await publish({ version: 1, bucket: 'eden-assets', objects, ...sourceField }, { credentials, fetcher: async (_, opts) => new Response(opts.method === 'HEAD' ? null : body, { headers }) });
+    const result = await publish({ version: 1, bucket: 'soul-game-assets', objects, ...sourceField }, { credentials, fetcher: async (_, opts) => new Response(opts.method === 'HEAD' ? null : body, { headers }) });
     assert.equal(result.sources, resolve(DEFAULT_SOURCES));
     assert.equal(result.sourcesSha256, hash(await readFile(DEFAULT_SOURCES)));
   }
@@ -271,7 +271,7 @@ test('public checker proves strict MISS then HIT with Age, app CORS and both byt
   const report = await verify('https://assets.example.test', { objects: [object] }, { wait: async () => {}, fetcher: async (_, opts) => {
     requests.push(opts); return new Response(data, { headers: { ...publicHeaders, 'cf-cache-status': requests.length === 1 ? 'MISS' : 'HIT', ...(requests.length > 1 ? { age: '1' } : {}) } });
   } });
-  assert.equal(report.ok, true); assert.equal(requests.length, 2); assert.ok(requests.every(o => o.method === 'GET' && o.headers.Origin === 'https://sim.eden.art'));
+  assert.equal(report.ok, true); assert.equal(requests.length, 2); assert.ok(requests.every(o => o.method === 'GET' && o.headers.Origin === 'https://soul.game'));
 });
 
 test('public checker fails warm-only MISS proof, absent cache/CORS/Age, and corrupt bytes', async () => {

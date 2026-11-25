@@ -9,7 +9,7 @@ import { FakeR2 } from './fake-r2.mjs';
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const GLB = new TextEncoder().encode('glTF fake upload bytes ' + 'x'.repeat(5000));
 const SHA = sha(GLB);
-const url = (path) => `https://assets.eden.art${path}`;
+const url = (path) => `https://cdn.soul.game${path}`;
 const PATH = `/w/bench-hamlet/assets/${SHA}.glb`;
 
 class FakeCache {
@@ -33,11 +33,11 @@ function origin(routes) {
 function rig(routes = {}, r2 = {}) {
   const env = { ASSETS: new FakeR2(r2) }, o = origin(routes), cache = new FakeCache(), waits = [];
   const ctx = { waitUntil: (p) => waits.push(p) };
-  const call = (path, init = {}) => handle(new Request(url(path), { ...init, headers: { origin: 'https://sim.eden.art', ...init.headers } }), env, ctx, { fetch: o.fetch, caches: cache });
+  const call = (path, init = {}) => handle(new Request(url(path), { ...init, headers: { origin: 'https://soul.game', ...init.headers } }), env, ctx, { fetch: o.fetch, caches: cache });
   const settle = () => Promise.all(waits.splice(0));
   return { env, o, cache, call, settle };
 }
-const SRC = `https://souls.game/w/bench-hamlet/assets/${SHA}.glb`;
+const SRC = `https://soul.game/w/bench-hamlet/assets/${SHA}.glb`;
 const body = async (r) => new Uint8Array(await r.arrayBuffer());
 
 test('parsePath: only /w/<slug>/assets/<sha>.<ext>, strict shapes', () => {
@@ -58,7 +58,7 @@ test('miss with a good hash: pulls the god world route, returns the bytes, store
   assert.equal(r.headers.get('x-eden-cdn'), 'miss');
   assert.equal(r.headers.get('content-type'), 'model/gltf-binary');
   assert.equal(r.headers.get('cache-control'), IMMUTABLE);
-  assert.equal(r.headers.get('access-control-allow-origin'), 'https://sim.eden.art');
+  assert.equal(r.headers.get('access-control-allow-origin'), 'https://soul.game');
   assert.equal(r.headers.get('etag'), `"${SHA}"`);
   assert.equal(r.headers.get('content-length'), String(GLB.byteLength));
   assert.deepEqual(await body(r), GLB);
@@ -92,7 +92,7 @@ test('hit: served from R2 (no origin request), then from the edge cache (no R2 r
   const r2 = await call2(PATH);
   assert.equal(r2.status, 200); assert.equal(r2.headers.get('x-eden-cdn'), 'hit');
   assert.equal(r2.headers.get('cache-control'), IMMUTABLE); assert.equal(r2.headers.get('content-type'), 'model/gltf-binary');
-  assert.equal(r2.headers.get('access-control-allow-origin'), 'https://sim.eden.art');
+  assert.equal(r2.headers.get('access-control-allow-origin'), 'https://soul.game');
   assert.deepEqual(await body(r2), GLB); await settle2();
   assert.equal(o2.calls.length, 0); assert.equal(env2.ASSETS.gets, 1); assert.equal(c2.map.size, 1);
   const r3 = await call2(PATH);
@@ -164,7 +164,7 @@ test('HEAD never pulls; OPTIONS answers CORS; If-None-Match gives 304', async ()
   const h2 = await call(PATH, { method: 'HEAD' });
   assert.equal(h2.status, 200); assert.equal(h2.headers.get('content-length'), String(GLB.byteLength)); assert.equal(h2.headers.get('x-eden-cdn'), 'hit');
   const opt = await call(PATH, { method: 'OPTIONS' });
-  assert.equal(opt.status, 204); assert.equal(opt.headers.get('access-control-allow-origin'), 'https://sim.eden.art');
+  assert.equal(opt.status, 204); assert.equal(opt.headers.get('access-control-allow-origin'), 'https://soul.game');
   const nm = await call(PATH, { headers: { 'if-none-match': `W/"${SHA}"` } });
   assert.equal(nm.status, 304); assert.equal(env.ASSETS.puts.length, 1);
 });
@@ -252,12 +252,12 @@ test('CORS is per request across miss, R2, cached old responses, HEAD, OPTIONS, 
 test('old slug cache keys remain unchanged and misses use root launcher aliases', async () => {
   for (const slug of ['eden-2026', 'my-mars-college-2026-3', 'mars-2027', 'eden', 'mars-college-2026', 'mars-college-2027']) {
     const path = `/w/${slug}/assets/${SHA}.glb`;
-    const { call, env, o } = rig({ [`https://souls.game${path}`]: { body: GLB } });
+    const { call, env, o } = rig({ [`https://soul.game${path}`]: { body: GLB } });
     const r = await call(path, { headers: { origin: 'https://souls.game' } });
     assert.equal(r.status, 200);
     assert.deepEqual(await body(r), GLB);
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://souls.game');
-    assert.equal(o.calls[0].url, `https://souls.game${path}`);
+    assert.equal(o.calls[0].url, `https://soul.game${path}`);
     assert.equal(env.ASSETS.puts[0].key, path.slice(1));
   }
 });

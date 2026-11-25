@@ -18,7 +18,7 @@ export function checkHeaders(response, object, { hit = false } = {}) {
   if (response.status !== 200) errors.push(`status ${response.status}, expected 200`);
   if ((h.get('content-type') ?? '').split(';')[0].trim() !== object.contentType) errors.push('wrong Content-Type');
   if (h.get('cache-control') !== CACHE) errors.push('missing immutable one-year cache policy');
-  if (!['https://sim.eden.art', '*'].includes(h.get('access-control-allow-origin'))) errors.push('CORS does not allow https://sim.eden.art');
+  if (!['https://soul.game', '*'].includes(h.get('access-control-allow-origin'))) errors.push('CORS does not allow https://soul.game');
   if (!h.get('etag')) errors.push('missing ETag');
   if (hit && h.get('cf-cache-status') !== 'HIT') errors.push(`cache ${h.get('cf-cache-status') ?? 'missing'}; expected HIT`);
   if (hit && !/^\d+$/.test(h.get('age') ?? '')) errors.push('missing numeric Age on cache HIT');
@@ -42,7 +42,7 @@ export async function verify(origin, plan, { sample = 3, key, fetcher = fetch, a
     const br = object.encoding === 'br' || isBrKey(object.key), modes = br ? ['br', 'br', CHROME, 'identity', 'gzip'] : ['identity', 'identity'];
     // GET primes the edge. HEAD alone need not populate a CDN's body cache.
     for (const [i, encoding] of modes.entries()) {
-      const response = await fetcher(url, { method: 'GET', headers: { Origin: 'https://sim.eden.art', 'Accept-Encoding': encoding }, redirect: 'error', signal: AbortSignal.timeout(180_000) });
+      const response = await fetcher(url, { method: 'GET', headers: { Origin: 'https://soul.game', 'Accept-Encoding': encoding }, redirect: 'error', signal: AbortSignal.timeout(180_000) });
       const hash = createHash('sha256'); let bytes = 0;
       if (response.body) for await (const chunk of response.body) { bytes += chunk.length; hash.update(chunk); }
       const downloadedSha256 = hash.digest('hex'), sent = response.headers.get('content-encoding'), length = response.headers.get('content-length');
