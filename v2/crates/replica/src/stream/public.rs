@@ -1156,10 +1156,10 @@ impl PublicPlayer {
     /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
     /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]
     /// works it out from the two whole states. A row of a node not live here is a node made (T-late) only when its id
-    /// is in `made`, the nodes the caller's cut made, with no links or timers on them; any other is a node that comes
-    /// back (out of a closed container, #3948) with rows this delta does not hold. None when it cannot be played in
-    /// place (such a row, a gone node, a frame walk `validate` would refuse, no new version); the caller then works it
-    /// out whole.
+    /// is in `made`, the nodes the caller's cut made, any link or timer on them among `links` and `timers` (set in the
+    /// same cut: an activity offered, its node and its member link); any other is a node that comes back (out of a
+    /// closed container, #3948) with rows this delta does not hold. None when it cannot be played in place (such a
+    /// row, a gone node, a frame walk `validate` would refuse, no new version); the caller then works it out whole.
     pub fn row_delta(
         &self,
         next: u64,
