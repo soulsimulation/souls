@@ -38,6 +38,10 @@ test('listing order and defaults on the live roster of 2026-10-21: bench worlds 
   assert.equal(isUnlisted({ slug: 'bench-hamlet', name: 'Bench hamlet (scratch)', unlisted: false }), false, 'an explicit flag wins');
   assert.equal(isUnlisted({ slug: 'garden', name: 'Garden', unlisted: true }), true);
   assert.equal(isUnlisted({ slug: 'garden', name: 'Garden' }), false);
+  // first day, 25 Nov: a local stack's `dev` world and test worlds are never on the public list unless someone lists them
+  for (const slug of ['dev', 'dev-2', 'test', 'test-rack-bay']) assert.equal(isUnlisted({ slug, name: slug }), true, slug);
+  for (const slug of ['devon', 'testament', 'my-dev']) assert.equal(isUnlisted({ slug, name: slug }), false, slug);
+  assert.equal(isUnlisted({ slug: 'dev', name: 'dev', unlisted: false }), false, 'an explicit flag wins');
 });
 
 test('unlisted worlds (QA2 F4): bench slugs and "(scratch)" names stay off the public list but answer at their URL; owner or operator flips it; flagships lead', async () => {

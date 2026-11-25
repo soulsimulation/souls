@@ -15,6 +15,11 @@
 .lh-menu button { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; text-align: left; font-size: 14px; background: none; border: 0; border-radius: 8px; color: inherit; cursor: pointer; }
 .lh-menu button:hover { background: var(--bg); }
 
+/* First day: what Souls is, above the worlds */
+.lh-intro { max-width: 720px; margin: 8px 0 28px; padding: 0; border: 0; background: none; border-radius: 0; }
+.lh-lede { margin: 0 0 8px; font-size: 20px; line-height: 1.4; color: var(--fg); }
+.lh-intro .dim { margin: 0; font-size: 15px; }
+
 /* The world grid: each card is its picture, with the name and one status line over it */
 .lh-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .lh-card { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: var(--line); color: #fff; text-decoration: none; }
