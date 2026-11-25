@@ -311,6 +311,63 @@ fn onto(frame: [i64; 4], p: [i64; 3]) -> R<[i64; 4]> {
     ])
 }
 
+/// Each entry's state fields a captured look seeds (#4784): `(name, n, type, max)` for its bool and int fields
+/// numbered in the entries' block (28 up: below it the import's own fields share numbers), keyed by the kind.
+type StateDefs = BTreeMap<String, Vec<(String, u64, String, Option<i64>)>>;
+fn entry_states(entries: &[(String, String)]) -> StateDefs {
+    use replica::rules::json::Value as J;
+    let mut out = StateDefs::new();
+    for (_, text) in entries {
+        let Ok(e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        let (Some(kind), Some(J::Obj(fs))) = (e.get("kind").and_then(J::str), e.get("state"))
+        else {
+            continue;
+        };
+        let int = |v: Option<&J>| match v {
+            Some(J::Int(n)) => i64::try_from(*n).ok(),
+            _ => None,
+        };
+        let defs = fs
+            .iter()
+            .filter_map(|(name, f)| {
+                let n = u64::try_from(int(f.get("n"))?).ok().filter(|n| *n >= 28)?;
+                let ty = f
+                    .get("type")
+                    .and_then(J::str)
+                    .filter(|t| matches!(*t, "bool" | "int"))?;
+                Some((name.clone(), n, ty.to_owned(), int(f.get("max"))))
+            })
+            .collect::<Vec<_>>();
+        if !defs.is_empty() {
+            out.insert(kind.to_owned(), defs);
+        }
+    }
+    out
+}
+
+/// A captured state value (today's entity state over its def's defaults: the facts' `state`) as the entry's field of
+/// that meaning: the same name; a burning or running bool by either name (`on`, `lit`); a lamp's `level` from `on`
+/// (on is the entry's top level, off 0). None when the capture says nothing of it.
+fn captured(state: &Json, name: &str, ty: &str, max: Option<i64>) -> Option<Value> {
+    const POWER: [&str; 4] = ["on", "lit", "playing", "running"];
+    let same = state.get(name);
+    let power = || POWER.iter().find_map(|k| state.get(k).and_then(Json::bool));
+    match ty {
+        "bool" => same
+            .and_then(Json::bool)
+            .or_else(|| if POWER.contains(&name) { power() } else { None })
+            .map(|b| Value::Uint(u64::from(b))),
+        "int" => match same.and_then(Json::int) {
+            Some(v) => Some(i(v)),
+            None if name == "level" => power().map(|on| i(if on { max.unwrap_or(1) } else { 0 })),
+            None => None,
+        },
+        _ => None,
+    }
+}
+
 /// Each entry's points (`points.*.at_mm`, its thing's frame), keyed by the kind the entry is for.
 fn entry_points(entries: &[(String, String)]) -> BTreeMap<String, Vec<[i64; 3]>> {
     use replica::rules::json::Value as J;
@@ -878,6 +935,7 @@ fn without_bodies(all: &[Json]) -> R<Residents> {
 /// Those kinds' names (their hashes) follow their entries, so a world seeded with such entries before is seeded again.
 pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
     let joining = joining_slots(entries);
+    let states = entry_states(entries);
     let f = json::parse(text)?;
     if s(&f, "format")? != "souls/import-eden/1" {
         return Err("not a souls/import-eden/1 file".into());
@@ -1130,6 +1188,15 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         }
         if let Some(p) = t.get("params").and_then(Json::str) {
             fields.insert(F_PARAMS, Value::Bytes(p.as_bytes().to_vec()));
+        }
+        // #4784: the world starts as today's page drew it (a lamp captured on is on, a fire burning is lit): each state
+        // field its entry has, from the captured state, where it says something of it
+        if let (Some(st), Some(defs)) = (t.get("state"), states.get(entry_name(&kind, &fields))) {
+            for (name, n, ty, max) in defs {
+                if let Some(v) = captured(st, name, ty, *max) {
+                    fields.entry(*n).or_insert(v);
+                }
+            }
         }
         if let Some(d) = t.get("door") {
             fields.insert(
@@ -2338,4 +2405,56 @@ fn slots_on(
             }),
     );
     found.len()
+}
+
+#[cfg(test)]
+mod captured_state {
+    use super::*;
+
+    /// #4784: a captured look seeds the entry's fields of that meaning (a fire burning is lit, a lamp on is at its top
+    /// level), and nothing below the entries' block.
+    #[test]
+    fn the_capture_seeds_the_entry_fields_of_its_meaning() {
+        let entry = |k: &str, t: &str| ("x".to_owned(), format!(r#"{{"kind":"{k}","state":{t}}}"#));
+        let entries = [
+            entry("eden:campfire", r#"{"lit":{"n":28,"type":"bool"}}"#),
+            entry(
+                "eden:floor_lamp",
+                r#"{"level":{"n":28,"type":"int","max":3}}"#,
+            ),
+            entry("eden:door", r#"{"open":{"n":6,"type":"bool"}}"#),
+        ];
+        let st = entry_states(&entries);
+        assert!(
+            !st.contains_key("eden:door"),
+            "below the entries' block: the import's own fields"
+        );
+        let seed = |kind: &str, capture: &str| {
+            let j = json::parse(capture).unwrap();
+            st[kind]
+                .iter()
+                .map(|(n, f, t, max)| (*f, captured(&j, n, t, *max)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            seed("eden:campfire", r#"{"on":true}"#),
+            vec![(28, Some(Value::Uint(1)))]
+        );
+        assert_eq!(
+            seed("eden:campfire", r#"{"lit":false}"#),
+            vec![(28, Some(Value::Uint(0)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"on":true}"#),
+            vec![(28, Some(Value::Uint(3)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"on":false}"#),
+            vec![(28, Some(Value::Uint(0)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"broken":false}"#),
+            vec![(28, None)]
+        );
+    }
 }
