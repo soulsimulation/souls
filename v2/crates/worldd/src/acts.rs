@@ -1046,29 +1046,27 @@ impl Geometry for Sight<'_> {
         // toward it may have no place within an arm (#1960): then the walk aims at the point itself, and the search
         // for a place to stand, from the body, finds the body's side.
         // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
-        // doorway (#3688).
+        // doorway (#3688). Whether a body may stand by the aim is the planner's to find (a route search), never the
+        // clock's: the walk waits for its answer as any walk does.
         let door = self
             .approaches
             .contains(&body)
             .then(|| self.walks.get(&body).map(|w| w.1))
             .flatten();
-        let (node, at) = if self.approaches.contains(&body) {
+        let (node, at, aim) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
                     let aim = skills::form_runner::short_of(p, me.pose.position, short);
-                    match v.stand_near_door(floor, aim, reach, Some(me), door) {
-                        Some(_) => (floor, aim),
-                        None => (floor, p),
-                    }
+                    (floor, p, Some(aim))
                 })
             })
             .flatten()
-            .unwrap_or((node, at))
+            .unwrap_or((node, at, None))
         } else {
-            (node, at)
+            (node, at, None)
         };
         let mut planning = self.planning.borrow_mut();
         let query = FormQuery::Walk {
@@ -1077,6 +1075,7 @@ impl Geometry for Sight<'_> {
             reach,
             door,
             ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
+            aim,
         };
         match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(walk)) => {

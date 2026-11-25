@@ -55,9 +55,10 @@
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
 //!     still while is on the page within the usual lag rather than waiting for the next record. With nothing open, the
 //!     pointer says the world is still up to world-now less [`SETTLE_US`] (`quiet(until)`), every [`QUIET_EVERY_US`] of
-//!     world time; a page plays a still world to there, and no empty part is ever written (rule 3). A record that
-//!     reaches the writer later than [`SETTLE_US`] after its world time is still written, in its own stretch; a page
-//!     that has drawn past it has missed only its motion, never its state.
+//!     world time (the public stream's every [`PUBLIC_QUIET_EVERY_US`]); a page plays a still world to there, and no
+//!     empty part is ever written (rule 3). A record that reaches the writer later than [`SETTLE_US`] after its world
+//!     time is still written, in its own stretch; a page that has drawn past it has missed only its motion, never its
+//!     state.
 //! 12. **A hiding place's contents stay out** (#3948). The public writer opened with the world's closed kinds
 //!     ([`PublicWriter::open_hiding`]) leaves what a closed container holds out of its state and baselines
 //!     ([`crate::closed::Closed::hides`]) and its entries ([`crate::closed::Inside`], the hub's rule), until it is
@@ -234,6 +235,11 @@ enum Start {
 pub const SETTLE_US: Micros = 100_000;
 /// How often, in world time, a still world's pointer moves its "quiet until" on (rule 11).
 pub const QUIET_EVERY_US: Micros = stream::PERIOD_US;
+/// The same for the public stream, the pointer every page polls. A record that arrives holds it until its stretch is
+/// cut, so this step adds to the longest wait a page sees between two writes: kept to [`SETTLE_US`]. Each write is
+/// synced; before this the writer wrote it at each idle (every 20 ms), and on a busy disk that storm of syncs held
+/// back the parts after it (the page held, then skipped, after each activity accept).
+pub const PUBLIC_QUIET_EVERY_US: Micros = SETTLE_US;
 /// Parts in one public generation before the next baseline (#3825): 2 minutes of a busy world at 2 parts a second,
 /// so a new viewer fetches the baseline and at most 2 minutes of parts.
 pub const GENERATION_PARTS: u64 = 240;
@@ -1188,6 +1194,9 @@ pub struct PublicWriter<S> {
     still_at: Option<(u64, u64, u64)>,
     /// While [`PublicWriter::sleep`] writes its pointer: the next due change's world time, or none (#2731).
     asleep: Option<Option<Micros>>,
+    /// The world time a still world's pointer was last brought up to (its quiet time, or the newest part's end), so
+    /// [`PublicWriter::idle`] writes it every [`PUBLIC_QUIET_EVERY_US`] (rule 11), not each 20 ms.
+    quiet_from: Option<Micros>,
     /// The world's closed kinds (#3948) and the containers and things it follows them by, for the entries.
     closed_kinds: Closed,
     inside: Inside,
@@ -1322,6 +1331,40 @@ fn id_of(header: &Header) -> String {
 /// Writes `bytes` under `path` once (rule 4): whole and synced under `<name>.tmp`, then linked to its name, which fails
 /// if the name exists. A writer killed mid-write leaves only its `.tmp`, which the next write of that name replaces; a
 /// file under a final name is always whole. A name already written must hold the same bytes.
+/// A write the public writer runs beside its own on a scoped thread, or here, in turn, when the OS makes no thread:
+/// a refused thread costs only the overlap, as the writes were before, never the stream (`Scope::spawn` would
+/// panic the writer's thread outside its refusals, and its health would still say serving).
+enum Beside<'scope, T> {
+    Thread(std::thread::ScopedJoinHandle<'scope, R<T>>),
+    Here(R<T>),
+}
+
+fn beside<'scope, T: Send + 'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    write: impl Fn() -> R<T> + Send + Copy + 'scope,
+) -> Beside<'scope, T> {
+    #[cfg(test)]
+    if tests::NO_THREADS.get() {
+        return Beside::Here(write());
+    }
+    match std::thread::Builder::new().spawn_scoped(s, write) {
+        Ok(h) => Beside::Thread(h),
+        Err(_) => Beside::Here(write()),
+    }
+}
+
+impl<T> Beside<'_, T> {
+    /// The write's outcome; a panic on its thread is a refused write (`stream-write`).
+    fn join(self, panicked: &'static str) -> R<T> {
+        match self {
+            Beside::Thread(h) => h
+                .join()
+                .unwrap_or_else(|_| Err(fault("stream-write", panicked))),
+            Beside::Here(done) => done,
+        }
+    }
+}
+
 fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
@@ -1507,19 +1550,60 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         Ok(hash)
     }
+    /// [`PublicWriter::put`] of each of `objects`. To the spool all at once, each on its own thread (the first on this
+    /// one), as no object waits on another's sync; to a store one by one.
+    fn put_all(&self, objects: &[&[u8]]) -> R<()> {
+        let (Some(spool), Some((first, rest))) = (&self.spool, objects.split_first()) else {
+            for o in objects {
+                self.put(o)?;
+            }
+            return Ok(());
+        };
+        let prefix = &self.prefix;
+        let key = |b: &[u8]| {
+            format!(
+                "{prefix}objects/{}",
+                replica::encode::to_hex(&replica::ids::sha256(b))
+            )
+        };
+        // The same bytes twice are one object, written once (two writers would share its temporary name).
+        let mut rest: Vec<&[u8]> = rest.iter().copied().filter(|o| o != first).collect();
+        rest.sort_unstable();
+        rest.dedup();
+        std::thread::scope(|s| {
+            let others: Vec<_> = rest
+                .iter()
+                .map(|o| beside(s, move || spool.object(&key(o), o)))
+                .collect();
+            let mut done = spool.object(&key(first), first);
+            for h in others {
+                done = done.and(h.join("an object's writer panicked"));
+            }
+            done
+        })
+    }
     fn get(&self, hash: &[u8]) -> R<Vec<u8>> {
         if hash.len() != 32 {
             return Err(fault("stream-recovery", "invalid object hash"));
         }
         let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(hash));
-        // R15: what is not yet backed up is read from the spool.
+        // R15: read from this disk, the spool or its copy of what the store holds; the store only for what it lacks.
         let bytes = match self.spool.as_ref().and_then(|s| s.read(&key)) {
             Some(bytes) => bytes,
             None => {
-                self.store
+                let bytes = self
+                    .store
                     .get(&key)?
                     .ok_or_else(|| fault("stream-recovery-missing", "required immutable object"))?
-                    .bytes
+                    .bytes;
+                // Read from the store once (a chain this machine did not write): kept on this disk, where the next
+                // restart reads it, once it is the bytes its name says.
+                if let Some(spool) = &self.spool
+                    && replica::ids::sha256(&bytes).as_slice() == hash
+                {
+                    spool.keep(&key, &bytes);
+                }
+                bytes
             }
         };
         if replica::ids::sha256(&bytes).as_slice() != hash {
@@ -1631,6 +1715,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             refs: None,
             still_at: None,
             asleep: None,
+            quiet_from: None,
             closed_kinds: closed,
             inside,
             hides: true,
@@ -3258,9 +3343,16 @@ impl<S: ObjectStore> PublicWriter<S> {
                 && !self.moved.iter().any(|id| self.hidden(tree, *id));
             // A node made with links or timers already on it (a link made to its id before it was a node is attached
             // to it when it is made, `Tree` rule 7) makes the cut whole: those rows are not in this cut's, and whether
-            // they are public changes with it (T-late review).
+            // they are public changes with it (T-late review). Links and timers set in this cut are in its rows (an
+            // activity offered: its node and the asker's member link, in one entry), so they leave it by rows.
             let bare = self.made.iter().all(|id| {
-                tree.links_at(*id).is_empty() && !tree.timers().values().any(|t| t.node == *id)
+                tree.links_at(*id)
+                    .iter()
+                    .all(|e| self.links.contains(&e.link))
+                    && tree
+                        .timers()
+                        .iter()
+                        .all(|(timer, t)| t.node != *id || self.timers.contains(timer))
             });
             // A timer's row as the public state holds it: of a public live owner; none once cleared. One whose
             // owner is not live here (in flight) is left to the whole cut.
@@ -3511,30 +3603,43 @@ impl<S: ObjectStore> PublicWriter<S> {
             ),
         ])))?;
         lap.mark(3);
-        let chunk_hash = self.put(&chunk)?;
-        let part_hash = self.put(&bytes)?;
-        lap.mark(4);
         let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
         lap.mark(5);
-        let text_hash = self.put(&text)?;
-        lap.mark(4);
-        self.player.play(&bytes)?;
-        lap.mark(6);
+        let hash = |b: &[u8]| replica::ids::sha256(b).to_vec();
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
-            (3, Value::Bytes(chunk_hash)),
+            (3, Value::Bytes(hash(&chunk))),
             (4, Value::Uint(number)),
-            (5, Value::Bytes(part_hash)),
-            (6, Value::Bytes(text_hash)),
+            (5, Value::Bytes(hash(&bytes))),
+            (6, Value::Bytes(hash(&text))),
             (7, Value::Uint(self.cursor)),
         ])))?;
+        // The part's objects are named by their hashes and wait on nothing but their own bytes: each is written and
+        // synced beside the others, so a part waits on one sync there, not four (on a busy disk the writer fell a
+        // part behind each period, and the page held after each activity accept).
+        self.put_all(&[&chunk, &bytes, &text, &manifest])?;
+        lap.mark(4);
+        self.player.play(&bytes)?;
+        lap.mark(6);
         self.commit(&manifest)?;
         lap.mark(7);
         // Commit exact recovery bytes (to the spool, R15, or else the store) before exposing local immutable files. A
-        // killed publication replays the same committed bytes, never a new cut at an orphan file's address.
-        immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
-        immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
+        // killed publication replays the same committed bytes, never a new cut at an orphan file's address. The two
+        // files are written side by side, as the objects are.
+        let (part_file, text_file) = (
+            self.generation_dir().join(number.to_string()),
+            self.generation_dir().join(format!("{number}.text")),
+        );
+        let (part_written, text_written) = std::thread::scope(|s| {
+            let text = beside(s, || immutable(&text_file, &text));
+            (
+                immutable(&part_file, &bytes),
+                text.join("the text file's writer panicked"),
+            )
+        });
+        part_written?;
+        text_written?;
         lap.mark(8);
         self.last_to = Some(sp.to);
         if let Some(began) = began {
@@ -3550,7 +3655,6 @@ impl<S: ObjectStore> PublicWriter<S> {
             );
         }
         self.clear_pending();
-        self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
             self.rollover()?;
         }
@@ -3565,7 +3669,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         lap.mark(9);
         self.pointer(None)?;
+        self.quiet_from = self.last_to;
         lap.mark(10);
+        // Old generations' deletes once the part is out: they never hold it back from the page.
+        self.delete_some(DELETES_PER_PART);
+        lap.mark(9);
         prof::count(0, 1, 0);
         Ok(())
     }
@@ -3652,6 +3760,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         if !self.records.is_empty() {
             return Ok(false);
         }
+        // Every PUBLIC_QUIET_EVERY_US of world time (rule 11); a sleeping world's pointer is written when asked for.
+        let quiet = world.saturating_sub(SETTLE_US);
+        if self.asleep.is_none()
+            && self
+                .quiet_from
+                .is_some_and(|q| quiet < q.saturating_add(PUBLIC_QUIET_EVERY_US))
+        {
+            return Ok(false);
+        }
         let mut lap = prof::Lap::start();
         let at = (
             self.canonical.version(),
@@ -3673,7 +3790,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.still_at = Some(at);
         }
         lap.mark(11);
-        self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
+        self.pointer(Some(quiet))?;
+        self.quiet_from = Some(quiet);
         lap.mark(12);
         Ok(true)
     }

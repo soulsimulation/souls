@@ -8,6 +8,7 @@
 #   bash install.sh check                       the test: nothing it writes is today's system's (a repo checkout)
 #   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
 #                                               puts a bundle together (the workflow)
+#   bash install.sh origin <out>                the origin's files alone (release.sh bundle's origin.tar)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
@@ -437,15 +438,22 @@ check() {
   return $bad
 }
 
+# The origin's files, as the install and a release's move (v2/tools/ops/release/release.sh) put them in $LIB/origin.
+origin_files() {
+  local out=${1:?origin <out>}
+  rm -rf "$out"
+  mkdir -p "$out"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/"
+  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/"
+}
+
 bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
   mkdir -p "$out/bin" "$out/units"
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
-  rm -rf "$out/origin" "$out/web"
-  mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
-  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
+  rm -rf "$out/web"
+  origin_files "$out/origin"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
   cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
@@ -510,8 +518,9 @@ main() {
       ;;
     check) check ;;
     bundle) bundle "$@" ;;
+    origin) origin_files "$@" ;;
     remote) remote "$@" ;;
-    *) die "plan|apply|uninstall|check|bundle|remote (see the top of $0)" ;;
+    *) die "plan|apply|uninstall|check|bundle|origin|remote (see the top of $0)" ;;
   esac
 }
 

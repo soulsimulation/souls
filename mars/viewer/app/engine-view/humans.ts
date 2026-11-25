@@ -44,6 +44,7 @@ import { createRig, libAction, type Rig, type Template } from './people.ts';
 import { CLIP_BODY, CLIP_FADE, IDLE_VARIANTS, SPRINT_SPEED, clipTime, libraryPick, pickClip, type LibraryPick } from './clip-library.ts';
 import {HumanActorAppearance} from './human-appearance.ts';
 import {applyHumanFinish} from './content/details/human-presets/finish.ts';
+import {BODY_DRAW,mergeRigBody,setBodyMerged} from './body-merge.ts';
 import { disposeSkeletons } from '../../lib/three-resources.ts';
 import { seatHeight } from './fixtures.ts';
 import {blendWaterFoot} from './water-foot-blend.ts';
@@ -64,7 +65,7 @@ import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shor
 import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
-import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import { ACTIVITY_OVERLAYS, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
@@ -192,6 +193,8 @@ type View = {
   waveRestAge?: number;
   prevBase?: string;
   prevDuration?: number;
+  /** The last drawn one-off gesture (activity-poses.ts RETURNS): its age and the take time it was drawn at. */
+  gesture?: { act: string; age: number; at: number };
   prevInstrument?: string;
   restAge?: number;
   restFrom?: number;
@@ -538,7 +541,9 @@ export class HumanViews {
   private syncAppearance(v:View,key:string|undefined){
     if(!this.humanPresets||v.appearance&&v.appearanceSoulKey===key)return;
     if(v.appearance&&!v.appearance.retire())return; // retain foreign-reference quarantine, never stack owners
-    v.appearanceSoulKey=key;v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    v.appearanceSoulKey=key;const a=v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    // a preset recolours the body's own primitives: draw those while it is attached (body-merge.ts)
+    void a.ready.then(()=>{if(v.appearance===a)setBodyMerged(v.rig,a.snapshot().state!=='attached');});
   }
 
   /** Stair flights people may be on (the Spatial scene's usable stairs links; call when they change). */
@@ -586,6 +591,7 @@ export class HumanViews {
 
   private make(id: string, s: Snap, activity: string,publicSoulKey?:string,bodyModel?:string): View {
     const rig = createRig(bodyModel?this.bodyTemplates.get(bodyModel)!:templateFor(id, this.templates)!);
+    mergeRigBody(rig);   // a classic body's primitives draw as one (body-merge.ts)
     rig.holder.name = id;
     rig.holder.traverse(o=>{
       o.userData.entity=id;const m=o as THREE.SkinnedMesh,p=THREE.SkinnedMesh.prototype;
@@ -1036,11 +1042,18 @@ export class HumanViews {
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
     const fluteRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='flute'&&v.since!==undefined&&v.since<.8;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
+    // A one-off gesture's age (a bow, a point) is the take's, else carried on from this body's last frame of it: a live
+    // take window can begin inside it with no history (its age unknown, its arc restarted at a random phase). One that
+    // ends while still out then comes back from where it was over GESTURE_RETURN, on the same clock, not in one frame.
+    const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
+    if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
+    const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
+      : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
     h.rotation.z = 0; h.rotation.x = 0;
     let lieFloor = h.position.y;
@@ -1956,7 +1969,7 @@ function skinnedPoints(rig: Rig, stride: number, out: (p: THREE.Vector3, part: B
   const p = V(), idx = new THREE.Vector4(), wt = new THREE.Vector4();
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const indices=Array.from({length:Math.ceil(pos.count/stride)},(_,i)=>i*stride);let at=0;
     eachSkinnedWorld([{mesh:m,idx:indices}],p,p=>{
@@ -1982,7 +1995,7 @@ const standingShapes=new WeakMap<Template,StandingShape>();
  * Attribute replacement/version changes invalidate the cache (kit shape edits and geometry updates). */
 function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
  const meshes:THREE.SkinnedMesh[]=[];
- rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh)meshes.push(o as THREE.SkinnedMesh);});
+ rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh&&!o.userData[BODY_DRAW])meshes.push(o as THREE.SkinnedMesh);});
  const attributes=(m:THREE.SkinnedMesh)=>[...Object.values(m.geometry.attributes),...Object.values(m.geometry.morphAttributes).flat()];
  const version=(a:THREE.BufferAttribute|THREE.InterleavedBufferAttribute)=>'version'in a?a.version:a.data.version;
  const old=standingShapes.get(rig.template);
@@ -2013,7 +2026,7 @@ function surfaceRefs(rig: Rig) {
   rig.holder.updateMatrixWorld(true);
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const contacts:{i:number;part:'foot'|'hand'}[]=[];
     for (let i = 0; i < pos.count; i++) {

@@ -144,14 +144,14 @@ jobs:
         with: { ref: "${{ needs.preflight.outputs.sha }}", persist-credentials: false }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
-      - name: Build the world process, the gateway, the page's WASM and the tools, once
+      - name: Build the world process, the gateway, the directory, the page's WASM and the tools, once
         if: ${{ inputs.part != 'move' }}
         working-directory: v2
         run: |
           channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
           rustup toolchain install "$channel" --profile minimal --no-self-update --target wasm32-unknown-unknown
           # --bin names targets in every -p package: the programs and the tools are two builds (O18b, #3498).
-          cargo build --release --locked -p worldd -p gatewayd
+          cargo build --release --locked -p worldd -p gatewayd -p directoryd
           cargo build --release --locked -p assets --bin assets-check
           cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade --bin world-aside
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)

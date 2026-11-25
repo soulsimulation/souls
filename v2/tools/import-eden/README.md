@@ -60,7 +60,9 @@ world defines itself (a template's `define`, which no page's library has: hello-
 the open ground as field 102, `[[ref, def] …]` with each whole stored def as JSON text (the exporter's `ground.defs`, the
 defs the world places), so that page draws it as the world's own page does (its roof) and not from the thing's solids.
 On the ground and not on a thing, removing any thing of the def never loses it. It is in every baseline: Eden-2026's
-31 such defs are about 64 KB of a baseline of about 9 MB.
+31 such defs are about 64 KB of a baseline of about 9 MB. The open ground also keeps the world's ground palette as field
+103, `souls:<palette>` (today's `state.ground.palette`, the exporter's `ground.palette`: a Mars camp's `desert`), which
+that page colours the ground and its cover by; facts exported without one leave it out and the page draws grass.
 
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for

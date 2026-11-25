@@ -30,6 +30,8 @@ machine_env() {
   export RELEASE_DATA=$m/data RELEASE_LIB=$m/lib RELEASE_ETC=$m/etc WORLDS_ROOT=. SCRATCH=$m PATH=$m/shim:$PATH
   export SOULS_LIB=$m/lib SOULS_ETC=$m/etc
   export RELEASE_WINDOW_S=${RELEASE_WINDOW_S:-5}
+  # It runs no directory and no origin, so the move restarts neither (release.test.mjs proves that step).
+  export RELEASE_SERVICES=
   cd "$m/data/worlds"
 }
 

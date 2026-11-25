@@ -7,10 +7,13 @@
 //!
 //! The spool is the queue: what is in it is not yet in the store. Each pass reads the spool's head first, then puts
 //! every object the spool holds (create-only: an object already there is the same bytes, as its name is their hash),
-//! then the head, and then removes the objects it put. A restart recovers its chain from the spool's head, reading an
-//! object from the spool where it is still there and from the store where it was backed up, so a crash before the
-//! backup replays the exact published bytes. Nothing is dropped: the spool's bound is the disk, as the log's is, and
-//! what it holds is said in `health.json` (`stream_backup.behind`, `behind_bytes`).
+//! moving each one put into `kept/` (the spool's copy of what the store holds), then the head. A restart recovers its
+//! chain from the spool's head and its objects from this disk, the spool or `kept/`, so it never waits on the store
+//! to serve viewers (24 Nov: three worlds served none for ten minutes while the store held every read of a backed-up
+//! object); only a chain this machine did not write (a new machine, a spool lost) is read from the store, and what it
+//! reads is kept too. A crash before the backup replays the exact published bytes. Nothing is dropped: the spool's
+//! bound is the disk, as the log's is, and what waits in it is said in `health.json` (`stream_backup.behind`,
+//! `behind_bytes`); `kept/` loses an old generation's objects as the store does (#3833).
 //!
 //! **One writer.** The head is put only over the head this writer last confirmed in the store (`head.confirmed` in
 //! the spool: its ETag and bytes, from the store as the writer found it at open, or from its own last put), and a
@@ -37,6 +40,8 @@ const DELETES_PER_PASS: usize = 64;
 /// The generations closed long enough ago to delete waiting, at most: a rollover adds one, so this holds hours of
 /// them; past it the oldest is left in the store (best effort, as deletion always was).
 const PRUNES_HELD: usize = 64;
+/// The spool's copies of the objects the store holds, under their store keys.
+const KEPT: &str = "kept";
 
 /// How the backup stands, for `health.json`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +138,10 @@ impl Spool {
         self.dir.join(key)
     }
 
+    fn kept(&self, key: &str) -> PathBuf {
+        self.dir.join(KEPT).join(key)
+    }
+
     fn write(&self, key: &str, bytes: &[u8]) -> super::R<()> {
         let path = self.path(key);
         if let Some(p) = path.parent() {
@@ -143,10 +152,23 @@ impl Spool {
 
     /// Writes `bytes` under `key` (an object once: its name is their hash).
     pub(super) fn object(&self, key: &str, bytes: &[u8]) -> super::R<()> {
-        if self.path(key).is_file() {
+        if self.path(key).is_file() || self.kept(key).is_file() {
             return Ok(());
         }
         self.write(key, bytes)
+    }
+
+    /// Keeps `bytes`, read from the store under `key`, on this disk: the next restart reads them here.
+    pub(super) fn keep(&self, key: &str, bytes: &[u8]) {
+        let path = self.kept(key);
+        if path.is_file() {
+            return;
+        }
+        if let Some(p) = path.parent()
+            && std::fs::create_dir_all(p).is_ok()
+        {
+            let _ = super::write_whole(&path, bytes);
+        }
     }
 
     /// The chain's head, written whole; then the thread is told.
@@ -161,8 +183,11 @@ impl Spool {
         confirm(&self.dir, &self.store, head_key, bytes, etag)
     }
 
+    /// `key` from this disk: the spool, or its copy of what the store holds.
     pub(super) fn read(&self, key: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.path(key)).ok()
+        std::fs::read(self.path(key))
+            .or_else(|_| std::fs::read(self.kept(key)))
+            .ok()
     }
 
     /// An old generation's record to delete by, with the objects the current chain names (never deleted).
@@ -392,7 +417,6 @@ impl<S: ObjectStore> Worker<S> {
     fn pass(&mut self) -> Result<bool, Short> {
         // The head first: every object it names was in the spool before it, or is already in the store.
         let head = std::fs::read(self.dir.join(&self.head_key)).ok();
-        let mut put = Vec::new();
         for key in self.objects() {
             let bytes = std::fs::read(self.dir.join(&key)).map_err(super::io)?;
             match self.store.put(&key, &bytes, When::Absent) {
@@ -401,7 +425,10 @@ impl<S: ObjectStore> Worker<S> {
                 Err(e) if e.name == "precondition-failed" => {}
                 Err(e) => return Err(e.into()),
             }
-            put.push(key);
+            // In the store now, and named by the spool's head or the next: out of the queue at once, so a pass refused
+            // later resumes from here rather than sending the whole spool again, and kept on this disk, where a restart
+            // reads it.
+            self.keep(&key);
         }
         let current = match head {
             Some(head) if self.confirmed.as_ref().map(|c| &c.0) != Some(&head) => {
@@ -409,12 +436,25 @@ impl<S: ObjectStore> Worker<S> {
             }
             _ => true,
         };
-        // In the store now, and named by a head there or by the next: off the spool.
-        for key in &put {
-            let _ = std::fs::remove_file(self.dir.join(key));
-        }
         self.prune();
         Ok(current)
+    }
+
+    fn kept(&self, key: &str) -> PathBuf {
+        self.dir.join(KEPT).join(key)
+    }
+
+    /// Moves the spool's `key` into `kept/`; one that cannot be moved leaves the queue all the same.
+    fn keep(&self, key: &str) {
+        let from = self.dir.join(key);
+        let to = self.kept(key);
+        let moved = to
+            .parent()
+            .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
+            && std::fs::rename(&from, &to).is_ok();
+        if !moved {
+            let _ = std::fs::remove_file(&from);
+        }
     }
 
     /// Puts `head` over the confirmed one; whether the store holds it now.
@@ -499,11 +539,9 @@ impl<S: ObjectStore> Worker<S> {
         Ok(())
     }
 
-    /// Old generations' chains off the store (#3833), a few at a time; a store that cannot delete is left as it is.
+    /// Old generations' chains off the store (#3833), a few at a time, and off `kept/`; a store that cannot delete is
+    /// left as it is.
     fn prune(&mut self) {
-        if !self.deleting {
-            return;
-        }
         if self.deletes.is_empty() {
             let todo = self
                 .prunes
@@ -511,10 +549,16 @@ impl<S: ObjectStore> Worker<S> {
                 .map(|mut p| std::mem::take(&mut *p))
                 .unwrap_or_default();
             for (record_key, live) in todo {
-                let Ok(Some(o)) = self.store.get(&record_key) else {
-                    continue;
+                // This disk's copy first: the store is read only for a record this machine never held.
+                let bytes = match std::fs::read(self.kept(&record_key)) {
+                    Ok(b) => b,
+                    Err(_) if self.deleting => match self.store.get(&record_key) {
+                        Ok(Some(o)) => o.bytes,
+                        _ => continue,
+                    },
+                    Err(_) => continue,
                 };
-                let Ok(r) = super::object_map(&o.bytes) else {
+                let Ok(r) = super::object_map(&bytes) else {
                     continue;
                 };
                 if let Some(replica::encode::Value::Array(objects)) = r.get(&3) {
@@ -534,10 +578,9 @@ impl<S: ObjectStore> Worker<S> {
             let Some(key) = self.deletes.pop_front() else {
                 return;
             };
-            if self.store.delete(&key).is_err() {
-                self.deletes.clear();
+            let _ = std::fs::remove_file(self.kept(&key));
+            if self.deleting && self.store.delete(&key).is_err() {
                 self.deleting = false;
-                return;
             }
         }
     }
@@ -546,4 +589,94 @@ impl<S: ObjectStore> Worker<S> {
 /// The spool beside a world's `views/`: never under it, as the chunks hold the world's own records.
 pub fn beside(views: &Path) -> PathBuf {
     views.with_file_name("stream-backup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use directoryd::directory::store::{Memory, Object, R};
+    use std::cell::{Cell, RefCell};
+
+    /// A store that keeps the keys put to it and does not answer the `refuse`th put.
+    struct Counting {
+        store: Memory,
+        puts: Cell<usize>,
+        refuse: usize,
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl ObjectStore for Counting {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.puts.set(self.puts.get() + 1);
+            if self.puts.get() == self.refuse {
+                return Err(super::super::Refusal {
+                    name: "store-unreachable",
+                    detail: format!("{key}: timeout: receive response"),
+                });
+            }
+            self.sent.borrow_mut().push(key.to_owned());
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.store.list(prefix)
+        }
+    }
+
+    /// Eden, 24 Nov: a backup 14,101 objects (690 MB) behind sent its whole spool again on every pass, and each pass
+    /// was refused on one unanswered put before it reached the head, so it never caught up. A refused pass now leaves
+    /// off the spool what the store already holds: the next sends each object left once, and the head after them.
+    #[test]
+    fn a_refused_pass_resumes_where_it_stopped_and_sends_nothing_twice() {
+        let dir = std::env::temp_dir().join(format!("backup-resumes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let spool = Spool::new(dir.clone(), "test-store".into());
+        let prefix = "s/w/".to_owned();
+        for i in 0..10u8 {
+            let bytes = vec![i; 1000];
+            let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&bytes)));
+            spool.object(&key, &bytes).unwrap();
+        }
+        spool.write(&format!("{prefix}head"), b"head one").unwrap();
+        let store = Counting {
+            store: Memory::default(),
+            puts: Cell::new(0),
+            refuse: 6,
+            sent: RefCell::default(),
+        };
+        let mut worker = Worker {
+            store,
+            dir: dir.clone(),
+            prefix: prefix.clone(),
+            head_key: format!("{prefix}head"),
+            identity: "test-store".into(),
+            prunes: Arc::default(),
+            progress: Arc::default(),
+            confirmed: None,
+            known: true,
+            tried: Vec::new(),
+            deletes: std::collections::VecDeque::new(),
+            deleting: false,
+        };
+        assert!(worker.pass().is_err(), "the sixth put is not answered");
+        assert_eq!(
+            worker.objects().len(),
+            5,
+            "the five the store holds are off the spool"
+        );
+        assert!(
+            matches!(worker.pass(), Ok(true)),
+            "the next pass is current"
+        );
+        let sent = worker.store.sent.borrow().clone();
+        let objects: Vec<&String> = sent.iter().filter(|k| k.contains("/objects/")).collect();
+        let unique: BTreeSet<&String> = objects.iter().copied().collect();
+        assert_eq!(objects.len(), 10, "each object sent once: {sent:?}");
+        assert_eq!(unique.len(), 10);
+        assert_eq!(sent.last().map(String::as_str), Some("s/w/head"));
+        assert!(worker.objects().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

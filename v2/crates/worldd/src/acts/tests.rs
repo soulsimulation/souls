@@ -140,6 +140,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             reach: 0,
             door: None,
             ring: None,
+            aim: None,
         },
     };
     let line = FormQuestion {
@@ -284,6 +285,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         reach: 0,
         door: None,
         ring: None,
+        aim: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {
@@ -372,6 +374,7 @@ fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
         reach: 0,
         door: None,
         ring: None,
+        aim: None,
     };
     let mut planning = Planning::default();
     let mut out = BTreeMap::new();
@@ -443,6 +446,7 @@ fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it(
         reach: 0,
         door: None,
         ring: None,
+        aim: None,
     };
     let mut planning = Planning::default();
     let (mut out, mut answers, mut sent) = (BTreeMap::new(), BTreeMap::new(), 0);

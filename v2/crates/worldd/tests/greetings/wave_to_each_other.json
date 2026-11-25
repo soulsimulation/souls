@@ -1,0 +1,116 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wave_to_each_other",
+  "owner": "thing",
+  "links": {
+    "one": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "other": {
+      "n": 2,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_one": {
+      "role": "stand",
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_other": {
+      "role": "stand",
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "one": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "stand": "by_one"
+    },
+    "other": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "stand": "by_other"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      1600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "one": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "one"
+        ],
+        "within_mm": 3000
+      },
+      "move": "wave"
+    },
+    "other": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "other"
+        ],
+        "within_mm": 3000
+      },
+      "move": "wave"
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Two Souls return a wave after an invitation is accepted.",
+    "greeting": "greeting",
+    "returned_wave": "returned wave",
+    "rules": "Invite a nearby Soul to exchange a wave. If they accept, both are asked to walk to separate standing places through ordinary movement admission and wave toward each other. Either may leave. The greeting also ends when both brief moves finish."
+  },
+  "card": {
+    "text": "card",
+    "category": "greeting",
+    "synonyms": [
+      "returned_wave"
+    ]
+  }
+}

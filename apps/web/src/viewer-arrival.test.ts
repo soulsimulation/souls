@@ -1,7 +1,8 @@
 // node --test apps/web/src/viewer-arrival.test.ts — #1266: one arrival progress for the bar and the light.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction } from './viewer-arrival.ts';
+import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
+import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 
 const bytes = (loaded: number, total: number, known = true) => ({ loaded, total, known });
@@ -32,4 +33,29 @@ test('preparing is never 100%: it goes past the download share and stops short o
 test('100% only once the world is drawn', () => {
   assert.equal(arrivalFraction({ card: false, bytes: bytes(1, 2), initial: gate('preparing'), arriving: false }), 1);
   for (const f of [at({ bytes: bytes(9e6, 8e6) }), at({ initial: gate('preparing', 9, 4) })]) assert.ok(f! < 1, String(f));
+});
+
+test('#4691: a reader catching up replaces a showing "not available" at once; otherwise a reason waits 4 s', () => {
+  // the status line's settle as ViewerFrame runs it: a reason shows reasonDelayMs after it came, given the line shown then
+  const blocked = (r: string) => /stream is not available/.test(r);
+  const run = (steps: [number, string | null][]) => {
+    let shown: string | null = null, due: { at: number; reason: string } | null = null;
+    const seen: [number, string | null][] = [[0, null]];
+    for (let t = 0, i = 0; t <= 20_000; t += 100) {
+      while (i < steps.length && steps[i][0] <= t) {
+        const r = steps[i++][1];
+        if (!r) { shown = null; due = null; } else due = { at: t + reasonDelayMs(r, shown, blocked(r)), reason: r };
+      }
+      if (due && t >= due.at) { shown = due.reason; due = null; }
+      if (seen.at(-1)![1] !== shown) seen.push([t, shown]);
+    }
+    return seen;
+  };
+  // the notice, then the catch-up's words: "Catching up" at once, then live
+  assert.deepEqual(run([[1000, STREAM_NOTICE], [5000, STREAM_CATCHING], [8700, null]]), [[0, null], [1000, STREAM_NOTICE], [5000, STREAM_CATCHING], [8700, null]]);
+  // a catch-up with nothing showing still waits its 4 s: a short one never flashes, a long one shows
+  assert.deepEqual(run([[1000, STREAM_CATCHING], [3000, null]]), [[0, null]]);
+  assert.deepEqual(run([[1000, STREAM_CATCHING], [9000, null]]), [[0, null], [5000, STREAM_CATCHING], [9000, null]]);
+  assert.equal(reasonDelayMs(STREAM_NOTICE, null, true), 0);
+  assert.equal(reasonDelayMs('Reconnecting; displaying the last recorded frame.', STREAM_NOTICE, false), 4000);
 });

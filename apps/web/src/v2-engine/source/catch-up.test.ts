@@ -71,6 +71,7 @@ test('a joiner 1,000 parts behind plays the old ones deferred, shows one snapsho
   };
   const parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [];
   let snapshots = 0;
+  const catching: number[] = [];
   const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
   try {
     globalThis.fetch = (async (input: string | URL) => {
@@ -83,8 +84,8 @@ test('a joiner 1,000 parts behind plays the old ones deferred, shows one snapsho
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => (polls.push(fn), 1);
     (globalThis as { self?: unknown }).self = {
       onmessage: null as null | ((e: unknown) => void),
-      postMessage: (m: { t: string; p: PartRec; message: string }) =>
-        m.t === 'part' ? parts.push(m.p) : m.t === 'snapshot' ? snapshots++ : m.t === 'error' ? errors.push(m.message) : undefined,
+      postMessage: (m: { t: string; p: PartRec; message: string; behind: number }) =>
+        m.t === 'part' ? parts.push(m.p) : m.t === 'snapshot' ? snapshots++ : m.t === 'error' ? errors.push(m.message) : m.t === 'catching' ? catching.push(m.behind) : undefined,
     };
     await import(new URL('./worker.ts?catch-up', import.meta.url).href);
     (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: base } });
@@ -104,6 +105,8 @@ test('a joiner 1,000 parts behind plays the old ones deferred, shows one snapsho
   assert.ok(asked.deferred >= PARTS - far - 1, `the older parts are played deferred (${asked.deferred})`);
   assert.ok(asked.verify >= 1 && asked.verifiedBeforeSnapshot, 'the deferred state is checked before it is shown');
   assert.ok(snapshots >= 2, 'the baseline and the caught-up state are each shown as one snapshot');
+  // #4684: a catch-up says how far behind it is as it goes, so the page says it is catching up, not that the stream is gone
+  assert.ok(catching.length >= 1 && catching[0] > far, `the catch-up says it is behind (${catching.join(', ')})`);
   assert.ok(asked.play >= 1, 'the newest part is played with its digest worked out');
   assert.ok(most > 1, `parts are fetched several at a time (at most ${most} at once)`);
 });

@@ -305,6 +305,33 @@ function measureWalk(gltf: GLTF, name = 'Walk', fitted: ReturnType<typeof fit> =
   return speed > 0.2 ? { walkSpeed: speed, forward: med < 0 ? 1 : -1, found: true } : { walkSpeed: 1, forward: 1 };
 }
 
+/**
+ * A body off screen is not drawn. Every mesh of the body gets one sphere: the whole body's at rest, its radius doubled
+ * so a pose (lying, reaching, a hair part swung a metre from where it rests) stays inside it. A skinned mesh's own
+ * sphere (three's default) would be one part's at the pose it was first checked in, so the rig used never to be culled
+ * and drew every body in the world each frame (#4684: 68 of 300 in view, all 300 drawn).
+ */
+export function cullAsOneBody(holder: THREE.Object3D): void {
+  holder.updateMatrixWorld(true);
+  const meshes: THREE.Mesh[] = [], body = new THREE.Box3(), s = new THREE.Sphere(), inverse = new THREE.Matrix4();
+  holder.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    const g = o.geometry.boundingSphere;
+    if (!g || !Number.isFinite(g.radius) || g.radius < 0) return;
+    meshes.push(o);
+    body.union(s.copy(g).applyMatrix4(o.matrixWorld).getBoundingBox(new THREE.Box3()));
+  });
+  if (!meshes.length || body.isEmpty()) return;
+  const whole = body.getBoundingSphere(new THREE.Sphere());
+  whole.radius *= 2;
+  for (const m of meshes) {
+    // a rigid mesh is culled by its own geometry's sphere, which its matrix carries wherever it goes
+    if (m instanceof THREE.SkinnedMesh) m.boundingSphere = whole.clone().applyMatrix4(inverse.copy(m.matrixWorld).invert());
+    m.frustumCulled = true;
+  }
+}
+
 export function createRig(t: Template): Rig {
   const { model, mixer, idle, walk, extra,appearance } = fit(t.gltf,t.appearance);
   model.traverse((o) => {
@@ -322,6 +349,7 @@ export function createRig(t: Template): Rig {
   holder.userData.avatarIdleClip=idle.getClip().toJSON();
   holder.userData.bodyModel=t.name;
   holder.add(inner);
+  cullAsOneBody(holder);
   idle.play();
   walk.play();
   walk.setEffectiveWeight(0);

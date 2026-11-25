@@ -57,6 +57,9 @@ test('an invitation reaches the body asked; a decline or a lapse is named to the
   assert.equal(offerNote(ev('souls:offer'), other), null, 'its own offer is no invitation');
   assert.deepEqual(offerNote(ev('souls:offer-declined'), other), { kind: 'conversation', what: 'declined', conversation: conv });
   assert.deepEqual(offerNote(ev('souls:offer-lapsed'), other), { kind: 'conversation', what: 'lapsed', conversation: conv });
+  // A lapse names those asked that did not answer (field 3): each is told, with who asked.
+  assert.deepEqual(offerNote(ev('souls:offer-lapsed'), me), { kind: 'conversation', what: 'lapsed', conversation: conv, from: other });
+  assert.equal(offerNote(ev('souls:offer-lapsed'), '0'.repeat(32) + '-7'), null, 'one the lapse does not name');
   assert.equal(offerNote(ev('souls:offer-declined'), me), null, 'another opener\'s decline');
   assert.equal(offerNote({ name: 'souls:said', fields: {} }, me), null);
 });
@@ -105,7 +108,9 @@ test('addressed activity frames reach offerNote while speech stays with wireHear
     const answer = effect(`souls:offer-${what}`, `{1: ${id(9)}, 2: ${id(3)}, 3: [${id(2)}]}`);
     const decoded = JSON.parse(wire.wireEntry(addressed(answer)));
     assert.deepEqual(offerNote(decoded.events[0], other), { kind: 'conversation', what, conversation: conv });
-    assert.equal(offerNote(decoded.events[0], me), null, 'the answer concerns the opener alone');
+    // A decline concerns the opener alone; a lapse also the one it names (field 3, a list as `wireEntry` gives it).
+    if (what === 'declined') assert.equal(offerNote(decoded.events[0], me), null, 'the decline concerns the opener alone');
+    else assert.deepEqual(offerNote(decoded.events[0], me), { kind: 'conversation', what, conversation: conv, from: other }, 'the one that did not answer');
   }
   const said = effect('souls:said', `{1: {21: ${id(8)}}, 2: 3000, 3: [${id(2)}], 4: 1000000}`);
   const speech = addressed(said, ", 3: h'6869'");

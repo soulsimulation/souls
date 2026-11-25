@@ -71,6 +71,22 @@
    76
   ]
  },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"steel": "#3f6fa8"},
+   "tags": ["rack", "upright", "frame"],
+   "shapes": [
+    {"kind": "box", "at": [-572, 3048, 0], "size": [76, 6096, 76], "tint": "steel"},
+    {"kind": "box", "at": [572, 3048, 0], "size": [76, 6096, 76], "tint": "steel"},
+    {"kind": "box", "at": [0, 319, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 1829, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 3339, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 4849, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 5965, 0], "size": [1144, 38, 38], "tint": "steel"}
+   ]
+  }
+ },
  "children": {
   "crew": {
    "kind": "mars:carry_activity",

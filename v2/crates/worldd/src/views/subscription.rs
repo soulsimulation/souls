@@ -26,7 +26,11 @@
 //!    of the hearers the entry records, and to no other; nothing is worked out again. It goes as `{1: 9, 2: entry, 3:
 //!    words}`, the words read from K16 for that subscriber's audiences, and left out when it may not read them (C6,
 //!    #3390). An entry that records no hearers (a `say` on a world whose tick does not work them out yet, C5 #3369) is
-//!    heard by the bodies within its reach in the tier's own index, the one interest sets read.
+//!    heard by the bodies within its reach in the tier's own index, the one interest sets read. An offer goes to the
+//!    bodies asked, its answer to the asker, and its lapse to the bodies it names too
+//!    (`replica::activity::addressed`); an activity's join, start, leave, end and carry set-down
+//!    (`replica::activity::TO_MEMBERS`, 0.135) to its members wherever they stand: those it held as the entry was
+//!    written and those the entry joins, and its end to those who left it before too.
 //!
 //! 6. **Audience** (T7 rule 5, T8): a subscriber is sent the public entries and those of the audience ids it is in
 //!    ([`Hub::subscribe_as`]; the gateway resolves them for its grant), never another audience's. An activity's
@@ -99,6 +103,26 @@ fn int(n: i64) -> Value {
 
 fn map(pairs: Vec<(u64, Value)>) -> Value {
     Value::Map(pairs.into_iter().collect())
+}
+
+/// Whether entry `e` is an activity's end told at a member's body (sim's `ENDED`, written once its activity is gone).
+fn ended_at_body(e: &Effect) -> bool {
+    e.events
+        .iter()
+        .flatten()
+        .any(|ev| ev.name.as_str() == "souls:activity-ended")
+        && !matches!(&e.body, Body::Changes(cs) if !cs.is_empty())
+        && e.events.iter().flatten().any(|ev| {
+            ev.fields
+                .get(&1)
+                .and_then(|v| read_id(v).ok())
+                .is_some_and(|a| a != e.envelope.node)
+        })
+}
+
+/// Whether entry `e` removes node `n`.
+fn removes(e: &Effect, n: Id) -> bool {
+    matches!(&e.body, Body::Changes(cs) if cs.iter().any(|c| matches!(c.change, Change::Remove { node } if node == n)))
 }
 
 /// What a client holds a scope of.
@@ -390,6 +414,9 @@ pub struct Hub {
     words: Option<Arc<Store>>,
     /// The `souls:member` links held now: link → (body, activity) (B5, E26a).
     member_links: BTreeMap<Id, (Id, Id)>,
+    /// The bodies that left each activity still standing (0.135): its end is told to them too, so the first of two
+    /// to leave a touch that finishes hears that it ended. Forgotten with the activity.
+    former: BTreeMap<Id, BTreeSet<Id>>,
     /// Authoritative C3 links, indexed both ways; multiple owners fail closed.
     owner_links: BTreeMap<Id, (Id, Id)>,
     body_owners: BTreeMap<Id, BTreeMap<Id, Id>>,
@@ -463,6 +490,10 @@ impl Hub {
             match &c.change {
                 Change::Link { link, ty, ends, .. } if ty.as_str() == MEMBER => {
                     self.member_links.insert(*link, (ends[0], ends[1]));
+                    // One who joins another activity is no longer told the end of one it left.
+                    for f in self.former.values_mut() {
+                        f.remove(&ends[0]);
+                    }
                 }
                 Change::Link {
                     link,
@@ -474,11 +505,14 @@ impl Hub {
                     self.ownership(*link, *ends, *owner);
                 }
                 Change::Unlink { link } => {
-                    self.member_links.remove(link);
+                    if let Some((body, activity)) = self.member_links.remove(link) {
+                        self.former.entry(activity).or_default().insert(body);
+                    }
                     self.unown(*link);
                 }
                 Change::Remove { node } => {
                     self.member_links.retain(|_, (b, a)| b != node && a != node);
+                    self.former.remove(node);
                     let gone: Vec<_> = self
                         .owner_links
                         .iter()
@@ -492,6 +526,40 @@ impl Hub {
                 _ => {}
             }
         }
+    }
+
+    /// The activity an entry tells its members of ([`replica::activity::TO_MEMBERS`]): the one its own membership
+    /// links name (a second taker of a two-member offer joins a new pair, while field 1 names the offer), else its
+    /// event's field 1, else the node it is written at.
+    fn told_activity(&self, e: &Effect) -> Option<Id> {
+        let ev = e
+            .events
+            .iter()
+            .flatten()
+            .find(|ev| replica::activity::to_members(ev.name.as_str()))?;
+        let linked = match &e.body {
+            Body::Changes(cs) => cs.iter().find_map(|c| match &c.change {
+                Change::Link { ty, ends, .. } if ty.as_str() == MEMBER => Some(ends[1]),
+                Change::Unlink { link } => self.member_links.get(link).map(|(_, a)| *a),
+                _ => None,
+            }),
+            _ => None,
+        };
+        Some(linked.unwrap_or_else(|| {
+            ev.fields
+                .get(&1)
+                .and_then(|v| read_id(v).ok())
+                .unwrap_or(e.envelope.node)
+        }))
+    }
+
+    /// The bodies that are members of `activity` now.
+    fn members_of(&self, activity: Id) -> BTreeSet<Id> {
+        self.member_links
+            .values()
+            .filter(|(_, a)| *a == activity)
+            .map(|(body, _)| *body)
+            .collect()
     }
 
     /// Who may read what audience `a` holds now ([`Readers`]).
@@ -657,7 +725,35 @@ impl Hub {
         let mut said: Vec<Utterance> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
+            // 0.135: an activity's join, start, leave, end and carry set-down go to its members wherever they stand:
+            // those it held as the entry was written (one who leaves hears its own leave) and those the entry joins.
+            let told = self.told_activity(e);
+            let mut members = BTreeSet::new();
+            match told {
+                // `souls:activity-ended` is written at each member's body, its activity already gone with the thing
+                // it was under (whose removal named the thing alone): to that body, and its membership let go here.
+                Some(a) if ended_at_body(e) => {
+                    let body = e.envelope.node;
+                    members.insert(body);
+                    self.member_links
+                        .retain(|_, (b, act)| !(*b == body && *act == a));
+                    if !self.member_links.values().any(|(_, act)| *act == a) {
+                        self.former.remove(&a);
+                    }
+                }
+                Some(a) => {
+                    members = self.members_of(a);
+                    // Its end (the entry removes it): to those who left it before, too.
+                    if removes(e, a) {
+                        members.extend(self.former.get(&a).into_iter().flatten().copied());
+                    }
+                }
+                None => {}
+            }
             self.members_apply(e);
+            if let Some(a) = told.filter(|_| !ended_at_body(e)) {
+                members.extend(self.members_of(a));
+            }
             let mut readers = self.readers(e.envelope.audience);
             if self.inside.apply(e) {
                 // A thing hidden in a closed container (#3915): its entry goes to its actor alone.
@@ -695,9 +791,13 @@ impl Hub {
                 } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
                     && !to.is_empty()
                 {
-                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    // An offer to each body asked, its decline to the asker, its lapse to the asker and those it names (E8,
+                    // C2): addressed like speech.
                     said.push((bytes_of(e.to_value())?, to, readers.clone(), None));
                 }
+            }
+            if !members.is_empty() {
+                said.push((bytes_of(e.to_value())?, members, readers.clone(), None));
             }
         }
         let new_second = self.second != Some(second);

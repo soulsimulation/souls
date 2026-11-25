@@ -338,7 +338,7 @@ pub enum Resumed {
     Nearest(Vec3),
     /// Off its floor with no way out: never carried through a cut. The world seats it again in the seat it was
     /// climbing out of ([`Slots::over`]), so its next rise climbs out or is refused by name; with no such seat free it
-    /// is left where the log had it (`resume-held`).
+    /// stands at the floor's nearest legal point (`worldd`'s `resume-placed`).
     Held,
 }
 

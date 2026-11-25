@@ -42,6 +42,8 @@
 //   souls.mjs together offer <word> <body id|name> [...]   offers it (`hug`, `dance` to up to seven, `follow`, ...); one
 //                                             played at a thing is offered at the nearest of that kind (0.134 T1, 0.135)
 //   souls.mjs together accept|decline|leave <offer id | word>   answers the newest offer of it, or leaves it
+//   souls.mjs together withdraw <offer id | activity>   takes back your own offer before it is answered (#4700); an
+//                                             accept after it is refused offer-withdrawn
 //   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
 //   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)

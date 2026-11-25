@@ -249,6 +249,8 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       assert.equal((await status()).hearing, principal(n));
       client.stage = 'held-pre-birth-sync';
       proxy.hold = true;
+      // A copy confirmed within RECENT_MS answers a look at once; past it, the look asks the world, and is held.
+      await sleep(2100);
       const oldLook = request(rt.socket, { op: 'look' });
       await until(() => proxy.held);
       const scopesBefore = proxy.scopeAnswers;
