@@ -62,11 +62,12 @@ function anchorOf(rows, near, me) {
   if (rows.get(near)) return near;
   return find(rows.values(), near, { limit: 1 }).found[0]?.id ?? null;
 }
-/** How far each row is from node `id`, metres (`row => metres`), or null when the copy lacks it: `find`'s distances. */
-export function metresFrom(rows, id, memo = new Map()) {
+/** How far each row is from node `id`, metres (`row => metres`), or null when the copy lacks it. `placed`: `find`'s
+ *  distances, none for a row nothing above it places (a zone at the ground's origin is not `1 m` from a Soul there). */
+export function metresFrom(rows, id, { placed = false } = {}, memo = new Map()) {
   const at = id ? placeOf(rows, id, memo)?.pos : null;
   if (!at) return null;
-  return (r) => { const o = placeOf(rows, r.id, memo), p = o?.posed ? o.pos : null; return p ? Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]) / 1e6 : undefined; };
+  return (r) => { const o = placeOf(rows, r.id, memo), p = o && (o.posed || !placed) ? o.pos : null; return p ? Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]) / 1e6 : undefined; };
 }
 /** The ids within `metres` of the anchor, by distance; `{error}` when the anchor is not in the copy. */
 function around(rows, q, me) {

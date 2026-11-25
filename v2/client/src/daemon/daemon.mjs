@@ -1595,7 +1595,7 @@ async function answer(req, conn = null) {
       if (!hydrated.ok) { age.stale = true; age.gap = { ms: 0, why: hydrated.reason }; }
       // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
       return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
-        metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id) ?? undefined, kinds: heldKinds() }), { age });
+        metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
@@ -1985,7 +1985,15 @@ function suggestionFor(r) {
   const t = thingOf(target);
   if (!t.ok) return null;
   // A form that needs the thing in hand (a book's `read`): pick it up first (the body walks to it), then send it again.
-  if (r.answers.at(-1)?.reason === 'not_held') return { act: `pick_up ${target}`, name: 'pick_up', checked: 'unknown', then: r.verbs.map((v) => `${String(v).replace(/^.*:/, '')}:${target}`)[0] };
+  const verb = String(r.verbs[0] ?? '').replace(/^.*:/, ''), again = verb === 'walk' ? target : `${verb}:${target}`;
+  if (r.answers.at(-1)?.reason === 'not_held') return { act: `pick_up ${target}`, name: 'pick_up', checked: 'unknown', then: again };
+  // first-day E5: seated, lying or aboard (the body is in a thing that admits bodies), a walk or a form elsewhere is
+  // refused `resource-held` naming its target: stand up first, then send it again.
+  if (r.answers.at(-1)?.reason === 'resource-held') {
+    const rows = rowsOf(copy), body = [...rows.values()].find((x) => x.soul === ME), on = body?.parent ? rows.get(body.parent) : null;
+    const slots = on && on.id !== target ? Object.values(heldKinds()[on.entry ?? on.kind]?.slots ?? {}) : [];
+    if (slots.some((x) => x?.admits === 'body')) return { act: `${NS}:rise`, name: 'rise', checked: 'unknown', then: again, why: `${body.name} is in ${on.name}` };
+  }
   const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
   const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
   const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));

@@ -1,7 +1,7 @@
 // #3704: query, catalog and context on a copy's rows, and the CLI's request for each, with batch and views.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { BUDGET, NEAR_METRES, catalog, context, placeOf, query } from './reads.mjs';
+import { BUDGET, NEAR_METRES, catalog, context, metresFrom, placeOf, query } from './reads.mjs';
 import { requestOf, runViews } from '../cli/souls.mjs';
 
 const row = (id, name, kind, parent, path, children = 0, text) => [id, { id, name, kind, parent, path, children, ...(text ? { text } : {}) }];
@@ -91,4 +91,14 @@ test('#3851: near keeps what is within its metres of an id, a name or me, from t
   assert.deepEqual(query(posed, [{ kind: 'eden:bench', near: 'me', within: 10 }], { me: 'me' }).answers[0].nearest.id, 'b');
   assert.equal(q.answers[3].code, 'query.unknown-near');
   assert.equal(query(posed, [{ find: 'fountain', near: 'me' }]).answers[0].code, 'query.unknown-near', 'no body: me is not placed');
+});
+
+test('first-day E5: find\'s metres, from the Soul to anything placed; a zone at the ground\'s origin has none', () => {
+  const m = 1e6, at = (id, parent, pos) => [id, { id, name: id, kind: 'k', parent, path: [], children: 0, ...(pos ? { pos } : {}) }];
+  const rows = new Map([at('g', null, null), at('zone', 'g', [0, 0, 0]), at('me', 'g', [1 * m, 0, 0]), at('house', 'g', [30 * m, 0, 40 * m]), at('shelf', 'house', [0, 0, 0])]);
+  const placed = metresFrom(rows, 'me', { placed: true }), any = metresFrom(rows, 'me');
+  assert.equal(Math.round(placed(rows.get('shelf'))), 49, 'at its house\'s origin, placed by the house');
+  assert.equal(placed(rows.get('zone')), undefined);
+  assert.equal(any(rows.get('zone')), 1, 'near queries keep every pose');
+  assert.equal(metresFrom(rows, 'nobody'), null);
 });

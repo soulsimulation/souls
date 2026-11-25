@@ -72,7 +72,7 @@ What is on: `whatson [--hours n]` (items now or soon, who is where), `calendar` 
 
 ## Refusals
 
-`ok: false`: say its `code`; take another id only if it serves the ask (say what differs), else stop.
+`ok: false`: say its `code`; `try` is what would work; take another id only if it serves the ask (say what differs), else stop.
 
 - `stopped-locally`: your copy shows none of your list can happen; nothing sent. `look`, choose again.
 - Taken or full: `find` another, or send fallbacks next time.
