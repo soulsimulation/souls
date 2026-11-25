@@ -6,6 +6,13 @@
 //!   9 the links it owns that share its audience, `[[id, link], ...]` in id order, and 10 the hashes of its children
 //!   that share its audience, in id order. Its hash is T3's: `souls/state-public/1` for a public node,
 //!   `souls/state-private/1` for a private one, over the record's bytes, so it covers its children's hashes.
+//! - **A big field is a record of its own** (#4713): a field whose value takes [`BIG_FIELD`] bytes or more (the open
+//!   ground's terrain tiles, megabytes) is left out of field 6, and the record's key 0 names it, `[[field, hash],
+//!   ...]` in field order. Its record is `{1: id, 5: audience, 6: {field: value}}`, hashed with the node's audience's
+//!   label. A child that moves changes its parent's record (field 10), and with it every ancestor's, but no big
+//!   field's record: a sync after a Soul walks on the ground fetches the ground's small record, not its terrain. The
+//!   tree keeps each big field's hash while the node itself is unchanged, so a seal hashes the terrain once, and gives
+//!   its bytes once. A flight carries its nodes' fields whole.
 //! - **Public and private are hashed apart** (T3 rule 11): no hash covers a node, a link or a timer of another
 //!   audience. A node whose parent has another audience (and the zone's root) is a **top**, listed by its audience.
 //! - **An audience's record** is `{1: audience, 2: [top hash, ...], 3: links, 4: timers, 5: flights}`, the tops in
@@ -27,9 +34,9 @@
 //!   Souls walking on Eden's ground (megabytes of fields), a tick no longer hashes the ground's fields. A change to
 //!   the node itself lets its head go; attaching or taking out a child keeps it.
 
-use super::{Away, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
+use super::{Away, Big, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
 use crate::effects::{TimerState, read_id};
-use crate::encode::{Name, Value, decode, encode, to_hex};
+use crate::encode::{Name, Value, decode, encode, encoded_len, to_hex};
 use crate::ids::{Hash, Id, Purpose, Scope, Sha256};
 use crate::pose::{Frame, HandOff, Pose};
 use crate::time::TimeEffect;
@@ -40,13 +47,43 @@ use std::collections::{BTreeMap, BTreeSet};
 /// ([`Tree::head`]): below it, encoding the record again costs less than keeping a SHA-256 state per node.
 const HEAD_KEPT: usize = 4096;
 
+/// A node's field whose value takes this many bytes or more is a record of its own (#4713), named by its hash from
+/// the node's record (key 0): the size of a big record, which `sync::Records` keeps longer (`sync::BIG_RECORD`).
+pub const BIG_FIELD: usize = 64 * 1024;
+
+/// Each of a node's big fields' record hashes, by field ([`BIG_FIELD`]).
+type Bigs = BTreeMap<u64, Hash>;
+
+/// Where a seal puts the records it gives, and whose each is ([`Sealed`]'s `nodes` and `ids`).
+type Giving<'a> = (&'a mut Vec<(Hash, Vec<u8>)>, &'a mut Vec<(Id, u64)>);
+
+/// A node's big field `n` as a record of its own: `{1: id, 5: audience, 6: {n: value}}`, and its hash.
+fn field_record(rec: &NodeRec, n: u64, v: &Value) -> R<(Hash, Vec<u8>)> {
+    let bytes = bytes_of(&Value::Map(BTreeMap::from([
+        (1, rec.id.to_value()),
+        (5, audience_value(rec.audience)),
+        (6, Value::Map(BTreeMap::from([(n, v.clone())]))),
+    ])))?;
+    Ok((Hash::of(purpose(rec.audience), &bytes), bytes))
+}
+
+/// The fields of a node that are big ([`BIG_FIELD`]).
+fn big_fields(rec: &NodeRec) -> impl Iterator<Item = (u64, &Value)> {
+    rec.fields
+        .iter()
+        .filter(|(_, v)| encoded_len(v) >= BIG_FIELD)
+        .map(|(n, v)| (*n, v))
+}
+
 /// What a seal gives: the records of nodes hashed again, and each audience's record, with their hashes.
 pub struct Sealed {
-    /// `(hash, record)` of each node whose hash was worked out again, new or not.
+    /// `(hash, record)` of each node whose hash was worked out again, new or not, and of each big field's record
+    /// worked out again ([`BIG_FIELD`]).
     pub nodes: Vec<(Hash, Vec<u8>)>,
-    /// The id of each of `nodes`, in the same order: what lets a keeper of records let a node's old record go once a
-    /// seal gives it a new one (`sync::Records`).
-    pub ids: Vec<Id>,
+    /// Whose each of `nodes` is, in the same order: the node's id, and 0 for its own record or the field's number for a
+    /// big field's. What lets a keeper of records let a node's old record go once a seal gives it a new one
+    /// (`sync::Records`).
+    pub ids: Vec<(Id, u64)>,
     /// `(audience, state hash, record)`, the public audience first.
     pub audiences: Vec<(Audience, Hash, Vec<u8>)>,
 }
@@ -110,16 +147,36 @@ fn int(n: i64) -> Value {
 }
 
 impl Tree {
-    /// A node's record without its children (field 10), its parent given (a flight's root names the node it left).
+    /// A node's record without its children (field 10), its parent given (a flight's root names the node it left),
+    /// its big fields `bigs` named by key 0 and left out of field 6 (none for a flight's, which carries them whole).
     /// Field 10 must stay the record's last key (every key here below 10): [`Tree::head`] takes the record's bytes
     /// before the children as a head that ends where field 10's array begins, and checks that only in debug builds.
-    fn record(&self, rec: &NodeRec, parent: Option<Id>) -> Value {
+    fn record(&self, rec: &NodeRec, parent: Option<Id>, bigs: &Bigs) -> Value {
+        let fields = if bigs.is_empty() {
+            rec.fields.clone()
+        } else {
+            rec.fields
+                .iter()
+                .filter(|(n, _)| !bigs.contains_key(n))
+                .map(|(n, v)| (*n, v.clone()))
+                .collect()
+        };
         let mut m = BTreeMap::from([
             (1, rec.id.to_value()),
             (2, Value::Text(self.names[rec.kind as usize].clone())),
             (5, audience_value(rec.audience)),
-            (6, Value::Map(rec.fields.clone())),
+            (6, Value::Map(fields)),
         ]);
+        if !bigs.is_empty() {
+            m.insert(
+                0,
+                Value::Array(
+                    bigs.iter()
+                        .map(|(n, h)| Value::Array(vec![Value::Uint(*n), h.to_value()]))
+                        .collect(),
+                ),
+            );
+        }
         m.extend(parent.map(|p| (3, p.to_value())));
         m.extend(rec.slot.map(|s| (4, Value::Uint(s))));
         let frame = |node| Frame {
@@ -163,10 +220,11 @@ impl Tree {
         (rec.parent != NONE).then(|| self.nodes[rec.parent as usize].id)
     }
 
-    /// A node's record and its hash, given its children's hashes (those that share its audience, in id order).
-    fn node_record(&self, slot: u32, children: Vec<Value>) -> R<(Hash, Vec<u8>)> {
+    /// A node's record and its hash, given its children's hashes (those that share its audience, in id order) and
+    /// its big fields' record hashes.
+    fn node_record(&self, slot: u32, children: Vec<Value>, bigs: &Bigs) -> R<(Hash, Vec<u8>)> {
         let rec = &self.nodes[slot as usize];
-        let Value::Map(mut m) = self.record(rec, self.parent_id(rec)) else {
+        let Value::Map(mut m) = self.record(rec, self.parent_id(rec), bigs) else {
             unreachable!("a record is a map")
         };
         m.insert(10, Value::Array(children));
@@ -185,12 +243,39 @@ impl Tree {
             .collect()
     }
 
+    /// The hashes of a node's big fields' records ([`BIG_FIELD`]): each worked out once while the node is unchanged
+    /// (`bigs`, let go when it changes). Given `out`, each record a seal has not given yet is pushed to it; without,
+    /// it is kept as not given (the state hash keeps no record).
+    fn bigs(&mut self, slot: u32, mut out: Option<Giving<'_>>) -> R<Bigs> {
+        let rec = &self.nodes[slot as usize];
+        let mut hashes = Bigs::new();
+        for (n, v) in big_fields(rec) {
+            let kept = self.bigs.entry(slot).or_default();
+            match kept.get(&n) {
+                Some(b) if b.given || out.is_none() => {
+                    hashes.insert(n, b.hash);
+                }
+                _ => {
+                    let (h, bytes) = field_record(rec, n, v)?;
+                    let given = out.is_some();
+                    if let Some((o, ids)) = out.as_mut() {
+                        o.push((h, bytes));
+                        ids.push((rec.id, n));
+                    }
+                    kept.insert(n, Big { hash: h, given });
+                    hashes.insert(n, h);
+                }
+            }
+        }
+        Ok(hashes)
+    }
+
     /// The node's hash, worked out again (with its marked children first) if it is marked.
     fn seal_node(
         &mut self,
         slot: u32,
         out: &mut Vec<(Hash, Vec<u8>)>,
-        ids: &mut Vec<Id>,
+        ids: &mut Vec<(Id, u64)>,
     ) -> R<Hash> {
         if let Some(h) = self.nodes[slot as usize].hash {
             return Ok(h);
@@ -199,11 +284,12 @@ impl Tree {
         for c in self.covered(slot) {
             hashes.push(self.seal_node(c, out, ids)?.to_value());
         }
-        let (h, bytes) = self.node_record(slot, hashes)?;
+        let bigs = self.bigs(slot, Some((&mut *out, &mut *ids)))?;
+        let (h, bytes) = self.node_record(slot, hashes, &bigs)?;
         let rec = &mut self.nodes[slot as usize];
         (rec.hash, rec.state) = (Some(h), Some(h));
         out.push((h, bytes));
-        ids.push(rec.id);
+        ids.push((rec.id, 0));
         Ok(h)
     }
 
@@ -234,8 +320,9 @@ impl Tree {
     /// [`Tree::node_record`]'s bytes are these, then the children's array, since field 10 is the record's last. Kept
     /// in `heads` when it is [`HEAD_KEPT`] bytes or more, until the node itself changes (`touch`).
     fn head(&mut self, slot: u32) -> R<Sha256> {
+        let bigs = self.bigs(slot, None)?;
         let rec = &self.nodes[slot as usize];
-        let Value::Map(mut m) = self.record(rec, self.parent_id(rec)) else {
+        let Value::Map(mut m) = self.record(rec, self.parent_id(rec), &bigs) else {
             unreachable!("a record is a map")
         };
         m.insert(10, Value::Array(Vec::new()));
@@ -261,13 +348,26 @@ impl Tree {
         self.heads.len()
     }
 
+    /// The node's big fields' records worked out whole ([`BIG_FIELD`]), reading and keeping nothing.
+    fn whole_bigs(&self, slot: u32) -> R<Vec<(u64, Hash, Vec<u8>)>> {
+        let rec = &self.nodes[slot as usize];
+        big_fields(rec)
+            .map(|(n, v)| field_record(rec, n, v).map(|(h, b)| (n, h, b)))
+            .collect()
+    }
+
     /// The node's hash worked out whole, reading and writing no mark.
     fn whole_node(&self, slot: u32) -> R<Hash> {
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
             hashes.push(self.whole_node(c)?.to_value());
         }
-        Ok(self.node_record(slot, hashes)?.0)
+        let bigs = self
+            .whole_bigs(slot)?
+            .into_iter()
+            .map(|(n, h, _)| (n, h))
+            .collect();
+        Ok(self.node_record(slot, hashes, &bigs)?.0)
     }
 
     /// Each audience's tops (by slot, in id order), loose links, timers and flights: a scan without hashing.
@@ -473,15 +573,22 @@ impl Tree {
         &self,
         slot: u32,
         out: &mut Vec<(Hash, Vec<u8>)>,
-        ids: &mut Vec<Id>,
+        ids: &mut Vec<(Id, u64)>,
     ) -> R<Hash> {
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
             hashes.push(self.whole_record(c, out, ids)?.to_value());
         }
-        let (h, bytes) = self.node_record(slot, hashes)?;
+        let id = self.nodes[slot as usize].id;
+        let mut bigs = Bigs::new();
+        for (n, h, bytes) in self.whole_bigs(slot)? {
+            out.push((h, bytes));
+            ids.push((id, n));
+            bigs.insert(n, h);
+        }
+        let (h, bytes) = self.node_record(slot, hashes, &bigs)?;
         out.push((h, bytes));
-        ids.push(self.nodes[slot as usize].id);
+        ids.push((id, 0));
         Ok(h)
     }
 
@@ -503,7 +610,7 @@ impl Tree {
                 } else {
                     self.parent_id(r)
                 };
-                (r.id, self.record(r, parent))
+                (r.id, self.record(r, parent, &Bigs::new()))
             })
             .collect();
         nodes.sort_by_key(|(id, _)| *id);
@@ -563,6 +670,7 @@ impl Tree {
                 .collect::<R<_>>()?;
             while let Some(h) = stack.pop() {
                 let (v, hash) = read(*a, &h)?;
+                let v = with_bigs(v, &mut |h| read(*a, h).map(|(v, _)| v))?;
                 let mut n = node_in(v, &mut links)?;
                 if n.audience != *a {
                     return refuse(
@@ -933,6 +1041,37 @@ fn link_in(v: Value) -> R<(Id, LinkIn)> {
 }
 
 /// A node's record; the links it owns go into `links`.
+/// A node's record with its big fields (key 0, [`BIG_FIELD`]) read from their own records into field 6; each must be
+/// its node's (`checkpoint-record`).
+fn with_bigs(v: Value, read: &mut dyn FnMut(&[u8]) -> R<Value>) -> R<Value> {
+    let mut m = map(v)?;
+    let Some(bigs) = m.remove(&0) else {
+        return Ok(Value::Map(m));
+    };
+    let id = m.get(&1).cloned();
+    let mut fields = map(take(&mut m, 6)?)?;
+    for p in array(bigs)? {
+        let [n, h]: [Value; 2] = array(p)?
+            .try_into()
+            .or_else(|_| refuse("checkpoint-record", "a big field is [field, hash]"))?;
+        let n = uint(&n)?;
+        let mut r = map(read(&hash_bytes(h)?)?)?;
+        if r.get(&1) != id.as_ref() {
+            return refuse(
+                "checkpoint-record",
+                "a big field's record is another node's",
+            );
+        }
+        let v = map(take(&mut r, 6)?)?.remove(&n).map_or_else(
+            || refuse("checkpoint-record", "a big field's record without it"),
+            Ok,
+        )?;
+        fields.insert(n, v);
+    }
+    m.insert(6, Value::Map(fields));
+    Ok(Value::Map(m))
+}
+
 fn node_in(v: Value, links: &mut BTreeMap<Id, LinkIn>) -> R<NodeIn> {
     let mut m = map(v)?;
     let mut n = NodeIn {

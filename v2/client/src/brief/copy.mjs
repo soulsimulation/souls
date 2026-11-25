@@ -124,6 +124,21 @@ export function publicNameRecords(copy, missingOnly = true) {
   }
   return found;
 }
+/**
+ * A node record's fields (key 6) with its big fields read in from their own records: a field of 64 KiB or more (the
+ * open ground's terrain tiles) is a record of its own, named by key 0 `[[field, hash], ...]` (replica
+ * `tree::BIG_FIELD`, #4713). One whose record the copy does not hold is left out.
+ */
+export function allFields(copy, m) {
+  const f = new Map(m.get(6) instanceof Map ? m.get(6) : []);
+  for (const [n, h] of m.get(0) ?? []) {
+    const bytes = copy.record(hex(h));
+    const own = bytes ? decode(bytes).get(6) : null;
+    if (own instanceof Map && own.has(n)) f.set(n, own.get(n));
+  }
+  return f;
+}
+
 /** An id `[scope, counter]` as text: `<scope hex>-<counter>`. */
 export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A kind `namespace:name@hash` as its plain name. */

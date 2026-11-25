@@ -12,8 +12,10 @@
 //!    (R4: a node held, or the room a body follows), then fetches every record it does not
 //!    hold, one round per level: a subtree whose hash it holds is the same, and is not opened.
 //! 3. **Every record is checked against the hash that named it** (`sync-hash`), with its audience's label, so a
-//!    world or a cache that sends a wrong record is refused by name. Records the scope no longer reaches are let go,
-//!    so the copy is exactly the scope.
+//!    world or a cache that sends a wrong record is refused by name, once: when it is taken. Records the scope no
+//!    longer reaches are let go, so the copy is exactly the scope. A node's big fields are records of their own,
+//!    named from its record (key 0, `tree::BIG_FIELD`, #4713), fetched like its children: a Soul walking on the
+//!    ground changes the ground's record, which names its children, but not its terrain's.
 //! 4. **The bytes are counted** ([`Synced`]): a room of 5,000 children lists 5,000 hashes (34 bytes each) to find one
 //!    change.
 //!
@@ -73,7 +75,7 @@ pub trait Source {
 /// A replaced record this large or larger is a big one ([`BIG_SEALS`]).
 pub const BIG_RECORD: usize = 64 * 1024;
 /// How many seals a replaced big record is still served after (#1960). A record re-sealed often and big is a moving
-/// body's ancestor near the top (Eden's ground: its terrain and every child's hash, megabytes), which a descent asks
+/// body's ancestor near the top (Eden's ground, before its terrain became a record of its own, #4713), which a descent asks
 /// for in its first rounds, right after the hashes answer.
 pub const BIG_SEALS: u64 = 16;
 /// How many seals a replaced small record (a body, a room) is still served after: a descent of a large scope asks for
@@ -85,7 +87,7 @@ pub const SMALL_BYTES: usize = 64 << 20;
 /// A record a seal replaced: when, whose, its hash and its size.
 struct Replaced {
     seal: u64,
-    node: Id,
+    node: (Id, u64),
     hash: Vec<u8>,
     size: usize,
 }
@@ -98,8 +100,8 @@ struct Replaced {
 #[derive(Default)]
 pub struct Records {
     by_hash: BTreeMap<Vec<u8>, Vec<u8>>,
-    /// Each node's record hash as last kept.
-    current: BTreeMap<Id, Vec<u8>>,
+    /// Each node's record hash as last kept, and each of its big fields' (`(id, 0)` its own, `(id, field)` a field's).
+    current: BTreeMap<(Id, u64), Vec<u8>>,
     /// Big and small records seals replaced, oldest first, and the small ones' bytes.
     big: VecDeque<Replaced>,
     small: VecDeque<Replaced>,
@@ -265,9 +267,13 @@ pub struct Descent {
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
     records: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// The hashes each held record names below it, as [`check`] gave them when it was taken: what the let go walks,
+    /// without decoding or hashing a record again (#4713).
+    below: BTreeMap<Vec<u8>, Vec<Vec<u8>>>,
 }
 
-/// Checks a record against the hash that named it (rule 3) and gives its children's hashes (field 10).
+/// Checks a record against the hash that named it (rule 3) and gives the hashes it names below it: its big fields'
+/// records (key 0) and its children's (field 10).
 fn check(want: &[u8], bytes: &[u8]) -> R<Vec<Vec<u8>>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
@@ -290,17 +296,35 @@ fn check(want: &[u8], bytes: &[u8]) -> R<Vec<Vec<u8>>> {
             format!("{} does not hash to its name", crate::encode::to_hex(want)),
         );
     }
-    match m.get(&10) {
-        None => Ok(Vec::new()),
-        Some(Value::Array(a)) => a
-            .iter()
-            .map(|v| match v {
-                Value::Bytes(b) if b.len() == 34 => Ok(b.clone()),
-                _ => refuse("sync-record", "a child's hash is not 34 bytes"),
-            })
-            .collect(),
-        Some(_) => refuse("sync-record", "children are not a list"),
+    let mut below = Vec::new();
+    match m.get(&0) {
+        None => {}
+        Some(Value::Array(a)) => {
+            for v in a {
+                let Value::Array(p) = v else {
+                    return refuse("sync-record", "a big field is not [field, hash]");
+                };
+                match p.as_slice() {
+                    [Value::Uint(_), Value::Bytes(b)] if b.len() == 34 => below.push(b.clone()),
+                    _ => return refuse("sync-record", "a big field is not [field, hash]"),
+                }
+            }
+        }
+        Some(_) => return refuse("sync-record", "big fields are not a list"),
     }
+    match m.get(&10) {
+        None => {}
+        Some(Value::Array(a)) => {
+            for v in a {
+                match v {
+                    Value::Bytes(b) if b.len() == 34 => below.push(b.clone()),
+                    _ => return refuse("sync-record", "a child's hash is not 34 bytes"),
+                }
+            }
+        }
+        Some(_) => return refuse("sync-record", "children are not a list"),
+    }
+    Ok(below)
 }
 
 fn size(v: &Value) -> u64 {
@@ -405,22 +429,25 @@ impl Copy {
         d.s.rounds += 1;
         d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
         for (h, bytes) in asked.iter().zip(got) {
-            for c in check(h, &bytes)? {
-                if !self.holds(&c) {
-                    d.next.push(c);
+            let below = check(h, &bytes)?;
+            for c in &below {
+                if !self.holds(c) {
+                    d.next.push(c.clone());
                 }
             }
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
             self.records.insert(h.clone(), bytes);
+            self.below.insert(h.clone(), below);
             d.taken.push(h.clone());
         }
         Ok(())
     }
 
     /// Rule 3's let go, once [`Copy::ask`] gives nothing more: the scope's new hashes become the copy's.
+    /// Each record was checked when taken, so this walks what each names below it as then given, hashing nothing.
     pub fn finish(&mut self, mut d: Descent) -> R<Synced> {
-        let reached = match self.reach_from(&d.roots) {
+        let reached = match self.reach_taken(&d.roots) {
             Ok(r) => r,
             Err(e) => {
                 self.abandon(d);
@@ -429,6 +456,7 @@ impl Copy {
         };
         self.roots = std::mem::take(&mut d.roots);
         self.records.retain(|h, _| reached.contains(h));
+        self.below.retain(|h, _| reached.contains(h));
         d.s.held = reached.len();
         Ok(d.s)
     }
@@ -439,6 +467,34 @@ impl Copy {
     pub fn abandon(&mut self, d: Descent) {
         for h in d.taken {
             self.records.remove(&h);
+            self.below.remove(&h);
+        }
+    }
+
+    /// Field `n` of a node whose record is `record`: from its field 6, or from its big field's own record (key 0,
+    /// `tree::BIG_FIELD`) if held. None when it has no such field or that record is not held.
+    pub fn field(&self, record: &BTreeMap<u64, Value>, n: u64) -> Option<Value> {
+        if let Some(Value::Map(f)) = record.get(&6)
+            && let Some(v) = f.get(&n)
+        {
+            return Some(v.clone());
+        }
+        let Some(Value::Array(bigs)) = record.get(&0) else {
+            return None;
+        };
+        let h = bigs.iter().find_map(|p| match p {
+            Value::Array(p) => match p.as_slice() {
+                [Value::Uint(f), Value::Bytes(h)] if *f == n => Some(h),
+                _ => None,
+            },
+            _ => None,
+        })?;
+        match decode(self.record(h)?).ok()?.value {
+            Value::Map(mut r) => match r.remove(&6) {
+                Some(Value::Map(mut f)) => f.remove(&n),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -450,6 +506,24 @@ impl Copy {
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
     pub fn reach(&self) -> R<BTreeSet<Vec<u8>>> {
         self.reach_from(&self.roots)
+    }
+
+    /// [`Copy::reach`] from `roots` over what each record named below it when it was taken (`below`): no record is
+    /// decoded or hashed again.
+    fn reach_taken(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<&[u8]> = roots.values().map(Vec::as_slice).collect();
+        while let Some(h) = stack.pop() {
+            if seen.contains(h) {
+                continue;
+            }
+            let Some(below) = self.below.get(h) else {
+                return refuse("sync-missing", crate::encode::to_hex(h));
+            };
+            stack.extend(below.iter().map(Vec::as_slice));
+            seen.insert(h.to_vec());
+        }
+        Ok(seen)
     }
 
     fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
