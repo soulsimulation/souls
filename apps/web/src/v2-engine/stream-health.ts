@@ -15,6 +15,9 @@ export type StreamHealth = {
   reloading?: boolean;
   /** The reader's last error, and how many parts had arrived when it was first seen (a later part clears it). */
   error: string | null; errorAtParts: number | null;
+  /** When the error was first seen (ms, the clock of `lastPartAt`): any life after it clears it, a still world's pointer
+   *  moving on too (25 Nov: one failed read in a still Eden showed the notice until its next part, 10 minutes on). */
+  errorAt?: number | null;
   parts: number;
   /** When the stream was started and when the newest part (or catch-up word) arrived (ms, one clock); null before any. */
   startedAt: number; lastPartAt: number | null; now: number;
@@ -35,12 +38,13 @@ export class StreamLife {
   }
 }
 
-/** The notice to show, or null: a failure, an error with no part since, no part 15 s after the start, or none for 15 s;
+/** The notice to show, or null: a failure, an error with no part (nor a still world's pointer moving on) since, no part 15 s after the start, or none for 15 s;
  *  a reader catching up says so. */
 export function streamNotice(h: StreamHealth): string | null {
   if (h.reloading) return STREAM_RELOADING;
   if (h.failed) return STREAM_NOTICE;
-  if (h.error && h.parts <= (h.errorAtParts ?? h.parts)) return STREAM_NOTICE;
+  const livedSince = h.errorAt != null && h.lastPartAt != null && h.lastPartAt > h.errorAt;
+  if (h.error && h.parts <= (h.errorAtParts ?? h.parts) && !livedSince) return STREAM_NOTICE;
   if (h.now - (h.lastPartAt ?? h.startedAt) >= STREAM_SILENCE_MS) return STREAM_NOTICE;
   return h.catching ? STREAM_CATCHING : null;
 }
