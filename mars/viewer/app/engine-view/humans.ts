@@ -73,6 +73,7 @@ import type { HandHoldState } from '../../engine/social/hand-hold.ts';
 import type { RpsState } from '../../engine/social/rps.ts';
 import {recordedGame,type RecordedGame} from './recorded-games.ts';
 import {runningGaitAt} from './running-gait.ts';
+import { chooseGait, type GaitChoice } from './gait-choice.ts';
 import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
@@ -179,6 +180,8 @@ type View = {
   gameDt?:number;
   groundSeat?: boolean;
   running?: boolean;
+  /** Walk or jog for a stretch (gait-choice.ts): the drawn gait, since when, and a change waiting out its dwell. */
+  gait?: GaitChoice;
   /** todo (leisure): the dock bicycle under a cycling body, metres ridden (turns the cranks), when it last cycled (s). */
   bike?: THREE.Group; ridden?: number; bikeAt?: number;
   prop?: { kind: PropKind; obj: THREE.Object3D };
@@ -309,7 +312,7 @@ export type SampledHuman = {
   game?:RecordedGame;
   gameTick?:number;
   gameDt?:number;
-  /** Ground speed (m/s) over ±0.15 s; running above RUN_SPEED plays the Run clip. */
+  /** Ground speed (m/s) over ±0.15 s; running (gait-choice.ts: above 2.3 m/s, for a stretch) plays the Run clip. */
   speed?: number;
   /** together/1: the other body of a paired gesture (hug, handshake, high-five, give/take, dance together). */
   partner?: string;
@@ -354,7 +357,6 @@ const OVERLAYS = new Set(['eat', 'serve', 'drink', ...ACTIVITY_OVERLAYS]);
 const CUP_LIPS = { fwd: 0.1, up: 0.02 } as const;
 /** #2197: where the eating palm stops, from the head bone: in front of the chin, with the food above it at the lips. */
 const EAT_PALM = { fwd: 0.11, up: -0.06, side: 0.02 } as const;
-const RUN_SPEED = 2.3; // m/s: faster than any walk
 const INTERACT = new Set(['browse', 'post-letter', 'give', 'take', 'hand-over']);
 const PELVIS = 0.09; // m from the hip joints down to the sitting surface (thigh/buttock thickness)
 const PALM_LIFT = 0.02; // m: palm centre above a surface the hand lies flat on (half a hand's thickness)
@@ -685,7 +687,7 @@ export class HumanViews {
       v.base = base;
       v.propWanted = (e.human as { prop?: string }).prop;
       v.instrument=(e.human as {instrument?:string}).instrument;v.game=recordedGame((e.human as {game?:unknown}).game)??undefined;v.gameTick=world.tick;v.gameDt=DT;
-      v.running = act === 'jog' || act === 'run' || ground > RUN_SPEED;
+      v.gait = chooseGait(v.gait, v.speed, world.tick * DT, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.grip = e.human.grip?.entity;
       v.gripSlot = e.human.grip?.slot;
       v.on = e.human.on;
@@ -926,8 +928,8 @@ export class HumanViews {
       if (v.groundSeat) v.seat = GROUND_SEAT;
       v.propWanted = f.prop;
       v.instrument=f.instrument;v.game=f.game;v.gameTick=f.gameTick;v.gameDt=f.gameDt;
-      v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
+      v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.since = f.activityAge;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
