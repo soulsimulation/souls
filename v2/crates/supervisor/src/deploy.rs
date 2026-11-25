@@ -910,7 +910,14 @@ pub fn rehearse(
         None
     };
     let checking = own.as_mut().unwrap_or(probe);
-    let checked = probe_once(&mut s, checking, c.answer_within);
+    // With no recorded intent fed (a quiet window, as Eden's on 0.136), the probe is the copy's first ask and meets
+    // its catch-up: it has the start bound, as the first fed tick does. After a fed intent's answer it has a tick's.
+    let first = if fed.is_empty() {
+        c.start_within
+    } else {
+        c.answer_within
+    };
+    let checked = probe_once(&mut s, checking, first);
     let cleaned = cleanup_operator(&socket_path(scratch), c, checking, &mut || None);
     match (checked, cleaned) {
         (Ok(()), r) => r,
@@ -1362,7 +1369,7 @@ mod tests {
             answer_within: Duration::from_millis(200),
             every: Duration::from_millis(100),
         };
-        let rehearse_with = |delay: &str| {
+        let rehearse_with = |state: &Path, delay: &str| {
             // The rehearsal clears the build's environment, so the script names what the fake reads.
             let build = dir.join(format!("build-{delay}"));
             std::fs::write(
@@ -1375,15 +1382,32 @@ mod tests {
             .unwrap();
             std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
             let mut probe = Probe::Ask(0);
-            rehearse(&build, &state, &dir.join("r"), 3, &c, &mut probe)
+            rehearse(&build, state, &dir.join("r"), 3, &c, &mut probe)
         };
-        let r = rehearse_with("1500").expect("every fed intent ended, late or not");
+        let r = rehearse_with(&state, "1500").expect("every fed intent ended, late or not");
         assert_eq!((r.copied, r.fed, r.ended), (1, 3, 3));
         assert_eq!(r.refused.get("intent.expired"), Some(&3));
-        let e = rehearse_with("never").unwrap_err();
+        let e = rehearse_with(&state, "never").unwrap_err();
         assert_eq!(
             e, "rehearsal.unanswered: 3 of 3 recorded intents reached no named end",
             "a copy that never answers is still refused"
+        );
+        // 0.136's Eden: a window of quiet records feeds no intent, so the probe was the copy's first ask and met its
+        // catch-up with a tick's wait (`rehearsal.canary.unanswered`). The probe then has the start bound.
+        let quiet = dir.join("q");
+        std::fs::create_dir_all(&quiet).unwrap();
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&quiet)).unwrap(), 1).unwrap();
+        for _ in 0..4 {
+            log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+                .unwrap();
+        }
+        log.wait_durable(4).unwrap();
+        drop(log.close());
+        let r = rehearse_with(&quiet, "1500").expect("the probe is answered after the catch-up");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 0, 0));
+        assert!(
+            rehearse_with(&quiet, "never").is_err(),
+            "a quiet copy that never answers is still refused"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -558,6 +558,14 @@ impl Stream {
             .starts_with("{\"state\":\"degraded\"")
     }
 
+    /// Whether the public stream still recovers its history ([`Stream::recovering`]).
+    pub fn is_recovering(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"recovering\"")
+    }
+
     /// Whether a running helper waits for the store ([`Stream::behind`]).
     pub fn is_behind(&self) -> bool {
         self.0
