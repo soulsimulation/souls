@@ -29,13 +29,14 @@ test('entries are written where the checks read them, revalidated by tag, and re
   const home = mkdtempSync(join(tmpdir(), 'entries-')), gateway = `ws://127.0.0.1:${server.address().port}/v2/ws`;
   try {
     writeFileSync(join(home, 'keep'), ''); // something of the owner's beside it is left alone
-    assert.deepEqual(await refreshEntries({ home, world: 'eden', gateway, token: 't0k' }), { entries: 2, changed: true });
+    assert.deepEqual(await refreshEntries({ home, world: 'eden', gateway, token: 't0k' }), { entries: 2, changed: true, written: 2 });
     assert.deepEqual(Object.keys(kindsIn(join(home, 'kinds'))).sort(), ['core:humanoid', 'eden:bench']);
     assert.deepEqual(await refreshEntries({ home, world: 'eden', gateway, token: 't0k' }), { entries: 2, changed: false });
     assert.ok(seen[1].tag, 'the second fetch sent the kept tag');
 
     list = [list[0], { format: 'souls-entry/1', kind: 'eden:lamp', owner: 'thing' }];
-    assert.deepEqual(await refreshEntries({ home, world: 'eden', gateway, token: 't0k' }), { entries: 2, changed: true });
+    // One entry new: only it is written; the unchanged one is left as it is (first run: a new daemon's re-fetch).
+    assert.deepEqual(await refreshEntries({ home, world: 'eden', gateway, token: 't0k' }), { entries: 2, changed: true, written: 1 });
     assert.deepEqual(Object.keys(kindsIn(join(home, 'kinds'))).sort(), ['eden:bench', 'eden:lamp'], 'an entry the world dropped is removed');
 
     unlinkSync(join(home, 'kinds', 'eden.lamp.json'));
