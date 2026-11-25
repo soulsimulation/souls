@@ -7,7 +7,7 @@
 // the session and the edit's bytes follow v2/web/src/panel/session.ts and edit.ts (T10's intent, `souls:edit`) rather
 // than importing them.
 // The token stays in memory only.
-import { MailBox, BoxSocket, V2OwnerMailbox, v2MailboxPlace, v2World, viewToken, type MailboxPlace } from './owner-mailbox.ts';
+import { MailBox, BoxSocket, NothingOwned, V2OwnerMailbox, v2MailboxPlace, v2World, viewToken, type MailboxPlace } from './owner-mailbox.ts';
 import { session as pageSession } from '../auth-session.ts';
 import type { AgentInbox } from '../AgentMessageBox.tsx';
 
@@ -201,6 +201,14 @@ const placeNow = (stream: string) => (stream === v2World() ? v2MailboxPlace() : 
 /** The world as the page's stream reader has it (use-v2-souls.ts `__soulsV2`): its own node and its time now. */
 const worldNow = () => (window as unknown as { __soulsV2?: { world?: string | null; newestTo?: number | null } }).__soulsV2 ?? null;
 
+/** Whether the exchange is worth asking: the directory's view token lists a creator grant for this account. A person
+ *  with none (a visitor, an owner of Souls only) is not asked for, so a world with no creator (Eden: the gateway's
+ *  `no-creator`, a 404) logs nothing on a normal visit (first day, 25 Nov). A view the directory cannot give now leaves it
+ *  to the exchange, as before. */
+export async function mayCreate(place: MailboxPlace, view: (p: MailboxPlace) => Promise<{ owned: readonly { grant: string }[] }> = viewToken): Promise<boolean> {
+  try { return creatorGrant((await view(place)).owned) !== null; } catch (e) { return !(e instanceof NothingOwned); }
+}
+
 /** The panel's creator on a v2 world: the exchange, the socket and the creator's mailbox. One a page and sign-in. */
 export class V2Creator {
   private session: Promise<CreatorSession> | null = null;
@@ -213,6 +221,7 @@ export class V2Creator {
     this.whoAsked ??= (async () => {
       const place = placeNow(this.stream);
       if (!place) return { creator: false as const, refused: 'no-gateway' };
+      if (!(await mayCreate(place))) return { creator: false as const, refused: 'not-the-creator' };
       try { await creatorToken(place); return { creator: true as const }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
     })();
     return this.whoAsked;

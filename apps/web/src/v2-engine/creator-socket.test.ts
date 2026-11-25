@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, creatorGrant, creatorToken, idOf, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
-const { MailBox, V2OwnerMailbox } = await import('./owner-mailbox.ts');
+const { CreatorSession, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
 const cbor = { encode, decode } as never;
@@ -106,4 +106,13 @@ test('the command box puts the creator\'s words in the creator\'s mailbox, the b
   const inbox = await box.send('Put a well by the square');
   assert.deepEqual(sock.sent, [`put ${CREATOR}\nPut a well by the square`]);
   assert.deepEqual(ticketOf(inbox), { id: 'm_1', text: 'Put a well by the square', state: 'sent', sentAt: ticketOf(inbox)!.sentAt }, 'the command log\'s row');
+});
+
+test('the exchange is asked only for an account the directory lists a creator grant for (first day: no 404 on Eden)', async () => {
+  const place = { directory: 'http://localhost:5960', gateway: 'ws://localhost:5960/w/eden/v2/ws', session: { page: true } } as never;
+  const owning = (...grants: string[]) => async () => ({ owned: grants.map((grant) => ({ grant })) });
+  assert.equal(await mayCreate(place, owning(CREATOR)), true, 'a creator is asked');
+  assert.equal(await mayCreate(place, owning(`soul-${'ab'.repeat(16)}-1`)), false, 'an owner of Souls only is not');
+  assert.equal(await mayCreate(place, async () => { throw new NothingOwned(); }), false, 'a new person, owning nothing, is not');
+  assert.equal(await mayCreate(place, async () => { throw new Error('no view: the directory said 500'); }), true, 'a view the directory cannot give leaves it to the exchange');
 });
