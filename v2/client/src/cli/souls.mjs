@@ -225,6 +225,17 @@ async function pairing(home, url, { within = 15_000 } = {}) {
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
 }
 
+/**
+ * The approval as plain lines for the person (`pair` writes them to stderr beside its JSON answer): the link alone on
+ * its line, so a terminal or a chat shows it as a link, the site to be signed in to, the code, and where else the card is.
+ */
+export function approvalText({ link, code }) {
+  let site = 'the world\'s site';
+  try { site = new URL(link).host; } catch { /* a link that is not a url is still printed as it came */ }
+  return `Approve this Soul: open this link while signed in to ${site}, and check it shows the code ${code}:\n${link}\n` +
+    'The card also appears on the world page if it is open.\n';
+}
+
 /** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
 export function argsOf(words) {
   if (words.length === 1 && words[0].trim().startsWith('{')) {
@@ -689,7 +700,11 @@ if (isMain(import.meta.url)) {
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
-    else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
+    else if (req.op === 'pair') {
+      const paired = req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url);
+      if (paired?.step === 'approve' && paired.link) process.stderr.write(approvalText(paired));
+      out(paired); process.exit(0);
+    }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
       // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
