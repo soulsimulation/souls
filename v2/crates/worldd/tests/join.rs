@@ -1163,8 +1163,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// writes the previous pin (06e9e816...), so the walk skill is the whole difference. Re-pinned by 0.133 Q1: a done walk's
 /// `souls:move-ended` carries field 7, how far from its target it ended, mm (same 905 records, 2,342 motion samples);
 /// with only field 7 left out the run writes the previous pin (26cdac83...), so field 7 is the whole difference.
+/// Re-pinned by #4795: a move refused as it starts is answered with its refusal's words (the second sit on the taken
+/// chair says who holds it), and the answer is logged (same 905 records, 2,342 motion samples); with only that detail
+/// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "85d9b1984b7ec6ce8efd775b76246aa1327852ac036d39c6b2841895cc660f85";
+    "1dff64e9459142e66eaa2479b57cad0d11897c42f1f1497c03a04a92a6415ff2";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
