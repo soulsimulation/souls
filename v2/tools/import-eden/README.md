@@ -69,7 +69,10 @@ world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes 
 a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entries this way
 (`content/worlds/mars/map.json`). worldd and the client look an entry up by that name, else by the kind's own. A
 borrowed seat or bed is set at the thing's own slot of the same number (its def's geometry), with the entry's stand
-offset from it; an entry seat the thing has no slot for is not offered.
+offset from it; an entry seat the thing has no slot for is not offered. A ride on its course whose own def declares
+no slots at all (Eden's launch balloon, mapped to `eden:balloon`) takes the entry's seats as the entry places them; its
+course comes from the entry it names too (`worldd serve`'s `with_rides`), so a world seeded before that offers the
+balloon's seats only once it is seeded again.
 A row may instead name the kind its copies are (`kind`): a kind that joins parts (a frame stand, a rack frame, a beam,
 a bay; `content/kinds/construction`) is read by its own name, so a copy that only borrowed its entry would never join.
 The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
