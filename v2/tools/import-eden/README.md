@@ -57,7 +57,10 @@ A thing starts in the state today's world draws it in (#4784). The exporter writ
 entity's bools and whole numbers over its def's defaults. Seeding with the world's entries (`load_with`), the import
 gives each value to the thing's entry field with the same meaning, for fields numbered 28 and up: the same name; a
 burning or running bool by either name (`on`, `lit`); a lamp's `level` from `on` (the entry's top level, or 0). So a
-lamp that is on today starts on, and a fire that is burning starts lit.
+lamp that is on today starts on, and a fire that is burning starts lit. A world imported before this change gets the
+same state once from `v2/tools/ops/seed-captured-state.mjs --template <template> [--dry-run]`, run as its creator. It
+sends creator edits that set only fields the world has never set, so it leaves alone anything a Soul has changed, and
+running it twice is safe.
 
 A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
 as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
