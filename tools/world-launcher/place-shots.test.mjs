@@ -15,12 +15,14 @@ test('a moved world\'s kept Explore picture is served small and immutable; a pla
   writeFileSync(join(dir, 'eden', `${sha}.webp`), Buffer.from('RIFF0000WEBP'));
   writeFileSync(join(dir, 'eden', 'index.json'), JSON.stringify({ schema: 'place-shots/1', shots: {
     e_balloon: { target: targetKey(target), sha, bytes: 12 }, e_moved: { target: targetKey({ ...target, point: [0, 0, 0] }), sha, bytes: 12 } } }));
-  const shots = placeShots({ dir });
+  const told = [], shots = placeShots({ dir, log: (s) => told.push(s) });
   assert.deepEqual(shots.views('eden', ['e_balloon', 'e_moved', 'e_new', 'e_gone'], places), [
     { ref: 'e_balloon', status: 'ready', thumb: `/v1/world/context/shot/${sha}.webp` },
     { ref: 'e_moved', status: 'unavailable', draw: 'page' },
     { ref: 'e_new', status: 'unavailable', draw: 'page' },
     { ref: 'e_gone', status: 'unavailable', draw: 'page' }]);
+  shots.views('eden', ['e_new'], places);
+  assert.equal(told.length, 1, 'said once per world and index'); assert.match(told[0], /eden has 2 of 3 places without a kept picture/);
   assert.equal(shots.views('other', ['e_balloon'], places)[0].draw, 'page', 'another world\'s pictures are its own');
   const server = createServer((req, res) => { if (!shots.serve(req, res, 'eden', req.url)) res.writeHead(418).end(); });
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));

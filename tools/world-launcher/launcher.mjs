@@ -303,7 +303,7 @@ export async function openLauncher(cfg = {}) {
   const templatesDir = resolve(cfg.templatesDir ?? join(root, 'worlds/templates'));
   // 24 Nov: a moved world's models and pictures, from the release's core assets and the box's shared upload store, as
   // its old process served them (moved-assets.mjs)
-  const shots = placeShots({ dir: join(dataDir, 'place-shots') });   // a moved world's kept Explore pictures (place-shots.mjs)
+  const shots = placeShots({ dir: join(dataDir, 'place-shots'), log: (s) => log(s) });   // a moved world's kept Explore pictures (place-shots.mjs)
   const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent

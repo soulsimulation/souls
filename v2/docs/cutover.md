@@ -57,9 +57,11 @@ too: each thing at the world's root, the ones with an authored meaning listed an
 the old process pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
 world's kept picture of the place as it is now, a small WebP served immutable at `/w/<slug>/v1/world/context/shot/<sha>.webp`,
 else `unavailable` with `draw: 'page'`, and the page draws that place itself from what it shows (kept in the browser per
-build). The kept pictures are made once per world, and again when its places change, by
-`node tools/world-launcher/place-shots.mjs --page <world page URL> --out <launcher data>/place-shots/<slug>`, which has
-the world's own page draw each place headless and draws only the ones missing; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
+build). The kept pictures are made at release, after the release is live, by
+`tools/world-launcher/deploy/place-shots.sh` (`--dry-run` first): for every moved world soul.game lists, it fetches the
+host's kept pictures, has the world's public page draw each place still missing on this machine's GPU, and copies the
+pictures and then their index to `<launcher data>/place-shots/<slug>/` (the host from `SIM_DEPLOY_HOST`, as ship.sh);
+a second run draws nothing. The launcher logs, once per world and index, how many places have no kept picture; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
 an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)

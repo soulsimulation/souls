@@ -71,7 +71,12 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
    is the release's id: a retry that finds it in the feed posts nothing. It posts before the browser checks' verdict
    and whatever that verdict is; a failed verdict still fails the run and prints the rollback command.
-9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
+9. **Explore's place pictures.** Once the release is live, on a machine with a GPU:
+   `tools/world-launcher/deploy/place-shots.sh --dry-run`, then `tools/world-launcher/deploy/place-shots.sh`. It draws
+   each moved world's places that have no kept picture from the public page and copies them to the host's
+   `<data>/place-shots/<slug>/` ([cutover](../v2/docs/cutover.md)); with nothing new it draws nothing. The launcher logs
+   `place-shots: <slug> has N of M places without a kept picture` while any are missing.
+10. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
 ## Shipping a pinned sha

@@ -138,7 +138,7 @@ export class WorldPlacePreviews{
    const bare=!scene.children.length;if(bare&&!this.live())return null;  // nothing of the place drawn: with a live world it is still pictured (a lake that is only water), never kept
    scene.updateMatrixWorld(true);
    const inside=location?.inside;  // a one-room building: shot from inside its room at eye level, like the room cards
-   const shot=await this.shoot(scene,center,radius,inside??view,key,alive,!!inside||id.startsWith('room:')||Object.hasOwn(INTERIOR_PLACE_VIEWS,id));if(!shot&&owned)return this.render(id,key,alive,location,false);  // a thing it cannot picture alone (a ground patch): its region
+   const shot=await this.shoot(scene,center,radius,inside??view,key,alive,!!inside||id.startsWith('room:')||Object.hasOwn(INTERIOR_PLACE_VIEWS,id),owned);  // one thing: framed by its own bounds, wherever it is now (a balloon aloft), not its regionif(!shot&&owned)return this.render(id,key,alive,location,false);  // a thing it cannot picture alone (a ground patch): its region
    if(shot&&!bare)keep(key,shot);return shot;
   }finally{target.dispose();for(const mesh of instances)mesh.dispose();for(const g of geometries)g.dispose();for(const m of materials.values())m.dispose();scene.clear();}
  }
@@ -149,7 +149,11 @@ export class WorldPlacePreviews{
  private async shoot(mask:THREE.Scene,center:THREE.Vector3,radius:number,view:{readonly p:readonly number[];readonly target:readonly number[]},key:string,alive:()=>boolean,interior=false,exact=false,size:readonly[number,number]=[SHOT_W,SHOT_H]):Promise<string|null>{
   const from=view.p;
   const world=this.live(),live=world??mask,insideWorld=interior&&!!world;  // isolated whole-building thumbnails must fit their geometry, even for a room card
-  const t0=performance.now(),bare=!mask.children.length,box=new THREE.Box3().setFromObject(mask),r=world&&!exact?radius*.8:0,extent=r<=0?box.clone():box.clone().union(new THREE.Box3(new THREE.Vector3(center.x-r,center.y,center.z-r),new THREE.Vector3(center.x+r,center.y,center.z+r))),aim=extent.getCenter(new THREE.Vector3());
+  const t0=performance.now(),bare=!mask.children.length,box=new THREE.Box3().setFromObject(mask),r=world&&!exact?radius*.8:0,extent=r<=0?box.clone():box.clone().union(new THREE.Box3(new THREE.Vector3(center.x-r,center.y,center.z-r),new THREE.Vector3(center.x+r,center.y,center.z+r)));
+  // one thing (exact): at least 2.5 m, and a third of its height, of ground around it, so a lamp or a flagpole is pictured whole
+  // with its surroundings from a step back and up, never filling the frame with what stands in front of it
+  if(exact&&world&&!box.isEmpty()){const c=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3()),half=Math.max(2.5,size.y*.35);extent.union(new THREE.Box3(new THREE.Vector3(c.x-half,box.min.y,c.z-half),new THREE.Vector3(c.x+half,box.min.y,c.z+half)));}
+  const aim=extent.getCenter(new THREE.Vector3());
   const az0=Math.atan2(from[0]-aim.x,from[2]-aim.z),el=35*Math.PI/180,W=size[0],H=size[1],CW=80,CH=56,renderer=this.renderer;
   const white=new THREE.MeshBasicMaterial({color:0xffffff,fog:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-8}),black=new THREE.MeshBasicMaterial({color:0,fog:false});
   const check=new THREE.WebGLRenderTarget(CW,CH,{depthBuffer:true}),target=new THREE.WebGLRenderTarget(W,H,{depthBuffer:true});target.texture.colorSpace=THREE.SRGBColorSpace;

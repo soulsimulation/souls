@@ -8,10 +8,11 @@
 //   beside `<sha>.webp`. `target` is `targetKey` of the place as the launcher lists it (its point, radius, viewpoint):
 //   a place that moved, or a new one, has no kept picture until it is drawn again, and the page draws it meanwhile.
 // - served: `/w/<slug>/v1/world/context/shot/<sha>.webp`, public and immutable (its name is its content's hash).
-// - made: `node tools/world-launcher/place-shots.mjs --page <world page URL> --out <data>/place-shots/<slug>` opens the
-//   world's own page headless (`?placeShots=1`, LiveWorld.tsx), has it draw every place of the published snapshot it has
-//   no current picture of, and writes them. Run once a world is moved, and again when its places change; nothing else
-//   changes and a run with nothing missing draws nothing.
+// - made: `node tools/world-launcher/place-shots.mjs --page <world page URL> --out <data>/place-shots/<slug> [--plan]`
+//   opens the world's own page headless (`?placeShots=1`, LiveWorld.tsx), has it draw every place of the published
+//   snapshot it has no current picture of, and writes them (`--plan`: only counts them). A run with nothing missing
+//   draws nothing. For every moved world of soul.game at once, drawn here and copied to the host:
+//   tools/world-launcher/deploy/place-shots.sh.
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -24,15 +25,18 @@ const SHA = /^[0-9a-f]{64}$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 
+/** How pictures are drawn (WorldPlacePreviews.ts framing): a new value redraws every kept picture on the next run. */
+export const DRAWING = 'place-shots/2';
 /** What a place's picture depends on, as the launcher lists it (cutover.mjs snapshotPlaces): where and how it is framed. */
 export function targetKey(t) {
-  return createHash('sha256').update(JSON.stringify([t.point, t.radius, t.viewpoint ?? null, !!t.enclosed])).digest('hex').slice(0, 32);
+  return createHash('sha256').update(JSON.stringify([DRAWING, t.point, t.radius, t.viewpoint ?? null, !!t.enclosed])).digest('hex').slice(0, 32);
 }
 
 /** `dir`: `<data>/place-shots`. → {views(slug, refs, places), serve(req, res, slug, rest)}. The index is read again when
- *  its file changes (looked at once a second), so a generator run takes effect without a restart. */
-export function placeShots({ dir }) {
-  const cache = new Map();
+ *  its file changes (looked at once a second), so a generator run takes effect without a restart. `log` is told, once per
+ *  world and index, how many of its places have no kept picture (the page draws those for each visitor). */
+export function placeShots({ dir, log = () => {} }) {
+  const cache = new Map(), told = new Map();
   const index = (slug) => {
     if (!SLUG.test(slug)) return null;
     const file = join(dir, slug, 'index.json'), now = Date.now(), c = cache.get(slug);
@@ -48,6 +52,12 @@ export function placeShots({ dir }) {
     /** POST /v1/world/context/views's answer: a kept picture of the place as it is now, else `draw: 'page'`. */
     views(slug, refs, places) {
       const shots = index(slug), byRef = new Map((places ?? []).map((p) => [p.target.ref, p.target]));
+      const seen = `${cache.get(slug)?.mtime ?? 0} ${byRef.size}`;
+      if (places?.length && told.get(slug) !== seen) {
+        told.set(slug, seen);
+        const without = [...byRef.values()].filter((t) => shots?.[t.ref]?.target !== targetKey(t)).length;
+        if (without) log(`place-shots: ${slug} has ${without} of ${byRef.size} places without a kept picture; the page draws them for each visitor (tools/world-launcher/deploy/place-shots.sh)`);
+      }
       return refs.map((ref) => {
         const s = shots?.[ref], t = byRef.get(ref);
         return s && t && SHA.test(s.sha ?? '') && s.target === targetKey(t) ? { ref, status: 'ready', thumb: `/v1/world/context/shot/${s.sha}.webp` } : { ref, status: 'unavailable', draw: 'page' };
@@ -69,10 +79,9 @@ export function placeShots({ dir }) {
 }
 
 /** Draws and keeps the pictures `out` has no current one of. `page`: the world's page URL (ending in `/`). */
-export async function makeShots({ page, out, chromium, args = [], log = () => {} }) {
+export async function makeShots({ page, out, chromium, args = [], plan = false, log = () => {} }) {
   const snapshot = await fetch(new URL('v1/world/snapshot', page)).then((r) => (r.ok ? r.json() : Promise.reject(Error(`snapshot ${r.status}`))));
   const places = snapshotPlaces(snapshot).map((p) => p.target);
-  mkdirSync(out, { recursive: true });
   let kept = {};
   try { kept = JSON.parse(readFileSync(join(out, 'index.json'), 'utf8')).shots ?? {}; } catch { /* first run */ }
   const missing = places.filter((t) => kept[t.ref]?.target !== targetKey(t) || !existsSync(join(out, `${kept[t.ref]?.sha}.webp`)));
@@ -80,13 +89,16 @@ export async function makeShots({ page, out, chromium, args = [], log = () => {}
   // written whole (.tmp, then renamed) every 25 pictures and at the end: a stopped run keeps what it drew
   const save = () => { writeFileSync(join(out, 'index.json.tmp'), JSON.stringify({ schema: 'place-shots/1', shots })); renameSync(join(out, 'index.json.tmp'), join(out, 'index.json')); };
   log(`${places.length} places, ${missing.length} to draw`);
+  if (plan) return { places: places.length, toDraw: missing.length, kept: Object.keys(shots).length };
+  mkdirSync(out, { recursive: true });
   if (missing.length) {
     const browser = await chromium.launch({ headless: true, args });
     try {
       const tab = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       const url = new URL(page); url.searchParams.set('placeShots', '1');
       await tab.goto(url.href, { waitUntil: 'load', timeout: 120_000 });
-      await tab.waitForFunction(() => window.__placeShots?.ready(), null, { timeout: 180_000, polling: 500 });
+      await tab.waitForFunction(() => window.__placeShots?.ready(), null, { timeout: 180_000, polling: 500 })
+        .catch(() => { throw Error(`${url.href}: the page never offered window.__placeShots (a build from before #4792, or the world did not load)`); });
       for (const t of missing) {
         // the page's 320 × 224 shot, kept at Explore's card size (256 wide) and WebP quality 0.72: a few KB
         const shot = await tab.evaluate(async (target) => {
@@ -113,11 +125,11 @@ export async function makeShots({ page, out, chromium, args = [], log = () => {}
 
 if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
-  const page = opt('page'), out = opt('out');
-  if (!page || !out) { console.error('usage: place-shots.mjs --page <world page URL> --out <data>/place-shots/<slug>'); process.exit(2); }
+  const page = opt('page'), out = opt('out'), plan = argv.includes('--plan');
+  if (!page || !out) { console.error('usage: place-shots.mjs --page <world page URL> --out <data>/place-shots/<slug> [--plan]'); process.exit(2); }
   const { resolvePlaywright, launchArgs } = await import(pathToFileURL(resolve(import.meta.dirname, '../playtest/lib/platform.mjs')).href);
   const pw = resolvePlaywright({ serverRoot: resolve(import.meta.dirname, '../..') });
   if (!pw) { console.error('place-shots: Playwright not found (pnpm install --frozen-lockfile)'); process.exit(1); }
-  const r = await makeShots({ page: page.endsWith('/') ? page : `${page}/`, out: resolve(out), chromium: pw.chromium, args: launchArgs().args, log: (s) => console.error(s) });
+  const r = await makeShots({ page: page.endsWith('/') ? page : `${page}/`, out: resolve(out), chromium: pw.chromium, args: launchArgs().args, plan, log: (s) => console.error(s) });
   console.log(JSON.stringify(r));
 }
