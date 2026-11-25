@@ -505,7 +505,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const light = (adopted?.light as Daylight|undefined) ?? new Daylight(scene,{bakedShadow:quality.bakedShadows});if(quality.shadowMapSize!==light.sun.shadow.mapSize.x)light.sun.shadow.mapSize.set(quality.shadowMapSize,quality.shadowMapSize);
     // PERF-BAKED-SHADOWS: still things cast into the sun's cached map (redrawn when the sun turns, the view steps or a still thing changes); the per-frame map draws what moves
     const sunCache=light.baked?new SunShadowCache(renderer,scene,light.sun,light.baked,{enabled:()=>look.enabled&&look.follow&&entityLayer.active&&!expansion&&!eyes&&entityLayer.freezeSettled,statics:()=>{const out=entityLayer.shadowStatics([]);out.push(entityBatches.group,staticBatches.group);return out;},revision:()=>entityLayer.shadowRevision}):null;
-    const broadcast = new WorldBroadcast();
+    const broadcast = new WorldBroadcast();if(earlyWanted)broadcast.openingShown();  // phone arrival: the card lifted over the opening view seconds ago; the live world opens on its Souls
     broadcast.hints=()=>({soulEntity:id=>context.current.sim.conn.replica.souls.get(id)?.entityId??null,eden:!!expansion&&!past.current,daylight:light.daylight,carriers:rideCarriers,...(entityLayer.active&&!expansion?{views:godTourViews(entityLayer,entityLayer.groundPeek)}:{})});  // R4-LIVE: a god world's own landmarks  // VF1/VF5: who speaks; Eden town views; time of day
     const followMotion=new WorldFollowMotion();
     let followTick:number|null=null,followEpoch:string|null=null;
@@ -821,6 +821,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const eyes=WorldEyes.fromSearch(location.search,{renderer,camera,scene,body:id=>people?.bodyObject(id)??floaters.object(id)??standIns.getObjectByName(id)??null,souls:()=>[...context.current.sim.conn.replica.souls.values()].map(x=>x.entityId),overlays:()=>[speechLayer.group,ring,fading.group,hover.marker],tick:()=>shown.current.tick,ready:()=>sceneSettled&&drawnTick.current!==null,where});
     const officeGuardFrom=new THREE.Vector3(),authoredBoundaries=new WorldAuthoredBoundaries();
     let shadowFrame=0;  // P1 phones
+    let liveAt:number|null=null;  // when this view first drew a live frame
     const fixtureInstances=new EngineFixtureInstances(entityLayer.motionInstancer);
     let posterFrames=0,programsPending=false,warmLayer=0,arrivedOnce=false,earlyPending=0,buildingFrameAt=-Infinity,layerStarted=false,afterNextDraw:(()=>void)|null=null;  // afterNextDraw: ?shot waits for a frame drawn after the build  // lane W1: the built world's shaders are still linking in parallel: no frame yet
     const compileInitialPrograms=async()=>{
@@ -1169,7 +1170,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // P7 lever D: an early arrival stays on the near world it drew until the rest is built (a cut to a Soul before that
       // showed hollow ground)
       // P7f: nor before it knows whether Souls live here (a world without them stays on its arrival view; the welcome decides)
-      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !(arrivalPending && !s.conn.replica.souls.size)) {
+      // phone arrival: nor, in a world with Souls, until its first live frame and no Soul marked by a stand-in (1.5 s at
+      // most; 20 s in all): the arrival view holds, then cuts to a Soul drawn as itself, with no town tour between (its
+      // scene's reset jumped to a random view ~0.5 s before) and no Soul as a stand-in
+      const firstLivePending=earlyWanted&&!past.current&&s.conn.replica.souls.size>0&&now<20_000&&(liveAt===null?!['failed','cancelled'].includes(initialGate?.snapshot().stage??''):standIns.children.length>0&&now<liveAt+1500);
+      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !firstLivePending && !(arrivalPending && !s.conn.replica.souls.size)) {
         const shot = broadcast.sample(at.entities, records, base ?? (entityLayer.active ? openGroundScene(entityLayer.groundExtent()) : null), at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
         if (shot?.pose) {
           camera.position.fromArray(shot.pose.position);
@@ -1263,7 +1268,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         // on a 4x phone: the town appeared ~1.5 s after the card) and the compile below covers its lights
         if(context.current.edenExpansion){const until=performance.now()+15_000;while(expansionWantedNow!==false&&!expansionFailed&&!past.current&&!expansion?.group.visible&&performance.now()<until){await new Promise(r=>setTimeout(r,100));if(abort.signal.aborted||initialGate!==gate||!gate.attached)return;}}
         await prepareStaticRendering();if(abort.signal.aborted||initialGate!==gate||!gate.attached)return;await compileInitialPrograms();})();void prepared.then(()=>{if(!abort.signal.aborted&&initialGate===gate)gate.preparationComplete(gate.generation);},()=>{if(!abort.signal.aborted&&initialGate===gate)gate.preparationFailed('Rendering preparation');});}
-      if (!renderer.getContext().isContextLost()) {if(at.take&&!holdDraw&&initialGate?.snapshot().stage==='first-frame')initialGate.firstFrame(initialGate.generation);drawnTick.current = at.take&&initialGate?.snapshot().stage==='ready' ? at.tick : null;if(drawnTick.current!==null)arrivalMark('first-live-frame');}
+      if (!renderer.getContext().isContextLost()) {if(at.take&&!holdDraw&&initialGate?.snapshot().stage==='first-frame')initialGate.firstFrame(initialGate.generation);drawnTick.current = at.take&&initialGate?.snapshot().stage==='ready' ? at.tick : null;if(drawnTick.current!==null){arrivalMark('first-live-frame');liveAt??=now;}}
       // A paused seek is a discrete displayed moment. Publish its first drawn
       // frame immediately; moving playback retains the existing 250ms cadence.
       const pausedFrameChanged = !!past.current && !past.current.playing &&
