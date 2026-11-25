@@ -1,6 +1,7 @@
 // Every seat of Eden's seat kinds has a front: a Soul sits on the seat's surface, facing out of it, with its legs in
-// front, and the engine's seat `n` is the seat the page draws it on. Checked against each seat def's own model, as the
-// page draws it (`buildKit`), for every seat kind Eden 2026 places. Offline: no renderer, network or server.
+// front. Checked against each seat def's own model, as the page draws it (`buildKit`), for every seat kind Eden 2026
+// places. (That the engine's seat `n` is the seat the page draws is v2/tools/import-eden/export/with.test.ts's.)
+// Offline: no renderer, network or server.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -8,7 +9,6 @@ import * as THREE from 'three';
 import { coreLibrary, type StoredDef } from '@souls/world-compiler';
 import { buildKit } from './kit.mesh.ts';
 import { MaterialLib } from './materials.ts';
-import { entriesIn, slotNumbers } from '../../../../v2/tools/import-eden/export/with.ts';
 
 const root = new URL('../../../../', import.meta.url);
 type Slot = StoredDef['slots'][number];
@@ -93,42 +93,4 @@ test("the check finds the seat turned wrong: sideways along the bench, as on sou
   // and on its end, over the arm: not on the seat's surface
   const end = { ...left, p: [-0.74, left.p[1], -0.02] as [number, number, number] };
   assert.match(seatFault(model, end, facingOf(end.yaw)) ?? '', /under it/);
-});
-
-test("each Eden seat kind's seat n, as the engine numbers its entry's slots, is the thing's own seat n the page draws", () => {
-  const entries = entriesIn(new URL('content/kinds', root).pathname);
-  const rows = (JSON.parse(readFileSync(new URL('content/worlds/eden/map.json', root), 'utf8')).rows as { def: string; entry?: string }[]);
-  // the map names defs `core/<name>@<rev>`, the library `core-<name>@<rev>`; a kind with no row goes by its own name
-  const entryOf = (d: StoredDef) => rows.find((r) => r.def.replace(/^core\//, 'core-') === d.ref)?.entry ?? `eden:${d.name.replace(/^core-/, '').replace(/-/g, '_')}`;
-  type Entry = { kind: string; slots?: Record<string, { admits?: string; at_mm?: number[] }> };
-  /** Each entry seat (the engine's seat `k`, the entry's order) the facts' numbering `number` puts on a slot of the
-   *  thing other than its own seat nearest the entry's point. */
-  const misdrawn = (number: (d: StoredDef, e: Entry) => Map<string, number>) => {
-    const wrong: string[] = [];
-    let checked = 0;
-    for (const d of edenSeatDefs()) {
-      const entry = entries.get(entryOf(d))?.entry as Entry | undefined;
-      if (!entry?.slots) continue;
-      const n = number(d, entry), own = d.slots.filter((s) => s.kind !== 'room');
-      const bodies = own.filter((s) => s.kind === 'seat' || s.kind === 'bed');
-      for (const [k, [name, e]] of Object.entries(entry.slots).entries()) {
-        if (e.admits !== 'body' || !e.at_mm) continue;
-        checked++;
-        const at = e.at_mm.map((v) => v / 1000);
-        const near = (s: Slot) => Math.hypot(s.p[0] - at[0], s.p[2] - at[2]);
-        const nearest = bodies.reduce((a, b) => (near(b) < near(a) ? b : a), bodies[0]);
-        const drawn = own.find((s) => n.get(s.id) === k + 1);
-        if (drawn?.id !== nearest?.id) wrong.push(`${d.ref} ${name}: ${drawn ? `${drawn.kind} ${drawn.id}` : 'no slot'}`);
-      }
-    }
-    assert.ok(checked > 40, `${checked} seats checked`);
-    return wrong;
-  };
-  assert.deepEqual(misdrawn((d, e) => slotNumbers(d.slots, e)), []);
-  // the def's own order, as the facts numbered every thing's slots before: a picnic or parasol table's seat 1 was its
-  // top (a Soul sat on the table), and a canoe's and a narrowboat's places were swapped
-  const before = misdrawn((d) => new Map(d.slots.map((s, i) => [s.id, i + 1])));
-  for (const w of ['core-picnic-table@1 seat_1: surface top', 'core-parasol-table@1 seat_1: surface top', 'core-canoe@1 back: seat front', 'core-narrowboat@1 stern: bed berth']) {
-    assert.ok(before.includes(w), `${w} in ${JSON.stringify(before)}`);
-  }
 });

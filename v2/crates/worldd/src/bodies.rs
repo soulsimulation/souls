@@ -2524,14 +2524,6 @@ const NOTABLE_NEAR: i64 = 6_000_000;
 /// things, so the same tree gives the same answer. None when nothing stands near: the body keeps its facing.
 fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> Option<Vec3> {
     use sim::ground::scene::{DOORWAY, F_SOLIDS, FLOOR, GROUND, PLACE, ROOM, WINDOW};
-    let plain = |n: &replica::tree::NodeRef<'_>| {
-        n.kind()
-            .as_str()
-            .split('@')
-            .next()
-            .unwrap_or_default()
-            .to_owned()
-    };
     let near = i128::from(NOTABLE_NEAR).pow(2);
     let off = i128::from(sim::controller::FACE_NEAR).pow(2);
     let h = tree.handle(frame)?;
@@ -2540,14 +2532,13 @@ fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> 
     while let Some((h, top)) = todo.pop() {
         for c in tree.children(h).unwrap_or_default() {
             let Some(n) = tree.node(*c) else { continue };
-            let kind = plain(&n);
+            let full = n.kind().as_str();
+            let kind = full.split_once('@').map_or(full, |(k, _)| k);
             if kind == ROOM && top {
                 todo.push((*c, false));
                 continue;
             }
-            if [GROUND, PLACE, ROOM, FLOOR, WINDOW, DOORWAY].contains(&kind.as_str())
-                || body(n.id())
-            {
+            if [GROUND, PLACE, ROOM, FLOOR, WINDOW, DOORWAY].contains(&kind) || body(n.id()) {
                 continue;
             }
             if !matches!(n.fields().get(&F_SOLIDS), Some(Value::Array(s)) if !s.is_empty()) {
