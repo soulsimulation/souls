@@ -371,7 +371,10 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const hid = await act(A, `hide:${stump.id}`, `thing=${apple}`);
   assert.ok(accepted(hid.answer), `A hides the apple in the stump: ${JSON.stringify(hid.answer)}`);
   await waitFor("the apple in the stump in A's copy", async () => (await apples(A)).find((r) => r.id === apple && r.in?.startsWith(stump.name)), 20_000);
-  const seekerSees = await apples(B);
+  // B's copy may answer from a confirm just before the hide (a copy confirmed within 1 s answers at once, #4716): its
+  // find then still shows the apple in A's hand. Once B's copy holds the hide, it must not hold the apple.
+  let seekerSees = await apples(B);
+  for (const until = Date.now() + 10_000; seekerSees.some((r) => r.id === apple) && Date.now() < until; seekerSees = await apples(B)) await new Promise((r) => setTimeout(r, 250));
   console.log(`e2e: (e) after the hide, A's find: ${JSON.stringify((await apples(A)).map((r) => [r.id, r.in]))}; B's: ${JSON.stringify(seekerSees.map((r) => [r.id, r.in]))}`);
   assert.deepEqual(seekerSees.filter((r) => r.id === apple), [], "(e) B's find does not hold the hidden apple");
   const lookB = JSON.stringify(await B.cli('look'));
