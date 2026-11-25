@@ -49,6 +49,18 @@ impl Client {
         parameters: BTreeMap<u64, Value>,
         within: i64,
     ) -> Result<Vec<u64>, String> {
+        self.send(verb, target, parameters, within);
+        self.answer(verb)
+    }
+
+    /// Sends an act, its intent expiring `within` µs from now, and reads no answer.
+    fn send(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        parameters: BTreeMap<u64, Value>,
+        within: i64,
+    ) {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -75,6 +87,10 @@ impl Client {
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
         self.0.write_all(&bytes).unwrap();
+    }
+
+    /// The next answer on the socket that is not a progress answer: an act's own answer.
+    fn answer(&mut self, verb: &str) -> Result<Vec<u64>, String> {
         // A progress answer (C20, kind 3 with the µs left) comes before the act's own answer: printed, and read past.
         let a = loop {
             let mut len = [0u8; 4];
@@ -4464,4 +4480,81 @@ fn w10_everyday_takes_on_eden_need_reach() {
         println!("W10 {arm}: {ok} of {} taken", answers.len());
     }
     println!("W10 refusals by arm and reason: {refused:?}");
+}
+
+/// One Eden seat-like thing a new person would use, by today's id: born at `at` (`x,z` m, outside its building's door,
+/// or beside it), a Soul takes it by `on` and leaves it by `off` (on the thing, or the gateway's `eden:rise`).
+const SEATS: &[(&str, &str, &str, &str, &str)] = &[
+    ("house bed", "178.8,39.2", "e_a9988e06", "eden:lie", "eden:get_up"),
+    ("house bed sleep", "178.8,39.2", "e_a9988e06", "eden:sleep", "eden:get_up"),
+    ("hall bed", "-117.9,60.0", "e_80a904af", "eden:lie", "eden:get_up"),
+    ("cottage bed", "-60.2,129.2", "e_60db0389", "eden:lie", "eden:get_up"),
+    ("townhouse bed", "127.9,-25.3", "e_a6a97ef2", "eden:lie", "eden:get_up"),
+    ("shop bed", "113.1,98.6", "e_433d5f0a", "eden:lie", "eden:get_up"),
+    ("cabin bed", "-117.0,-62.0", "e_bbbb741b", "eden:lie", "eden:get_up"),
+    ("barn bunk", "-70.0,131.4", "e_64eea6e7", "eden:lie", "eden:get_up"),
+    ("hammock", "52.6,70.5", "e_ed70c839", "eden:lie", "eden:get_up"),
+    ("sleeping mat", "-18.0,14.0", "e_ba667eb9", "eden:lie", "eden:get_up"),
+    ("bench", "28.0,-10.0", "e_f848c0f5", "eden:sit", "eden:rise"),
+    ("chair", "178.8,39.2", "e_3391b018", "eden:sit", "eden:rise"),
+    ("armchair", "178.8,39.2", "e_d95aa852", "eden:sit", "eden:rise"),
+    ("sofa", "178.8,39.2", "e_fa425262", "eden:sit", "eden:rise"),
+    ("see-saw", "19.0,106.0", "e_a75004f7", "eden:ride", "eden:get_off"),
+    ("swing after", "18.0,99.0", "e_7dacb4f7", "eden:swing", "eden:get_off"),
+];
+
+/// Beds, swings and seats on Eden: every seat-like thing on [`SEATS`] is taken from outside its building (or beside
+/// it) and left again, each answer printed; the lie, sit or ride ends `done`, and so does the way off. A swing's
+/// `get_off` sent 12 s into its 30 s swing ends the swinging and gets off. `SEATS_ONLY=<words>` runs the rows whose
+/// name holds them.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn every_eden_seat_is_taken_and_left_from_outside() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let only = std::env::var("SEATS_ONLY").ok();
+    let wanted = |what: &str| only.as_deref().is_none_or(|o| what.contains(o));
+    let mut failed = Vec::new();
+    for (i, (what, at, today, on, off)) in SEATS.iter().enumerate() {
+        if !wanted(what) {
+            continue;
+        }
+        let thing = im.nodes[*today];
+        let (served, mut soul, dir) = serve(&facts, at, &format!("seat{i}"), lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        let took = soul.act(on, Some(thing), BTreeMap::new());
+        let end = track(&dir).last().map(|b| (b.2, b.3));
+        let target = (*off != "eden:rise").then_some(thing);
+        let left = soul.act(off, target, BTreeMap::new());
+        println!("SEAT {what} {today}: {on} {took:?} (ended at {end:?}); {off} {left:?}");
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+        if took.is_err() || left.is_err() {
+            failed.push(format!("{what}: {on} {took:?}; {off} {left:?}"));
+        }
+    }
+    if wanted("swing during") {
+        let (served, mut soul, dir) = serve(&facts, "18.0,99.0", "seatswing", lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        let swings = im.nodes["e_7dacb4f7"];
+        // The swing is sent and not waited for: 12 s on, its get_off follows on the same socket; then both answers.
+        soul.send("eden:swing", Some(swings), BTreeMap::new(), 120_000_000);
+        std::thread::sleep(Duration::from_secs(12));
+        soul.send("eden:get_off", Some(swings), BTreeMap::new(), 120_000_000);
+        let first = soul.answer("first");
+        let second = soul.answer("second");
+        println!("SEAT swing during: answers {first:?} then {second:?}");
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+        let refused = |a: &Result<Vec<u64>, String>| a.as_ref().is_err_and(|e| e == "not-permitted");
+        if refused(&first) || refused(&second) || first.is_err() && second.is_err() {
+            failed.push(format!("swing during: {first:?} then {second:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
