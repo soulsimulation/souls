@@ -63,12 +63,13 @@ function browser() {
     if (!CFG.key || !CFG.issuer) { gate('Owner access is not configured.'); return false; }
     try {
       if (!clerkReady) clerkReady = (async () => {
-        await new Promise((ok, no) => {
-          const s = document.createElement('script'); s.src = CFG.issuer + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js'; s.crossOrigin = 'anonymous'; s.dataset.clerkPublishableKey = CFG.key; s.onload = ok; s.onerror = no; document.head.append(s);
+        const add = (src, key) => new Promise((ok, no) => {
+          const s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous'; if (key) s.dataset.clerkPublishableKey = key; s.onload = ok; s.onerror = no; document.head.append(s);
         });
+        await Promise.all([add(CFG.issuer + '/npm/@clerk/clerk-js@6/dist/clerk.browser.js', CFG.key), add(CFG.issuer + '/npm/@clerk/ui@1/dist/ui.browser.js')]);
         clerk = window.Clerk;
         const sat = CFG.satellite && location.origin === 'https://' + CFG.satellite.domain ? CFG.satellite : null;
-        await clerk.load(sat ? { isSatellite: true, domain: sat.domain, signInUrl: sat.signInUrl } : {});
+        await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor }, ...(sat ? { isSatellite: true, domain: sat.domain, signInUrl: sat.signInUrl } : {}) });
         identity = identityOf(clerk.session, clerk.user);
         clerk.addListener(({ session, user }) => {
           const next = identityOf(session, user);
@@ -127,7 +128,7 @@ ${c?.proofs?.length ? `<ul class="proofs">${c.proofs.map(p => `<li>${link(p.url,
   $('#sign-in').onclick = () => {
     const target = location.origin + location.pathname;
     if (CFG.satellite && location.origin === 'https://' + CFG.satellite.domain) location.assign(clerk.buildSignInUrl({ signInForceRedirectUrl: target, signUpForceRedirectUrl: target }));
-    else clerk?.openSignIn({ afterSignInUrl: target, afterSignUpUrl: target });
+    else clerk?.openSignIn({ forceRedirectUrl: target, signUpForceRedirectUrl: target });
   };
   addEventListener('pagehide', () => { identityVersion++; gate('Owner access must be checked again.'); });
   addEventListener('pageshow', event => { if (event.persisted) load(); });

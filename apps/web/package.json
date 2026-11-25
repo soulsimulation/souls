@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.6",
+    "@clerk/react": "^6.19.6",
     "@souls/client": "workspace:*",
     "@souls/ground": "workspace:*",
     "@souls/world-compiler": "workspace:*",

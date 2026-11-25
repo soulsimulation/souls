@@ -30,7 +30,7 @@ test('a version 1 index reads as one performance per piece', () => {
 
 test('the file key is the CDN convention: assets/<sha[0:2]>/<sha>.<ext>', () => {
   const sha = 'ab'.repeat(32);
-  assert.equal(cdnUrl(sha, 'm4a'), `https://assets.eden.art/assets/ab/${sha}.m4a`);
+  assert.equal(cdnUrl(sha, 'm4a'), `https://cdn.soul.game/assets/ab/${sha}.m4a`);
 });
 
 test('the index text is stable: fields in order, one piece per line, sorted; performances contiguous from 0', () => {

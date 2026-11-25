@@ -1312,44 +1312,48 @@ fn at(r: &Replica, n: Id) -> Vec3 {
         .position
 }
 
-/// #4086: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the can's own
-/// form, as Eden and Mars serve it). Before this change a body 100 m away was handed the can at once, never moving
-/// (A1). Now the world measures the reach at commit: the can 100 m away and one just beyond a form's reach (2.2 m)
-/// are refused `out_of_reach`, naming the walk that would work, with nothing changed; one within it (1.5 m) is taken.
-/// The body's place and the cans' parents are read from the world's records.
+/// #4086, #4118: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the
+/// can's own form, as Eden and Mars serve it). Before #4097 a body 2.2 m or 100 m away was handed the can at once,
+/// never moving; #4097 refused it `out_of_reach` at commit. Now a bare take walks to its thing first and takes it at
+/// contact, within reach: the can 1.5 m away is taken where the body stands, with no walk; the one 2.2 m away, just
+/// beyond a form's reach, is walked to, then taken. The body's place and the cans' parents are read from the world's
+/// records.
 #[test]
-fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
+fn w10_a_bare_take_walks_to_its_thing_then_takes_it_in_reach() {
     let (run, mut a, _) = serve("w10");
     let none = BTreeMap::new;
     let before = at(&run.replay(), w1());
-    let far = a.act("test:take", Some(far_can()), none());
-    let r = run.replay();
-    println!(
-        "W10 take 100 m: {far:?}; body {before:?} then {:?}; can at {:?}, parent {:?}",
-        at(&r, w1()),
-        at(&r, far_can()),
-        parent(&r, far_can())
-    );
-    assert_eq!(far, Err("out_of_reach".to_owned()), "refused by name");
-    assert_eq!(at(&r, w1()), before, "the body has not moved");
-    assert_eq!(
-        parent(&r, far_can()),
-        (Some(ground()), None),
-        "the can lies where it lay"
-    );
-    let beyond = a.act("test:take", Some(beyond_can()), none());
-    println!("W10 take 2.2 m: {beyond:?}");
-    assert_eq!(beyond, Err("out_of_reach".to_owned()));
-    assert_eq!(parent(&run.replay(), beyond_can()), (Some(ground()), None));
     let near = a.act("test:take", Some(near_can()), none());
     let r = run.replay();
     println!(
-        "W10 take 1.5 m: {near:?}; parent {:?}",
-        parent(&r, near_can())
+        "W10 take 1.5 m: {near:?}; body {before:?} then {:?}",
+        at(&r, w1())
     );
     assert!(!near.expect("within reach: taken").is_empty());
     assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
     assert_eq!(at(&r, w1()), before, "taken where the body stands");
+    let can = at(&r, beyond_can());
+    let beyond = a.act("test:take", Some(beyond_can()), none());
+    let r = run.replay();
+    let after = at(&r, w1());
+    println!(
+        "W10 take 2.2 m: {beyond:?}; body {before:?} then {after:?}; can at {can:?}, parent {:?}",
+        parent(&r, beyond_can())
+    );
+    assert!(!beyond.expect("walked to, then taken").is_empty());
+    assert_eq!(parent(&r, beyond_can()).0, Some(w1()), "in the body's hand");
+    let gap =
+        |p: Vec3, q: Vec3| (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt();
+    assert!(gap(before, can) > 2_000_000, "the can lay beyond reach");
+    assert!(
+        gap(after, can) < gap(before, can) - 500_000,
+        "the body walked toward it first"
+    );
+    assert_eq!(
+        parent(&r, far_can()),
+        (Some(ground()), None),
+        "the far can lies where it lay"
+    );
     run.stop();
 }
 

@@ -518,13 +518,66 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
         .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
         .map_or(0, <[_]>::len);
     println!("{punts} rowing punts added by the world, {riders} seats each");
+    // The world gives each ride that flies a loop its course (`with_rides`, #4795), and a ride on its course whose own
+    // def declares no seats takes its entry's seats as they are (Eden's launch balloon, an `eden:balloon` by Eden's
+    // map): the facts read here have no course, so `body_slots` gives it none.
+    let (mut aloft, mut aloft_things) = (0, 0);
+    let all = replica::rules::json::parse(&text).unwrap();
+    let kind_of: BTreeMap<&str, String> = all
+        .get("kinds")
+        .and_then(|k| k.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?,
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    for t in all.get("things").and_then(|t| t.arr()).unwrap_or(&[]) {
+        let on_ground = t.get("parent").is_none_or(|p| p.str().is_none());
+        let own_slots = t
+            .get("slots")
+            .and_then(|s| s.arr())
+            .is_some_and(|s| !s.is_empty());
+        let (Some(entry), Some(def)) = (
+            t.get("entry").and_then(|e| e.str()),
+            t.get("def").and_then(|d| d.str()),
+        ) else {
+            continue;
+        };
+        let Some((_, e)) = found.iter().find(|(k, _)| k == entry) else {
+            continue;
+        };
+        if !on_ground
+            || own_slots
+            || kind_of.get(def).is_some_and(|k| k == entry)
+            || !sim::courses::rides::Ride::of(e).is_some_and(|r| r.loops_aloft())
+        {
+            continue;
+        }
+        let seats = e.get("slots").and_then(|s| s.obj()).unwrap_or(&[]);
+        aloft += seats
+            .iter()
+            .filter(|(_, d)| d.get("admits").and_then(|a| a.str()) == Some("body"))
+            .count();
+        aloft_things += 1;
+    }
+    println!(
+        "{aloft} seats on {aloft_things} rides that take their entry's seats on the course the world gives them"
+    );
     assert_eq!(
-        mine.len() + punts * riders,
+        mine.len() + punts * riders + aloft,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len() + punts, "the things they are on");
+    assert_eq!(
+        on,
+        on_things.len() + punts + aloft_things,
+        "the things they are on"
+    );
     assert_eq!(registered, declared, "every declared body slot registered");
     // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
     // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).
@@ -4315,4 +4368,177 @@ fn first_day_walks_end_beside_a_bench_and_a_table_and_sitting_still_works() {
     rose.expect("rose from it");
     to_book.expect("walked to the book");
     assert!(beside_table, "beside the table, not in it: {at_table}");
+}
+
+/// Each body's places in the world's log in `dir`, in order: `(x, z)` m in its frame, by the body's id.
+fn body_rows(dir: &Path) -> BTreeMap<Id, Vec<(f64, f64)>> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::<Id, Vec<(f64, f64)>>::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let Ok(Value::Map(m)) = decode(&r).map(|d| d.value) else {
+            continue;
+        };
+        if let Some(Value::Array(rows)) = m.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                let p = (pose.position.x as f64 / 1e6, pose.position.z as f64 / 1e6);
+                out.entry(id).or_default().push(p);
+            }
+        }
+    }
+    out
+}
+
+/// The everyday things W10 takes on Eden (#4086, #4118): of each def, the `n` nearest to `at` (x, z m), as `(def,
+/// facts id, m from at)`.
+fn w10_things(
+    facts: &str,
+    at: (f64, f64),
+    defs: &[(&'static str, usize)],
+) -> Vec<(&'static str, String, f64)> {
+    use replica::rules::json::Value as Json;
+    let f = replica::rules::json::parse(&std::fs::read_to_string(facts).unwrap()).unwrap();
+    let things = f.get("things").and_then(Json::arr).unwrap_or(&[]);
+    let mut out = Vec::new();
+    for &(def, n) in defs {
+        let mut found: Vec<(f64, String)> = things
+            .iter()
+            .filter(|t| t.get("def").and_then(Json::str) == Some(def))
+            .filter_map(|t| {
+                let w = t.get("world")?.arr()?;
+                let m = |i: usize| match w.get(i)? {
+                    Json::Int(v) => Some(*v as f64 / 1000.0),
+                    _ => None,
+                };
+                let d = ((m(0)? - at.0).powi(2) + (m(2)? - at.1).powi(2)).sqrt();
+                Some((d, t.get("id")?.str()?.to_owned()))
+            })
+            .collect();
+        found.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out.extend(found.into_iter().take(n).map(|(d, id)| (def, id, d)));
+    }
+    out
+}
+
+/// One W10 answer: the walk's answer and seconds (when the Soul walked first), the take's and its seconds, and how
+/// far the body moved across x and z from its first row to its last (m, in its frame; NaN with no rows).
+type W10 = (
+    Option<(Result<Vec<u64>, String>, f64)>,
+    Result<Vec<u64>, String>,
+    f64,
+    f64,
+);
+
+/// One arm of W10 on a freshly seeded Eden: one Soul per thing, born at `at`, all at once, each sending `eden:take` on
+/// its thing, after `eden:walk` to it when `walk_first`.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+fn w10_arm(
+    facts: &str,
+    at: &str,
+    tag: &str,
+    things: &[(&'static str, String, f64)],
+    walk_first: bool,
+) -> Vec<W10> {
+    let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let (served, _first, dir) = serve(facts, at, tag, lineage);
+    // Every Soul is joined, and its body (the one new body in the log) known, before any acts.
+    let mut known: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+    let souls: Vec<(Client, Option<Id>)> = (0..things.len())
+        .map(|i| {
+            let soul = join(&dir, 2 + i as u64, lineage);
+            soul.0
+                .set_read_timeout(Some(Duration::from_secs(600)))
+                .unwrap();
+            let now: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+            let body = now.difference(&known).next().copied();
+            known = now;
+            (soul, body)
+        })
+        .collect();
+    let threads: Vec<_> = souls
+        .into_iter()
+        .zip(things)
+        .map(|((mut soul, body), (_, id, _))| {
+            let thing = im.nodes[id.as_str()];
+            std::thread::spawn(move || {
+                let t0 = std::time::Instant::now();
+                let walked = walk_first.then(|| {
+                    let w = soul.act_within("eden:walk", Some(thing), BTreeMap::new(), 300_000_000);
+                    (w, t0.elapsed().as_secs_f64())
+                });
+                let t1 = std::time::Instant::now();
+                let took = soul.act_within("eden:take", Some(thing), BTreeMap::new(), 300_000_000);
+                (body, walked, took, t1.elapsed().as_secs_f64())
+            })
+        })
+        .collect();
+    let answers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let rows = body_rows(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    answers
+        .into_iter()
+        .map(|(body, walked, took, secs)| {
+            let moved = match body
+                .and_then(|b| rows.get(&b))
+                .map(|r| (r.first(), r.last()))
+            {
+                Some((Some(a), Some(b))) => ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt(),
+                _ => f64::NAN,
+            };
+            (walked, took, secs, moved)
+        })
+        .collect()
+}
+
+/// W10 (#4086, #4118) on Eden as it is served: everyday takes (bowls and a cup on tables, a kettle, watering cans on
+/// the ground, a book from a bookcase or a bookshelf), each by its own Soul born by the library's door. Arm `far`
+/// sends the take from where the Soul was born; arm `walked` walks to the thing first (`eden:walk`), then takes. It
+/// prints every answer and the refusals by reason per arm. A take never lands at a distance: one that is taken from
+/// more than 3 m away was walked to.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn w10_everyday_takes_on_eden_need_reach() {
+    let facts = facts_path();
+    let at = (74.0, -1.0);
+    let defs = [
+        ("core-bowl@1", 8),
+        ("core-cup@2", 1),
+        ("core-kettle@1", 1),
+        ("core-watering-can@1", 4),
+        ("core-bookcase@1", 4),
+        ("core-bookshelf@1", 4),
+    ];
+    let things = w10_things(&facts, at, &defs);
+    let mut refused = BTreeMap::<(&str, String), usize>::new();
+    for (arm, walk_first) in [("far", false), ("walked", true)] {
+        let answers = w10_arm(
+            &facts,
+            "74.0,-1.0",
+            &format!("w10{arm}"),
+            &things,
+            walk_first,
+        );
+        for ((def, id, d), (walked, took, secs, moved)) in things.iter().zip(&answers) {
+            println!(
+                "W10 {arm}: {def} {id} at {d:.1} m: walk {walked:?}; take {took:?} in {secs:.1} s; body moved {moved:.1} m"
+            );
+            if let Err(why) = took {
+                *refused.entry((arm, why.clone())).or_default() += 1;
+            }
+            if took.is_ok() && *d > 3.0 {
+                assert!(
+                    *moved > 1.0,
+                    "{arm}: {def} {id} {d:.1} m away taken by a body that never moved"
+                );
+            }
+        }
+        let ok = answers.iter().filter(|a| a.1.is_ok()).count();
+        println!("W10 {arm}: {ok} of {} taken", answers.len());
+    }
+    println!("W10 refusals by arm and reason: {refused:?}");
 }

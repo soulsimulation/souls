@@ -28,7 +28,7 @@ export type ArtDeps = {
   soulFromBearer: (c: Context) => { id: string; name: string } | null;
   /** The world's owner id (for the creator's maker record). */
   owner: () => string | null;
-  /** Public base URL of this world (e.g. https://sim.eden.art/w/eden); the media URL is its path + /art/<file>. */
+  /** Public base URL of this world (e.g. https://soul.game/w/eden); the media URL is its path + /art/<file>. */
   baseOf: (c: Context) => string;
   limitIp: (c: Context, key: string, max: number, windowMs: number) => void;
   dir: string;

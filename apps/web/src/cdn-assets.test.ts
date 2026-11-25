@@ -26,6 +26,8 @@ test('only explicit local manifest paths opt in, retaining query version pins an
   assert.throws(() => cdnOrigin('https://other.test'));
   assert.throws(() => cdnOrigin('http://127.0.0.1:5811/path'));
   assert.equal(cdnOrigin('http://127.0.0.1:5811'), 'http://127.0.0.1:5811');
+  assert.equal(cdnOrigin('https://cdn.soul.game'), 'https://cdn.soul.game');
+  assert.equal(cdnOrigin('https://assets.eden.art'), 'https://assets.eden.art', 'the former CDN stays accepted for a rollback build');
 });
 
 test('default-off never asks for a manifest; dynamic world slugs use explicit immutable aliases only', async () => {
@@ -56,11 +58,11 @@ test('page view transport keeps the new origin URL on CDN failure and missing pu
   const of = 'd'.repeat(64), view = `https://sim.eden.art/worlds/w/eden/asset-view/${of}.glb`;
   const hashes = readCdnManifest({ version: 1, assets: { [`/worlds/assets/${of}.glb`]: { ...entry, of, licence: 'served-public' } } });
   const calls: string[] = [];
-  const original: typeof fetch = async input => { const url = String(input); calls.push(url); if (url.startsWith('https://assets.eden.art/')) throw Error('CDN unavailable'); return new Response('current origin representation'); };
-  assert.equal(await (await cdnFetch(original, hashes, 'https://assets.eden.art', page)(view)).text(), 'current origin representation');
-  assert.deepEqual(calls, ['https://assets.eden.art/' + entry.key, view]);
+  const original: typeof fetch = async input => { const url = String(input); calls.push(url); if (url.startsWith('https://cdn.soul.game/')) throw Error('CDN unavailable'); return new Response('current origin representation'); };
+  assert.equal(await (await cdnFetch(original, hashes, 'https://cdn.soul.game', page)(view)).text(), 'current origin representation');
+  assert.deepEqual(calls, ['https://cdn.soul.game/' + entry.key, view]);
   calls.length = 0;
-  assert.equal(await (await cdnFetch(original, { version: 1, assets: {} }, 'https://assets.eden.art', page)(view)).text(), 'current origin representation');
+  assert.equal(await (await cdnFetch(original, { version: 1, assets: {} }, 'https://cdn.soul.game', page)(view)).text(), 'current origin representation');
   assert.deepEqual(calls, [view]);
 });
 
@@ -87,10 +89,10 @@ test('verified CDN bytes omit origin credentials and auth headers', async () => 
   const calls: { input: RequestInfo | URL; init?: RequestInit }[] = [];
   const original: typeof fetch = async (input, init) => { calls.push({ input, init }); return new Response(bytes, { headers: { 'content-type': 'model/gltf-binary', 'content-encoding': 'br' } }); };
   const request = new Request('https://sim.eden.art/worlds/assets/model.glb', { headers: { authorization: 'test-fixture' }, credentials: 'include' });
-  const response = await cdnFetch(original, manifest, 'https://assets.eden.art', page)(request);
+  const response = await cdnFetch(original, manifest, 'https://cdn.soul.game', page)(request);
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].input, 'https://assets.eden.art/' + entry.key);
+  assert.equal(calls[0].input, 'https://cdn.soul.game/' + entry.key);
   assert.equal(calls[0].init?.credentials, 'omit');
   assert.equal(calls[0].init?.headers, undefined);
   assert.equal(response.headers.get('content-encoding'), null);
@@ -109,7 +111,7 @@ for (const failure of ['network', 'http', 'length', 'hash', 'body']) test(`${fai
     if (failure === 'hash') return new Response('x'.repeat(bytes.length));
     return new Response(new ReadableStream({ start(c) { c.error(Error('body failed')); } }));
   };
-  const response = await cdnFetch(original, manifest, 'https://assets.eden.art', page)(input, init);
+  const response = await cdnFetch(original, manifest, 'https://cdn.soul.game', page)(input, init);
   assert.equal(await response.text(), 'origin');
   assert.equal(calls.length, 2);
 });
@@ -123,10 +125,10 @@ test('CDN timeout covers streaming body and falls back; caller cancellation stop
   // The timer's unref behavior needs another pending handle in node's test process.
   const keepAlive = setTimeout(() => {}, 500);
   try {
-    assert.equal(await (await cdnFetch(original, manifest, 'https://assets.eden.art', page, 10)('/worlds/assets/model.glb')).text(), 'origin');
+    assert.equal(await (await cdnFetch(original, manifest, 'https://cdn.soul.game', page, 10)('/worlds/assets/model.glb')).text(), 'origin');
     calls = 0;
     const abort = new AbortController();
-    const task = cdnFetch(original, manifest, 'https://assets.eden.art', page)('/worlds/assets/model.glb', { signal: abort.signal });
+    const task = cdnFetch(original, manifest, 'https://cdn.soul.game', page)('/worlds/assets/model.glb', { signal: abort.signal });
     setTimeout(() => abort.abort(), 5);
     await assert.rejects(task, { name: 'AbortError' });
     assert.equal(calls, 1);
@@ -137,34 +139,34 @@ test('PF2: a CDN request with no answer in 4 s is asked for at the origin beside
   const asked: string[] = [], cancelled: string[] = [];
   const hanging = (url: string, init?: RequestInit) => new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => { cancelled.push(url); reject(init.signal?.reason); }));
   // the CDN never answers; the origin answers at once
-  const stalled: typeof fetch = async (input, init) => { const url = String(input); asked.push(url); return url.startsWith('https://assets.eden.art/') ? hanging(url, init) : new Response('origin'); };
+  const stalled: typeof fetch = async (input, init) => { const url = String(input); asked.push(url); return url.startsWith('https://cdn.soul.game/') ? hanging(url, init) : new Response('origin'); };
   const t0 = Date.now();
-  assert.equal(await (await cdnFetch(stalled, manifest, 'https://assets.eden.art', page, 12_000, undefined, 40)('/worlds/assets/model.glb')).text(), 'origin');
+  assert.equal(await (await cdnFetch(stalled, manifest, 'https://cdn.soul.game', page, 12_000, undefined, 40)('/worlds/assets/model.glb')).text(), 'origin');
   assert.ok(Date.now() - t0 < 2_000, 'the origin answered after the hedge, not after the 12 s timeout');
-  assert.deepEqual(asked, [`https://assets.eden.art/${entry.key}`, '/worlds/assets/model.glb']);
-  assert.deepEqual(cancelled, [`https://assets.eden.art/${entry.key}`]);
+  assert.deepEqual(asked, [`https://cdn.soul.game/${entry.key}`, '/worlds/assets/model.glb']);
+  assert.deepEqual(cancelled, [`https://cdn.soul.game/${entry.key}`]);
   // the CDN answers (late, after the hedge) before the origin, which then is cancelled; the CDN bytes are used
   asked.length = 0; cancelled.length = 0;
   let cdnAnswer!: (r: Response) => void;
   const slowCdn: typeof fetch = async (input, init) => { const url = String(input); asked.push(url);
-    return url.startsWith('https://assets.eden.art/') ? new Promise<Response>((r) => { cdnAnswer = r; }) : hanging(url, init); };
-  const task = cdnFetch(slowCdn, manifest, 'https://assets.eden.art', page, 12_000, undefined, 20)('/worlds/assets/model.glb');
+    return url.startsWith('https://cdn.soul.game/') ? new Promise<Response>((r) => { cdnAnswer = r; }) : hanging(url, init); };
+  const task = cdnFetch(slowCdn, manifest, 'https://cdn.soul.game', page, 12_000, undefined, 20)('/worlds/assets/model.glb');
   await new Promise((r) => setTimeout(r, 60));
   cdnAnswer(new Response(bytes));
   assert.deepEqual([...new Uint8Array(await (await task).arrayBuffer())], [...bytes]);
-  assert.deepEqual(asked, [`https://assets.eden.art/${entry.key}`, '/worlds/assets/model.glb']);
+  assert.deepEqual(asked, [`https://cdn.soul.game/${entry.key}`, '/worlds/assets/model.glb']);
   assert.deepEqual(cancelled, ['/worlds/assets/model.glb']);
   // a CDN answer within the hedge time: only the CDN is asked
   asked.length = 0;
   const ok: typeof fetch = async (input) => { asked.push(String(input)); return new Response(bytes); };
-  await (await cdnFetch(ok, manifest, 'https://assets.eden.art', page)('/worlds/assets/model.glb')).arrayBuffer();
-  assert.deepEqual(asked, [`https://assets.eden.art/${entry.key}`]);
+  await (await cdnFetch(ok, manifest, 'https://cdn.soul.game', page)('/worlds/assets/model.glb')).arrayBuffer();
+  assert.deepEqual(asked, [`https://cdn.soul.game/${entry.key}`]);
 });
 
 test('unmapped, range and non-GET requests retain their ordinary transport', async () => {
   const calls: (RequestInfo | URL)[] = [];
   const original: typeof fetch = async input => { calls.push(input); return new Response('origin'); };
-  const wrapped = cdnFetch(original, manifest, 'https://assets.eden.art', page);
+  const wrapped = cdnFetch(original, manifest, 'https://cdn.soul.game', page);
   await wrapped('/not-published.glb');
   await wrapped('/worlds/assets/model.glb', { method: 'POST' });
   await wrapped('/worlds/assets/model.glb', { headers: { range: 'bytes=0-2' } });
@@ -226,7 +228,7 @@ test('a large CDN body that keeps moving outlasts the stall timeout and reports 
     c.close();
   } }));
   // 22 chunks x 3 ms is well past a 20 ms total, but no single gap reaches it.
-  const response = await cdnFetch(original, scoped, 'https://assets.eden.art', 'https://sim.eden.art/w/mars', 20, (url, loaded, total) => {
+  const response = await cdnFetch(original, scoped, 'https://cdn.soul.game', 'https://sim.eden.art/w/mars', 20, (url, loaded, total) => {
     assert.equal(url, '/browser/campus.glb?v=20260922b'); assert.equal(total, bytes.length); progress.push(loaded);
   })('/browser/campus.glb?v=20260922b');
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
@@ -247,9 +249,9 @@ test('a CDN body that stalls falls back to the exact origin request; an oversize
     };
     const keepAlive = setTimeout(() => {}, 500);
     try {
-      const response = await cdnFetch(original, scoped, 'https://assets.eden.art', 'https://sim.eden.art/w/mars', 15)('/browser/campus.glb?v=20260922b');
+      const response = await cdnFetch(original, scoped, 'https://cdn.soul.game', 'https://sim.eden.art/w/mars', 15)('/browser/campus.glb?v=20260922b');
       assert.equal(await response.text(), 'origin', body);
-      assert.deepEqual(calls, [`https://assets.eden.art/assets/w/mars/${sha256}.glb`, '/browser/campus.glb?v=20260922b']);
+      assert.deepEqual(calls, [`https://cdn.soul.game/assets/w/mars/${sha256}.glb`, '/browser/campus.glb?v=20260922b']);
     } finally { clearTimeout(keepAlive); }
   }
 });
@@ -264,9 +266,9 @@ test('CDN3: precompressed br keys validate, still hash-bound; /modular resolves 
   }
   // The browser decodes Content-Encoding br before the body reaches the transport: the check runs on the decoded bytes.
   const calls: string[] = [];
-  const response = await cdnFetch(async (input) => { calls.push(String(input)); return new Response(bytes, { headers: { 'content-encoding': 'br' } }); }, m, 'https://assets.eden.art', page)('https://sim.eden.art/modular/environment/x.glb?v=abc');
+  const response = await cdnFetch(async (input) => { calls.push(String(input)); return new Response(bytes, { headers: { 'content-encoding': 'br' } }); }, m, 'https://cdn.soul.game', page)('https://sim.eden.art/modular/environment/x.glb?v=abc');
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
-  assert.deepEqual(calls, ['https://assets.eden.art/' + brEntry.key]);
+  assert.deepEqual(calls, ['https://cdn.soul.game/' + brEntry.key]);
   const prepared = readCdnManifest(JSON.parse(readFileSync(new URL('./cdn-manifest.json', import.meta.url), 'utf8')));
   for (const prefix of ['', '/worlds']) {
     const mesh = manifestAsset(prepared, `${prefix}/modular/environment/animated-casual.mesh.glb?v=767b7c427cc6`, page);
@@ -301,14 +303,14 @@ test('CDN4: a god upload the snapshot sized maps to the pull-through Worker, onl
   noteUploadSizes({ [up]: body.length });
   const calls: string[] = [];
   const ok: typeof fetch = async (input) => { calls.push(String(input)); return new Response(body); };
-  const r = await cdnFetch(ok, manifest, 'https://assets.eden.art', own)(`https://sim.eden.art${path}`);
+  const r = await cdnFetch(ok, manifest, 'https://cdn.soul.game', own)(`https://sim.eden.art${path}`);
   assert.deepEqual(new Uint8Array(await r.arrayBuffer()), body);
-  assert.deepEqual(calls, [`https://assets.eden.art/w/bench-hamlet/assets/${up}.glb`]);
+  assert.deepEqual(calls, [`https://cdn.soul.game/w/bench-hamlet/assets/${up}.glb`]);
   for (const bad of [new Response('x'.repeat(body.length)), new Response('not deployed', { status: 404 }), new Response(body.slice(1))]) {
     const seen: string[] = [];
     const f: typeof fetch = async (input) => { seen.push(String(input)); return seen.length === 1 ? bad : new Response('origin'); };
-    assert.equal(await (await cdnFetch(f, manifest, 'https://assets.eden.art', own)(`https://sim.eden.art${path}`)).text(), 'origin');
-    assert.deepEqual(seen, [`https://assets.eden.art/w/bench-hamlet/assets/${up}.glb`, `https://sim.eden.art${path}`]);
+    assert.equal(await (await cdnFetch(f, manifest, 'https://cdn.soul.game', own)(`https://sim.eden.art${path}`)).text(), 'origin');
+    assert.deepEqual(seen, [`https://cdn.soul.game/w/bench-hamlet/assets/${up}.glb`, `https://sim.eden.art${path}`]);
   }
   // ?godcdn=0 turns the route off at run time.
   const loc = globalThis.location;

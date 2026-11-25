@@ -25,8 +25,8 @@ const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i
 if (!url) { console.error('usage: profile-arrival.mjs <worldUrl> --out <dir>'); process.exit(2); }
 const target = new URL(url), port = Number(target.port);
 const lanePorts = (process.env.SPEED_PORTS ?? '').split(',').filter(Boolean).map(Number);
-const live = args.includes('--live'); // read-only stranger load of the real site: https://sim.eden.art only, no dev flags
-if (live ? target.origin !== 'https://sim.eden.art' : (!['localhost', '127.0.0.1'].includes(target.hostname) || (port >= 4930 && port <= 4990) || !(lanePorts.includes(port) || (port >= 5890 && port <= 5899)))) throw new Error('lane ports only (SPEED_PORTS), or --live for https://sim.eden.art');
+const live = args.includes('--live'); // read-only stranger load of the real site: https://soul.game only, no dev flags
+if (live ? target.origin !== 'https://soul.game' : (!['localhost', '127.0.0.1'].includes(target.hostname) || (port >= 4930 && port <= 4990) || !(lanePorts.includes(port) || (port >= 5890 && port <= 5899)))) throw new Error('lane ports only (SPEED_PORTS), or --live for https://soul.game');
 const out = resolve(opt('out', '.lane/profile')); mkdirSync(out, { recursive: true });
 const desktop = args.includes('--desktop'), warm = args.includes('--warm');
 const cpu = Number(opt('cpu', desktop ? '1' : '4')), mbps = Number(opt('mbps', desktop ? '0' : '60')), interval = Number(opt('interval', '250'));

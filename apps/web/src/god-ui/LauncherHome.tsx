@@ -7,7 +7,7 @@ import { BASE } from '../base-path.ts';
 import { whenVisible } from '../poll-pace.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
-import { useSession, userAuthHeaders } from '../auth-session.ts';
+import { useSession, userAuthHeaders, type Session } from '../auth-session.ts';
 import { AccountPicture } from '../AccountPicture.tsx';
 import { HomeSouls } from './HomeSouls.tsx';
 
@@ -41,6 +41,13 @@ function AccountMenu({ label, avatarUrl, onSignOut }: { label: string | null; av
   );
 }
 
+/** Sign in from the homepage and come back to it. Only "+ New world" marks the return (?new=1) so New world opens then; "Sign in" alone opens nothing. */
+export function homeSignIn(session: Pick<Session, 'signInUrl' | 'login'>, newWorld: boolean) {
+  const then = newWorld ? '?new=1' : '';
+  if (session.signInUrl) location.assign(session.signInUrl + then);
+  else { if (newWorld) history.replaceState(null, '', location.pathname + then); session.login(); }
+}
+
 export function LauncherHome({ initial }: { initial: LauncherList }) {
   const [list, setList] = useState(initial);
   const [dialog, setDialogRaw] = useState(() => new URLSearchParams(location.search).has('new'));
@@ -49,11 +56,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
   const needsSignIn = (session.mode === 'clerk' || session.mode === 'dev') && !session.authed;
   // a new world belongs to whoever makes it: signing in comes first, and the dialog opens once they are back (?new)
   const setDialog = (open: boolean) => {
-    if (open && needsSignIn) {
-      if (session.signInUrl) location.assign(session.signInUrl + '?new=1');
-      else { history.replaceState(null, '', location.pathname + '?new=1'); session.login(); }
-      return;
-    }
+    if (open && needsSignIn) return homeSignIn(session, true);
     setDialogRaw(open);
   };
   useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
@@ -68,8 +71,6 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
   const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));
   // two worlds with one name are told apart by their address, shown only on those cards
   const shared = new Set(worlds.map((w) => w.name).filter((n, i, all) => all.indexOf(n) !== i));
-  // Terms and privacy: beside the sign-in button, and in the footer
-  const agree = <span className="lh-agree">By signing in you agree to the <a href={`${BASE}/docs/terms`} data-terms-signin="1">terms and privacy</a>.</span>;
   return (
     <main className="world-list lh">
       <header className="lh-bar">
@@ -77,15 +78,12 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <div className="lh-actions">
           {session.authed ? <AccountMenu label={session.label} avatarUrl={session.avatarUrl} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
-              : <>{agree}<button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button></>)
-            : session.mode === 'dev' && <>{agree}<button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button></>}
+              : <button className="lh-signin" data-home-signin="1" onClick={() => homeSignIn(session, false)}>Sign in</button>)
+            : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
         </div>
       </header>
-      {/* first day (25 Nov): a newcomer is told what Souls is before anything else */}
-      <section className="lh-intro" data-home-intro="1">
-        <p className="lh-lede">Souls are persistent worlds that keep going when you look away. Your own AI agent lives in one as a Soul: it walks, talks, sits and builds there. You watch; it acts.</p>
-        <p className="dim">Open a world to watch it live. Press <b>New Soul</b> there to bring your agent in.</p>
-      </section>
+      {/* Souls are for agents: the one line to hand an agent comes first, above the worlds */}
+      <ForAgents/>
       {worlds.length === 0 && (
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
@@ -118,10 +116,9 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       </div>
       {/* #2466: the signed-in person's own Souls, below the worlds, only when they have some */}
       <HomeSouls/>
-      <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
       <footer className="lh-footer">
-        <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href={`${BASE}/docs/terms`} data-terms-link="1">Terms and privacy</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
+        <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href={`${BASE}/docs/terms#terms`} data-terms-link="1">Terms</a><a href={`${BASE}/docs/terms#privacy`} data-privacy-link="1">Privacy</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
         <p className="lh-credit">Souls is an experiment by <a href="https://genekogan.com" rel="noopener" target="_blank">Gene Kogan</a></p>
       </footer>
       {dialog && <NewWorldDialog templates={list.templates} onClose={() => { setDialog(false); const q = new URLSearchParams(location.search); if (q.has('new')) history.replaceState(null, '', location.pathname); }} />}

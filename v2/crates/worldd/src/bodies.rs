@@ -1383,10 +1383,11 @@ impl Bodies {
 
     /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
     /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
-    /// (the ground, a room, a building's main room) keeps its facing, as does one ending within
-    /// [`sim::controller::FACE_NEAR`] of the origin ([`sim::controller::facing_toward`], the one rule a form's walk
-    /// keeps too). The turn is its legs' facing input, set by a driver of them, as a place's facing is
-    /// ([`Self::take_places`]).
+    /// (the ground, a room, a building's main room, a point on one) turns it to what is there instead: the nearest
+    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. One ending
+    /// within [`sim::controller::FACE_NEAR`] of what it faces keeps its facing ([`sim::controller::facing_toward`], the
+    /// one rule a form's walk keeps too). The turn is its legs' facing input, set by a driver of them, as a place's
+    /// facing is ([`Self::take_places`]).
     fn face(&mut self, body: Id, target: Id) {
         use sim::ground::scene::{GROUND, PLACE, ROOM};
         let Some((frame, at)) = self.pose(body) else {
@@ -1400,10 +1401,23 @@ impl Bodies {
                     [GROUND, PLACE, ROOM].contains(&kind)
                 })
         });
-        if target == body || place || main_room(tree, target).is_some() {
+        if target == body {
             return;
         }
-        let to = match self.pose(target) {
+        let to = if place || main_room(tree, target).is_some() {
+            let c = &self.runner.controller;
+            notable_near(tree, frame, at, &|id| c.body(id).is_some())
+        } else {
+            self.toward(target, frame)
+        };
+        self.turn_to(body, at, to);
+    }
+
+    /// Where `target`, a thing or another Soul's body, is in `frame`'s axes, on the level: its origin, or the thing it
+    /// sits in when it is seated or lying ([`Bodies::face`]).
+    fn toward(&self, target: Id, frame: Id) -> Option<Vec3> {
+        let tree = &self.town.tree;
+        match self.pose(target) {
             Some((f, p)) if f == frame => Some(p),
             // seated or lying: the thing it is in
             Some(_) => self
@@ -1411,7 +1425,12 @@ impl Bodies {
                 .held_by(target)
                 .and_then(|t| select::origin_in(tree, t, frame).ok()),
             None => select::origin_in(tree, target, frame).ok(),
-        };
+        }
+    }
+
+    /// Turns `body`, standing at `at`, to face `to` (both in its frame's axes); nothing when there is nowhere to face or
+    /// it is already on it ([`sim::controller::facing_toward`]).
+    fn turn_to(&mut self, body: Id, at: Vec3, to: Option<Vec3>) {
         let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) else {
             return;
         };
@@ -2517,6 +2536,54 @@ fn beside(at: Vec3, from: Option<Vec3>, d: i64) -> Vec3 {
         return Vec3::new(at.x, at.y, at.z + d);
     }
     Vec3::new(at.x + dx * d / len, at.y, at.z + dz * d / len)
+}
+
+/// How far around a body a walk to a place looks for what to face, µm ([`notable_near`]): a few steps, so a Soul faces
+/// what is beside it, never a thing across the square.
+const NOTABLE_NEAR: i64 = 6_000_000;
+
+/// What a body standing at `at` in `frame` (its floor) faces after a walk to a place (0.136): the nearest thing standing
+/// there, by its origin on the level within [`NOTABLE_NEAR`] and farther than [`sim::controller::FACE_NEAR`], the
+/// lower id on a tie. A thing standing there is one on the floor itself or in a room on it, with solids of its own (a
+/// fountain, a bench, a tree, a table; not ground cover, a path or a lawn), that holds no room (not a building, whose
+/// wall is not what a Soul came to look at) and is not a body (`body`). One pass over the floor's things and its rooms'
+/// things, so the same tree gives the same answer. None when nothing stands near: the body keeps its facing.
+fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> Option<Vec3> {
+    use sim::ground::scene::{DOORWAY, F_SOLIDS, FLOOR, GROUND, PLACE, ROOM, WINDOW};
+    let near = i128::from(NOTABLE_NEAR).pow(2);
+    let off = i128::from(sim::controller::FACE_NEAR).pow(2);
+    let h = tree.handle(frame)?;
+    let mut todo: Vec<(replica::tree::Handle, bool)> = vec![(h, true)];
+    let mut best: Option<(i128, Id, Vec3)> = None;
+    while let Some((h, top)) = todo.pop() {
+        for c in tree.children(h).unwrap_or_default() {
+            let Some(n) = tree.node(*c) else { continue };
+            let full = n.kind().as_str();
+            let kind = full.split_once('@').map_or(full, |(k, _)| k);
+            if kind == ROOM && top {
+                todo.push((*c, false));
+                continue;
+            }
+            if [GROUND, PLACE, ROOM, FLOOR, WINDOW, DOORWAY].contains(&kind) || body(n.id()) {
+                continue;
+            }
+            if !matches!(n.fields().get(&F_SOLIDS), Some(Value::Array(s)) if !s.is_empty()) {
+                continue;
+            }
+            let Ok(p) = select::origin_in(tree, n.id(), frame) else {
+                continue;
+            };
+            let d = i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2);
+            if d <= off || d > near || best.is_some_and(|(b, id, _)| (b, id) <= (d, n.id())) {
+                continue;
+            }
+            if main_room(tree, n.id()).is_some() {
+                continue;
+            }
+            best = Some((d, n.id(), p));
+        }
+    }
+    best.map(|(_, _, p)| p)
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with

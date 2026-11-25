@@ -122,7 +122,10 @@ const isProofJson = u => /proof[^/]*\.json(\?|#|$)/i.test(u);
 
 /** Where tools/proof/upload.mjs puts proof: the asset CDN's `proofs/` prefix. Old proof that lived on GitHub
  *  releases was moved to `proofs/legacy/<release>/<asset>` and its links rewritten. */
-export const PROOF_CDN = 'https://assets.eden.art/proofs';
+export const PROOF_CDN = 'https://cdn.soul.game/proofs';
+/** Proof uploaded before the move to soul.game's bucket stays where it is (the old bucket is kept read-only), so its
+ *  links still count. Nothing uploads there any more. */
+export const LEGACY_PROOF_CDN = 'https://assets.eden.art/proofs';
 
 /**
  * Where a proof.json or clip link may live (#765): the proof CDN, GitHub user attachments, and the endpoint named by
@@ -135,7 +138,7 @@ export function proofHostProblem(value, { cdn = process.env.SIM_PROOF_PUBLIC_URL
   if (u.protocol !== 'https:') return 'not https';
   if (u.username || u.password || u.port || u.search || u.hash) return 'userinfo, a port, a query or a fragment is not allowed';
   const under = base => { let c; try { c = new URL(base); } catch { return false; } return u.origin === c.origin && u.pathname.startsWith(c.pathname.replace(/\/?$/, '/')); };
-  if (under(PROOF_CDN) && /^\/proofs\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+$/.test(u.pathname) && !/(?:^|\/)\.\.?(?:\/|$)/.test(u.pathname)) return null;
+  if ((under(PROOF_CDN) || under(LEGACY_PROOF_CDN)) && /^\/proofs\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+$/.test(u.pathname) && !/(?:^|\/)\.\.?(?:\/|$)/.test(u.pathname)) return null;
   if (u.origin === 'https://github.com') {
     if (/^\/user-attachments\/(?:assets|files)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9._-]+)?$/.test(u.pathname)) return null;
     return 'not a GitHub attachment (GitHub releases are no longer proof hosts: upload with tools/proof/upload.mjs)';

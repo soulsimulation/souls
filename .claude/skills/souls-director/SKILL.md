@@ -20,9 +20,9 @@ window.
 - Names: the user's choice, or short personal names (never a world or place name). Reuse a folder already paired.
 
 ## Start a run
-1. **World URL.** `SIM_ORIGIN` defaults to `https://sim.eden.art`; worlds live at `$SIM_ORIGIN/worlds/w/<slug>`
-   (Eden 2026 is `eden-2026`; the world launcher lists the rest). `$SIM_ORIGIN/w/<slug>` is the
-   legacy site; do not use it unless the user names it. Verify with `curl -s <url>/instructions.md | head -3`
+1. **World URL.** `SIM_ORIGIN` defaults to `https://soul.game`; worlds live at `$SIM_ORIGIN/w/<slug>`
+   (Eden 2026 is `eden-2026`; the world list at `$SIM_ORIGIN/` names the rest). The former origin
+   `https://sim.eden.art` only redirects there. Verify with `curl -s <url>/instructions.md | head -3`
    (a 404 `world.not-served` means a wrong slug). For a local world of the new engine, use the URL
    `node tools/playtest/arena/new-engine/old-page.mjs --template <file>` prints (its `ready` line); the Souls pair at
    the engine's page it names next (`new engine <url>`).

@@ -76,7 +76,7 @@ export async function preflight({ serverRoot, scenario = {} }) {
   try { requireProviders(policy, checks); checks.providersOk = true; } catch (e) { checks.providersOk = false; checks.providerError = e.message; }
   // Live arena health, so a slow world is caught before a playout, not after (Gene 2026-10-25).
   checks.live = {};
-  for (const w of ['eden-2026', 'godmode-lab']) { try { const r = await fetch(`https://sim.eden.art/worlds/w/${w}/healthz`, { signal: AbortSignal.timeout(8000) }); const j = await r.json(); checks.live[w] = { ok: j.ok, build: j.build, tickMs: j.tickMs, clients: j.clients }; } catch (e) { checks.live[w] = { ok: false, error: String(e.message).slice(0, 80) }; } }
+  for (const w of ['eden-2026', 'godmode-lab']) { try { const r = await fetch(`https://soul.game/w/${w}/healthz`, { signal: AbortSignal.timeout(8000) }); const j = await r.json(); checks.live[w] = { ok: j.ok, build: j.build, tickMs: j.tickMs, clients: j.clients }; } catch (e) { checks.live[w] = { ok: false, error: String(e.message).slice(0, 80) }; } }
   // Machine gate (Gene 2026-10-25): a loaded or memory-bound laptop produced false failures all night. Refuse to start
   // unless the 1-minute load is under 10 and at least 6 GB of memory is free; `--force-machine` records the breach instead.
   // macOS: os.freemem() excludes inactive and purgeable pages; vm_stat gives the reclaimable total (Linux: MemAvailable).

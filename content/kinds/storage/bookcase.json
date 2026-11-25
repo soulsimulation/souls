@@ -160,6 +160,49 @@
         }
       ],
       "effects": []
+    },
+    "put_back": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "book": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:book",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "holds": "eden:book"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "shelves"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": {
+            "arg": "book"
+          },
+          "event": "put_back"
+        }
+      ]
     }
   },
   "stock": {

@@ -117,7 +117,8 @@ pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec
 
 /// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex> <kind> <reason or
 /// outcome> <names> <op>[ <detail>]`, with `-` for any the frame has none of (an answer the gateway gives itself has
-/// no version), a refusal's detail (its words, with spaces) last when it has one, or
+/// no version), a refusal's detail (its words, with spaces) or a progress answer's `left_us=<µs>` last when it has
+/// one, or
 /// `sync <n> <refusal name or ->` for the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
 #[wasm_bindgen(js_name = wireFrame)]
 pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
@@ -165,9 +166,12 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
             .join(","),
         _ => "-".to_owned(),
     };
-    // A refusal's detail (8), its own words, last: everything after the seventh space, when it has one.
-    let detail = match a.get(&8) {
-        Some(Value::Bytes(b)) if kind == "2" => format!(" {}", String::from_utf8_lossy(b)),
+    // A refusal's detail (8), its own words, last: everything after the seventh space, when it has one. An act's
+    // progress answer (accepted, with the µs it has left until its deadline in 5: worldd's `answers::progress`) says
+    // that there as `left_us=<µs>`: the longest the world gives the act (a dance for a minute, an hour's held one).
+    let detail = match (a.get(&8), a.get(&5)) {
+        (Some(Value::Bytes(b)), _) if kind == "2" => format!(" {}", String::from_utf8_lossy(b)),
+        (_, Some(Value::Uint(left))) if kind == "3" => format!(" left_us={left}"),
         _ => String::new(),
     };
     Ok(format!(

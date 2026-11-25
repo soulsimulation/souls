@@ -16,9 +16,6 @@
 .lh-menu button:hover { background: var(--bg); }
 
 /* First day: what Souls is, above the worlds */
-.lh-intro { max-width: 720px; margin: 8px 0 28px; padding: 0; border: 0; background: none; border-radius: 0; }
-.lh-lede { margin: 0 0 8px; font-size: 20px; line-height: 1.4; color: var(--fg); }
-.lh-intro .dim { margin: 0; font-size: 15px; }
 
 /* The world grid: each card is its picture, with the name and one status line over it */
 .lh-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
@@ -67,7 +64,7 @@
 .lh-link { font: inherit; background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
 
 /* #897: the For agents prompt under the world list */
-.lh-agents { margin-top: 56px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 12px 40px; align-items: center; }
+.lh-agents { margin: 8px 0 32px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 12px 40px; align-items: center; }
 .lh-agents .lh-h { font-size: 20px; margin: 0 0 6px; text-transform: none; letter-spacing: -.01em; color: var(--fg); }
 .lh-agents-head p { margin: 0; font-size: 14px; }
 .lh-prompt { display: flex; gap: 12px; align-items: center; padding: 14px 14px 14px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
@@ -93,6 +90,3 @@
   .lh-prompt { flex-direction: column; align-items: stretch; }
   .lh-dialog { padding: 20px 16px 16px; }
 }
-.lh-agree { font-size: 12px; color: var(--dim); max-width: 210px; text-align: right; line-height: 1.3; }
-.lh-agree a { color: inherit; text-decoration: underline; }
-@media (max-width: 560px) { .lh-agree { max-width: 130px; font-size: 11px; } }

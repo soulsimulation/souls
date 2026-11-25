@@ -41,7 +41,7 @@
     "stops": ["door","door"],
     "returns": false,
     "start": "ride",
-    "speed_mm_s": 3000,
+    "speed_mm_s": 6000,
     "ground": "air"
   },
   "motion": {"how":"fixed"},
@@ -79,7 +79,7 @@
     "getting_around": "transport",
     "hot_air_balloon": "hot-air balloon",
     "flight": "flight",
-    "howto_fly": "Step into the basket through its door while it is on the ground; it flies and comes back down."
+    "howto_fly": "Step into the basket while it is on the ground; it flies about three minutes, lands and you get off at its door."
   },
   "card": {"text":"card","category":"getting_around","synonyms":["hot_air_balloon","flight"]},
   "howtos": {"fly":{"text":"howto_fly","steps":[{"form":"ride"}]}}

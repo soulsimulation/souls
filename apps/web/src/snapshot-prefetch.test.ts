@@ -31,6 +31,18 @@ test('entry script: one plain GET of this new world\'s snapshot URL (the layer\'
   }
 });
 
+test('page arrival: a page the new engine runs fetches its named replica and its WASM at entry; no other address', () => {
+  const run = (v2Replica: unknown) => {
+    const calls: unknown[][] = [];
+    const ctx: Record<string, unknown> = { location: { pathname: '/w/eden' }, __simConfig: { worldEngine: true, v2Views: false, v2Replica }, fetch: (...a: unknown[]) => { calls.push(a); return Promise.resolve(new Response('')); } };
+    ctx.window = ctx;
+    vm.runInNewContext(entryPrefetchScript(''), ctx);
+    return calls;
+  };
+  assert.deepEqual(run('/w/eden/v2/replica/5a3078cd4de2c2bd/replica.js'), [['/w/eden/v2/replica/5a3078cd4de2c2bd/replica.js'], ['/w/eden/v2/replica/5a3078cd4de2c2bd/replica_bg.wasm']]);
+  for (const bad of [undefined, 3, '//elsewhere.example/replica.js', 'https://elsewhere.example/x/replica.js', '/w/eden/../replica.js', '/w/eden/v2/replica/x/other.js']) assert.deepEqual(run(bad), [], String(bad));
+});
+
 test('entry script: a failed prefetch leaves no unhandled rejection and still hands the failure to its taker', async () => {
   const ctx: Record<string, unknown> = { location: { pathname: '/w/eden-2026' }, fetch: () => Promise.reject(new TypeError('offline')) };
   ctx.window = ctx;

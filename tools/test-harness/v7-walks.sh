@@ -34,7 +34,7 @@ if [ -n "${SIM_PREBUILT_WEB_ROOT:-}" ]; then
     base=/worlds/; target="$OUT/web-worlds"
     if [ "$suffix" = -root ]; then base=/; target="$ROOT/apps/web/dist"; fi
     node tools/world-launcher/deploy/prebuilt-web.mjs install "$SIM_PREBUILT_WEB_ROOT/$BUILD$suffix" "$target" "$SHA" "$BUILD$suffix" "$base" \
-      "${SIM_ASSETS_CDN_ENABLED-1}" "${SIM_ASSETS_CDN_ORIGIN:-https://assets.eden.art}" "${VITE_EDEN_EXPERIENCE_WORLD_IDS-pm-preview-eden-20261005}" \
+      "${SIM_ASSETS_CDN_ENABLED-1}" "${SIM_ASSETS_CDN_ORIGIN:-https://cdn.soul.game}" "${VITE_EDEN_EXPERIENCE_WORLD_IDS-pm-preview-eden-20261005}" \
       "${SIM_ARRIVAL_UI_ENABLED:-0}" "${SIM_GOATCOUNTER-simeden}" "${SIM_GOD_UPLOADS_CDN:-1}" > "$OUT/prebuilt$([ -n "$suffix" ] && echo -root || echo -worlds).log" 2>&1 || { echo prebuilt install failed; exit 1; }
   done
 else

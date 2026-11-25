@@ -3,7 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { entriesIn, withMap, withThings } from './with.ts';
+import { readFileSync } from 'node:fs';
+import { coreLibrary, type StoredDef } from '../../../../packages/world-compiler/src/index.ts';
+import { entriesIn, slotNumbers, withMap, withThings } from './with.ts';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const entries = entriesIn(`${root}content/kinds`);
@@ -40,4 +42,59 @@ test('a row naming an entry or a slot the content does not have is refused', () 
   assert.throws(() => withThings(holder, [{ entry: 'eden:no_such_thing', slot: 'cradle' }], entries, place), /does not have/);
   assert.throws(() => withThings(holder, [{ entry: 'eden:guitar', slot: 'shelf' }], entries, place), /does not have/);
   assert.deepEqual(withOf('core-chair@1'), [], 'a row without `with` adds nothing');
+});
+
+type Slot = StoredDef['slots'][number];
+
+/** Eden's seat kinds: every def the template places with a seat slot. */
+function edenSeatDefs(): StoredDef[] {
+  const refs = new Set<string>();
+  const walk = (o: unknown): void => {
+    if (Array.isArray(o)) o.forEach(walk);
+    else if (o && typeof o === 'object') {
+      const r = o as Record<string, unknown>;
+      if (r.op === 'place' && typeof r.def === 'string') refs.add(r.def);
+      Object.values(r).forEach(walk);
+    }
+  };
+  walk(JSON.parse(readFileSync(`${root}worlds/templates/eden-2026.json`, 'utf8')));
+  const lib = coreLibrary();
+  return [...refs].sort().map((r) => lib.get(r)).filter((d): d is StoredDef => !!d && d.slots.some((s) => s.kind === 'seat'));
+}
+
+test("each Eden seat kind's seat n, as the engine numbers its entry's slots, is the thing's own seat n the page draws", () => {
+  const rows = (JSON.parse(readFileSync(`${root}content/worlds/eden/map.json`, 'utf8')).rows as { def: string; entry?: string }[]);
+  // the map names defs `core/<name>@<rev>`, the library `core-<name>@<rev>`; a kind with no row goes by its own name
+  const entryOf = (d: StoredDef) => rows.find((r) => r.def.replace(/^core\//, 'core-') === d.ref)?.entry ?? `eden:${d.name.replace(/^core-/, '').replace(/-/g, '_')}`;
+  type Entry = { kind: string; slots?: Record<string, { admits?: string; at_mm?: number[] }> };
+  /** Each entry seat (the engine's seat `k`, the entry's order) the facts' numbering `number` puts on a slot of the
+   *  thing other than its own seat nearest the entry's point. */
+  const misdrawn = (number: (d: StoredDef, e: Entry) => Map<string, number>) => {
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const d of edenSeatDefs()) {
+      const entry = entries.get(entryOf(d))?.entry as Entry | undefined;
+      if (!entry?.slots) continue;
+      const n = number(d, entry), own = d.slots.filter((s) => s.kind !== 'room');
+      const bodies = own.filter((s) => s.kind === 'seat' || s.kind === 'bed');
+      for (const [k, [name, e]] of Object.entries(entry.slots).entries()) {
+        if (e.admits !== 'body' || !e.at_mm) continue;
+        checked++;
+        const at = e.at_mm.map((v) => v / 1000);
+        const near = (s: Slot) => Math.hypot(s.p[0] - at[0], s.p[2] - at[2]);
+        const nearest = bodies.reduce((a, b) => (near(b) < near(a) ? b : a), bodies[0]);
+        const drawn = own.find((s) => n.get(s.id) === k + 1);
+        if (drawn?.id !== nearest?.id) wrong.push(`${d.ref} ${name}: ${drawn ? `${drawn.kind} ${drawn.id}` : 'no slot'}`);
+      }
+    }
+    assert.ok(checked > 40, `${checked} seats checked`);
+    return wrong;
+  };
+  assert.deepEqual(misdrawn((d, e) => slotNumbers(d.slots, e)), []);
+  // the def's own order, as the facts numbered every thing's slots before: a picnic or parasol table's seat 1 was its
+  // top (a Soul sat on the table), and a canoe's and a narrowboat's places were swapped
+  const before = misdrawn((d) => new Map(d.slots.map((s, i) => [s.id, i + 1])));
+  for (const w of ['core-picnic-table@1 seat_1: surface top', 'core-parasol-table@1 seat_1: surface top', 'core-canoe@1 back: seat front', 'core-narrowboat@1 stern: bed berth']) {
+    assert.ok(before.includes(w), `${w} in ${JSON.stringify(before)}`);
+  }
 });

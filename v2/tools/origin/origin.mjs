@@ -40,7 +40,7 @@ import { createServer } from 'node:http';
 import { availableParallelism } from 'node:os';
 import { promisify } from 'node:util';
 import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
-import { basename, normalize, resolve, sep } from 'node:path';
+import { basename, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
@@ -49,6 +49,8 @@ import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
+/** A world's public history object that is rewritten in place: asked again each time, a 304 while its ETag holds. */
+export const REVALIDATE = 'public, no-cache, no-transform';
 export const MISS = 'no-store';
 /** Smaller immutable files (a part is a few hundred bytes, already packed) are always sent as they are. */
 export const COMPRESS_FROM = 16 * 1024;
@@ -102,6 +104,19 @@ export function byteRange(range, size) {
   return start > end || start >= size ? 'unsatisfiable' : { start, end };
 }
 const SLICE = 256 * 1024; // a response body is written this much at a time (createOrigin's stallMs)
+
+/** A day's object of a world's public event index (`…/history/everyone/events/<day>`). */
+const EVENTS_DAY = /(?:^|\/)history\/everyone\/events\/-?\d+$/;
+
+/**
+ * Whether `path` is a world's public history object that worldd's mirror rewrites in place (`history_mutable_key`):
+ * the event index and counts, a day's bundle index and a numbered (open) bundle. A content-addressed bundle
+ * (`<start>-<sha256>`) and the header never change, and stay immutable.
+ */
+export function rewritten(path) {
+  return /(?:^|\/)history\/everyone\/(?:events|counts)\/[^/]+(?:\/[^/]+)*$/.test(path)
+    || /(?:^|\/)history\/bundles\/-?\d+\/(?:index|-?\d+)$/.test(path);
+}
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -192,8 +207,11 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     } catch {
       return miss();
     }
-    const file = normalize(resolve(root, rel));
+    let file = normalize(resolve(root, rel));
     if (!file.startsWith(root + sep)) return miss();
+    // V4: a day's event index whose hours split off sits in the day's directory, beside them, as `day` (worldd's
+    // history mirror); its URL stays the day's.
+    if (EVENTS_DAY.test(rel) && (await stat(file).then((s) => s.isDirectory(), () => false))) file = join(file, 'day');
     const kind = kindOf(file);
     if (!kind) return miss();
     let body, etag;
@@ -206,7 +224,8 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     } catch {
       return miss();
     }
-    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE, etag };
+    const again = kind === 'immutable' && rewritten(file);
+    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : again ? REVALIDATE : IMMUTABLE, etag };
     let status = 200;
     if (kind === 'immutable') {
       headers['accept-ranges'] = 'bytes';
@@ -227,6 +246,12 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
         // the decoded file, so an encoded copy's tag must never match a resumed download's If-Range
         if (packed) { headers['content-encoding'] = encoding; headers.etag = `W/${etag}`; body = packed; }
       }
+    }
+    // A rewritten history object whose ETag the reader holds: a 304 with the validators the 200 would carry (weak when
+    // encoded, and its Vary). If-None-Match compares weakly (RFC 9110 13.1.2).
+    if (again && status === 200 && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
+      stats[kind]++;
+      return res.writeHead(304, { 'cache-control': REVALIDATE, etag: headers.etag, ...(headers.vary ? { vary: headers.vary } : {}) }).end();
     }
     stats[kind]++;
     stats.perPath.set(rel, (stats.perPath.get(rel) ?? 0) + 1);

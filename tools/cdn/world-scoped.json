@@ -2,7 +2,7 @@
  "version": 1,
  "schema": "cdn-world-scoped/1",
  "note": "Reviewed per-file provenance for world-scoped CDN delivery (tools/cdn/README.md). Each object is published only for its own world page, under assets<world>/<sha>.<ext>, and only after apply re-fetches its exact bytes from the public served URL. Nothing here is CC0 or enters the shared catalogue.",
- "origin": "https://sim.eden.art",
+ "origin": "https://soul.game",
  "liveRelease": {
   "source": "1080cfa9ffc5965c15f22aa1228b0dfaadb5c86c",
   "runtime": "<team>/runtime/convergence-1080cfa9",
@@ -21,7 +21,7 @@
    "slug": "mars",
    "namespace": "root",
    "worldId": "mars-2026-1",
-   "page": "https://sim.eden.art/w/mars",
+   "page": "https://soul.game/w/mars",
    "audience": "public: anyone who opens the world page",
    "descriptor": "<team>/runtime/convergence-1080cfa9/successor-mars-descriptor.json"
   },
@@ -29,7 +29,7 @@
    "slug": "littlemartians",
    "namespace": "root",
    "worldId": "littlemartians-1",
-   "page": "https://sim.eden.art/w/littlemartians",
+   "page": "https://soul.game/w/littlemartians",
    "audience": "public: anyone who opens the world page",
    "descriptor": "<team>/runtime/convergence-1080cfa9/successor-littlemartians-descriptor.json"
   }

@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { ACT_WAIT_MS, actEnd, actWaitMs, lookParams, pairingState, requestOf, worldOf } from './souls.mjs';
+import { ACT_WAIT_LONGEST_MS, ACT_WAIT_MS, actEnd, actWaitMs, forSeconds, lookParams, pairingState, requestOf, worldOf } from './souls.mjs';
 import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -165,7 +165,7 @@ test('0.135: act --wait waits out a declared for=<seconds> and a margin, so a da
   assert.equal(actWaitMs(req('wave')), ACT_WAIT_MS);
   assert.equal(actWaitMs(req('dance', 'for=10')), ACT_WAIT_MS, 'a short one keeps the usual window');
   assert.equal(actWaitMs(req('dance', 'for=60')), 75_000);
-  assert.equal(actWaitMs(req('dance', 'for=3600')), 3_615_000);
+  assert.equal(actWaitMs(req('dance', 'for=3600')), ACT_WAIT_LONGEST_MS, 'an hour is not waited out');
   // The minute's dance ends 60.8 s after it was sent: inside its window it is `done`, never still running.
   let t = 0;
   const sent = { ok: true, sequence: 7, sent: true };
@@ -173,6 +173,32 @@ test('0.135: act --wait waits out a declared for=<seconds> and a margin, so a da
   const done = await actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() } }), sent,
     { ms: actWaitMs(req('dance', 'for=60')), now: () => t, sleep: async (ms) => { t += ms; } });
   assert.deepEqual([done.phase, done.stillRunning], ['done', undefined]);
+});
+
+test('continuous activities: `for=` takes s, m or h; a held act --wait comes back at once with when the world ends it', async () => {
+  assert.deepEqual(['for=60', 'for=90s', 'for=2m', 'for=1h', 'for=5min', 'for=soon', 'gait=run'].map(forSeconds),
+    ['for=60', 'for=90', 'for=120', 'for=3600', 'for=300', 'for=soon', 'gait=run']);
+  assert.deepEqual(requestOf(['act', 'dance', 'for=1m', '--wait']).req.acts, ['dance', 'for=60']);
+  // A dance held until the next act (the daemon's `lasts_s`, from its form): --wait says so once the world has it under way.
+  let t = 0;
+  const wait = (sent, answers, ms = ACT_WAIT_MS) => actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers(t) } }), sent,
+    { ms, now: () => t, sleep: async (d) => { t += d; } });
+  const held = { answer: 'accepted', left_s: 3610, ends_by: '2026-11-25T22:00:10.000Z' };
+  const out = await wait({ ok: true, sequence: 9, sent: true, lasts_s: 3600 }, (now) => (now < 400 ? [] : [held]));
+  assert.deepEqual([out.phase, out.stillRunning, out.ends_by], ['running', true, held.ends_by]);
+  assert.ok(t < 1000, `it came back as soon as the world answered, not after the window: ${t} ms`);
+  assert.match(out.detail, /^running: it goes on until your next act or `stop 9`; the world ends it by 2026-11-25T22:00:10.000Z at the latest$/);
+  // A dance for ten minutes outlasts the 5 min window too, and says how long.
+  t = 0;
+  assert.match((await wait({ ok: true, sequence: 9, sent: true, lasts_s: 600 }, () => [held], ACT_WAIT_LONGEST_MS)).detail, /it goes on 600 s, or until your next act/);
+  // A minute's dance fits its 75 s window, and a sit across a room the world gives half an hour (its walk's deadline)
+  // repeats nothing: each is waited out to its receipt, as before.
+  for (const [sent, ms] of [[{ ok: true, sequence: 9, sent: true, lasts_s: 60 }, 75_000], [{ ok: true, sequence: 10, sent: true }, ACT_WAIT_MS]]) {
+    t = 0;
+    const accepted = { answer: 'accepted', left_s: 1810, ends_by: 'x' };
+    const done = await wait(sent, (now) => (now < 9_000 ? [accepted] : [accepted, { answer: 'receipt' }]), ms);
+    assert.deepEqual([done.phase, done.stillRunning], ['done', undefined], JSON.stringify(sent));
+  }
 });
 
 test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {

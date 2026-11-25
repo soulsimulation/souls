@@ -1,7 +1,7 @@
 # Media assets
 
 Git holds code, not binary media. Models, images, audio and fixture databases live on the asset CDN
-(`https://assets.eden.art`, immutable content-addressed keys). `tools/assets/manifest.json` lists every file by
+(`https://cdn.soul.game`, immutable content-addressed keys). `tools/assets/manifest.json` lists every file by
 repo path with its `sha256`, `bytes` and `url`; `pull.mjs` puts each one back at its path.
 
 ```sh
