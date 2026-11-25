@@ -31,10 +31,12 @@ type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
   moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
-  courses?: CoursePlaces };
+  courses?: CoursePlaces;
+  /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
+  leaves?: Record<string, number> };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null;
   /** N14: the courses' places up to the time a still world is still to (the worker's), since it writes no part. */
-  courses?: CoursePlaces };
+  courses?: CoursePlaces; leaves?: Record<string, number> };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string } | { t: 'format'; format: number }
   | { t: 'catching'; behind: number };
 
@@ -77,7 +79,9 @@ type TurnLine = { type: 'edge'; conversation: string; tick: number; at: number }
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
 export type V2Soul = { id: string; entityId: string; name: string; description: string; doing: Doing; state: 'awake' | Wound };
 /** What a Soul is doing, derived from the copy as the v2 page derives its status (v2/web/src/souls/souls.ts), never sent. */
-export type Doing = 'speaking' | 'walking' | 'standing' | Wound | (typeof DOING)[keyof typeof DOING];
+export type Doing = 'speaking' | 'walking' | 'standing' | Wound | (typeof DOING)[keyof typeof DOING] | `aboard — takes off in ${number} s`;
+/** First-day round 4: how near the place it was put a thing on a course stands to be at its stop, µm. */
+const AT_STOP_UM = 500_000;
 type Wound = 'idle' | 'zombie' | 'asleep';
 const WOUND = new Map<string, Wound | 'awake'>([['souls:awake', 'awake'], ['souls:idle', 'idle'], ['souls:zombie', 'zombie'], ['souls:asleep', 'asleep']]);
 /** Walking while its track has a sample within this long of the time shown (souls.ts WALKING_US). */
@@ -92,9 +96,11 @@ const DOING = {
 /** Speaking while a sentence of its own is on at `t`; then the world's wind-down word (B16); then what its drawn
  *  `activity` at `t` is (riding, sitting, lying down, dancing, exercising, reading…; sitting while in a slot when no
  *  activity is given); walking while it has a sample ahead of `t` or within the last second; else standing. */
-export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t: number, speaking: boolean, wound: { at: number; word: Wound | 'awake' } | undefined, activity?: string): Doing {
+export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t: number, speaking: boolean, wound: { at: number; word: Wound | 'awake' } | undefined, activity?: string, takesOffIn?: number): Doing {
   if (speaking) return 'speaking';
   if (wound && wound.at <= t && wound.word !== 'awake') return wound.word;
+  // First-day round 4: aboard a balloon still at its stop, it says so and when it takes off; "riding" once under way
+  if (activity === 'ride' && takesOffIn !== undefined) return `aboard — takes off in ${takesOffIn} s`;
   const shown = activity !== undefined ? DOING[activity as keyof typeof DOING] : n && n.slot !== null ? DOING.sit : undefined;
   if (shown) return shown;
   if (activity === 'walk') return 'walking';
@@ -157,6 +163,8 @@ export class V2Bridge {
   /** K4 (0.135): where each node on a course is, as the reader's worker posts it with the parts (course-samples.ts); the
    *  page never loads the replica itself. A thing on a course stands where it was placed until its places come. */
   private readonly places = new Map<string, number[]>();
+  /** First-day round 4: when each thing on a course that stood still as the worker last read it moves on, world µs. */
+  private readonly leaves = new Map<string, number>();
   /** K4: a `courseAt` to read a course with directly where no places were posted (a test's stand-in); `onCourse` is
    *  called once, when the first node with a course arrives. */
   courseAt: CourseAt | null = null;
@@ -213,6 +221,7 @@ export class V2Bridge {
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
     if (m.t === 'pointer') {
       keepPlaces(this.places, m.p.courses);
+      this.keepLeaves(m.p.leaves);
       const q = this.stillTo(m.p);
       if (typeof q !== 'number' || q <= (this.view.newestTo ?? -Infinity)) return;
       // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has
@@ -228,6 +237,7 @@ export class V2Bridge {
     this.liveFrom ??= p.from;
     for (const id of p.removed) for (const k of [...this.places.keys()]) if (k === id || k.startsWith(`${id}#`)) this.places.delete(k);
     keepPlaces(this.places, p.courses);
+    this.keepLeaves(p.leaves);
     // K2: a record that changes a body's frame or slot (a sit, a stand, a step inside) lands after the part's own motion
     // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
     // A live part spans its time and its records are as at its end; a history bundle's state (history.ts) spans none:
@@ -334,6 +344,22 @@ export class V2Bridge {
     if (!up) return null;
     const q: Mat['q'] = [n.rot[0] / Q, n.rot[1] / Q, n.rot[2] / Q, n.rot[3] / Q], r = rotate(up.q, (t !== undefined && this.coursePos(n, t)) || n.pos);
     return { p: [up.p[0] + r[0], up.p[1] + r[1], up.p[2] + r[2]], q: mul(up.q, q) };
+  }
+
+  private keepLeaves(more: Record<string, number> | undefined): void {
+    for (const [id, at] of Object.entries(more ?? {})) this.leaves.set(id, at);
+  }
+
+  /** First-day round 4: the whole seconds from world time `t` until the thing on a course that body `body` rides takes
+   *  off, while it waits at its stop (where it was placed, its own loop's first station); undefined otherwise. Right after
+   *  boarding a balloon waits out its boarding window, and the page said "Riding" over a basket still on the grass. */
+  private takesOffIn(body: string, t: number): number | undefined {
+    const on = this.nodes.get(this.nodes.get(body)?.parent ?? '');
+    const leaves = on?.course ? this.leaves.get(on.id) : undefined;
+    if (!on || leaves === undefined || !(leaves > t)) return undefined;
+    const p = this.coursePos(on, t);
+    if (!p || Math.hypot(p[0] - on.pos[0], p[1] - on.pos[1], p[2] - on.pos[2]) > AT_STOP_UM) return undefined;
+    return Math.ceil((leaves - t) / 1_000_000);
   }
 
   /** Where node `n`'s course has it at world time `t` (µm, its parent's frame); null with no course or no reader yet. */
@@ -482,7 +508,7 @@ export class V2Bridge {
     // First day (25 Nov): a body-kind node with no Soul link (an imported resident figure) is drawn but is not a Soul:
     // the Souls panel, the navbar and the card list only bodies a Soul drives.
     const souls = new Map(bodies.filter((b) => !!this.nodes.get(b.node)?.soul).map((b) => {
-      const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node), activityAt(b, shown));
+      const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node), activityAt(b, shown), this.takesOffIn(b.node, shown));
       const state = doing === 'idle' || doing === 'zombie' || doing === 'asleep' ? doing : 'awake';
       return [b.soul, { id: b.soul, entityId: b.entity, name: b.name, description: b.description, doing, state } satisfies V2Soul];
     }));
