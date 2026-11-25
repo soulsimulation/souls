@@ -1300,7 +1300,6 @@ impl Bodies {
             && let Some((frame, at)) = self.pose(body)
         {
             let gap = select::gap(tree, node, frame, at)?;
-            eprintln!("DBG gap {gap}");
             if gap <= half {
                 return Ok(Target::new(frame, at));
             }
@@ -1319,12 +1318,10 @@ impl Bodies {
             let mut s = first;
             while s < len {
                 if let Some(p) = view.stand_reached(frame, along(s), (frame, at)) {
-                    eprintln!("DBG found {p:?} at {s} of {len}");
                     return Ok(Target::new(frame, p));
                 }
                 s += 1_000_000;
             }
-            eprintln!("DBG none of {len} from {edge:?} to {at:?}");
             return Ok(Target::new(frame, along(first)));
         }
         let node = main_room(&self.town.tree, node).unwrap_or(node);

@@ -1661,6 +1661,8 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
         for name in names {
             let place = im.nodes[&facts_id(&text, name)];
             let walked = soul.act("eden:walk", Some(place), BTreeMap::new());
+            // The turn to face it is the legs' input after the walk's end: logged a tick or two later.
+            std::thread::sleep(Duration::from_secs(2));
             let bytes = std::fs::read(dir.join("log")).unwrap();
             let mut last = None;
             for r in sim::log::recover(&bytes).unwrap().records {
