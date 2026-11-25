@@ -56,8 +56,12 @@ test("the old page: the production front door with this run's addresses, and the
   const c = frontDoor(front, { base: 'http://127.0.0.1:9000', launcher: 9001, directory: '127.0.0.1:7801', origin: '127.0.0.1:7803', web: '/web', slugs: '/slugs', caddyDir: '/caddy' });
   assert.ok(c.includes('http://127.0.0.1:9000 {') && c.includes('127.0.0.1:9001') && c.includes('127.0.0.1:7801') && c.includes('root /web') && c.includes('root /slugs'));
   assert.ok(!/soul\.game|@@PRODUCTION_PORT@@|localhost:73[123]0|\/usr\/local|\/var\/lib/.test(c), 'no production address is left');
-  const routes = { schema: 'souls/world-routes/1', worlds: { dev: { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: true } } };
-  assert.deepEqual(withRoute(routes, 'hello-hamlet').worlds['hello-hamlet'], { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: false });
+  const routes = { schema: 'souls/world-routes/1', worlds: { dev: { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', history: '/s/w/dev/history/', canonical: true } } };
+  // the slug's own name in its stream's path (the page's world name, the one an agent pairs with); dev stays routed
+  const routed = withRoute(routes, 'my-hello-hamlet').worlds;
+  assert.deepEqual(routed['my-hello-hamlet'], { gateway: 'http://127.0.0.1:7802', stream: '/s/w/my-hello-hamlet/x/', history: '/s/w/my-hello-hamlet/history/', canonical: false });
+  assert.deepEqual(routed.dev, routes.worlds.dev);
+  assert.ok(frontDoor('root * /srv/sim-worlds/production/apps/web/dist', { base: 'http://127.0.0.1:9000', launcher: 1, directory: 'd', origin: 'o', web: '/web', slugs: '/s', caddyDir: '/c' }).endsWith('apps/web/dist'), '/pair from this checkout\'s build');
   assert.equal(templateName('worlds/templates/hello-hamlet.json'), 'hello-hamlet');
 });
 

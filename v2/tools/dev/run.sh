@@ -49,6 +49,9 @@ command -v node > /dev/null || die "node is not on PATH"
 mkdir -p "$DIR/logs"
 DIR=$(cd "$DIR" && pwd)
 BASE=http://$HOST:$PORT
+# The address people reach the world at (the pairing link the directory gives): this run's page, or V2_PUBLIC_URL, a
+# front door in front of it (tools/playtest/arena/new-engine/old-page.mjs), as soul.game is the directory's on the host.
+PUBLIC=${V2_PUBLIC_URL:-$BASE}
 DIRECTORY=127.0.0.1:$((PORT + 1)) GATEWAY=127.0.0.1:$((PORT + 2)) ORIGIN=127.0.0.1:$((PORT + 3))
 
 # What is missing is built, as tools/ci.sh builds it.
@@ -113,7 +116,7 @@ until_ready() {
 if [ ! -f world/world.json ]; then
   mkdir -p seed/entries
   od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
-  start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
+  start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$PUBLIC" --store "$DIR/accounts.sqlite" \
     --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/seed/tokens" --view-key "$DIR/view.key" --test-sign-in
   until_ready directoryd grep -q '^listening' logs/directoryd.log
   node -e 'fetch(process.argv[1], { method: "POST", headers: { "content-type": "application/json" }, body: "{\"name\":\"Ada\"}" })
@@ -136,7 +139,7 @@ CREATOR=$(cat creator)
 [ -f mailbox.key ] || od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > mailbox.key
 
 # The directory first: with the dev sign-in it refuses a page address that is not loopback, and nothing else starts.
-start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
+start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$PUBLIC" --store "$DIR/accounts.sqlite" \
   --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/world/tokens" --view-key "$DIR/view.key" \
   --test-sign-in --test-own "Ada=creator-$CREATOR" --mailbox-key "$DIR/mailbox.key"
 until_ready directoryd grep -q '^listening' logs/directoryd.log
@@ -172,7 +175,7 @@ until_ready origin grep -q '^origin' logs/origin.log
   sed -e "s|https://soul.game|$BASE|" -e "s|/usr/local/lib/souls/web|$WEB|g" \
     -e "s|/var/lib/souls-routes/slugs|$DIR/slugs|g" -e "s|/var/lib/souls-routes|$DIR/routes|g" \
     -e "s|/var/lib/souls/models|$DIR/models|g" -e "s|localhost:7310|$DIRECTORY|g" -e "s|localhost:7320|$ORIGIN|g" -e "s|localhost:7330|$ORIGIN|g" \
-    -e "s|localhost:@@PRODUCTION_PORT@@|$ORIGIN|g" "$V2/tools/ops/proxy/soul-game.caddy"
+    -e "s|localhost:@@PRODUCTION_PORT@@|$ORIGIN|g" -e "s|/srv/sim-worlds/production/apps/web|$V2/../apps/web|g" "$V2/tools/ops/proxy/soul-game.caddy"
 } > Caddyfile
 start caddy env XDG_CONFIG_HOME="$DIR/caddy" XDG_DATA_HOME="$DIR/caddy" "$CADDY" run --adapter caddyfile --config Caddyfile
 until_ready caddy node -e 'fetch(process.argv[1]).then(async (r) => process.exit(r.ok && (await r.json()).world === "dev" ? 0 : 1), () => process.exit(1))' \

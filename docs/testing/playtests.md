@@ -88,7 +88,10 @@ real Souls home.
 
 `node tools/playtest/arena/new-engine/old-page.mjs [--template <file>]` brings up the old page (apps/web) on such a world
 (0.135 P5; the proof skill's section 1). With history on (its default) it registers the world's creator (Ada) in the
-world's store itself, so creator edits are taken; no `register-world` by hand. To stage a scene and record it there, uncut and at real speed, from a camera
+world's store itself, so creator edits are taken; no `register-world` by hand. The world is served under its slug's own
+name end to end, as on soul.game: its stream path (`/s/w/<slug>/…`, the name the page asks the directory for pairing
+requests and Souls under), its directory row (with the template's display name) and its page; `/pair` serves this
+checkout's pairing card. run.sh's `/w/dev/` stays routed for tools that pair there, and is left off the home page. To stage a scene and record it there, uncut and at real speed, from a camera
 the scene names (follow a Soul, a fixed pose, or a path of poses):
 
 ```sh
