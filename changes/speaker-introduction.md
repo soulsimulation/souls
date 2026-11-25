@@ -1,4 +1,4 @@
 ---
 type: feature
 ---
-A consenting host and guest can share a brief pointing introduction and returned bow.
+A host can offer a speaker introduction by name, pointing to a consenting guest who returns a brief bow.

@@ -3,16 +3,16 @@
   "kind": "eden:speaker_introduction",
   "owner": "thing",
   "links": {
-    "guest": {
-      "n": 1,
+    "announcer": {
+      "n": 2,
       "from": "body",
       "most": 1,
       "audience": {
         "rule": "everyone"
       }
     },
-    "host": {
-      "n": 2,
+    "guest": {
+      "n": 1,
       "from": "body",
       "most": 1,
       "audience": {
@@ -41,6 +41,16 @@
     }
   },
   "slots": {
+    "announcer": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "stand": "by_host"
+    },
     "guest": {
       "admits": "body",
       "most": 1,
@@ -50,16 +60,6 @@
         0
       ],
       "stand": "by_guest"
-    },
-    "host": {
-      "admits": "body",
-      "most": 1,
-      "at_mm": [
-        -1100,
-        0,
-        0
-      ],
-      "stand": "by_host"
     }
   },
   "geometry": {
@@ -71,6 +71,17 @@
   },
   "forms": {},
   "roles": {
+    "announcer": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "announcer"
+        ],
+        "within_mm": 3000
+      },
+      "move": "point"
+    },
     "guest": {
       "need": "required",
       "places": {
@@ -81,17 +92,6 @@
         "within_mm": 3000
       },
       "move": "bow"
-    },
-    "host": {
-      "need": "required",
-      "places": {
-        "in": "here",
-        "slots": [
-          "host"
-        ],
-        "within_mm": 3000
-      },
-      "move": "point"
     }
   },
   "motion": {
