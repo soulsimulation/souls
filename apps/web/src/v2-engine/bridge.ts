@@ -10,6 +10,7 @@ import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from '
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
 import { reloadForFormat } from './stream-format.ts';
+import { localIsoAt } from './source/sky-record.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -608,13 +609,12 @@ export class V2Bridge {
     }
   }
 
-  /** The world's civil time at world time `t` µs, from the world node's calendar (replica::sky: origin + t · 86,400 / day). */
+  /** The world's local time at world time `t` µs, from the world node's calendar and zone (sky-record.ts localIsoAt). */
   private datetime(t: number): string | null {
     for (const n of this.nodes.values()) {
       if (n.parent !== null) continue; // the world's own node holds the calendar (other kinds may use fields 60, 61)
-      const s = n.sky, dayS = Number(s?.[60]), origin = Number(s?.[61]);
-      if (!s || !Number.isFinite(dayS) || dayS <= 0 || !Number.isFinite(origin)) continue;
-      const iso = new Date((origin + Math.floor((t * 86_400) / dayS)) / 1000).toISOString();
+      const iso = localIsoAt(n.sky, t);
+      if (iso === null) continue;
       return this.hour ? `${iso.slice(0, 11)}${this.hour}${iso.slice(16)}` : iso;
     }
     return null;

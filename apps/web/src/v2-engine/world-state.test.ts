@@ -98,8 +98,8 @@ test('the sky\'s clock follows v2\'s calendar fields 60-61 in the chunks', () =>
   const last = b.view.takes.chunks.at(-1)!, end = last.toTick;
   const env = (last.take as { finalState: { env: { datetime: string } } }).finalState.env;
   assert.equal(end % CHUNK, 0);
-  // the chunks' clock is the newest chunk end's civil time: origin + t · 86,400 / day
-  const want = new Date(Date.UTC(2026, 5, 1) + Math.floor((b.view.takes.serverTick * TICK_US * 86_400) / day) / 1000).toISOString();
+  // the chunks' clock is the newest chunk end's local time, naive (no zone): origin + t · 86,400 / day (no offsets here)
+  const want = new Date(Date.UTC(2026, 5, 1) + Math.floor((b.view.takes.serverTick * TICK_US * 86_400) / day) / 1000).toISOString().slice(0, 23);
   assert.equal(env.datetime, want);
 });
 
