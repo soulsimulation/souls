@@ -10,7 +10,7 @@
 //                                                by name, its slots and what holds each, what is in it, its marks (R8b)
 //   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
 //                                                things, roads and zones, each with its centre and size in metres (R8d)
-//   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
+//   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; metres in the parent
 //   souls-god.mjs place <kind> --path '[[x,z],...]' [--width m] | --area '[[x,z],...]' | --rect cx,cz,w,d
 //                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
 //                                                (metres), as today's place by a shape
@@ -56,11 +56,11 @@
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
-//   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
+//   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist m]   beside another (default e, 1 m)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
-//   place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x|z]   a row of n, centred on --at (R8a)
-//   place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <mm>[,<mm>]      a grid: C along x, R along z; one batch,
+//   place <kind> --in <id> --at x,y,z --row <n> --gap <m> [--along x|z]   a row of n, centred on --at (R8a)
+//   place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <m>[,<m>]      a grid: C along x, R along z; one batch,
 //                                                all or none (at most 64); with --facing n|e|s|w they all face it
 //   any edit verb --build <name> --step <name>  a build's step (#3694): one batch the world keeps under that name
 //   souls-god.mjs undo [--build <name>] | redo   the newest edit undone (a whole build, step by step), or redone
@@ -72,13 +72,13 @@
 //                                                chapter to claim (#3701)
 //   souls-god.mjs build district <id> --file plan.json   records a plan once (today's plan file: metres, radians)
 //   souls-god.mjs build claim <part> --area x0,z0,x1,z1 | --district <id> [--plots a,b]   a build claim over an area
-//                                                (mm on the ground), or over a plan's plots (its next chapter if none)
+//                                                (metres on the ground), or over a plan's plots (its next chapter if none)
 //   souls-god.mjs build claims | build release <claim>    the live claims (ids c:k<8 hex>); a claim released
 //   souls-god.mjs own <id> <soul id|god|group:<name>|none> [--private|--public]   who owns a thing or a place (#3700)
 //   souls-god.mjs access <id> private|public|none   a private thing is its owner's alone; what is inside takes its mark
 //   souls-god.mjs recolor <id> '#rrggbb' [--part <part>]   a tint on a thing, or on one named part of it (R4); the
 //                                                page multiplies its picture by it; undo takes it back
-//   souls-god.mjs zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]'   a land-use zone (mm)
+//   souls-god.mjs zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]'   a land-use zone (metres)
 //   souls-god.mjs zone-suggest <use> | layers | secret   what suits a use; zones and marks; secret places (off)
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
 //                                                and others stay out of it until it is released
@@ -93,7 +93,7 @@
 //   souls-god.mjs about <id> --title '<t>' [--alias '<a>' ...] | --set '{"title":..,"aliases":[..]}' | --clear
 //                                                a place's title and aliases (today's `about`), kept by the world as
 //                                                words for everyone; Souls' find matches either
-//   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs status | quit                  the daemon: where it is; ended (`stop` too, today's word)
 //   souls-god.mjs catalog [--category c] [--has slot:sit|form:<f>|point:<role>|state:<field>]   every kind, one each
 //   souls-god.mjs find <words> [--category c] [--has ...] [--all]    kinds that match, best first, with why
 //   souls-god.mjs recommend <what you want to make> [--per n]        kinds per need, and an example batch
@@ -122,6 +122,8 @@
 //                                                these three pass to the daemon as souls.mjs's do for a Soul
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
+// Every position and length the command takes or prints is metres (#4700), x east, y up, z south, in the parent's
+// frame; a batch's `at` too. The world keeps mm: the command converts. Field values (`--field`, `set`) are as kept.
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
 // SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG. The token never leaves the daemon.
 
@@ -181,6 +183,7 @@ export const VERBS = [
   'pair',
   'pending',
   'place',
+  'quit',
   'recommend',
   'recolor',
   'redo',
@@ -331,10 +334,15 @@ export const FIX = {
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
 const takeOpt = (args, name) => { const k = args.indexOf(name); if (k < 0) return undefined; const v = args[k + 1]; args.splice(k, 2); return v; };
 const takeAll = (args, name) => { const out = []; for (let v; (v = takeOpt(args, name)) !== undefined;) out.push(v); return out; };
+/** Metres as the world's whole mm. */
+const mmOf = (m) => Math.round(Number(m) * 1000);
+/** The world's mm as metres, for printing. */
+export const metres = (mm) => Math.round(Number(mm)) / 1000;
+/** `--at x,y,z` in metres, as the world's mm. */
 const xyz = (t) => {
   const p = String(t).split(',').map(Number);
-  if (p.length !== 3 || p.some((n) => !Number.isFinite(n))) throw usage(`--at x,y,z in mm, not ${t}`);
-  return p;
+  if (p.length !== 3 || p.some((n) => !Number.isFinite(n))) throw usage(`--at x,y,z in metres, not ${t}`);
+  return p.map(mmOf);
 };
 /** A field's value as written: an integer, true or false, else a name. */
 const valueOf = (t) => (/^-?\d+$/.test(t) ? Number(t) : t === 'true' ? true : t === 'false' ? false : t);
@@ -353,16 +361,16 @@ export function historyOf(words) {
 export const SPOTS_MOST = 64;
 /**
  * R8a: the spots of a row (`--row n`, along x, or z with `--along z`) or a grid (`--grid CxR`: C along x, R along z),
- * `--gap` mm apart (a grid may give `--gap gx,gz`), centred on `--at` (mm in the parent), in order: the first row's
+ * `--gap` metres apart (a grid may give `--gap gx,gz`), centred on `--at` (metres in the parent), in order: the first row's
  * things west to east, then the next row south of it.
  */
 export function spotsOf(at, row, grid, gap, along) {
-  const how = 'place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x|z] | --grid <C>x<R> --gap <mm>[,<mm>]';
+  const how = 'place <kind> --in <id> --at x,y,z --row <n> --gap <m> [--along x|z] | --grid <C>x<R> --gap <m>[,<m>]';
   if (at === undefined || (row === undefined) === (grid === undefined) || gap === undefined) throw usage(how);
   if (along !== undefined && (row === undefined || !['x', 'z'].includes(along))) throw usage(how);
   const whole = (t) => (/^\d+$/.test(String(t)) ? Number(t) : NaN);
   const [cols, rows] = grid !== undefined ? String(grid).split('x').map(whole) : along === 'z' ? [1, whole(row)] : [whole(row), 1];
-  const gaps = String(gap).split(',').map(Number), gx = gaps[0], gz = gaps[1] ?? gaps[0];
+  const gaps = String(gap).split(',').map(Number), gx = mmOf(gaps[0]), gz = mmOf(gaps[1] ?? gaps[0]);
   if (!(cols >= 1 && rows >= 1) || cols * rows < 2 || gaps.length > 2 || ![gx, gz].every((g) => Number.isFinite(g) && g > 0)) throw usage(how);
   if (cols * rows > SPOTS_MOST) throw usage(`at most ${SPOTS_MOST} things in one row or grid, not ${cols * rows}`);
   const [x, y, z] = xyz(at), out = [];
@@ -374,7 +382,11 @@ export function spotsOf(at, row, grid, gap, along) {
 export function opsOf(verb, words, { related = false } = {}) {
   const args = [...words];
   if (verb === 'batch') {
-    try { return JSON.parse(args.join(' ')); } catch { throw usage('batch takes a JSON list of operations'); }
+    let ops;
+    try { ops = JSON.parse(args.join(' ')); } catch { throw usage('batch takes a JSON list of operations'); }
+    if (!Array.isArray(ops)) throw usage('batch takes a JSON list of operations');
+    // A place's or a move's `at` is metres, as every flag is.
+    return ops.map((o) => (o && Array.isArray(o.at) ? { ...o, at: o.at.map((v) => (Number.isFinite(Number(v)) ? mmOf(v) : v)) } : o));
   }
   if (verb === 'place') {
     const on = takeOpt(args, '--on');
@@ -574,6 +586,8 @@ export function requestOf(argv) {
   if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
   // R8d: the world at a glance, read from the copy (map.mjs)
   if (verb === 'map') { if (rest.length) throw usage('map'); return { map: true, creator }; }
+  // `quit` ends the daemon, as souls.mjs's `quit` does a Soul's (#4700); `stop` is kept, a creator having no act to stop
+  if (verb === 'quit') return { req: { op: 'stop' }, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
   if (verb === 'export' || verb === 'import') {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
@@ -625,7 +639,7 @@ const withoutRelation = (words) => { const args = [...words]; for (const k of ['
 const COMPASS = { n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0], nw: [-1, -1] };
 /**
  * The batch with its relation resolved on `world` (describe's answer: each node's parent and `at`, mm in it): beside
- * puts the thing `dist` mm (default 1000) from the other toward `dir` (default e; north is −z), in the same parent;
+ * puts the thing `dist` metres (default 1) from the other toward `dir` (default e; north is −z), in the same parent;
  * on puts it in the other, in its first slot a thing may take and nothing holds; facing turns it about +y so its +z
  * faces the other, or the compass point. A relation that names what is not there is refused `relation-unknown`.
  */
@@ -639,7 +653,8 @@ export function resolve(req, relation, world) {
     const other = known(relation.beside);
     if (!other.at) throw Object.assign(new Error(`${other.id} has no place to stand beside`), { code: 'relation-unknown' });
     const [dx, dz] = COMPASS[relation.dir ?? 'e'] ?? (() => { throw usage('--dir is n, ne, e, se, s, sw, w or nw'); })();
-    const dist = Number(relation.dist ?? 1000), k = Math.hypot(dx, dz);
+    const dist = mmOf(relation.dist ?? 1), k = Math.hypot(dx, dz);
+    if (!Number.isFinite(dist)) throw usage('--dist is metres');
     op.at = [Math.round(other.at[0] + (dx / k) * dist), other.at[1], Math.round(other.at[2] + (dz / k) * dist)];
     if (op.op === 'place') op.in = /^\d+$/.test(String(other.parent)) ? Number(other.parent) : other.parent;
   }
@@ -686,7 +701,6 @@ const named = (ns, t) => `${ns}:${slug(t)}`;
 const bare = (t) => String(t).replace(/^[a-z][a-z0-9-]*:/, '');
 /** A claim id as written (`c:1a2b3c4d` or `1a2b3c4d`) as the world holds it. */
 export const claimId = (t) => (String(t).startsWith('c:') ? String(t) : `c:${String(t)}`);
-const mmOf = (m) => Math.round(Number(m) * 1000);
 const mdegOf = (rad) => Math.round(((Number(rad ?? 0) * 180) / Math.PI) * 1000);
 
 /** The build request the words make: `{ act: 'districts' | 'district' | 'record' | 'claim' | 'claims' | 'release', ... }`. */
@@ -722,8 +736,8 @@ export function buildOf(words) {
     if (!id || (area === undefined) === (district === undefined)) throw usage('build claim <part> --area x0,z0,x1,z1 | --district <id> [--plots a,b]');
     if (area !== undefined) {
       const a = area.split(',').map(Number);
-      if (a.length !== 4 || a.some((n) => !Number.isInteger(n)) || a[0] >= a[2] || a[1] >= a[3]) throw usage(`--area x0,z0,x1,z1 in whole mm, x0 < x1 and z0 < z1, not ${area}`);
-      return { act: 'claim', part: id, area: a, ...helped };
+      if (a.length !== 4 || a.some((n) => !Number.isFinite(n)) || a[0] >= a[2] || a[1] >= a[3]) throw usage(`--area x0,z0,x1,z1 in metres, x0 < x1 and z0 < z1, not ${area}`);
+      return { act: 'claim', part: id, area: a.map(mmOf), ...helped };
     }
     return { act: 'claim', part: id, district, ...(plots ? { plots: plots.split(',') } : {}), ...helped };
   }
@@ -762,11 +776,11 @@ const inside = ([x0, z0, x1, z1], x, z) => x >= x0 && x < x1 && z >= z0 && z < z
 export function districtView(row, claims) {
   const [id, title, plots, roads, chapters] = row;
   const claimOf = (p) => claims.find((c) => inside(c.area, Number(p[1]), Number(p[2])));
-  const view = plots.map((p) => ({ id: bare(p[0]), at: [p[1], p[2]], size: [p[3], p[4]], yaw: p[5], ...(p[6] ? { use: bare(p[6]) } : {}), status: claimOf(p) ? 'claimed' : 'planned', ...(claimOf(p) ? { claim: claimOf(p).id } : {}) }));
+  const view = plots.map((p) => ({ id: bare(p[0]), at: [metres(p[1]), metres(p[2])], size: [metres(p[3]), metres(p[4])], yaw: p[5], ...(p[6] ? { use: bare(p[6]) } : {}), status: claimOf(p) ? 'claimed' : 'planned', ...(claimOf(p) ? { claim: claimOf(p).id } : {}) }));
   const groups = chapters.length ? chapters.map((c) => c.map(bare)) : view.map((p) => [p.id]);
   const open = groups.find((g) => g.every((p) => view.find((v) => v.id === p)?.status === 'planned'));
   return {
-    id: bare(id), title: bare(title), plots: view, roads: roads.map(([r, w, path]) => ({ id: bare(r), width: w, path: rowsIn(path).reduce((o, n, i) => (i % 2 ? (o.at(-1).push(n), o) : [...o, [n]]), []) })),
+    id: bare(id), title: bare(title), plots: view, roads: roads.map(([r, w, path]) => ({ id: bare(r), width: metres(w), path: rowsIn(path).reduce((o, n, i) => (i % 2 ? (o.at(-1).push(metres(n)), o) : [...o, [metres(n)]]), []) })),
     counts: { plots: view.length, claimed: view.filter((p) => p.status === 'claimed').length, planned: view.filter((p) => p.status === 'planned').length },
     next: open ? { plots: open, then: `build claim <part> --district ${bare(id)} --plots ${open.join(',')}` } : null,
   };
@@ -783,7 +797,7 @@ export async function runBuild(b, ask, mint) {
   const set = (field, value) => ask({ op: 'edit', ops: [{ op: 'set', node: root.id, field, value }] });
   const find = (id) => plans.find((r) => r[0] === named('d', id));
   if (b.act === 'districts') return { ok: true, districts: plans.map((r) => { const v = districtView(r, claims); return { id: v.id, title: v.title, counts: v.counts }; }) };
-  if (b.act === 'claims') return { ok: true, claims };
+  if (b.act === 'claims') return { ok: true, claims: claims.map((c) => ({ ...c, area: c.area.map(metres) })) };
   if (b.act === 'district') { const r = find(b.id); return r ? { ok: true, district: districtView(r, claims) } : fail('district.unknown', `no plan ${b.id}`); }
   if (b.act === 'record') {
     if (find(b.id)) return fail('district.exists', `plan ${b.id} is recorded`);
@@ -811,7 +825,7 @@ export async function runBuild(b, ask, mint) {
   const out = await set(F_CLAIMS, [...rowsIn(root.fields[F_CLAIMS]), [id, named('part', b.part), ...area, ...(h ? [`helper:h${h.helper}`] : [])]]);
   if (out.ok === false) return out;
   return {
-    ...out, claim: { id, part: slug(b.part), area, ...(h ? { helper: h.helper } : {}) },
+    ...out, claim: { id, part: slug(b.part), area: area.map(metres), ...(h ? { helper: h.helper } : {}) },
     then: h ? `give the helper SOULS_HOME=${h.home}: its souls-god sends every edit under ${id}, inside it only, for ${h.minutes} minutes` : `send its edits with --claim ${id}`,
     ...(h ? { helper: { home: h.home, expires_in: h.expires_in } } : {}),
   };
@@ -914,16 +928,16 @@ export function ownerValue(t) {
   throw usage(`own <id> <soul id|god|group:<name>|none>, not ${v}`);
 }
 const ACCESS = { none: 0, public: 1, private: 2 };
-/** A zone's outline in whole mm, as today's --rect, --circle and --area give it (here in mm). */
+/** A zone's outline in whole mm, from today's --rect, --circle and --area in metres. */
 export function outlineOf({ rect, circle, area }) {
-  const nums = (t, n, what) => { const a = String(t).split(',').map(Number); if (a.length < n || a.slice(0, n).some((x) => !Number.isFinite(x))) throw usage(`${what}, in mm`); return a; };
+  const nums = (t, n, what) => { const a = String(t).split(',').map(Number); if (a.length < n || a.slice(0, n).some((x) => !Number.isFinite(x))) throw usage(`${what}, in metres`); return a; };
   let pts;
   if (rect !== undefined) { const [cx, cz, w, d] = nums(rect, 4, '--rect cx,cz,w,d'); pts = [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]]; }
   else if (circle !== undefined) { const [cx, cz, r] = nums(circle, 3, '--circle cx,cz,r'); pts = Array.from({ length: 12 }, (_, k) => [cx + Math.sin((k / 12) * 2 * Math.PI) * r, cz + Math.cos((k / 12) * 2 * Math.PI) * r]); }
-  else if (area !== undefined) { try { pts = JSON.parse(area); } catch { throw usage("--area '[[x,z],...]' in mm"); } }
-  else throw usage('zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area \'[[x,z],...]\' (mm)');
+  else if (area !== undefined) { try { pts = JSON.parse(area); } catch { throw usage("--area '[[x,z],...]' in metres"); } }
+  else throw usage('zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area \'[[x,z],...]\' (metres)');
   if (!Array.isArray(pts) || pts.length < 3 || pts.some((p) => !Array.isArray(p) || p.length !== 2 || p.some((n) => !Number.isFinite(Number(n))))) throw usage('a zone outline is at least three [x, z] points');
-  return pts.flatMap(([x, z]) => [Math.round(Number(x)), Math.round(Number(z))]);
+  return pts.flatMap(([x, z]) => [mmOf(x), mmOf(z)]);
 }
 
 /** The request a layer verb's words make. */
@@ -942,7 +956,7 @@ export function layerOf(verb, words) {
   if (verb === 'zone') {
     const rect = takeOpt(args, '--rect'), circle = takeOpt(args, '--circle'), area = takeOpt(args, '--area');
     const [name, use] = args;
-    if (!name || !USES.includes(use)) throw usage(`zone <name> <${USES.join('|')}> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]' (mm); zone <name> none removes it`);
+    if (!name || !USES.includes(use)) throw usage(`zone <name> <${USES.join('|')}> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]' (metres); zone <name> none removes it`);
     return { act: 'zone', name: slug(name), use, outline: outlineOf({ rect, circle, area }) };
   }
   if (verb === 'zone-suggest') {
@@ -975,7 +989,7 @@ export async function runLayer(l, ask) {
   if (d.ok === false) return d;
   const words = { 0: 'none', 1: 'public', 2: 'private' };
   const marked = d.nodes.filter((n) => n.marks).map((n) => ({ id: n.id, kind: n.kind, ...(n.marks.owner !== undefined ? { owner: n.marks.owner } : {}), ...(n.marks.access !== undefined ? { access: words[n.marks.access] ?? n.marks.access } : {}) }));
-  return { ok: true, zones: zonesIn(zones), marked, secrets: 'off, as today' };
+  return { ok: true, zones: zonesIn(zones).map((z) => ({ ...z, outline: z.outline.map((p) => p.map(metres)) })), marked, secrets: 'off, as today' };
 }
 
 if (isMain(import.meta.url)) {
@@ -1037,6 +1051,7 @@ if (isMain(import.meta.url)) {
     if (asked.thing !== undefined) {
       const d = await ask({ op: 'describe' }, 15_000), f = d.ok === false ? null : await ask({ op: 'fields', node: asked.thing }, 15_000);
       const said = d.ok === false ? d : f.ok === false ? f : describeThing(asked.thing, d, f.fields, kindsIn(join(home, 'kinds')));
+      if (Array.isArray(said.at)) said.at = said.at.map(metres); // printed in metres, as every position (#4700)
       out(withFix(said));
       if (said.ok === false) process.exitCode = 1;
       process.exit();
@@ -1058,6 +1073,8 @@ if (isMain(import.meta.url)) {
     req = inSession(home, req);
     const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : asked.recolor ? await runRecolor(asked.recolor, ask) : await ask(req);
     recordEdit(home, req, answer);
+    // describe's spots are the world's mm (a relation is resolved on them); printed in metres, as every position
+    if (req?.op === 'describe' && Array.isArray(answer.nodes)) answer.nodes = answer.nodes.map((n) => (Array.isArray(n.at) ? { ...n, at: n.at.map(metres) } : n));
     out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {

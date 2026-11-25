@@ -43,6 +43,8 @@
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
 //   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
+//   souls.mjs together withdraw <offer id | activity>   takes back your own offer before it is answered (#4700); an
+//                                             accept after it is refused offer-withdrawn
 //   souls.mjs together offer <activity> <body id|name> [...]   any other activity the world serves, by its word
 //                                             (`together kinds` lists them); accept|decline <activity> answers the
 //                                             newest offer of it (0.135)

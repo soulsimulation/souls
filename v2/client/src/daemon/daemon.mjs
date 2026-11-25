@@ -21,7 +21,8 @@
 //     {"op":"receipt","sequence":n}   #3705: that intent's receipt, as its answers came (the newest sent by default)
 //     {"op":"events","since":n}  #3705: the events numbered after `since`, kept or not yet taken; takes nothing
 //   and R7's (#2701), each answer ending with `at` (the copy's version) and `changed` (what changed since the answer
-//   before, by name, capped, the rest counted), the copy brought current first:
+//   before, by name, capped, the rest counted), the copy brought current first (#4700: a Soul's copy a compare confirmed
+//   within 1 s, holding its own writes, is current already; a copy nothing confirmed for 4 s is compared unasked):
 //     {"op":"look"}                       the brief (`../brief/brief.mjs`)
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
@@ -129,7 +130,8 @@
 // - **Each intent is sent at most once**: its sequence is written to disk before it goes out, and nothing resends
 //   it. An intent sent and not answered by the next sign-in stays `unanswered` in `status`.
 //
-//   node v2/client/src/daemon/daemon.mjs --home <.souls> --soul <id> --pkg <replica wasm-bindgen pkg>
+//   node v2/client/src/daemon/daemon.mjs --home <.souls> --soul <id> --pkg <replica wasm-bindgen pkg> [--ready-fd <n>]
+//   (--ready-fd: a pipe it writes `ready` to once it listens, then closes: how the command that started it knows)
 
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -165,8 +167,8 @@ import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
-import { giveIntents } from '../give/give.mjs';
-import { KINDS as TOUCHES, activitiesIn, activityNamed } from '../together/together.mjs';
+import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
+import { KINDS as TOUCHES, activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
 import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -203,7 +205,11 @@ function takeLock() {
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       let held = {};
-      try { held = JSON.parse(readFileSync(rt.lock, 'utf8')); } catch { /* a lock being written */ }
+      // A lock just created is written a moment later: read again before calling it a dead process's (#4700: two
+      // first commands at once started two daemons, and the second ended on the socket the first listened on).
+      for (let k = 0; k < 20 && !Number.isSafeInteger(held.pid); k++) {
+        try { held = JSON.parse(readFileSync(rt.lock, 'utf8')); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25); }
+      }
       if (Number.isSafeInteger(held.pid) && held.pid !== process.pid && alive(held.pid)) {
         process.stderr.write(`daemon-already-running: ${soul} has a daemon, pid ${held.pid}\n`);
         process.exit(3);
@@ -321,7 +327,9 @@ const joinsOf = new Set(); // own join sequences: only a successful receipt requ
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
 
+let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
+  sentAt = performance.now();
   // Written down before it goes, so neither a drop nor a restart sends it again.
   state.unanswered.push(sequence);
   save();
@@ -426,6 +434,8 @@ function granted() {
  */
 let followWanted = false;
 let owed = 0, again = 0, againTimer = null;
+// The newest version this Soul's own receipts named since sign-in: an answer after its own write waits for it.
+let ownOwed = 0;
 // A refresh's waiters (an answer bringing the copy current) when it ended behind `owed`: handed to the follow again,
 // so an answer after this Soul's own write or edit shows it, not the seal before it.
 let carried = [];
@@ -554,8 +564,9 @@ function syncAnswer(sock, n, refused, bytes) {
   syncing = null;
   hearing();
   const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
-  if (behind) carried.push(...waiters);
-  else for (const w of waiters) w(true);
+  // A waiter is owed the version the newest entry or receipt named when it asked (`need`), not one named since: in a
+  // busy world `owed` moves on during every follow, and chasing it held each command until its refresh gave up.
+  for (const w of waiters) { if (behind && sequenceOf(copyVersion) < w.need) carried.push(w); else w(true); }
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
   if (done.kind === 'refresh' || done.kind === 'follow') {
@@ -619,7 +630,7 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
-        owed = 0; // versions named on an earlier socket may be another epoch's
+        owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
         refreshKinds();
         step = 'stream';
@@ -651,6 +662,9 @@ function connect() {
           if (Number(c) === 1) changed = true;
         }
         if (changed) { if (b !== '-') owe(sequenceOf(b)); followWanted = true; follow(); }
+        // #4700: any end of an own intent at a version (a walk's resolve comes after its accept) is owed to the next
+        // answer, which then does not take a recent copy as current before it holds that version.
+        if (receipts.has(s) && (Number(c) === 1 || Number(c) === 4) && b !== '-') { owe(sequenceOf(b)); ownOwed = Math.max(ownOwed, sequenceOf(b)); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -807,10 +821,17 @@ const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
 function refresh() {
-  if (syncing) return new Promise((ok) => syncing.waiters.push(ok));
-  if (!ws || !signedIn) return Promise.resolve(false);
-  startSync(ws, 'refresh');
-  return new Promise((ok) => syncing.waiters.push(ok));
+  // A copy confirmed within RECENT_MS, holding this Soul's own writes and every change an entry named (or being brought
+  // to them by a follow under way), answers now. In a busy world a follow is nearly always under way, and waiting on
+  // it held each command up to a second, past the command's 5 s under machine load (#4700's audit: a world whose
+  // ground record is 8 MB fetches it again whenever a body on the ground moves). A creator's edit is planned at the
+  // world's version, so a creator's daemon always asks.
+  const at = sequenceOf(copyVersion);
+  if (seat.grant.actor !== 'creator' && signedIn && confirmedAt !== null && performance.now() - confirmedAt < RECENT_MS && at >= ownOwed && (syncing || at >= owed)) return Promise.resolve(true);
+  if (!syncing && (!ws || !signedIn)) return Promise.resolve(false);
+  if (!syncing) startSync(ws, 'refresh');
+  // It waits for the version owed when it asked (`syncAnswer`), not for one an entry names while it waits.
+  return new Promise((ok) => syncing.waiters.push(Object.assign((v) => ok(v), { need: owed })));
 }
 
 /**
@@ -870,6 +891,12 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
+/** A copy confirmed this recently answers a command at once (`refresh`): R8's bound for a copy current enough to
+ *  refuse an act, so a check made on it is still made. */
+const RECENT_MS = CURRENT_MS;
+/** A still world's copy is confirmed this often with no command asking (`beat`): one compare of its hashes, so an
+ *  act's answer, which does not ask, is not `unconfirmed` after a long turn (#4700's audit: 10 to 60 s). */
+const CONFIRM_EVERY_MS = 4000;
 
 const OPS = new Set([
   'carry',
@@ -2048,9 +2075,27 @@ async function give(req) {
     if (!e) return { ok: false, code: 'together-no-offer', detail: `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
     req = { ...req, offer: e.offer };
   }
+  // #4700: a withdraw by its word is of this Soul's own newest offer of it: the node of that kind its offer made (not
+  // in the copy when it was sent), else the newest of that kind in the copy.
+  if (req.do === 'withdraw' && req.offer !== undefined && !ID.test(String(req.offer))) {
+    const w = String(req.offer).toLowerCase().replace(/_/g, '-');
+    const kind = (TOUCHES[w] ?? activityNamed(activitiesIn(kinds), w)?.pin ?? (w === 'give' ? GIVE_KIND : ''))?.split('@')[0];
+    // An activity the home holds no entry for is known by its node's kind (`<ns>:<word>_activity`).
+    const mine = (state.offersMade ?? []).findLast((o) => (kind ? o.kind === kind : touchOf(o.kind) === w));
+    const of = rows.filter((r) => (kind ? r.kind === kind : touchOf(r.kind) === w));
+    const r = of.filter((x) => mine && !mine.before.includes(x.id)).at(-1) ?? of.at(-1);
+    if (!r) return { ok: false, code: 'together-no-offer', detail: `no offer of ${w.slice(0, 40)} of yours here: together withdraw <offer id>`, ...ageNow() };
+    req = { ...req, offer: r.id };
+  }
   const intents = giveIntents(req, { place, kinds });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;
+  // An offer's kind and the nodes of it the copy holds now, so a later withdraw by its word finds the node it made.
+  const offered = intents.find((i) => i.verb === 'activity:offer')?.params?.[1];
+  if (offered) {
+    const kind = String(offered).split('@')[0];
+    state.offersMade = [...(state.offersMade ?? []), { kind, before: rows.filter((r) => r.kind === kind).map((r) => r.id) }].slice(-8);
+  }
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   // `sequence`: the command waits for its end, so a refused offer or accept (too far, already in one) is said.
   return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
@@ -2264,6 +2309,8 @@ function idleCheck(now) {
 function beat() {
   const now = Date.now(), s = state.schedule;
   idleCheck(now);
+  // Nothing confirmed the copy or was sent for CONFIRM_EVERY_MS (a sent intent's receipt brings its own follow).
+  if (signedIn && !syncing && confirmedAt !== null && performance.now() - Math.max(confirmedAt, sentAt) > CONFIRM_EVERY_MS) refresh();
   const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
   if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
   s.beat = now;
@@ -2370,5 +2417,11 @@ server.on('error', (e) => {
 rmSync(rt.socket, { force: true });
 beat(); // before the first answer, so it lists what was missed while off
 const beating = setInterval(beat, BEAT_MS);
-atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
+// #4700: the command that started it waits for this word on the pipe it named, not for a fixed time.
+const READY_FD = arg('--ready-fd');
+atSocket(rt.socket, (path) => server.listen(path, () => {
+  log(`listening for ${soul}, pid ${process.pid}`);
+  if (READY_FD === undefined) return;
+  try { writeSync(Number(READY_FD), 'ready\n'); closeSync(Number(READY_FD)); } catch { /* the command is gone */ }
+}));
 connect();
