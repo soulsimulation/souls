@@ -44,7 +44,7 @@ export function postureKind(activity: string, base?: string): PostureKind {
 export type PostureNow = { rise?: number; tilt?: { act: string; k: number }; flat?: { act: string; k: number; ago?: number }; frame?: ActivityFrame | null; activity?: 'sit-down' | 'stand-up'; since?: number; settle: number };
 /** A change of posture in the record: the activity (and base) before it, the activity after it, its age (s); `before`:
  *  the change before it, when that was still being drawn as this one came. */
-export type PostureChange = { from: string; fromBase?: string; to: string; age: number; fromAge?: number; before?: PostureChange };
+export type PostureChange = { from: string; fromBase?: string; to: string; age: number; fromAge?: number; fromWalk?: { weight: number; distance: number }; before?: PostureChange };
 
 const S = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 type Phase = { s: number; at: (u: number) => Omit<PostureNow, 'settle'> & { settle?: number } };

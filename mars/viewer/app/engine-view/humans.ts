@@ -1022,9 +1022,15 @@ export class HumanViews {
     const a = v.prev, b = v.cur, h = v.rig.holder;
     // Animation bindings capture original values when activated. Reset before activating any clip so random-access
     // evaluation cannot capture a previous procedural layer as the next clip's reference pose.
-    v.rig.mixer.stopAllAction();
-    for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
-    v.rig.idle.play();v.rig.walk.play();v.layered=false;
+    // Transition layouts change the lowest torso vertex; a prior-pose shortlist is not a valid contact sample.
+    if(v.postureChange)v.restCache=undefined;
+    const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
+    const plainIdle=v.activity==='idle'&&!v.postureChange;
+    if(!nativeHandOwner && !plainIdle){
+      v.rig.mixer.stopAllAction();
+      for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
+      v.rig.idle.play();v.rig.walk.play();v.layered=false;
+    }
     h.position.set(a.p[0] + (b.p[0] - a.p[0]) * alpha, a.p[1] + (b.p[1] - a.p[1]) * alpha, a.p[2] + (b.p[2] - a.p[2]) * alpha);
     let yaw = lerpAngle(a.yaw, b.yaw, alpha);
     const engineYaw = yaw;
@@ -1644,12 +1650,15 @@ export class HumanViews {
     const pc = v.postureChange;
     const floorToMove=!!pc&&['back','front'].includes(postureKind(pc.from,pc.fromBase))&&GAIT_ACTS.has(v.activity);
     const freeFloor=['back','front'].includes(postureKind(v.activity,v.base))&&POSTURE_ORIGINS.has(v.activity);
-    const noOwner = POSTURE_ORIGINS.has(pc?.from ?? v.activity) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
     const phase = pc ? posturePhaseEnds(pc,v.base,v.activity).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
+    const walkingOrigin=!!pc&&GAIT_ACTS.has(pc.from)&&!!pc.fromWalk&&freeFloor&&pc.age<ACT_BLEND;
+    // A known floor-phase endpoint is safe to sample even when its original entry came from locomotion.
+    const noOwner = (POSTURE_ORIGINS.has(pc?.from ?? v.activity)||walkingOrigin||phase!==undefined&&freeFloor) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
     if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
       this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
     } else if (!noOwner) v.postureOrigins?.clear();
-    if (noOwner && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
+    const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
+    if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
@@ -1657,21 +1666,21 @@ export class HumanViews {
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
-    const delta=pc.age-phase+(phase?1e-6:0);
+    const delta=pc.age-phase+1e-6;
     const boundary = time - delta, h = v.rig.holder;
     const shifted = (c: PostureChange): PostureChange => ({...c,age:c.age-delta,...(c.before?{before:shifted(c.before)}:{})});
     const before = phase ? shifted(pc) : pc.before ? shifted(pc.before) : undefined;
     const from = phase ? v.activity : pc.from, fromBase=phase?v.base:pc.fromBase;
     const nativeQ = new THREE.Quaternion().setFromAxisAngle(UP, -v.cur.yaw);
-    const key = JSON.stringify([Math.round(boundary*1e6),pc.from,pc.fromBase,pc.fromAge,before,v.cur.p,v.cur.yaw,phase],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
+    const key = JSON.stringify([Math.round(boundary*1e6),pc.from,pc.fromBase,pc.fromAge,before,v.cur.p,v.cur.yaw,pc.fromWalk??null,phase],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
     const cache = v.postureOrigins ??= new Map();
     let origin = cache.get(key);
     const joints:THREE.Object3D[]=[];v.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});
     const target = {bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
     const root = new THREE.Vector3(...v.cur.p);
     if (!origin) {
-      const age = phase ? v.since===undefined?undefined:v.since-delta : pc.fromAge;
-      const snap = {...v.cur,...(!phase&&!GAIT_ACTS.has(from)?{walkW:0,walkT:0}:{}),expressionT:boundary,idleT:(boundary+(h.name.length*.37)%1)%v.rig.idle.getClip().duration};
+      const age = phase ? v.since===undefined?undefined:v.since-delta : pc.fromAge===undefined?undefined:Math.max(0,pc.fromAge-1e-6);
+      const snap = {...v.cur,...(!phase?GAIT_ACTS.has(from)&&pc.fromWalk?{walkW:pc.fromWalk.weight,walkT:((pc.fromWalk.distance/v.rig.template.walkSpeed)%v.rig.walk.getClip().duration+v.rig.walk.getClip().duration)%v.rig.walk.getClip().duration}:{walkW:0,walkT:0}:{}),expressionT:boundary,idleT:(boundary+(h.name.length*.37)%1)%v.rig.idle.getClip().duration};
       // A separate skeleton AND mixer keep source evaluation out of the displayed rig's property-binding cache.
       // This private evaluator is never attached to the world and never loads appearances, props or network assets.
       const evaluator = new HumanViews(false);evaluator.templates=[v.rig.template];

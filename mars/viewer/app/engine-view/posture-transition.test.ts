@@ -103,3 +103,18 @@ test('a frame crossfade moves each hand from one goal to the other, never in one
   assert.equal(flat.lying?.face, 'back');
   assert.equal(flat.lying?.raise, 0);
 });
+
+test('recorded walk cancellation carries its actual eased boundary weight and stride distance',async()=>{
+  const [{TakePeople},{Runtime},{Spatial},{emptyWorld,human},{TakeRecorder},{openGround}]=await Promise.all([import('./take-replay.ts'),import('../../engine/runtime/runtime.ts'),import('../../engine/spatial/service.ts'),import('../../engine/world/factory.ts'),import('../../engine/take/recorder.ts'),import('../../engine/test/frame-fixtures.ts')]);
+  const scene=openGround(),world=emptyWorld('posture-gait',scene),body=human('gait-origin',0,0);world.entities[body.id]=body;
+  const runtime=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),recorder=new TakeRecorder(runtime,{rulesVersion:'posture-gait'});let chunk=new TakeRecorder(runtime,{rulesVersion:'posture-gait'});const chunks:import('../../engine/take/types.ts').Take[]=[];
+  for(let k=0;k<40;k++){body.human!.activity=k<5?'idle':k<20?'walk':'stargaze';body.pose.p[0]=Math.max(0,Math.min(15,k-5))*.02;runtime.step();if(k===24){chunks.push(chunk.finish());chunk=new TakeRecorder(runtime,{rulesVersion:'posture-gait'});}}chunks.push(chunk.finish());
+  const people=new TakePeople(recorder.finish()),reader=people as unknown as {activityHistory(id:string,tick:number,act:string,walk:number):{postureChange?:{fromWalk?:{weight:number;distance:number}}}};
+  const origin=reader.activityHistory(body.id,30,'stargaze',0).postureChange?.fromWalk;
+  assert.ok(origin,'original gait boundary metadata reaches the renderer');assert.ok(origin.weight>.1&&origin.weight<.9,'the eased stop boundary is a partial stride, not a fabricated full-weight gait');assert.ok(origin.distance>.2&&origin.distance<.4,'stride phase comes from the recorded path');
+  const rolled=new TakePeople(chunks[0]);rolled.setTake(chunks[1],{[body.id]:.3});rolled.setWaterHistory(chunks);
+  const later=(rolled as unknown as typeof reader).activityHistory(body.id,5,'stargaze',0).postureChange?.fromWalk;
+  assert.ok(later,'compatible previous-window origin is retained');assert.ok(Math.abs(later.weight-origin.weight)<1e-6,'rollover preserves eased boundary weight');assert.ok(Math.abs(later.distance-origin.distance)<1e-6,'rollover preserves cumulative stride phase');
+  rolled.setTake(chunks[1]);rolled.setWaterHistory(chunks);assert.equal((rolled as unknown as typeof reader).activityHistory(body.id,5,'stargaze',0).postureChange?.fromWalk,undefined,'unknown previous cumulative offset never fabricates a stride origin');
+
+});

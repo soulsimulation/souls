@@ -183,6 +183,7 @@ export class TakePeople {
   private waveOwners = new Map<string,number[]>();
   private waveActs = new Map<string,{t:number[];v:string[]}>();
   private waveTakes = new WeakMap<Take,boolean>();
+  private activityStreams = new WeakMap<Take,{changes:Take['changes'];activityAt:Set<string>;hasWave:boolean}>();
   private acts = new Map<string, { t: number[]; v: string[]; pt: number[]; pv: string[]; bt: number[]; bv: (string | null)[]; it?:number[];iv?:(string|null)[] }>();
   private base: SpatialScene;
   private stairKey = '';
@@ -325,7 +326,19 @@ export class TakePeople {
     // posture-transition.ts: the latest change of posture (an idle tick between sit-ups and jumping jacks keeps it)
     const baseAt=(at:number,before:boolean)=>{for(let i=a.bt.length-1;i>=0;i--)if(before?a.bt[i]<at:a.bt[i]<=at)return a.bv[i]??undefined;return undefined;};
     let pk=a.pt.length-1;while(pk>=0&&a.pt[pk]>tick)pk--;
-    const change=lastPostureChange(a.pt,a.pv,pk,tick,this.take.dt,baseAt);if(change)posture.postureChange=change;
+    const change=lastPostureChange(a.pt,a.pv,pk,tick,this.take.dt,baseAt);
+    if(change){
+      const track=this.walks.get(id),segments=track?this.gaitSteps(id):null;
+      for(let c:typeof change|undefined=change;c;c=c.before)if(GAIT_ACTS.has(c.from)&&track&&segments){
+        const at=tick-c.age/this.take.dt,prev=this.neighbours.prev,offset=prev?prev.startTick-this.take.startTick:0;
+        if(at<segments.t[0]||at>segments.t.at(-1)!)continue;
+        let distance:number|undefined;
+        if(at>=0&&at<=this.take.ticks)distance=this.walked(track,at)+(this.walkOffsets[id]??0);
+        else if(prev&&prev.rulesVersion===this.take.rulesVersion&&prev.tracks[id]&&at>=offset&&at<=0&&this.walkOffsets[id]!==undefined){const s=prev.tracks[id],cum=walkCum(s);distance=this.walkOffsets[id]-cum.at(-1)!+this.walked({track:s,cum,ticks:s.map(p=>p[0])},at-offset);}
+        if(distance!==undefined)c.fromWalk={weight:walkWeightAt(segments,at-1e-6,this.take.dt),distance};
+      }
+      posture.postureChange=change;
+    }
     }
     if(!a||k<1)return {...rest,...wave,...posture};
     let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
@@ -383,14 +396,14 @@ export class TakePeople {
       first = (ending.get(at.startTick) ?? []).find((t) => t !== at && t.ticks > 0 && adjacentTakes(t, at) && t.rulesVersion === at.rulesVersion) ?? null;
     }
     const add=(take:Take,offset:number)=>{
-      let found=false;
-      const activityAt=new Set(take.changes.filter(c=>c[2]==='activity').map(c=>c[1]+'@'+c[0]));
-      for(const [tick,id,field,value]of take.changes){
+      let parsed=this.activityStreams.get(take);
+      if(!parsed){const changes=take.changes.filter(c=>c[2]==='activity'||c[2]==='baseActivity'||c[2]==='instrument');parsed={changes,activityAt:new Set(changes.filter(c=>c[2]==='activity').map(c=>c[1]+'@'+c[0])),hasWave:changes.some(c=>c[2]==='activity'&&c[3]==='wave')};this.activityStreams.set(take,parsed);}
+      const {activityAt}=parsed;
+      for(const [tick,id,field,value]of parsed.changes){
         if(field!=='activity'&&field!=='baseActivity'&&field!=='instrument')continue;
         if(field==='instrument'&&value!=='piano'&&value!=='keyboard'&&!this.acts.get(id)?.it)continue;
         let a=this.acts.get(id);if(!a)this.acts.set(id,(a={t:[],v:[],pt:[],pv:[],bt:[],bv:[]}));
         if(field==='activity'){
-          if(value==='wave')found=true;
           if(typeof value==='string'&&a.v[a.v.length-1]!==value){a.t.push(tick+offset);a.v.push(value);a.pt.push(tick+offset);a.pv.push(value);}
         }else if(field==='baseActivity'){
           const next=typeof value==='string'?value:null, prior=a.bv.at(-1);
@@ -399,7 +412,7 @@ export class TakePeople {
         }
         else{(a.it??=[]).push(tick+offset);(a.iv??=[]).push(typeof value==='string'?value:null);}
       }
-      this.waveTakes.set(take,found);
+      this.waveTakes.set(take,parsed.hasWave);
     };
     for(const [take,offset]of windows)add(take,offset);
     this.waveActs.clear();this.waveOwners.clear();

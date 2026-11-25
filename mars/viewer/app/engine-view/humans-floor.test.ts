@@ -103,5 +103,20 @@ test('actual rig plants both push-up feet throughout entry, repetitions and exit
   for(const end of [.25,1.25,1.55]){const a=moving(end-1e-5),b=moving(end+1e-5),d=distance(a,b);if(d>=.015){const i=a.findIndex((p,i)=>Math.hypot(...p.p.map((x,j)=>x-b[i].p[j]))===d);console.log('MOVING_PHASE',end,d,a[i],b[i]);}assert.ok(d<.015,'moving-root get-up phase '+end+' surface '+d+'m');}
   for(const end of [.25,1.25,1.55])assert.ok(distance(moving(end-1e-5,0,0,true),moving(end+1e-5,0,0,true))<.015,'short idle gap retains floor-to-motion phase continuity '+end);
   for(const walk of [.05,.103,.25,.49]){const p:[number,number,number]=[1.067,0,-.019];views.setFrame([{id:'contact-rig',p,yaw:-.274,walk,walkDist:.067,activity:'stargaze',activityAge:2.115}],82+walk);views.render(1);assert.deepEqual(p,[1.067,0,-.019],'native input root remains authoritative');const points=views.meshPoints('contact-rig',1);for(const part of ['leg','foot']){const skin=points.filter(x=>x.part===part);assert(skin.length>0);assert(Math.min(...skin.map(x=>x.p[1]))>=-.015,'free floor '+part+' remains above penetration tolerance while movement weight ramps '+walk);}}
+  // Original runtime cancellation witness: walking ends while its underlying stargaze form remains active.
+  // The current activity owns free floor support even though its transition origin is locomotion.
+  const cancelled=(time:number,weight=.5)=>{
+    const age=Math.max(0,time),idleAge=Math.max(0,age-.9);
+    const walked={from:'stargaze',to:'walk',age:1.6+age,fromAge:2.9};
+    const returning={from:'walk',to:'stargaze',age,fromAge:1.6,fromWalk:{weight,distance:2.31},before:walked};
+    const activity=age<.9?'stargaze':'idle';
+    views.setFrame([{id:'contact-rig',p:[3.224,0,-.626],yaw:-.274,walk:Math.max(0,weight*(1-age/.2)),walkDist:2.31,activity,activityAge:age<.9?age:idleAge,...(activity==='idle'?{restAge:idleAge}:{}),postureChange:age<.9?returning:{from:'stargaze',to:'idle',age:idleAge,fromAge:.9,before:returning}}],90+age);views.render(1);
+    return views.meshPoints('contact-rig',1);
+  };
+  for(const weight of [.2,.5,1]){views.setFrame([{id:'contact-rig',p:[3.224,0,-.626],yaw:-.274,walk:weight,walkDist:2.31,activity:'walk',activityAge:1.6-1e-5,postureChange:{from:'stargaze',to:'walk',age:1.6-1e-5,fromAge:2.9}}],90-1e-5);views.render(1);
+  const priorWalk=views.meshPoints('contact-rig',1);assert.ok(distance(priorWalk,cancelled(1e-5,weight))<.015,'walk cancellation starts from the actual moving pose '+weight);}
+  for(let age=0;age<2.6;age+=.025){cancelled(age);const rows=metrics();for(const part of ['footL','footR','legL','legR','handL','handR'])assert.ok(rows[part].min>=-.015,`walk cancellation ${age} ${part} penetration ${rows[part].min}`);}
+  for(const boundary of [.2,.6,.9,1.15,2.15,2.45]){const pa=cancelled(boundary-1e-5),pb=cancelled(boundary+1e-5),d=distance(pa,pb);if(d>=.015){const i=pa.findIndex((p,i)=>Math.hypot(...p.p.map((x,j)=>x-pb[i].p[j]))===d);console.log('CANCEL_BOUNDARY',boundary,d,pa[i],pb[i]);}assert.ok(d<.015,'walk cancellation phase surface continuity '+boundary+' delta '+d);};
+  const cancelPose=cancelled(.6);cancelled(1.7);assert.ok(distance(cancelPose,cancelled(.6))<1e-5,'walk cancellation surface evaluation is order independent');
   views.clear();setHumanGround(null);
 });
