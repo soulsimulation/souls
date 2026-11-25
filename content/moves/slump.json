@@ -6,5 +6,6 @@
   "cancels_on": ["claim_taken"],
   "effector": "hand",
   "reach_mm": 600,
+  "seated": true,
   "phases": { "start_up_us": 500000, "recovery_us": 800000 }
 }

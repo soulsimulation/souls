@@ -1735,6 +1735,11 @@ impl Bodies {
                         }
                         Ok(())
                     }
+                    // A walk whose legs a newer claim took (its Soul's bow or dance: the controller cancels the walk's
+                    // driver) is replaced, and says so as [`Self::replace`] does (#4171), not `resource-not-held`.
+                    Some((_, Progress::Failed(n))) if n.as_str() == "resource-not-held" => {
+                        Err("claim-taken".to_owned())
+                    }
                     Some((_, Progress::Failed(n))) => Err(n.as_str().to_owned()),
                     Some((_, Progress::Going)) => continue,
                     None if self.runner.running(body) => continue,

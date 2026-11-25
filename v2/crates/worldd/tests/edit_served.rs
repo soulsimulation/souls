@@ -1761,6 +1761,99 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
     );
 }
 
+/// #4143 (review of #4902): a Soul seated by the gateway's `eden:sit` stretches and slumps from its seat (moves made
+/// from a seat, `content/moves/stretch.json`'s `seated`), and is still refused a jump `resource-held` by the seat's
+/// hold on its legs: a gateway sit writes no `posture`, so the jump's posture need alone would let it play through the
+/// seat. The body stays seated throughout.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refused() {
+    let (text, chair) = seat_world();
+    let im = import_eden::load(&text).unwrap();
+    let source = im
+        .tree
+        .node(im.tree.handle(im.nodes[chair]).unwrap())
+        .unwrap();
+    let (kind, fields) = (source.kind().clone(), source.fields().clone());
+    let (x, z) = clear_row(&text);
+    let d = scratch("seated-moves");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let w = seed_entries(&d, &text, 1, (x, z), Some(&entries));
+    let (c, actor) = creator(0xce);
+    static_creator(&w, c);
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let (url, tokens) = gateway(&socket, &[actor, Actor::Soul(w.souls[0])]).await;
+    let mut creator = sign_in(&url, &tokens[0]).await;
+    let mut soul = sign_in(&url, &tokens[1]).await;
+    let op = Op::Place {
+        name: 1,
+        kind,
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new((x + 1) * M, 0, z * M - 509_000),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields,
+    };
+    let (placed, _) = send(&mut creator, edit_intent(&w, actor, 1, 0, op)).await;
+    assert_eq!(placed.kind, 1, "the chair commits: {placed:?}");
+    let chair = placed.names[&1];
+    let ask = |sequence, verb: &str, target: Option<Id>| {
+        encode(
+            &Intent {
+                actor: Actor::Soul(w.souls[0]),
+                verb: Name::new(verb).unwrap(),
+                target: target.map(Target::Node),
+                parameters: BTreeMap::new(),
+                sequence,
+                basis: basis(w.root.scope(), placed.version),
+                expiry: i64::MAX,
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+                reflex: false,
+            }
+            .to_value(),
+        )
+        .unwrap()
+    };
+    let sat = send_ended(&mut soul, ask(1, "eden:sit", Some(chair))).await;
+    assert_eq!(sat.kind, 1, "the Soul sits by the gateway's sit: {sat:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let body = t
+        .links_at(w.souls[0])
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's body");
+    let jumped = send_ended(&mut soul, ask(2, "eden:jump", Some(body))).await;
+    let stretched = send_ended(&mut soul, ask(3, "eden:stretch", Some(body))).await;
+    let slumped = send_ended(&mut soul, ask(4, "eden:slump", Some(body))).await;
+    println!(
+        "#4143 seated: jump {} {}, stretch {} {}, slump {} {}",
+        jumped.kind, jumped.reason, stretched.kind, stretched.reason, slumped.kind, slumped.reason
+    );
+    assert_eq!(
+        (jumped.kind, jumped.reason.as_str()),
+        (2, "resource-held"),
+        "a jump never plays through the seat"
+    );
+    assert_eq!(stretched.kind, 1, "a seated stretch is made: {stretched:?}");
+    assert_eq!(slumped.kind, 1, "a seated slump is made: {slumped:?}");
+    // Still seated: the Soul's rise is answered, as only a seated body's is.
+    let rose = send_ended(&mut soul, ask(5, "eden:rise", None)).await;
+    assert_eq!(rose.kind, 1, "still seated, so it rises: {rose:?}");
+}
+
 #[path = "edit_served/k18d.rs"]
 mod k18d;
 
