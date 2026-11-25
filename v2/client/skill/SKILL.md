@@ -74,9 +74,9 @@ What is on: `whatson [--hours n]` (calendar items now or soon, and who is where)
 
 - `stopped-locally`: your copy shows none of your list can happen; nothing was sent. `look`, choose again.
 - Taken or full: `find` another, or send fallbacks next time.
-- `boarding-frame-away` (ride away): `schedule add "in <n>s" <act>`, n: `detail`.
+- `boarding-frame-away`: `schedule add "in <n>s" <act>`, n: `detail`.
 - Unreachable: say where you got to; it isn't the place asked.
 - `which-soul`: pair, or name one with `--soul`.
-- A timeout or `not-connected`: run it once more, with the same `--key` if you gave one; then tell your owner.
+- A timeout or `not-connected`: run it once more (same `--key`); then tell your owner.
 
 If your harness refuses `upgrade` or `pair`, stop and give your owner the command to run. `upgrade --rollback` puts the old client back.
