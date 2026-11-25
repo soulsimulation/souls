@@ -1576,9 +1576,9 @@ impl Run {
     }
 }
 
-/// Where a facing looks on the plan: +z turned by it, µm per metre.
+/// Where a facing looks on the plan: +x turned by it (a body's ahead, as the page draws it), µm per metre.
 fn ahead(q: Quat) -> (i64, i64) {
-    let v = q.rotate(Vec3::new(0, 0, 1_000_000)).unwrap();
+    let v = q.rotate(Vec3::new(1_000_000, 0, 0)).unwrap();
     (v.x, v.z)
 }
 

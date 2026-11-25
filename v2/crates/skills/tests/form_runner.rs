@@ -383,7 +383,8 @@ fn c25_every_step_shape_binds() {
             point: Name::new("a").unwrap(),
             at: Vec3::new(0, 0, 500_000),
             on: None,
-            approach: false
+            approach: false,
+            face: None,
         }
     );
     assert_eq!(seat[2], Step::Rise);
@@ -399,7 +400,8 @@ fn c25_every_step_shape_binds() {
             point: Name::new("top").unwrap(),
             at: Vec3::new(0, 900_000, 0),
             on: None,
-            approach: false
+            approach: false,
+            face: None,
         }]
     );
     assert_eq!(
@@ -420,7 +422,8 @@ fn c25_every_step_shape_binds() {
             point: Name::new("room").unwrap(),
             at: Vec3::ZERO,
             on: Some(room),
-            approach: false
+            approach: false,
+            face: None,
         }]
     );
 }

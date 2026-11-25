@@ -1363,8 +1363,10 @@ impl Bodies {
 
     /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
     /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
-    /// (the ground, a room, a building's main room) keeps its facing, as does one ending within [`FACE_NEAR`] of the
-    /// origin. The turn is its legs' facing input, set by a driver of them, as a place's facing is ([`Self::take_places`]).
+    /// (the ground, a room, a building's main room) keeps its facing, as does one ending within
+    /// [`sim::controller::FACE_NEAR`] of the origin ([`sim::controller::facing_toward`], the one rule a form's walk
+    /// keeps too). The turn is its legs' facing input, set by a driver of them, as a place's facing is
+    /// ([`Self::take_places`]).
     fn face(&mut self, body: Id, target: Id) {
         use sim::ground::scene::{GROUND, PLACE, ROOM};
         let Some((frame, at)) = self.pose(body) else {
@@ -1390,12 +1392,7 @@ impl Bodies {
                 .and_then(|t| select::origin_in(tree, t, frame).ok()),
             None => select::origin_in(tree, target, frame).ok(),
         };
-        let Some(to) = to else { return };
-        let d = [to.x - at.x, to.z - at.z];
-        if i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2) <= i128::from(FACE_NEAR).pow(2) {
-            return;
-        }
-        let Ok(facing) = sim::activity::carry::yaw_toward(d) else {
+        let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) else {
             return;
         };
         let c = &mut self.runner.controller;
@@ -2485,9 +2482,6 @@ mod map_tests {
 
 /// How far from another Soul a walk to its body ends, µm (0.133 Q2): near enough to talk, out of its space.
 const SPEAKING: i64 = 1_200_000;
-
-/// A done walk ending this near its target's origin, µm, keeps its facing ([`Bodies::face`]): it is on it.
-const FACE_NEAR: i64 = 100_000;
 
 /// The point `d` from `at` toward `from` (the walker), on the level; along +z when the walker is elsewhere or on it.
 fn beside(at: Vec3, from: Option<Vec3>, d: i64) -> Vec3 {
