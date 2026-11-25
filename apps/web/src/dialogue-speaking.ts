@@ -1,7 +1,7 @@
 /** DLG3 head pop-ups: who is speaking right now, published by the dialogue dock (which owns threads and
- * their colours) and painted by LiveWorld inside each Soul's name tag. A fresh line from a nearby, on-screen
- * speaker shows for a few seconds as a compact pop-up in the tag (above the head, so it moves with the tag and
- * the label packing keeps pop-ups apart); afterwards, or for distant speakers, only a small dot remains.
+ * their colours) and painted by LiveWorld into each Soul's speech bubble, anchored above its head and apart from
+ * its name tag (the tag hangs under the body since C2). A fresh line from a nearby, on-screen speaker shows for
+ * several seconds as a compact pop-up there; afterwards, or for distant speakers, only a small dot remains.
  * Clicking the pop-up or the dot opens that conversation in the dock. */
 export type Speaking={colour:string;since:number;thread:string;
  /** The line itself (DLG3 pop-up); absent for older publishers. */
@@ -15,8 +15,8 @@ export const SPEAKING_PULSE_MS=3_500;
 export const POPUP_NEAR_M=48;
 /** At most this many pop-ups at once (newest first); phones get fewer. */
 export const POPUP_MAX=4,POPUP_MAX_PHONE=2;
-/** How long a line stays up: ~4.5 s, a little longer for long lines, never more than ~6.5 s. */
-export const popupMs=(text:string)=>Math.min(6_500,4_500+Math.max(0,text.length-40)*30);
+/** How long a line stays up: 6 s, longer for long lines (reading time), never more than 10 s. */
+export const popupMs=(text:string)=>Math.min(10_000,6_000+Math.max(0,text.length-40)*45);
 const POPUP_FADE_MS=600;
 
 /** Requests from a pop-up or dot click: open the dock on this thread. */
@@ -37,12 +37,13 @@ function chosen(now:number){
 }
 const clip=(text:string)=>text.length>160?text.slice(0,157).trimEnd()+'…':text;
 
-/** Paint (or clear) the pop-up and the small speaking dot in one name tag. Cheap when nothing changed; one
- * style read. `distance` is the camera distance in metres (unknown = near). */
-export function paintSpeakingDot(label:HTMLElement,soulId:string,enabled:boolean,now=performance.now(),distance?:number){
+/** Paint (or clear) the pop-up and the small speaking dot in one Soul's speech bubble (`label`, the element at its
+ * head). Cheap when nothing changed; one style read. `distance` is the camera distance in metres (unknown = near);
+ * `shown`, whether the Soul is drawn on screen (default: `label` itself is displayed). */
+export function paintSpeakingDot(label:HTMLElement,soulId:string,enabled:boolean,now=performance.now(),distance?:number,shown?:boolean){
  let dot=label.querySelector<HTMLElement>(':scope > [data-speaking-dot]'),pop=label.querySelector<HTMLElement>(':scope > [data-speech-popup]');
  const s=enabled?speakingNow.get(soulId):undefined,age=s?now-s.since:Infinity;
- const drawn=label.style.display!=='none'&&label.style.visibility!=='hidden';
+ const drawn=shown??(label.style.display!=='none'&&label.style.visibility!=='hidden');
  seen.set(soulId,{at:now,eligible:drawn&&(distance===undefined||!Number.isFinite(distance)||distance<=POPUP_NEAR_M)});
  if(seen.size>400)for(const [id,v] of seen)if(now-v.at>5_000)seen.delete(id);
  const showPop=!!s?.text&&age<popupMs(s.text)&&chosen(now).has(soulId);
