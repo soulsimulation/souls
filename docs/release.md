@@ -56,7 +56,7 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    receipt.
 2. **Build exactly HEAD of a clean tree.** `release.sh` refuses uncommitted tracked changes and ships `git archive
    HEAD`, so the build id names exactly what runs.
-3. **CDN first.** Any new immutable asset the web build's CDN manifest references is uploaded to `assets.eden.art`
+3. **CDN first.** Any new immutable asset the web build's CDN manifest references is uploaded to `cdn.soul.game`
    and verified before the release ([CDN](operations/cdn.md)). The client falls back to the origin on a CDN miss,
    but a release must not depend on that.
 4. **Staged ship.** `tools/world-launcher/deploy/ship.sh` takes a read-only snapshot, stages without activating, boots a
@@ -534,7 +534,7 @@ release.sh never prunes local or remote releases. Focused check: `node --test to
 | `SIM_WORLDS_BASE` | `/worlds` | Production path prefix |
 | `SIM_RELEASE_NO_INSTALL` | `0` | `1` stages without `install.sh` (units, timers, `daemon-reload`); dependencies are still installed. `ship.sh --no-switch` sets it |
 | `SIM_ASSETS_CDN_ENABLED` | `1` | `0` builds without the asset CDN for one release; other values are refused |
-| `SIM_ASSETS_CDN_ORIGIN` | `https://assets.eden.art` | CDN origin compiled into the build |
+| `SIM_ASSETS_CDN_ORIGIN` | `https://cdn.soul.game` | CDN origin compiled into the build |
 | `VITE_EDEN_EXPERIENCE_WORLD_IDS` | the qualified Eden world id | Worlds that get the Eden experience; empty disables the check |
 | `SIM_GOATCOUNTER` | site default | Visitor counter code or URL; `off` disables ([analytics](operations/analytics.md)) |
 | `SIM_GOD_UPLOADS_CDN` | `1` | Route god uploads through the CDN Worker |
@@ -644,7 +644,7 @@ node tools/world-launcher/op.mjs set-test --port <port> --base /worlds --slug re
 Then, in an empty folder on the machine that will run the release, register and pair a god for it:
 
 ```sh
-node tools/god-skill/eden-god.mjs register https://sim.eden.art/worlds/w/release-probe/
+node tools/god-skill/eden-god.mjs register https://soul.game/w/release-probe/
 node tools/god-skill/eden-god.mjs pair          # prints a pairing code and waits
 # on the host:
 node tools/world-launcher/op.mjs god-pending --port <port> --base /worlds --slug release-probe

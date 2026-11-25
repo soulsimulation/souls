@@ -1,8 +1,10 @@
 # Asset CDN
 
-`https://assets.eden.art` is a Cloudflare R2 bucket on a custom domain. It holds immutable, content-addressed copies of
-assets the origin (`sim.eden.art`) already serves publicly, so they load from the nearest edge. The origin always
-remains the fallback.
+`https://cdn.soul.game` is a Cloudflare R2 bucket (`soul-game-assets`, on soul.game's Cloudflare account) on a custom
+domain. It holds immutable, content-addressed copies of assets the origin (`soul.game`) already serves publicly, so they
+load from the nearest edge. The origin always remains the fallback. Until the move to soul.game the same keys were
+served from `https://assets.eden.art` (bucket `eden-assets`); that bucket is kept read-only, so old proof and journal
+links still answer, and nothing writes to it any more.
 
 ## Keys
 
@@ -77,7 +79,8 @@ deliveries.
 
 The switch is build-time: `SIM_ASSETS_CDN_ENABLED=1` (off when absent in a plain `vite build`; `release.sh` defaults it
 on and fails a build without the origin or the manifest). `SIM_ASSETS_CDN_ORIGIN` defaults to
-`https://assets.eden.art`; the client accepts only that origin or a loopback `http` origin for tests.
+`https://cdn.soul.game`; the client accepts only that origin, the former `https://assets.eden.art` (so a rollback
+build can name it) or a loopback `http` origin for tests.
 
 ## Publishing
 
@@ -105,10 +108,10 @@ prompts without echoing the values.
 ```sh
 # 1. one object first, then prove it live
 EDEN_ASSETS_CREDENTIALS=<file> node tools/cdn/publish.mjs --apply --plan <plan> --only <key> --receipt <new>/receipt-test.json
-node tools/cdn/verify.mjs https://assets.eden.art <plan> --key <key> --out <new>/proof-test.json
+node tools/cdn/verify.mjs https://cdn.soul.game <plan> --key <key> --out <new>/proof-test.json
 # 2. the whole plan (existing objects are verified and skipped), then a cache proof
 EDEN_ASSETS_CREDENTIALS=<file> node tools/cdn/publish.mjs --apply --plan <plan> --receipt <new>/receipt.json
-node tools/cdn/verify.mjs https://assets.eden.art <plan> --key <k1>,<k2>,<k3> --out <new>/proof.json
+node tools/cdn/verify.mjs https://cdn.soul.game <plan> --key <k1>,<k2>,<k3> --out <new>/proof.json
 ```
 
 Before any network access every object is rehashed and its licence evidence revalidated. Publishing always uses the
@@ -155,18 +158,18 @@ is skipped. `manifest` merges only receipt-verified paths into the manifest's `w
 ## The uploads Worker
 
 `tools/cdn/worker/god-uploads.js` is a Cloudflare Worker (one ES module, no imports, no secrets) on the route
-`assets.eden.art/w/*`. It serves exactly `GET /w/<slug>/assets/<sha256>.<ext>` (`glb`, `png`, `jpg`, `json`):
+`cdn.soul.game/w/*`. It serves exactly `GET /w/<slug>/assets/<sha256>.<ext>` (`glb`, `png`, `jpg`, `json`):
 
 - **R2 hit:** the stored object with the CDN headers (immutable, Content-Type, CORS matching the exact allowed requesting origin,
   `Content-Encoding: br` when stored so, ETag `"<sha>"`), also kept in the edge cache.
-- **Miss:** it fetches the god world's own route `https://souls.game/w/<slug>/assets/<sha>.<ext>`, hashes the
+- **Miss:** it fetches the god world's own route `https://soul.game/w/<slug>/assets/<sha>.<ext>`, hashes the
   body while reading it (32 MiB cap), and stores and returns it only when the digest equals the path's sha. The R2
   write completes before the 200, so `x-eden-cdn: miss` means stored.
 - **Refusals** (`no-store`, `x-eden-cdn: refused:<reason>`): a malformed path or a query is 400, origin 404 is 404, a
   hash mismatch, redirect, other origin status or oversize body is 502. Nothing refused is stored.
 
 The root launcher retains old slug aliases, so existing upload keys continue to resolve without rewriting objects.
-CORS permits exactly `https://souls.game` and `https://sim.eden.art`, including cached responses, errors, HEAD,
+CORS permits exactly `https://soul.game`, `https://souls.game` and `https://sim.eden.art`, including cached responses, errors, HEAD,
 OPTIONS and 304. Unknown or absent origins receive no allow-origin header; responses vary on Origin.
 
 The client routes a god upload to the Worker only when the world's snapshot gives its size, so the same length and
@@ -178,8 +181,8 @@ SHA checks apply. `SIM_GOD_UPLOADS_CDN=0` at build time turns that off; a visito
 |---|---|
 | Script | `tools/cdn/worker/god-uploads.js` |
 | Compatibility date | `2026-10-01` or later, no flags |
-| R2 binding | variable `ASSETS` → the bucket behind `assets.eden.art` |
-| Route | `assets.eden.art/w/*`, failure mode **Fail open** |
+| R2 binding | variable `ASSETS` → the bucket behind `cdn.soul.game` (`soul-game-assets`) |
+| Route | `cdn.soul.game/w/*`, failure mode **Fail open** |
 | workers.dev and preview URLs | disabled (the route is the only entry point) |
 | Variables and secrets | none |
 

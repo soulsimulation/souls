@@ -41,7 +41,7 @@ flowchart LR
     Brain["Brain<br/>brain.ts + packages/brain"]
     DB[("sim.db<br/>events, snapshots, world_edits_v1, edge_*")]
   end
-  CDN["assets.eden.art<br/>cdn-manifest.json"]
+  CDN["cdn.soul.game<br/>cdn-manifest.json"]
   Models["Anthropic / TypeSafe<br/>(live mode only)"]
 
   SoulCLI -- "eden-edge/1.1<br/>/v1/edge/*" --> HTTP
@@ -345,7 +345,7 @@ dirty or every 200 (`hub.ts:125-138`, `world.ts:1631`); limits `MAX_PER_IP = 30`
 from `GET /v1/takes` (`WorldTakeTransport.ts`). God panel: `GodPanel.tsx` + `god-ui/`. Soul pages: `SoulHome.tsx`,
 `MySouls.tsx`, `SoulDay.tsx`, `PairApprove.tsx`. Clerk via `ClerkBridge.tsx` and `LauncherRoot.tsx`. Assets resolve
 through `cdn-assets.ts` (`readCdnManifest`, `manifestAsset`, `cdnFetch` with a 4 s hedge) against `src/cdn-manifest.json`
-(origin path → `{key: assets/[br/]xx/<sha256>.<ext>, sha256, bytes}`), origin fixed to `https://assets.eden.art`.
+(origin path → `{key: assets/[br/]xx/<sha256>.<ext>, sha256, bytes}`), origin fixed to `https://cdn.soul.game`.
 `visitor-counts.ts` posts to GoatCounter by `sendBeacon`: path `/w/<slug>` or `/`, referrer origin, screen width, and
 three events (`enter world`, `soul paired`, `god connected`), skipping `navigator.webdriver`, `?shot`, `skipgc` and
 local hosts.

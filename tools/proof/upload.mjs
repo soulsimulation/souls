@@ -5,10 +5,10 @@
 //        [--preview-seconds <s>] <file>...
 //
 // Targets:
-//   default   the proof CDN: the asset bucket behind assets.eden.art, at `proofs/pr-<n>/<file>`, public at
-//             https://assets.eden.art/proofs/pr-<n>/<file> (PROOF_CDN). Uploads sign with the R2 credentials of
+//   default   the proof CDN: the asset bucket behind cdn.soul.game, at `proofs/pr-<n>/<file>`, public at
+//             https://cdn.soul.game/proofs/pr-<n>/<file> (PROOF_CDN). Uploads sign with the R2 credentials of
 //             tools/cdn/publish.mjs: EDEN_ASSETS_CREDENTIALS, else the main checkout's
-//             .local/project/team/secrets/eden-assets-r2.env, and CF_ACCOUNT_ID from the environment or the main
+//             .local/project/team/secrets/soul-game-assets-r2.env, and SOULS_ASSETS_R2_ENDPOINT or CF_ACCOUNT_ID from the environment or the main
 //             checkout's deploy.env. Without them the upload is blocked (exit 3): attach the clips to the PR by hand.
 //             Proof never goes in GitHub Releases, which are for versions of the software.
 //   SIM_PROOF_UPLOAD_URL (+ SIM_PROOF_UPLOAD_TOKEN)
@@ -92,7 +92,7 @@ export function checkLocal(files, git = (...a) => execFileSync('git', a, { cwd: 
 // ── targets ─────────────────────────────────────────────────────────────────────────────────────────────────────
 export { PROOF_CDN };
 /** Repo-relative home of the R2 credential file in the main checkout (never committed: .local is ignored). */
-export const CREDENTIALS_FILE = '.local/project/team/secrets/eden-assets-r2.env';
+export const CREDENTIALS_FILE = '.local/project/team/secrets/soul-game-assets-r2.env';
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 
 /** The main checkout, where a worktree's ignored .local and deploy.env live. */
@@ -108,7 +108,7 @@ function mainCheckout() {
  * `If-None-Match: *` never overwrites: a name already there (412) moves on to `-2`, `-3`, ... `sign({url, method,
  * credentials, body, headers})` returns the signed headers (publish.mjs sigv4Headers); injected in tests.
  */
-export function cdnTarget({ credentials = null, endpoint = null, bucket = 'eden-assets', sign = null, fetchImpl = fetch, read = readFileSync, dryRun = false, publicUrl = PROOF_CDN }) {
+export function cdnTarget({ credentials = null, endpoint = null, bucket = 'soul-game-assets', sign = null, fetchImpl = fetch, read = readFileSync, dryRun = false, publicUrl = PROOF_CDN }) {
   const taken = new Set(), pub = publicUrl.replace(/\/+$/, '');
   return {
     name: `the proof CDN (${new URL(pub).host})`,

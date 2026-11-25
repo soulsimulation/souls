@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // What a visitor and a god see during a release (lane Z1, backlog G9). Run it before the release, release, then stop it:
 //
-//   node tools/world-launcher/deploy/release-probe.mjs --origin https://sim.eden.art \
+//   node tools/world-launcher/deploy/release-probe.mjs --origin https://soul.game \
 //        --pages /worlds/w/eden-2026/,/w/eden/ [--phone-pages /worlds/w/eden-2026/,/w/eden/] --out <dir> \
 //        [--cli <god dir>[,<god dir>…]] [--cli-every 1] [--arrive-every 6] [--after-s 60] [--expect-build we-<sha12>] [--max-min 20]
 //   … wait for <dir>/ready, release, then: touch <dir>/released → the probe watches --after-s more seconds (default 60),

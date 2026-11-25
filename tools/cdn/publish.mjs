@@ -10,12 +10,14 @@ import { ALLOWED_LICENCES, BR_EXTENSIONS, CACHE, DEFAULT_BR_CACHE, DEFAULT_SOURC
 import { withNewReceipt } from './receipt.mjs';
 import { deployEnv } from '../world-launcher/deploy/deploy-env.mjs';
 
-// The R2 S3 endpoint of the Cloudflare account that owns the bucket: CF_ACCOUNT_ID in the environment or deploy.env.
-// Unset, ENDPOINT is a stand-in (tests and dry runs need no account) and a real --apply stops before any request.
+// The R2 S3 endpoint of the Cloudflare account that owns the bucket (soul.game's): SOULS_ASSETS_R2_ENDPOINT, the full
+// https://<account>.r2.cloudflarestorage.com, else CF_ACCOUNT_ID, each from the environment or deploy.env. Unset,
+// ENDPOINT is a stand-in (tests and dry runs need no account) and a real --apply stops before any request.
+const R2_ENDPOINT = /^https:\/\/[0-9a-f]{32}\.r2\.cloudflarestorage\.com$/.test(deployEnv('SOULS_ASSETS_R2_ENDPOINT') ?? '') ? deployEnv('SOULS_ASSETS_R2_ENDPOINT') : null;
 const ACCOUNT = /^[0-9a-f]{32}$/.test(deployEnv('CF_ACCOUNT_ID') ?? '') ? deployEnv('CF_ACCOUNT_ID') : null;
-export const ENDPOINT = `https://${ACCOUNT ?? 'cf-account-id-unset'}.r2.cloudflarestorage.com`;
+export const ENDPOINT = R2_ENDPOINT ?? `https://${ACCOUNT ?? 'cf-account-id-unset'}.r2.cloudflarestorage.com`;
 export function requireAccount() {
-  if (!ACCOUNT) throw Error('Set CF_ACCOUNT_ID (the 32-hex Cloudflare account id) in the environment or deploy.env (template: deploy.env.example)');
+  if (!R2_ENDPOINT && !ACCOUNT) throw Error('Set SOULS_ASSETS_R2_ENDPOINT (https://<account>.r2.cloudflarestorage.com) or CF_ACCOUNT_ID (the 32-hex Cloudflare account id) in the environment or deploy.env (template: deploy.env.example)');
 }
 // Repo media (tools/assets): pull-only objects for files that left git. Their evidence is the committed asset manifest
 // (path, sha256, bytes, url), never the plan; they never enter the client cdn-manifest.json.
@@ -27,7 +29,8 @@ async function readAssetManifest(file = ASSET_MANIFEST) {
   for (const f of m.files) if (f.url) byKey.set(new URL(f.url).pathname.slice(1), f);
   return byKey;
 }
-export const BUCKET = 'eden-assets';
+// soul.game's asset bucket, public at https://cdn.soul.game (moved from eden-assets behind assets.eden.art, which stays read-only).
+export const BUCKET = 'soul-game-assets';
 export const SCOPED_KEY = /^assets(?:\/worlds)?\/w\/[a-z][a-z0-9-]{0,31}\/[0-9a-f]{64}\.[a-z0-9]+$/;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const hmac = (key, value) => createHmac('sha256', key).update(value).digest();

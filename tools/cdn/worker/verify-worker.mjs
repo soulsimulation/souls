@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// verify-worker.mjs — post-deploy proof of the god-uploads Worker on assets.eden.art/w/* (lane CDN4, 2026-10-20).
+// verify-worker.mjs — post-deploy proof of the god-uploads Worker on cdn.soul.game/w/* (lane CDN4, 2026-10-20).
 //
 //   node tools/cdn/worker/verify-worker.mjs --god <god folder> --out <receipt.json>
 //   node tools/cdn/worker/verify-worker.mjs --self-test [--out <receipt.json>]   (loopback stand-ins, no network)
@@ -7,7 +7,7 @@
 // With --god it uploads ONE fresh, never-seen GLB (a single triangle with random vertices, so its sha is new) to that
 // scratch god world with the folder's own god session (the session file is read by path and never printed), then:
 //   1. origin   GET <world>/assets/<sha>.glb is 200 and hashes to <sha>;
-//   2. absent   HEAD https://assets.eden.art/w/<slug>/assets/<sha>.glb is 404 (HEAD never pulls);
+//   2. absent   HEAD https://cdn.soul.game/w/<slug>/assets/<sha>.glb is 404 (HEAD never pulls);
 //   3. miss     GET  same URL: 200, x-eden-cdn miss, immutable, model/gltf-binary, CORS matching the allowed app origin, ETag "<sha>" (or
 //               W/"<sha>" when Cloudflare compressed it on the way out: Content-Encoding br/gzip/zstd is transport only),
 //               the DECODED body hashes to <sha> with the upload's byte count;
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, '../../..');
 const args = process.argv.slice(2), opt = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
-const APPS = ['https://sim.eden.art', 'https://souls.game', 'https://soul.game'];
+const APPS = ['https://soul.game', 'https://souls.game', 'https://sim.eden.art'];
 
 /** A minimal valid GLB: one triangle, random vertices (a fresh sha every run), about 1 m tall. */
 export function triangleGlb() {
@@ -151,7 +151,7 @@ async function selfTest() {
       return;
     }
     const waits = [];
-    const r = await handle(new Request(`https://assets.eden.art${req.url}`, { method: req.method, headers: req.headers }), env, { waitUntil: (p) => waits.push(p) }, { origin: `http://127.0.0.1:${wport}`, caches: null });
+    const r = await handle(new Request(`https://cdn.soul.game${req.url}`, { method: req.method, headers: req.headers }), env, { waitUntil: (p) => waits.push(p) }, { origin: `http://127.0.0.1:${wport}`, caches: null });
     const headers = Object.fromEntries(r.headers);
     let out = req.method === 'HEAD' ? undefined : Buffer.from(await r.arrayBuffer());
     if (out && r.status === 200 && !headers['content-encoding'] && /\bbr\b/.test(req.headers['accept-encoding'] ?? '')) {
@@ -171,11 +171,11 @@ if (isMain(import.meta.url)) {
   let result;
   if (args.includes('--self-test')) result = { mode: 'self-test (loopback stand-ins)', ...(await selfTest()) };
   else {
-    const dir = opt('god'); if (!dir) throw Error('usage: verify-worker.mjs --god <god folder> [--out receipt.json] [--cdn https://assets.eden.art] | --self-test');
+    const dir = opt('god'); if (!dir) throw Error('usage: verify-worker.mjs --god <god folder> [--out receipt.json] [--cdn https://cdn.soul.game] | --self-test');
     const { world, token } = session(resolve(dir));
     const slug = /^\/(?:worlds\/)?w\/([a-z][a-z0-9-]{0,31})\/$/.exec(new URL(world).pathname)?.[1];
     if (!slug || !APPS.includes(new URL(world).origin)) throw Error('the god folder must name an allowed app origin and /w/<slug>/ or /worlds/w/<slug>/');
-    result = { mode: 'live', world, at: new Date().toISOString(), ...(await verify({ cdn: opt('cdn', 'https://assets.eden.art'), world, token, slug })) };
+    result = { mode: 'live', world, at: new Date().toISOString(), ...(await verify({ cdn: opt('cdn', 'https://cdn.soul.game'), world, token, slug })) };
   }
   const failed = result.checks.filter((c) => !c.ok);
   const receipt = { result: failed.length ? 'FAIL' : 'PASS', failed: failed.map((c) => c.name), ...result };

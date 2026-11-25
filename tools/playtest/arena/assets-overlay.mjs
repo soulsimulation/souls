@@ -3,7 +3,7 @@
 // (the cloud box). Without it a dev world proxies /modular and /browser to sim.mars.college, which the cloud cannot reach.
 //
 //   node tools/playtest/arena/assets-overlay.mjs <dir> [--only manifests,draco,browser,kit,environment]
-//        [--origin https://sim.eden.art] [--server-root <root>] [--concurrency 6] [--probe]
+//        [--origin https://soul.game] [--server-root <root>] [--concurrency 6] [--probe]
 //   --probe: no downloads; a 1-byte GET of every URL the plan holds (kit parts and the Draco list need the kit.json
 //   and static-manifest.json already in <dir>, e.g. from a previous `--only manifests,kit`).
 //
@@ -55,7 +55,7 @@ export function scanEnvironment(serverRoot) {
 
 /** The download list for the chosen groups. Reads already-fetched manifests/kit from dir for the dependent lists.
  *  → [{rel, url, group, required, sha256?}] */
-export function planOverlay(dir, { origin = 'https://sim.eden.art', only = GROUPS, serverRoot = null } = {}) {
+export function planOverlay(dir, { origin = 'https://soul.game', only = GROUPS, serverRoot = null } = {}) {
   const o = origin.replace(/\/+$/, '');
   const items = [];
   const add = (group, rel, url, required = true, sha256 = null) => items.push({ group, rel, url, required, ...(sha256 ? { sha256 } : {}) });
@@ -115,7 +115,7 @@ export async function fetchItem(dir, it, { fetchImpl = fetch, tries = 4 } = {}) 
 async function pool(items, n, fn) { const out = []; let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } })); return out; }
 
 /** Build (or resume) the overlay. Groups run in dependency order: manifests before draco/browser, kit.json before parts. */
-export async function buildOverlay(dir, { origin = 'https://sim.eden.art', only = GROUPS, serverRoot = null, concurrency = 6, fetchImpl = fetch, log = () => {} } = {}) {
+export async function buildOverlay(dir, { origin = 'https://soul.game', only = GROUPS, serverRoot = null, concurrency = 6, fetchImpl = fetch, log = () => {} } = {}) {
   dir = resolve(dir); mkdirSync(dir, { recursive: true });
   const manFile = join(dir, 'overlay-manifest.json');
   const prev = readJsonFile(manFile);
@@ -152,13 +152,13 @@ async function main() {
   const only = String(flag('only', GROUPS.join(','))).split(',').filter((g) => GROUPS.includes(g));
   const t0 = Date.now();
   if (argv.includes('--probe')) {
-    const rows = await probeOverlay(resolve(dir), { origin: flag('origin', 'https://sim.eden.art'), serverRoot: flag('server-root', null) });
+    const rows = await probeOverlay(resolve(dir), { origin: flag('origin', 'https://soul.game'), serverRoot: flag('server-root', null) });
     for (const x of rows) console.log(`${x.ok ? 'ok ' : 'BAD'} ${String(x.status).padEnd(4)} ${String(x.size ?? '?').padStart(9)} ${x.required ? 'req' : 'opt'} ${x.url}`);
     const bad = rows.filter((x) => !x.ok && x.required);
     console.error(`[overlay] probe: ${rows.length} urls, ${rows.filter((x) => x.ok).length} ok, ${bad.length} required missing, ${Math.round(rows.reduce((a, x) => a + (x.ok ? x.size ?? 0 : 0), 0) / 1048576)} MB`);
     process.exit(bad.length ? 1 : 0);
   }
-  const r = await buildOverlay(dir, { origin: flag('origin', 'https://sim.eden.art'), only, serverRoot: flag('server-root', null), concurrency: Number(flag('concurrency', 6)), log: (m) => console.error(`[overlay] ${m}`) });
+  const r = await buildOverlay(dir, { origin: flag('origin', 'https://soul.game'), only, serverRoot: flag('server-root', null), concurrency: Number(flag('concurrency', 6)), log: (m) => console.error(`[overlay] ${m}`) });
   console.log(JSON.stringify({ ok: r.ok, dir: resolve(dir), files: r.files.length, bytes: r.bytes, missing: r.missing.map((m) => `${m.rel} (${m.status}${m.required ? ', required' : ''})`), seconds: Math.round((Date.now() - t0) / 1000), manifest: r.manifestFile }, null, 1));
   process.exit(r.ok ? 0 : 1);
 }

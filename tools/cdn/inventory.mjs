@@ -28,7 +28,7 @@ export const brKeyFor = (sha, ext) => `assets/br/${sha.slice(0, 2)}/${sha}${ext}
 export const isBrKey = key => typeof key === 'string' && key.startsWith('assets/br/');
 export function validKey(key, sha) { return /^[0-9a-f]{64}$/.test(sha) && new RegExp(`^assets/(?:br/)?${sha.slice(0, 2)}/${sha}\\.[a-z0-9]+$`).test(key); }
 
-// Precompression (CDN3). Origin sends /blobs, /modular and the Vite bundles as quality-11 brotli; assets.eden.art
+// Precompression (CDN3). Origin sends /blobs, /modular and the Vite bundles as quality-11 brotli; cdn.soul.game
 // compresses on the fly at about quality 4 (CDN2 audit), so the CDN only beats the origin when it stores q11 itself.
 // Images (PNG/JPEG/WebP/AVIF/KTX2) are already entropy-coded and stay identity.
 export const BR_EXTENSIONS = new Set(['.glb', '.bin', '.hdr', '.exr', '.gltf', '.json', '.wasm', '.svg']);
@@ -217,7 +217,7 @@ export async function inventory({ root = ROOT, sources = DEFAULT_SOURCES, roots 
   const all = [...objects.values()];
   if (brOptions !== false) await precompress(all, assets, brOptions);
   return {
-    version: 1, generatedAt: now.toISOString(), root: resolve(root), sources: resolve(sources), bucket: 'eden-assets',
+    version: 1, generatedAt: now.toISOString(), root: resolve(root), sources: resolve(sources), bucket: 'soul-game-assets',
     coverage: ['/w/eden', '/w/mars', '/w/littlemartians', '/worlds'],
     note: 'Local public-asset inventory, not a live traffic capture. Missing roots and unlicensed files are explicit. No network or credentials used.',
     ...(brOptions !== false ? { brotli: { ...BR_PARAMS, minSaving: BR_MIN_SAVING, cache: resolve(brOptions.cache ?? DEFAULT_BR_CACHE) } } : {}),

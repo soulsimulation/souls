@@ -1,10 +1,10 @@
 # tools/cdn
 
-Publishing and checking the immutable asset CDN at `https://assets.eden.art`. How it works and how to run each tool:
+Publishing and checking the immutable asset CDN at `https://cdn.soul.game`. How it works and how to run each tool:
 [docs/operations/cdn.md](../../docs/operations/cdn.md). Pulling media into a checkout is `tools/assets/`
 (`pnpm assets:pull`).
 
-Dry runs need nothing. A real upload (`--apply`) needs `CF_ACCOUNT_ID`, from the environment or the untracked
+Dry runs need nothing. A real upload (`--apply`) needs `SOULS_ASSETS_R2_ENDPOINT` (the bucket `soul-game-assets`'s R2 endpoint) or `CF_ACCOUNT_ID`, from the environment or the untracked
 `deploy.env` at the repository root (template: `deploy.env.example`), and `EDEN_ASSETS_CREDENTIALS` in the environment:
 the absolute path of the mode-0600 R2 credentials file, kept outside the repository.
 

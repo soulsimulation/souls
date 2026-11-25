@@ -283,7 +283,7 @@ if step stall "phone stall x4 on Eden 2026: no frame gap over 1 s"; then
 fi
 
 # ---- 12 cdn walk ----------------------------------------------------------------------------------------------------
-if step cdn-walk "every manifest asset from assets.eden.art (Eden 2026, /w/mars, /w/eden; desktop + phone, dpr 1+2)"; then
+if step cdn-walk "every manifest asset from cdn.soul.game (Eden 2026, /w/mars, /w/eden; desktop + phone, dpr 1+2)"; then
   set --; for pg in $CDN_PAGES; do set -- "$@" "$ORIGIN$pg"; done
   x_env_to "$OUT/cdn-walk.log" "$NODE" "$ROOT/tools/cdn/cdn-walk.mjs" "$OUT/cdn-walk" "$@" || { tail -20 "$OUT/cdn-walk.log"; die "cdn-walk FAILED (cdn-walk.log)"; }
   [ "$DRY" = 1 ] || tail -3 "$OUT/cdn-walk.log" | sed 's/^/   /' | cut -c1-200

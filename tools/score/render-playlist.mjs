@@ -35,7 +35,7 @@ import { findPlaywright } from '../god-skill/lib/look.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const PLAYLIST_DIR = resolve(root, 'apps/web/src/score/playlist');
 export const INDEX = resolve(PLAYLIST_DIR, 'playlist-audio.json');
-export const CDN = 'https://assets.eden.art';
+export const CDN = 'https://cdn.soul.game';
 export const TRACK_S = 240;
 /** Encoded peak ceiling (linear): -1 dBFS, the engine's own limiter threshold. */
 export const PEAK_TARGET = Math.pow(10, -1 / 20);

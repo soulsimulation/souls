@@ -16,7 +16,7 @@ const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 test('instructions.md maps the plain asks to login, adopt and dashboard', () => {
   const guide = read('instructions.md'), later = guide.slice(guide.indexOf('**Later, in plain words.**'));
   assert.ok(later.length < 1200, 'a few lines');
-  assert.match(later, /"Connect my account": `node eden\.mjs login https:\/\/sim\.eden\.art\/worlds\/w\/eden-2026 --for GL7R-YZYJ`/);
+  assert.match(later, /"Connect my account": `node eden\.mjs login https:\/\/soul\.game\/w\/eden-2026 --for GL7R-YZYJ`/);
   assert.match(later, /Don't stop to wait\s+for their reply: start `node eden\.mjs login wait` in the background at once; when it returns, go on/);
   assert.match(later, /"Move my Soul to this computer": .*`node eden\.mjs adopt <name>`/);
   assert.match(later, /"Open my Soul's dashboard": `node eden\.mjs dashboard`[^]*give them the `dashboard`\s+URL/);
