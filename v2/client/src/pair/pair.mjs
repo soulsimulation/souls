@@ -23,6 +23,7 @@ import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeGuide } from '../home/guide.mjs';
 import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
@@ -100,22 +101,28 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const list = await r.json();
   if (!Array.isArray(list)) throw new Refused('entries-answer', 'the entries are not a list');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Off the daemon's thread of control (fs/promises), and only the entries whose bytes changed: a world's 449 entries
+  // written and renamed one by one, synchronously, held a new daemon's clock, sync and answers for 6 to 18 s on its
+  // first sign-in, right after its pairing had written the same files (first run, 0.135).
   const files = [], served = activitiesFile(home, world);
+  let written = 0;
   const activities = list.find((e) => e?.format === 'souls-activities/1' && Array.isArray(e.activities));
-  if (activities) { writeFileSync(`${served}.tmp`, JSON.stringify(activities)); renameSync(`${served}.tmp`, served); } else rmSync(served, { force: true });
+  if (activities) { await writeFile(`${served}.tmp`, JSON.stringify(activities)); await rename(`${served}.tmp`, served); } else await rm(served, { force: true });
   for (const e of list) {
     if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
-    const f = `${e.kind.replaceAll(':', '.')}.json`;
-    writeFileSync(join(dir, `${f}.tmp`), JSON.stringify(e));
-    renameSync(join(dir, `${f}.tmp`), join(dir, f));
+    const f = `${e.kind.replaceAll(':', '.')}.json`, text = JSON.stringify(e);
     files.push(f);
+    if (await readFile(join(dir, f), 'utf8').then((t) => t === text, () => false)) continue;
+    await writeFile(join(dir, `${f}.tmp`), text);
+    await rename(join(dir, `${f}.tmp`), join(dir, f));
+    written++;
   }
   const now = new Set(files);
-  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
-  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
-  renameSync(`${mark}.tmp`, mark);
-  return { entries: files.length, changed: true };
+  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) await rm(join(dir, f), { force: true });
+  await writeFile(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
+  await rename(`${mark}.tmp`, mark);
+  return { entries: files.length, changed: true, written };
 }
 
 const activitiesFile = (home, world) => join(home, 'kinds', `.activities-${encodeURIComponent(world)}.json`);
@@ -205,12 +212,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
     if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
-    const credFile = join(home, CREDENTIALS);
-    const creds = existsSync(credFile) ? readJson(credFile) : {};
-    creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
-    writePrivate(credFile, creds);
-    // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
     // #3760: the world's kinds, so the client's own checks know them; the Soul is paired whether or not they came.
+    // Fetched before the token is written: a daemon can start only once the token is there (an agent's `look` the
+    // moment its owner approves), and one started while these were still being written fetched them all again over
+    // the same files at its sign-in (first run, 0.135).
     let entries;
     try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
     // #1960: a creator's edits are checked against the world's kinds text.
@@ -218,6 +223,11 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (got.grant.startsWith('creator-')) {
       try { await refreshKindsText({ home, world, gateway, token: got.token }); kinds = 'kept'; } catch (e) { kinds = { failed: e.code ?? 'kinds-unreachable' }; }
     }
+    const credFile = join(home, CREDENTIALS);
+    const creds = existsSync(credFile) ? readJson(credFile) : {};
+    creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
+    writePrivate(credFile, creds);
+    // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
     // Its owner's page shows the same name; the Soul is paired whether or not the directory took it.
     let named;
     if (name) {

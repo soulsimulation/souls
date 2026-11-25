@@ -40,6 +40,16 @@ test('a body in a turned building is drawn in the world frame, with the page\'s 
   assert.ok(Math.abs(at(0.5).yaw - Math.atan2(-1, 0)) < 0.002, 'it faces the way it walks in the world (-z)');
 });
 
+test('first day: a body-kind figure with no Soul link is drawn but is not a Soul (the Souls panel, the navbar)', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const figure = node('b.9', 'w.2', [2_000_000, 0, 0], { kind: 'souls:body@1', at: T0 });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body, figure], removed: [] } });
+  for (let n = 0; n < 12; n++) b.receive(part(n, n === 0 ? [['b.7', 'w.2', null, T0, 1_000_000, 0, 0], ['b.9', 'w.2', null, T0, 2_000_000, 0, 0]] : []));
+  assert.deepEqual([...b.view.souls.keys()], ['s_abc-7']);
+  const drawn = Object.keys((b.view.takes.chunks.at(-1)!.take as unknown as { finalState: { entities: object } }).finalState.entities);
+  assert.ok(drawn.length >= 2, `both bodies are drawn: ${drawn}`);
+});
+
 test('no chunk until the world is past it by the v2 page\'s lag; a body the copy cannot place is hidden, not moved', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
@@ -144,4 +154,27 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
   // BEHIND_US: a part ends on the half-second grid the chunks are on, so up to one chunk it costs nothing more; it must
   // cover a walker's next sample (every 0.2 s, p99 0.25 s)
   assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
+});
+
+test('a walker\'s record lands after its part\'s motion samples: no burst to a jog at the walk\'s end, no step back', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  // as the world writes it: 1.4 m/s, a sample every 0.2 s (off the parts' half-second grid), and each part the body's record where its last sample put
+  // it; the walk ends 0.35 s into part 12, whose record carries no motion time (local Eden, 25 Nov: a 15 m/s burst)
+  const speed = 1.4, end = T0 + 12 * 500_000 + 350_000, x = (at: number) => 1_000_000 + Math.round((Math.min(at, end) - T0) * speed);
+  for (let n = 0; n < 24; n++) {
+    const from = T0 + n * 500_000, samples: [string, string, number | null, number, number, number, number][] = [];
+    for (let at = Math.ceil((from - 50_000) / 200_000) * 200_000 + 50_000; at < from + 500_000 && at < end; at += 200_000) samples.push(['b.7', 'w.2', null, at, x(at), 0, 0]);
+    if (from <= end && end < from + 500_000) samples.push(['b.7', 'w.2', null, end, x(end), 0, 0]);
+    const last = samples.at(-1);
+    b.receive(part(n, samples, last ? { nodes: [{ ...body, pos: [last[4], 0, 0], at: last[3] === end ? null : last[3] }] } : {}));
+  }
+  const pos: number[][] = [];
+  for (const c of b.view.takes.chunks) {
+    const take = c.take as unknown as Take;
+    for (let k = c === b.view.takes.chunks[0] ? 0 : 1; k <= CHUNK; k++) pos.push(sampleTake(take, k * DT).entities[E].p);
+  }
+  // the floor's +x is the world's -z: walking on, z only falls, and never faster than a walk
+  const steps = pos.slice(1).map((p, i) => pos[i][2] - p[2]);
+  assert.ok(steps.length > 100 && Math.max(...steps) <= speed * DT * 1.05 && Math.min(...steps) >= -1e-6, `steps ${Math.min(...steps).toFixed(3)}..${Math.max(...steps).toFixed(3)} m a tick`);
 });

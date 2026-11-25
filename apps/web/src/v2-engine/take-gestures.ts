@@ -41,6 +41,19 @@ export function gestureFrom(move: { name: string; start: number; ends: readonly 
   const end = activity && LOOPS.has(activity) ? last + LOOP_HOLD : last;
   return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
 }
+/** How long a reading is drawn at most when its run's end never reaches the page, µs. */
+export const READ_LONGEST = 600_000_000;
+/** A move aimed at a book the body holds (a book's `read` form looks at its spine, then waits) as the old renderer's
+ *  `read` pose, the book open in both hands, until the run ends (`cut`) or the book leaves the hand (`endReading`).
+ *  `heldProp`: the prop of the move's target when this body holds it, else null. Null when it is not a reading. */
+export function readingFrom(move: { start: number; run?: string }, heldProp: string | null): Gesture | null {
+  return heldProp === 'book' ? { start: move.start, end: move.start + READ_LONGEST, activity: 'read', ...(move.run ? { run: move.run } : {}) } : null;
+}
+/** Ends the reading running at `at`: the book left the body's hand. */
+export function endReading(gestures: Gesture[], at: number): void {
+  for (const g of gestures) if (g.activity === 'read' && g.start <= at && at < g.end) g.end = at;
+}
+
 /** Ends the gesture of the move that started at `start` at `at` (a held move let go, 0.134 T2). */
 export function endGesture(gestures: Gesture[], start: number, at: number): void {
   for (const g of gestures) if (g.start === start && at < g.end) g.end = Math.max(g.start, at);
