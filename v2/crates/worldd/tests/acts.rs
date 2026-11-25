@@ -2649,6 +2649,9 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
         started.elapsed()
     );
     off.expect("gets off at the far stop");
+    // It steps off its seat to the stop's stand point over the rise's recovery (sim::slots::step_track): read where it
+    // stands once that step is in the stream.
+    at(16_500);
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(ground()), None), "on the ground");
     let t = r.tree();

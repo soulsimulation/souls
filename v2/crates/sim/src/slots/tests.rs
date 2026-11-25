@@ -358,7 +358,11 @@ fn rising_hands_the_body_back_at_the_stand_point() {
     );
     let contact = w.moves.record(n).expect("in progress").contact_at();
     w.run(contact + 1);
-    let p = w.c.body(b).expect("a body").pose;
+    assert!(
+        w.c.carried(b) && w.slots.climbs().is_empty(),
+        "a normal rise is a step, no climb out (E11d)"
+    );
+    let p = stepped_off(&mut w, b, contact);
     let stand = w
         .slots
         .place(w.chair)
@@ -377,12 +381,91 @@ fn rising_hands_the_body_back_at_the_stand_point() {
         None,
         "released when the holder left"
     );
-    assert!(
-        !w.c.carried(b) && w.slots.climbs().is_empty(),
-        "a normal rise is a step, no climb out (E11d)"
-    );
     w.run(i64::MAX);
     assert!(w.c.claims(b).expect("a body").running().is_empty());
+}
+
+/// Steps the controller from `from` until the world's carry of `b` (a rise's step off its seat) has landed it, at most
+/// two seconds: where it then stands.
+fn stepped_off(w: &mut World, b: Id, from: i64) -> replica::pose::Pose {
+    let mut t = from;
+    while w.c.carried(b) && t < from + 2_000_000 {
+        t += 50_000;
+        assert!(w.c.step(&w.floors, 50_000, t).refused.is_empty());
+    }
+    assert!(!w.c.carried(b), "landed");
+    w.c.body(b).expect("a body").pose
+}
+
+/// Standing up is a step off the seat, never a jump (PR #4790's finding: ~0.6 m off a mat in one tick): at contact
+/// the body is on its feet where it sat, and the world carries it to the stand point over the rise's recovery, no
+/// tick moving it farther than a brisk step.
+#[test]
+fn rising_steps_off_the_seat_over_its_recovery() {
+    steps_off(world(chair()));
+    // a step faster than a walk whose length does not divide into whole ticks (500.005 mm) lands by the rise's end
+    // all the same (a tick's reach is rounded down); the reach is the served world's, horizontal
+    let mut place = chair();
+    place.stand = [0, 500_000];
+    let point = Vec3::new(2_237, place.height, 0);
+    let mut w = world_with(place, point, -5_000, 300_000);
+    w.flat = true;
+    steps_off(w);
+}
+
+fn steps_off(mut w: World) {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let b = *w.bodies.iter().min().expect("bodies");
+    w.sit(&[0, 1], &sit);
+    w.run(i64::MAX);
+    let geo = w.geo();
+    let n = w
+        .slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            b,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    let (contact, end) = {
+        let r = w.moves.record(n).expect("in progress");
+        (r.contact_at(), *r.ends.last().expect("phases"))
+    };
+    let at = w.slots.place(w.chair).expect("the chair").clone();
+    let stand = at.stand().expect("a point");
+    w.run(contact + 1);
+    let p = w.c.body(b).expect("a body").pose;
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (at.point.x, at.point.z),
+        "on its feet where it sat"
+    );
+    assert!(w.c.carried(b), "the world carries it off where it sat");
+    assert!(
+        w.slots.climbs().is_empty(),
+        "a step, not a climb out (E11d)"
+    );
+    let (dt, mut t, mut last) = (50_000, contact, p.position);
+    while t < end {
+        t += dt;
+        assert!(w.c.step(&w.floors, dt, t).refused.is_empty());
+        let q = w.c.body(b).expect("a body").pose.position;
+        let d = (i128::from(q.x - last.x).pow(2) + i128::from(q.z - last.z).pow(2)).isqrt();
+        assert!(d <= 150_000, "{d} µm in one tick");
+        last = q;
+    }
+    let p = w.c.body(b).expect("a body").pose;
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (stand.x, stand.z),
+        "at the stand point by the rise's end"
+    );
+    assert!(!w.c.carried(b) && matches!(p.support, Support::Surface { .. }));
 }
 
 /// A later claim on the legs that nothing cancels: a walk.
@@ -633,8 +716,31 @@ fn clearance_chair(front: i32, at: i64) -> World {
 /// the first supported point out along the chair's exit, stands on the floor, frees the seat, and walks the next tick.
 #[test]
 fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
+    rises_from_clearance_chair(true);
+}
+
+/// The step off a seat is taken only along a way out: with no footprint for the chair, its seat point is a cut the
+/// line may not pass, so the body stands at the rise point at once, as before the step (and is never stuck).
+#[test]
+fn a_rise_whose_step_is_no_way_out_stands_at_once() {
+    rises_from_clearance_chair(false);
+}
+
+fn rises_from_clearance_chair(footprint: bool) {
     let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
     let mut w = clearance_chair(528, 700_000);
+    // the chair's own box, as worldd registers a seat thing's footprint: what its step off may pass over
+    if footprint {
+        w.slots.footprint(
+            w.chair,
+            vec![[
+                [-250_000, -250_000],
+                [250_000, -250_000],
+                [250_000, 228_000],
+                [-250_000, 228_000],
+            ]],
+        );
+    }
     let b = w.bodies[0];
     let stand = w.slots.place(w.chair).unwrap().stand().unwrap();
     assert_eq!(
@@ -707,7 +813,12 @@ fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
         .expect("rising");
     let contact = w.moves.record(n).expect("in progress").contact_at();
     run(&mut w, contact + 1);
-    let p = w.c.body(b).unwrap().pose;
+    assert_eq!(
+        w.c.carried(b),
+        footprint,
+        "steps off along a way out, else stands at once"
+    );
+    let p = stepped_off(&mut w, b, contact);
     assert!(
         matches!(p.support, Support::Surface { .. }),
         "on the floor: {p:?}"
@@ -1030,9 +1141,9 @@ fn e11d_a_seat_with_no_floor_nearby_stays_seated_and_is_not_stuck() {
     // Floor near again: it rises at the stand point, as any rise.
     w.floors
         .insert(fixture(1), floor_only(-5_000, -5_000, 5_000, 5_000));
-    let (_, handed) = rise_to_contact(&mut w, b, 9_000_000);
+    let (contact, handed) = rise_to_contact(&mut w, b, 9_000_000);
     assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
-    let p = w.c.body(b).unwrap().pose;
+    let p = stepped_off(&mut w, b, contact);
     assert_eq!(
         (p.position.x, p.position.z),
         (0, 300_000),
@@ -1613,7 +1724,7 @@ fn n14_a_seat_that_moves_with_its_cabin_is_boarded_and_left_only_at_a_stop() {
     let n = rise_at(&mut w, b, now).expect("rises at the far stop");
     let contact = w.moves.record(n).expect("in progress").contact_at();
     w.run(contact + 1);
-    let p = w.c.body(b).expect("a body").pose;
+    let p = stepped_off(&mut w, b, contact);
     let stand = w
         .slots
         .place(w.chair)

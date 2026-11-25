@@ -21,8 +21,9 @@
 //!   naming the holders. A rise frees exactly that body's place.
 //! - **Contact hands the body over.** At the sit's (or lie's) contact instant the body is handed from the floor into
 //!   the slot ([`Controller::slot_in`], T4's hand-off from mover to slot) with the stance the request named; at the rise's
-//!   contact it is handed back onto the floor at the seat's stand point ([`Controller::stand`]), standing. Postures
-//!   are the controller's stance input: stand, sit, lie.
+//!   contact it is handed back onto the floor ([`Controller::stand`]), standing, where it sat, and the world carries it
+//!   to the seat's stand point by the rise's end ([`step_track`]): a step off the seat, never a jump. Postures are the
+//!   controller's stance input: stand, sit, lie.
 //! - **A seated body has no timer and no mover.** When the move is done, a driver with no timer ([`seated_shape`])
 //!   holds its legs and its stance, and the controller's tick never visits it.
 //! - **The engine releases the seat**, never the skill: when the holder rises (at the rise's contact), and when the
@@ -383,6 +384,38 @@ pub fn placed_off(
     b.pose.position.z = at.z;
     b.pose.position.y = at.y;
     Ok(b)
+}
+
+/// A rise's step off its seat, µm, below which the body is stood at the stand point at once (less than a tick's walk).
+pub const STEP_OFF_MIN: i64 = 50_000;
+
+/// The world's carry of a rise's step off its seat: from where it sat (`from`, x and z) along a straight line to `to`
+/// on `floor`, the seat's exit ([`rise_point`] searches along it), within `within` µs and at no less than walking
+/// speed, at most four times it (a step longer than that, from a far place of a bench, outlasts the rise; a walk asked
+/// meanwhile waits for its landing, [`crate::host::Runner`]). It lands as the stand point always has, without waiting
+/// for a body standing near it. `None` for a step shorter than [`STEP_OFF_MIN`].
+pub fn step_track(
+    floor: Id,
+    from: Vec3,
+    to: Vec3,
+    within: Micros,
+) -> Option<crate::controller::Track> {
+    let (dx, dz) = (i128::from(to.x - from.x), i128::from(to.z - from.z));
+    let len = (dx * dx + dz * dz).isqrt() as i64;
+    if len < STEP_OFF_MIN {
+        return None;
+    }
+    // 1 mm/s over the exact speed: a tick's reach is rounded down, so the exact speed could land a tick late.
+    let speed = if within > 0 {
+        (len.saturating_mul(1_000_000) + within - 1) / within + 1_000
+    } else {
+        i64::MAX
+    };
+    Some(crate::controller::Track {
+        speed: speed.clamp(crate::gaits::WALK.speed, 4 * crate::gaits::WALK.speed),
+        hold: false,
+        ..climb_track(floor, to)
+    })
 }
 
 /// The world's carry of a climb out (E11d) or of its rest after a restart: along a straight line to `to` on `floor` at
@@ -1309,7 +1342,7 @@ impl Slots {
             .iter()
             .find(|r| r.class == Class::Locomotion)?;
         let d = claims.holder(&leg.name)?;
-        let handed = self.stand(c, at, floors, h.body, d, now);
+        let handed = self.stand(c, at, floors, h.body, d, now, None);
         if handed.is_ok() {
             let _ = c.set(h.body, d, Part::Stance(Stance::Stand));
             self.release(key);
@@ -1318,8 +1351,8 @@ impl Slots {
     }
 
     /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
-    /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
-    /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
+    /// handed into the slot, at a rise's onto the floor where it sat (its surface in `floors`) and carried to the stand
+    /// point by the rise's end ([`step_track`]), and the seat is released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
     /// did and the hand-off made, or why it could not be (the move is then cancelled by that name: a rise's body stays
     /// seated, a sit's seat is released).
     #[allow(clippy::too_many_arguments)]
@@ -1383,7 +1416,12 @@ impl Slots {
             }
             (Fired::Phase { phase: 1, .. }, State::Rising(_)) => {
                 let d = moves.driver(instance).unwrap_or(0);
-                let h = self.stand(c, &at, floors, body, d, now);
+                // The step off the seat ends with the rise (its recovery): the body is on its feet by then.
+                let by = moves
+                    .record(instance)
+                    .and_then(|r| r.ends.last().copied())
+                    .filter(|&e| e != Micros::MAX);
+                let h = self.stand(c, &at, floors, body, d, now, by);
                 match &h {
                     Ok(_) => {
                         let _ = c.set(body, d, Part::Stance(Stance::Stand));
@@ -1459,6 +1497,11 @@ impl Slots {
     /// out from it ([`rise_point`]); else it climbs out ([`climb_point`], E11d): handed onto the floor's frame at the
     /// seat's point and carried by the world at walking speed in a straight line to the floor, never appearing there
     /// ([`ClimbOut`]). `off-surface` when there is no floor within [`CLIMB_BOUND`] by a way out: the body stays seated.
+    /// With `step_off` (a rise's contact; the time its move ends), a body rising at the stand point is put on its feet
+    /// where it sat and carried there in a straight line by then, at walking speed or faster ([`step_track`]): standing
+    /// up is a step off the seat, never a jump to the stand point. Without it (a claim that took the legs), it stands
+    /// there at once.
+    #[allow(clippy::too_many_arguments)]
     fn stand(
         &mut self,
         c: &mut Controller,
@@ -1467,6 +1510,7 @@ impl Slots {
         body: Id,
         driver: Driver,
         now: Micros,
+        step_off: Option<Micros>,
     ) -> R<HandOff> {
         let build = c.build(body).ok_or_else(|| Refusal {
             name: "body-missing",
@@ -1484,11 +1528,8 @@ impl Slots {
             node: at.floor,
             slot: None,
         };
-        if let Some(p) = rise_point(floor, at, body, build)? {
-            let placed = floor.place_built(body, frame, p, at.facing, build)?;
-            return c.stand(body, driver, placed, now);
-        }
-        // A climb out starts from the body's own place in the seat (E16: a bench's places), never from another.
+        // A step off or a climb out starts from the body's own place in the seat (E16: a bench's places), never from
+        // another.
         let mut here = at.clone();
         if !at.more.is_empty()
             && let Some(p) = c.body(body).map(|b| b.pose.position)
@@ -1496,6 +1537,39 @@ impl Slots {
         {
             here.point.x += d.x;
             here.point.z += d.z;
+        }
+        if let Some(p) = rise_point(floor, at, body, build)? {
+            let placed = floor.place_built(body, frame, p, at.facing, build)?;
+            // The step's line is a way out, as a climb out's is: off the floor only over water or the seat's own thing,
+            // never through another cut (a table in front of the chair); else it stands at the stand point at once.
+            let own = self
+                .footprints
+                .get(&at.thing)
+                .map_or(&[][..], Vec::as_slice);
+            let clear = Climb {
+                floor,
+                floors: all,
+                own,
+                taken: &|_| false,
+                body,
+                node: at.floor,
+                facing: at.facing,
+                from: Vec3::new(here.point.x, 0, here.point.z),
+                base: here.point.y - at.place.height,
+                build,
+            };
+            let Some(track) = step_off
+                .and_then(|by| step_track(at.floor, here.point, placed.pose.position, by - now))
+                .filter(|_| clear.way_out(placed.pose.position))
+            else {
+                return c.stand(body, driver, placed, now);
+            };
+            let mut from = placed;
+            from.pose.position.x = here.point.x;
+            from.pose.position.z = here.point.z;
+            let h = c.stand(body, driver, from, now)?;
+            c.carry(body, track)?;
+            return Ok(h);
         }
         let near = c.near();
         let taken = |p: Vec3| {
