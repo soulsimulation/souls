@@ -15,6 +15,16 @@ use super::store::{Object, R, Store, When, refuse};
 /// directory's caller, not the tick, that makes these calls.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long a read (GET, HEAD, a listing page) waits for its answer's head before it is sent once more, on another
+/// connection, within the same [`TIMEOUT`] ([`S3::read`]). The offsite bucket, measured from the production host on
+/// 25 Nov 2026 (3,036 authenticated requests in 10 min): p50 0.14 s, p99 4.2 s; 3.0% past 2 s and 0.76% past 5 s,
+/// every one of them waiting for the answer's head after a connect and TLS of under 0.03 s, alike over IPv4 and IPv6
+/// and on fresh and kept connections; unauthenticated requests never passed 0.11 s. The stalls are one request's: a
+/// request sent 2 s into another's stall was answered within 3 s in 88 of 100 samples, which puts reads unanswered at
+/// 5 s from 0.69% to about 0.3% (an estimate from those requests, not measured with this client). Not for an
+/// operator's tool or the probe ([`Reads::Limit`]): those have their own bounds and tries.
+const HEDGE: Duration = Duration::from_secs(2);
+
 /// The largest object a world's store reads ([`S3::for_world`]): 1 GiB, the largest legitimate object (a large
 /// world's stream-recovery object or checkpoint, tens of MB) with a wide margin.
 pub const WORLD_READ_LIMIT: u64 = 1 << 30;
@@ -313,6 +323,59 @@ impl S3 {
         ]
     }
 
+    /// Sends a read (`GET` or `HEAD` of `path`, with `query`), signed afresh for each try. A directory's or a world's
+    /// read whose answer's head has not come within [`HEDGE`] is given up on and sent once more, on another
+    /// connection (ureq drops the one that timed out), with what is left of [`TIMEOUT`]: the bucket's stalls are one
+    /// request's, not the link's ([`HEDGE`]). Any other failure, and a second try's, is the store out of reach, as
+    /// before; a store that does not answer at all is still found within [`TIMEOUT`].
+    fn read(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        what: &str,
+    ) -> R<ureq::http::Response<ureq::Body>> {
+        let url = match query {
+            "" => format!("{}{path}", self.endpoint),
+            q => format!("{}{path}?{q}", self.endpoint),
+        };
+        let hedged = !matches!(self.reads, Reads::Limit(_));
+        // `second`: whether this is the try sent once the first went unanswered for [`HEDGE`].
+        let send = |second: bool| {
+            let mut req = match method {
+                "HEAD" => self.agent.head(&url),
+                _ => self.agent.get(&url),
+            };
+            for (k, v) in self.sign_query(method, path, query, b"") {
+                req = req.header(k, v);
+            }
+            let rest = TIMEOUT.saturating_sub(HEDGE);
+            match (hedged, second, self.reads) {
+                (false, _, _) => req.call(),
+                (true, false, _) => req
+                    .config()
+                    .timeout_recv_response(Some(HEDGE))
+                    .build()
+                    .call(),
+                // The directory's client bounds each whole request ([`S3::new`]): the second try has the rest of it.
+                (true, true, Reads::Capped) => {
+                    req.config().timeout_global(Some(rest)).build().call()
+                }
+                (true, true, _) => req
+                    .config()
+                    .timeout_recv_response(Some(rest))
+                    .build()
+                    .call(),
+            }
+        };
+        match send(false) {
+            Err(ureq::Error::Timeout(ureq::Timeout::RecvResponse)) if hedged => {
+                send(true).or_else(|e| unreachable(what, e))
+            }
+            answered => answered.or_else(|e| unreachable(what, e)),
+        }
+    }
+
     /// After a 5xx or a lost answer to a create-only write, reads `key` back (#4014): the same bytes there count as
     /// applied (their ETag), other bytes as the key existing (`precondition-failed`, what a 412 says), and nothing
     /// there or no answer to the read leave the write `lost`, `store-unreachable`, so nothing is decided on it.
@@ -439,12 +502,7 @@ fn unreachable(what: &str, e: ureq::Error) -> R<ureq::http::Response<ureq::Body>
 
 impl Store for S3 {
     fn get(&self, key: &str) -> R<Option<Object>> {
-        let path = self.path(key);
-        let mut req = self.agent.get(format!("{}{path}", self.endpoint));
-        for (k, v) in self.sign("GET", &path, b"") {
-            req = req.header(k, v);
-        }
-        let mut res = req.call().or_else(|e| unreachable(key, e))?;
+        let mut res = self.read("GET", &self.path(key), "", key)?;
         if res.status().as_u16() == 404 {
             return Ok(None);
         }
@@ -494,12 +552,7 @@ impl Store for S3 {
 
     /// HeadObject: the object's length and ETag, with no body.
     fn head(&self, key: &str) -> R<Option<(u64, String)>> {
-        let path = self.path(key);
-        let mut req = self.agent.head(format!("{}{path}", self.endpoint));
-        for (k, v) in self.sign("HEAD", &path, b"") {
-            req = req.header(k, v);
-        }
-        let res = req.call().or_else(|e| unreachable(key, e))?;
+        let res = self.read("HEAD", &self.path(key), "", key)?;
         if res.status().as_u16() == 404 {
             return Ok(None);
         }
@@ -577,11 +630,7 @@ impl Store for S3 {
                 .map(|(k, v)| format!("{k}={}", encode(v)))
                 .collect::<Vec<_>>()
                 .join("&");
-            let mut req = self.agent.get(format!("{}{path}?{query}", self.endpoint));
-            for (k, v) in self.sign_query("GET", &path, &query, b"") {
-                req = req.header(k, v);
-            }
-            let mut res = req.call().or_else(|e| unreachable(prefix, e))?;
+            let mut res = self.read("GET", &path, &query, prefix)?;
             status(&res, prefix)?;
             let xml = res
                 .body_mut()
