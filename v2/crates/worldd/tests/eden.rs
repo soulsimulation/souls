@@ -4019,7 +4019,8 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
         projected.len() >= 3,
         "the balloons' courses (and the punts') are in the public stream"
     );
-    // Board in the balloon's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
+    // Board in the balloon's boarding stop (its first minute each lap, `rides::BOARDING`): wait for the next when less
+    // than 50 s are left.
     let phase = |t: i64| (t - t0).rem_euclid(period);
     let p = phase(answers::now());
     if p > 10_000_000 {
@@ -4031,10 +4032,11 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     println!("board it by its own form: {boarded:?}");
     let seated_in = last_frames(&dir).into_values().find(|f| f.0 == balloon);
     println!("the rider's frame: {seated_in:?}");
-    // Aloft: 60 s into the lap it is on its ring, and its rider with it.
+    // Aloft: half a minute after its stop it is on its ring, and its rider with it.
+    let aloft_at = sim::courses::rides::BOARDING + 30_000_000;
     let p = phase(answers::now());
-    if p < 60_000_000 {
-        std::thread::sleep(Duration::from_micros((60_000_000 - p) as u64));
+    if p < aloft_at {
+        std::thread::sleep(Duration::from_micros((aloft_at - p) as u64));
     }
     let aloft = soul.act("eden:rise", None, BTreeMap::new());
     // Where its course has the balloon now, as the page reads it from the public stream.
@@ -4063,7 +4065,10 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     println!("the public stream: into the balloon {into:?}, out of it {out:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(rides.len(), 3, "the three festival balloons fly loops");
+    assert!(
+        rides.len() >= 3,
+        "the three festival balloons fly loops (and the Eden balloon, where the facts name its entry)"
+    );
     for (name, [x, z], period, _) in &rides {
         assert!(
             projected

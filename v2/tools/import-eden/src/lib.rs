@@ -2309,11 +2309,12 @@ fn slots_on(
     };
     // A thing that borrows another kind's entry (field 27: a Mars chair names `eden:chair`) has its own shape: each
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
-    // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered. A thing whose
-    // kind declares no slots at all (Eden's launch balloon, a `core/balloon` by another name) has no shape of its own
-    // to fit: it is the entry's, so it takes the entry's seats as they are.
+    // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered. A ride on its
+    // course whose kind declares no slots at all (Eden's launch balloon, a `core/balloon` by another name, flying the
+    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are.
     let has_slots = matches!(fields.get(&F_SLOTS), Some(Value::Array(rows)) if !rows.is_empty());
-    let borrowed = entry != plain(kind) && has_slots;
+    let bare_ride = !has_slots && fields.contains_key(&replica::schedule::F_COURSE);
+    let borrowed = entry != plain(kind) && !bare_ride;
     out.extend(
         found
             .iter()
