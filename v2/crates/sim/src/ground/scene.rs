@@ -460,11 +460,28 @@ fn yaw(mdeg: i64) -> Result<Quat, String> {
 /// a campfire's ring of logs (4.5 m), a swing set or a hammock between its posts stay walkable among their own boxes.
 pub const UNDER_MOST: i64 = 3_000_000;
 
-/// How far the box under a thing's slots is taken in from its legs' outline on each side, µm: half today's body radius
-/// (`replica::kinds::sizes::Size::Standard`, 280 mm). Grown by a body's clearance, the cut keeps a standard body's
-/// centre 200 mm off the plank or the top, so no body stands in a bench or a table, and its edge may come under them,
-/// as it does at a table.
-pub const UNDER_INSET: i64 = 140_000;
+/// The kinds (their plain names, any namespace) never given a box under their slots ([`under_slots`]): a rack's parts.
+pub const UNDER_NEVER: &[&str] = &[
+    "rack_bay",
+    "rack_beam",
+    "rack_upright",
+    "frame_stand",
+    "pallet_rack",
+];
+
+thread_local! {
+    /// Set only by [`without_under_boxes`]: the ground as it was before the boxes under slots, to measure them.
+    static UNDER_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with no box under any thing's slots on this thread: the ground as before them, for a check that compares
+/// the two (no piece of ground newly sealed off). The engine never calls it.
+pub fn without_under_boxes<R>(f: impl FnOnce() -> R) -> R {
+    UNDER_OFF.with(|c| c.set(true));
+    let r = f();
+    UNDER_OFF.with(|c| c.set(false));
+    r
+}
 
 /// The boxes of node `h` (an N1 `solids` row each), moved into the frame by `x`, and the box under its slots
 /// ([`under_slots`]) when it has one.
@@ -517,12 +534,22 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
 /// thing's boxes are its parts at least 0.3 m tall (kit/2's colliders), so a bench's are its end legs and a table's
 /// its four legs: its seat plank or its top blocks nothing, and a body walked to it would stand inside it. So a thing
 /// with a slot above a step and within the body's height ([`STEP`] to [`BODY_HIGH`]: a seat, a surface, a bunk) also
-/// blocks the box its legs (its boxes that start below that slot) span, taken in by [`UNDER_INSET`], from their foot
-/// up to its highest such slot. Not a thing with fewer than two legs (its one box is all it spans), one more than [`UNDER_MOST`] across, one that
-/// holds a floor (a building), nor one with a slot inside that box no higher than a step (a place to stand in it: a
-/// kiosk's vendor, a bookshelf's bottom shelf). A walk to it ends beside it, as at any box (N9's spots, C15's reach),
-/// and its seats' stand points, measured against this ground when they are registered, are moved clear of it.
+/// blocks the box its legs (its boxes that start below that slot) span, from their foot up to its highest such slot.
+/// The box is the legs' whole span, never taken in: a leg's own cut then never reaches past the box's, so two such
+/// things close together (a bench 950 mm from its table) block the strip between them as one, never leaving a pocket
+/// of ground sealed off by their legs (measured: a 140 mm inset sealed 13 pockets on Eden and Mars camp, none
+/// without; `tests/under_seats.rs`). Not a thing with fewer than two legs (its one box is all it spans), one more than
+/// [`UNDER_MOST`] across, one that holds a floor (a building), one of [`UNDER_NEVER`]'s kinds, nor one with a slot
+/// inside that box no higher than a step (a place to stand in it: a kiosk's vendor, a bookshelf's bottom shelf). A
+/// walk to it ends beside it, as at any box (N9's spots, C15's reach), and its seats' stand points, measured against
+/// this ground when they are registered, are moved clear of it, never into a sealed pocket.
 fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64; 4], i64, i64)> {
+    // A rack's parts (a bay, its frames and beams, a frame stand) hold joined parts in their slots, never a seat or a
+    // top, and Souls build and take them down from inside: never a box under them, whatever their slots' heights.
+    let k = kind_of(tree, h);
+    if UNDER_NEVER.contains(&k.rsplit(':').next().unwrap_or("")) || UNDER_OFF.with(|c| c.get()) {
+        return None;
+    }
     let slots: Vec<Vec3> = tree
         .node(h)?
         .fields()
@@ -567,11 +594,6 @@ fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64;
     if stand_in || building {
         return None;
     }
-    // Taken in by UNDER_INSET (keeping 2 mm of it), so the cut keeps a body's centre that much plus its clearance off
-    // the plank or the top, and its edge may come under them, as a body sits up to a table.
-    let inset = |a: i64, b: i64| UNDER_INSET.min((b - a) / 2 - 1000).max(0);
-    let (ix, iz) = (inset(bb[0], bb[2]), inset(bb[1], bb[3]));
-    let bb = [bb[0] + ix, bb[1] + iz, bb[2] - ix, bb[3] - iz];
     let y0 = under.iter().map(|(_, y0)| *y0).min()?;
     Some((bb, y0, top))
 }

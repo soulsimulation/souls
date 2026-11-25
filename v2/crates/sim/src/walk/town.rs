@@ -2976,6 +2976,14 @@ impl<'a> View<'a> {
         out
     }
 
+    /// Whether `at` (µm, `node`'s frame) is ground sealed off from the main ground ([`Map::in_main_part`]): a pocket
+    /// no walk from the open ground reaches. Off the ground, false.
+    pub fn sealed(&self, node: Id, at: Vec3) -> bool {
+        self.map
+            .spot_near(node, at, AT_EDGE)
+            .is_some_and(|s| !self.map.in_main_part(s.piece))
+    }
+
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
     /// [`crate::spots::within`] over this town's ground.
     pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {

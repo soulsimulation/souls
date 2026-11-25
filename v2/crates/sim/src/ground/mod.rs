@@ -12,8 +12,9 @@
 //!   slot above [`STEP`] and within [`BODY_HIGH`] (a seat, a surface, a bunk) also has the box its legs span, up to
 //!   that slot (`scene::under_slots`): no body stands inside a bench or a table, and a walk to one ends beside it. Not
 //!   a thing more than [`scene::UNDER_MOST`] across (a campfire's ring of logs, a swing set), a building, or one with a
-//!   slot at floor height inside that box (a kiosk its vendor stands in). The box is taken in by
-//!   [`scene::UNDER_INSET`], so a body still comes up to a table's edge. Every reader of a thing's boxes in the engine
+//!   slot at floor height inside that box (a kiosk its vendor stands in), nor a rack's part ([`scene::UNDER_NEVER`]).
+//!   The box is the legs' whole span, so their cuts never seal a pocket between two such things. A seat's stand point
+//!   is never moved into ground sealed off from the main ground (`View::sealed`). Every reader of a thing's boxes in the engine
 //!   sees it (the cut, a seat's footprint a body climbs out over at a rise or a restart, G2's safety); the import's
 //!   stand points (`import_eden::clear_stand_points`) do not, and are moved clear when the seats are registered.
 //! - **Ground cover.** A floor on the open ground that holds no room and lies within [`STEP`] of the ground

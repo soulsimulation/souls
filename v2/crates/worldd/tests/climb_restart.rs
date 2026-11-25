@@ -874,9 +874,17 @@ const BENCH_AND_TABLE: &str = r#"{
 /// seat, is placed at its floor's nearest legal point (`resume-placed`). Both then stand where they may, and walk.
 #[test]
 fn a_restart_places_bodies_logged_under_a_bench_or_a_table_where_they_may_stand_and_they_walk() {
+    let (town, nodes) = town_of(BENCH_AND_TABLE);
+    let ground = nodes["ground"];
+    let bench = nodes["e_bench"];
+    restart_under(town, ground, bench);
+}
+
+/// A town of the facts `text` (an open ground and what stands on it), and its nodes by key.
+fn town_of(text: &str) -> (Town, BTreeMap<String, Id>) {
     let Import {
         tree, rules, nodes, ..
-    } = import_eden::load(BENCH_AND_TABLE).expect("the bench and the table load");
+    } = import_eden::load(text).expect("the facts load");
     let root = nodes["world"];
     let v = Value::Map(BTreeMap::from([
         (
@@ -893,8 +901,49 @@ fn a_restart_places_bodies_logged_under_a_bench_or_a_table_where_they_may_stand_
     let header = Header::read(&encode(&v).unwrap()).unwrap();
     let next = tree.to_state().next;
     let ground = nodes["ground"];
-    let bench = nodes["e_bench"];
     let town = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    (town, nodes)
+}
+
+/// A pen on the open ground: four walls round a 2 m square, no gap. Its inside is ground no walk from outside reaches:
+/// `View::sealed` says so there and not outside, so a seat's stand point is never moved in (`places::register`).
+const PEN: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-fence@1", "hash": "ad", "name": "core:fence", "form": "point"}],
+  "things": [
+    {"id": "e_pen", "def": "core-fence@1", "ref": "core-fence@1", "parent": null,
+     "pose": [0, 0, 0, 0], "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "pen",
+     "solids": [[0, -1500, 1600, 100, 0, 0, 1500, 0, 0], [0, 1500, 1600, 100, 0, 0, 1500, 0, 0],
+                [-1500, 0, 100, 1600, 0, 0, 1500, 0, 0], [1500, 0, 100, 1600, 0, 0, 1500, 0, 0]]}
+  ],
+  "doors": [],
+  "places": [{"id": "square.area", "of": "area", "kind": "square", "name": "the square",
+              "polygon": [[-10000, -10000], [10000, -10000], [10000, 10000], [-10000, 10000]]}],
+  "bake": {"things": 1},
+  "byRef": {"core-fence@1": 1}
+}"#;
+
+#[test]
+fn ground_sealed_off_from_the_main_ground_is_named_sealed() {
+    let (mut town, nodes) = town_of(PEN);
+    let ground = nodes["ground"];
+    assert!(on(&town, ground, Vec3::ZERO), "the pen's inside is ground");
+    assert!(
+        on(&town, ground, Vec3::new(4_000_000, 0, 0)),
+        "outside it too"
+    );
+    let view = town.view();
+    assert!(
+        view.sealed(ground, Vec3::ZERO),
+        "the pen's inside is sealed off"
+    );
+    assert!(
+        !view.sealed(ground, Vec3::new(4_000_000, 0, 0)),
+        "outside it is not"
+    );
+}
+
+fn restart_under(town: Town, ground: Id, bench: Id) {
     let frame = Frame {
         node: ground,
         slot: None,

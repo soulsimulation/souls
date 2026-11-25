@@ -110,9 +110,12 @@ fn a_bench_and_a_table_block_the_ground_under_their_seats_and_top() {
         assert!(!walkable(&p, x, z), "under the table at ({x}, {z}) mm");
     }
     // Beside each, a body stands: 0.6 m in front of the bench's seats (its stand points are 0.455 m out), and up to
-    // the table's long side, 0.25 m off its top's edge (the box is taken in, `UNDER_INSET`).
+    // the table's long side, 0.4 m off its top's edge.
     assert!(walkable(&p, -3000 + 600, -3350), "in front of the bench");
-    assert!(walkable(&p, 3000, -3000 - 600), "at the table's edge");
+    assert!(
+        walkable(&p, 3000, -3000 - 750),
+        "beside the table's long side"
+    );
     // One box under each, from the legs' foot to the slot: the bench's to its seats (465 mm), the table's to its top
     // (750 mm); the campfire (4.5 m across) and the kiosk (a vendor stands in it) have none.
     let bench = boxes(&im, "e_bench");
@@ -139,4 +142,147 @@ fn a_campfires_ring_and_a_kiosk_stay_walkable_inside() {
     );
     // The kiosk's vendor stands in it, behind its counter.
     assert!(walkable(&p, 3500, 3500 - 250), "the kiosk's vendor point");
+}
+
+/// Mars camp's kitchen (`worlds/templates/mars-camp.json`): its long dining table and the bench seat 950 mm from it
+/// (today's rows). With a box under each, the strip between them must not become ground of its own, sealed off by
+/// their legs' cuts: a seat's stand point moved there would leave a Soul that rises there with no way out.
+const DINING: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-hall@1", "hash": "aa", "name": "core:hall", "form": "point"},
+            {"ref": "core-bench-seat@1", "hash": "ab", "name": "core:bench_seat", "form": "point"},
+            {"ref": "core-long-table@1", "hash": "ac", "name": "core:long_table", "form": "point"}],
+  "things": [
+    {"id": "e_hall", "def": "core-hall@1", "ref": "core-hall@1", "parent": null, "pose": [0, 0, 0, 0],
+     "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "kitchen",
+     "floors": [{"level": 0, "y": 0, "polygon": [[-3000, -3000], [6000, -3000], [6000, 6000], [-3000, 6000]]}],
+     "rooms": [{"id": "kitchen", "name": "Kitchen", "floor": 0, "pose": [0, 0, 0, 0], "height": 2400,
+                "polygon": [[-3000, -3000], [6000, -3000], [6000, 6000], [-3000, 6000]]}]},
+    {"id": "e_table", "def": "core-long-table@1", "ref": "core-long-table@1", "parent": "e_hall",
+     "pose": [1500, 0, 1500, 0], "world": [1500, 0, 1500, 0], "scale_ppm": 1000000,
+     "slot": {"room": "kitchen"}, "name": "dining-table",
+     "solids": [[-1200, 0, 25, 335, 0, 25, 695, 0, 0], [1200, 0, 25, 335, 0, 25, 695, 0, 0]],
+     "slots": [{"n": 1, "id": "top", "kind": "surface", "at": [0, 760, 0], "yaw": 0, "capacity": 12}]},
+    {"id": "e_bench", "def": "core-bench-seat@1", "ref": "core-bench-seat@1", "parent": "e_hall",
+     "pose": [1500, 0, 2450, 179909], "world": [1500, 0, 2450, 179909], "scale_ppm": 1000000,
+     "slot": {"room": "kitchen"}, "name": "dining-bench",
+     "solids": [[-600, 0, 15, 135, 0, 15, 405, 0, 0], [600, 0, 15, 135, 0, 15, 405, 0, 0]],
+     "slots": [{"n": 1, "id": "seat-1", "kind": "seat", "at": [-350, 465, 0], "yaw": 0, "capacity": 1},
+               {"n": 2, "id": "seat-2", "kind": "seat", "at": [350, 465, 0], "yaw": 0, "capacity": 1}]}
+  ],
+  "doors": [],
+  "places": [],
+  "bake": {"things": 3},
+  "byRef": {"core-hall@1": 1}
+}"#;
+
+/// The pieces of floor `floor` cut for today's body, with and without the boxes under slots.
+fn pieces(im: &import_eden::Import, floor: replica::ids::Id) -> (usize, usize) {
+    let cut = || {
+        let s = Scene::of(&im.tree, floor).unwrap();
+        cut_floor(&s, HUMAN_RADIUS, Turn::NONE)
+            .unwrap()
+            .pieces
+            .len()
+    };
+    (cut(), sim::ground::scene::without_under_boxes(cut))
+}
+
+#[test]
+fn a_dining_bench_by_its_table_seals_off_no_ground() {
+    let im = import_eden::load(DINING).expect("the kitchen loads");
+    let (with, without) = pieces(&im, im.nodes["e_hall/floor-0"]);
+    println!("the kitchen: {with} pieces with the boxes under slots, {without} without");
+    assert!(
+        with <= without,
+        "a piece sealed off between the bench and the table"
+    );
+}
+
+/// Across a whole exported world (`UNDER_FACTS`, default Eden's and Mars camp's under `.local/import-eden/`), no floor
+/// falls into more pieces with the boxes under slots than without, and no square of the open ground does: no ground
+/// newly sealed off. `cargo test -p sim --release --test under_seats -- --ignored --nocapture`.
+#[test]
+#[ignore = "needs exported facts files (v2/tools/import-eden/export/export.ts)"]
+fn no_ground_is_newly_sealed_off_on_eden_or_mars_camp() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.local/import-eden");
+    let files = std::env::var("UNDER_FACTS")
+        .unwrap_or_else(|_| format!("{root}/eden-2026.facts.json,{root}/mars-camp.facts.json"));
+    let mut sealed = Vec::new();
+    for file in files.split(',') {
+        let im = import_eden::load(&std::fs::read_to_string(file).expect("a facts file")).unwrap();
+        let mut floors = 0;
+        for (key, &node) in &im.nodes {
+            if !key.contains("/floor-") || Scene::of(&im.tree, node).is_err() {
+                continue;
+            }
+            floors += 1;
+            let (with, without) = pieces(&im, node);
+            if with > without {
+                sealed.push(format!("{file}: {key}: {without} -> {with} pieces"));
+            }
+        }
+        let ground = im.nodes["ground"];
+        let open = |off: bool| {
+            let cut = || {
+                sim::ground::OpenGround::of(&im.tree, ground, HUMAN_RADIUS)
+                    .unwrap()
+                    .cut_all(1)
+                    .into_iter()
+                    .map(|(sq, p)| (sq, p.pieces.iter().map(bounds).collect::<Vec<_>>()))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            };
+            if off {
+                sim::ground::scene::without_under_boxes(cut)
+            } else {
+                cut()
+            }
+        };
+        let (with, without) = (open(false), open(true));
+        // A piece that reaches its square's edge goes on in the next square: only the pieces wholly inside a square
+        // can be sealed off there.
+        let inner = |sq: &(i32, i32), pieces: &[[i32; 4]]| -> Vec<[i32; 4]> {
+            let s = sim::ground::SQUARE as i32;
+            let (x0, z0) = (sq.0 * s, sq.1 * s);
+            pieces
+                .iter()
+                .filter(|b| b[0] > x0 && b[1] > z0 && b[2] < x0 + s && b[3] < z0 + s)
+                .copied()
+                .collect()
+        };
+        for (sq, pieces) in &with {
+            let now = inner(sq, pieces);
+            let before = without.get(sq).map_or(0, |p| inner(sq, p).len());
+            if now.len() > before {
+                sealed.push(format!(
+                    "{file}: open ground square {sq:?}: {before} -> {} pieces inside it, mm bounds {now:?}",
+                    now.len()
+                ));
+            }
+        }
+        println!(
+            "{file}: {floors} floors and {} squares compared",
+            with.len()
+        );
+    }
+    println!("{sealed:#?}");
+    assert!(
+        sealed.is_empty(),
+        "{} places newly sealed off",
+        sealed.len()
+    );
+}
+
+/// A piece's box on the ground plane, mm: `[x0, z0, x1, z1]`.
+fn bounds(p: &sim::ground::Piece) -> [i32; 4] {
+    p.vertices
+        .iter()
+        .fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |b, v| {
+            [
+                b[0].min(v[0]),
+                b[1].min(v[2]),
+                b[2].max(v[0]),
+                b[3].max(v[2]),
+            ]
+        })
 }

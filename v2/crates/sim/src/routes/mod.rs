@@ -273,8 +273,9 @@ pub struct Map {
     /// The map's own scratch, for its `&mut self` searches ([`Map::route`]).
     scratch: Scratch,
     /// Each piece's part for a body with hands ([`Map::parts`]), found on first need and dropped when the map changes
-    /// ([`Map::replace`], [`Map::replace_squares`]): [`Map::may_reach`] (#4072).
-    hands_parts: std::sync::OnceLock<Vec<u32>>,
+    /// ([`Map::replace`], [`Map::replace_squares`]): [`Map::may_reach`] (#4072), with the main part, the one with the
+    /// most pieces ([`Map::in_main_part`]).
+    hands_parts: std::sync::OnceLock<(Vec<u32>, u32)>,
 }
 
 /// What a search writes as it goes (N17b, #3255): its working state, and the lines it measured that the map had not
@@ -1229,8 +1230,31 @@ impl Map {
     /// joins them, so no route search can find a way (#4072). One lookup once the map's parts are found (once after
     /// each change); a failed route search instead searches the whole part the walk starts in, twice.
     pub fn may_reach(&self, a: u32, b: u32) -> bool {
-        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS));
+        let (parts, _) = self.hands_parts();
         parts.get(a as usize) == parts.get(b as usize)
+    }
+
+    /// Whether piece `piece` is in the map's main part for a body with hands: the part with the most pieces (ties by
+    /// the smaller name), the ground a walk from the open ground reaches. A piece outside it is sealed off from there
+    /// (a pocket between furniture): no seat's stand point is moved into one (`worldd::places::register`).
+    pub fn in_main_part(&self, piece: u32) -> bool {
+        let (parts, main) = self.hands_parts();
+        parts.get(piece as usize) == Some(main)
+    }
+
+    fn hands_parts(&self) -> &(Vec<u32>, u32) {
+        self.hands_parts.get_or_init(|| {
+            let parts = self.parts(HANDS);
+            let mut count: BTreeMap<u32, usize> = BTreeMap::new();
+            for p in &parts {
+                *count.entry(*p).or_default() += 1;
+            }
+            let main = count
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+                .map_or(0, |(p, _)| *p);
+            (parts, main)
+        })
     }
 
     /// Each link: its id, kind, whether a door stands in it, why it cannot be crossed if it cannot, and how many
