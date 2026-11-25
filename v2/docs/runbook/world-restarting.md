@@ -49,8 +49,10 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
   `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
   holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
-  log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
-  so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
+  log is (`behind_bytes` says how much). Each object the store holds moves to `stream-backup/kept/`, so a restart,
+  even after a SIGKILL, recovers the chain from this disk (the spool's head, its objects and `kept/`) and serves
+  viewers without waiting on the store, with the exact bytes they were shown; only a chain the machine did not write
+  (no `stream-backup/`) is read from the store, and what it reads is kept. Do not delete `stream-backup/` on a running machine. A stop
   (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
 - **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
   that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,

@@ -9,7 +9,7 @@
 
 import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
-import { openSync } from 'node:fs';
+import { openSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -35,30 +35,66 @@ export function request(socket, req, ms = 5000) {
   });
 }
 
-/** Starts the Soul's daemon, detached; gives its pid. A daemon already running refuses this one by name. */
-export function start(home, soul, pkg = DEFAULT_PKG) {
+/** How long a daemon just started may take to listen: its library loaded and its state read, on a machine under load. */
+export const READY_WITHIN = 60_000;
+
+function launch(home, soul, pkg, ready) {
   const rt = runtimeOf(home, soul);
   const out = openSync(rt.log, 'a', 0o600);
-  const child = spawn(process.execPath, [join(here, 'daemon.mjs'), '--home', home, '--soul', soul, '--pkg', pkg], {
+  const child = spawn(process.execPath, [join(here, 'daemon.mjs'), '--home', home, '--soul', soul, '--pkg', pkg, ...(ready ? ['--ready-fd', '3'] : [])], {
     detached: true,
     cwd: rt.dir,
-    stdio: ['ignore', out, out],
+    stdio: ['ignore', out, out, ...(ready ? ['pipe'] : [])],
     env: { PATH: process.env.PATH ?? '' },
   });
   child.unref();
-  return child.pid;
+  return child;
 }
 
-/** Sends `req` to the Soul's daemon, starting it first if none answers. */
-export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000, ms = 5000 } = {}) {
+/** Starts the Soul's daemon, detached; gives its pid. A daemon already running refuses this one by name. */
+export function start(home, soul, pkg = DEFAULT_PKG) {
+  return launch(home, soul, pkg, false).pid;
+}
+
+/**
+ * Starts the Soul's daemon and waits for its word that it listens (#4700: a fixed wait of 5 s was too short for a
+ * first command on a loaded machine, which then failed `connect ENOENT`): `{ready: true}`, `{exited: code}` when it
+ * ended first (3: another daemon of this Soul runs, or is starting), or `{}` after `within` with no word.
+ */
+export function startReady(home, soul, pkg = DEFAULT_PKG, within = READY_WITHIN) {
+  const child = launch(home, soul, pkg, true), pipe = child.stdio[3];
+  return new Promise((ok) => {
+    let said = '';
+    const done = (v) => { clearTimeout(timer); child.removeListener('exit', ended); pipe?.destroy(); ok(v); };
+    const ended = (code) => done({ exited: code });
+    const timer = setTimeout(() => done({}), within);
+    pipe.on('data', (d) => { said += d; if (said.includes('ready\n')) done({ ready: true }); });
+    pipe.on('error', () => {});
+    child.on('exit', ended);
+    child.on('error', () => done({ exited: -1 }));
+  });
+}
+
+/** The last line of the daemon's log: why it ended (it never holds the token). */
+function lastLine(log) {
+  try { return readFileSync(log, 'utf8').trim().split('\n').at(-1).replace(/^\S+ /, '').slice(0, 160); } catch { return 'no log'; }
+}
+
+/** Sends `req` to the Soul's daemon, starting it first if none answers and waiting until it listens. */
+export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = READY_WITHIN, ms = 5000 } = {}) {
   const rt = runtimeOf(home, soul);
   try {
     return await request(rt.socket, req, ms);
   } catch (e) {
     if (!['ENOENT', 'ECONNREFUSED'].includes(e.code)) throw e;
   }
-  start(home, soul, pkg);
-  const until = Date.now() + within;
+  const t0 = Date.now(), launched = await startReady(home, soul, pkg, within);
+  // 3: another daemon of this Soul runs, or is starting; 5: one listens on the socket already. Either is asked.
+  if (launched.exited !== undefined && launched.exited !== 3 && launched.exited !== 5) {
+    throw Object.assign(new Error(`the daemon ended as it started (${launched.exited}): ${lastLine(rt.log)}`), { code: 'daemon-not-started' });
+  }
+  // Listening, or another daemon of this Soul's: its socket is asked until it answers.
+  const until = launched.ready ? Date.now() + 1000 : t0 + within;
   for (;;) {
     try {
       return { ...(await request(rt.socket, req, ms)), started: true };

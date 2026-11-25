@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const inputs = [
   ...['verdelis.glb', 'kalama.glb', 'kweku.glb', 'mycos.glb', 'ada.glb', 'shuijing.glb', 'nyx.glb', 'kin/green-patterns-blue.glb', 'kin/chebel.glb', 'kin/colors-lemuet.glb', 'kin/crystal-freeman.glb', 'kin/dark-blue.glb', 'kin/green-brains-out.glb'].map((name) => 'worlds/littlemartians/characters/' + name),
+  ...['dog', 'duck', 'snail'].flatMap((name) => [`v2/tools/import-body/released/${name}.json`, `v2/tools/import-body/released/${name}.simple.bin`]),
   ...['animated-casual.glb', 'animated-casual.mesh.glb', 'animated-punk.mesh.glb', 'animated-woman.mesh.glb', 'clips-ual.glb', 'clips-ual-woman.glb'].map((name) => 'mars/viewer/public/modular/environment/' + name),
 ];
 /** Fixed existing dependencies for the released renderer's source/type closure; no package install. */

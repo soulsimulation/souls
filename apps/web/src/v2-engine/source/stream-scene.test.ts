@@ -134,3 +134,21 @@ test('a def the world defines itself is drawn by the body the open ground keeps 
   // a body that is not a def is left out, and the thing falls back to its solids
   assert.match(streamSnapshot([WORLD[0], ground([['lab-closeable-hall@1', '{"schema":"def/1"}']]), hall('h1', 'e_read1', 0)], 'hamlet').entities[0].def, /^v2-eden-lab-closeable-hall-/);
 });
+
+test('the ground is drawn of the palette the open ground keeps (field 103): a Mars camp is desert, not the default grass', () => {
+  const withPalette = (p: string) => [WORLD[0], { ...WORLD[1], groundPalette: p }];
+  assert.deepEqual(streamSnapshot(withPalette('souls:desert'), 'mars-camp').state.ground, { palette: 'desert' });
+  assert.deepEqual(streamSnapshot(withPalette('souls:playa'), 'mars-two').state.ground, { palette: 'playa' });
+  assert.equal(streamSnapshot(WORLD, 'hamlet').state.ground, undefined, 'none kept: the page\'s default');
+  assert.equal(streamSnapshot(withPalette('souls:lava'), 'odd').state.ground, undefined, 'a palette the page does not draw: its default');
+});
+
+test('a scatter\'s species named by def (a Mars camp\'s rock-field) come with the snapshot, so they are not drawn as oaks', () => {
+  const params = { palette: [{ def: 'core/grass-tuft@1', weight: 3 }, { def: 'core/cactus@1', weight: 0.6 }, { kind: 'rock', weight: 2 }], density: 0.008 };
+  const field = at('rf', 'eden:rock_field@1', 'g', [0, 0, 0], { origin: 'e_rocks1', def: 'core-rock-field@1', params,
+    outline: [[-20_000, -20_000], [20_000, -20_000], [20_000, 20_000], [-20_000, 20_000]] });
+  const s = streamSnapshot([WORLD[0], WORLD[1], field], 'mars-camp');
+  assert.deepEqual(s.entities[0].params, params);
+  const refs = s.defs.map((d) => d.ref);
+  for (const r of ['core-rock-field@1', 'core-grass-tuft@1', 'core-cactus@1']) assert.ok(refs.includes(r), `${r} in ${refs}`);
+});

@@ -62,7 +62,7 @@ export function templateFacts({ template = TEMPLATE, out }) {
 /** The yard as one creator edit (`souls-god.mjs batch`, all or none): the stand with a frame in each slot, two beams on
  *  the ground, the bay; each with the title Souls see it by. */
 export function stageBatch(ground, at = AT_LIVE) {
-  const m = (v) => Math.round(v * 1000);
+  const m = (v) => v; // a batch's `at` is metres (#4700)
   return [
     { op: 'place', name: 1, kind: 'mars:frame_stand', in: ground, at: [m(at.stand[0]), 0, m(at.stand[1])], title: 'frame stand' },
     { op: 'place', name: 2, kind: 'mars:rack_upright', in: 1, slot: 1, title: 'rack frame 1' },

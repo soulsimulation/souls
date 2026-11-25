@@ -8,7 +8,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decode, entryKind, idText, plainKind } from '../brief/copy.mjs';
+import { allFields, decode, entryKind, idText, plainKind } from '../brief/copy.mjs';
 
 /**
  * The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped.
@@ -48,7 +48,7 @@ export function definedIn(copy) {
       if (!bytes) continue;
       const m = decode(bytes);
       if (plainKind(m.get(2)) !== 'souls:kind') continue;
-      const f = m.get(6) instanceof Map ? m.get(6) : new Map(), b = f.get(2) ?? f.get(2n), full = f.get(1) ?? f.get(1n);
+      const f = allFields(copy, m), b = f.get(2) ?? f.get(2n), full = f.get(1) ?? f.get(1n);
       if (!(b instanceof Uint8Array) || typeof full !== 'string') continue;
       try {
         const e = JSON.parse(Buffer.from(b).toString('utf8'));

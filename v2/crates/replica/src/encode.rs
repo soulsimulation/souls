@@ -175,6 +175,33 @@ fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
     }
 }
 
+/// How many bytes [`encode`] writes for `value`, worked out without writing them (#4713: whether a node's field is
+/// big enough to be a record of its own, `tree::BIG_FIELD`). Depth is not checked.
+pub fn encoded_len(value: &Value) -> usize {
+    let head = |arg: u64| match arg {
+        0..24 => 1,
+        24..256 => 2,
+        256..65_536 => 3,
+        65_536..4_294_967_296 => 5,
+        _ => 9,
+    };
+    match value {
+        Value::Uint(n) | Value::Nint(n) => head(*n),
+        Value::Bytes(b) => head(len(b.len())) + b.len(),
+        Value::Text(t) => head(len(t.0.len())) + t.0.len(),
+        Value::Array(items) => {
+            head(len(items.len())) + items.iter().map(encoded_len).sum::<usize>()
+        }
+        Value::Map(entries) => {
+            head(len(entries.len()))
+                + entries
+                    .iter()
+                    .map(|(k, v)| head(*k) + encoded_len(v))
+                    .sum::<usize>()
+        }
+    }
+}
+
 /// A length, written from a fixed-width type: `usize` is 32 bits in WASM and 64 natively.
 fn len(n: usize) -> u64 {
     n as u64
