@@ -48,6 +48,8 @@
 //!   other, `{"mail": {"id", "state": "picked"}}` when it is given to the agent's socket, `{"doing": {"seq", "verb",
 //!   "phase", "outcome"}}` for each intent the agent sends while it is open (the phase is the answer's own: `sent`,
 //!   `accepted`, `receipt`, `refused`, `resolved`), and the agent's own `{"close": …}` once the directory took it.
+//!   Whether each grant's agent is connected (a socket signed in for it), first when the view socket starts watching
+//!   and then on each change: `{"agent": {"grant", "connected"}}`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -239,6 +241,7 @@ impl Gateway {
         held.who = Some(who);
         held.mail = Some(mail_tx);
         held.mailed.clear();
+        self.tell_watchers(&grant.key(), mailbox::agent(grant, true));
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
             Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c, seen)) {
@@ -255,14 +258,18 @@ impl Gateway {
         }
     }
 
-    /// Lets a socket go, unless another has signed in for the grant since.
+    /// Lets a socket go, unless another has signed in for the grant since. With none signed in for it after, the
+    /// view sockets that watch the grant are told its agent is gone (also after a slow socket was let go).
     pub fn detach(&self, grant: Grant, session: u64) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(held) = hub.grants.get_mut(&grant.key())
-            && held.session.as_ref().is_some_and(|(s, _)| *s == session)
-        {
-            held.session = None;
-            held.mail = None;
+        if let Some(held) = hub.grants.get_mut(&grant.key()) {
+            if held.session.as_ref().is_some_and(|(s, _)| *s == session) {
+                held.session = None;
+                held.mail = None;
+            }
+            if held.session.is_none() {
+                self.tell_watchers(&grant.key(), mailbox::agent(grant, false));
+            }
         }
     }
 
@@ -295,19 +302,38 @@ impl Gateway {
     }
 
     /// W10: a view socket watches the messages of `grants`; its number, and the queue its text frames arrive on.
+    /// The queue starts with whether each grant's agent is connected now (`mailbox::agent`); each change follows.
     pub fn watch(&self, grants: &[Grant]) -> (u64, mpsc::Sender<String>, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel(OUTBOUND);
+        for g in grants.iter().take(OUTBOUND / 2) {
+            let _ = tx.try_send(mailbox::agent(*g, self.connected(*g) == Some(true)));
+        }
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
         let n = w.keys().next_back().map_or(1, |n| n + 1);
         w.insert(n, (grants.iter().map(|g| g.key()).collect(), tx.clone()));
         (n, tx, rx)
     }
 
-    /// W10: what a watching view socket may see changed (its token was renewed for other grants).
+    /// W10: what a watching view socket may see changed (its token was renewed for other grants); a grant new to it
+    /// is told whether its agent is connected.
     pub fn rewatch(&self, n: u64, grants: &[Grant]) {
+        let now: Vec<(Vec<u8>, String)> = grants
+            .iter()
+            .map(|g| {
+                (
+                    g.key(),
+                    mailbox::agent(*g, self.connected(*g) == Some(true)),
+                )
+            })
+            .collect();
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((keys, _)) = w.get_mut(&n) {
-            *keys = grants.iter().map(|g| g.key()).collect();
+        if let Some((keys, tx)) = w.get_mut(&n) {
+            for (k, frame) in &now {
+                if !keys.contains(k) {
+                    let _ = tx.try_send(frame.clone());
+                }
+            }
+            *keys = now.into_iter().map(|(k, _)| k).collect();
         }
     }
 
