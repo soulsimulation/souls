@@ -127,9 +127,12 @@ function drawBuilding(L: BuildingLayout, p: Record<string, Value>, presetTrim: u
   for (const room of L.rooms) {
     if (L.open || detail < 1) break;
     b.group = at(room.floor);
+    // First-day E6: a flush ceiling light on a short rose. It hung on a 0.5 m cord with its shade at 2.4-2.7 m, the
+    // height a follow camera indoors sits at, and glow is camera-transparent: the camera came to rest beside it and the
+    // unlit shade filled a third of the view (Eden's library reading room).
     const [cx, cz] = room.centre, top = room.y + room.height - 0.05;
-    b.cyl(cx, top - 0.5, cz, 0.012, 0.012, 0.5, '#3b3d40', 'trim', 4);
-    b.cone(cx, top - 0.72, cz, 0.2, 0.22, '#ffd99a', 'glow', 8);
+    b.cyl(cx, top - 0.04, cz, 0.06, 0.06, 0.04, '#3b3d40', 'trim', 4);
+    b.cone(cx, top - 0.16, cz, 0.2, 0.12, '#ffd99a', 'glow', 8);
   }
 
   return b;

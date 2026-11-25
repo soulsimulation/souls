@@ -133,7 +133,7 @@ import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
 import { buildTakesClicks } from './v2-engine/creator-build.ts';
-import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { WorldBroadcast, openGroundScene, ridingCarrier, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
@@ -1031,7 +1031,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
        for(const [cid,thing] of rideWheels){const c=more.find(x=>x.id===cid),home=(records[cid] as {carrier?:{home?:readonly number[]}}|undefined)?.carrier?.home;entityLayer.wheelRide(thing,c?{p:c.p,aloft:!!home&&Math.hypot(c.p[0]-home[0],c.p[1]-home[1],c.p[2]-home[2])>0.05}:null);}}
       const cards = refresh ? cardsAt(s.plays, at.tick) : null;
       const alive = new Set<string>();
-      let focus: THREE.Vector3 | null = null;
+      let focus: THREE.Vector3 | null = null, focusRiding = false;   // first-day E4: the followed Soul rides a vehicle
       screenDown.setFromMatrixColumn(camera.matrixWorld, 1).negate();
       const ringR = plateRadius(), eye = camera.position, down = {x: screenDown.x, z: screenDown.z};
       camera.getWorldDirection(cardForward);
@@ -1066,7 +1066,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
             (l.obj.element as HTMLElement).style.outline = soul.id === soulId||groupSelection.has(soul.id) ? '2px solid #ffd34d' : 'none';
           }
         }
-        if (soul.id === soulId) focus = spot.set(pos[0], pos[1], pos[2]);
+        if (soul.id === soulId) { focus = spot.set(pos[0], pos[1], pos[2]); focusRiding = at.entities[soul.entityId]?.activity === 'ride' || !!ridingCarrier(pos, rideCarriers); }
         const depth = cardOffset.set(pos[0] - eye.x, pos[1] - eye.y, pos[2] - eye.z).dot(cardForward);
         const look = cardLook({ mine: owned.has(soul.id), revealed: soul.id === soulId || groupSelection.has(soul.id) || hover.hoveredSoul === soul.id,
           state: past.current ? null : soul.body?.state, speaking: cardSpeakers.has(soul.id), distance: cardOffset.length(), height: eye.y - pos[1], depth, focusDepth, occluded: l.occluded });
@@ -1119,6 +1119,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
             camera.position.add(new THREE.Vector3(...tracked.translation));controls.target.fromArray(tracked.aim);
             followView.shiftFrame(new THREE.Vector3(...tracked.offsetTranslation));
           }
+          // first-day E4: a vehicle moves smoothly, and a lagging pivot left the camera under a climbing balloon's basket
+          if(focusRiding){followMotion.reset(target.toArray());controls.target.copy(target);}
         }
       }
       if(viewing==='follow' && at.take && !focus&&initialGate?.snapshot().stage==='ready'){navigation?.release();context.current.setCameraMode('manual');followed=null;}
@@ -1160,7 +1162,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       try{godLightning?.update(shown.current?.tick??NaN,camera,step,!!reducedMotionQuery?.matches);}catch{}
       if(controls.enabled)controls.update();
       rts.afterControls();  // B2: the head offset over the pivot (controls.update aims at the pivot)
-      if(context.current.cameraMode==='follow'&&focus){renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');followView.view={sun:light.sun.position.clone().sub(light.sun.target.position).normalize(),daylight:light.daylight,fov:camera.fov};const metered=camTrace?performance.now():0;const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camTrace?.cost(performance.now()-metered,followView.rays);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);}
+      if(context.current.cameraMode==='follow'&&focus){renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');followView.riding=focusRiding;followView.view={sun:light.sun.position.clone().sub(light.sun.target.position).normalize(),daylight:light.daylight,fov:camera.fov};const metered=camTrace?performance.now():0;const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camTrace?.cost(performance.now()-metered,followView.rays);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);}
       if(camTrace){const tracing=context.current.cameraMode==='follow'&&!!focus;camTrace.frame({mode:context.current.cameraMode,target:controls.target.toArray(),eye:camera.position.toArray(),desired:tracing?followView.desired?.toArray()??null:null,rule:tracing?followView.rule:null,dt:Math.round(step*1e5)/1e5});}  // #1317
       const area = visibleViewport(host.clientWidth, host.clientHeight, context.current.viewportInsets);
       // #3374: a box with no size waits quietly; panels that cover a sized box get the note, and the console names why once

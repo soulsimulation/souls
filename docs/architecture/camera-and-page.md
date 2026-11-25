@@ -20,7 +20,7 @@ back to the engine.
 |---|---|
 | The three modes: `broadcast`, `manual` (orbit, or free with WASD), `follow` | `apps/web/src/WorldBroadcast.ts` (`WorldCameraMode`), switched in `apps/web/src/LiveWorld.tsx` |
 | Broadcast: the automatic director that picks a subject and a shot | `apps/web/src/WorldBroadcast.ts`; design in `docs/design/auto-camera.md` |
-| Follow: choosing the shot round one Soul (distance, keeping its sightline clear, holding the viewer's own zoom and orbit) | `apps/web/src/WorldFollow.ts` (`FOLLOW_MIN`/`FOLLOW_MAX`, `SPRING`, `DWELL`) |
+| Follow: choosing the shot round one Soul (distance, keeping its sightline clear, holding the viewer's own zoom and orbit, framing a ride from outside) | `apps/web/src/WorldFollow.ts` (`FOLLOW_MIN`/`FOLLOW_MAX`, `SPRING`, `DWELL`, `RIDE`) |
 | Follow: moving smoothly to that shot, at any frame rate | `apps/web/src/WorldFollowMotion.ts`, `apps/web/src/camera-spring.ts` |
 | Manual camera: drag, wheel, pinch, keys, double-click to focus | `apps/web/src/WorldRtsCamera.ts`, `apps/web/src/touch/WorldTouchFree.ts`, `apps/web/src/WorldNavigation.ts` |
 | Never below the ground; what may block a view (the roots a shot checks its sightline against) | `apps/web/src/WorldCameraGround.ts`, `apps/web/src/WorldCameraRenderRoots.ts` |
@@ -71,7 +71,10 @@ v2 adapter turns the engine's public stream into that frame's input.
    `shown.current.entities` (line 951): a position `p` and heading `yaw` for each take entity.
 6. **The camera.** For each Soul, `LiveWorld.tsx` looks up its entity in that frame (`at.entities[soul.entityId]?.p`,
    line 995). For the Soul being followed, that position is the focus (line 1019). Follow aims one metre above it
-   (line 1054), `WorldFollow` chooses the shot, and `WorldFollowMotion` carries the camera there. Broadcast
+   (line 1054), `WorldFollow` chooses the shot, and `WorldFollowMotion` carries the camera there. While the followed
+   Soul rides (its activity is `ride`, or it stands in a ride carrier's basket), the aim tracks it without lag and
+   `WorldFollow.riding` keeps the camera outside the vehicle: at least `RIDE.distance` out and between `RIDE.pitch`
+   and `RIDE.top` above the rider, never in or under the vehicle, which is camera-transparent. Broadcast
    reads its subject's position from the same frame (line 990).
 
 So the camera sees a v2 body exactly where the page draws it, at the same tick. It follows the page's take entity
