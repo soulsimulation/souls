@@ -10,7 +10,9 @@
 // does, as it draws any diff. The world's clock (calendar fields 60, 61) already rides the chunks (bridge.ts datetime).
 // A thing a Soul sets down elsewhere (B2-2: its node's parent or place changed since the stream first showed it, or,
 // before the page opened, its first place is not where the captured scene has it) is moved to where v2 has it: an upsert at its world pose, which the layer eases there as it eases any moved thing. A
-// thing in a body's hand is not (the bodies' adapter draws what is held).
+// thing in a body's hand is not: the bodies' adapter draws what is held, so the layer's copy is removed while it is
+// held (a book picked up from a table is not also drawn on the table), and drawn again, where v2 has it, once it is
+// set down. A thing the stream no longer holds (eaten, put away) is removed from the layer too.
 import { TICK_US } from './takes.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
@@ -147,6 +149,12 @@ const mul = (a: Q4, b: Q4): Q4 => [a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3
 /** A body (bridge.ts isBody): a node with a public Soul, or one of a body kind. */
 const isBody = (n: NodeLike) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
 const placeOf = (n: NodeLike) => JSON.stringify([n.parent, n.slot ?? null, n.pos, n.rot]);
+/** Whether a node is in a hand: a frame it rides in, at any depth, is a body. */
+export function inHand(nodes: ReadonlyMap<string, NodeLike>, id: string): boolean {
+  let n = nodes.get(id);
+  for (let depth = 0; n?.parent != null && depth <= 32; depth++) { n = nodes.get(n.parent); if (n && isBody(n)) return true; }
+  return false;
+}
 
 /** A node's world pose from its chain of frames (positions µm, a slot adds its point, as bridge.ts V2Bridge.world), or
  *  null when a frame is not in the copy or one is a body (a thing in a hand). */
@@ -217,13 +225,22 @@ function asDrawn(want: Record<string, boolean | number | string> | undefined, e:
  *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
  *  page's picture reaches it (light-diff-clock.ts), not seconds before the bodies around it. */
 export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number | string>>, weather: OldWeather | null, at: number,
-  ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map(), tilted: Set<string> = new Set()): WorldDiff | null {
+  ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map(), tilted: Set<string> = new Set(),
+  hidden: ReadonlyMap<string, number> = new Map(), stash: Map<string, EntityLike> = new Map()): WorldDiff | null {
   const m = layer?.model, seq = layer?.seq;
   if (!m || typeof seq !== 'number') return null;
-  const upserts: unknown[] = [];
+  const upserts: unknown[] = [], removes: string[] = [];
   let tick = 0;
-  for (const id of new Set([...things.keys(), ...moved.keys()])) {
-    const e = m.entities.get(id), to = moved.get(id);
+  // a thing in a hand or gone is removed from the layer, its entity kept (`stash`) to draw it again once it is set down
+  for (const [id, at] of hidden) {
+    const e = m.entities.get(id);
+    if (!e) continue;
+    stash.set(id, e); removes.push(id); tick = Math.max(tick, at);
+  }
+  for (const id of stash.keys()) if (!hidden.has(id) && m.entities.has(id)) stash.delete(id);
+  for (const id of new Set([...things.keys(), ...moved.keys(), ...stash.keys()])) {
+    if (hidden.has(id)) continue;
+    const back = !m.entities.has(id), e = m.entities.get(id) ?? stash.get(id), to = moved.get(id);
     if (!e) continue;
     const want = asDrawn(things.get(id), e, m);
     let next: EntityLike = e;
@@ -239,14 +256,14 @@ export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyM
       if (to.tilt) tilted.add(id);
       next = { ...next, in: { parent: 'world' }, p: [...to.p], r, ...(s !== undefined ? { s } : {}) };
     }
-    if (next === e) continue;
+    if (next === e && !back) continue;
     upserts.push(next);
     tick = Math.max(tick, ticks.get(id) ?? 0);
   }
   const world = weather && !sameWeather(m.state?.weather, weather) ? { weather } : undefined;
   if (world) tick = Math.max(tick, ticks.get('') ?? 0);
-  if (!upserts.length && !world) return null;
-  return { type: 'edge', kind: 'world-diff', seq: seq + 1, at, by: 'engine', ...(tick > 0 ? { tick } : {}), diff: { upserts, removes: [], defs: [], tiles: [], ...(world ? { world } : {}) } };
+  if (!upserts.length && !removes.length && !world) return null;
+  return { type: 'edge', kind: 'world-diff', seq: seq + 1, at, by: 'engine', ...(tick > 0 ? { tick } : {}), diff: { upserts, removes, defs: [], tiles: [], ...(world ? { world } : {}) } };
 }
 
 /** What the v2 stream says of things' state and the weather, kept from the reader worker's messages. */
@@ -264,6 +281,12 @@ export class WorldState {
   readonly moved = new Map<string, Placed>();
   /** K5: the things this has drawn tilted (worldDiff stands them up again when v2 does). */
   private readonly tilted = new Set<string>();
+  /** Old entity id → the take tick from which it is in a hand or gone from the stream: not drawn by the layer. */
+  readonly hidden = new Map<string, number>();
+  /** The layer's entities of hidden things, to draw them again once set down (worldDiff). */
+  private readonly stash = new Map<string, EntityLike>();
+  /** Node id → its old entity id, for every thing of the captured world the stream has shown. */
+  private readonly captured = new Map<string, string>();
   /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
   private readonly ticks = new Map<string, number>();
   /** The sequence number of the last diff handed to the page: each is sent once (the layer applies the first of a seq). */
@@ -284,9 +307,11 @@ export class WorldState {
     for (const id of c.removed) {
       this.nodes.delete(id);
       const o = this.origins.get(id); if (o) { this.things.delete(o); this.moved.delete(o); this.ticks.delete(o); this.origins.delete(id); }
+      const was = this.captured.get(id); if (was) { this.hidden.set(was, tick); this.captured.delete(id); }
     }
     let moves = false;
     for (const n of c.nodes) {
+      if (n.origin && n.pos && !n.origin.includes('/')) this.captured.set(n.id, n.origin);
       this.nodes.set(n.id, n);
       if (n.parent === null && n.sky) { const w = weatherOf(n.sky); if (w) { this.weather = w; this.ticks.set('', tick); } }
       if (!n.origin) continue;
@@ -297,6 +322,13 @@ export class WorldState {
       const at = placeOf(n), was = this.first.get(n.id);
       if (was === undefined) { this.first.set(n.id, at); this.unchecked.add(n.id); }
       else if (was !== at || this.moved.has(n.origin)) { this.origins.set(n.id, n.origin); this.ticks.set(n.origin, tick); moves = true; }
+    }
+    // once every frame of this message is in: a thing of the captured world in a hand is not drawn by the layer
+    for (const n of c.nodes) {
+      const o = this.captured.get(n.id);
+      if (!o) continue;
+      if (inHand(this.nodes, n.id)) { if (!this.hidden.has(o)) this.hidden.set(o, tick); }
+      else this.hidden.delete(o);
     }
     if (moves) this.place();
   }
@@ -343,7 +375,10 @@ export class WorldState {
   }
 
   /** The diff for the page's entity layer now, or null (see worldDiff). */
-  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { this.check(layer); return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved, this.tilted); }
+  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null {
+    this.check(layer);
+    return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved, this.tilted, this.hidden, this.stash);
+  }
 
   /** K5 (0.135): the moving frames as they stand at the time the page draws (take-parts.ts CarriedParts.frames): a
    *  carry's node where its samples have it, a load lifted or set down only once the picture reaches it. A thing of the
