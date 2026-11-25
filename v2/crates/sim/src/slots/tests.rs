@@ -716,8 +716,31 @@ fn clearance_chair(front: i32, at: i64) -> World {
 /// the first supported point out along the chair's exit, stands on the floor, frees the seat, and walks the next tick.
 #[test]
 fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
+    rises_from_clearance_chair(true);
+}
+
+/// The step off a seat is taken only along a way out: with no footprint for the chair, its seat point is a cut the
+/// line may not pass, so the body stands at the rise point at once, as before the step (and is never stuck).
+#[test]
+fn a_rise_whose_step_is_no_way_out_stands_at_once() {
+    rises_from_clearance_chair(false);
+}
+
+fn rises_from_clearance_chair(footprint: bool) {
     let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
     let mut w = clearance_chair(528, 700_000);
+    // the chair's own box, as worldd registers a seat thing's footprint: what its step off may pass over
+    if footprint {
+        w.slots.footprint(
+            w.chair,
+            vec![[
+                [-250_000, -250_000],
+                [250_000, -250_000],
+                [250_000, 228_000],
+                [-250_000, 228_000],
+            ]],
+        );
+    }
     let b = w.bodies[0];
     let stand = w.slots.place(w.chair).unwrap().stand().unwrap();
     assert_eq!(
@@ -790,6 +813,11 @@ fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
         .expect("rising");
     let contact = w.moves.record(n).expect("in progress").contact_at();
     run(&mut w, contact + 1);
+    assert_eq!(
+        w.c.carried(b),
+        footprint,
+        "steps off along a way out, else stands at once"
+    );
     let p = stepped_off(&mut w, b, contact);
     assert!(
         matches!(p.support, Support::Surface { .. }),
