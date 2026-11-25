@@ -21,7 +21,9 @@
 //! another writer's: the backup is **fenced**, for good. It never adopts that head nor puts over it, and says so in
 //! `health.json`; the stream and its viewers go on from the local disk. A confirmed head is kept with the store's
 //! identity: a spool with none, or one of another store, learns the store's head again (and puts over it), and a
-//! store with no head gets this writer's; neither is fenced.
+//! store with no head gets this writer's; neither is fenced. A spool of another store (the store moved: its address
+//! changed) also puts every object kept on this disk to the new one again before its first head there, so the new
+//! store holds the whole chain its head names, as a new machine reads it.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -244,18 +246,30 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     let (wake, woken) = std::sync::mpsc::sync_channel(1);
     spool.wake = Some(wake);
     let head_key = format!("{prefix}head");
+    let found = std::fs::read(spool.dir.join(confirmed_key(&head_key))).ok();
     // Known only when it is this store's: a spool with none, or one of another store, learns the store's head again.
-    let confirmed = std::fs::read(spool.dir.join(confirmed_key(&head_key)))
-        .ok()
-        .and_then(|b| {
-            let mut fields = b.splitn(3, |c| *c == b'\n');
-            let (store, etag, bytes) = (fields.next()?, fields.next()?, fields.next()?);
-            if store != spool.store.as_bytes() {
-                return None;
-            }
-            let etag = String::from_utf8(etag.to_vec()).ok()?;
-            Some((!etag.is_empty()).then(|| (bytes.to_vec(), etag)))
-        });
+    let confirmed = found.as_deref().and_then(|b| {
+        let mut fields = b.splitn(3, |c| *c == b'\n');
+        let (store, etag, bytes) = (fields.next()?, fields.next()?, fields.next()?);
+        if store != spool.store.as_bytes() {
+            return None;
+        }
+        let etag = String::from_utf8(etag.to_vec()).ok()?;
+        Some((!etag.is_empty()).then(|| (bytes.to_vec(), etag)))
+    });
+    // The store moved (its address changed: the head confirmed is another store's). The new store holds none of the
+    // chain's objects this writer already put to the old one, and the spool queues only what it has not put: every
+    // object kept on this disk goes back in the queue, so the next pass puts the whole chain before its head there.
+    let moved_from = found
+        .as_deref()
+        .and_then(|b| b.split(|c| *c == b'\n').next())
+        .is_some_and(|store| store != spool.store.as_bytes());
+    if moved_from {
+        let queued = requeue(&spool.dir, &prefix);
+        eprintln!(
+            "worldd: the public stream's store moved; {queued} recovery objects kept on this disk are queued for it again"
+        );
+    }
     let known = confirmed.is_some();
     let confirmed = confirmed.flatten();
     let tried = std::fs::read(spool.dir.join(tried_key(&head_key)))
@@ -281,6 +295,30 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
         .spawn(move || worker.run(&woken, &*report))
         .map_err(super::io)?;
     Ok(())
+}
+
+/// The chain's objects kept on this disk (`kept/<prefix>objects/`) back in the spool's queue (`<prefix>objects/`), for
+/// a store that holds none of them; how many. One that cannot be moved stays kept (and readable) and is not counted.
+fn requeue(dir: &Path, prefix: &str) -> u64 {
+    let rel = format!("{prefix}objects");
+    let Ok(entries) = std::fs::read_dir(dir.join(KEPT).join(&rel)) else {
+        return 0;
+    };
+    let to = dir.join(&rel);
+    if std::fs::create_dir_all(&to).is_err() {
+        return 0;
+    }
+    let mut n = 0;
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let hex = name
+            .to_str()
+            .is_some_and(|n| n.len() == 64 && n.bytes().all(|b| b.is_ascii_hexdigit()));
+        if hex && std::fs::rename(e.path(), to.join(&name)).is_ok() {
+            n += 1;
+        }
+    }
+    n
 }
 
 /// After a refused pass that put `moved` objects, with `stuck` refused passes before it in a row that put nothing: the
