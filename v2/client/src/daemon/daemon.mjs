@@ -641,7 +641,10 @@ function connect() {
         refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
-        if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
+        // Resumed at the stream's cursor, the world holds that version: it is owed, so a follow that hashes an older seal
+        // follows again, and a recent copy behind it is not taken as current (R10: a copy one version behind after a
+        // resume was called current until a beat, and a later sync then took the old write for a new one).
+        if (a === 'stream.resumed' && !copy.empty()) { if (state.cursor) owe(sequenceOf(state.cursor)); followWanted = true; current(); }
         else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
       }
