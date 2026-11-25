@@ -491,46 +491,24 @@ pub static ARCHIVE: Stream = Stream(Mutex::new(String::new()));
 /// R17: the creator's record in the directory, as [`SHIPPING`]. While it is degraded, edits fail closed.
 pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
 
-/// The parts handed to the history archiver and not yet taken by it, and their bytes (`archive.queued` and
-/// `archive.queued_bytes` in `health.json`): they wait in order while a write waits for the store (`behind`).
-pub struct Backlog {
-    parts: AtomicU64,
-    bytes: AtomicU64,
-}
+/// The history archiver's backlog (`archive.queued`, `archive.queued_bytes` and `archive.in_log` in `health.json`):
+/// the parts waiting in its channel and their bytes (at most the window), and the records past them left in the log on
+/// the disk for it to read once it has caught up (`worldd serve`'s handover sets them, under its own lock).
+pub struct Backlog(Mutex<(u64, u64, u64)>);
 
-/// This process's archiver's queue.
-pub static ARCHIVE_QUEUE: Backlog = Backlog {
-    parts: AtomicU64::new(0),
-    bytes: AtomicU64::new(0),
-};
+/// This process's archiver's backlog.
+pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
 
 impl Backlog {
-    /// A part of `bytes` bytes handed over.
-    pub fn sent(&self, bytes: usize) {
-        self.parts.fetch_add(1, Ordering::Relaxed);
-        self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+    /// The backlog as it stands now.
+    pub fn set(&self, queued: u64, queued_bytes: u64, in_log: u64) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = (queued, queued_bytes, in_log);
     }
 
-    /// A part of `bytes` bytes taken.
-    pub fn taken(&self, bytes: usize) {
-        let less = |v: u64, by: u64| Some(v.saturating_sub(by));
-        let _ = self
-            .parts
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| less(v, 1));
-        let _ = self
-            .bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                less(v, bytes as u64)
-            });
-    }
-
-    /// `"queued":n,"queued_bytes":n`.
+    /// `"queued":n,"queued_bytes":n,"in_log":n`.
     fn fields(&self) -> String {
-        format!(
-            "\"queued\":{},\"queued_bytes\":{}",
-            self.parts.load(Ordering::Relaxed),
-            self.bytes.load(Ordering::Relaxed)
-        )
+        let (q, b, l) = *self.0.lock().unwrap_or_else(|e| e.into_inner());
+        format!("\"queued\":{q},\"queued_bytes\":{b},\"in_log\":{l}")
     }
 }
 
@@ -578,6 +556,14 @@ impl Stream {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .starts_with("{\"state\":\"degraded\"")
+    }
+
+    /// Whether a running helper waits for the store ([`Stream::behind`]).
+    pub fn is_behind(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"behind\"")
     }
 
     fn set(&self, json: String) {
@@ -699,10 +685,7 @@ mod tests {
     fn an_archive_behind_says_its_fault_and_the_parts_that_wait() {
         let (archive, queue) = (
             Stream(Mutex::new(String::new())),
-            Backlog {
-                parts: AtomicU64::new(0),
-                bytes: AtomicU64::new(0),
-            },
+            Backlog(Mutex::new((0, 0, 0))),
         );
         let json = || {
             let mut o = String::new();
@@ -711,18 +694,15 @@ mod tests {
         };
         assert_eq!(json(), "", "unset: no field");
         archive.behind("store-unreachable: k: timeout: receive response", 3, 4000);
-        queue.sent(10);
-        queue.sent(20);
-        queue.taken(10);
-        queue.sent(5);
+        queue.set(2, 25, 7);
         assert_eq!(
             json(),
-            ",\"archive\":{\"state\":\"behind\",\"fault\":\"store-unreachable: k: timeout: receive response\",\"tries\":3,\"next_try_ms\":4000,\"queued\":2,\"queued_bytes\":25}"
+            ",\"archive\":{\"state\":\"behind\",\"fault\":\"store-unreachable: k: timeout: receive response\",\"tries\":3,\"next_try_ms\":4000,\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
         );
         archive.current();
         assert_eq!(
             json(),
-            ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25}"
+            ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
         );
     }
 

@@ -55,11 +55,13 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   as the store holds it, so a refused pass resumes where it stopped and never sends the spool again.
 - **A store that stalls after the archive opens.** A running history archiver never stops on a store that does not
   answer: the write (or read) it is on is tried again after 1, 2, 4 … s, then every 60 s, until the store answers,
-  and the parts that come meanwhile wait in order. The journal says `worldd: the archive is behind, the world goes on:
-  <fault>; try <n> unanswered, the next in <ms> ms`, then `the archive caught up`. `health.json` has
-  `"archive":{"state":"behind","fault":…,"tries":…,"next_try_ms":…,"queued":<parts>,"queued_bytes":<bytes>}`
-  (`current` once answered; `queued` is in every state). A write whose answer was lost is read back: these bytes there
-  are this write's. A refusal of another kind ends the archiver with `"state":"stopped"` and its fault; a restart
+  and the parts that come meanwhile wait in order: up to 64 MiB of them in memory, the rest in the log on the disk,
+  which the compactor keeps until they are archived and which the archiver reads on from once the store answers. An
+  outage of any length costs at most that memory, and nothing is dropped. The journal says `worldd: the archive is
+  behind, the world goes on: <fault>; try <n> unanswered, the next in <ms> ms`, then `the archive caught up`.
+  `health.json` has `"archive":{"state":"behind","fault":…,"tries":…,"next_try_ms":…,"queued":<parts>,
+  "queued_bytes":<bytes>,"in_log":<records>}` (`current` once answered; the counts are in every state, `in_log` the
+  records left in the log for it). A write whose answer was lost is read back: these bytes there are this write's. A refusal of another kind ends the archiver with `"state":"stopped"` and its fault; a restart
   starts it again from the log.
 - **A world's writes wait for their answer by their size.** A write's body is sent once the connection's buffer holds
   it, so a large object's tail may still be on the wire while the answer is awaited: a world's store waits 5 s for a

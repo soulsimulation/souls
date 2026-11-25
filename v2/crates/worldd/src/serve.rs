@@ -2211,9 +2211,199 @@ impl Store for Again {
 
 /// Where each record on the disk goes off the machine: the shipper, and the archiver (parts only, numbered among
 /// the parts).
+/// The most bytes of parts that wait in the archiver's channel. Past it the parts stay in the log on the disk, which the
+/// compactor keeps until they are archived, and the archiver reads them from there once it has taken those queued: a
+/// store out of reach for hours costs this much memory at most, never the log's rate times the outage.
+const ARCHIVE_WINDOW: u64 = 64 << 20;
+
+/// What [`Off`] hands the archiver and what it leaves for it in the log, shared by the two.
+struct Handover {
+    window: u64,
+    state: std::sync::Mutex<Handing>,
+}
+
+#[derive(Default)]
+struct Handing {
+    /// Parts in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
+    queued: u64,
+    queued_bytes: u64,
+    /// While parts are not sent: the first record left in the log, and its number in the archive.
+    left: Option<(u64, u64)>,
+    /// The record after the last one handed or left, and the archive's number after it.
+    end: u64,
+    next: u64,
+}
+
+impl Handover {
+    fn new(window: u64) -> Arc<Handover> {
+        Arc::new(Handover {
+            window,
+            state: std::sync::Mutex::default(),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Handing> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn gauge(h: &Handing) {
+        let in_log = h.left.map_or(0, |(from, _)| h.end.saturating_sub(from));
+        measures::ARCHIVE_QUEUE.set(h.queued, h.queued_bytes, in_log);
+    }
+
+    /// Record `record`, the archive's `number`: sent on `tx`, unless the channel holds the window already or parts
+    /// are left in the log, when it is left there too.
+    fn hand(&self, tx: &Sender<(u64, Vec<u8>)>, record: u64, number: u64, bytes: &[u8]) {
+        let mut h = self.lock();
+        let len = bytes.len() as u64;
+        if h.left.is_none() && h.queued > 0 && h.queued_bytes + len > self.window {
+            h.left = Some((record, number));
+        }
+        if h.left.is_none() {
+            h.queued += 1;
+            h.queued_bytes += len;
+            if tx.send((number, bytes.to_vec())).is_err() {
+                h.queued -= 1;
+                h.queued_bytes -= len;
+            }
+        }
+        (h.end, h.next) = (record + 1, number + 1);
+        Handover::gauge(&h);
+    }
+
+    /// The archiver took a part of `len` bytes from the channel.
+    fn took(&self, len: usize) {
+        let mut h = self.lock();
+        h.queued = h.queued.saturating_sub(1);
+        h.queued_bytes = h.queued_bytes.saturating_sub(len as u64);
+        Handover::gauge(&h);
+    }
+
+    /// What is left in the log for the archiver: its first record and number, and the record after the last.
+    fn left(&self) -> Option<(u64, u64, u64)> {
+        let h = self.lock();
+        h.left.map(|(from, number)| (from, number, h.end))
+    }
+
+    /// The archiver read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
+    /// the last record taken, parts are sent again from the next.
+    fn read_to(&self, reached: u64, number: u64) -> Result<(), Refusal> {
+        let mut h = self.lock();
+        if reached >= h.end {
+            if number != h.next {
+                return Err(Refusal {
+                    name: "archive-handover",
+                    detail: format!(
+                        "read from the log to {number}, the world handed to {}",
+                        h.next
+                    ),
+                });
+            }
+            h.left = None;
+        } else {
+            h.left = Some((reached, number));
+        }
+        Handover::gauge(&h);
+        Ok(())
+    }
+}
+
+/// A record of the log and its number.
+type Numbered = (u64, Vec<u8>);
+
+/// The world's log read forward from the disk a batch at a time, for the parts left there ([`Handover`]). Its place
+/// is kept between batches; the first read starts at the log's cut, or its first record. Offsets and record numbers
+/// never change when the log is compacted (`sim::log::compact`), and the compactor keeps every record the archive has
+/// not closed, so what it reads is there.
+struct LogReader {
+    path: PathBuf,
+    at: Option<sim::log::At>,
+}
+
+impl LogReader {
+    /// The bytes one batch reads; a record longer than that is read whole.
+    const BATCH: usize = 8 << 20;
+
+    /// The records from `from` (at most up to `end`) in the next batch, each with its number, and the record after the
+    /// last one read.
+    fn batch(&mut self, from: u64, end: u64) -> Result<(Vec<Numbered>, u64), Refusal> {
+        use sim::log::{At, HEAD_LEN, HEADER_LEN, MAX_RECORD};
+        use std::io::{Read, Seek, SeekFrom};
+        let fault = |detail: String| Refusal {
+            name: "archive-log",
+            detail,
+        };
+        let io = |e: std::io::Error| fault(format!("{}: {e}", self.path.display()));
+        let mut file = std::fs::File::open(&self.path).map_err(io)?;
+        let mut header = [0u8; HEADER_LEN];
+        file.read_exact(&mut header).map_err(io)?;
+        let at = match self.at {
+            Some(at) if at.record <= from => at,
+            _ => match sim::log::compact::read_cut(&self.path)? {
+                Some(cut) => cut.at,
+                None => At {
+                    record: 0,
+                    offset: HEADER_LEN as u64,
+                    crc: sim::log::Header::new(u64::from_le_bytes(
+                        header[16..24].try_into().expect("8 bytes"),
+                    ))
+                    .salt,
+                },
+            },
+        };
+        if at.record > from {
+            return Err(fault(format!(
+                "record {from} is before the log's cut at {}",
+                at.record
+            )));
+        }
+        let mut chunk = Self::BATCH;
+        loop {
+            file.seek(SeekFrom::Start(at.offset)).map_err(io)?;
+            let mut tail = Vec::new();
+            (&mut file)
+                .take(chunk as u64)
+                .read_to_end(&mut tail)
+                .map_err(io)?;
+            let found = sim::log::recover_from(&header, &tail, at)?.ok_or_else(|| {
+                fault(format!("the log does not continue at record {}", at.record))
+            })?;
+            if found.records.is_empty() {
+                if tail.len() < chunk || chunk > MAX_RECORD {
+                    self.at = Some(at);
+                    return Ok((Vec::new(), at.record));
+                }
+                chunk *= 2;
+                continue;
+            }
+            let (mut out, mut next, mut offset) = (Vec::new(), at, 0usize);
+            for (k, bytes) in found.records.into_iter().enumerate() {
+                let record = at.record + k as u64;
+                if record >= end {
+                    break;
+                }
+                let crc =
+                    u32::from_le_bytes(tail[offset + 8..offset + 12].try_into().expect("4 bytes"));
+                offset += HEAD_LEN + bytes.len();
+                next = At {
+                    record: record + 1,
+                    offset: at.offset + offset as u64,
+                    crc,
+                };
+                if record >= from {
+                    out.push((record, bytes));
+                }
+            }
+            self.at = Some(next);
+            return Ok((out, next.record));
+        }
+    }
+}
+
 struct Off {
     ship: Sender<Item>,
     archive: Option<Sender<(u64, Vec<u8>)>>,
+    handover: Arc<Handover>,
     parts: u64,
     based: bool,
     archive_base: u64,
@@ -2229,9 +2419,7 @@ impl Off {
             if let Some(crate::compactor::Archive::Parts(p)) = &self.floor {
                 p.sent(record, self.parts);
             }
-            if a.send((self.parts, bytes.to_vec())).is_ok() {
-                measures::ARCHIVE_QUEUE.sent(bytes.len());
-            }
+            self.handover.hand(a, record, self.parts, bytes);
             self.parts += 1;
         }
     }
@@ -2252,8 +2440,8 @@ impl Off {
         });
         if let Some(a) = &self.archive {
             if self.based {
-                if record >= self.archive_base && a.send((record, bytes.to_vec())).is_ok() {
-                    measures::ARCHIVE_QUEUE.sent(bytes.len());
+                if record >= self.archive_base {
+                    self.handover.hand(a, record, record, bytes);
                 }
             } else if !input {
                 self.part(record, bytes);
@@ -2276,12 +2464,12 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
 /// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
 /// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
-/// in `rx` in order (#3746). An open the store does not answer is tried again until it does (R17, `archive` in
+/// in `feed` in order (#3746): at most [`ARCHIVE_WINDOW`] of them in memory, the rest read from the log ([`Handover`]). An open the store does not answer is tried again until it does (R17, `archive` in
 /// `health.json`); once open, each call the store does not answer is tried again after each of `waits` ms until it
 /// does ([`persistently`]), so a store out of reach never stops the archiver (`archive` says `behind` meanwhile).
 fn archiving(
     mut open: impl FnMut() -> Result<Archiver<Again>, Refusal> + Send + 'static,
-    rx: Receiver<(u64, Vec<u8>)>,
+    mut feed: Feed,
     text: Arc<sim::text::Store>,
     closed: impl Fn(u64) + Send + 'static,
     waits: &'static [u64],
@@ -2292,7 +2480,7 @@ fn archiving(
         let a = until_answered("the archive", &measures::ARCHIVE, || patiently(&mut open))?;
         // Once open, each of its calls is tried until the store answers it: the archiver never stops on a store out
         // of reach, and parts wait in `rx` meanwhile, in order. Any other refusal still ends it, named in health.json.
-        persistently(waits, || archive_parts(a, &rx, &text, &closed))
+        persistently(waits, || archive_parts(a, &mut feed, &text, &closed))
             .inspect_err(|e| measures::ARCHIVE.stopped(&refusal(e.clone())))
     })
 }
@@ -2300,7 +2488,7 @@ fn archiving(
 /// The archiver's loop once open ([`archiving`]).
 fn archive_parts(
     mut a: Archiver<Again>,
-    rx: &Receiver<(u64, Vec<u8>)>,
+    feed: &mut Feed,
     text: &sim::text::Store,
     closed: &impl Fn(u64),
 ) -> Result<(), Refusal> {
@@ -2309,21 +2497,33 @@ fn archive_parts(
     publish(&a);
     let mut indexed = a.shelf.writes.bundles;
     let (mut fresh, mut viewed) = (false, std::time::Instant::now());
+    // Whether the last batch read from the log moved on: the next is read at once.
+    let mut reading = false;
     loop {
         if a.is_based() && a.refresh_redactions(text.redactions())? {
             fresh = true;
         }
-        match rx.recv_timeout(shipping::POLL * 20) {
+        let wait = if reading {
+            std::time::Duration::ZERO
+        } else {
+            shipping::POLL * 20
+        };
+        match feed.rx.recv_timeout(wait) {
             Ok((n, bytes)) => {
-                measures::ARCHIVE_QUEUE.taken(bytes.len());
+                feed.handover.took(bytes.len());
                 if a.is_based() {
                     a.refresh_redactions(text.redactions())?;
                 }
                 a.push(n, bytes)?;
                 fresh = true;
             }
-            Err(RecvTimeoutError::Timeout) => {}
+            // The channel is empty: what was sent before parts were left in the log is taken, so they come next.
+            Err(RecvTimeoutError::Timeout) => {
+                reading = from_log(&mut a, feed, text)?;
+                fresh |= reading;
+            }
             Err(RecvTimeoutError::Disconnected) => {
+                while from_log(&mut a, feed, text)? {}
                 if a.is_based() {
                     a.refresh_redactions(text.redactions())?;
                 }
@@ -2343,6 +2543,46 @@ fn archive_parts(
             (fresh, viewed) = (false, std::time::Instant::now());
         }
     }
+}
+
+/// Where the archiver's parts come from: the channel, and the log for those left there ([`Handover`]). A fork's
+/// archive (`based`) is handed records from `base` on, inputs too, by record; any other is handed parts (records that
+/// are not inputs), numbered among the parts.
+struct Feed {
+    rx: Receiver<(u64, Vec<u8>)>,
+    handover: Arc<Handover>,
+    log: LogReader,
+    based: bool,
+    base: u64,
+}
+
+/// One batch of the parts left in the log, pushed in order; whether the read moved on.
+fn from_log(
+    a: &mut Archiver<Again>,
+    feed: &mut Feed,
+    text: &sim::text::Store,
+) -> Result<bool, Refusal> {
+    let Some((from, number, end)) = feed.handover.left() else {
+        return Ok(false);
+    };
+    let before = feed.log.at.map(|at| at.record);
+    let (records, reached) = feed.log.batch(from, end)?;
+    let mut next = number;
+    for (record, bytes) in records {
+        if feed.based {
+            if record < feed.base {
+                continue;
+            }
+            a.refresh_redactions(text.redactions())?;
+            a.push(record, bytes)?;
+            next = record + 1;
+        } else if !recorder::is_input(&bytes) {
+            a.push(next, bytes)?;
+            next += 1;
+        }
+    }
+    feed.handover.read_to(reached.max(from), next)?;
+    Ok(feed.log.at.map(|at| at.record) != before)
 }
 
 fn archive_bridge(
@@ -2636,6 +2876,17 @@ fn off_machine(
         header: built.header.stored().to_vec(),
     };
     let mut archive_floor = None;
+    let handover = Handover::new(ARCHIVE_WINDOW);
+    let feed = |rx, based, base| Feed {
+        rx,
+        handover: Arc::clone(&handover),
+        log: LogReader {
+            path: dir.join("log"),
+            at: None,
+        },
+        based,
+        base,
+    };
     let archive = if let Some(base) = fork_base {
         // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
@@ -2663,7 +2914,13 @@ fn off_machine(
         let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
         report(
             "the archiver",
-            archiving(open, rx, Arc::clone(&text), publish, &STREAM_RETRY_MS),
+            archiving(
+                open,
+                feed(rx, true, archive_base),
+                Arc::clone(&text),
+                publish,
+                &STREAM_RETRY_MS,
+            ),
         );
         Some(tx)
     } else if let Some(kind) = built
@@ -2698,7 +2955,13 @@ fn off_machine(
         archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(open, rx, Arc::clone(&text), publish, &STREAM_RETRY_MS),
+            archiving(
+                open,
+                feed(rx, false, 0),
+                Arc::clone(&text),
+                publish,
+                &STREAM_RETRY_MS,
+            ),
         );
         Some(tx)
     } else {
@@ -2707,6 +2970,7 @@ fn off_machine(
     let mut off = Off {
         ship,
         archive,
+        handover,
         parts: parts_from,
         based,
         archive_base,
@@ -4054,6 +4318,7 @@ mod tests {
         let mut off = Off {
             ship,
             archive: Some(archive),
+            handover: Handover::new(ARCHIVE_WINDOW),
             parts: 0,
             based: true,
             archive_base: 4,
@@ -4080,6 +4345,7 @@ mod tests {
         let mut legacy = Off {
             ship,
             archive: Some(archive),
+            handover: Handover::new(ARCHIVE_WINDOW),
             parts: 0,
             based: false,
             archive_base: 4,
@@ -4172,26 +4438,170 @@ mod tests {
             )
             .unwrap(),
         );
-        let (tx, rx) = channel();
-        // Production's fault was on a write: the bundles' and the day index's refused, then answers lost.
-        s.refuse_writes(3, 503, "/bundles/");
-        let h = archiving(open, rx, text, |_| {}, &[10, 20, 40]);
-        for (n, p) in parts.into_iter().enumerate() {
-            if n == 120 {
-                s.fail_writes(40, Fail::Lost);
-            }
-            tx.send((n as u64, p)).unwrap();
+        // The world's log on the disk, as the world writes it: the archiver reads from it what it is not handed.
+        let (mut log, _) = Log::open(FileStore::open(&dir.join("log")).unwrap(), EPOCH).unwrap();
+        for p in &parts {
+            log.append(p.clone()).unwrap();
         }
-        drop(tx);
+        log.wait_durable(parts.len() as u64).unwrap();
+        // A window of 16 KiB: the parts past it stay in the log while the store is out.
+        let (tx, rx) = channel();
+        let handover = Handover::new(16 << 10);
+        let feed = Feed {
+            rx,
+            handover: Arc::clone(&handover),
+            log: LogReader {
+                path: dir.join("log"),
+                at: None,
+            },
+            based: false,
+            base: 0,
+        };
+        let (ship, _shipped) = channel();
+        let mut off = Off {
+            ship,
+            archive: Some(tx),
+            handover: Arc::clone(&handover),
+            parts: 0,
+            based: false,
+            archive_base: 0,
+            mark: shipping::Mark::default(),
+            floor: None,
+        };
+        // Production's fault was on a write. The store refuses every write (503) while the world hands its parts over.
+        s.refuse_writes(usize::MAX, 503, "");
+        let h = archiving(open, feed, text, |_| {}, &[10, 20, 40]);
+        let largest = parts.iter().map(Vec::len).max().unwrap() as u64;
+        let (mut most, mut in_log) = (0, 0);
+        for (n, p) in parts.iter().enumerate() {
+            off.take(n as u64, p, false);
+            let state = handover.lock();
+            most = most.max(state.queued_bytes);
+            in_log = in_log.max(state.left.map_or(0, |(from, _)| state.end - from));
+        }
+        println!("in memory at most {most} B; in the log at most {in_log} records");
+        assert!(
+            most <= (16 << 10) + largest,
+            "memory stays in the window: {most}"
+        );
+        assert!(
+            in_log > 100,
+            "the parts past the window wait in the log: {in_log}"
+        );
+        // The archiver reads on from the log and meets the store out: it says so, and waits. (The deadline only stops a
+        // hung test.)
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !measures::ARCHIVE.is_behind() {
+            assert!(
+                std::time::Instant::now() < end,
+                "the archiver meets the refusals"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!h.is_finished(), "it keeps trying");
+        // The store answers again, then loses the answers to writes it did, and the archiver catches up from the log.
+        s.refuse_writes(0, 503, "");
+        s.fail_writes(40, Fail::Lost);
+        drop(off);
         h.join()
             .unwrap()
             .expect("the archiver never stops on a store that does not answer");
+        let state = handover.lock();
+        assert_eq!(
+            (state.queued, state.queued_bytes, state.left),
+            (0, 0, None),
+            "nothing is counted as waiting once all is taken"
+        );
         for key in &expected {
             let want = memory.get(key).unwrap().unwrap().bytes;
             let got = again.get(key).unwrap();
             assert_eq!(got.map(|o| o.bytes), Some(want), "{key} lands");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The parts left in the log are read from it a batch at a time, from its cut once it is compacted, with the bytes
+    /// the world wrote; a record before the cut is refused by name, never read as something else.
+    #[test]
+    fn the_archivers_log_reader_reads_on_from_a_compacted_log() {
+        let dir = std::env::temp_dir().join(format!("archiver-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records: Vec<Vec<u8>> = (0..50u8).map(|i| vec![i; 1000 + i as usize]).collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records[..30] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(30).unwrap();
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: None,
+        };
+        let (first, reached) = reader.batch(0, 10).unwrap();
+        assert_eq!(reached, 10);
+        assert_eq!(
+            first,
+            (0..10)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        );
+        // Compacted at record 10, then written on.
+        let durable = log.durable_mark();
+        let cut = sim::log::compact::Cut {
+            at: reader.at.unwrap(),
+            note: 0,
+        };
+        durable.compact(
+            sim::log::compact::prepare(&path, cut, durable.at())
+                .unwrap()
+                .unwrap(),
+        );
+        for r in &records[30..] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(50).unwrap();
+        // The writer finishes the compaction just after its sync; the deadline only stops a hung test.
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match durable.compacted() {
+                Some(done) => break assert!(done.is_ok(), "compacted: {done:?}"),
+                None => {
+                    assert!(std::time::Instant::now() < end, "the compaction finishes");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+        let mut fresh = LogReader { path, at: None };
+        let (rest, reached) = fresh.batch(10, 50).unwrap();
+        assert_eq!(reached, 50);
+        assert_eq!(
+            rest,
+            (10..50)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        );
+        // The first reader goes on from its own place, across the compaction.
+        assert_eq!(reader.batch(10, 50).unwrap().0, rest);
+        let mut early = LogReader {
+            path: dir.join("log"),
+            at: None,
+        };
+        assert_eq!(early.batch(5, 50).unwrap_err().name, "archive-log");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A part handed to an archiver that is gone is not counted as waiting.
+    #[test]
+    fn a_part_the_channel_refuses_is_not_counted_as_queued() {
+        let handover = Handover::new(1 << 20);
+        let (tx, rx) = channel();
+        handover.hand(&tx, 0, 0, b"one");
+        drop(rx);
+        handover.hand(&tx, 1, 1, b"two");
+        let h = handover.lock();
+        assert_eq!((h.queued, h.queued_bytes, h.end, h.next), (1, 3, 2, 2));
     }
 
     #[test]
