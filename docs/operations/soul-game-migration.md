@@ -165,7 +165,7 @@ The trade-off:
 |---|---|---|---|
 | Full copy (supported, tested by the dry run) | about 26 h of background copy, no outage | nothing | none |
 | Copy without `aside/` | about 25 h (it saves 1,584 objects, but 2.7 GB) | the undo of past reseeds | a `--skip` prefix in `store-copy` (about 1 h) |
-| Copy without `stream-recovery/` and `aside/` | about 1.6 h (2,038 objects) | until each world writes a new chain, a viewer's stream cannot recover from the store on a new machine | the same, plus the engine owner's confirmation that worlds write a full chain again |
+| Copy without `stream-recovery/` and `aside/` | about 1.6 h (2,038 objects) | **not safe as the engine stands.** A moved world writes a new chain head to the new store, but never uploads again the objects that head names: they are already in its spool's `kept/` (`v2/crates/worldd/src/view_out/backup.rs` `objects()`, `Spool::object`). On a new machine the stream then fails with `stream-recovery-missing` and the world shows no viewers until it is fixed by hand | the same, plus a worldd change: when the store's address changes, queue the live chain's `kept/` objects for upload again |
 | Empty R2, old store read-only | minutes | every world's stored history and directory entry; worlds reseeded | not supported |
 
 Recommendation: start the full copy as soon as steps 1 to 3 are done. It needs no new code and no outage, and the
