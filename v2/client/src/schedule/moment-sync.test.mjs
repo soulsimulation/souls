@@ -125,8 +125,10 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
     const target = await waitFor(() => JSON.parse(readFileSync(rt.state, 'utf8')).schedule?.targets?.[entry.key]);
     assert.equal(target.realMs, moment / 1000);
     const at = target.realMs;
-    // Hold a sync answer from 1.8 s before the moment until 0.5 s after it: at least one beat falls inside.
-    await waitFor(() => Date.now() >= at - 1_800, 30_000);
+    // Hold a sync answer from before the moment until 0.5 s after it: at least one beat falls inside. A copy confirmed
+    // within 1 s answers a look without asking (#4716), so the hold starts once the copy is older than that: the look
+    // then asks, and its sync is the one held (from 2.8 s before the moment, by 1.8 s before it at the latest).
+    await waitFor(async () => Date.now() >= at - 2_800 && (await ask({ op: 'status' })).age > 1_000, 30_000);
     proxy.hold = true;
     const looked = ask({ op: 'look' }).catch(() => null); // brings the copy current: a sync whose answer is held
     await waitFor(() => proxy.heldAt !== null, 5_000);
