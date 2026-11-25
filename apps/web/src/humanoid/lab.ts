@@ -66,7 +66,7 @@ function stats() {
 const icons = document.getElementById('icons')!;
 async function portraits(entries: {id: string; rig: Rig; label: string}[]) {
   const avatars = new WorldSoulAvatars(renderer);
-  entries.forEach((e, i) => avatars.capture(e.id, e.id, e.rig.holder, false, (i + 1) * 1000));
+  for (const [i, e] of entries.entries()) await avatars.capture(e.id, e.id, e.rig.holder, false, (i + 1) * 1000);
   for (const e of entries) { const fig = document.createElement('figure'), img = document.createElement('img'); img.src = soulAvatars.images.get(e.id) ?? ''; img.alt = e.label; img.title = e.label;
     const cap = document.createElement('figcaption'); cap.textContent = e.id.replace(/^body-/, ''); fig.append(img, cap); icons.append(fig); }
   renderer.setRenderTarget(null); renderer.setSize(W, H);
