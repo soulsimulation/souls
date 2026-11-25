@@ -82,6 +82,13 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
+   **The body catalogue** (`release.sh bodies`): before the deploys, each world's folder gets the page's `bodies.json`
+   (the body files the bundle built, `assets/bodies/`) when it has none, or when the release's admits every body its
+   own does; its deploy's restart reads it (worldd reads `bodies.json` only at start), so `wear` admits the presets.
+   A fork keeps its own (its boot pins it), and so does a world whose catalogue has a body the release's lacks (a Soul
+   wearing it could not start). After the page moves, each world of the launcher's cutover binding that names no
+   catalogue gets `bodiesDir` `/usr/local/lib/souls/web/assets/bodies`, served at `/w/<slug>/v2/bodies/` and named in
+   its page's `v2Bodies` ([cutover.md](cutover.md)); the launcher reads the binding again within a second.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already

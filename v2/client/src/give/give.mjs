@@ -20,11 +20,11 @@ const ID = /^[0-9a-f]{32}-\d+$/;
 const no = (code, detail) => ({ code, detail });
 
 /** The intents a `give` request sends, or a refusal by name. `place` is the node this Soul's body stands under. */
-export function giveIntents(req, { place }) {
+export function giveIntents(req, { place, kinds }) {
   switch (req.do) {
     case 'offer': {
       // 0.134 T1: `together offer` comes here too (the CLI sends it as a give): a touch offered, nothing handed over.
-      if (req.touch !== undefined) return togetherIntents(req, { place });
+      if (req.touch !== undefined) return togetherIntents(req, { place, kinds });
       if (!ID.test(String(req.thing ?? '')) || !ID.test(String(req.to ?? ''))) return no('give-usage', 'give <thing id> --to <body id>');
       if (!ID.test(String(place ?? ''))) return no('give-no-place', 'this Soul stands nowhere in its copy yet: look first');
       return [{ verb: 'activity:offer', target: place, params: { 1: KIND, 2: GIVER, 3: [req.to], 4: req.thing } }];
@@ -33,6 +33,8 @@ export function giveIntents(req, { place }) {
       if (!ID.test(String(req.offer ?? ''))) return no('give-names-an-offer', `give ${req.do} <offer id>`);
       return [{ verb: `activity:${req.do}`, target: req.offer }];
     }
+    // `together leave <id>` comes here too: leaving the activity an offer made (`activity:leave`).
+    case 'leave': return togetherIntents(req, { place, kinds });
     default: return no('give-usage', 'give <thing id> --to <body id> | give accept|decline <offer id>');
   }
 }

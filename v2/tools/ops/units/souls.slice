@@ -6,7 +6,10 @@
 # 24 GB, docs/operations.md); 2 GiB for the OS, Caddy and the rest leaves 14 GiB. On the new engine Eden peaks at
 # 1.7 GB and a small world at 0.85 GB; eleven worlds (Eden and ten others) at those peaks are 10.2 GB, the gateways,
 # directory and origin about 0.1 GB, so 14 GB is that with 40 % to spare, and Eden at its 4 GB cap with the ten others
-# at their peaks (12.6 GB) still fits. MemoryLow is Eden's (2 GB): a child's MemoryLow only counts up to its parent's.
+# at their peaks (12.6 GB) still fits. Raised to 18 GB on 24 Nov (Gene's choice): the eleven worlds, idle, already held
+# 10.4 GB, 74 % of 14, too little room for the limits run (limits-run.md), and 20 GB of the machine was free. Both caps
+# full at once (18 + today's 14.2 GiB peak) would pass the machine; that is now the margin, not the cap.
+# MemoryLow is Eden's (2 GB): a child's MemoryLow only counts up to its parent's.
 # The processor and the disk are shared, never capped: at weight 20 against the default 100 the new system gets a
 # fifth of what today's gets when both are busy, and all of it when today's is idle, so neither system's world time is
 # throttled. Applied live, restarting nothing: memory-bounds.sh.
@@ -14,7 +17,7 @@
 Description=Souls Engine v2 programs
 
 [Slice]
-MemoryMax=14G
+MemoryMax=18G
 MemoryLow=2G
 MemorySwapMax=0
 CPUWeight=20

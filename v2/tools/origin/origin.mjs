@@ -38,6 +38,7 @@ import { worldRoutes } from './world-routes.mjs';
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
 export const MISS = 'no-store';
+const SLICE = 256 * 1024; // a response body is written this much at a time (createOrigin's stallMs)
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -99,11 +100,12 @@ export function sharedFiles(cacheBytes, stats = {}) {
 
 /**
  * An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served.
- * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles).
+ * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles). `stallMs` is how long a
+ * response may go with its reader taking nothing before the connection is closed (`stats.stalled`).
  */
-export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20 } = {}) {
+export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20, stallMs = 20_000 } = {}) {
   const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
-  const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
+  const stats = { pointer: 0, immutable: 0, miss: 0, stalled: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const shared = sharedFiles(cacheBytes, stats);
   const server = createServer(async (req, res) => {
     const miss = () => {
@@ -149,7 +151,22 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
       'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE,
       etag,
     });
-    res.end(req.method === 'HEAD' ? undefined : body);
+    if (req.method === 'HEAD') return res.end();
+    // A reader that takes nothing for stallMs is let go: its socket closes, and the page asks again from the newest
+    // baseline. Without this a stalled connection held its socket, and the buffer of the file it asked for, for as long
+    // as it stayed connected (Node gives a response no time limit), one 9 MB baseline per generation it stalled on.
+    // The body goes in slices of the one shared buffer, each written once the last has drained, so a slow reader that
+    // keeps taking bytes resets the clock with each slice and is never let go.
+    res.setTimeout(stallMs, () => { stats.stalled++; res.destroy(); });
+    let at = 0;
+    const more = () => {
+      while (at < body.length) {
+        const slice = body.subarray(at, at = Math.min(body.length, at + SLICE));
+        if (!res.write(slice)) return res.once('drain', more);
+      }
+      res.end();
+    };
+    more();
   });
   server.on('upgrade', worlds.upgrade);
   server.keepAliveTimeout = 60_000;
@@ -203,7 +220,7 @@ function serveOne(dir, port, host, every) {
   const figures = () => {
     const cpu = process.cpuUsage();
     return { index, pid: process.pid, started, pointer: stats.pointer, immutable: stats.immutable, miss: stats.miss,
-      reads: stats.reads, bytes: stats.bytes, cpu_s: (cpu.user + cpu.system) / 1e6, rss_bytes: process.memoryUsage.rss() };
+      stalled: stats.stalled, reads: stats.reads, bytes: stats.bytes, cpu_s: (cpu.user + cpu.system) / 1e6, rss_bytes: process.memoryUsage.rss() };
   };
   const end = () => {
     const f = figures();

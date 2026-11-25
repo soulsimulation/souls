@@ -87,7 +87,8 @@ real Souls home.
 `.local/playtest-v2/` and prints one line per check.
 
 `node tools/playtest/arena/new-engine/old-page.mjs [--template <file>]` brings up the old page (apps/web) on such a world
-(0.135 P5; the proof skill's section 1). To stage a scene and record it there, uncut and at real speed, from a camera
+(0.135 P5; the proof skill's section 1). With history on (its default) it registers the world's creator (Ada) in the
+world's store itself, so creator edits are taken; no `register-world` by hand. To stage a scene and record it there, uncut and at real speed, from a camera
 the scene names (follow a Soul, a fixed pose, or a path of poses):
 
 ```sh

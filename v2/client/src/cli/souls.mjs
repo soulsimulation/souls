@@ -43,6 +43,11 @@
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
 //   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
+//   souls.mjs together offer <activity> <body id|name> [...]   any other activity the world serves, by its word
+//                                             (`together kinds` lists them); accept|decline <activity> answers the
+//                                             newest offer of it (0.135)
+//   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
+//   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
@@ -145,6 +150,7 @@ export const OPS = [
   'batch',
   'calendar',
   'can',
+  'carry',
   'catalog',
   'context',
   'conversations',
@@ -162,6 +168,7 @@ export const OPS = [
   'now',
   'object',
   'pair',
+  'part',
   'pending',
   'pray',
   'prayers',
@@ -182,7 +189,7 @@ export const OPS = [
 ];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
 // 0.134 T1: a touch is offered as a give is, to one body on the open ground; the daemon's give handler sends it.
-const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look', together: 'give' };
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look', together: 'give', part: 'carry' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = [
@@ -248,9 +255,11 @@ export function requestOf(argv) {
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
-  // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd).
-  const waits = args[0] === 'act' && args.includes('--wait');
-  if (waits) args.splice(args.indexOf('--wait'), 1);
+  // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd). A carry's or a part's step
+  // always waits: the next step needs its end (0.135 C, A).
+  const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list')
+    || (['together', 'give'].includes(args[0]) && args[1] !== 'kinds');
+  if (args.includes('--wait')) args.splice(args.indexOf('--wait'), 1);
   const [op = 'status', ...rest] = args;
   if (op === 'schedule') {
     const [sub = 'list', ...more] = rest;
@@ -356,7 +365,22 @@ export function requestOf(argv) {
   if (op === 'together') {
     // 0.134 T1: together offer <touch> <body id>, or together accept|decline <offer id>.
     if (rest[0] === 'offer') Object.assign(req, { do: 'offer', touch: rest[1], to: rest.length > 3 ? rest.slice(2) : rest[2] });
+    else if (rest[0] === 'kinds') req.do = 'kinds';
     else Object.assign(req, { do: rest[0], offer: rest[1] });
+  }
+  if (op === 'carry' || op === 'part') {
+    // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
+    const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
+    const on = flag('--on'), from = flag('--from');
+    const [does, a, b, c] = words;
+    Object.assign(req, { op: 'carry', do: does });
+    if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
+    else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
+    else if (does !== 'list') req.crew = a;
+    for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   if (op === 'listen' && rest.includes('--follow')) req.follow = true;
@@ -560,7 +584,8 @@ export async function runViews(args, shootOne) {
 
 function help(home, named, topic) {
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account'), { code: 'help-topics' });
+  if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
+  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account | carry'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -596,6 +621,32 @@ async function schedule(home, named, { sub, args, until, missed }) {
   let marks = {};
   try { marks = JSON.parse(readFileSync(runtimeOf(home, soul).state, 'utf8')).schedule?.marks ?? {}; } catch { /* no daemon yet */ }
   return { ok: true, soul, file: 'memory/schedule.md', ...listed(readSchedule(file), marks, Date.now()) };
+}
+
+/** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
+export const CARRY_HELP = [
+  'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
+  'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
+  'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
+  'carry lift <crew id> <load id>   lift a loose load together',
+  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry set-down <crew id>   put the lifted load down where it is',
+  'part take <crew id> <part id>   take a loose part, or one standing in a stand',
+  'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
+  'part unseat <crew id> <part id>   take it out of its bay',
+  'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
+];
+const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+
+/** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
+export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const listed = await ask({ op: 'carry', do: 'list' }, 5000);
+    const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
+    if (made) return { crew: made.id };
+    await sleep(200);
+  }
+  return { crew: null, note: 'the crew is not in the copy yet: `carry list` names it' };
 }
 
 if (isMain(import.meta.url)) {
@@ -639,11 +690,14 @@ if (isMain(import.meta.url)) {
     else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
+      // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
       const answer = asked.wait ? await actEnd(ask, await ask(req, ms)) : await ask(req, ms);
+      // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
+      if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
