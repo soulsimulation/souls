@@ -195,7 +195,7 @@ for (const e of m.entities.values()) {
   if (slots.length) rec.slots = b.slots.flatMap((x, i) => x.kind === 'room' ? [] : [{ n: i + 1, id: x.id, kind: x.kind, at: [S(x.p[0]), S(x.p[1]), S(x.p[2])], yaw: mdeg(x.yaw), ...(x.capacity !== undefined ? { capacity: x.capacity } : {}) }]);
   if (b.water && WATER_KINDS.test(d.name)) rec.water = { level: mm(b.water.level), ...(b.water.area ? { area: b.water.area.map(pt) } : {}), ...(b.water.path ? { path: b.water.path.map(pt), width: mm(b.water.width ?? 0) } : {}), ...(b.water.levels ? { levels: b.water.levels.map(mm) } : {}) };
   things.push(rec);
-  for (const w of withOf ? withThings({ id: e.id, name: e.name, entry: rec.entry as string | undefined, parent, slot: rec.slot, pose: rel, scale: s }, withOf(ref), entries, out) : []) {
+  for (const w of withOf ? withThings({ id: e.id, name: e.name, entry: rec.entry as string | undefined, parent, slot: rec.slot, pose: rel, world: wp, scale: s }, withOf(ref), entries, out) : []) {
     if (!kinds.has(w.kind.ref)) kinds.set(w.kind.ref, w.kind);
     const held = (rec.slots ??= []) as { n: number }[];
     if (w.slot && !held.some((x) => x.n === w.slot!.n)) held.push(w.slot);
@@ -319,6 +319,12 @@ for (const e of m.entities.values()) {
   add('slots', b.slots.filter((x) => x.kind !== 'room').length);
   for (const o of b.openings ?? []) add(o.kind === 'window' ? 'windows' : 'doorways');
   for (const l of b.links ?? []) add(`stairs:${l.kind}`);
+  // the map's `with` things it holds (with.ts): each a thing, and a slot its def does not bake is the holder's too
+  for (const w of withOf?.(d.ref) ?? []) {
+    add('things'); byRef[w.entry] = (byRef[w.entry] ?? 0) + 1;
+    const n = w.slot === undefined ? 0 : Object.keys(entries.get(entryOf?.(d.ref) ?? '')?.entry.slots ?? {}).indexOf(w.slot) + 1;
+    if (n > b.slots.filter((x) => x.kind !== 'room').length) add('slots');
+  }
 }
 
 // --- Sky (V19c, #3521) ---------------------------------------------------------------------------------------------

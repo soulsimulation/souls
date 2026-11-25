@@ -40,6 +40,13 @@ export function entriesIn(dir: string): Map<string, { entry: Entry; hash: string
 /** The facts kind of a `with` thing: named as its entry, its hash its entry's (no def of today's draws it alone). */
 export const withKind = (entry: string, hash: string) => ({ ref: `entry:${entry}`, hash, name: entry, form: 'point', layer: null, door: false, mesh: false, slots: 0 });
 
+type Pose = { x: number; y: number; z: number; yaw: number };
+/** `l` (metres and radians, in `f`'s frame) in the frame `f` is in, as the exporter composes poses. */
+const compose = (f: Pose, l: Pose): Pose => {
+  const c = Math.cos(f.yaw), s = Math.sin(f.yaw);
+  return { x: f.x + l.x * c + l.z * s, y: f.y + l.y, z: f.z - l.x * s + l.z * c, yaw: f.yaw + l.yaw };
+};
+
 /**
  * The facts things a holder's `with` rows add, and each slot they fill as the facts give a holder its slots (`{n, id,
  * kind, at, yaw}`, mm): today's def draws the guitar as part of its stand and bakes no slot, so the holder's kind
@@ -49,7 +56,7 @@ export const withKind = (entry: string, hash: string) => ({ ref: `entry:${entry}
  * is refused, as is an entry the content does not have.
  */
 export function withThings(
-  holder: { id: string; name?: string; entry?: string; parent: string | null; slot?: unknown; pose: { x: number; y: number; z: number; yaw: number }; scale: number },
+  holder: { id: string; name?: string; entry?: string; parent: string | null; slot?: unknown; pose: Pose; world: Pose; scale: number },
   rows: readonly With[],
   entries: ReadonlyMap<string, { entry: Entry; hash: string }>,
   place: (p: { x: number; y: number; z: number; yaw: number }) => number[],
@@ -64,14 +71,13 @@ export function withThings(
       if (!n) throw new Error(`${holder.id}: with ${w.entry} in slot ${w.slot}, which ${holder.entry ?? 'its entry'} does not have`);
       // in the slot, at its point: the facts give a slotted thing's pose from its parent's origin (the import takes the
       // slot's point off)
-      const at = (slots[w.slot]?.at_mm ?? [0, 0, 0]).map(Math.round);
-      Object.assign(thing, { parent: holder.id, slot: { n, id: w.slot }, pose: [...at, 0] });
+      const at = (slots[w.slot]?.at_mm ?? [0, 0, 0]).map((v) => Math.round(v * holder.scale)), [ax, ay, az] = at.map((v) => v / 1000);
+      Object.assign(thing, { parent: holder.id, slot: { n, id: w.slot }, pose: [...at, 0], world: place(compose(holder.world, { x: ax, y: ay, z: az, yaw: 0 })) });
       return { kind: withKind(w.entry, made.hash), thing, slot: { n, id: w.slot, kind: 'thing', at, yaw: 0 } };
     } else {
       // beside it, in its frame: a child of the holder's own parent (in its room, not in a slot one thing holds)
-      const [x, y, z] = (w.at_mm ?? [0, 0, 0]).map((v) => (v / 1000) * holder.scale), c = Math.cos(holder.pose.yaw), s = Math.sin(holder.pose.yaw);
-      const p = { x: holder.pose.x + x * c + z * s, y: holder.pose.y + y, z: holder.pose.z - x * s + z * c, yaw: holder.pose.yaw + ((w.yaw_mdeg ?? 0) / 180_000) * Math.PI };
-      Object.assign(thing, { parent: holder.parent, ...((holder.slot as { room?: string } | undefined)?.room ? { slot: holder.slot } : {}), pose: place(p) });
+      const [x, y, z] = (w.at_mm ?? [0, 0, 0]).map((v) => (v / 1000) * holder.scale), l = { x, y, z, yaw: ((w.yaw_mdeg ?? 0) / 180_000) * Math.PI };
+      Object.assign(thing, { parent: holder.parent, ...((holder.slot as { room?: string } | undefined)?.room ? { slot: holder.slot } : {}), pose: place(compose(holder.pose, l)), world: place(compose(holder.world, l)) });
     }
     return { kind: withKind(w.entry, made.hash), thing };
   });
