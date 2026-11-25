@@ -482,9 +482,16 @@ fn arrival<G: Geometry, R>(w: &World<'_, G, R>, fr: &FormRun) -> Option<replica:
             replica::select::point_in(w.tree, parent, p, frame).ok()
         }
     };
-    let add = |a: Vec3, b: Vec3| Vec3::new(a.x.saturating_add(b.x), a.y.saturating_add(b.y), a.z.saturating_add(b.z));
+    let add = |a: Vec3, b: Vec3| {
+        Vec3::new(
+            a.x.saturating_add(b.x),
+            a.y.saturating_add(b.y),
+            a.z.saturating_add(b.z),
+        )
+    };
     let point = add(origin, *at);
-    let toward = |p: Vec3| here(p).and_then(|to| crate::controller::facing_toward(b.pose.position, to));
+    let toward =
+        |p: Vec3| here(p).and_then(|to| crate::controller::facing_toward(b.pose.position, to));
     match face {
         Some(f) => {
             // the stand point's way, from wherever the walk ended (a body cannot stand there: the nearest place)

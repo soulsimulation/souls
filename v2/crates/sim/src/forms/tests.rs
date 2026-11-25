@@ -3003,7 +3003,11 @@ fn a_forms_walk_ends_facing_the_way_its_stand_point_says() {
         }
         // the body's facing (its +x turned), on the level, 1 m long
         let m = b.c.bodies().find(|x| x.id == body).expect("the body");
-        let f = m.pose.orientation.rotate(Vec3::new(1_000_000, 0, 0)).expect("turns");
+        let f = m
+            .pose
+            .orientation
+            .rotate(Vec3::new(1_000_000, 0, 0))
+            .expect("turns");
         let at = m.pose.position;
         println!(
             "turned {turned} mdeg: stands at ({}, {}) mm, faces ({}, {})",
