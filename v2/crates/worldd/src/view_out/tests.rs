@@ -4511,3 +4511,96 @@ fn t_late_a_thing_taken_out_of_a_closed_container_is_still_a_whole_cut() {
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
     assert_eq!(rows_whole, 1, "taking out is a whole cut");
 }
+
+/// soul.game's store move (25 Nov 2026): a world whose store moves to a new bucket, with no copy of its recovery chain
+/// there, restarts on this machine from its spool and backs its whole chain up to the new store: after one pass the new
+/// store holds a head and every object of the chain, and a writer on a fresh disk (a new machine) recovers from it.
+/// Before, the new store got the head alone (its objects were already in `kept/`, never queued again), and a new
+/// machine's recovery was refused `stream-recovery-missing`.
+#[test]
+fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
+    use directoryd::directory::store::{Memory, Store as _};
+    let h = header();
+    let d = scratch("store-move");
+    let (views, spool) = (d.join("views"), d.join("spool"));
+    let old: &'static Memory = Box::leak(Box::default());
+    let new: &'static Memory = Box::leak(Box::default());
+    fn start<'a>(
+        root: &'a Path,
+        h: &'a Header,
+        initial: Replica,
+        record: u64,
+        checkpoint: Option<Vec<u8>>,
+    ) -> PublicStart<'a> {
+        PublicStart {
+            root,
+            header: h,
+            key: key(h),
+            initial,
+            record,
+            checkpoint,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        }
+    }
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open_spooled(
+        start(&views, &h, actual.frozen(), 0, None),
+        old,
+        Closed::default(),
+        Some((spool.clone(), "old-store".to_owned())),
+    )
+    .unwrap();
+    let body = Id::new(Scope([72; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    out.back_up(old, Box::new(|_| {})).unwrap();
+    assert!(
+        out.drainer().unwrap().drain(Duration::from_secs(20)),
+        "the old store holds the spool's head"
+    );
+    drop(out);
+    let chain = old.list("").unwrap();
+    assert!(chain.iter().any(|k| k.ends_with("head")), "{chain:?}");
+    assert!(
+        chain.iter().filter(|k| k.contains("objects/")).count() > 1,
+        "{chain:?}"
+    );
+    // The move: the same machine, its views and spool, on a new and empty store.
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 1);
+    let mut moved = PublicWriter::open_spooled(
+        start(&views, &h, actual.frozen(), 1, Some(cp.clone())),
+        new,
+        Closed::default(),
+        Some((spool.clone(), "new-store".to_owned())),
+    )
+    .unwrap();
+    moved.back_up(new, Box::new(|_| {})).unwrap();
+    assert!(
+        moved.drainer().unwrap().drain(Duration::from_secs(20)),
+        "the new store holds the spool's head"
+    );
+    let state = moved.public_player().state().clone();
+    drop(moved);
+    let there = new.list("").unwrap();
+    for key in &chain {
+        assert!(there.contains(key), "the new store lacks {key}: {there:?}");
+    }
+    // A new machine: no views, no spool; the chain from the new store alone.
+    let fresh = PublicWriter::open_spooled(
+        start(&d.join("fresh-views"), &h, actual.frozen(), 1, Some(cp)),
+        new,
+        Closed::default(),
+        Some((d.join("fresh-spool"), "new-store".to_owned())),
+    )
+    .unwrap();
+    assert_eq!(fresh.public_player().state(), &state);
+    assert_eq!(fresh.source_cursor(), 1);
+}
