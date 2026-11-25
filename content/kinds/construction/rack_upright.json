@@ -420,7 +420,8 @@
   }
  },
  "geometry": {
-  "bounds_mm": [1219, 2438, 76]
+  "bounds_mm": [1219, 2438, 76],
+  "solids_mm": [[-572, 0, 38, 38, 0, 0, 2438], [572, 0, 38, 38, 0, 0, 2438]]
  },
  "looks": {
   "shape": {
@@ -449,7 +450,7 @@
   "ever": true
  },
  "text": {
-  "card": "card"
+  "card": "A 2.4 m rack frame: two carry it flat; one holds it up in its bay for the beams."
  },
  "card": {
   "text": "card"

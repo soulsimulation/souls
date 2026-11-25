@@ -118,7 +118,7 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
   changes get one independent read first. Nothing else needs a label, a tier or a sign-off.
 - **Done** means seen working on the real address with real input.
 - Never commit secrets or bypass the secret scanner. Never publish device details (see above).
-- Repo skills in `.claude/skills/`: `e2e`, `souls-director`, `entry`, `coordinator-handoff`. Agent definitions in
+- Repo skills in `.claude/skills/`: `first-day`, `e2e`, `souls-director`, `entry`, `coordinator-handoff`. Agent definitions in
   `.claude/agents/`: `coordinator`, `lane`, `reviewer`.
 
 ## Development coordinator
@@ -139,6 +139,9 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 
 - A release is main at a green nightly, built once, deployed, then looked at in a real browser on the real
   address: the world draws, a Soul moves, sign-in works, the home page is intact. If not, switch back and fix.
+- **First day comes first.** A release is not done until the `first-day` skill passes on the real address: a fresh
+  agent that knows nothing of this repository takes a new person from New Soul to a named Soul they can see and
+  instruct, approved on the page. Judge by the screen, never by a client's or another agent's report.
 - No freeze, no gate receipt, no rehearsal. The coordinator releases when a release's tasks are done.
 - Never touch services, users, DNS or proxies on the host that aren't Soul's. [docs/operations.md](docs/operations.md)
 

@@ -955,6 +955,11 @@ impl Forms {
             .collect()
     }
 
+    /// Whether `body` has a run open, or an act waiting for one (#4187).
+    pub fn running(&self, body: Id) -> bool {
+        self.by_body.contains_key(&body) || self.waiting.contains_key(&body)
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;

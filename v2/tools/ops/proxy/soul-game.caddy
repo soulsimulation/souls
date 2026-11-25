@@ -108,8 +108,10 @@ https://soul.game {
 		root * /usr/local/lib/souls/web
 		file_server
 	}
-	# /v1/account/view-token: the old page exchanges its sign-in there for the owner's message box (#4250)
-	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account/view-token
+	# /v1/account/view-token: the old page exchanges its sign-in there for the owner's message box (#4250); the owner's
+	# Souls on the new engine and their names (/v1/account/souls, /v1/account/souls/profile: the navbar and the approval
+	# card on a world page, first day 25 Nov), which the launcher does not serve
+	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account/view-token /v1/account/souls /v1/account/souls/profile
 	handle @pairing {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {

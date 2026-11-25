@@ -48,7 +48,7 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   `worldd: the public stream's backup is behind, viewers unaffected: <fault>; pass <n> refused, <k> objects wait, the
   next in <ms> ms`. `health.json` has `"stream_backup":{"state":"degraded",…,"behind":<k>}` while `stream` stays
   `serving`. The backup tries again after 1, 2, 4 … s, then every 60 s, for ever, and says `caught up` once the store
-  holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
+  holds the spool's head; a refused pass that put objects first waits 1 s again, since the store is answering. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
   log is (`behind_bytes` says how much). Each object the store holds moves to `stream-backup/kept/` at once, so a
   refused pass resumes where it stopped and never sends the spool again, and a restart, even after a SIGKILL,
   recovers the chain from this disk (the spool's head, its objects and `kept/`) and serves viewers without waiting on
@@ -68,6 +68,11 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
 - **A world's writes wait for their answer by their size.** A write's body is sent once the connection's buffer holds
   it, so a large object's tail may still be on the wire while the answer is awaited: a world's store waits 5 s for a
   write's answer, plus 1 s per MiB sent. A small write that is not answered is still found within 5 s.
+- **A read the store holds is sent again at 2 s.** The offsite bucket holds about one authenticated request in a
+  hundred past 5 s, one request at a time, while the link itself answers in a tenth of a second (measured 25 Nov
+  2026). A world's or the directory's read (an object, its head, a listing page) whose answer has not begun after
+  2 s is sent once more on another connection, with the rest of its 5 s. A store that answers neither is still found
+  within 5 s.
 - **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
   that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,
   once the world has moved past the recovered cursor, starts a new generation whose baseline holds those records, so

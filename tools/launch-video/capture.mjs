@@ -43,9 +43,10 @@ export function takeUrl(url, { hour = null, shot = false } = {}) {
 export const takeSeconds = (shot, seconds) => (shot && !shot.live ? (shot.toTick - shot.fromTick) * shot.dt : shot?.live ? shot.seconds : seconds);
 
 /** Records one take. `onPlay()` is called as the recording starts (a staged scene's beats run from then). → the sidecar */
-export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, speed = 1, onPlay = null, log = () => {} }) {
+/** `remote`: a staged world on a real site (https), as rack-bay/staged.mjs films one; never a live public world. */
+export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, speed = 1, onPlay = null, remote = false, log = () => {} }) {
   if (![1, 2, 4, 8].includes(speed) || (speed > 1 && (!shot || shot.live))) throw Error('--speed: 1, 2, 4 or 8, for a range of history');
-  if (!url || !/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url)) throw Error('--url must be a local world URL');
+  if (!url || !(/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url) || (remote && /^https:\/\//.test(url)))) throw Error('--url must be a local world URL');
   out = resolve(out);
   seconds = takeSeconds(shot, seconds) / speed;
   const [width, height] = size.split('x').map(Number);
