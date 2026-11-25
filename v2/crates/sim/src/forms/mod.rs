@@ -1976,9 +1976,15 @@ impl Forms {
                 ) {
                     Ok(n) => {
                         fr.mv = Some(n);
-                        // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
-                        if let Some(r) = w.moves.record(n) {
+                        // A repeated move (a dance for a minute) is one record for viewers, written at its first move
+                        // and planned to the latest its step can end (its length and one more move); its repeats
+                        // write nothing, and the run's end (`souls:form-ended`) is where it stopped (0.135).
+                        let repeat = fr.runner.repeat();
+                        if let Some(r) = w.moves.record(n).filter(|_| !repeat.is_some_and(|(_, again)| again)) {
                             let mut r = r.clone();
+                            if let (Some((length, _)), Some(last)) = (repeat, r.ends.last_mut()) {
+                                *last = last.saturating_add(length);
+                            }
                             if let Some(t) = w.reach.aimed(body, &r.contact) {
                                 r.target = t;
                             }

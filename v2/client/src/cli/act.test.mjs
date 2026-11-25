@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { actEnd, lookParams, requestOf, worldOf } from './souls.mjs';
+import { ACT_WAIT_MS, actEnd, actWaitMs, lookParams, requestOf, worldOf } from './souls.mjs';
 import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -142,6 +142,21 @@ test('D1: act --wait returns the final phase, the refusal, or after its window a
   assert.match(still.detail, /still running after 60 s: check with `receipt 7`/);
   const notSent = { ok: false, code: 'stopped-locally', sent: false };
   assert.equal(await actEnd(async () => assert.fail('nothing asked'), notSent), notSent, 'a local refusal is returned as it is');
+});
+
+test('0.135: act --wait waits out a declared for=<seconds> and a margin, so a dance for a minute comes back done', async () => {
+  const req = (...words) => requestOf(['act', ...words, '--wait']).req;
+  assert.equal(actWaitMs(req('wave')), ACT_WAIT_MS);
+  assert.equal(actWaitMs(req('dance', 'for=10')), ACT_WAIT_MS, 'a short one keeps the usual window');
+  assert.equal(actWaitMs(req('dance', 'for=60')), 75_000);
+  assert.equal(actWaitMs(req('dance', 'for=3600')), 3_615_000);
+  // The minute's dance ends 60.8 s after it was sent: inside its window it is `done`, never still running.
+  let t = 0;
+  const sent = { ok: true, sequence: 7, sent: true };
+  const answers = () => (t < 60_800 ? [{ answer: 'accepted' }] : [{ answer: 'accepted' }, { answer: 'receipt' }]);
+  const done = await actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() } }), sent,
+    { ms: actWaitMs(req('dance', 'for=60')), now: () => t, sleep: async (ms) => { t += ms; } });
+  assert.deepEqual([done.phase, done.stillRunning], ['done', undefined]);
 });
 
 test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {

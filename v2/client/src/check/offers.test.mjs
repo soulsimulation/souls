@@ -94,3 +94,10 @@ test('#3603: a thing moving on a course with seats offers its rider steer, stop 
   assert.deepEqual(offersOf(ID, { ...garden, slots: { shelf: { admits: 'thing' } } }, { moving: true }).map((o) => o.name),
     ['walk', 'brush', 'fill', 'rake'], 'a moving thing with no seat has no rider');
 });
+
+test('0.135: a dance\'s `for` shows its step\'s default, 10 s, and is left out of the usage\'s required words', () => {
+  const humanoid = JSON.parse(readFileSync(new URL('../../../../content/kinds/body/humanoid.json', import.meta.url), 'utf8'));
+  const dance = offersOf(ID, humanoid).find((o) => o.name === 'dance');
+  assert.equal(dance.params.for.default, 10);
+  assert.match(dance.usage, /\[for=<count>\]/);
+});

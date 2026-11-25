@@ -1791,6 +1791,8 @@ pub struct Runner {
     /// When the step in progress began, µs: a repeated move ([`Step::Move`]'s `repeat`) goes on until its length
     /// has passed since then.
     since: Micros,
+    /// The move asked for last is a repeat of the step's move, not its first.
+    again_move: bool,
     /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
     /// body out again by a rise, then ends `left`.
     backing: bool,
@@ -1832,6 +1834,7 @@ impl Runner {
             leaving: false,
             again: false,
             since: 0,
+            again_move: false,
             backing: false,
             rising_out: false,
         }
@@ -1862,6 +1865,18 @@ impl Runner {
     pub fn next_step(&self) -> Option<&Step> {
         self.step()?;
         self.steps.get(self.at + 1)
+    }
+
+    /// The step in progress is a repeated move (a dance for a minute): its length, µs, and whether the move asked for
+    /// last is a repeat rather than its first. The world writes one record for viewers at the first move, planned to
+    /// the step's end, and none for the repeats; the run's end cuts it (0.135).
+    pub fn repeat(&self) -> Option<(Micros, bool)> {
+        match self.step()? {
+            Step::Move {
+                repeat: Some(r), ..
+            } => Some((*r, self.again_move)),
+            _ => None,
+        }
     }
 
     /// The number of the step in progress, if the run has not ended.
@@ -1959,6 +1974,7 @@ impl Runner {
                 name: mv, at, on, ..
             } => {
                 self.since = host.now();
+                self.again_move = false;
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
@@ -2114,6 +2130,7 @@ impl Runner {
                 }
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                self.again_move = true;
                 Next::Move {
                     name: mv,
                     node: on.unwrap_or(self.node),

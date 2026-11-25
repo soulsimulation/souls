@@ -461,6 +461,14 @@ export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
 
 /** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
 export const ACT_WAIT_MS = 60_000;
+/** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
+export const ACT_WAIT_MARGIN_MS = 15_000;
+
+/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer. */
+export function actWaitMs(req) {
+  const declared = (req?.acts ?? []).map((a) => /^for=(\d+)$/.exec(String(a))?.[1]).find((n) => n !== undefined);
+  return declared === undefined ? ACT_WAIT_MS : Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS);
+}
 /** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
 const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
 
@@ -697,7 +705,7 @@ if (isMain(import.meta.url)) {
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
-      const answer = asked.wait ? await actEnd(ask, await ask(req, ms)) : await ask(req, ms);
+      const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
