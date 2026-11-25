@@ -231,7 +231,7 @@ export class GodWorldLiving {
     const portable=new Map<string,{index:number;halo:number;at:readonly number[]}[]>();
     const candidates = (this.layer.lightCandidates?.() as Iterable<ModelLike['entities'] extends Map<string, infer E> ? E : never> | null | undefined) ?? m.entities.values();   // PERF-STREAM: the drawn things only under streaming
     const scan = () => { for (const e of candidates) {
-      if (e.state?.on === false) continue;
+      if (e.state?.on === false || e.state?.lit === false) continue; // switched off, or a fire or candle put out
       const def = m.resolvedDef(e.def), components = def?.components, lights = defLights(components);
       // W2: any lighthouse sweeps its beams at night from its lantern room (near the top of its box)
       if (def?.tags?.includes('lighthouse')) { const p = m.worldPose(e), h = (def.size?.box?.[1] ?? 16) * (p.s ?? 1); beacons.push([p.x, p.y + h * 0.83, p.z]); }

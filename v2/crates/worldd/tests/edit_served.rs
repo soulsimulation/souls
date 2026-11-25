@@ -2877,6 +2877,137 @@ fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() 
     }
 }
 
+/// 0.135: a dance for a while (`act dance for=20`) in a served world is one run whose move repeats back to back. The log
+/// holds a record of it for viewers (`souls:form-move`) at its first move and again 15 s on, so a viewer who comes in
+/// mid-dance draws it from the next, each planned to the latest the dance can end; not one a move (25 here). The run
+/// ends (`souls:form-ended`, where the page cuts it) once its 20 s have passed, at the end of its last whole move.
+#[test]
+fn a_dance_for_a_while_is_a_move_record_every_15_s_for_viewers_and_ends_after_its_length() {
+    let d = scratch("dance-for");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    std::fs::copy(root, entries.join("humanoid.json")).unwrap();
+    let w = seed_entries(
+        &d,
+        &testworld::generate(1, 0).unwrap().text,
+        1,
+        (-40, 30),
+        Some(&entries),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+    assert_eq!(socket_end(&mut souls).kind, 1, "the Soul's walk births it");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let body = t
+        .links_at(w.souls[0])
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's body");
+    let i = Intent {
+        actor: Actor::Soul(w.souls[0]),
+        verb: Name::new("eden:dance").unwrap(),
+        target: Some(Target::Node(body)),
+        parameters: BTreeMap::from([(
+            1,
+            Value::Array(vec![Value::Array(vec![
+                Value::Bytes(b"for".to_vec()),
+                Value::Uint(20),
+            ])]),
+        )]),
+        sequence: 2,
+        basis: basis(w.root.scope(), 0),
+        expiry: answers::now() + 120_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    souls
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    souls.write_all(&bytes).unwrap();
+    let mut kinds = Vec::new();
+    loop {
+        let got = socket_answer(&mut souls);
+        kinds.push(got.kind);
+        if got.kind != 3 {
+            break;
+        }
+    }
+    assert_eq!(kinds.last(), Some(&1), "done: {kinds:?}");
+    // The body's form events, in log order: (name, world time, the move record's planned ends).
+    let log = std::fs::read(w.dir.join("log")).unwrap();
+    let mut events: Vec<(String, i64, Vec<i64>)> = Vec::new();
+    for rec in sim::log::recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&rec).unwrap().effects {
+            for v in e.events.iter().flatten() {
+                if !v.name.as_str().starts_with("souls:form-")
+                    || v.fields.get(&2) != Some(&body.to_value())
+                {
+                    continue;
+                }
+                let ends = match v.fields.get(&3) {
+                    Some(Value::Map(r)) => match r.get(&8) {
+                        Some(Value::Array(a)) => a
+                            .iter()
+                            .filter_map(|x| match x {
+                                Value::Uint(u) => i64::try_from(*u).ok(),
+                                _ => None,
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    },
+                    _ => Vec::new(),
+                };
+                events.push((v.name.as_str().to_owned(), e.envelope.at, ends));
+            }
+        }
+    }
+    let moves: Vec<_> = events.iter().filter(|e| e.0 == "souls:form-move").collect();
+    let ended: Vec<_> = events
+        .iter()
+        .filter(|e| e.0 == "souls:form-ended")
+        .collect();
+    println!("dance events: {events:?}");
+    assert_eq!(
+        moves.len(),
+        2,
+        "a record at the start and 15 s on, not one a move"
+    );
+    let (start, planned) = (moves[0].1, *moves[0].2.last().expect("planned ends"));
+    let again = moves[1].1 - start;
+    assert!(
+        (15_000_000..15_000_000 + 900_000).contains(&again),
+        "the record again at the first move 15 s on: {again}"
+    );
+    assert_eq!(moves[1].2.last(), Some(&planned), "planned to the same end");
+    let end = ended.last().expect("the run ended").1;
+    assert!(
+        (start + 20_000_000..=start + 20_800_000 + 100_000).contains(&end),
+        "it dances its 20 s, to its last whole move: ended {} ms in",
+        (end - start) / 1000
+    );
+    assert!(
+        planned >= end,
+        "the record is planned to the latest the dance can end: {planned} < {end}"
+    );
+}
+
 /// One Soul's end of the world's socket (0.135 A2): its own connection, so two Souls' walks run at once and each
 /// reads its own answers.
 struct Hand {

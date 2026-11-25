@@ -302,6 +302,9 @@ const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unkno
 const PAGE_STREAM = typeof window === 'undefined' ? null : v2Stream();
 /** This page's v2 stream as its inline config named it when the page loaded; null on an old-engine world. */
 export const v2World = (): string | null => PAGE_STREAM;
+/** The world's name as the page's inline config gives it (`worldName`), or null: what the page calls the world, never
+ *  the tab's title (`<name> · Souls`). */
+export const v2PageWorldName = (): string | null => (typeof PAGE_CONFIG?.worldName === 'string' && PAGE_CONFIG.worldName.trim() ? PAGE_CONFIG.worldName.trim() : null);
 /** The new engine's name for this page's world, from its stream (`/s/w/<name>/views/…`): the name a Soul's pairing
  *  request and the owner's Soul list use, which need not be the page's slug. Null on an old-engine world. */
 export const v2WorldName = (stream: string | null = PAGE_STREAM): string | null => (stream ? /^\/s\/w\/([a-z0-9][a-z0-9-]{0,62})\//.exec(stream)?.[1] ?? null : null);
