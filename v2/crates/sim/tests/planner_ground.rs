@@ -159,6 +159,7 @@ fn wants(body: Body, target: Target, to: Vec3, map: &Arc<Versions>) -> Wants {
                     reach: 0,
                     door: None,
                     ring: None,
+                    aim: None,
                 },
             },
             FormQuestion {

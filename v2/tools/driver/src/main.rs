@@ -1054,6 +1054,12 @@ async fn agent(
                         Heard::Refused(s, reason) if pending.contains_key(&s) => {
                             let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
                             *out.refused_by.entry(format!("{verb} {reason}")).or_default() += 1;
+                            // A walk refused `resource-held` is a walk while seated (`replica::move_check`): the Soul
+                            // sits, though no sit's receipt said so (one lost with a world killed as it sat), so its
+                            // next walk or sit goes as a rise first.
+                            if reason == "resource-held" && verb.ends_with(":walk") {
+                                seated.store(true, Ordering::Relaxed);
+                            }
                             let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
                             let first = !accepted.remove(&s);
                             if first {

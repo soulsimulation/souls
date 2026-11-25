@@ -81,6 +81,10 @@ pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (
 /// them as today's page does (a hall's roof). On the ground, never on a thing of the def, so removing any thing keeps
 /// it. Above the entries' block (`replica::fields`).
 pub const F_DEF_BODIES: u64 = 102;
+/// The open ground's palette (today's `state.ground.palette`: desert, playa, grass …) as `souls:<palette>`: what a page
+/// colours the ground and its cover by (a Mars camp's desert floor, not grass). Display only, like the sky's palette
+/// (`replica::sky::F_PALETTE`): no rule reads it. On the open ground, when the facts' ground names one.
+pub const F_GROUND_PALETTE: u64 = 103;
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -1656,8 +1660,8 @@ fn presentation(f: &Json) -> R<Presentation> {
     Ok(p)
 }
 
-/// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, and the world's
-/// own defs (`F_DEF_BODIES`), when the facts have a ground.
+/// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, the world's
+/// own defs (`F_DEF_BODIES`) and its palette (`F_GROUND_PALETTE`), when the facts have a ground.
 fn terrain(f: &Json) -> R<BTreeMap<u64, Value>> {
     let mut out = BTreeMap::new();
     let Some(g) = f.get("ground") else {
@@ -1674,6 +1678,10 @@ fn terrain(f: &Json) -> R<BTreeMap<u64, Value>> {
         if !rows.is_empty() {
             out.insert(F_DEF_BODIES, Value::Array(rows));
         }
+    }
+    if let Some(p) = g.get("palette").and_then(Json::str) {
+        let n = Name::new(&format!("souls:{p}")).ok_or_else(|| format!("ground palette {p:?}"))?;
+        out.insert(F_GROUND_PALETTE, Value::Text(n));
     }
     let mut tiles = Vec::new();
     for t in need(g, "tiles")?.arr() {
