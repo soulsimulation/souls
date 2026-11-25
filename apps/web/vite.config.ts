@@ -246,7 +246,9 @@ function vendorGroups() {
  *  (`content/kinds`; not an activity), by its name: the old page draws a placed thing no library def draws as a box that
  *  size (v2-engine/source/stream-scene.ts). Outside the build the table is empty. The kinds with their own shape
  *  (`looks.shape`) go in one data file beside the bundle (`KIND_LOOKS_URL`, not code: fetched once, the first time the
- *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none. */
+ *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none.
+ *  `KIND_STATE_URL`: a data file of each kind's state fields by name and number, which the page names a thing's fields by
+ *  (world-state.ts), fetched with the looks. */
 function kindBounds(): Plugin {
   const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
   let build = false;
@@ -255,17 +257,23 @@ function kindBounds(): Plugin {
     configResolved(c) { build = c.command === 'build'; },
     transform(_code, id) {
       if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
-      const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {};
+      const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {}, state: Record<string, Record<string, unknown[]>> = {};
       for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
         if (!f.endsWith('.json')) continue;
         const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; state?: unknown; geometry?: { bounds_mm?: unknown }; looks?: { shape?: { shapes?: unknown }; table?: unknown } };
         this.addWatchFile(file);
         if (typeof e.kind !== 'string' || e.owner !== 'thing' || e.roles || !Array.isArray(e.geometry?.bounds_mm)) continue;
         out[e.kind] = e.geometry.bounds_mm as number[];
+        for (const [k, f] of Object.entries((e.state ?? {}) as Record<string, { n?: unknown; type?: unknown; default?: unknown; values?: unknown }>)) {
+          if (typeof f?.n !== 'number' || (f.type !== 'bool' && f.type !== 'int' && f.type !== 'enum')) continue;
+          const d = typeof f.default === 'boolean' ? Number(f.default) : typeof f.default === 'number' || typeof f.default === 'string' ? f.default : null;
+          (state[e.kind] ??= {})[k] = [f.n, f.type, d, ...(Array.isArray(f.values) ? [f.values] : [])];
+        }
         if (Array.isArray(e.looks?.shape?.shapes)) looks[e.kind] = { format: 'souls-entry/1', kind: e.kind, state: e.state ?? {}, geometry: { bounds_mm: e.geometry.bounds_mm }, looks: { shape: e.looks.shape, ...(e.looks.table ? { table: e.looks.table } : {}) } };
       }
       const url = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-looks.json', source: JSON.stringify(looks) })}` : 'null';
-      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};`, map: null };
+      const stateUrl = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-state.json', source: JSON.stringify(state) })}` : 'null';
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};`, map: null };
     },
   };
 }

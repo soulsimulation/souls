@@ -17,7 +17,7 @@
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
-import { placedOf, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
 
@@ -269,8 +269,11 @@ export class CreatorKinds {
       if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
-      // a kind drawn from its own shape shows its state: the parts its `when`s and looks table pick
-      const shown = d?.fields ? { ...lookState(n.fields as Fields | undefined, d.fields), ...(tint !== undefined ? { tint } : {}) } : tint !== undefined ? { tint } : undefined;
+      // a kind drawn from its own shape shows its state: the parts its `when`s and looks table pick; one drawn by a library
+      // def or the world's own things' def, by that def's state keys (a campfire's `lit` is its def's `on`), as theirs are
+      const libDef = lib ?? (!d && old ? m.resolvedDef?.(old) : undefined), kept = libDef ? thingState(n) : null, drawn = kept ? drawnState(kept, libDef) : null;
+      const shown = d?.fields ? { ...lookState(n.fields as Fields | undefined, d.fields), ...(tint !== undefined ? { tint } : {}) }
+        : drawn && Object.keys(drawn).length ? drawn : tint !== undefined ? { tint } : undefined;
       const ref = d ? d.def.ref : old!, key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), [to.yaw, ...(to.tilt ?? [])].map((v) => Math.round(v * 1000)), shown ?? null]);
       live.add(eid);
       if (this.sent.get(eid) === key && m.entities.has(eid) && !(d && need(d.def))) continue;

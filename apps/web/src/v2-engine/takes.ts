@@ -25,6 +25,8 @@ const WALKING = 0.05;
  *  position then the floor under the seat. K4 (0.135): `on` while its frame moves on a course (a balloon's rider): its
  *  world position (mm) at a later time, until its next sample; `p` is where it was at `at`. */
 export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat; on?: (t: number) => [number, number, number] | null };
+/** The world turned a standing body at world time `at` (µs), from one heading to another (radians, atan2(dz, dx)). */
+export type Turn = { at: number; from: number; to: number };
 /** One Soul's body as the chunks need it. */
 export type Body = {
   /** The take's entity id. */
@@ -38,6 +40,8 @@ export type Body = {
   samples: WorldSample[];
   /** Heading (radians, atan2(dz, dx)) before it first moves: from its placed orientation. */
   heading: number;
+  /** Each time the world turned it where it stood (its record's orientation changed in place), in time order. */
+  turns?: Turn[];
   /** World time (µs) from which it is not drawn: the public copy can no longer place it (a frame that is not public, or
    *  it left); absent while it is drawn. */
   until?: number;
@@ -82,24 +86,55 @@ export function positionAt(s: readonly WorldSample[], t: number): [number, numbe
 }
 
 /** Ground speed (m/s) and heading at t: of the segment around t; heading of the last segment that moved before it. */
-export function motionAt(s: readonly WorldSample[], t: number, heading: number): { speed: number; heading: number } {
-  if (s.length < 2 || t < s[0].at || t >= s[s.length - 1].at) return { speed: 0, heading: lastHeading(s, s.length - 1, t, heading) };
+export function motionAt(s: readonly WorldSample[], t: number, heading: number, turns: readonly Turn[] = []): { speed: number; heading: number } {
+  // seated, it faces out of its seat: never the way it walked up to it (its back to the seat's back)
+  const sat = seatAt(s, t)?.heading;
+  if (sat !== undefined) return { speed: 0, heading: sat };
+  if (s.length < 2 || t < s[0].at || t >= s[s.length - 1].at) return { speed: 0, heading: turnedAt(turns, t, lastHeading(s, s.length - 1, t, heading)) };
   let i = 0;
   while (s[i + 1].at <= t) i++;
   const a = s[i], b = s[i + 1];
-  if (a.seat || b.seat) return { speed: 0, heading: lastHeading(s, i, t, heading) };
+  if (a.seat || b.seat) return { speed: 0, heading: lastHeading(s, i, t, heading).heading };
   const d = Math.hypot(b.p[0] - a.p[0], b.p[2] - a.p[2]) / POS_Q, secs = (b.at - a.at) / 1e6;
   const speed = secs > 0 ? d / secs : 0;
-  return { speed, heading: lastHeading(s, i + 1, t, heading) };
+  const h = lastHeading(s, i + 1, t, heading);
+  return { speed, heading: speed < WALKING ? turnedAt(turns, t, h) : h.heading };
 }
 
-function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): number {
+/** The heading of the last step that moved before t, and when that step ended (µs; -Infinity: none, `fallback`). */
+function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): { heading: number; at: number } {
   for (let k = Math.min(upTo, s.length - 1); k > 0; k--) {
-    if (s[k - 1].at > t || s[k - 1].seat || s[k].seat) continue;
+    if (s[k - 1].at > t) continue;
+    // risen from a seat it faced out of: it stands facing that way, never back the way it walked up to the seat
+    if (s[k - 1].seat?.heading !== undefined && !s[k].seat) return { heading: s[k - 1].seat!.heading!, at: s[k].at };
+    if (s[k - 1].seat || s[k].seat) continue;
     const dx = s[k].p[0] - s[k - 1].p[0], dz = s[k].p[2] - s[k - 1].p[2];
-    if (Math.hypot(dx, dz) >= 1) return Math.atan2(dz, dx);
+    if (Math.hypot(dx, dz) >= 1) return { heading: Math.atan2(dz, dx), at: s[k].at };
   }
-  return fallback;
+  return { heading: fallback, at: -Infinity };
+}
+
+/** How fast the drawing turns a standing body to the facing the world set it (rad/s): half a turn in 0.6 s. */
+const TURN_RATE = Math.PI / 0.6;
+
+/**
+ * A standing body's heading at t: the world's facing for it once the world turned it after its last step (a walk to a
+ * thing ends facing it, worldd `Bodies::face`), else the way that step went. The drawing eases from the one to the other
+ * at [TURN_RATE]; the world's body turned at once.
+ */
+function turnedAt(turns: readonly Turn[], t: number, last: { heading: number; at: number }): number {
+  let from = last.heading, to: Turn | null = null;
+  for (const r of turns) {
+    if (r.at > t) { if (!to && last.at === -Infinity) from = r.from; break; }
+    if (r.at < last.at) continue;
+    if (to) from = to.to;
+    else if (last.at === -Infinity) from = r.from;
+    to = r;
+  }
+  if (!to) return from;
+  const d = ((to.to - from) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+  const u = Math.min(1, (t - to.at) / 1e6 * TURN_RATE / Math.max(Math.abs(d), 1e-9));
+  return from + d * u * u * (3 - 2 * u);
 }
 
 /** How long a let-go hand hold stays in the take after it ends, µs: the old renderer lowers both arms over it
@@ -118,7 +153,7 @@ export function holdState(b: Body, byNode: ReadonlyMap<string, Body>, t: number)
   if (!h || !other) return null;
   const p = positionAt(b.samples, h.start), q = positionAt(other.samples, h.start);
   if (!p || !q) return null;
-  const f = motionAt(b.samples, h.start, b.heading).heading;
+  const f = motionAt(b.samples, h.start, b.heading, b.turns).heading;
   // The partner to the right of the way the body faces (+z of a body facing +x) is held with the right hand.
   const right = Math.cos(f) * (q[2] - p[2]) - Math.sin(f) * (q[0] - p[0]) >= 0;
   const tick = (us: number) => Math.round(us / TICK_US);
@@ -155,7 +190,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
       p = positionAt(b.samples, t)!;
-      const m = motionAt(b.samples, t, heading);
+      const m = motionAt(b.samples, t, heading, b.turns);
       heading = m.heading;
       const walking = m.speed >= WALKING;
       // 0.134 B4: a gesture aimed at another body faces it and names it the partner (the old paired poses meet it); a

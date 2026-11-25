@@ -603,7 +603,7 @@ function boatStep(obj: THREE.Object3D, e: Entity, def: StoredDef, model: WorldMo
   obj.rotation.y = base.yaw + 0.35 * (R / Math.max(1e-6, b.drift)) * Math.sin((t * T) / (P * 0.9) + phase * 0.5);
 }
 
-/** Lamps glow at dusk and night; `state.on: false` darkens this one. Lane PERF-MATERIALS: a glow level is a shared
+/** Lamps glow at dusk and night; `state.on: false` (a fire's or candle's `lit: false`) darkens this one. Lane PERF-MATERIALS: a glow level is a shared
  *  variant of the part's library material (material-variants.ts), one per (material, level in ~1% steps), not a clone
  *  per lamp: Eden 2026 had 813 lamp materials for 16 distinct looks. A flame part's variant is also its dimmed albedo. */
 type GlowPart = { mesh: THREE.Mesh; base: THREE.MeshStandardMaterial; flame: boolean; gain: number; steady?: boolean };
@@ -661,7 +661,7 @@ export function syncLightGlow(obj: THREE.Object3D, e: Entity, def: StoredDef, mo
     obj.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (m && (m as { emissive?: THREE.Color }).emissive && m.emissive.getHex() !== 0 && m.emissiveIntensity > 0 && !c.userData.shadowProxy) { parts.push({ mesh: c as THREE.Mesh, base: m, flame: isFlamePart(c), gain: m.userData.kitGlowIntensity ?? 1 }); } });  // PERF-BATCH: steadyPart decides whether a part merges or stays dynamic
     ud.glow = parts;
   }
-  const lights=defLights(def.components),off = e.state?.on === false || lights.every(l=>l.on===false);
+  const lights=defLights(def.components),off = e.state?.on === false || e.state?.lit === false || lights.every(l=>l.on===false);
   if (off) { for (const p of ud.glow) { steadyPart(p, false); setGlow(p, 0); } return; }
   const reduced=!!reducedLightMotion?.matches;
   const patterned=lights.some(l=>l.pattern&&l.pattern!=='steady'),flame=!patterned&&flickers(e.def); // W2: a flame's own glow flickers with its pool
@@ -681,7 +681,7 @@ function steadyWobble(t: number): number { return 0.03 * Math.sin((Math.floor(t 
  *  steadyGlowAt × its gain), or by its own pattern (a blink, a twinkle, a flame's flicker). */
 export function glowKind(obj: THREE.Object3D, e: Entity, def: StoredDef): 'off' | 'steady' | 'patterned' {
   const lights = defLights(def.components);
-  if (e.state?.on === false || lights.every((l) => l.on === false)) return 'off';
+  if (e.state?.on === false || e.state?.lit === false || lights.every((l) => l.on === false)) return 'off';   // a fire put out: `lit`
   void obj;
   return lights.some((l) => l.pattern && l.pattern !== 'steady') || flickers(e.def) ? 'patterned' : 'steady';
 }
