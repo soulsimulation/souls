@@ -1601,6 +1601,109 @@ fn r12_a_world_whose_stream_store_refuses_stays_up_degraded_and_recovers_when_it
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// 24 Nov (0.135.0): three production worlds served no viewers for ten minutes after a restart, their stream's
+/// recovery reading each backed-up object from a store that held every read past the client's 5 s. A restart recovers
+/// the public stream from this machine's disk (the spool and its copy of what the store holds): while the store never
+/// answers, the stream serves at once and only the backup waits.
+// A real process on the real clock: the stall and the health file's writes are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn a_restart_serves_the_stream_from_disk_while_the_store_never_answers() {
+    use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("disk-recovery");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/disk", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let health = dir.join("health.json");
+    let pointer = dir.join("views/world.json");
+    let stream_until = |state: &str, within: Duration| -> String {
+        let want = format!("\"stream\":{{\"state\":\"{state}\"");
+        let end = Instant::now() + within;
+        loop {
+            let h = std::fs::read_to_string(&health).unwrap_or_default();
+            if h.contains(&want) {
+                return h;
+            }
+            assert!(
+                Instant::now() < end,
+                "no stream {state} in health.json within {within:?}: {h}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // The spool's queue: the objects not yet in the store.
+    let queued = || -> usize {
+        let mut n = 0;
+        let mut todo = vec![dir.join("stream-backup")];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.ends_with("kept") {
+                    continue;
+                }
+                if p.is_dir() {
+                    todo.push(p);
+                } else if p.parent().is_some_and(|q| q.ends_with("objects")) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    stream_until("serving", Duration::from_secs(30));
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "the walk ends in a receipt");
+    drop(c);
+    // The backup catches up: its head in the store, every object off the queue.
+    let end = Instant::now() + Duration::from_secs(60);
+    while !(s
+        .paths()
+        .iter()
+        .any(|p| p.contains("/stream-recovery/") && p.ends_with("/head"))
+        && queued() == 0)
+    {
+        assert!(Instant::now() < end, "the stream's backup caught up");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_millis(1_500));
+    w.kill();
+    // The store never answers: every read held past the client's timeout, every write's answer lost.
+    s.stall_reads(usize::MAX, Duration::from_secs(6), "");
+    s.fail_writes(usize::MAX, Fail::Lost);
+    let _ = std::fs::remove_file(&health);
+    let started = Instant::now();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    println!("listening {:?} after the restart", started.elapsed());
+    // Served from disk: well inside one stalled read and its first retries (6 s + 2 s + 6 s ...), never degraded. (The
+    // start's own 5 s is the creator's record, which the world starts without.)
+    let h = stream_until("serving", Duration::from_secs(12));
+    println!("serving {:?} after the restart", started.elapsed());
+    assert!(!h.contains("\"stream\":{\"state\":\"degraded\""), "{h}");
+    assert!(pointer.is_file(), "viewers have the stream");
+    let (_, files) = served_stream(&dir);
+    assert!(!files.is_empty(), "it names a valid stream");
+    w.kill();
+    s.stall_reads(0, Duration::ZERO, "");
+    s.fail_writes(0, Fail::Lost);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R15 (0.133): viewers read the public stream from the machine's disk, and the store is its backup only. A 60 s store
 /// stall mid-run (every write's answer lost, every read held past the client's timeout) never delays a viewer or the
 /// world: while the store is stalled, new parts are published on disk, a Soul's walks are answered, and
