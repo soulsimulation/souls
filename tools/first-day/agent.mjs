@@ -102,8 +102,11 @@ export function say({ cwd, text, sessionId = null, model = null, maxSec = 600, o
     p.on('close', (exit) => {
       clearTimeout(timer); clearTimeout(ended);
       const init = events.find((e) => e.type === 'system' && e.subtype === 'init') ?? null;
-      const result = events.findLast((e) => e.type === 'result' && String(e.result ?? '').trim()) ?? events.findLast((e) => e.type === 'result') ?? null;
-      ok({ sessionId: result?.session_id ?? init?.session_id ?? sessionId, events, init, result, final: String(result?.result ?? ''), ms: result?._at ?? Date.now() - t0, exit, timedOut: timedOut && !result, answered, stopped, stderr: err.slice(-2000) });
+      // a reply ends the turn; with none (cut off at the cap), the turn lasted until it was stopped, and an empty result
+      // (a resumed session's stale task notice) is not a reply
+      const reply = events.findLast((e) => e.type === 'result' && String(e.result ?? '').trim()) ?? null;
+      const result = reply ?? events.findLast((e) => e.type === 'result') ?? null;
+      ok({ sessionId: result?.session_id ?? init?.session_id ?? sessionId, events, init, result, final: String(reply?.result ?? ''), ms: reply?._at ?? Date.now() - t0, exit, timedOut: timedOut && !reply, answered, stopped, stderr: err.slice(-2000) });
     });
   });
 }

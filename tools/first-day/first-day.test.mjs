@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { contamination, pairingIn, personReply, turnSummary, personEnv } from './agent.mjs';
+import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { contamination, pairingIn, personReply, turnSummary, personEnv, say } from './agent.mjs';
 import { checkStep, arrivalChecks } from './checks.mjs';
 import { parseVerdict } from './judge.mjs';
 import { stepPassed, findingsOf, confusingOf, markdown } from './report.mjs';
@@ -90,4 +93,11 @@ test('the report turns failed steps into findings, worst first, and renders a ta
   assert.match(md, /\| E3 \| "Put out the campfire\." \| FAIL/);
   assert.match(md, /S4: Shall I\?/);
   assert.match(md, /shots\/E3-after\.png/);
+});
+
+test('a turn cut off at the cap lasts until it was stopped, not until a stale empty result', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'first-day-test-')), bin = join(dir, 'fake-claude');
+  writeFileSync(bin, '#!/bin/sh\necho \'{"type":"result","result":"","session_id":"s1"}\'\nsleep 5\n'); chmodSync(bin, 0o755);
+  const r = await say({ cwd: dir, text: 'hi', maxSec: 1, bin });
+  assert.ok(r.ms >= 900, `ms ${r.ms}`); assert.equal(r.timedOut, true); assert.equal(r.final, ''); assert.equal(r.sessionId, 's1');
 });
