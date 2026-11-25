@@ -2102,6 +2102,25 @@ impl Forms {
                 if let Some(at) = at {
                     found.contact = at;
                 }
+                // A move made from a seat (`Move::seated`: a stretch, a slump) by a body in a seat, a bed or a standing
+                // slot leaves its legs where the slot holds them (#4143): it neither claims nor blocks them, which the
+                // slot's hold would refuse `resource-held` while the client's form rules say yes. Every other move (a
+                // jump, a dance, a bow) still claims the legs, and the seat's hold refuses it: a gateway sit writes no
+                // `posture`, so a form's posture need alone would let it play through the seat.
+                if found.seated
+                    && w.places
+                        .as_ref()
+                        .is_some_and(|p| p.slots.held_by(body).is_some())
+                {
+                    use replica::bodies::{Class, Want};
+                    found.claims.retain(|c| {
+                        !matches!(
+                            c,
+                            Want::All(Class::Locomotion) | Want::One(Class::Locomotion)
+                        )
+                    });
+                    found.blocks.retain(|c| *c != Class::Locomotion);
+                }
                 match w.moves.start(
                     w.controller,
                     w.due,

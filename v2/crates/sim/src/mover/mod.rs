@@ -677,6 +677,14 @@ pub trait Floors {
     fn wet(&self, _node: Id, _at: Vec3) -> bool {
         false
     }
+
+    /// Whether `at` (µm, `node`'s frame) is dry ground sealed off, for a body of `build`, from the main ground: the part
+    /// of the ground that holds the world's entry, where Souls are born (`crate::walk::town::Town::set_entry`), on the
+    /// map for the body's size. A pocket no walk from there reaches: a restart never places a body there, nor does a
+    /// climb out land one there. No entry known, or no dry ground at `at`: never.
+    fn sealed(&self, _node: Id, _at: Vec3, _build: replica::kinds::sizes::Build) -> bool {
+        false
+    }
 }
 impl Floors for std::collections::BTreeMap<Id, Surface> {
     fn for_build(

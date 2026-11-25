@@ -62,8 +62,8 @@ pub fn register(
         // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
         let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
         let clear = stand.as_ref().ok().and_then(|&stand| {
-            if view.stand_near(floor, stand, 1, None).is_none() {
-                view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            if view.stand_near(floor, stand, 1, None).is_none() || view.sealed(floor, stand) {
+                clear_near(&view, floor, stand)
             } else if passage(stand) {
                 out_of_passage(&view, floor, stand, point, &passage)
             } else {
@@ -218,6 +218,30 @@ pub fn ride_trips(
             (!ends.is_empty()).then_some((thing, ends))
         })
         .collect()
+}
+
+/// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand and that
+/// a walk from the main ground reaches ([`sim::walk::town::View::sealed`]): never a pocket sealed off between things
+/// (a bench 950 mm from its table), where a seat's walk would end `no-way` and a body rising would be shut in. The
+/// nearest place ([`sim::spots::within`]) when it is not sealed; else the nearest on a 50 mm grid round `at`.
+fn clear_near(view: &sim::walk::town::View<'_>, floor: Id, at: Vec3) -> Option<Vec3> {
+    const STEP: i64 = 50_000;
+    let reach = skills::form_runner::REACH;
+    let first = view.stand_near(floor, at, reach, None)?;
+    if !view.sealed(floor, first) {
+        return Some(first);
+    }
+    let n = reach / STEP;
+    let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
+        .flat_map(|i| (-n..=n).map(move |j| (i * i + j * j, i, j)))
+        .filter(|(d, ..)| *d * STEP * STEP <= reach * reach)
+        .collect();
+    grid.sort_unstable();
+    grid.into_iter().find_map(|(_, i, j)| {
+        let p = Vec3::new(at.x + i * STEP, at.y, at.z + j * STEP);
+        view.stand_near(floor, p, 1, None)
+            .filter(|q| !view.sealed(floor, *q))
+    })
 }
 
 /// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that

@@ -560,7 +560,9 @@ A form's `move` step names a move and a point; moves are their own data in `cont
 and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
 classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
-`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+`start_up_us`, `recovery_us` and for a slide `slide_us`. `seated: true` (#4143) marks a move made from a seat (a
+stretch, a slump): a body a seat, a bed or a standing slot holds makes it with its legs left to the slot, which its
+`locomotion` claim and block then skip; any other move that claims the legs is refused there `resource-held`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
 point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
 `swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and

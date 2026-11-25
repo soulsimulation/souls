@@ -738,9 +738,10 @@ fn c19_three_souls_share_a_sofa_each_in_its_own_slot_over_a_restart() {
 /// `front`, where a body stands to take the seat, lies under the table top) through the chair's own `sit` form: it
 /// walks in through the cabin's door to the nearest clear ground within reach of the seat's stand point (C15) and
 /// takes the seat by the form's `sit` step (B2's sit move into B3's seat, the gateway's own). It rises by the
-/// gateway's rise. The library's reading chairs stand under their tables too, but their nearest clear ground within
-/// 0.3 m is a pocket between the chair and the table no walk reaches (0.6 m off is the nearest a walk reaches): the sit
-/// there answers `souls:no-way`, by name.
+/// gateway's rise. The library's reading chairs stand under their tables too. Their nearest clear ground within 0.3 m
+/// was a pocket between the chair and the table no walk reached, and the sit there answered `souls:no-way`; since the
+/// ground under a table's top is cut (first-day tester, round 2) that pocket is gone, the stand point is moved to the
+/// nearest ground a walk reaches when the seats are registered, and a Soul born outside the library sits there.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c17_a2_a_soul_sits_at_a_chair_under_its_table_by_its_own_form() {
@@ -755,13 +756,17 @@ fn c17_a2_a_soul_sits_at_a_chair_under_its_table_by_its_own_form() {
     println!("from outside, sit at the cabin's chair under its table, by its own form: {sat:?}");
     let rose = soul.act("eden:rise", None, BTreeMap::new());
     println!("rise: {rose:?}");
-    let pocket = soul.act("eden:sit", Some(reading), args(&[("seat", Value::Uint(1))]));
-    println!("sit at the library's west reading chair: {pocket:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    // Born outside the library's door (at (74.0, -2.91) m).
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "c17a2lib", im.nodes["world"].scope());
+    let reads = soul.act("eden:sit", Some(reading), args(&[("seat", Value::Uint(1))]));
+    println!("sit at the library's west reading chair: {reads:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     sat.expect("sat by the chair's own form");
     rose.expect("rose");
-    assert_eq!(pocket, Err("souls:no-way".to_owned()));
+    reads.expect("sat at the reading chair");
 }
 
 /// C17 (#3453) A3: a Soul born outside the library walks in through its door (a form's walk across the doorway's
@@ -4307,6 +4312,78 @@ fn a_join_under_a_wide_roof_is_born_on_its_floor() {
     assert_eq!(nodes, [floor].into(), "both on the floor");
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Whether the body's last row (`track`) stands on `floor`, its centre clear of `thing`'s boxes by a body's radius:
+/// the boxes the ground cuts (its legs, and the box under its seats or top), read in `building`'s frame (its floor's).
+fn clear_of(im: &import_eden::Import, dir: &Path, thing: &str, building: &str) -> (bool, String) {
+    let &(_, node, x, z) = track(dir).last().expect("the body's row");
+    let t = &im.tree;
+    let (th, bh) = (
+        t.handle(im.nodes[thing]).unwrap(),
+        t.handle(im.nodes[building]).unwrap(),
+    );
+    let boxes = sim::ground::scene::solids_under(t, th, bh).unwrap();
+    let p = [(x * 1e6).round() as i64, (z * 1e6).round() as i64];
+    let r = sim::ground::HUMAN_RADIUS * 1000;
+    let on = node == im.nodes[&format!("{building}/floor-0")];
+    let inside = boxes
+        .iter()
+        .any(|b| sim::ground::scene::within(&b.ring, p, r));
+    (
+        on && !inside,
+        format!(
+            "the body at ({x:.2}, {z:.2}) m, {} boxes, inside: {inside}",
+            boxes.len()
+        ),
+    )
+}
+
+/// First-day tester, round 2: a bench seat's boxes are its end legs and a table's its four legs, so the ground under the
+/// seat plank and the tabletop was walkable. A walk to the domed hall (whose middle is `hall-bench-1`'s) ended with the
+/// Soul standing inside the bench, and a walk to a book lying on a table inside the table. The ground now blocks the box
+/// under their slots (`sim::ground::scene`): each walk ends beside the thing, and sitting on the bench still succeeds.
+/// (Taking from a table: `l46_tea_coffee_and_eating` takes a bowl from a cottage's kitchen table.)
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn first_day_walks_end_beside_a_bench_and_a_table_and_sitting_still_works() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    // The domed hall (e_ab3f3077, at (166, 73) m) and hall-bench-1 at its middle; born outside its west door.
+    let (hall, bench) = (im.nodes["e_ab3f3077"], im.nodes["e_d949a299"]);
+    let (served, mut soul, dir) = serve(
+        &facts,
+        "157.0,73.0",
+        "first-day-hall",
+        im.nodes["world"].scope(),
+    );
+    let walked = soul.act("eden:walk", Some(hall), BTreeMap::new());
+    let (beside_bench, at_bench) = clear_of(&im, &dir, "e_d949a299", "e_ab3f3077");
+    println!("walk to the domed hall: {walked:?}; {at_bench}");
+    let sat = soul.act("eden:sit", Some(bench), BTreeMap::new());
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("sit on hall-bench-1: {sat:?}, rise: {rose:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    // The library's west reading table (e_4c11fb72, at (71.5, -6.4) m) and the book stack lying on it (e_e27ed1a2).
+    let book = im.nodes["e_e27ed1a2"];
+    let (served, mut soul, dir) = serve(
+        &facts,
+        "74.0,-1.0",
+        "first-day-book",
+        im.nodes["world"].scope(),
+    );
+    let to_book = soul.act("eden:walk", Some(book), BTreeMap::new());
+    let (beside_table, at_table) = clear_of(&im, &dir, "e_4c11fb72", "e_a0741c1e");
+    println!("walk to the book on the table: {to_book:?}; {at_table}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("walked to the domed hall");
+    assert!(beside_bench, "beside hall-bench-1, not in it: {at_bench}");
+    sat.expect("sat on the bench");
+    rose.expect("rose from it");
+    to_book.expect("walked to the book");
+    assert!(beside_table, "beside the table, not in it: {at_table}");
 }
 
 /// Each body's places in the world's log in `dir`, in order: `(x, z)` m in its frame, by the body's id.

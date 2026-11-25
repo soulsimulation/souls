@@ -101,8 +101,12 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    other body there (`resume-placed`). A body logged seated whose seat is still there sits in it again; with its seat
    taken it stands at the seat's stand point, or the nearest legal point to it (`resume-stood`). A body that cannot be
    placed on its own ground at all (its floor or seat gone, no legal point on it) is placed at the world's entry, where
-   Souls are born (`resume-entry`). None is silent: each is an entry on the body, `souls:restarted` (fields 1 body,
-   2 how, 3 node, 4 from, in the frame the log had it in, 5 to), written with the first tick, which its Soul's client
+   Souls are born (`resume-entry`). A legal point or a landing here is never ground sealed off from the main ground:
+   dry ground no walk from the world's entry reaches, read on the map for the body's own size
+   (`sim::mover::Floors::sealed`). A body logged in such a pocket is placed out of it; with no entry known, no ground
+   is sealed. None is silent:
+   each is an entry on the body, `souls:restarted` (fields 1 body, 2 how, 3 node, 4 from, in the frame the log had it
+   in, 5 to), written with the first tick, which its Soul's client
    reads as it reads the ladder's; the next row heals the log. Left out, by name, while the others start: only a body
    with no recorded build, or one whose ground holds no legal point for its build at all (a world with no ground).
    One bad row never leaves a world refusing every move.
@@ -166,7 +170,12 @@ slot) with the stance the request named. Postures are the controller's stance in
   standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
   body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
-  controller keeps it apart from the bodies it steps, so a tick never visits it.
+  controller keeps it apart from the bodies it steps, so a tick never visits it. A form's move made from a seat
+  (`seated` in `content/moves`: a stretch, a slump) by a body in a slot leaves the legs to the slot: it neither claims
+  nor blocks them, so the seat's hold never refuses it `resource-held` (#4143). Every other move that claims the legs
+  (a jump, a dance, a bow) is still refused `resource-held` there: a gateway sit writes no `posture`, so a form's
+  posture need alone would not stop it. A rise during a seated stretch does not cancel the stretch, which holds no
+  leg; it plays out its hand phases.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is

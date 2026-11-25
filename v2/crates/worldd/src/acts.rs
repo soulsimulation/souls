@@ -77,7 +77,7 @@ use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
 use replica::tree::Tree;
-use sim::controller::Controller;
+use sim::controller::{Controller, Driver};
 use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
 use sim::ground::scene::xform_to;
 use sim::host::{Geometry, Staged};
@@ -1467,6 +1467,9 @@ pub struct Acts {
     made_way: BTreeSet<(Id, usize)>,
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
+    /// The Soul's own walk (its driver) each body's run started beside (#4171): a point or a look while walking. Only
+    /// a walk sent after the run leaves it (intents rule 10); the walk it started beside goes on with it.
+    beside: BTreeMap<Id, Driver>,
     planning: RefCell<Planning>,
     /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
@@ -1934,6 +1937,15 @@ pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
 }
 
+/// The driver of `body`'s walk under way (a gateway walk, the runner's), if it is walking.
+fn walk_driver(b: &Bodies, body: Id) -> Option<Driver> {
+    b.runner
+        .runs
+        .iter()
+        .find(|r| r.body == body)
+        .map(|r| r.driver)
+}
+
 /// The name of a node's Soul Actions entry ([`import_eden::entry_name`]): the entry it names, else its kind's.
 fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
     import_eden::entry_name(n.kind().as_str(), n.fields())
@@ -2043,6 +2055,7 @@ impl Acts {
             fired: Vec::new(),
             watch: Watch::new(),
             made_way: BTreeSet::new(),
+            beside: BTreeMap::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
@@ -2752,6 +2765,12 @@ impl Acts {
                     if let Asked::Started(run) | Asked::Running(run) = a {
                         self.runs.insert(run, intent.id);
                     }
+                    if let Asked::Started(_) = a {
+                        match bodies.as_deref().and_then(|b| walk_driver(b, body)) {
+                            Some(d) => self.beside.insert(body, d),
+                            None => self.beside.remove(&body),
+                        };
+                    }
                     if let Asked::Started(_) = a
                         && let Some(t) = tie_of(&entry, form, &all, *node)
                     {
@@ -2796,12 +2815,16 @@ impl Acts {
         let mut blocked = Vec::new();
         // Intents rule 10 (0.134 I4): a Soul's own walk replaces its open run. In the run's walk its claim on the legs
         // ends the run (`claim-taken`); a hand move holds no legs, so the run is left, at the move's next phase end
-        // (its contact or its end: never mid-contact).
+        // (its contact or its end: never mid-contact). A run started beside a walk of its Soul's (a point while walking)
+        // is left only by a newer walk (#4171): before, the walk it was sent during left it at its first phase end.
         let walking: Vec<Id> = bodies.as_deref().map_or_else(Vec::new, |b| {
             b.runner
                 .running_bodies()
                 .into_iter()
-                .filter(|body| self.forms.in_hand_move(*body))
+                .filter(|body| {
+                    self.forms.in_hand_move(*body)
+                        && walk_driver(b, *body) != self.beside.get(body).copied()
+                })
                 .collect()
         });
         let mut stalled = Vec::new();

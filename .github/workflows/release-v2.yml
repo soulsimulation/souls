@@ -240,6 +240,17 @@ jobs:
         run: |
           bash v2/tools/ops/release/release.sh remote mailbox plan 2>&1 | tee "$RUNNER_TEMP/mailbox.txt"
           { echo "Mailbox settings ($([ "$DRY_RUN" != false ] && echo 'dry run: not applied' || echo 'applied by the move'))"; echo '```'; cat "$RUNNER_TEMP/mailbox.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # Which library entries each world takes from this release's content/kinds (`worldd entries plan`), and which
+      # change is refused and why, read only; the move stages each world's just before its deploy, which takes them.
+      - name: The worlds' library entries (plan)
+        if: ${{ inputs.part != 'stage' }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -o pipefail
+          bash v2/tools/ops/release/release.sh remote entries plan "$SHA" 2>&1 | tee "$RUNNER_TEMP/entries.txt"
+          { echo "Library entries ($([ "$DRY_RUN" != false ] && echo 'dry run: not applied' || echo 'taken by the move, each world at its deploy'))"; echo '```'; cat "$RUNNER_TEMP/entries.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Move by canary, then the rest
         if: ${{ !inputs.dry_run && inputs.part != 'stage' }}
         env:

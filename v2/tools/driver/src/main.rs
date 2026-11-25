@@ -128,7 +128,7 @@ struct Sent {
     minutes: Vec<Minute>,
     /// Refusals by `<verb> <name>`, over the run.
     refused_by: BTreeMap<String, u64>,
-    /// Acts the agent's own later act replaced before their first answer (`claim-taken` once a later sequence was
+    /// Acts the agent's own later act replaced (`claim-taken`, or a form's run `left`, once a later sequence was
     /// sent): the open loop's doing, not the world telling a Soul no, so not counted as refusals (#4171).
     replaced: u64,
     /// X10: second receipts for one sequence, intents sent again (after a lost socket or `world.restarting`), and
@@ -717,9 +717,24 @@ fn heard(bytes: &[u8]) -> Heard {
     }
 }
 
+/// A refusal's own words (field 8, UTF-8 bytes; `v2/docs/intents.md` rule 8), on one line, if it has any.
+fn refusal_detail(bytes: &[u8]) -> Option<String> {
+    let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
+        return None;
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return None;
+    };
+    match a.get(&8) {
+        Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).replace('\n', " ")),
+        Some(Value::Text(t)) => Some(t.as_str().replace('\n', " ")),
+        _ => None,
+    }
+}
+
 /// What the run hands an agent: an act, or (the first agent, before the clock starts) a request to read its copy.
 enum Job {
-    Act(Due),
+    Act(Box<Due>),
     Read(tokio::sync::oneshot::Sender<Result<targets::Seen, String>>),
 }
 
@@ -731,6 +746,8 @@ struct Due {
     start: Instant,
     verb: Name,
     target: Option<Id>,
+    /// The place or thing the act names: a walk's or a sit's target, a body form's argument (the trace's `sent`).
+    place: Option<Id>,
 }
 
 /// How long an agent waits for its answers after its last act: a form's receipt comes when it ends, seconds later.
@@ -955,6 +972,16 @@ async fn agent(
                         takes.insert(d.sequence, t);
                     }
                     newest = newest.max(d.sequence);
+                    // #4171: each act's verb at its send, so a refusal can be read against the agent's acts before it.
+                    let place = d.place.map_or("-".to_owned(), |p| {
+                        format!("{}-{}", replica::encode::to_hex(&p.scope().0), p.counter())
+                    });
+                    out.trace.push(format!(
+                        "sent {k} {} {} {} {place}",
+                        d.sequence,
+                        unix_ms(),
+                        d.verb.as_str()
+                    ));
                     verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                     if tx.send(Message::Binary(d.bytes.into())).await.is_err() {
@@ -975,6 +1002,10 @@ async fn agent(
                     let now = Instant::now();
                     let s0 = start.unwrap_or(now);
                     let h = heard(&b);
+                    // #4171: a refusal's own words (field 8: the holder of a `resource-held`, ...), for the trace.
+                    if let (Heard::Refused(s, _), Some(why)) = (&h, refusal_detail(&b)) {
+                        out.trace.push(format!("why {k} {s} {why}"));
+                    }
                     if matches!(h, Heard::Receipt(..) | Heard::Accepted(..) | Heard::Refused(..)) {
                         last_answer = Some(now);
                     }
@@ -1037,16 +1068,21 @@ async fn agent(
                             out.restarting += 1;
                             retry.push_back((now + RESTARTING_RETRY, s));
                         }
+                        // A form's run the body's newer act takes the place of ends `left` (`sim::forms`): the same.
                         Heard::Refused(s, reason)
-                            if reason == "claim-taken" && newest > s && pending.contains_key(&s) =>
+                            if (reason == "claim-taken" || reason == "left")
+                                && newest > s
+                                && pending.contains_key(&s) =>
                         {
                             verb_of.remove(&s);
                             let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
                             // An accepted act's first answer was timed at its acceptance.
                             if !accepted.remove(&s) {
                                 let ms = unix_ms();
-                                out.trace.push(format!("first {k} {s} {sent_ms} {ms} claim-taken replaced-by {newest}"));
+                                out.trace.push(format!("first {k} {s} {sent_ms} {ms} {reason} replaced-by {newest}"));
                                 out.minute(s0, now).latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            } else {
+                                out.trace.push(format!("end {k} {s} {} {reason} replaced-by {newest}", unix_ms()));
                             }
                             out.replaced += 1;
                             out.other += 1;
@@ -1064,6 +1100,9 @@ async fn agent(
                             let first = !accepted.remove(&s);
                             if first {
                                 out.trace.push(format!("first {k} {s} {sent_ms} {} {reason}", unix_ms()));
+                            } else {
+                                // #4171: an accepted act's end by a refusal (its receipt is an `ack` line).
+                                out.trace.push(format!("end {k} {s} {} {reason}", unix_ms()));
                             }
                             let m = out.minute(s0, now);
                             *m.refusals.entry(reason).or_default() += 1;
@@ -1696,14 +1735,15 @@ async fn main() {
             last_place[k] = Some((sequence[k], v.to_owned(), p));
         }
         *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
-        let _ = chans[k].send(Job::Act(Due {
+        let _ = chans[k].send(Job::Act(Box::new(Due {
             at: due,
             bytes: intent(actors[k], &verb, target, arg.as_ref(), sequence[k], &based),
             sequence: sequence[k],
             start,
             verb,
             target,
-        }));
+            place,
+        })));
     }
     // #4154, Gene's accuracy measure: 15 s after the last act, the first agent reads its copy again, and each agent's
     // last act that names a place (a walk, a sit, or a body form on a thing) is checked by where its body is.
@@ -1907,7 +1947,7 @@ async fn main() {
         same_target(&sent_to)
     );
     println!(
-        "  replaced by the agent's own next act (claim-taken, not counted as refused): {replaced}"
+        "  replaced by the agent's own next act (claim-taken or left, not counted as refused): {replaced}"
     );
     println!("  accepted, not ended by the drain's end: {unfinished}");
     if a.reconnect || a.drop.is_some() || !viewers.is_empty() {

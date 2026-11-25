@@ -7,6 +7,16 @@
 //!   box whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above the floor) is taken away, grown by
 //!   the same amount, and so are the doorways (a doorway is never floor), the floors of buildings standing on the
 //!   open ground (each is a node of its own) and the waters, which are cut beside it ([`OpenGround::cut_water`]).
+//! - **Under seats and tables.** A thing's boxes are its parts at least 0.3 m tall (kit/2's colliders): a bench
+//!   seat's are its two end legs, a table's its four legs, so the plank and the top blocked nothing. A thing with a
+//!   slot above [`STEP`] and within [`BODY_HIGH`] (a seat, a surface, a bunk) also has the box its legs span, up to
+//!   that slot (`scene::under_slots`): no body stands inside a bench or a table, and a walk to one ends beside it. Not
+//!   a thing more than [`scene::UNDER_MOST`] across (a campfire's ring of logs, a swing set), a building, or one with a
+//!   slot at floor height inside that box (a kiosk its vendor stands in), nor a rack's part ([`scene::UNDER_NEVER`]).
+//!   The box is the legs' whole span, so their cuts never seal a pocket between two such things. A seat's stand point
+//!   is never moved into ground sealed off from the main ground (`View::sealed`). Every reader of a thing's boxes in the engine
+//!   sees it (the cut, a seat's footprint a body climbs out over at a rise or a restart, G2's safety); the import's
+//!   stand points (`import_eden::clear_stand_points`) do not, and are moved clear when the seats are registered.
 //! - **Ground cover.** A floor on the open ground that holds no room and lies within [`STEP`] of the ground
 //!   (Eden's footpaths, lawns, garden beds, shores, piers) is not a node of its own to walk: it is open ground, added
 //!   back over any water it lies on, so a pier reaches out over the sea. A body on it stays on the open ground (its
