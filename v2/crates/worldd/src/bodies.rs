@@ -905,7 +905,10 @@ impl Bodies {
             5_000_000,
         )
         // Never into ground sealed off from the main ground.
-        .filter(|q| !sim::mover::Floors::sealed(&self.town, p.frame.node, Vec3::new(q[0], 0, q[1])))
+        .filter(|q| {
+            let at = Vec3::new(q[0], p.position.y, q[1]);
+            !sim::mover::Floors::sealed(&self.town, p.frame.node, at, build)
+        })
         .and_then(|q| {
             floor
                 .place_built(
@@ -1917,7 +1920,7 @@ pub fn legal_near(
     facing: Quat,
     build: Build,
 ) -> R<Moved> {
-    let sealed = |p: Vec3| floors.sealed(frame.node, p);
+    let sealed = |p: Vec3| floors.sealed(frame.node, p, build);
     if !sealed(at)
         && let Ok(b) = floor.place_built(id, frame, at, facing, build)
     {

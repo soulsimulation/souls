@@ -218,15 +218,18 @@ impl Climb<'_> {
     }
 
     /// Where the body stands at `p` on the floor, when it may land there: a dry floor point within a step's height
-    /// ([`crate::ground::STEP`]) of the floor it starts from, where no body stands.
+    /// ([`crate::ground::STEP`]) of the floor it starts from, where no body stands, and never in ground sealed off from
+    /// the main ground for its size ([`Floors::sealed`]), where it would be shut in.
     fn landing(&self, p: Vec3) -> Option<Vec3> {
         let b = self
             .floor
             .place_built(self.body, self.frame(), p, self.facing, self.build)
             .ok()?;
         let foot = b.pose.position.y - self.build.hover_mm * 1000;
-        ((foot - self.base).abs() <= crate::ground::STEP * 1000 && !(self.taken)(b.pose.position))
-            .then_some(b.pose.position)
+        ((foot - self.base).abs() <= crate::ground::STEP * 1000
+            && !(self.taken)(b.pose.position)
+            && !self.floors.sealed(self.node, b.pose.position, self.build))
+        .then_some(b.pose.position)
     }
 
     /// Whether the straight line from `from` to `to` is a way out, sampled every [`CLIMB_SAMPLE`]: each point off the
@@ -270,7 +273,7 @@ impl Climb<'_> {
     }
 
     /// The nearest landing within [`CLIMB_BOUND`] of `from` with a way out, on a grid of [`CLIMB_STEP`] (ties by x,
-    /// then z).
+    /// then z): a sealed pocket nearer is passed over for the nearest unsealed landing ([`Climb::landing`]).
     fn nearest(&self) -> Option<Vec3> {
         let n = CLIMB_BOUND / CLIMB_STEP;
         let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
@@ -806,7 +809,7 @@ impl Slots {
     ) -> Resumed {
         // A body the log had in ground sealed off from the main ground (a pocket no walk from outside reaches) is not
         // left there: it is placed out of it like a body off its floor.
-        let sealed = |p: Vec3| floors.sealed(frame.node, p);
+        let sealed = |p: Vec3| floors.sealed(frame.node, p, build);
         if floor.place_built(id, frame, at, facing, build).is_ok() && !sealed(at) {
             return Resumed::Stood;
         }
@@ -827,7 +830,7 @@ impl Slots {
             base: at.y - build.hover_mm * 1000,
             build,
         };
-        if let Some(l) = cl.nearest().filter(|l| !sealed(*l)) {
+        if let Some(l) = cl.nearest() {
             return Resumed::Climbs(l);
         }
         if let Some((_, to)) =

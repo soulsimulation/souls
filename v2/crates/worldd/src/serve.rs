@@ -3469,6 +3469,19 @@ fn serve(args: &[String]) -> R<()> {
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
+    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground
+    // that holds it is the main ground: a stand point or a restart is never put in ground no walk from there reaches.
+    let int = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let entry = match meta.get("entry").and_then(Json::arr) {
+        Some([x, z]) => int(x).zip(int(z)),
+        _ => None,
+    }
+    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    town.set_entry(entry);
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
     let trips = worldd::places::ride_trips(&town, &kinds, &places);
@@ -3637,18 +3650,6 @@ fn serve(args: &[String]) -> R<()> {
     std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
-
-    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
-    let int = |v: &Json| match v {
-        Json::Int(n) => i64::try_from(*n).ok(),
-        _ => None,
-    };
-    let entry = match meta.get("entry").and_then(Json::arr) {
-        Some([x, z]) => int(x).zip(int(z)),
-        _ => None,
-    }
-    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
-    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     cfg.join = Some(Join {
         entry: (ground, entry),
         family: humanoid()?,

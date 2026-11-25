@@ -11,6 +11,7 @@ use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Actor, Header, schema_hash};
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
+use replica::kinds::sizes::{Build, Size};
 use replica::moves::Place;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use sim::links::Doors;
@@ -928,8 +929,9 @@ const PEN: &str = r#"{
 /// the pen (`resume-placed`), and walks.
 #[test]
 fn a_restart_places_a_body_logged_in_a_sealed_pocket_outside_it_and_it_walks() {
-    let (town, nodes) = town_of(PEN);
+    let (mut town, nodes) = town_of(PEN);
     let ground = nodes["ground"];
+    town.set_entry(OUTSIDE);
     let frame = Frame {
         node: ground,
         slot: None,
@@ -966,24 +968,225 @@ fn a_restart_places_a_body_logged_in_a_sealed_pocket_outside_it_and_it_walks() {
     assert!(moved, "it walks");
 }
 
+/// Where the pen's world has its entry, µm: outside the pen.
+const OUTSIDE: Vec3 = Vec3 {
+    x: 4_000_000,
+    y: 0,
+    z: 0,
+};
+
+/// The pen's inside is sealed off from the ground holding the world's entry, outside it is not; with the entry inside
+/// the pen, the pen is the main ground and outside is sealed; with no entry known, nothing is.
 #[test]
 fn ground_sealed_off_from_the_main_ground_is_named_sealed() {
     let (mut town, nodes) = town_of(PEN);
     let ground = nodes["ground"];
     assert!(on(&town, ground, Vec3::ZERO), "the pen's inside is ground");
+    assert!(on(&town, ground, OUTSIDE), "outside it too");
+    let view = town.view();
     assert!(
-        on(&town, ground, Vec3::new(4_000_000, 0, 0)),
-        "outside it too"
+        !view.sealed(ground, Vec3::ZERO) && !view.sealed(ground, OUTSIDE),
+        "no entry known: nothing sealed"
     );
+    town.set_entry(OUTSIDE);
     let view = town.view();
     assert!(
         view.sealed(ground, Vec3::ZERO),
         "the pen's inside is sealed off"
     );
+    assert!(!view.sealed(ground, OUTSIDE), "outside it is not");
+    town.set_entry(Vec3::ZERO);
+    let view = town.view();
     assert!(
-        !view.sealed(ground, Vec3::new(4_000_000, 0, 0)),
-        "outside it is not"
+        !view.sealed(ground, Vec3::ZERO) && view.sealed(ground, OUTSIDE),
+        "the entry's part is the main ground, whatever its size"
     );
+}
+
+/// Standard base64, for the terrain written in a test.
+fn b64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for k in 0..4 {
+            if k <= c.len() {
+                s.push(A[(n >> (18 - 6 * k) & 63) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
+}
+
+/// A small island in a large sea: four 16 m terrain tiles under one sea at -0.2 m, the bed 1 m down everywhere but
+/// the island (4 m to 8 m each way, at 0) in the first tile. The sea's ground spans four squares, the island's one.
+fn island() -> String {
+    let n = 16;
+    let tile = |tx: i32, tz: i32| {
+        let mut heights = Vec::new();
+        for j in 0..=n {
+            for i in 0..=n {
+                let dry = tx == 0 && tz == 0 && (4..=8).contains(&i) && (4..=8).contains(&j);
+                let h: i32 = if dry { 0 } else { -1_000 };
+                heights.extend_from_slice(&h.to_le_bytes());
+            }
+        }
+        format!(
+            r#"{{"tx": {tx}, "tz": {tz}, "heights": "{}", "classes": "{}"}}"#,
+            b64(&heights),
+            b64(&vec![0u8; (n * n) as usize])
+        )
+    };
+    let tiles = [tile(0, 0), tile(1, 0), tile(0, 1), tile(1, 1)].join(", ");
+    // The sea in four parts round the island, so its outline leaves the island out.
+    let sea = [
+        (0, 0, 32_000, 3_000),
+        (0, 9_000, 32_000, 32_000),
+        (0, 3_000, 3_000, 9_000),
+        (9_000, 3_000, 32_000, 9_000),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(k, (x0, z0, x1, z1))| {
+        format!(
+            r#"{{"id": "sea{k}.water", "of": "water", "kind": "sea", "name": "sea",
+              "polygon": [[{x0}, {z0}], [{x1}, {z0}], [{x1}, {z1}], [{x0}, {z1}]], "level": -200}}"#
+        )
+    })
+    .collect::<Vec<_>>()
+    .join(", ");
+    format!(
+        r#"{{"format": "souls/import-eden/1", "kinds": [], "things": [], "doors": [],
+          "places": [{sea}],
+          "bake": {{}}, "byRef": {{}}, "ground": {{"tileM": {n}, "tiles": [{tiles}]}}}}"#
+    )
+}
+
+/// Reviewer, PR #4848: the main ground is the part holding the world's entry, never the part with the most pieces. On
+/// a small island in a large sea (the sea's ground in more pieces than the island's), with the entry on the island, no
+/// dry point is sealed: a restart leaves a body on the island where it stood.
+#[test]
+fn on_a_small_island_in_a_large_sea_no_dry_point_is_sealed() {
+    let (mut town, nodes) = town_of(&island());
+    let ground = nodes["ground"];
+    let sea = Vec3::new(20_000_000, 0, 20_000_000);
+    assert!(
+        sim::mover::Floors::wet(&town, ground, sea),
+        "the sea is water"
+    );
+    town.set_entry(Vec3::new(6_000_000, 0, 6_000_000));
+    let mut dry = 0;
+    for i in 0..=40 {
+        for j in 0..=40 {
+            let p = Vec3::new(4_000_000 + i * 100_000, 0, 4_000_000 + j * 100_000);
+            if on(&town, ground, p) {
+                dry += 1;
+                assert!(
+                    !sim::mover::Floors::sealed(&town, ground, p, Build::STANDARD),
+                    "the island's ground at {p:?} is not sealed"
+                );
+            }
+        }
+    }
+    assert!(dry > 100, "the island is ground: {dry} points");
+    let body = id(1);
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let at = Vec3::new(6_000_000, 0, 6_000_000);
+    let logged = Pose {
+        frame,
+        position: at,
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: ground,
+            height: 0,
+        },
+    };
+    let placed = Placed::from([(body, (logged, None))]);
+    let added = town.surfaces[&ground]
+        .place(body, frame, at, Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    b.add_body_at(humanoid(), added, &placed)
+        .expect("it starts");
+    b.begin(0);
+    assert_eq!(b.resumed, vec![], "it stands where it stood");
+    let p = b.runner.controller.body(body).unwrap().pose.position;
+    assert_eq!((p.x, p.z), (at.x, at.z));
+}
+
+/// The pen with a gap 620 mm wide in its east wall: wide enough for a small body (0.2 m, cut 260 mm each side), too
+/// narrow for today's walking body (0.28 m, 340 mm each side).
+const PEN_GAP: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-fence@1", "hash": "ad", "name": "core:fence", "form": "point"}],
+  "things": [
+    {"id": "e_pen", "def": "core-fence@1", "ref": "core-fence@1", "parent": null,
+     "pose": [0, 0, 0, 0], "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "pen",
+     "solids": [[0, -1500, 1600, 100, 0, 0, 1500, 0, 0], [0, 1500, 1600, 100, 0, 0, 1500, 0, 0],
+                [-1500, 0, 100, 1600, 0, 0, 1500, 0, 0],
+                [1500, 955, 100, 645, 0, 0, 1500, 0, 0], [1500, -955, 100, 645, 0, 0, 1500, 0, 0]]}
+  ],
+  "doors": [],
+  "places": [{"id": "square.area", "of": "area", "kind": "square", "name": "the square",
+              "polygon": [[-10000, -10000], [10000, -10000], [10000, 10000], [-10000, 10000]]}],
+  "bake": {"things": 1},
+  "byRef": {"core-fence@1": 1}
+}"#;
+
+/// Reviewer, PR #4848: whether ground is sealed is read on the map for the body's own size. Inside the gapped pen is
+/// sealed off for today's walking body but not for a small one, which walks through the gap: a small body the log had
+/// inside is left where it stood at a restart, never moved out as a standard body would be.
+#[test]
+fn a_small_body_on_ground_only_small_bodies_reach_is_not_moved() {
+    let (mut town, nodes) = town_of(PEN_GAP);
+    let ground = nodes["ground"];
+    town.prepare_classes([Size::Small]).unwrap();
+    town.set_entry(OUTSIDE);
+    let small = Build {
+        size: Size::Small,
+        ..Build::STANDARD
+    };
+    assert!(
+        sim::mover::Floors::sealed(&town, ground, Vec3::ZERO, Build::STANDARD),
+        "sealed off for today's walking body"
+    );
+    assert!(
+        !sim::mover::Floors::sealed(&town, ground, Vec3::ZERO, small),
+        "not for a small body"
+    );
+    assert!(!town.view_for_size(Size::Small).unwrap().sealed(ground, Vec3::ZERO));
+    let body = id(1);
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let logged = Pose {
+        frame,
+        position: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: ground,
+            height: 0,
+        },
+    };
+    let placed = Placed::from([(body, (logged, None))]);
+    let added = town.surfaces_for(Size::Small).unwrap()[&ground]
+        .place_built(body, frame, OUTSIDE, Quat::IDENTITY, small)
+        .unwrap();
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    b.add_body_at_built(humanoid(), added, &placed, small)
+        .expect("it starts");
+    b.begin(0);
+    assert_eq!(b.resumed, vec![], "it stands where it stood");
+    let p = b.runner.controller.body(body).unwrap().pose.position;
+    assert_eq!((p.x, p.z), (0, 0), "inside the pen still");
 }
 
 fn restart_under(town: Town, ground: Id, bench: Id) {

@@ -83,6 +83,8 @@ struct World {
     flat: bool,
     /// Water on the floor (E11d), each `[x0, z0, x1, z1]` µm: what a climb out may pass over.
     water: Vec<[i64; 4]>,
+    /// Floor sealed off from the main ground, each `[x0, z0, x1, z1]` µm: where a climb out never lands.
+    sealed: Vec<[i64; 4]>,
 }
 
 const FLOOR: i64 = 5_000_000;
@@ -150,6 +152,7 @@ fn world_with(place: Place, point: Vec3, front: i32, at: i64) -> World {
         bodies,
         flat: false,
         water: Vec::new(),
+        sealed: Vec::new(),
     }
 }
 
@@ -953,6 +956,13 @@ type Handed = Option<Result<replica::pose::HandOff, replica::effects::Refusal>>;
 struct Wet<'a> {
     floors: &'a BTreeMap<Id, Surface>,
     water: &'a [[i64; 4]],
+    sealed: &'a [[i64; 4]],
+}
+
+fn in_rects(rects: &[[i64; 4]], at: Vec3) -> bool {
+    rects
+        .iter()
+        .any(|r| at.x >= r[0] && at.z >= r[1] && at.x <= r[2] && at.z <= r[3])
 }
 
 impl crate::mover::Floors for Wet<'_> {
@@ -961,9 +971,11 @@ impl crate::mover::Floors for Wet<'_> {
     }
 
     fn wet(&self, _: Id, at: Vec3) -> bool {
-        self.water
-            .iter()
-            .any(|r| at.x >= r[0] && at.z >= r[1] && at.x <= r[2] && at.z <= r[3])
+        in_rects(self.water, at)
+    }
+
+    fn sealed(&self, _: Id, at: Vec3, _: replica::kinds::sizes::Build) -> bool {
+        in_rects(self.sealed, at)
     }
 }
 
@@ -981,6 +993,7 @@ fn run_near(w: &mut World, until: i64) -> Handed {
                 &Wet {
                     floors: &w.floors,
                     water: &w.water,
+                    sealed: &w.sealed,
                 },
                 &t,
             )
@@ -1012,8 +1025,18 @@ fn rise_to_contact(w: &mut World, b: Id, now: i64) -> (i64, Handed) {
 /// E11d: body 0 seated in the chair (slot at the origin, stand point 300 mm in front, +z), then the floor becomes
 /// `floor`, and the body rises to the rise's contact.
 fn seated_then_rise(floor: Surface, water: &[[i64; 4]]) -> (World, Id, i64, Handed) {
+    seated_then_rise_sealed(floor, water, &[])
+}
+
+/// As [`seated_then_rise`], with the floor in `sealed` sealed off from the main ground.
+fn seated_then_rise_sealed(
+    floor: Surface,
+    water: &[[i64; 4]],
+    sealed: &[[i64; 4]],
+) -> (World, Id, i64, Handed) {
     let mut w = world(chair());
     w.water = water.to_vec();
+    w.sealed = sealed.to_vec();
     let b = w.bodies[0];
     w.sit(&[0], &mv("souls:sit"))[0].1.clone().expect("started");
     w.run(i64::MAX);
@@ -1253,6 +1276,37 @@ fn e11d_a_seat_behind_a_thin_wall_does_not_climb_through_it() {
     assert!(w.c.carried(b));
 }
 
+/// Reviewer, PR #4848: a climb out never lands a body in ground sealed off from the main ground. Water round the seat,
+/// a strip of floor 0.8 m in front of it and the bank 1 m behind it: the strip is the nearest landing, but sealed off
+/// (a pocket no walk reaches), it is passed over for the nearest unsealed one, the bank.
+#[test]
+fn a_climb_out_passes_over_a_sealed_pocket_for_the_main_ground() {
+    let floor = || {
+        floor_of(&[
+            [-5_000, -5_000, 5_000, -1_000, 0],
+            [-5_000, 800, 5_000, 2_000, 0],
+        ])
+    };
+    let (mut w, _, _, handed) = seated_then_rise(floor(), &[LAKE]);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let [cl] = w.slots.climbs()[..] else {
+        panic!("one climb")
+    };
+    assert_eq!((cl.to.x, cl.to.z), (0, 800_000), "the strip is nearest");
+    let pocket = [-5_000_000, 0, 5_000_000, 5_000_000];
+    let (mut w, b, _, handed) = seated_then_rise_sealed(floor(), &[LAKE], &[pocket]);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let [cl] = w.slots.climbs()[..] else {
+        panic!("one climb")
+    };
+    assert_eq!(
+        (cl.to.x, cl.to.z),
+        (0, -1_000_000),
+        "the bank, on the main ground"
+    );
+    assert!(w.c.carried(b));
+}
+
 /// E11d review: the seat's thing (its own box, [`hull`]) is moored against another hull (z -1.3 m to -0.5 m, no
 /// water), and the bank lies beyond it. The climb may pass over its own hull but not the other: refused, seated
 /// still. With water where the other hull was, it climbs over its own hull and the water to the bank.
@@ -1387,6 +1441,7 @@ fn e11d_a_restart_mid_climb_climbs_on_by_the_climbs_rule_not_through_another_hul
     let wet = Wet {
         floors: &w.floors,
         water: &water,
+        sealed: &[],
     };
     let build = replica::kinds::sizes::Build::STANDARD;
     let r = w
@@ -1410,6 +1465,7 @@ fn e11d_a_restart_mid_climb_climbs_on_by_the_climbs_rule_not_through_another_hul
     let dry = Wet {
         floors: &w.floors,
         water: &[],
+        sealed: &[],
     };
     let r = w
         .slots
