@@ -591,7 +591,41 @@ function syncAnswer(sock, n, refused, bytes) {
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
   note({ ...done, kind: 'synced', sync: done.kind }); // its own kind, which wakes no `wait`; `sync` is snapshot or resync
+  firstSynced = true;
+  arrive();
   current();
+}
+
+/** The name its owner's agent gave this Soul at pairing (`pair --name`) or since (`profile name`), or null. */
+function givenName() {
+  try { const n = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).souls?.[soul]?.name; return typeof n === 'string' && n.trim() ? n.trim() : null; } catch { return null; }
+}
+const hasBody = () => [...rowsOf(copy).values()].some((r) => r.soul === ME);
+let firstSynced = false;
+
+/** A Soul newly paired stands in the world without being told to (C3 births a body only on a Soul's first intent):
+ *  once the copy is synced, a Soul seat with no body linked to it in the copy that has never sent an intent sends
+ *  `life:join` once, carrying its name, so it is born named. Once only, kept in the state: a Soul that later leaves
+ *  (`life:leave`) is not joined again by a restart. With no name yet it waits (`look` says so); a creator's seat has
+ *  no body. Called after a sync and on `look` and `status`, so a name given later is joined with at once. */
+function arrive() {
+  if (!firstSynced || state.arrived || seat.grant.actor === 'creator') return;
+  if (state.sequence > 0 || hasBody()) { state.arrived = true; save(); return; } // born by its own first intent, or left
+  const name = givenName();
+  if (!name) return;
+  state.arrived = true;
+  state.arrival = sendIntent(['life:join'], { words: name }).sequence;
+  log(`arrived: life:join sent as ${JSON.stringify(name)}: the Soul had no body in the world`);
+  save();
+}
+
+/** Where this Soul stands, in plain words, while it has no body here: null once it stands in the world. */
+function arrival() {
+  if (seat.grant.actor === 'creator' || hasBody()) return null;
+  if (!firstSynced) return { in_world: false, say: 'Approved: your Soul is arriving. The client is getting the world; it stands in it within seconds. Look again.' };
+  if (state.arrival && state.sequence === state.arrival) return { in_world: false, say: 'Approved: your Soul is arriving. It was sent into the world and stands there within seconds. Look again.' };
+  if (!state.arrived && !givenName()) return { in_world: false, say: 'Your Soul is not in the world yet: it needs a name first. Ask your owner what to call it (or choose one), then run: profile name "<Name>". It arrives at once.' };
+  return { in_world: false, say: 'Your Soul is not in the world. Run: act life:join, to come in.' };
 }
 
 /** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304), and for
@@ -1529,6 +1563,7 @@ async function answer(req, conn = null) {
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
         // The Soul's own body in the copy, once born (a joined body is minted, not the Soul's id): `act wave:<body>`.
         body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
+        ...((arrive(), arrival()) ?? { in_world: seat.grant.actor !== 'creator' }),
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
@@ -1536,6 +1571,9 @@ async function answer(req, conn = null) {
       const heard = named(rows, heardSince.splice(0));
       const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
+      // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
+      const away = (arrive(), arrival());
+      if (away) b.not_in_world = away.say;
       return b;
     });
     case 'find': {
@@ -1643,7 +1681,12 @@ async function answer(req, conn = null) {
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
+      // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
+      // otherwise it carries the Soul's given name, so no join of this client births a nameless body.
+      const plainJoin = keep.length === 1 && keep[0].verb === 'life:join' && !args && !params && !target;
+      if (plainJoin && state.arrival && state.sequence === state.arrival && !hasBody()) return closing({ ok: true, sequence: state.arrival, sent: true, arriving: true, basis: sequenceOf(basis) }, null, { now: true });
+      const words = plainJoin ? givenName() ?? undefined : undefined;
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, words, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
