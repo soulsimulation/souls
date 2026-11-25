@@ -2389,7 +2389,11 @@ fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
     // How far (µm, on the level, at 1 m out) the body's facing (+x turned by its orientation) is from pointing at `to`.
     let off = |b: &Bodies, to: Vec3| {
         let m = b.runner.controller.body(body_id()).unwrap();
-        let f = m.pose.orientation.rotate(Vec3::new(1_000_000, 0, 0)).unwrap();
+        let f = m
+            .pose
+            .orientation
+            .rotate(Vec3::new(1_000_000, 0, 0))
+            .unwrap();
         let (dx, dz) = (to.x - m.pose.position.x, to.z - m.pose.position.z);
         let l = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() as i64;
         let (ux, uz) = (dx * 1_000_000 / l, dz * 1_000_000 / l);
@@ -2429,14 +2433,28 @@ fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
     let origin = select::origin_in(&im.tree, stand, frame).unwrap();
     let o = off(&b, origin);
     println!("to the stand: facing {o} um off its origin at 1 m");
-    assert!(o < 20_000, "faces the thing it walked to: {o} um off at 1 m");
+    assert!(
+        o < 20_000,
+        "faces the thing it walked to: {o} um off at 1 m"
+    );
 
     // To the ground, a place it ends in: the facing it had is kept.
-    let before = b.runner.controller.body(body_id()).unwrap().pose.orientation;
+    let before = b
+        .runner
+        .controller
+        .body(body_id())
+        .unwrap()
+        .pose
+        .orientation;
     walk(&mut b, 3, ground).expect("the walk to the ground starts");
     assert_eq!(run(&mut b, soul(3)), Ok(()));
     assert_eq!(
-        b.runner.controller.body(body_id()).unwrap().pose.orientation,
+        b.runner
+            .controller
+            .body(body_id())
+            .unwrap()
+            .pose
+            .orientation,
         before,
         "a walk to a place keeps its facing"
     );
