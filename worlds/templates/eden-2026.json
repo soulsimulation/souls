@@ -109907,6 +109907,166 @@
           "r": 0
         }
       ]
+    },
+    {
+      "note": "Existing question-request fixture beside the classroom conference podium",
+      "group": "eden-4808-question",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-conference_question",
+            "version": 1,
+            "description": "Post a question, mark it answered, then withdraw your request.",
+            "tags": [
+              "furniture",
+              "conference"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.03,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.06,
+                      0.6
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.45,
+                      -0.035
+                    ],
+                    "size": [
+                      0.08,
+                      0.84,
+                      0.08
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.36,
+                      0.1
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0.055
+                    ],
+                    "size": [
+                      0.52,
+                      0.28,
+                      0.01
+                    ],
+                    "tint": "paper"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.81,
+                      0.065
+                    ],
+                    "size": [
+                      0.18,
+                      0.06,
+                      0.02
+                    ],
+                    "tint": "blue",
+                    "role": "light"
+                  }
+                ],
+                "looks_table": [
+                  {
+                    "part": "light",
+                    "field": "pending",
+                    "do": "tint",
+                    "at": {
+                      "false": "#5b91c4",
+                      "true": "#e5ac3e"
+                    }
+                  },
+                  {
+                    "part": "light",
+                    "field": "answered",
+                    "do": "tint",
+                    "at": {
+                      "true": "#76ad73"
+                    }
+                  }
+                ],
+                "looks_units": {}
+              }
+            },
+            "params": {},
+            "palette": {
+              "frame": "#43505a",
+              "paper": "#f5ead1",
+              "amber": "#e5ac3e",
+              "blue": "#5b91c4",
+              "green": "#76ad73",
+              "red": "#bc5955"
+            },
+            "state": {
+              "pending": {
+                "type": "bool",
+                "default": false
+              },
+              "answered": {
+                "type": "bool",
+                "default": false
+              }
+            },
+            "size": {
+              "box": [
+                0.6,
+                1.1,
+                0.6
+              ]
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/conference_question@1",
+          "name": "classroom-conference-question",
+          "in": {
+            "parent": "eden-classroom-1",
+            "slot": "classroom"
+          },
+          "p": [
+            2.2,
+            0,
+            -7
+          ],
+          "r": 0
+        }
+      ]
     }
   ]
 }
