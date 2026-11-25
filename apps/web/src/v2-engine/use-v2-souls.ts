@@ -67,7 +67,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       const enc = new TextEncoder();
       parts.addLooks(new Map(Object.entries(all).map(([k, e]) => [k, enc.encode(JSON.stringify(e))])));
     }).catch(() => {});
-    let errorAtParts: number | null = null;
+    let errorAtParts: number | null = null, errorAt: number | null = null;
     const life = new StreamLife();
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -131,7 +131,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
           conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: x.description, owner: '', intent: null, intentText: '',
             mood: '', energy: '', doing: x.doing, native: false, body: { state: x.state, doing: null, since: 0 } } satisfies PublicSoul]));
         }
-        if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
+        if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; errorAt = performance.now(); console.warn('v2 stream:', v.error); }
         // a new part, a still world's pointer moving its time on (B2-3) or a catch-up's word (#4684): the stream alive
         life.see(v, performance.now());
         // K1, K5: the moving frames where the page draws now (the newest chunk's end, less the play delay, and the time
@@ -147,7 +147,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
-      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
+      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, errorAt, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
       force((n) => n + 1);
     }, 200);
     return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };

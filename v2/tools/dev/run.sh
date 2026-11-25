@@ -15,6 +15,8 @@
 #           directory refuses to start and so does this command, before anything listens.
 #   --facts a world's facts (`v2/tools/import-eden/export/export.ts --template <file>`) to seed instead of N2's test
 #           world, with every entry in content/kinds. Read only when the folder holds no world yet.
+#   --bodies the world's body catalogue (`souls/bodies/1`, a placed world's bodies.json) to seed it with. Read only when
+#           the folder holds no world yet.
 #
 # The world is at <url>/w/dev/ and, signed in as the test person Ada, its creator, at <url>/w/dev/?as=Ada (any other
 # name is a test person who owns nothing). V2_SEED_SOULS=<n> seeds n test Souls on its open ground (a viewer bench's
@@ -28,14 +30,15 @@
 # Local only: loopback ports, its own folder, never a production world or its data.
 set -euo pipefail
 V2=$(cd "$(dirname "$0")/../.." && pwd)
-PORT=7400 HOST=127.0.0.1 DIR=$V2/../.local/v2-dev FACTS=
+PORT=7400 HOST=127.0.0.1 DIR=$V2/../.local/v2-dev FACTS= BODIES=
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT=$2; shift 2 ;;
     --dir) DIR=$2; shift 2 ;;
     --host) HOST=$2; shift 2 ;;
     --facts) FACTS=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
-    *) sed -n '2,27p' "$0" >&2; exit 2 ;;
+    --bodies) BODIES=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
+    *) sed -n '2,29p' "$0" >&2; exit 2 ;;
   esac
 done
 die() { echo "run.sh: $*" >&2; exit 1; }
@@ -125,7 +128,7 @@ if [ ! -f world/world.json ]; then
     cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
   fi
   "$BIN/worldd" seed --facts seed/world.facts.json --dir world --souls "${V2_SEED_SOULS:-0}" --at 0,0 --entries seed/entries \
-    --creator "$(cat creator)" >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
+    --creator "$(cat creator)" ${BODIES:+--bodies "$BODIES"} >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
 fi
 [ -f creator ] || die "$DIR holds a world seeded before its creator was Ada's principal: use a new --dir"
 CREATOR=$(cat creator)

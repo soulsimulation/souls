@@ -241,7 +241,8 @@ mod tests {
             .expect("settings")
             .for_world();
         assert_eq!(world.get("big").expect("read").map(|o| o.bytes), Some(big));
-        s.stall_reads(1, std::time::Duration::from_secs(7), "/big");
+        // Both tries held (the read and the one sent again at 2 s, `s3.rs` HEDGE).
+        s.stall_reads(2, std::time::Duration::from_secs(7), "/big");
         let begun = std::time::Instant::now();
         assert_eq!(
             world.get("big").expect_err("stalled").name,
@@ -252,6 +253,40 @@ mod tests {
             "{:?}",
             begun.elapsed()
         );
+    }
+
+    /// 25 Nov 2026: the offsite bucket holds about one authenticated request in a hundred past 5 s, each one alone
+    /// (`s3.rs` HEDGE). A read held past 2 s is sent once more and answered by that second try, inside the 5 s a read
+    /// always had, for the directory's client and a world's alike, and a listing page too.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // a real store's timeout is real time
+    fn a_read_the_store_holds_is_sent_again_and_answered_within_its_five_seconds() {
+        use std::time::{Duration, Instant};
+        let s = StandIn::start(10).expect("a stand-in");
+        let plain = Bucket::parse(&s.url("souls"), keys).expect("settings");
+        plain.put("small", b"bytes", When::Absent).expect("written");
+        let world = Bucket::parse(&s.url("souls"), keys)
+            .expect("settings")
+            .for_world();
+        for (who, store) in [("directory", &plain), ("world", &world)] {
+            s.stall_reads(1, Duration::from_secs(8), "/small");
+            let begun = Instant::now();
+            let got = store.get("small").expect("answered by the second try");
+            let took = begun.elapsed();
+            assert_eq!(got.map(|o| o.bytes), Some(b"bytes".to_vec()), "{who}");
+            assert!(
+                took >= Duration::from_secs(2) && took < Duration::from_secs(5),
+                "{who}: {took:?}"
+            );
+            s.stall_reads(1, Duration::from_secs(8), "prefix=sm");
+            let begun = Instant::now();
+            assert_eq!(store.list("sm").expect("listed"), ["small"], "{who}");
+            assert!(begun.elapsed() < Duration::from_secs(5), "{who}");
+        }
+        // Unheld, a read is one request, answered at once.
+        let begun = Instant::now();
+        assert!(world.get("small").expect("read").is_some());
+        assert!(begun.elapsed() < Duration::from_secs(1));
     }
 
     /// A3: a refusal never carries the address or a key; unsigned requests are refused by the stand-in.

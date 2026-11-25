@@ -8,6 +8,7 @@ import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
 import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
 import { lookBody } from '../humanoid/look.ts';
+import { PROPS, carriedProp, carrySide } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
 
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
 
@@ -80,6 +81,8 @@ test('the pure parts: seats, postures, props and what is held when', () => {
   assert.equal(propOf('eden:tea-cup@1'), 'cup');
   assert.equal(propOf('eden:paperback_book@2'), 'book');
   assert.equal(propOf('eden:crate@1'), 'tool');
+  assert.equal(propOf('eden:basket@1'), 'basket', 'a basket is drawn as one, not as a tool');
+  assert.equal(propOf('eden:dumbbell_2kg@1'), 'dumbbell');
   const held = [{ at: 10, prop: 'cup' }, { at: 20, prop: null }];
   assert.deepEqual([5, 10, 15, 20, 25].map((t) => heldAt(held, t)), [null, 'cup', 'cup', null, null]);
 });
@@ -194,4 +197,15 @@ test('V5: a state that lists a seated body before its chair (a history bundle\'s
   const seated = on(b, 1);
   assert.equal(seated?.activity, 'sit');
   assert.deepEqual(seated.p.map((x) => +x.toFixed(3)), [2, 0, 0]);
+});
+
+test('every prop the page hands the old renderer is one it draws; a held book is carried closed and read open', () => {
+  for (const k of ['book', 'cup', 'mug', 'plate', 'hammer', 'tulip', 'basket', 'letter', 'pen', 'brush', 'spoon', 'bread', 'apple', 'guitar', 'dumbbell_2kg'])
+    assert.ok((PROPS as readonly string[]).includes(propOf(`eden:${k}@1`)), `${k}: ${propOf(`eden:${k}@1`)}`);
+  assert.equal(carriedProp('book', 'idle'), 'tome');
+  assert.equal(carriedProp('book', 'walk'), 'tome', 'walking with it, the book is closed');
+  assert.equal(carriedProp('book', 'read'), 'book', 'read, it is open in both hands');
+  assert.equal(carriedProp('cup', 'idle'), 'cup');
+  assert.equal(carrySide('plate'), 'left');
+  assert.equal(carrySide('tome'), 'right');
 });

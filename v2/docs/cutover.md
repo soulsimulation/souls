@@ -54,8 +54,14 @@ for a world with no old twin), a crawler's too; each view from the published fil
 draws it from its stream); `/v1/me` with its sign-in; `/v1/world/visitors` as a world without travel (`available:
 false`); `/v1/world/seq` from the published snapshot (else seq 0); `/v1/world/context` (Explore's places) from the published snapshot
 too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search, paged as
-the old process pages them, and with nothing published a listing with no places; Explore's place pictures as each
-`unavailable` (a place stays text); writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
+the old process pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
+world's kept picture of the place as it is now, a small WebP served immutable at `/w/<slug>/v1/world/context/shot/<sha>.webp`,
+else `unavailable` with `draw: 'page'`, and the page draws that place itself from what it shows (kept in the browser per
+build). The kept pictures are made at release, after the release is live, by
+`tools/world-launcher/deploy/place-shots.sh` (`--dry-run` first): for every moved world soul.game lists, it fetches the
+host's kept pictures, has the world's public page draw each place still missing on this machine's GPU, and copies the
+pictures and then their index to `<launcher data>/place-shots/<slug>/` (the host from `SIM_DEPLOY_HOST`, as ship.sh);
+a second run draws nothing. The launcher logs, once per world and index, how many places have no kept picture; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
 an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)
@@ -246,6 +252,26 @@ world already seeded (Chiba's entrance, mars-college-2026), so the release may b
 It has the same steps and the same safety as Eden's (receipt first, folder and bucket objects aside, nothing deleted,
 `resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
 the world from the receipt. Re-seeding a world needs Gene's yes; `reseed-world.test.mjs` runs it on stand-ins.
+
+### Eden's old residents as Souls (25 Nov)
+
+Eden's import listed its 22 resident Souls' bodies as things (`core/humanoid@1`, ids `h_<old Soul id>`): standing,
+unnamed, owned by nobody. `import-eden` now leaves a Soul's body out of the tree (its facts may still list one), so a
+world seeded on a build carrying that has none; `eden-residents.mjs` brings each resident back as a real, unpaired Soul
+in the directory under its owner's account (found by sign-in from the old registry), with its saved name and
+description, and writes `births.json` so its body is born in its old look when its agent first joins. Its owner pairs
+it as any Soul brought over (`souls.mjs upgrade`, or `pair.mjs --soul <grant> --world eden-2026-1`, the old world's id
+the import is keyed by). Root on the host, `W=/var/lib/souls/worlds/worlds/$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' /etc/souls/cutover.env)`:
+
+| Step | Command |
+| --- | --- |
+| 1. Eden fresh on a build carrying the change, so the 22 bodies leave its tree (Gene's yes) | `release.yml -f reseed=fresh`, or `bash v2/tools/ops/cutover/reseed-eden.sh <sha> check`, then `run` |
+| 2. The dry run: reads only, prints each resident and what it needs | `node /srv/sim-worlds/production/v2/tools/ops/cutover/eden-residents.mjs --facts $W/facts.json --old /srv/sim-worlds-data/production/worlds/eden-2026/sim.db --registry /srv/sim-worlds-data/production/accounts.sqlite --registry /srv/sim-worlds-data/production/forks/accounts.sqlite --store /var/lib/souls/directory/accounts.sqlite --world-dir $W` |
+| 3. The same with `--apply`, the directory stopped; then the world restarted, so it reads `births.json` | `systemctl stop souls-directory && node … --apply; systemctl start souls-directory && systemctl restart worldd@$(basename $W)` |
+
+A second `--apply` changes nothing. A resident already brought by `keep-souls.mjs` keeps its id and gets its look. A
+resident whose owner has no sign-in in the old registry is listed and never brought. Output names Souls, never people.
+Tested on a fake host (`eden-residents.test.mjs`).
 
 ## One writer
 

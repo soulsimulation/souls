@@ -1791,12 +1791,16 @@ fn born(
     Ok(out)
 }
 
-/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body.
+/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body. A row
+/// with no body may carry `look`, a humanoid look's params as JSON text (#3998's, at most `skills::wear::LOOK_MOST`
+/// bytes, one object): the body is born wearing it, as if its Soul's first act had been `life:look` (old Eden's
+/// residents, each made in today's editor).
 fn imported_births(
     dir: &Path,
     header: &replica::effects::Header,
     catalogue: &skills::wear::Catalogue,
     born: &mut BTreeMap<Id, [u8; 32]>,
+    looks: &mut BTreeMap<Id, Vec<u8>>,
 ) -> R<()> {
     let path = dir.join("births.json");
     let metadata = match std::fs::symlink_metadata(&path) {
@@ -1851,12 +1855,13 @@ fn imported_births(
         return Err(bad.into());
     }
     let mut seen = BTreeMap::new();
+    let mut new_looks = BTreeMap::new();
     for row in rows {
         let fields = row.obj().ok_or(bad)?;
         if !(3..=4).contains(&fields.len())
             || fields
                 .iter()
-                .any(|(k, _)| !["soul", "entry", "asked", "body"].contains(&k.as_str()))
+                .any(|(k, _)| !["soul", "entry", "asked", "body", "look"].contains(&k.as_str()))
         {
             return Err(bad.into());
         }
@@ -1881,6 +1886,20 @@ fn imported_births(
             ),
             Some(_) => return Err("body-births-unknown".into()),
         };
+        let look = match row.get("look") {
+            None => None,
+            Some(Json::Str(text))
+                if choice.is_none()
+                    && text.len() <= skills::wear::LOOK_MOST
+                    && json::parse(text).is_ok_and(|v| v.obj().is_some()) =>
+            {
+                Some(text.as_bytes().to_vec())
+            }
+            Some(_) => return Err("body-births-look".into()),
+        };
+        if let Some(look) = look {
+            new_looks.insert(soul, look);
+        }
         if seen.insert(soul, choice).is_some() {
             return Err("body-births-duplicate".into());
         }
@@ -1895,6 +1914,7 @@ fn imported_births(
             born.insert(soul, hash);
         }
     }
+    looks.extend(new_looks);
     Ok(())
 }
 
@@ -3519,7 +3539,8 @@ fn serve(args: &[String]) -> R<()> {
     };
     let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
     let (tx, synced) = channel();
-    imported_births(&dir, initial.header(), &catalogue, &mut born)?;
+    let mut looks = BTreeMap::new();
+    imported_births(&dir, initial.header(), &catalogue, &mut born, &mut looks)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
     cfg.closed = closed_kinds.clone();
@@ -3616,7 +3637,11 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
-    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.wear = Some(answers::Wearing {
+        catalogue,
+        born,
+        looks,
+    });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
         let b = bodies(
             town,
@@ -4348,14 +4373,16 @@ mod tests {
         let digest = to_hex(&sha256(text.as_bytes()));
         let valid = make(&lineage, &zone, &digest, &row);
         let mut born = BTreeMap::new();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        let mut looks = BTreeMap::new();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert!(
             born.is_empty(),
             "absent private file leaves defaults unchanged"
         );
         std::fs::write(dir.join("births.json"), &valid).unwrap();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert_eq!(born.get(&soul), Some(&[0x11; 32]));
+        assert!(looks.is_empty(), "a row with a body carries no look");
         for invalid in [
             make(&"00".repeat(16), &zone, &digest, &row),
             make(&lineage, "invalid", &digest, &row),
@@ -4370,13 +4397,55 @@ mod tests {
         ] {
             std::fs::write(dir.join("births.json"), invalid).unwrap();
             let before = born.clone();
-            assert!(imported_births(&dir, &header, &catalogue, &mut born).is_err());
+            assert!(imported_births(&dir, &header, &catalogue, &mut born, &mut looks).is_err());
             assert_eq!(born, before, "no partial installation on refusal");
+        }
+        // Old Eden's residents: a row with no body may carry a look, and its body is born wearing it.
+        let other = Id::new(Scope([0x4c; 16]), 0).unwrap();
+        let other_text = directoryd::accounts::principal_text(other);
+        let look = r#"{"hair":"bob","height":1.7}"#;
+        let quoted = |t: &str| Json::Str(t.into()).to_json();
+        let looked = |l: &str| {
+            format!(
+                r#"{{"soul":"{other_text}","entry":"{zone}","asked":0,"look":{}}}"#,
+                quoted(l)
+            )
+        };
+        let both = format!("{row},{}", looked(look));
+        std::fs::write(
+            dir.join("births.json"),
+            make(&lineage, &zone, &digest, &both),
+        )
+        .unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
+        assert_eq!(looks.get(&other).map(Vec::as_slice), Some(look.as_bytes()));
+        assert!(!born.contains_key(&other));
+        let long = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+        for invalid in [
+            row.replace(
+                r#""asked":0"#,
+                &format!(r#""asked":0,"look":{}"#, quoted(look)),
+            ),
+            looked("[1]"),
+            looked(&long),
+        ] {
+            let mut fresh = BTreeMap::new();
+            std::fs::write(
+                dir.join("births.json"),
+                make(&lineage, &zone, &digest, &invalid),
+            )
+            .unwrap();
+            assert!(
+                imported_births(&dir, &header, &catalogue, &mut BTreeMap::new(), &mut fresh)
+                    .is_err(),
+                "{invalid}"
+            );
+            assert!(fresh.is_empty(), "no partial installation on refusal");
         }
         std::fs::write(dir.join("births.json"), valid).unwrap();
         let mut explicit = BTreeMap::from([(soul, [0x22; 32])]);
         assert!(
-            imported_births(&dir, &header, &catalogue, &mut explicit)
+            imported_births(&dir, &header, &catalogue, &mut explicit, &mut looks)
                 .unwrap_err()
                 .contains("contradictory")
         );
