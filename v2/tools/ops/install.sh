@@ -162,7 +162,7 @@ directory_args() {
 # Arguments for souls-directory.service (directoryd; v2/crates/directoryd/src/accounts/start.rs). Written once by
 # the install, never overwritten. Add the sign-in provider (--issuer <https origin> --parties <origin,...>) before
 # starting it; only the configured origin mounts sign-in (docs/operations/auth.md).
-DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory --view-key $ETC/view.key
+DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory --view-key $ETC/view.key --mailbox-key $ETC/mailbox.key
 EOF
 }
 SECRETS="# Secrets for Engine v2's programs, KEY=value lines (root only; systemd reads it before a unit drops to souls)."
@@ -226,6 +226,9 @@ install_all() {
   build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
   ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
   ensure_key "$ETC/view.key"
+  # The mailbox key (R13): the gateways' bearer for the directory's /v1/mailbox/*, so an owner's message from the page
+  # reaches the Soul's client; without it every send is refused `no-mailbox`.
+  ensure_key "$ETC/mailbox.key"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
   ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Browser provider: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
@@ -350,6 +353,7 @@ check() {
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
   grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
   grep -qxF "would file $ETC/view.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the view key missing from plan"
+  grep -qxF "would file $ETC/mailbox.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the mailbox key missing from plan"
   cp -R "$tmp/root" "$tmp/placed"
   mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"

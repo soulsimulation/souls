@@ -207,6 +207,45 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[tokio::test]
+    async fn the_owners_box_is_told_whether_its_agent_is_connected() {
+        let gw = Gateway::new(Tokens::default(), vec![], Arc::new(|_| {}));
+        let grant = Grant::parse(&format!("soul-{}-0", "03".repeat(16))).unwrap();
+        let other = Grant::parse(&format!("soul-{}-0", "04".repeat(16))).unwrap();
+        let said = |c: bool| crate::mailbox::agent(grant, c);
+        let (_, _, mut box_rx) = gw.watch(&[grant]);
+        let (_, _, mut theirs) = gw.watch(&[other]);
+        assert_eq!(box_rx.try_recv().unwrap(), said(false), "at once, as it is");
+        theirs.try_recv().unwrap();
+        let old = gw.attach(grant, None, 1, Arc::new(Who::default()));
+        assert_eq!(box_rx.try_recv().unwrap(), said(true));
+        assert!(
+            said(true).contains(r#""connected":true"#) && said(true).contains(&grant.to_text())
+        );
+        let next = gw.attach(grant, None, 1, Arc::new(Who::default()));
+        assert_eq!(
+            box_rx.try_recv().unwrap(),
+            said(true),
+            "the last device wins"
+        );
+        gw.detach(grant, old.session);
+        assert!(
+            box_rx.try_recv().is_err(),
+            "the one replaced going says nothing"
+        );
+        let (_, _, mut late) = gw.watch(&[grant]);
+        assert_eq!(
+            late.try_recv().unwrap(),
+            said(true),
+            "a box opened later is told"
+        );
+        gw.detach(grant, next.session);
+        assert_eq!(box_rx.try_recv().unwrap(), said(false));
+        assert!(
+            theirs.try_recv().is_err(),
+            "another grant's box is told nothing"
+        );
+    }
+    #[tokio::test]
     async fn startup_lock_serializes_concurrent_dead_socket_replacement_and_preserves_substitutions()
      {
         let root = folder();
