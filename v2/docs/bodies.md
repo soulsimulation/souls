@@ -92,10 +92,17 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it). A body is logged where it stands, never mid-crossing: while it is carried across a
-   link its row keeps where it last stood. A restart that finds a logged body off its floor anyway (an older log, a
-   kill mid-climb out of a seat) resumes it by E11d's rule (`sim::slots::Slots::resume`: carried on to a landing or
-   the floor's nearest legal point, seated again, or held by name). A body that cannot be placed again at all is left
-   out by name and the others start: one bad row never leaves a world refusing every move.
+   link its row keeps where it last stood. **Every body a restart starts stands at a point it may stand on, and its
+   next move is answered from there.** A logged body where it may not stand (an older log, a kill mid-climb out of a
+   seat, an edit since) is resumed by one rule, in order: carried on along a clean way, never through a cut, to a
+   landing or the floor's nearest legal point (`climb-out`, `resume-nearest`); else seated again in the seat it was
+   climbing out of when that seat is free and, moving with a cabin, at its own stop (`resume-seated`,
+   `resume-seated-other`); else placed at once at its floor's nearest legal point (`resume-placed`). A body that
+   cannot be placed on its own ground at all (its floor or seat gone, no legal point on it) is placed at the world's
+   entry, where Souls are born (`resume-entry`). None is silent: each is an entry on the body, `souls:restarted`
+   (fields 1 body, 2 how, 3 node, 4 from, 5 to), written with the first tick, which its Soul's client reads as it
+   reads the ladder's; the next row heals the log. Only a body with no recorded build is left out, by name, and the
+   others start: one bad row never leaves a world refusing every move.
 
 ## The controller (B1)
 
@@ -177,9 +184,11 @@ slot) with the stance the request named. Postures are the controller's stance in
   leaves the world as one does, and rises once there is floor near again. A restart that finds a body off its floor (killed mid-climb) places it where it was and
   never refuses it, so one body never stops the others starting (`Slots::resume`). It climbs on by the climb's own
   rule from where it is, over water or the boxes of the thing it is over (`climb-out`); else to the floor's nearest
-  legal point when that line is as clean (`resume-nearest`); else it is never carried through a cut
-  (`resume-held`): it is seated again in the seat it was climbing out of, so its next rise climbs out or is refused by
-  name, or, with no such seat free, left where it was, as a seat gone at a restart leaves a body. A thing's boxes are refreshed when an edit changes anything under it.
+  legal point when that line is as clean (`resume-nearest`); else it is never carried through a cut: it is seated
+  again in the seat it was climbing out of, so its next rise climbs out or is refused by name, or, with no such seat
+  free (a seat moving with its cabin counts only at its own stop, `Slots::at_own_stop`), placed at the floor's nearest
+  legal point (`resume-placed`), where its next walk is answered. Rule 9 above has the whole restart rule. A thing's
+  boxes are refreshed when an edit changes anything under it.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
