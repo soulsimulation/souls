@@ -615,11 +615,11 @@ impl Slots {
         let mut out = Vec::new();
         let things: Vec<Id> = self.trips.keys().copied().collect();
         for thing in things {
-            let mut seats = self.runs.range((thing, 0)..=(thing, u64::MAX)).peekable();
-            let away = if seats.peek().is_none() && self.moving.contains_key(&thing) {
+            let mut places = self.runs.range((thing, 0)..=(thing, u64::MAX)).peekable();
+            let away = if places.peek().is_none() && self.moving.contains_key(&thing) {
                 self.at_home(thing, now, 0).is_err()
             } else {
-                seats.any(|(_, r)| !matches!(r.table.stopped(now), Ok(Some(_))))
+                places.any(|(_, r)| !matches!(r.table.stopped(now), Ok(Some(_))))
             };
             if let Some((ends, was)) = self.trips.get_mut(&thing) {
                 if *was && !away && !ends.is_empty() {
