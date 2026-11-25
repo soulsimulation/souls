@@ -37,8 +37,8 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 
 | eden-god | souls-god | Status |
 |---|---|---|
-| `place <def> --at x,z` | `place <kind> --in <id> --at x,y,z` (mm in the parent) | done |
-| `place --near/--inside/--on/--along/--against/--between/--facing/--count/--row/--grid` | `place --beside/--on/--facing`; `--row n --gap mm [--along x\|z]` and `--grid CxR --gap mm` as one all-or-none batch (R8a) | partial: near, inside, along, against, between and count no task |
+| `place <def> --at x,z` | `place <kind> --in <id> --at x,y,z` (metres in the parent) | done |
+| `place --near/--inside/--on/--along/--against/--between/--facing/--count/--row/--grid` | `place --beside/--on/--facing`; `--row n --gap m [--along x\|z]` and `--grid CxR --gap m` as one all-or-none batch (R8a) | partial: near, inside, along, against, between and count no task |
 | `place <path-def> --from --to`, `place <area-def> --rect/--circle/--area` | none | gap: roads and areas; zones in #3700, the rest no task |
 | `move <ref> --by / relations / --in` | `move <id> --at` (same parent) | partial: `--by` and relations with #3694; a new parent is a crossing |
 | `set --param --state` | `set <id> <field number> <value>` | partial: named params no task |

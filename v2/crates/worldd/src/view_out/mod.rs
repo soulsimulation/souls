@@ -1587,14 +1587,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             return Err(fault("stream-recovery", "invalid object hash"));
         }
         let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(hash));
-        // R15: what is not yet backed up is read from the spool.
+        // R15: read from this disk, the spool or its copy of what the store holds; the store only for what it lacks.
         let bytes = match self.spool.as_ref().and_then(|s| s.read(&key)) {
             Some(bytes) => bytes,
             None => {
-                self.store
+                let bytes = self
+                    .store
                     .get(&key)?
                     .ok_or_else(|| fault("stream-recovery-missing", "required immutable object"))?
-                    .bytes
+                    .bytes;
+                // Read from the store once (a chain this machine did not write): kept on this disk, where the next
+                // restart reads it, once it is the bytes its name says.
+                if let Some(spool) = &self.spool
+                    && replica::ids::sha256(&bytes).as_slice() == hash
+                {
+                    spool.keep(&key, &bytes);
+                }
+                bytes
             }
         };
         if replica::ids::sha256(&bytes).as_slice() != hash {

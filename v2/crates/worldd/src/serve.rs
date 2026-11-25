@@ -1899,11 +1899,14 @@ fn imported_births(
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it. The planner keeps its own town and all declared seats are registered.
+/// where the log last had it. The planner keeps its own town and all declared seats are registered. `entry` is where
+/// the world's Souls are born on its ground: a restart's last resort for a body it cannot place on its own ground.
+#[allow(clippy::too_many_arguments)]
 fn bodies(
     town: Town,
     planner: Town,
     ground: Id,
+    entry: Vec3,
     placed: &Placed,
     places: Vec<PlaceAt>,
     runs: Vec<(Id, sim::courses::rides::SeatRun)>,
@@ -1913,18 +1916,23 @@ fn bodies(
         name: "family",
         detail: e,
     })?;
-    // Each recorded body is placed on its own: one that cannot be is left out by name, and the others start (a local
-    // failure never stops unrelated actors). One standing off its floor is placed where it was
-    // (`sim::slots::placed_off`) and `Bodies::add_body_at_built` resumes it (E11d).
+    // Each recorded body is placed on its own, so one never stops the others starting (a local failure never stops
+    // unrelated actors), and always at a point it may stand on: where the log had it; off its floor, by the restart
+    // rule (`Bodies::add_body_at_built`, E11d); a body that cannot be placed on its own ground at all (its floor or seat
+    // gone) at the world's entry (`Bodies::add_body_at_entry`), named. Only a body with no recorded build is left out.
     let mut at = Vec::new();
+    let mut lost = Vec::new();
     for (id, (pose, _)) in placed {
         match recorded_body(&town, &places, *id, pose, builds) {
             Ok(one) => at.push(one),
-            Err(r) => eprintln!(
-                "worldd: {} was not placed again, left out: {}",
-                replica::world_model::show(*id),
-                refusal(r)
-            ),
+            Err(r) => {
+                eprintln!(
+                    "worldd: {} cannot be placed where the log had it: {}",
+                    replica::world_model::show(*id),
+                    refusal(r)
+                );
+                lost.push((*id, *pose));
+            }
         }
     }
     // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
@@ -1971,10 +1979,33 @@ fn bodies(
         let id = a.id;
         if let Err(r) = b.add_body_at_built(family.clone(), a, placed, build) {
             eprintln!(
-                "worldd: {} was not added again, left out: {}",
+                "worldd: {} cannot be added where the log had it: {}",
                 replica::world_model::show(id),
                 refusal(r)
             );
+            if let Some((pose, _)) = placed.get(&id) {
+                lost.push((id, *pose));
+            }
+        }
+    }
+    for (id, pose) in lost {
+        let placed_at = match builds.get(&id) {
+            Some(&build) => b.add_body_at_entry(family.clone(), id, build, entry, &pose),
+            None => Err(Refusal {
+                name: "body-unknown",
+                detail: "recorded build missing".into(),
+            }),
+        };
+        match placed_at {
+            Ok(()) => eprintln!(
+                "worldd: {} placed at the world's entry (resume-entry)",
+                replica::world_model::show(id)
+            ),
+            Err(r) => eprintln!(
+                "worldd: {} was not placed again, left out: {}",
+                replica::world_model::show(id),
+                refusal(r)
+            ),
         }
     }
     Ok(b)
@@ -2027,14 +2058,14 @@ fn recorded_body(
         name: "no-surface",
         detail: "recorded ground".into(),
     })?;
-    let moved = sim::slots::placed_off(
-        surface,
-        id,
-        Frame { node, slot: None },
-        point,
-        facing,
-        build,
-    )?;
+    let frame = Frame { node, slot: None };
+    // A body that sat stands at its seat's stand point until its seat is held again, or for good when the seat is gone
+    // or taken: at a point it may stand on.
+    let moved = if pose.support == replica::pose::Support::Slot {
+        worldd::bodies::legal_near(surface, id, frame, point, facing, build)?
+    } else {
+        sim::slots::placed_off(surface, id, frame, point, facing, build)?
+    };
     Ok((moved, build))
 }
 
@@ -3243,6 +3274,7 @@ fn serve(args: &[String]) -> R<()> {
             town,
             planner,
             ground,
+            entry,
             placed,
             places.clone(),
             runs.clone(),
@@ -5405,14 +5437,15 @@ mod s10c_lockstep {
                 kinds: built.rules.kinds.clone(),
             });
             let ground = built.ground;
+            let entry = Vec3::new(36_000_000, 0, -20_000_000);
             cfg.join = Some(Join {
-                entry: (ground, Vec3::new(36_000_000, 0, -20_000_000)),
+                entry: (ground, entry),
                 family: humanoid().unwrap(),
                 kind: Name::new(&built.body_kind).unwrap(),
                 per_tick: 8,
             });
             cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-                bodies(town, planner, ground, placed, places, runs, builds)
+                bodies(town, planner, ground, entry, placed, places, runs, builds)
             }));
             let world = answers::start(initial.frozen(), rules, store.clone(), cfg).unwrap();
             Lock {
@@ -5837,20 +5870,74 @@ mod s10c_lockstep {
         let off = Id::new(Scope([7; 16]), 1).unwrap();
         let fine = Id::new(Scope([7; 16]), 2).unwrap();
         let unknown = Id::new(Scope([7; 16]), 3).unwrap();
+        let gone = Id::new(Scope([7; 16]), 4).unwrap();
         let on_ground = Vec3::new(-40_000_000, 0, 30_000_000);
+        let no_floor = Id::new(Scope([7; 16]), 77).unwrap();
         let placed: Placed = BTreeMap::from([
             (off, (standing(floor, past), None)),
             (fine, (standing(ground, on_ground), None)),
             (unknown, (standing(ground, on_ground), None)),
+            (gone, (standing(no_floor, past), None)),
         ]);
-        let builds = BTreeMap::from([(off, Build::STANDARD), (fine, Build::STANDARD)]);
-        let b = bodies(town, planner, ground, &placed, places, Vec::new(), &builds)
-            .expect("the bodies start");
+        let builds = BTreeMap::from([
+            (off, Build::STANDARD),
+            (fine, Build::STANDARD),
+            (gone, Build::STANDARD),
+        ]);
+        let entry = Vec3::new(-38_000_000, 0, 30_000_000);
+        let mut b = bodies(
+            town,
+            planner,
+            ground,
+            entry,
+            &placed,
+            places,
+            Vec::new(),
+            &builds,
+        )
+        .expect("the bodies start");
+        // A body whose floor is gone stands at the world's entry, named, and an entry on it says so.
+        let (enode, eat) = b.pose(gone).expect("a body whose floor is gone stands");
+        assert_eq!(enode, ground, "on the ground");
+        let ground_surface = &b
+            .town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&ground];
+        let probe = Id::new(Scope([7; 16]), 98).unwrap();
+        assert!(
+            ground_surface
+                .place(
+                    probe,
+                    Frame {
+                        node: ground,
+                        slot: None
+                    },
+                    eat,
+                    replica::pose::Quat::IDENTITY
+                )
+                .is_ok(),
+            "at a point it may stand on: {eat:?}"
+        );
+        assert!(
+            b.resumed.contains(&(gone, "resume-entry")),
+            "{:?}",
+            b.resumed
+        );
+        b.begin(0);
+        b.step(50_000);
+        let said: Vec<_> = b
+            .wind_log
+            .iter()
+            .filter(|e| e.envelope.node == gone)
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == worldd::unstick::RESTARTED)
+            .collect();
+        assert_eq!(said.len(), 1, "one entry on the body: {said:?}");
         let (node, _) = b.pose(off).expect("the body logged off its floor started");
         assert_eq!(node, floor, "on its own floor's frame");
         // E11d's resume: carried on to the floor's nearest legal point (a way out through the door), never refused.
         assert!(
-            b.runner.controller.carried(off) || !b.resumed.is_empty(),
+            b.runner.controller.carried(off) || b.resumed.iter().any(|(i, _)| *i == off),
             "resumed by rule: {:?}",
             b.resumed
         );
@@ -5888,7 +5975,17 @@ mod s10c_lockstep {
             .pose;
         let placed: Placed = BTreeMap::from([(body, (recorded, None))]);
         let builds = BTreeMap::from([(body, Build::STANDARD)]);
-        let mut b = bodies(town, planner, ground, &placed, places, Vec::new(), &builds).unwrap();
+        let mut b = bodies(
+            town,
+            planner,
+            ground,
+            Vec3::ZERO,
+            &placed,
+            places,
+            Vec::new(),
+            &builds,
+        )
+        .unwrap();
         assert!(b.moved().is_empty());
         // Out through the door and on past its end, at 1 m/s: half a second in, it is still crossing.
         let past = past_door(&b.town, floor, door);

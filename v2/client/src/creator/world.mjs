@@ -11,7 +11,7 @@
 //
 // A refusal is by name, with what was wrong, before anything is sent. Levels are today's 0 to 1 and E6's 0 to 100.
 
-import { decode, idText } from '../brief/copy.mjs';
+import { allFields, decode, idText } from '../brief/copy.mjs';
 
 /** E6's fields on the world node (`v2/crates/replica/src/sky.rs`). */
 export const SKY = { DAY_S: 60, WEATHER_UNTIL: 65, PALETTE: 89, HOUR: 91, STRIKE: 69, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
@@ -49,7 +49,7 @@ export function worldOf(copy) {
   const nodes = new Map();
   for (const r of records(copy)) {
     nodes.set(r.id, r.m);
-    const f = fieldsOf(r.m);
+    const f = allFields(copy, r.m);
     if (!world && f.has(SKY.DAY_S)) world = { id: r.id, fields: f };
     if (!ground && f.has(TILES)) ground = { id: r.id, fields: f };
   }

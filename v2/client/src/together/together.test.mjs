@@ -32,6 +32,15 @@ test('together offers a handshake, a hug or a high five to one body by the serve
   assert.equal(togetherIntents({ do: 'accept' }, ctx).code, 'together-names-an-offer');
 });
 
+test('#4700: together withdraw takes back an offer by its id or its word: the asker\'s leave of it', () => {
+  assert.deepEqual(togetherIntents({ do: 'withdraw', offer: id(9) }, { place: id(1) }), [{ verb: 'activity:leave', target: id(9) }]);
+  assert.equal(togetherIntents({ do: 'withdraw' }, { place: id(1) }).code, 'together-names-an-offer');
+  assert.deepEqual(requestOf(['together', 'withdraw', 'hug']).req, { op: 'give', do: 'withdraw', offer: 'hug' });
+  const { req } = requestOf(['together', 'withdraw', id(9)]);
+  assert.deepEqual(giveIntents(req, { place: id(1) }), [{ verb: 'activity:leave', target: id(9) }]);
+  assert.deepEqual(giveIntents({ do: 'withdraw', offer: id(8) }, { place: id(1) }), [{ verb: 'activity:leave', target: id(8) }], 'a give too');
+});
+
 test('the CLI sends a touch as a give, and the give handler builds the touch', () => {
   const { req } = requestOf(['together', 'offer', 'hug', id(3)]);
   assert.equal(req.op, 'give');

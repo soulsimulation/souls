@@ -25,7 +25,7 @@
 // Not here: `smooth` (a brush that samples its neighbours is not folded onto tiles) and `move` of a landform. Each is
 // refused by name.
 
-import { decode, idText, plainKind } from '../../brief/copy.mjs';
+import { allFields, decode, idText, plainKind } from '../../brief/copy.mjs';
 import { F, bodiesUnder, changedCells, expand, grownTiles, heightAt, tileRange } from './terrain.mjs';
 
 /** A body's radius and margin on the open ground (`sim::ground::HUMAN_RADIUS + MARGIN`), µm: the world's own. */
@@ -58,7 +58,7 @@ export function groundOf(copy) {
     const m = decode(bytes);
     const id = idText(m.get(1));
     records.set(id, m);
-    const f = m.get(6) instanceof Map ? m.get(6) : new Map();
+    const f = allFields(copy, m);
     if (!ground && f.has(F.TILES)) ground = { id, m, f };
     for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
   }
