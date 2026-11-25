@@ -414,14 +414,23 @@ pub const OFFER_DECLINED: &str = "souls:offer-declined";
 pub const OFFER_LAPSED: &str = "souls:offer-lapsed";
 
 /// The bodies an offer's event is addressed to, for the queue of events addressed to a Soul (R4): an offer goes to
-/// each body asked, and a refusal or a lapse to the asker. `None` for any other event.
+/// each body asked, a refusal to the asker, and a lapse to the asker and to the bodies it names (those that did not
+/// answer, or the one whose accepted pair never started), so no one is left waiting on an offer that is gone.
+/// `None` for any other event.
 pub fn addressed(name: &str, fields: &BTreeMap<u64, Value>) -> Option<BTreeSet<Id>> {
-    match (name, fields.get(&3), fields.get(&2)) {
-        (OFFER, Some(Value::Array(a)), _) => {
-            Some(a.iter().filter_map(|x| read_id(x).ok()).collect())
+    let listed = |v: Option<&Value>| -> BTreeSet<Id> {
+        match v {
+            Some(Value::Array(a)) => a.iter().filter_map(|x| read_id(x).ok()).collect(),
+            _ => BTreeSet::new(),
         }
-        (OFFER_DECLINED | OFFER_LAPSED, _, Some(asker)) => {
-            Some(read_id(asker).into_iter().collect())
+    };
+    match (name, fields.get(&3), fields.get(&2)) {
+        (OFFER, Some(Value::Array(_)), _) => Some(listed(fields.get(&3))),
+        (OFFER_DECLINED, _, Some(asker)) => Some(read_id(asker).into_iter().collect()),
+        (OFFER_LAPSED, asked, Some(asker)) => {
+            let mut to = listed(asked);
+            to.extend(read_id(asker));
+            Some(to)
         }
         (OFFER | OFFER_DECLINED | OFFER_LAPSED, _, _) => Some(BTreeSet::new()),
         _ => None,
@@ -497,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offer_goes_to_those_asked_and_its_outcome_to_the_asker() {
+    fn an_offer_goes_to_those_asked_its_decline_to_the_asker_and_its_lapse_to_both() {
         let mut mint = Minter::new(Scope([0xe8; 16]));
         let mut id = || mint.mint().expect("an id");
         let (asker, a, b) = (id(), id(), id());
@@ -510,7 +519,15 @@ mod tests {
         let lapsed = BTreeMap::from([(2, asker.to_value()), (3, Value::Array(vec![a.to_value()]))]);
         assert_eq!(
             addressed(OFFER_LAPSED, &lapsed),
-            Some(BTreeSet::from([asker]))
+            Some(BTreeSet::from([asker, a])),
+            "a lapse reaches the asker and the body that did not answer"
+        );
+        let declined =
+            BTreeMap::from([(2, asker.to_value()), (3, Value::Array(vec![b.to_value()]))]);
+        assert_eq!(
+            addressed(OFFER_DECLINED, &declined),
+            Some(BTreeSet::from([asker])),
+            "a decline reaches the asker alone"
         );
         assert_eq!(addressed("souls:said", &lapsed), None);
     }

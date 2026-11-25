@@ -229,7 +229,8 @@ fn a2_a3_with_no_answer_the_offer_lapses_and_the_asker_is_told() {
     assert_eq!(e.envelope.at, 1_000 + LASTS);
     assert_eq!(
         addressed(OFFER_LAPSED, &event(e).fields),
-        Some(BTreeSet::from([b0]))
+        Some(BTreeSet::from([b0, b1])),
+        "the asker, and the one asked that never answered"
     );
     assert_eq!(
         bodies(event(e).fields.get(&3)),
@@ -244,7 +245,7 @@ fn a2_a3_with_no_answer_the_offer_lapses_and_the_asker_is_told() {
         "offer-missing"
     );
     println!(
-        "a2/a3: no answer from Soul 1; souls:offer-lapsed at {} µs to the asker",
+        "a2/a3: no answer from Soul 1; souls:offer-lapsed at {} µs to the asker and to Soul 1",
         1_000 + LASTS
     );
 }

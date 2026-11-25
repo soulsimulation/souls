@@ -74,8 +74,8 @@
 //   page and its owner's, set the same way through the gateway:
 //     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
 //                                         holding an open owner's message is refused (`now.owner-words`)
-//   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
-//   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`
+//   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, a decline or lapse of
+//   its own offer, or the lapse of one it was asked (with `from` and a `note`), is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`
 //   (0.135: an answer to an offer of another activity goes by that activity's kind and word, `together` and `touch`;
 //   each word of an activity this Soul is in, which the world addresses to its members, is `joined`, `started`,
 //   `left`, `ended`, `expired` or a carry's `set-down` with its `why`, every Soul by name: `../together/members.mjs`):
@@ -805,8 +805,10 @@ function onEntry(e) {
     keepKinds(rows);
     for (const ev of offers) {
       const n = offerNote(ev, body);
-      // Who declined, or did not answer (the event's field 3), for the offerer.
-      if (n) note({ ...n, ...((n.what === 'declined' || n.what === 'lapsed') && ev.fields?.[3] !== undefined ? { who: ev.fields[3] } : {}), sequence: e.sequence });
+      // Who declined, or did not answer (the event's field 3), for the offerer. One asked is told its offer's `from`,
+      // and the offer's word from the offer it was told of (its node may never have been in this Soul's copy).
+      const was = n?.from ? logged.findLast((x) => (x.what === 'offered' ? x.offer : x.what === 'invited' ? x.conversation : null) === n.conversation) : null;
+      if (n) note({ ...n, ...((n.what === 'declined' || n.what === 'lapsed') && !n.from && ev.fields?.[3] !== undefined ? { who: ev.fields[3] } : {}), ...(was ? { word: was.kind === 'together' ? was.touch : was.kind } : {}), sequence: e.sequence });
     }
     for (const n of memberNotes(e, mine)) note({ ...n, sequence: e.sequence });
   }
