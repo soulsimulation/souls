@@ -1542,13 +1542,15 @@ fn seat_args(entry: &Json, form: &str, on: Id, slot: u64) -> skills::form_runner
         .collect()
 }
 
-/// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
+/// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms and roles, a timed field left
+/// out. An activity's roles are not part of its kind (`Structure::from_entries` leaves them out too): kept, the kind
+/// loader refused the whole entry, and a form's `set ... by` on a harvest's basket was refused `field-unknown`.
 fn loaded(kinds: &Json) -> replica::kinds::Kinds {
     let mut loaded = replica::kinds::Kinds::default();
     for (_, entry) in kinds.obj().unwrap_or(&[]) {
         let mut e = entry.clone();
         if let Json::Obj(o) = &mut e {
-            o.retain(|(k, _)| k != "forms");
+            o.retain(|(k, _)| k != "forms" && k != "roles");
             // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
             // left out, so the entry's amounts load (#3715).
             if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
@@ -2122,6 +2124,11 @@ impl Acts {
         out.sort();
         out.dedup();
         out
+    }
+
+    /// Whether `body`'s Soul has a form act running or waiting to run (`Forms::running`).
+    pub fn acting(&self, body: Id) -> bool {
+        self.forms.running(body)
     }
 
     /// Whether `body` sits in the seat of another thing its form took, still linked by it (E14b): an act stopped
