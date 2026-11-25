@@ -641,6 +641,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // soon as an initial body needs one; old worlds load them at once, as before
     let templatesStarted=false;const startTemplates=()=>{if(templatesStarted)return;templatesStarted=true;void loadPeopleKit().then(kit=>kit.loadTemplates(abort.signal,resources,templateOptions)).catch(()=>{});};
     if((!newWorld&&!peopleLater)||shotMode)startTemplates();
+    // page arrival: a new world whose arrival waits for its people (desktop) loads their models once its near world is
+    // built (the stream's baseline is in by then), so they are in when its first live chunks come, not fetched after them
+    else if(!peopleLater)void whenMarked('entity-built').then(()=>{if(!peopleLater&&!abort.signal.aborted)startTemplates();});
     const requireTemplate=async(name:string)=>{startTemplates();if(templates.some(t=>t.name===name))return;if(templateLoads.get(name)?.failed){beginTemplate(name);void loadPeopleKit().then(kit=>kit.loadTemplates(abort.signal,resources,{...templateOptions,names:[name]})).catch(()=>{});}await templateLoads.get(name)!.promise;};
 
     // Current unbound live viewers retain their observed layout. Historical
@@ -668,8 +671,20 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const newInitialGate=()=>{initialGate?.cancel();const generation=++initialGeneration;initialSnapshot=false;preparingGeneration=0;initialBodyIds=[];const gate=new InitialWorldReadiness(generation,progress=>{if(!abort.signal.aborted&&initialGate===gate){arrivalMark('initial-'+progress.stage);setInitialProgress(progress);}});initialGate=gate;setInitialProgress(gate.snapshot());retryInitial.current=()=>{if(initialGate===gate){preparingGeneration=0;gate.retry();}};return gate;};
 
     const sceneryStatus=(reason:string|null)=>{sceneReason=reason;setSceneryNotice(reason);};
+    const captureUrl=(hash:string)=>apiPath('/v1/scenes/'+hash)+'?world='+encodeURIComponent(owner.worldId);
+    // page arrival: a new world's scenery capture, named by its published layout (/v1/scene), is asked for at once, so its
+    // first live chunk (which names the same capture) finds it in, not one more round trip after the stream; used once
+    const earlyCaptures=new Map<string,Promise<unknown>>();
+    if(newWorld&&oldViews())void fetch(apiPath('/v1/scene'),{signal:abort.signal}).then(r=>r.ok?r.json():null).then((layout:{renderSceneRef?:{hash?:unknown}}|null)=>{
+      const hash=layout?.renderSceneRef?.hash;
+      if(typeof hash!=='string'||!/^[0-9a-f]{64}$/.test(hash)||abort.signal.aborted)return;
+      const early=fetch(captureUrl(hash),{signal:abort.signal}).then(r=>r.ok?r.json():Promise.reject(Error('Recorded scenery unavailable')));early.catch(()=>{});
+      earlyCaptures.set(hash,early);
+    }).catch(()=>{});
     const sceneHistory=new WorldSceneHistory(owner.worldId,async(hash,signal)=>{
-      const response=await fetch(apiPath('/v1/scenes/'+hash)+'?world='+encodeURIComponent(owner.worldId),{signal});  // lane W1: browser-cached per world (http.ts)
+      const early=earlyCaptures.get(hash);earlyCaptures.delete(hash);
+      if(early)try{return await early;}catch{/* asked again below */}
+      const response=await fetch(captureUrl(hash),{signal});  // lane W1: browser-cached per world (http.ts)
       if(!response.ok)throw Error('Recorded scenery unavailable');return response.json();
     },decodeSceneCapturePublication);
     const installScene=(info:ReturnType<typeof parseSceneInfo>,verifiedPublication?:unknown,profiles:OptionalAppearanceProfiles=ALL_OPTIONAL_APPEARANCE_PROFILES)=>{
@@ -864,6 +879,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         liveProbe.tick = tick; liveProbe.target = target; liveProbe.newest = chunks.at(-1)?.toTick ?? null;
       }
 
+      // page arrival: where the arrival waits for its people (desktop), their models download by the world's first live
+      // chunks at the latest, beside its scenery, not once that is in and the first frame sampled (startTemplates runs once)
+      if(!peopleLater&&liveList.length)startTemplates();
       if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,liveDelayOf(s),motionOwner(),motionOwner);
       const candidate = initialMotionHistory?.loading&&!past.current ? null : chunkAt(chunks, tick);
       // the people renderer: at once on desktops and old worlds (no frame until it is here), after the arrival on a phone's
