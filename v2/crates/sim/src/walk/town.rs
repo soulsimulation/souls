@@ -3064,6 +3064,25 @@ impl<'a> View<'a> {
         self.stand_near_door(node, at, reach, from, None)
     }
 
+    /// Where a body stands at `at` (µm, `node`'s frame), when it may stand there and a walk from `from` (a node and a
+    /// point in its frame) may reach it: the map's parts joined (`Map::may_reach`, one lookup, no route search). What a
+    /// walk to a place's edge steps back toward the walker by, to the first point it can get to (worldd's
+    /// `Bodies::goal`).
+    pub fn stand_reached(&self, node: Id, at: Vec3, from: (Id, Vec3)) -> Option<Vec3> {
+        let mut scratch = self.scratch.borrow_mut();
+        let g = Grounds {
+            tree: self.tree,
+            map: MapRef::Shared(self.map, &mut scratch),
+            surfaces: self.surfaces,
+            buildings: self.buildings,
+            ground: self.ground,
+            passages: self.passages,
+            door: None,
+        };
+        let (p, _) = g.stand(node, at)?;
+        (!g.passage(node, p) && g.may_reach(from.0, from.1, node, p)).then_some(p)
+    }
+
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
     /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
     pub fn stand_near_door(

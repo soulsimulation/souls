@@ -4273,6 +4273,29 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
+    /// A boat is read from its entry's data: a `vehicle` on `deep_water` (a rowing boat at 1.5 m/s, a canoe), never a
+    /// bicycle on level ground or a punt, whose course is its mooring's.
+    #[test]
+    fn a_boat_is_a_vehicle_on_deep_water_by_its_entry() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let row = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_boat.json"
+        ));
+        let canoe = read(include_str!(
+            "../../../../content/kinds/vehicles/canoe.json"
+        ));
+        let bike = read(include_str!(
+            "../../../../content/kinds/vehicles/bicycle.json"
+        ));
+        let punt = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_punt.json"
+        ));
+        assert_eq!(boat_speed(&row), Some(1_500_000));
+        assert!(boat_speed(&canoe).is_some());
+        assert_eq!(boat_speed(&bike), None);
+        assert_eq!(boat_speed(&punt), None);
+    }
+
     /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
     #[test]

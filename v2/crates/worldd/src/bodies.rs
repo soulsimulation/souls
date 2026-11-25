@@ -1262,7 +1262,7 @@ impl Bodies {
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
-    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
+    fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             return Ok(Target::new(node, p));
         }
@@ -1292,9 +1292,10 @@ impl Bodies {
             return Err(refusal("move.whole-world", node));
         }
         // A landform or another place on the ground (a range, a sea, a lake, a wood): its middle is no place to
-        // stand, so a walk to it ends at its edge, the point of its outline (or of a wide line's side) nearest the
-        // walker, stood back from it ([`select::GAP`]); the walk's own spots stand it on the nearest walkable ground
-        // there. A walker already within it is there.
+        // stand, so a walk to it ends at its edge. From the point of its outline (or of a wide line's side) nearest the
+        // walker, stood back from it by [`select::GAP`], it steps back toward the walker a metre at a time to the first
+        // point a body may stand on that the walker's walk may reach (`View::stand_reached`, no route search): the
+        // nearest walkable point at its edge on the walker's way there. A walker already within it is there.
         if let Some(half) = place_half_width(tree, node)
             && let Some((frame, at)) = self.pose(body)
         {
@@ -1307,12 +1308,21 @@ impl Bodies {
             let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
                 .isqrt()
                 .max(1);
-            let off = i128::from(half.saturating_add(select::GAP)).min(len);
-            let back = |d: i64| i64::try_from(i128::from(d) * off / len).unwrap_or(0);
-            return Ok(Target::new(
-                frame,
-                Vec3::new(edge.x + back(dx), 0, edge.z + back(dz)),
-            ));
+            let along = |s: i128| {
+                let s = s.min(len);
+                let k = |d: i64| i64::try_from(i128::from(d) * s / len).unwrap_or(0);
+                Vec3::new(edge.x + k(dx), 0, edge.z + k(dz))
+            };
+            let first = i128::from(half.saturating_add(select::GAP));
+            let view = self.town.view_for(body)?;
+            let mut s = first;
+            while s < len {
+                if let Some(p) = view.stand_reached(frame, along(s), (frame, at)) {
+                    return Ok(Target::new(frame, p));
+                }
+                s += 1_000_000;
+            }
+            return Ok(Target::new(frame, along(first)));
         }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
@@ -1339,7 +1349,7 @@ impl Bodies {
 
     /// The candidate of `a`'s ranked list that is taken, and its rank (C14): a sit's or a lie's through I5's
     /// selector (`sim::commit::bind`, named slots: the first free one binds), a walk's the first with somewhere to go.
-    fn bind(&self, a: &Asked) -> R<(usize, Ask)> {
+    fn bind(&mut self, a: &Asked) -> R<(usize, Ask)> {
         if a.fallbacks.is_empty() {
             return Ok((0, a.ask.clone()));
         }
