@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { activityFrame } from './activity-poses.ts';
-import { ACT_BLEND, GET_UP, LIE_DOWN, TILT, blendFrames, lastPostureChange, postureKind, postureNow } from './posture-transition.ts';
+import { ACT_BLEND, ACT_HISTORY, FLATTEN, GET_UP, LIE_DOWN, TILT, blendFrames, lastPostureChange, postureKind, postureNow, type PostureChange } from './posture-transition.ts';
+
+const change = (from: string, to: string, age: number, before?: PostureChange): PostureChange => ({ from, to, age, ...(before ? { before } : {}) });
 
 test('posture kinds of the exercise and rest activities', () => {
   assert.equal(postureKind('situps'), 'back');
@@ -12,57 +14,63 @@ test('posture kinds of the exercise and rest activities', () => {
   assert.equal(postureKind('sit-ground'), 'ground');
 });
 
-test('sit-ups to jumping jacks: the body gets up from its back (LayToIdle 0 → 1), then the jacks ease in', () => {
-  const at = (age: number) => postureNow('situps', undefined, 'jumping-jacks', 'jumping-jacks', undefined, age);
-  assert.equal(at(0)!.rise, 0);
+test('sit-ups to jumping jacks: the sit-up flattens, the body gets up from its back (LayToIdle 0 → 1), then the jacks ease in', () => {
+  const at = (age: number) => postureNow(change('situps', 'jumping-jacks', age), 'jumping-jacks');
+  assert.deepEqual(at(0)!.flat, { act: 'situps', k: 1 });
+  assert.ok(at(FLATTEN - 0.01)!.flat!.k < 0.01);
   let last = 0;
-  for (let age = 0; age < GET_UP; age += 0.05) { const r = at(age)!.rise!; assert.ok(r >= last && r - last < 0.12, `rise ${r} after ${last}`); last = r; }
+  for (let age = FLATTEN; age < FLATTEN + GET_UP; age += 0.05) { const r = at(age)!.rise!; assert.ok(r >= last && r - last < 0.12, `rise ${r} after ${last}`); last = r; }
   assert.ok(last > 0.99);
-  const s = at(GET_UP + ACT_BLEND / 2)!;
+  const s = at(FLATTEN + GET_UP + ACT_BLEND / 2)!;
   assert.equal(s.rise, undefined);
   assert.ok(s.settle > 0 && s.settle < 1);
-  assert.equal(at(GET_UP + ACT_BLEND + 0.01), null);
+  assert.equal(at(FLATTEN + GET_UP + ACT_BLEND + 0.01), null);
+  assert.ok(FLATTEN + GET_UP + ACT_BLEND < ACT_HISTORY, 'the whole change stays within the history the replay keeps');
 });
 
-test('standing to sit-ups lies down; standing to push-ups tilts the plank down from the feet', () => {
-  const lie = postureNow('idle', undefined, 'situps', 'situps', undefined, 0)!;
-  assert.equal(lie.rise, 1);
-  assert.ok(postureNow('idle', undefined, 'situps', 'situps', undefined, LIE_DOWN - 0.05)!.rise! < 0.02);
-  const tilt = postureNow('jumping-jacks', undefined, 'pushups', 'pushups', undefined, TILT / 2)!.tilt!;
+test('standing to sit-ups lies down, then the sit-up eases in; standing to push-ups tilts the plank down from the feet', () => {
+  assert.equal(postureNow(change('idle', 'situps', 0), 'situps')!.rise, 1);
+  assert.ok(postureNow(change('idle', 'situps', LIE_DOWN - 0.05), 'situps')!.rise! < 0.02);
+  assert.ok(postureNow(change('idle', 'situps', LIE_DOWN + 0.1), 'situps')!.settle < 1);
+  const tilt = postureNow(change('jumping-jacks', 'pushups', TILT / 2), 'pushups')!.tilt!;
   assert.equal(tilt.act, 'pushups');
   assert.ok(tilt.k > 0 && tilt.k < 1);
-  const up = postureNow('pushups', undefined, 'idle', 'idle', undefined, 0)!.tilt!;
-  assert.deepEqual(up, { act: 'pushups', k: 1 });
+  assert.deepEqual(postureNow(change('pushups', 'idle', 0), 'idle')!.tilt, { act: 'pushups', k: 1 });
 });
 
-test('back to face down gets up then goes down, within the second the history keeps', () => {
-  const at = (age: number) => postureNow('situps', undefined, 'pushups', 'pushups', undefined, age);
-  assert.equal(at(0)!.rise, 0);
-  assert.ok(at(0.8)!.tilt);
-  assert.equal(at(1.01), null);
+test('a change that comes while the one before is drawn waits for it: up off the back, then down onto the hands', () => {
+  // sit-ups → idle (0.6 s) → push-ups: at the push-ups' start the getting-up is 0.6 s in and goes on to its end
+  const at = (sincePushups: number) => postureNow(change('idle', 'pushups', sincePushups, change('situps', 'idle', 0.6 + sincePushups)), 'pushups');
+  assert.ok(at(0)!.rise! > 0 && at(0)!.rise! < 1);
+  const left = FLATTEN + GET_UP - 0.6;
+  assert.ok(at(left - 0.05)!.rise! > 0.99);
+  assert.ok(at(left + TILT / 2)!.tilt);
+  assert.equal(at(left + TILT + 0.01), null);
 });
 
 test('a seat: straight from standing to sit draws sit-down, from sit to standing stand-up; the old engine phases are left alone', () => {
-  assert.deepEqual(postureNow('idle', undefined, 'sit', 'sit', undefined, 0.3), { activity: 'sit-down', since: 0.3, settle: 0 });
-  assert.deepEqual(postureNow('sit', undefined, 'idle', 'idle', undefined, 0.2), { activity: 'stand-up', since: 0.2, settle: 0 });
-  assert.equal(postureNow('idle', undefined, 'sit-down', 'sit', undefined, 0.3), null);
-  assert.equal(postureNow('stand-up', undefined, 'idle', 'idle', undefined, 0.1), null);
+  assert.deepEqual(postureNow(change('idle', 'sit', 0.3), 'sit'), { settle: 0, activity: 'sit-down', since: 0.3 });
+  assert.deepEqual(postureNow(change('sit', 'idle', 0.2), 'idle'), { settle: 0, activity: 'stand-up', since: 0.2 });
+  assert.equal(postureNow(change('idle', 'sit-down', 0.3), 'sit'), null);
+  assert.equal(postureNow(change('stand-up', 'idle', 0.1), 'idle'), null);
 });
 
 test('no transition while the body walks off, or without a change of posture', () => {
-  assert.equal(postureNow('situps', undefined, 'idle', 'walk', undefined, 0.2), null);
-  assert.equal(postureNow('idle', undefined, 'jumping-jacks', 'jumping-jacks', undefined, 0.1), null);
-  assert.equal(postureNow(undefined, undefined, 'idle', 'idle', undefined, 0.1), null);
+  assert.equal(postureNow(change('situps', 'idle', 0.2), 'walk'), null);
+  assert.equal(postureNow(change('idle', 'jumping-jacks', 0.1), 'jumping-jacks'), null);
+  assert.equal(postureNow(undefined, 'idle'), null);
 });
 
-test('the latest posture change in a history survives an idle tick between two exercises', () => {
+test('the latest posture change in a history survives an idle tick between two exercises, with the one before it', () => {
   // sit-ups from tick 0, idle for one tick at 40, jumping jacks from 41
   const t = [0, 40, 41], v = ['situps', 'idle', 'jumping-jacks'];
   const c = lastPostureChange(t, v, 2, 45, 0.05, () => undefined)!;
   assert.deepEqual({ from: c.from, to: c.to }, { from: 'situps', to: 'idle' });
   assert.ok(Math.abs(c.age - 0.25) < 1e-9);
-  assert.ok(postureNow(c.from, c.fromBase, c.to, 'jumping-jacks', undefined, c.age)!.rise! > 0);
+  assert.ok(postureNow(c, 'jumping-jacks'));
   assert.equal(lastPostureChange(t, v, 2, 40 + 40, 0.05, () => undefined), null); // 2 s later: over
+  const two = lastPostureChange([0, 40, 52], ['situps', 'idle', 'pushups'], 2, 55, 0.05, () => undefined)!;
+  assert.deepEqual([two.from, two.to, two.before?.from, two.before?.to], ['idle', 'pushups', 'situps', 'idle']);
 });
 
 test('a frame crossfade moves each hand from one goal to the other, never in one step', () => {
@@ -81,4 +89,7 @@ test('a frame crossfade moves each hand from one goal to the other, never in one
   const off = blendFrames(a, null, 0.75)!;
   for (const i of [0, 1] as const) if (a.hands?.[i]) assert.ok(Math.abs(off.handW![i] - 0.25) < 1e-9);
   assert.equal(blendFrames(null, null, 0.5), null);
+  const sit = activityFrame('situps', 'idle', 2.1, 's1')!, flat = blendFrames(null, sit, 0)!;
+  assert.equal(flat.lying?.face, 'back');
+  assert.equal(flat.lying?.raise, 0);
 });
