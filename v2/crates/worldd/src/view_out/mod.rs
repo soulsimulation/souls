@@ -2954,9 +2954,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         view: &mut View,
         duplicates: &mut Vec<(u64, Id)>,
         migration_state: &mut Option<Value>,
+        was: &mut BTreeMap<Id, bool>,
     ) -> R<()> {
         let header = self.header.hash().to_bytes();
         for effect in &part.effects {
+            // Each node this entry changes that the part's start did not list (`may_change`) is read as it is now,
+            // before the entry: nothing before it in the part changed it, or it would have been listed.
+            for id in self.canonical.touches(effect) {
+                if let std::collections::btree_map::Entry::Vacant(v) = was.entry(id) {
+                    v.insert(self.visible(self.canonical.tree(), id));
+                }
+            }
             let before = Before::of(self.canonical.tree(), effect);
             if effect.envelope.audience == Audience::Everyone
                 && let Body::Transfer(replica::effects::TransferRec::Arrive { transfer, .. }) =
@@ -3014,8 +3022,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             let kept = self.kept_out(&part);
             // Whole canonical validation first. Never publish a partial producer result or private ledger. The part is
             // taken entry by entry, as a viewer applies it; the view, the duplicates and the cut's state are kept only
-            // when every entry applied, and a part refused part way poisons the writer. The view reads the copy's tree around each
-            // entry: no whole state is built per entry (#3667).
+            // when every entry applied, and a part refused part way poisons the writer. The view reads the writer's tree
+            // around each entry: no whole state is built per entry (#3667).
             // A part of motion, fields and timers only (#3799) changes no node's parent and brings no node, so each
             // entry's view reads the same parent chains before and after it: the view steps over the tree as it stands,
             // and the part is applied to the one tree, all of it or none, with no copy. Any other part is taken entry by
@@ -3078,7 +3086,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 // every node it can change (`may_change`). An entry refused part way leaves the tree part changed:
                 // the writer is poisoned ([`PublicWriter::apply_record`]), so nothing is published from it; the
                 // world's stream thread ends with it, as it did on any refusal.
-                let was: BTreeMap<Id, bool> = self
+                let mut was: BTreeMap<Id, bool> = self
                     .canonical
                     .may_change(&part)
                     .into_iter()
@@ -3096,6 +3104,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     &mut view,
                     &mut duplicates,
                     &mut migration_state,
+                    &mut was,
                 )?;
                 self.view = view;
                 self.duplicates.extend(duplicates);

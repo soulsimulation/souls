@@ -4526,10 +4526,15 @@ fn t_late_a_thing_taken_out_of_a_closed_container_is_still_a_whole_cut() {
 /// byte, and never refuse them (`stream-poisoned`).
 #[test]
 fn a_flight_landed_and_walked_in_one_part_is_taken_as_a_copy_took_it() {
-    for then in ["remove", "leave"] {
-        let reference = flight_output(true, then);
-        let tree = flight_output(false, then);
-        assert!(reference == tree, "{then}: the in-place part differs");
+    for linked in [false, true] {
+        for then in ["remove", "leave"] {
+            let reference = flight_output(true, then, linked);
+            let tree = flight_output(false, then, linked);
+            assert!(
+                reference == tree,
+                "{then} (linked {linked}): the in-place part differs"
+            );
+        }
     }
 }
 
@@ -4545,14 +4550,14 @@ fn replay_in_place_publishes_the_same_bytes_as_a_copy_per_part() {
     assert!(reference == tree, "the in-place replay differs");
 }
 
-fn flight_output(copy: bool, then: &str) -> Vec<u8> {
+fn flight_output(copy: bool, then: &str, linked: bool) -> Vec<u8> {
     use replica::effects::TransferRec;
     COPY_PART.set(copy);
     let h = header();
-    let views = scratch(&format!("flight-{copy}-{then}")).join("views");
+    let views = scratch(&format!("flight-{copy}-{then}-{linked}")).join("views");
     let store = directoryd::directory::store::Memory::default();
     let n = |s: u8| Id::new(Scope([0xA0 + s; 16]), 1).unwrap();
-    let (carrier, child, t1, t2) = (n(1), n(2), n(3), n(4));
+    let (carrier, child, t1, t2, stay) = (n(1), n(2), n(3), n(4), n(5));
     let everyone = Audience::Everyone;
     let mut source = Replica::start(h.stored()).unwrap();
     let mut out = PublicWriter::open(
@@ -4597,9 +4602,11 @@ fn flight_output(copy: bool, then: &str) -> Vec<u8> {
             }),
         )
     };
+    // With `linked`, a node that stays owns a link to the child, which stays indexed at both ends while it flies.
+    let o = if linked { 2 } else { 0 };
     let last = if then == "remove" {
         w3e_effect(
-            4,
+            4 + o,
             carrier,
             everyone,
             Body::Changes(vec![ChangeRec {
@@ -4608,10 +4615,10 @@ fn flight_output(copy: bool, then: &str) -> Vec<u8> {
             }]),
         )
     } else {
-        leave(4, t2)
+        leave(4 + o, t2)
     };
     let arrive = w3e_effect(
-        3,
+        3 + o,
         h.zone,
         everyone,
         Body::Transfer(TransferRec::Arrive {
@@ -4619,14 +4626,29 @@ fn flight_output(copy: bool, then: &str) -> Vec<u8> {
             carried: Vec::new(),
         }),
     );
-    let log = vec![
-        vec![
-            w3e_create(&h, 0, carrier, h.zone, everyone),
-            w3e_create(&h, 1, child, carrier, everyone),
-        ],
-        vec![leave(2, t1)],
-        vec![arrive, last],
+    let mut first = vec![
+        w3e_create(&h, 0, carrier, h.zone, everyone),
+        w3e_create(&h, 1, child, carrier, everyone),
     ];
+    if linked {
+        first.push(w3e_create(&h, 2, stay, h.zone, everyone));
+        first.push(w3e_effect(
+            3,
+            stay,
+            everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Link {
+                    link: n(6),
+                    ty: Name::new("souls:near").unwrap(),
+                    ends: [stay, child],
+                    owner: replica::world_model::End::First,
+                    audience: everyone,
+                },
+                rest: Rest::new(),
+            }]),
+        ));
+    }
+    let log = vec![first, vec![leave(2 + o, t1)], vec![arrive, last]];
     for (i, effects) in log.into_iter().enumerate() {
         let bytes = w3e_packet(&h, effects);
         source.apply_bytes(&bytes).unwrap();
