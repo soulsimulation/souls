@@ -456,7 +456,18 @@ fn yaw(mdeg: i64) -> Result<Quat, String> {
     Quat::from_yaw_mdeg(mdeg).map_err(|e| format!("{e:?}"))
 }
 
-/// The boxes of node `h` (an N1 `solids` row each), moved into the frame by `x`.
+/// The most a thing may measure across, µm, and still block the ground under its seats or its top ([`under_slots`]):
+/// a campfire's ring of logs (4.5 m), a swing set or a hammock between its posts stay walkable among their own boxes.
+pub const UNDER_MOST: i64 = 3_000_000;
+
+/// How far the box under a thing's slots is taken in from its legs' outline on each side, µm: half today's body radius
+/// (`replica::kinds::sizes::Size::Standard`, 280 mm). Grown by a body's clearance, the cut keeps a standard body's
+/// centre 200 mm off the plank or the top, so no body stands in a bench or a table, and its edge may come under them,
+/// as it does at a table.
+pub const UNDER_INSET: i64 = 140_000;
+
+/// The boxes of node `h` (an N1 `solids` row each), moved into the frame by `x`, and the box under its slots
+/// ([`under_slots`]) when it has one.
 fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<(), String> {
     let Some(v) = tree
         .node(h)
@@ -464,6 +475,8 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
     else {
         return Ok(());
     };
+    // Each box's corners and foot in the thing's own frame, for the box under its slots.
+    let mut legs: Vec<([Xz; 4], i64)> = Vec::new();
     for r in row(&v) {
         let n: Vec<i64> = row(r)
             .iter()
@@ -485,8 +498,82 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
             y0: y0 + w.pos.y,
             y1: y1 + w.pos.y,
         });
+        let l = |u: i64, v: i64| on_plane(&b, [u, v], 0).map(|p| [p.x, p.z]);
+        legs.push(([l(-hx, -hz)?, l(hx, -hz)?, l(hx, hz)?, l(-hx, hz)?], y0));
+    }
+    if let Some(([x0, z0, x1, z1], y0, y1)) = under_slots(tree, h, &legs) {
+        let c = |u: i64, v: i64| on_plane(x, [u, v], 0).map(|p| [p.x, p.z]);
+        let lift = on_plane(x, [(x0 + x1) / 2, (z0 + z1) / 2], 0)?.y;
+        out.push(Solid {
+            ring: [c(x0, z0)?, c(x1, z0)?, c(x1, z1)?, c(x0, z1)?],
+            y0: y0 + lift,
+            y1: y1 + lift,
+        });
     }
     Ok(())
+}
+
+/// The box under the seats or the top of node `h`, in its own frame: `[x0, z0, x1, z1]` and its height span, µm. A
+/// thing's boxes are its parts at least 0.3 m tall (kit/2's colliders), so a bench's are its end legs and a table's
+/// its four legs: its seat plank or its top blocks nothing, and a body walked to it would stand inside it. So a thing
+/// with a slot above a step and within the body's height ([`STEP`] to [`BODY_HIGH`]: a seat, a surface, a bunk) also
+/// blocks the box its legs (its boxes that start below that slot) span, taken in by [`UNDER_INSET`], from their foot
+/// up to its highest such slot. Not a thing with fewer than two legs (its one box is all it spans), one more than [`UNDER_MOST`] across, one that
+/// holds a floor (a building), nor one with a slot inside that box no higher than a step (a place to stand in it: a
+/// kiosk's vendor, a bookshelf's bottom shelf). A walk to it ends beside it, as at any box (N9's spots, C15's reach),
+/// and its seats' stand points, measured against this ground when they are registered, are moved clear of it.
+fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64; 4], i64, i64)> {
+    let slots: Vec<Vec3> = tree
+        .node(h)?
+        .fields()
+        .get(&F_SLOTS)
+        .map(row)?
+        .iter()
+        .filter_map(|r| {
+            let r = row(r);
+            let at = |k: usize| r.get(k).and_then(um);
+            Some(Vec3::new(at(1)?, at(2)?, at(3)?))
+        })
+        .collect();
+    let top = slots
+        .iter()
+        .map(|p| p.y)
+        .filter(|y| *y > STEP * 1000 && *y <= BODY_HIGH * 1000)
+        .max()?;
+    let under: Vec<&([Xz; 4], i64)> = legs.iter().filter(|(_, y0)| *y0 < top).collect();
+    if under.len() < 2 {
+        return None;
+    }
+    let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    for p in under.iter().flat_map(|(r, _)| r) {
+        bb = [
+            bb[0].min(p[0]),
+            bb[1].min(p[1]),
+            bb[2].max(p[0]),
+            bb[3].max(p[1]),
+        ];
+    }
+    if bb[2] - bb[0] > UNDER_MOST || bb[3] - bb[1] > UNDER_MOST {
+        return None;
+    }
+    let stand_in = slots.iter().any(|p| {
+        p.y <= STEP * 1000 && (bb[0]..=bb[2]).contains(&p.x) && (bb[1]..=bb[3]).contains(&p.z)
+    });
+    let building = tree
+        .children(h)
+        .unwrap_or(&[])
+        .iter()
+        .any(|&c| kind_of(tree, c) == FLOOR);
+    if stand_in || building {
+        return None;
+    }
+    // Taken in by UNDER_INSET (keeping 2 mm of it), so the cut keeps a body's centre that much plus its clearance off
+    // the plank or the top, and its edge may come under them, as a body sits up to a table.
+    let inset = |a: i64, b: i64| UNDER_INSET.min((b - a) / 2 - 1000).max(0);
+    let (ix, iz) = (inset(bb[0], bb[2]), inset(bb[1], bb[3]));
+    let bb = [bb[0] + ix, bb[1] + iz, bb[2] - ix, bb[3] - iz];
+    let y0 = under.iter().map(|(_, y0)| *y0).min()?;
+    Some((bb, y0, top))
 }
 
 /// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`.

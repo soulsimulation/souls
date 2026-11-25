@@ -841,3 +841,139 @@ fn a_restart_with_a_seat_gone_stands_the_body_says_so_and_it_walks() {
     r.expect("the walk is done");
     assert!(moved, "it moved");
 }
+
+/// An open ground 20 m square holding Eden's bench seat at the origin and its table 3 m east (today's solids and slots,
+/// the facts' rows): the ground under the bench's seats and the table's top is cut since the first-day tester's round
+/// 2 (`sim::ground::scene`).
+const BENCH_AND_TABLE: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-bench-seat@1", "hash": "ab", "name": "core:bench_seat", "form": "point"},
+            {"ref": "core-table@1", "hash": "ac", "name": "core:table", "form": "point"}],
+  "things": [
+    {"id": "e_bench", "def": "core-bench-seat@1", "ref": "core-bench-seat@1", "parent": null,
+     "pose": [0, 0, 0, 0], "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "bench",
+     "solids": [[-600, 0, 15, 135, 0, 15, 405, 0, 0], [600, 0, 15, 135, 0, 15, 405, 0, 0]],
+     "slots": [{"n": 1, "id": "seat-1", "kind": "seat", "at": [-350, 465, 0], "yaw": 0, "capacity": 1},
+               {"n": 2, "id": "seat-2", "kind": "seat", "at": [350, 465, 0], "yaw": 0, "capacity": 1}]},
+    {"id": "e_table", "def": "core-table@1", "ref": "core-table@1", "parent": null,
+     "pose": [3000, 0, 0, 0], "world": [3000, 0, 0, 0], "scale_ppm": 1000000, "name": "table",
+     "solids": [[-520, -320, 30, 30, 0, 0, 700, 0, 0], [520, -320, 30, 30, 0, 0, 700, 0, 0],
+                [-520, 320, 30, 30, 0, 0, 700, 0, 0], [520, 320, 30, 30, 0, 0, 700, 0, 0]],
+     "slots": [{"n": 1, "id": "top", "kind": "surface", "at": [0, 750, 0], "yaw": 0, "capacity": 12}]}
+  ],
+  "doors": [],
+  "places": [{"id": "square.area", "of": "area", "kind": "square", "name": "the square",
+              "polygon": [[-10000, -10000], [10000, -10000], [10000, 10000], [-10000, 10000]]}],
+  "bake": {"things": 2},
+  "byRef": {"core-bench-seat@1": 1, "core-table@1": 1}
+}"#;
+
+/// First-day tester, round 2: a body the log had standing where the ground under a bench's seats or a table's top is
+/// now cut (in the bench's middle, under the table) is never left there at a restart. The bench's body climbs out
+/// over the bench's own boxes (its footprint, which holds the box under its seats); the table's, under a thing with no
+/// seat, is placed at its floor's nearest legal point (`resume-placed`). Both then stand where they may, and walk.
+#[test]
+fn a_restart_places_bodies_logged_under_a_bench_or_a_table_where_they_may_stand_and_they_walk() {
+    let Import {
+        tree, rules, nodes, ..
+    } = import_eden::load(BENCH_AND_TABLE).expect("the bench and the table load");
+    let root = nodes["world"];
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/climb-restart/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(root.scope().0.to_vec())),
+        (4, root.to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = tree.to_state().next;
+    let ground = nodes["ground"];
+    let bench = nodes["e_bench"];
+    let town = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let (in_bench, in_table) = (Vec3::ZERO, Vec3::new(3_000_000, 0, 0));
+    assert!(!on(&town, ground, in_bench), "the bench's middle is cut");
+    assert!(!on(&town, ground, in_table), "under the table is cut");
+    let own = worldd::places::footprint(&town.tree, bench, ground);
+    let clear = Vec3::new(0, 0, 3_000_000);
+    let first = |b| town.surfaces[&ground].place(b, frame, clear, Quat::IDENTITY);
+    let (a, c) = (id(1), id(2));
+    let (a0, c0) = (first(a).unwrap(), first(c).unwrap());
+    let logged = |p| {
+        (
+            Pose {
+                frame,
+                position: p,
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: ground,
+                    height: 0,
+                },
+            },
+            None,
+        )
+    };
+    let placed = Placed::from([(a, logged(in_bench)), (c, logged(in_table))]);
+    let mut b = Bodies::new(town, TICK).expect("the bodies");
+    // The bench's seats, as `worldd serve` registers them: the seat's point and its stand point 455 mm in front.
+    for (slot, x) in [(1, -350_000), (2, 350_000)] {
+        b.add_place(PlaceAt {
+            thing: bench,
+            place: Place {
+                slot,
+                height: 465_000,
+                stand: [0, 455_000],
+            },
+            point: Vec3::new(x, 465_000, 0),
+            facing: Quat::IDENTITY,
+            floor: ground,
+            more: Vec::new(),
+        })
+        .expect("its seat");
+    }
+    b.slots.footprint(bench, own);
+    b.add_body_at(humanoid(), a0, &placed)
+        .expect("the bench's body starts");
+    b.add_body_at(humanoid(), c0, &placed)
+        .expect("the table's body starts");
+    b.begin(0);
+    println!("resumed: {:?}", b.resumed);
+    let mut now = 0;
+    while b.runner.controller.carried(a) || b.runner.controller.carried(c) {
+        now += TICK;
+        assert!(now < 10 * S, "landed within 10 s");
+        b.step(now);
+    }
+    let said = restarted(&mut b);
+    println!("restarted: {said:?}");
+    let how = |who| said.iter().find(|s| s.0 == who).map(|s| s.1.clone());
+    assert_eq!(
+        how(a).as_deref(),
+        Some("climb-out"),
+        "out over the bench's own boxes"
+    );
+    assert_eq!(
+        how(c).as_deref(),
+        Some("resume-placed"),
+        "placed beside the table"
+    );
+    for (n, body) in [(1, a), (2, c)] {
+        let p = b.runner.controller.body(body).unwrap().pose.position;
+        assert!(
+            on_after(&b, ground, p),
+            "body {n} stands where it may: {p:?}"
+        );
+        let (r, moved) = walk_east(&mut b, ground, body, id(100 + n), &mut now);
+        println!("body {n}: from {p:?}: {r:?}");
+        r.expect("the walk is done");
+        assert!(moved, "body {n} moved");
+    }
+}
