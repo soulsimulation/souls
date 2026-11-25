@@ -23,6 +23,8 @@
 #                                                   a move installed it, a probe write, read and delete in each bucket
 #   bash store-switch.sh undo                       the last apply backwards: the backed-up settings first, then each
 #                                                   world and every service restarted on them; writes to no bucket
+#   bash store-switch.sh chains                     each world's public stream chain: all in the store its spool
+#                                                   backs up to (nothing queued, no head unanswered), or still sending
 #
 # The new store file (default /etc/souls/store-new.env, root, mode 600) holds STORE_BASE, AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY and optionally AWS_DEFAULT_REGION (R2's `auto` when absent). Keys are read from files by path
@@ -49,7 +51,6 @@ SERVICES=(souls-directory souls-alarms)
 DROPIN=50-store-switch.conf
 MANIFESTS=
 SKIP_ARGS=()
-for p in ${SWITCH_SKIP:-}; do SKIP_ARGS+=(--skip "$p"); done
 
 die() {
   echo "store-switch: $*" >&2
@@ -118,8 +119,38 @@ check_new() {
   named AWS_ACCESS_KEY_ID "$new" && named AWS_SECRET_ACCESS_KEY "$new" || die "$new has no AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY"
 }
 
+# SWITCH_SKIP as store-copy's --skip arguments. Leaving stream-recovery/ behind is safe only for a world whose chain
+# is on this disk: its backup sends that chain again to the new store (worldd, a store moved). A world with none (not
+# started since the spool came in, or its spool lost) would find no chain in the new store and start a new one, so
+# the move refuses while any world folder has no spooled head.
+skip_check() {
+  local p w skips=() missing=()
+  SKIP_ARGS=()
+  read -r -a skips <<< "${SWITCH_SKIP:-}"
+  for p in ${skips[@]+"${skips[@]}"}; do
+    case $p in
+      */) SKIP_ARGS+=(--skip "$p") ;;
+      *) die "SWITCH_SKIP: '$p' is not a prefix ending in /" ;;
+    esac
+  done
+  case " ${skips[*]-} " in
+    *" stream-recovery/ "*)
+      for w in $(ls "$WORLDS" 2> /dev/null | sort); do
+        [[ "$w" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] || continue
+        [ -n "$(spooled_heads "$w" | sed -n 1p)" ] || missing+=("$w")
+      done
+      [ ${#missing[@]} -eq 0 ] || die "SWITCH_SKIP leaves stream-recovery/ behind, but ${#missing[@]} world(s) have no stream chain on this disk to send again: ${missing[*]}. Start each once, or drop stream-recovery/ from SWITCH_SKIP"
+      ;;
+  esac
+  return 0
+}
+
+# A world's spooled chain heads (not the kept copies).
+spooled_heads() { find "$WORLDS/$1/stream-backup" -name head -path '*stream-recovery/*' -not -path '*/kept/*' 2> /dev/null; }
+
 check_current() {
   local u first
+  skip_check
   [ -r "$SECRETS" ] || die "no $SECRETS"
   [ -n "$(buckets "$SECRETS")" ] || die "$SECRETS names no bucket (${NAMES[*]})"
   ! named DIRECTORY_STORE_ENDPOINT "$SECRETS" || die "$SECRETS uses DIRECTORY_STORE_ENDPOINT: put the store in DIRECTORY_STORE_URL's one-value form first"
@@ -400,14 +431,40 @@ check() {
   return 1
 }
 
+# Each running world's public stream chain against the store its backup writes to: complete when nothing waits in its
+# spool (every object put) and no head put went unanswered. After a move each world sends its whole chain again
+# (worldd, a store moved); run this until it passes before the old bucket is retired.
+chains() {
+  local w d n bad=0
+  for w in $(worlds); do
+    d=$WORLDS/$w/stream-backup
+    if [ -z "$(spooled_heads "$w" | sed -n 1p)" ]; then
+      echo "  worldd@$w: no spooled stream chain"
+      bad=1
+      continue
+    fi
+    n=$(find "$d" -type f -path '*stream-recovery/*/objects/*' -not -path '*/kept/*' 2> /dev/null | wc -l | tr -d ' ')
+    if [ "$n" = 0 ] && [ -z "$(find "$d" -name head.tried -not -path '*/kept/*' 2> /dev/null | sed -n 1p)" ]; then
+      echo "  worldd@$w: its stream chain is all in the store"
+    else
+      echo "  worldd@$w: still sending: $n objects wait"
+      bad=1
+    fi
+  done
+  [ "$bad" = 0 ] && say "chains complete" && return 0
+  say "chains not complete: run again in a minute"
+  return 1
+}
+
 [ -n "${SWITCH_ETC:-}" ] || [ "$(id -u)" = 0 ] || die "run as root"
 case ${1:-} in
   plan) plan "${2:-$ETC/store-new.env}" ;;
   apply) apply "${2:-$ETC/store-new.env}" ;;
   check) check ;;
   undo) undo ;;
+  chains) chains ;;
   *)
-    sed -n 2,33p "$0"
+    sed -n 2,35p "$0"
     exit 2
     ;;
 esac

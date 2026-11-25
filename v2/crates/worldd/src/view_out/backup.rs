@@ -125,6 +125,10 @@ fn tried_key(head_key: &str) -> String {
     format!("{head_key}.tried")
 }
 
+fn requeued_key(head_key: &str) -> String {
+    format!("{head_key}.requeued")
+}
+
 impl Spool {
     /// The spool in `dir`, backed up to the store whose identity is `store` (a digest of its address: a store moved to
     /// another bucket is another store, whose head the backup learns again).
@@ -260,14 +264,22 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     // The store moved (its address changed: the head confirmed is another store's). The new store holds none of the
     // chain's objects this writer already put to the old one, and the spool queues only what it has not put: every
     // object kept on this disk goes back in the queue, so the next pass puts the whole chain before its head there.
-    let moved_from = found
-        .as_deref()
-        .and_then(|b| b.split(|c| *c == b'\n').next())
-        .is_some_and(|store| store != spool.store.as_bytes());
-    if moved_from {
-        let queued = requeue(&spool.dir, &prefix);
+    // Once per move (`head.requeued` names the store they were queued for): a restart before the first head lands
+    // there finds them queued or, put, kept again, and sends none twice.
+    if let Some((queued, left)) = requeue_if_moved(
+        &spool.dir,
+        &spool.store,
+        found.as_deref(),
+        &head_key,
+        &prefix,
+    ) {
         eprintln!(
-            "worldd: the public stream's store moved; {queued} recovery objects kept on this disk are queued for it again"
+            "worldd: the public stream's store moved; {queued} recovery objects kept on this disk are queued for it again{}",
+            if left > 0 {
+                format!(", {left} could not be (the new store lacks them)")
+            } else {
+                String::new()
+            }
         );
     }
     let known = confirmed.is_some();
@@ -297,28 +309,53 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
     Ok(())
 }
 
+/// [`requeue`] when the head confirmed (`found`, `head.confirmed`'s bytes) is another store's and this store's objects
+/// were not queued yet (`head.requeued`); what it did, or none.
+fn requeue_if_moved(
+    dir: &Path,
+    store: &str,
+    found: Option<&[u8]>,
+    head_key: &str,
+    prefix: &str,
+) -> Option<(u64, u64)> {
+    let moved = found
+        .and_then(|b| b.split(|c| *c == b'\n').next())
+        .is_some_and(|s| s != store.as_bytes());
+    let marker = dir.join(requeued_key(head_key));
+    if !moved || std::fs::read(&marker).ok().as_deref() == Some(store.as_bytes()) {
+        return None;
+    }
+    let done = requeue(dir, prefix);
+    // Best effort: without it a restart before the first head queues what was put again (the store keeps one copy).
+    let _ = super::write_whole(&marker, store.as_bytes());
+    Some(done)
+}
+
 /// The chain's objects kept on this disk (`kept/<prefix>objects/`) back in the spool's queue (`<prefix>objects/`), for
-/// a store that holds none of them; how many. One that cannot be moved stays kept (and readable) and is not counted.
-fn requeue(dir: &Path, prefix: &str) -> u64 {
+/// a store that holds none of them: how many were queued, and how many could not be (they stay kept and readable).
+fn requeue(dir: &Path, prefix: &str) -> (u64, u64) {
     let rel = format!("{prefix}objects");
     let Ok(entries) = std::fs::read_dir(dir.join(KEPT).join(&rel)) else {
-        return 0;
+        return (0, 0);
     };
     let to = dir.join(&rel);
-    if std::fs::create_dir_all(&to).is_err() {
-        return 0;
-    }
-    let mut n = 0;
+    let made = std::fs::create_dir_all(&to).is_ok();
+    let (mut n, mut left) = (0, 0);
     for e in entries.flatten() {
         let name = e.file_name();
         let hex = name
             .to_str()
             .is_some_and(|n| n.len() == 64 && n.bytes().all(|b| b.is_ascii_hexdigit()));
-        if hex && std::fs::rename(e.path(), to.join(&name)).is_ok() {
+        if !hex {
+            continue;
+        }
+        if made && std::fs::rename(e.path(), to.join(&name)).is_ok() {
             n += 1;
+        } else {
+            left += 1;
         }
     }
-    n
+    (n, left)
 }
 
 /// After a refused pass that put `moved` objects, with `stuck` refused passes before it in a row that put nothing: the
@@ -738,6 +775,59 @@ mod tests {
         assert_eq!(unique.len(), 10);
         assert_eq!(sent.last().map(String::as_str), Some("s/w/head"));
         assert!(worker.objects().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// soul.game's store move (25 Nov 2026): a spool whose confirmed head is another store's queues every kept object
+    /// again, once: a restart before the first head lands in the new store queues none twice, and a spool of the same
+    /// store (a normal restart) or with no confirmed head queues nothing.
+    #[test]
+    fn a_moved_store_queues_the_kept_chain_again_once() {
+        let dir = std::env::temp_dir().join(format!("backup-requeue-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let prefix = "s/w/";
+        let head_key = format!("{prefix}head");
+        let spool = Spool::new(dir.clone(), "new".into());
+        spool.write(&head_key, b"head").unwrap();
+        for i in 0..3u8 {
+            let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&[i])));
+            spool.keep(&key, &[i]);
+        }
+        let queue = dir.join(format!("{prefix}objects"));
+        let count = |d: &Path| std::fs::read_dir(d).map_or(0, |e| e.count());
+        let kept = dir.join(KEPT).join(format!("{prefix}objects"));
+        let at = |id: &str| format!("{id}\netag\nhead").into_bytes();
+        assert_eq!(
+            requeue_if_moved(&dir, "new", None, &head_key, prefix),
+            None,
+            "no confirmed head"
+        );
+        assert_eq!(
+            requeue_if_moved(&dir, "new", Some(&at("new")), &head_key, prefix),
+            None,
+            "same store"
+        );
+        assert_eq!(count(&queue), 0);
+        assert_eq!(
+            requeue_if_moved(&dir, "new", Some(&at("old")), &head_key, prefix),
+            Some((3, 0)),
+            "moved: every kept object queued"
+        );
+        assert_eq!((count(&queue), count(&kept)), (3, 0));
+        // Put to the new store and kept again, then a restart before its head lands there.
+        for e in std::fs::read_dir(&queue).unwrap().flatten() {
+            std::fs::rename(e.path(), kept.join(e.file_name())).unwrap();
+        }
+        assert_eq!(
+            requeue_if_moved(&dir, "new", Some(&at("old")), &head_key, prefix),
+            None
+        );
+        assert_eq!((count(&queue), count(&kept)), (0, 3));
+        // A later move again (to a third store) queues them for it.
+        assert_eq!(
+            requeue_if_moved(&dir, "third", Some(&at("new")), &head_key, prefix),
+            Some((3, 0))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
