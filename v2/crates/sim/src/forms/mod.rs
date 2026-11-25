@@ -960,9 +960,9 @@ impl Forms {
         self.by_body.contains_key(&body) || self.waiting.contains_key(&body)
     }
 
-    /// Whether form `form` of `node`'s kind `entry` is for those its `who` link names (`who: {link: t}`) and `body`'s
-    /// own run in progress is on `node` and links it so: a swing walked to and not yet sat in, whose `get_off` is the
-    /// swinger's. Who may lets that body through ([`Forms::may_or_linking`]): its new act ends the run as any new act
+    /// Whether form `form` of `node`'s kind `entry` is for those its `who` link names (`who: {link: t}`), takes down
+    /// the actor's own link of that type, and `body`'s own run in progress is on `node` and links it so: a swing
+    /// walked to and not yet sat in, whose `get_off` is the swinger's. Who may lets that body through ([`Forms::may_or_linking`]): its new act ends the run as any new act
     /// does, so asking to get off on the way stops the swing instead of being refused while it goes on.
     pub fn linking(
         &self,
@@ -971,14 +971,28 @@ impl Forms {
         entry: &replica::rules::json::Value,
         form: &str,
     ) -> bool {
-        let who = entry
-            .get("forms")
-            .and_then(|fs| fs.get(form))
-            .and_then(Who::read);
-        let (Some(Who::Link(t)), Some(kind)) = (who, entry.get("kind").and_then(|k| k.str()))
-        else {
+        let f = entry.get("forms").and_then(|fs| fs.get(form));
+        let (Some(Who::Link(t)), Some(kind)) = (
+            f.and_then(Who::read),
+            entry.get("kind").and_then(|k| k.str()),
+        ) else {
             return false;
         };
+        // Only a way off: a form that takes down the actor's own link of that type (get_off, get_up, leave). Any
+        // other form of those the link names (a see-saw's push, a board's page) stays theirs alone.
+        let unlinks = f
+            .and_then(|f| f.get("effects"))
+            .and_then(|e| e.arr())
+            .is_some_and(|es| {
+                es.iter().any(|e| {
+                    e.get("change").and_then(|c| c.str()) == Some("unlink")
+                        && e.get("link").and_then(|l| l.str()) == Some(t.as_str())
+                        && e.get("from").and_then(|a| a.str()) == Some("actor")
+                })
+            });
+        if !unlinks {
+            return false;
+        }
         let ty = audience::link_type(kind, &t);
         self.by_body
             .get(&body)

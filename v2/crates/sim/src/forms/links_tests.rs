@@ -489,7 +489,8 @@ fn swing_entry() -> json::Value {
     "swing": { "who": "anyone", "steps": [{ "step": "sit", "slot": "place" }, { "step": "wait", "us": 30000000 }],
       "effects": [{ "change": "link", "link": "user", "from": "actor", "event": "began" }] },
     "get_off": { "who": { "link": "user" }, "steps": [{ "step": "rise" }],
-      "effects": [{ "change": "unlink", "link": "user", "from": "actor", "event": "got_off" }] },"#;
+      "effects": [{ "change": "unlink", "link": "user", "from": "actor", "event": "got_off" }] },
+    "kick": { "who": { "link": "user" }, "steps": [{ "step": "wait", "us": 1000000 }], "effects": [] },"#;
     let text = ENTRY.replacen(r#""forms": {"#, forms, 1);
     assert_ne!(text, ENTRY);
     parse(&text).expect("JSON")
@@ -573,6 +574,14 @@ fn a_swings_get_off_before_its_seat_is_taken_ends_the_swing() {
         0,
         "not linked before the sit's contact"
     );
+    // A form of the swinger's that is not its way off (a kick) is still theirs alone: refused, the swing goes on.
+    let kick = b.commit("kick");
+    assert_eq!(
+        kick.map_err(|r| r.name),
+        Err("not-permitted"),
+        "only a way off"
+    );
+    assert!(b.forms.at(id(2)).is_some(), "the swing goes on");
     let off = b.commit("get_off");
     assert!(matches!(off, Ok(super::Asked::Started(_))), "{off:?}");
     assert_eq!(b.run(), "done", "got off");
