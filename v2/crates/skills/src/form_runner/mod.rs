@@ -121,6 +121,10 @@ pub enum Step {
         at: Vec3,
         on: Option<Id>,
         approach: bool,
+        /// The way the body faces once there (0.135): its stand point's `yaw_mdeg` turning the node's +z, 1 m long,
+        /// in the node's axes and turned with `at` ([`turn`]). None: toward the point, or the thing's origin for a
+        /// body standing on the point (the world's turn, `sim::forms`).
+        face: Option<Vec3>,
     },
     /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
     Move {
@@ -256,6 +260,30 @@ fn point(entry: &Value, p: &str) -> Result<Vec3, Refusal> {
     }
 }
 
+/// The way a body standing at point `p` faces (0.135): the point's `yaw_mdeg` (a slot's: its stand point's) turning
+/// the kind's +z, 1 m long, in the kind's axes; none when the point names no yaw.
+fn facing(entry: &Value, p: &str) -> Result<Option<Vec3>, Refusal> {
+    let points = entry.get("points");
+    let stand = entry
+        .get("slots")
+        .and_then(|s| s.get(p))
+        .and_then(|s| s.get("stand"))
+        .and_then(Value::str);
+    let yaw = points
+        .and_then(|s| s.get(p))
+        .or_else(|| stand.and_then(|s| points.and_then(|x| x.get(s))))
+        .and_then(|x| x.get("yaw_mdeg"));
+    let Some(Value::Int(mdeg)) = yaw else {
+        return Ok(None);
+    };
+    let bad = |e: replica::pose::PoseRefusal| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: {e:?}"),
+    };
+    let q = Quat::from_yaw_mdeg(i64::try_from(*mdeg).unwrap_or(0)).map_err(bad)?;
+    q.rotate(Vec3::new(0, 0, 1_000_000)).map(Some).map_err(bad)
+}
+
 /// A move named in a form: a bare name is in the `souls` namespace, as the engine's moves are (B2).
 fn move_name(t: &str) -> Result<Name, Refusal> {
     if t.contains(':') {
@@ -365,11 +393,16 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
+                    let face = match on {
+                        None => facing(entry, point.as_str())?,
+                        Some(_) => None,
+                    };
                     Ok(Step::WalkTo {
                         point,
                         at,
                         on,
                         approach: false,
+                        face,
                     })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
@@ -498,6 +531,7 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
             at: Vec3::new(to.x, 0, to.z),
             on: None,
             approach: true,
+            face: None,
         };
         bound.insert(k, step);
     }
@@ -548,6 +582,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
                 approach: false,
+                face: None,
             };
             bound.insert(k, step);
             k += 1;
@@ -640,13 +675,18 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            face,
             ..
         } = s
         {
-            *at = q.rotate(*at).map_err(|e| Refusal {
+            let unturnable = |e: replica::pose::PoseRefusal| Refusal {
                 name: "point-unturnable",
                 detail: format!("{}: {e:?}", point.as_str()),
-            })?;
+            };
+            *at = q.rotate(*at).map_err(unturnable)?;
+            if let Some(f) = face {
+                *f = q.rotate(*f).map_err(unturnable)?;
+            }
         }
     }
     Ok(())

@@ -311,8 +311,14 @@ pub fn position(tree: &Tree, id: Id) -> R<Xz> {
 /// Where a node's own origin is in `frame`'s own frame, on the level (height 0): what a body standing in `frame` turns
 /// toward to face it (0.135: a walk to a thing ends facing it).
 pub fn origin_in(tree: &Tree, id: Id, frame: Id) -> R<Vec3> {
+    point_in(tree, id, Vec3::ZERO, frame)
+}
+
+/// Point `p` of node `id`'s own frame in `frame`'s own frame, on the level (height 0): what a body standing in `frame`
+/// turns toward to face it (0.135: a form's walk ends facing the way its stand point says).
+pub fn point_in(tree: &Tree, id: Id, p: Vec3, frame: Id) -> R<Vec3> {
     let v = View { tree };
-    let o = v.to_root(id)?.pos;
+    let o = v.to_root(id)?.point(p)?;
     v.to_root(frame)?.inverse_xz([o.x, o.z])
 }
 

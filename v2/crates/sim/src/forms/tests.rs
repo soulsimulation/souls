@@ -1609,6 +1609,7 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
             at: point,
             on: None,
             approach: true,
+            face: None,
         };
         start(&mut b, vec![walk, Step::Wait(200_000)], intent(body, 1)).expect("started");
         b.run(30_000_000);
@@ -1653,6 +1654,7 @@ fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
         at: Vec3::new(stand.x, stand.y, stand.z + 1_000_000),
         on: None,
         approach: false,
+        face: None,
     };
     b.steps(
         body,
@@ -1752,6 +1754,7 @@ fn e14_a_form_takes_and_gives_back_a_seat_of_another_thing() {
         at,
         on: None,
         approach: false,
+        face: None,
     };
     // Leave mid-sit, before the hand-off: out again, at the stand point, nothing of the run left.
     b.steps(
@@ -2957,4 +2960,64 @@ fn i4575_e14_a_lecture_removed_mid_attend_ends_it_and_frees_the_seat() {
         "the place given back"
     );
     b.clean();
+}
+
+/// 0.135: a form's walk ends facing the way its stand point says, however the walk came in: the campfire's `warm`
+/// walks to its `stand` (1.1 m in front of the fire, `yaw_mdeg` 180, facing it). From 4 m to the side of the stand
+/// point the walk comes in across the fire's front; there, the body faces the fire, not the way it walked. Turned 90
+/// degrees (C13), the fire's stand point and its facing turn with it.
+#[test]
+fn a_forms_walk_ends_facing_the_way_its_stand_point_says() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entry = parse(&std::fs::read_to_string(root.join("camp/campfire.json")).expect("read"))
+        .expect("JSON");
+    for (turned, start, want) in [
+        (0, Vec3::new(4_000_000, 0, 1_100_000), (0, -1_000_000)),
+        (90_000, Vec3::new(1_100_000, 0, -4_000_000), (-1_000_000, 0)),
+    ] {
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, start, Vec3::ZERO);
+        let mut steps = bind(&entry, "warm").expect("binds");
+        let q = Quat::from_yaw_mdeg(turned).expect("a turn");
+        skills::form_runner::turn(&mut steps, q).expect("turns");
+        b.look();
+        let now = b.now;
+        {
+            let (mut w, forms) = b.world();
+            forms
+                .start(
+                    &mut w,
+                    body,
+                    node,
+                    intent(body, 0),
+                    steps,
+                    Vec::new(),
+                    Limits::default(),
+                    now,
+                )
+                .expect("started");
+        }
+        // the walk (about 4 m) is done well inside 8 s; the form then waits 20 s at the fire
+        while b.now < 8_000_000 {
+            b.tick();
+        }
+        // the body's facing (its +x turned), on the level, 1 m long
+        let m = b.c.bodies().find(|x| x.id == body).expect("the body");
+        let f = m.pose.orientation.rotate(Vec3::new(1_000_000, 0, 0)).expect("turns");
+        let at = m.pose.position;
+        println!(
+            "turned {turned} mdeg: stands at ({}, {}) mm, faces ({}, {})",
+            at.x / 1000,
+            at.z / 1000,
+            f.x,
+            f.z
+        );
+        let off = (i128::from(f.x - want.0).pow(2) + i128::from(f.z - want.1).pow(2)).isqrt();
+        assert!(
+            off < 20_000,
+            "faces the fire, not the way it walked: ({}, {}), {off} um off at 1 m",
+            f.x,
+            f.z
+        );
+    }
 }

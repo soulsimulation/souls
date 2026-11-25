@@ -116,7 +116,7 @@ use replica::who_may::{self, Answer, Who};
 use replica::world_model::{Audience, End, plain, show};
 use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
-use crate::controller::{Controller, Driver};
+use crate::controller::{Controller, Driver, Part};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::slots::{PlaceAt, Request, Slots, hands};
@@ -460,6 +460,49 @@ struct Waiting {
 /// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
 /// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
 /// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
+/// 0.135: the facing a run's body takes when its walk step is done, by [`crate::controller::facing_toward`] (the one
+/// rule a walk to a thing keeps too): the way the step's stand point says (its `face`), else toward the walk's point,
+/// else (on the point) toward the thing's origin. The node is read as the runner read it (the world's geometry, else
+/// the tree), the point in its parent's frame; a body standing in another frame has it carried over through the tree.
+/// None for a body in a slot, a node gone, or nothing to turn to.
+fn arrival<G: Geometry, R>(w: &World<'_, G, R>, fr: &FormRun) -> Option<replica::pose::Quat> {
+    let Some(Step::WalkTo { at, on, face, .. }) = fr.runner.step() else {
+        return None;
+    };
+    let b = w.controller.body(fr.body)?;
+    if b.pose.frame.slot.is_some() {
+        return None;
+    }
+    let node = on.unwrap_or(fr.node);
+    let (parent, origin) = match w.geometry.read(node) {
+        Some(s) => (s.parent?, s.position),
+        None => {
+            let n = w.tree.node(w.tree.handle(node)?)?;
+            (n.parent()?, n.place().map_or(Vec3::ZERO, |p| p.position))
+        }
+    };
+    let frame = b.pose.frame.node;
+    let here = |p: Vec3| {
+        if parent == frame {
+            Some(p)
+        } else {
+            replica::select::point_in(w.tree, parent, p, frame).ok()
+        }
+    };
+    let add = |a: Vec3, b: Vec3| Vec3::new(a.x.saturating_add(b.x), a.y.saturating_add(b.y), a.z.saturating_add(b.z));
+    let point = add(origin, *at);
+    let toward = |p: Vec3| here(p).and_then(|to| crate::controller::facing_toward(b.pose.position, to));
+    match face {
+        Some(f) => {
+            // the stand point's way, from wherever the walk ended (a body cannot stand there: the nearest place)
+            let to = here(add(point, *f))?;
+            let from = here(point)?;
+            crate::controller::facing_toward(from, to)
+        }
+        None => toward(point).or_else(|| toward(origin)),
+    }
+}
+
 fn slots_taken(
     node: Id,
     steps: &[Step],
@@ -2251,6 +2294,13 @@ impl Forms {
             if let Some(fr) = self.runs.get_mut(&run)
                 && let Some(d) = fr.walk.take()
             {
+                // 0.135: there, it turns the way its stand point says (or to the point, or the thing), by the walk's
+                // own driver of its legs, before it lets them go
+                if p == Progress::Done
+                    && let Some(q) = arrival(w, fr)
+                {
+                    let _ = w.controller.set(body, d, Part::Facing(q));
+                }
                 let _ = w.controller.release(body, d);
             }
             self.wake(w, run, Woke::Walked(p), now);
