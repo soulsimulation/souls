@@ -5,7 +5,8 @@
   "state": { "computer_on": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "user": { "role": "stand", "at_mm": [-100, 0, 1050], "yaw_mdeg": 180000 },
-    "power": { "role": "contact", "at_mm": [-100, 1080, -150] }
+    "power": { "role": "contact", "at_mm": [-100, 1080, -150] },
+    "keys": { "role": "contact", "at_mm": [-100, 775, 80] }
   },
   "geometry": { "bounds_mm": [1400, 1250, 700] },
   "forms": {
@@ -22,6 +23,17 @@
       "needs": [{ "need": "state", "field": "computer_on", "is": true }],
       "steps": [{ "step": "walk_to", "point": "user" }, { "step": "move", "move": "press", "at": "power" }],
       "effects": [{ "change": "set", "field": "computer_on", "to": false, "event": "computer_switched_off" }]
+    },
+    "work": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "computer_on", "is": true, "says": "computer_off" }],
+      "steps": [
+        { "step": "walk_to", "point": "user" },
+        { "step": "move", "move": "press", "at": "keys" },
+        { "step": "wait", "us": 60000000 }
+      ],
+      "effects": []
     }
   },
   "motion": { "how": "two_souls" },
@@ -40,11 +52,12 @@
     ]
   },
   "text": {
-    "card": "An office desk with a chair and a computer you switch on and off.",
+    "card": "An office desk with a computer: switch it on, work at it, switch it off.",
     "work": "work",
     "computer": "computer",
     "office": "office",
-    "computer_on": "computer on"
+    "computer_on": "computer on",
+    "computer_off": "The computer is off: switch it on first."
   },
   "card": { "text": "card", "category": "work", "synonyms": ["computer", "office"] }
 }

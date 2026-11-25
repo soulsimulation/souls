@@ -5,6 +5,7 @@
 
 pub mod acts;
 pub mod answers;
+pub mod assembly;
 pub mod bodies;
 pub mod buildsafe;
 pub mod carrier;
@@ -13,6 +14,7 @@ pub mod closed;
 pub mod directory;
 mod edit_places;
 pub mod engine;
+pub mod handover;
 pub mod loose;
 pub mod measures;
 pub mod moves;
@@ -23,8 +25,10 @@ pub mod setdown;
 pub mod shipping;
 pub mod start;
 mod syncs;
+pub use syncs::SEAL_EVERY;
 pub mod testbodies;
 pub mod undo;
+pub mod unstick;
 pub mod view_out;
 pub mod views;
 pub mod words;

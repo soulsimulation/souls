@@ -23,19 +23,31 @@
 //
 // writes <dir>/<slug>.diag (the kind), <dir>/<slug>.json (what the crowd loads) and <dir>/models/<sha256>.glb|.mesh,
 // and prints the summary as JSON. A refusal prints {refused: {code, message, field?, measured?, limit?}} and exits 1.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import * as THREE from '../../web/node_modules/three/build/three.module.js';
 import { inPlace, merge, parseModel, fitRigid, bakeModel } from '../../web/src/crowd/bake.ts';
 import { decodedGeometry } from './decode-draco.ts';
 import { encodeMesh, simplify, type LodMesh } from '../../web/src/crowd/lod.ts';
 import type { BodyMotion } from '../../../mars/viewer/engine/bodies/motion.ts';
-import { BODY_LIMITS } from '../../../apps/server/src/edge/body/admission.ts';
 
 const REPO = resolve(import.meta.dirname, '../../..');
+/** Today's body admission limits (`apps/server/src/edge/body/admission.ts`, 0.134 D3: a copy, so this tool keeps
+ *  working once the old server is gone). */
+export const BODY_LIMITS = {
+  bytes: 4 * 1024 * 1024,
+  triangles: 10000,
+  images: 2,
+  imageBytes: 1024 * 1024,
+  imageDimension: 1024,
+  nodes: 512,
+  accessors: 1024,
+  rigidDrawCalls: 4,
+  humanoidDrawCalls: 16,
+} as const;
 export const SIMPLE_TRIANGLES = 600;
 export const MEASURE_FPS = 15;
 /** B12's size classes, smallest first: name and radius in mm (`sizes.rs`, `Size::ALL`). */
@@ -143,7 +155,8 @@ function geometryOnly(bytes: Buffer): ArrayBuffer {
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
 }
 
-export type Measure = { radius: number; height: number; hover: number; clips: string[]; mesh: LodMesh };
+/** `simple`: an already released simple mesh, kept byte for byte instead of simplifying `mesh` again. */
+export type Measure = { radius: number; height: number; hover: number; clips: string[]; mesh: LodMesh; simple?: Uint8Array };
 
 /** Measures the body: footprint radius and height (m), hover (m) and the clips posed, and its merged mesh. */
 export async function measure(bytes: Buffer, motion?: BodyMotion): Promise<Measure> {
@@ -243,7 +256,7 @@ export async function importBody(glb: string, manifest: string): Promise<Importe
 export function imported(bytes: Buffer, v: Report, m: Measure): Imported {
   const radiusMm = Math.ceil(m.radius * 1000), heightMm = Math.ceil(m.height * 1000), hoverMm = Math.round(m.hover * 1000);
   const size = sizeFor(radiusMm);
-  const simple = encodeMesh(simplify(m.mesh, SIMPLE_TRIANGLES));
+  const simple = m.simple ?? encodeMesh(simplify(m.mesh, SIMPLE_TRIANGLES));
   const profile = v.report.profile, res = resources(profile), actions = v.report.actions.supported.map((a) => a.action);
   const kind = `body:${slug(v.admitted.name ?? v.admitted.assetId)}`;
   const full = { hash: `sha256:${sha(bytes)}`, bytes, triangles: v.admitted.triangles };
@@ -280,7 +293,7 @@ export function write(b: Imported, out: string) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), o = a.indexOf('--out'), out = o >= 0 ? a.splice(o, 2)[1] : null;
   if (a.length !== 2 || !out) {
     console.error('usage: node v2/tools/import-body/import-body.ts <body.glb> <manifest.json> --out <dir>');

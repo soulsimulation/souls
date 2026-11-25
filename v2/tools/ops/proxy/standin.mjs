@@ -4,10 +4,12 @@
 // loopback, in front of a real launcher (fake minds, a synthetic Clerk issuer, production's satellite and primary
 // settings, an alias and the /worlds prefix from reslug), a directory answering W3's GET /v1/worlds, the viewers' origin
 // and the new page's built files. Then, from outside with front-check.mjs: before the switch (must fail), the README's
-// SWITCH script, every point, the poster and the site's pages (O23) with the launcher stopped, the README's BACK script, and again (must fail).
+// SWITCH script, every point, the poster and the new system's parts (stream, gateway, pairing) with the launcher stopped, the README's
+// BACK script, and again (must fail).
 // Production's names, paths and ports are swapped for the scratch host's; the scripts run as written otherwise, with a
 // systemctl that reloads the scratch Caddy and runs the unit's ExecStart.
-//   BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <v2/web build> --today-web <apps/web build> [--keep]
+//   BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <the install's page folder> --today-web <apps/web build> [--keep]
+// (the page folder: the body files, v2/tools/ops/release/bodies.ts; the pairing card is the --today-web build's pair.html)
 // Exit 0 when every step comes out as it should.
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,6 +20,7 @@ import { openLauncher } from '../../../../tools/world-launcher/launcher.mjs';
 import { migrateRegistry } from '../../../../tools/world-launcher/reslug.mjs';
 import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../apps/server/test/clerk-fixture.ts';
 import { testPort } from '../../../../apps/server/test/test-port.ts';
+import { createAgents } from '../../origin/agents.mjs';
 import { createOrigin } from '../../origin/origin.mjs';
 import { build } from '../../../client/served/build.mjs';
 import { frontCheck, POINTS } from '../front-check.mjs';
@@ -28,8 +31,8 @@ const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); retur
 const web = resolve(opt('--web', join(repo, 'v2/web/dist'))), todayWeb = resolve(opt('--today-web', join(repo, 'apps/web/dist')));
 mkdirSync(join(repo, '.local'), { recursive: true });
 const dir = mkdtempSync(join(repo, '.local', 'front-door-'));
-const P0 = await testPort(16);
-const port = { launcher: P0 + 9, directory: P0 + 10, origin: P0 + 11, admin: P0 + 12, public: P0 + 13, primary: P0 + 14, old: P0 + 15 };
+const P0 = await testPort(17);
+const port = { launcher: P0 + 9, directory: P0 + 10, origin: P0 + 11, admin: P0 + 12, public: P0 + 13, primary: P0 + 14, old: P0 + 15, agents: P0 + 16 };
 const at = (p) => `http://127.0.0.1:${p}`;
 const PUBLIC = 'https://soul.game', PRIMARY = 'https://sim.eden.art', OLD = 'https://souls.game';
 const stops = [];
@@ -68,7 +71,8 @@ const directory = createServer((req, res) => {
 }).listen(port.directory, '127.0.0.1');
 const streams = join(dir, 'streams');
 mkdirSync(streams);
-writeFileSync(join(streams, 'pointer'), 'standin');
+mkdirSync(join(streams, 'standin'));
+writeFileSync(join(streams, 'standin/pointer'), 'standin'); // /s/standin/pointer: the front door strips /s
 // the site's pages (O23): the page's changelog files and one release in news.jsonl, as release.sh news writes it
 const news = join(dir, 'news');
 mkdirSync(news);
@@ -78,7 +82,8 @@ build({ out: client, version: '0.0.0' });
 const worldRoutes = join(dir, 'world-routes.json');
 writeFileSync(worldRoutes, JSON.stringify({ schema: 'souls/world-routes/1', worlds: Object.fromEntries(listed.worlds.map(w => [w.name, { gateway: at(port.directory), stream: '/s/standin/', canonical: true }])) }));
 const origin = createOrigin(streams, { web, data: news, client, worldRoutes }).server.listen(port.origin, '127.0.0.1');
-stops.push(() => directory.close(), () => origin.close());
+const agents = createAgents(worldRoutes).server.listen(port.agents, '127.0.0.1'); // the agents' relay (#4152)
+stops.push(() => directory.close(), () => origin.close(), () => agents.close());
 
 // the scratch host: /etc, the live release and the map under the scratch folder
 const etc = join(dir, 'etc'), release = join(dir, 'release'), routes = join(dir, 'routes'), shims = join(dir, 'bin');
@@ -88,15 +93,18 @@ const names = (text) => text
   .replace(/^https:\/\/soul\.game \{/m, `http://127.0.0.1:${port.public} {`)
   .replace(/^https:\/\/sim\.eden\.art \{/m, `http://127.0.0.1:${port.primary} {`)
   .replace(/^https:\/\/souls\.game \{/m, `http://127.0.0.1:${port.old} {`)
-  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`)
+  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`).replaceAll('localhost:7330', `localhost:${port.agents}`)
   .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls/models', join(dir, 'models')).replaceAll('/var/lib/souls-routes', routes).replaceAll('/usr/bin/node', process.execPath)
-  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release);
+  .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production/apps/web/dist', todayWeb).replaceAll('/srv/sim-worlds/production', release)
+  .replaceAll('/run/souls-routes-input/worlds.json', worldRoutes);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(here, f), 'utf8')));
 writeFileSync(join(src, 'routes.mjs'), readFileSync(join(here, 'routes.mjs')));
 const originModules = join(release, 'v2/tools/origin');
 mkdirSync(originModules, { recursive: true });
 writeFileSync(join(originModules, 'world-routes.mjs'), readFileSync(join(here, '../../origin/world-routes.mjs')));
 writeFileSync(join(originModules, 'upgrade-refusal.mjs'), readFileSync(join(here, '../../origin/upgrade-refusal.mjs')));
+mkdirSync(join(release, 'tools/lib'), { recursive: true });
+writeFileSync(join(release, 'tools/lib/is-main.mjs'), readFileSync(join(repo, 'tools/lib/is-main.mjs'))); // routes.mjs imports it
 writeFileSync(join(etc, 'sim-worlds/production.conf'), `SIM_WORLDS_ARGS="--port ${port.launcher} --data /nowhere"\n`);
 writeFileSync(join(etc, 'caddy/cdn-trust.snippet'), readFileSync(join(today, 'cdn-trust.snippet')));
 writeFileSync(join(etc, 'caddy/Caddyfile'), `{\n\tadmin localhost:${port.admin}\n\tauto_https off\n\timport cdn-trust.snippet\n}\nimport sites/*.caddy\n`);
@@ -129,7 +137,7 @@ async function script(name) {
 
 const map = { [PUBLIC]: at(port.public), [PRIMARY]: at(port.primary), [OLD]: at(port.old) };
 const run = async (title, extra, quiet = false) => {
-  const r = await frontCheck({ public: PUBLIC, primary: PRIMARY, old: [OLD], v2: 'eden', today: slugs[1], aliases: [[slugs[0], 'eden']], unlisted: slugs[2], map, ...extra });
+  const r = await frontCheck({ public: PUBLIC, primary: PRIMARY, old: [OLD], v2: 'eden', today: slugs[1], aliases: [[slugs[0], 'eden']], unlisted: slugs[2], stream: '/s/standin/', map, ...extra });
   console.log(`== ${title}`);
   if (!quiet) for (const s of r.seen) console.log(`  ${s}`);
   for (const p of r.problems) console.log(`  PROBLEM ${p}`);
@@ -138,15 +146,15 @@ const run = async (title, extra, quiet = false) => {
 };
 let pass = false;
 try {
-  const before = await run('before the switch (must fail: today serves every world)', { points: ['worlds', 'list'] }, true);
+  const before = await run('before the switch (must fail: today serves the gateway and pairing too)', { points: ['gateway', 'pairing'] }, true);
   await script('SWITCH');
   const up = await run('switched, everything up', { points: POINTS });
   await L.close();
   L = null;
-  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site', 'client'], today: undefined, stopped: `/w/${slugs[1]}/` });
+  const down = await run("switched, today's launcher stopped", { points: ['poster', 'stream', 'gateway', 'pairing'], today: undefined, stopped: `/w/${slugs[1]}/` });
   L = await openLauncher(launcherCfg);
   await script('BACK');
-  const back = await run('switched back (must fail as before the switch)', { points: ['worlds', 'list'] }, true);
+  const back = await run('switched back (must fail as before the switch)', { points: ['gateway', 'pairing'] }, true);
   const old = await fetch(at(port.old)).then(() => 'answers', () => 'refused');
   log(`switched back: the souls.game stand-in ${old}`);
   pass = !before && up && down && !back && old === 'refused';

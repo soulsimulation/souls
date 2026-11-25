@@ -44,7 +44,7 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 ## Orders, and what the engine never holds
 
 5. **The orders are a closed list of four:** ranked fallbacks (any act's field 9), a held stance (`souls:hold`, its
-   stance a parameter), follow (`souls:follow`, its target) and standing in a queue (`souls:queue`, its target, and
+   stance a parameter), follow (`souls:follow`, its target; a band behind it, or a place beside it, as parameters) and standing in a queue (`souls:queue`, its target, and
    the act taken at its head as a parameter: "queue for this seat and sit"). Each expires, can be cancelled, and is
    recorded as the agent's; an order is in the log, so it survives a restart.
 6. **Fallbacks are ranked and bounded:** at most 4, each another act `{2: verb, 3: target, 4: parameters, 8:
@@ -63,17 +63,25 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 8. **A checked act gets a receipt or a refusal.** A receipt is `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log
    sequence, ...], 6: {name: id}}`, naming the entries that carried it out (one act may be several, since each entry
    writes one node); 6 is an edit's (rule 15), left out when empty. A refusal is `{.., 3: 2, 4: reason, 5: version
-   now, 6: [node, ...], 7: operation}`, naming what changed since its basis (6 left out when empty) and, for an
-   edit, the operation that failed by its place in the batch (7 left out when none). Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
+   now, 6: [node, ...], 7: operation, 8: detail}`, naming what changed since its basis (6 left out when empty), for an
+   edit, the operation that failed by its place in the batch (7 left out when none), and the refusal's own words
+   (8: UTF-8 bytes, at most 240, left out when it has none; `together.too-far`'s say how far apart and how far the
+   move reaches). A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
-   walk, moves and pauses, C20); one still running at the deadline it got on arrival is answered in progress then,
-   `{.., 3: 3, 4: intent id, 5: µs left}`, and its receipt or refusal follows by its own deadline.
+   walk, moves and pauses, C20), and a walk's by its planned route's time from when it is planned (C29). Either is
+   answered in progress in the tick its run starts or its route is planned, `{.., 3: 3, 4: intent id, 5: µs left}`
+   (W11, #4087: not at the deadline it got on arrival), and its receipt or refusal follows by its own deadline.
 9. **A move inside a joint activity is accepted, then resolved:** `{.., 3: 3, 4: intent id}`, then `{.., 3: 4, 4:
    outcome}`; a miss is an outcome, not a refusal. Its parameter may name one of the activity's next beats, at most
    about two seconds ahead (B8): a parameter of a move already accepted, not an order waiting on the world.
 10. **A cancel ends and a replace supersedes the actor's own earlier intent,** named by its sequence in field 10. A
     cancel without it is refused (`cancel-without-replaces`), and so is one that carries anything else
-    (`cancel-not-bare`).
+    (`cancel-not-bare`). A Soul's new act needs neither: sent while its own form run is open, it leaves that run as a
+    cancel does (the old act ends `left`) and starts at once, or right after a seat taken or left or a ground
+    posture in progress ends (never half seated). A walk replaces it at any point: in the run's walk the walk's
+    claim on the legs ends the run (`claim-taken`); in a hand move the run is left (`left`) at that move's next phase
+    end, its contact or its end, never mid-contact, and the walk goes on (an effect landed at the contact stays; 0.134
+    I4). `form-running` is left only for a run of another actor (#4187).
     An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
     between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
     answer leaves, so the logged answer never holds it.
@@ -124,7 +132,13 @@ completed intent with the same form decoder as the gateway before sending it.
     field 100 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
     match (`edit.doorway-wall-changed`), with intervening wall writes refused `edit.stale` by the normal stamp check.
     Imported doors have no inferred restoration: their creator supplies an explicit wall Set in the same removal
-    batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. A node is an id, or the
+    batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. Link `{1: 6, 2: name, 3: type,
+    4: [end, end], 5: owner, 6: field, 7: row, 8: door}` (#3728, an imported world's doorways and stairs) makes a link
+    of `type` between two nodes, owned by its first (`5: 0`) or second (`5: 1`) end, appends `[link, ...row]` (at
+    most 16 values) to the owner's `field` and, with `8`, has that door name it in field 7 (8 left out when none).
+    It cuts no wall. A `souls:` type, field 7 or 100, or equal ends are refused `edit.link`; so is a doorway link
+    owned by its second end, or one whose row is not in field 22 with at least 5 values. The claim check judges
+    both ends and the door. A node is an id, or the
     temporary name of one placed earlier in the batch (an integer). A spot is
     `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them (4 left out when none). The kind is
     split so no text is over the text limit. Any actor's edit reads; the world refuses one from anyone but its
@@ -170,8 +184,12 @@ slot number, a declared part name as UTF-8 bytes, or T8 text by reference. Bare 
 alongside existing `item=<id>` arguments. Its numbered JSON surface also accepts name/value pairs, for example
 `{"1":[["drawer","top"]]}`; string keys become the same UTF-8 byte keys. A text value may use the existing
 `{"23":"private words"}` input wrapper or `{"21":"<id>"}` reference wrapper. The authority stores words and
-replaces input text with its reference; another argument's text remains private to its sender. Arbitrary JSON
-objects are refused. Duplicate argument names and incompatible physical move targets are refused rather than
+replaces input text with its reference; another argument's text remains private to its sender. A slot of another
+thing (0.135 E14b: a lecture's attendee on a hall's bench) is `[id, slot number]`, the slot numbered 1, 2, ... in
+that thing's own entry; the numbered JSON surface writes it `{"node":"<id>","slot":2}`. A seat the act leaves out
+that its form selects from the free slots `in` its `parent` or `here` is chosen by the world in the selector's
+order; two seats it cannot tell apart (as far from the anchor and from the body) are refused `arg-ambiguous`.
+Arbitrary JSON objects are refused. Duplicate argument names and incompatible physical move targets are refused rather than
 selecting the last value. Signed whole-number parameters keep their exact canonical T0 values, including nested
 coordinate arrays; floating-point parameters remain unsupported. Named room/floor movement uses its separate
 existing target contract.

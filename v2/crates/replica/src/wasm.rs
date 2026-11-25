@@ -18,10 +18,11 @@
 
 use crate::apply::Replica;
 use crate::edit::{OPS_MOST, Op, Ref, Spot};
-use crate::effects::{Actor, Body, Effect, read_id};
+use crate::effects::{Actor, Body, Change, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
+use crate::kinds::defined;
 use crate::pose::{Quat, Support, Vec3};
 use crate::rules::json;
 use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
@@ -115,7 +116,8 @@ pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec
 }
 
 /// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex> <kind> <reason or
-/// outcome>`, with `-` for any the frame has none of (an answer the gateway gives itself has no version), or
+/// outcome> <names> <op>[ <detail>]`, with `-` for any the frame has none of (an answer the gateway gives itself has
+/// no version), a refusal's detail (its words, with spaces) last when it has one, or
 /// `sync <n> <refusal name or ->` for the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
 #[wasm_bindgen(js_name = wireFrame)]
 pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
@@ -163,8 +165,13 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
             .join(","),
         _ => "-".to_owned(),
     };
+    // A refusal's detail (8), its own words, last: everything after the seventh space, when it has one.
+    let detail = match a.get(&8) {
+        Some(Value::Bytes(b)) if kind == "2" => format!(" {}", String::from_utf8_lossy(b)),
+        _ => String::new(),
+    };
     Ok(format!(
-        "answer {sequence} {version} {kind} {name} {names} {}",
+        "answer {sequence} {version} {kind} {name} {names} {}{detail}",
         field(7)
     ))
 }
@@ -251,9 +258,9 @@ fn json_value(v: &Value) -> Result<String, JsError> {
 
 /// An entry in a view item frame (R4's `{1: 1, 2: entry}` or an addressed activity notification's
 /// `{1: 9, 2: entry bytes}`) as JSON, for the
-/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
-/// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
-/// an entry.
+/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"removed"?:
+/// ["<id>",..],"events":[{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator, `removed`
+/// the nodes it removes (none, absent); empty when the item is not an entry.
 #[wasm_bindgen(js_name = wireEntry)]
 pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
@@ -285,11 +292,10 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
             .iter()
             .flatten()
             .any(|ev| ev.name.as_str() == crate::speech::SAID)
-            || !e
-                .events
-                .iter()
-                .flatten()
-                .any(|ev| crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()))
+            || !e.events.iter().flatten().any(|ev| {
+                crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()
+                    || crate::activity::to_members(ev.name.as_str())
+            }))
     {
         return Ok(String::new());
     }
@@ -300,6 +306,22 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let changes = match &e.body {
         Body::Changes(c) => c.len(),
         _ => 0,
+    };
+    // 0.135: the nodes the entry removes, so a member told of a leave knows when it ended its activity.
+    let removed: Vec<String> = match &e.body {
+        Body::Changes(c) => c
+            .iter()
+            .filter_map(|c| match c.change {
+                Change::Remove { node } => Some(format!("\"{}\"", id_text(node))),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let removed = if removed.is_empty() {
+        String::new()
+    } else {
+        format!(r#","removed":[{}]"#, removed.join(","))
     };
     let mut events = Vec::new();
     for ev in e.events.iter().flatten() {
@@ -314,7 +336,7 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
         ));
     }
     Ok(format!(
-        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes},"events":[{}]}}"#,
+        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes}{removed},"events":[{}]}}"#,
         e.envelope.sequence,
         e.envelope.at,
         id_text(e.envelope.node),
@@ -755,7 +777,49 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                         },
                     }
                 }
-                _ => return Err("op is place, move, set, remove or doorway".into()),
+                // #3728: a link between two nodes, its row appended to the owner's field, a door naming it.
+                Some("link") => {
+                    let ends = o
+                        .get("ends")
+                        .and_then(json::Value::arr)
+                        .ok_or("a link's ends are [node, node]")?;
+                    if ends.len() != 2 {
+                        return Err("a link's ends are [node, node]".into());
+                    }
+                    Op::Link {
+                        name: uint_of(o.get("name"), "a link's name")?,
+                        ty: o
+                            .get("type")
+                            .and_then(json::Value::str)
+                            .and_then(Name::new)
+                            .ok_or("a link's type is a name")?,
+                        ends: [ref_of(Some(&ends[0]))?, ref_of(Some(&ends[1]))?],
+                        owner: match uint_of(o.get("owner"), "a link's owner")? {
+                            0 => crate::world_model::End::First,
+                            1 => crate::world_model::End::Second,
+                            _ => return Err("a link's owner is 0 or 1".into()),
+                        },
+                        field: uint_of(o.get("field"), "a link's field")?,
+                        row: match field_value(o.get("row").ok_or("a link's row")?)? {
+                            Value::Array(row) => row,
+                            _ => return Err("a link's row is an array".into()),
+                        },
+                        door: match o.get("door") {
+                            None | Some(json::Value::Null) => None,
+                            d => Some(ref_of(d)?),
+                        },
+                    }
+                }
+                // #3728: rows into an array field (a land edit's changed terrain tiles).
+                Some("rows") => Op::Rows {
+                    node: node()?,
+                    field: uint_of(o.get("field"), "the rows' field")?,
+                    rows: match field_value(o.get("rows").ok_or("the rows")?)? {
+                        Value::Array(rows) => rows,
+                        _ => return Err("rows are an array".into()),
+                    },
+                },
+                _ => return Err("op is place, move, set, remove, doorway, link or rows".into()),
             })
         })
         .collect()
@@ -945,6 +1009,7 @@ fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_mode
             children: Default::default(),
             slots: Default::default(),
             hands: None,
+            fields: Default::default(),
         };
         if kinds.get(*activity).is_some_and(|kind| kind != &runtime) {
             return Err(crate::world_model::Refusal::Source(
@@ -966,6 +1031,10 @@ fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_mode
 #[wasm_bindgen(js_name = editKinds)]
 pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
     let kinds = creator_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
+    Ok(kinds_json(&kinds))
+}
+
+fn kinds_json(kinds: &BTreeMap<String, Kind>) -> String {
     let list = |l: &BTreeSet<String>| l.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
     let out: Vec<String> = kinds
         .iter()
@@ -984,7 +1053,7 @@ pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
             )
         })
         .collect();
-    Ok(format!("{{{}}}", out.join(",")))
+    format!("{{{}}}", out.join(","))
 }
 
 /// A node on the copy: its kind's full name and its parent.
@@ -992,11 +1061,18 @@ struct Held {
     kind: String,
     parent: Option<Id>,
     doorway: bool,
+    /// The fields asked for by number, as the copy holds them (the fields a rows operation merges into).
+    fields: BTreeMap<u64, Value>,
+    /// A `souls:kind` node's full name and record (#3697).
+    definition: Option<(String, Vec<u8>)>,
 }
 
-/// The copy's nodes, read from its roots down by the records' hashes.
-fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
+/// The copy's nodes, read from its roots down by the records' hashes, each with the fields `wanted` names for it.
+fn held(copy: &Copy, wanted: &BTreeSet<(Id, u64)>) -> Result<BTreeMap<Id, Held>, String> {
     let mut out = BTreeMap::new();
+    // A door is in a doorway while the link its field 7 names is there (`edit::check` asks the tree the same): a door
+    // whose room was removed keeps a field naming a link that is gone (#3728).
+    let (mut live, mut names_link) = (BTreeSet::new(), BTreeMap::new());
     let mut todo: Vec<Vec<u8>> = copy.roots().values().cloned().collect();
     while let Some(h) = todo.pop() {
         let Some(bytes) = copy.record(&h) else {
@@ -1021,17 +1097,103 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 _ => None,
             }));
         }
-        let doorway = matches!(m.get(&6), Some(Value::Map(fields)) if fields.get(&7).is_some_and(|v| read_id(v).is_ok()));
+        if let Some(Value::Array(owned)) = m.get(&9) {
+            live.extend(owned.iter().filter_map(|p| match p {
+                Value::Array(p) => p.first().and_then(|l| read_id(l).ok()),
+                _ => None,
+            }));
+        }
+        if let Some(Value::Map(fields)) = m.get(&6)
+            && let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok())
+        {
+            names_link.insert(id, link);
+        }
+        // A wanted field may be a big field, in a record of its own (#4713): `Copy::field` reads either.
+        let kept: BTreeMap<u64, Value> = wanted
+            .range((id, 0)..=(id, u64::MAX))
+            .filter_map(|(_, f)| copy.field(&m, *f).map(|v| (*f, v)))
+            .collect();
+        let definition = match m.get(&6) {
+            Some(Value::Map(fields)) if defined::is_definition(&kind) => {
+                match (defined::named(fields), copy.field(&m, defined::ENTRY)) {
+                    (Some(full), Some(Value::Bytes(b))) => Some((full.to_owned(), b)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         out.insert(
             id,
             Held {
                 kind,
                 parent,
-                doorway,
+                doorway: false,
+                fields: kept,
+                definition,
             },
         );
     }
+    for (id, link) in names_link {
+        if let Some(h) = out.get_mut(&id) {
+            h.doorway = live.contains(&link);
+        }
+    }
     Ok(out)
+}
+
+/// The kinds the copy's `souls:kind` nodes at its root define (#3697), with `souls:kind` itself: the loader's reading.
+fn copy_defined(nodes: &BTreeMap<Id, Held>) -> BTreeMap<String, Kind> {
+    let root: BTreeSet<Id> = nodes
+        .iter()
+        .filter(|(_, h)| h.parent.is_none())
+        .map(|(id, _)| *id)
+        .collect();
+    let mut out = BTreeMap::from([defined::kind().clone()]);
+    for h in nodes.values() {
+        if let (Some((full, b)), Some(p)) = (&h.definition, h.parent)
+            && root.contains(&p)
+            && let Ok(d) = defined::read(b, &|_| false)
+            && d.full == *full
+        {
+            out.insert(d.full, d.kind);
+        }
+    }
+    out
+}
+
+/// The kinds a creator defined in the world (#3697), from the copy (not `souls:kind` itself), in [`edit_kinds`]'s JSON: what `describe` lists
+/// beside the boot kinds, and what a place may name.
+#[wasm_bindgen(js_name = definedKinds)]
+pub fn defined_kinds(copy: &WasmCopy) -> Result<String, JsError> {
+    let nodes = held(&copy.copy, &BTreeSet::new()).map_err(|e| JsError::new(&e))?;
+    let mut own = copy_defined(&nodes);
+    own.remove(&defined::kind().0);
+    Ok(kinds_json(&own))
+}
+
+/// The engine's generic kind a definition is a node of (#3697): what a `define` places, never listed as a creator's.
+#[wasm_bindgen(js_name = definitionKind)]
+pub fn definition_kind() -> String {
+    defined::kind().0.clone()
+}
+
+/// A record's full name and canonical bytes as the world would keep them (#3697): `{"ok": true, "kind": "<full>",
+/// "bytes": <n>}`, or the refusal `{"ok": false, "code": "kind.<name>", "detail": ".."}`. Checks no namespace a boot kind
+/// uses; the world does.
+#[wasm_bindgen(js_name = defineName)]
+pub fn define_name(record: &str) -> String {
+    match defined::read(record.as_bytes(), &|_| false) {
+        Ok(d) => format!(
+            r#"{{"ok":true,"kind":{},"bytes":{}}}"#,
+            json_str(&d.full),
+            d.bytes.len()
+        ),
+        Err((code, detail)) => format!(
+            r#"{{"ok":false,"code":{},"detail":{}}}"#,
+            json_str(code),
+            json_str(&detail)
+        ),
+    }
 }
 
 fn ref_text(r: Ref) -> String {
@@ -1062,7 +1224,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
         Ok(o) => o,
         Err(e) => return no(None, "edit.batch", &e),
     };
-    let kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
+    let mut kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
         None
     } else {
         match creator_kinds(kinds) {
@@ -1070,10 +1232,40 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             Err(e) => return no(None, "edit.kinds-text", &format!("{e:?}")),
         }
     };
-    let nodes = match held(&copy.copy) {
+    // The fields a rows operation merges into, read as the copy holds them and as the batch leaves them (`edit::check`).
+    let targets: BTreeSet<(Ref, u64)> = ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Rows { node, field, .. } => Some((*node, *field)),
+            _ => None,
+        })
+        .collect();
+    let wanted = targets
+        .iter()
+        .filter_map(|(r, f)| match r {
+            Ref::Node(id) => Some((*id, *f)),
+            Ref::New(_) => None,
+        })
+        .collect();
+    let nodes = match held(&copy.copy, &wanted) {
         Ok(n) => n,
         Err(e) => return no(None, "edit.copy", &e),
     };
+    // The creator's own kinds, by the world's loader (#3697); a definition in the batch is checked as the world will.
+    let boot = defined::namespaces(kinds.iter().flat_map(|k| k.keys().map(String::as_str)));
+    let mut defines: BTreeMap<String, Vec<u8>> = nodes
+        .values()
+        .filter_map(|h| h.definition.clone())
+        .collect();
+    if let Some(k) = kinds.as_mut() {
+        k.extend(copy_defined(&nodes));
+    }
+    let root = nodes
+        .iter()
+        .find(|(_, h)| h.parent.is_none())
+        .map(|(id, _)| *id);
+    let mut made: Vec<String> = Vec::new();
+    let mut definitions_gone: Vec<(usize, String)> = Vec::new();
     // Each name placed so far, with its kind and parent, and every node the batch has removed.
     let mut new: BTreeMap<u64, (String, Ref)> = BTreeMap::new();
     let mut links = BTreeSet::new();
@@ -1083,6 +1275,8 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
         .map(|(id, _)| Ref::Node(*id))
         .collect();
     let mut gone: BTreeSet<Ref> = BTreeSet::new();
+    let mut fields: BTreeMap<(Ref, u64), Value> = BTreeMap::new();
+    let mut written = 0usize;
     for (i, op) in ops.iter().enumerate() {
         let named = |r: Ref| -> Result<(String, Option<Ref>), Why> {
             if gone.contains(&r) {
@@ -1120,7 +1314,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             );
             Err(("edit.child-not-admitted", d))
         };
-        let step = || -> Result<(), Why> {
+        let mut step = || -> Result<(), Why> {
             match op {
                 Op::Place {
                     name,
@@ -1146,6 +1340,28 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     if new.contains_key(name) || links.contains(name) {
                         return Err(("edit.name-twice", format!("{name} is placed twice")));
                     }
+                    if defined::is_definition(kind.as_str()) {
+                        if root.is_none_or(|r| *parent != Ref::Node(r)) {
+                            return Err((
+                                "kind.invalid",
+                                "a kind is defined at the world's root".into(),
+                            ));
+                        }
+                        let Some(Value::Bytes(sent)) = fields.get(&defined::ENTRY) else {
+                            return Err((
+                                "kind.invalid",
+                                "the definition is its record, as bytes".into(),
+                            ));
+                        };
+                        let d = defined::read(sent, &|ns| boot.contains(ns))?;
+                        if defines.contains_key(&d.full) {
+                            return Err((
+                                "kind.collision",
+                                format!("{} is defined already", d.full),
+                            ));
+                        }
+                        return Err(("", d.full));
+                    }
                     let (pk, _) = named(*parent)?;
                     admits(&pk, kind.as_str(), at.slot)
                 }
@@ -1156,14 +1372,47 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     let (pk, _) = named(parent)?;
                     admits(&pk, &k, at.slot)
                 }
-                Op::Set { node, field, .. } => {
+                Op::Set { node, field, to } => {
                     if *field == crate::edit::DOOR_GEOMETRY {
                         return Err((
                             "edit.doorway-geometry",
                             "owned geometry is written only by the doorway operation".into(),
                         ));
                     }
-                    named(*node).map(|_| ())
+                    named(*node)?;
+                    written = crate::edit::write_size(None, written, to)
+                        .map_err(|r| (r.name, r.detail))?;
+                    if targets.contains(&(*node, *field)) {
+                        fields.insert((*node, *field), to.clone());
+                    }
+                    Ok(())
+                }
+                Op::Rows { node, field, rows } => {
+                    if *field == crate::edit::DOOR_GEOMETRY || *field == 7 {
+                        return Err((
+                            "edit.rows",
+                            "a door's link and owned geometry are not rows".into(),
+                        ));
+                    }
+                    if rows.is_empty() {
+                        return Err((
+                            "edit.rows",
+                            "a rows operation carries at least one row".into(),
+                        ));
+                    }
+                    named(*node)?;
+                    let now = fields.get(&(*node, *field)).or_else(|| match node {
+                        Ref::Node(id) => nodes.get(id).and_then(|h| h.fields.get(field)),
+                        Ref::New(_) => None,
+                    });
+                    let to = crate::edit::merged_rows(now, rows).ok_or((
+                        "edit.rows",
+                        "rows go into a field of rows, each at least two values".to_owned(),
+                    ))?;
+                    written = crate::edit::write_size(None, written, &to)
+                        .map_err(|r| (r.name, r.detail))?;
+                    fields.insert((*node, *field), to);
+                    Ok(())
                 }
                 Op::Doorway {
                     name,
@@ -1247,26 +1496,103 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     (_, None) => Err(("edit.root", "the zone's root is not removed".to_owned())),
                     _ => Ok(()),
                 },
+                Op::Link {
+                    name,
+                    ty,
+                    ends,
+                    field,
+                    row,
+                    door,
+                    ..
+                } => {
+                    if new.contains_key(name) || links.contains(name) {
+                        return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    if ty.as_str().starts_with("souls:")
+                        || *field == crate::edit::DOOR_GEOMETRY
+                        || *field == 7
+                        || ends[0] == ends[1]
+                        || row.len() > crate::edit::LINK_ROW_MOST
+                    {
+                        return Err(("edit.link", "a link joins two distinct nodes, is not the engine's own, and appends a short row to a field other than 7".into()));
+                    }
+                    for end in ends {
+                        named(*end)?;
+                    }
+                    if let Some(door) = door {
+                        named(*door)?;
+                        if doorways.contains(door) {
+                            return Err(("edit.doorway", "the door already has a doorway".into()));
+                        }
+                    }
+                    Ok(())
+                }
             }
         };
-        if let Err((code, detail)) = step() {
-            return no(Some(i), code, &detail);
+        match step() {
+            // A definition that passed: its full name is pinned for the rest of the batch.
+            Err(("", full)) => {
+                if let (Some(k), Op::Place { fields, .. }) = (kinds.as_mut(), op)
+                    && let Some(Value::Bytes(b)) = fields.get(&defined::ENTRY)
+                    && let Ok(d) = defined::read(b, &|_| false)
+                {
+                    k.insert(full.clone(), d.kind);
+                }
+                defines.insert(full.clone(), Vec::new());
+                made.push(full);
+            }
+            Err((code, detail)) => return no(Some(i), code, &detail),
+            Ok(()) => {}
+        }
+        match op {
+            Op::Set { node, .. } => {
+                if let Ref::Node(id) = node
+                    && nodes
+                        .get(id)
+                        .is_some_and(|h| defined::is_definition(&h.kind))
+                {
+                    return no(
+                        Some(i),
+                        "kind.invalid",
+                        "a definition never changes: define the new revision",
+                    );
+                }
+            }
+            Op::Remove {
+                node: Ref::Node(id),
+            } => {
+                if let Some((full, _)) = nodes.get(id).and_then(|h| h.definition.clone()) {
+                    definitions_gone.push((i, full));
+                }
+            }
+            _ => {}
         }
         match op {
             Op::Doorway { name, door, .. } => {
                 links.insert(*name);
                 doorways.insert(*door);
             }
+            Op::Link { name, door, .. } => {
+                links.insert(*name);
+                if let Some(door) = door {
+                    doorways.insert(*door);
+                }
+            }
             Op::Place {
                 name,
                 kind,
                 parent,
-                fields,
+                fields: placed,
                 ..
             } => {
                 new.insert(*name, (kind.as_str().to_owned(), *parent));
-                if fields.get(&7).is_some_and(|v| read_id(v).is_ok()) {
+                if placed.get(&7).is_some_and(|v| read_id(v).is_ok()) {
                     doorways.insert(Ref::New(*name));
+                }
+                for (f, v) in placed {
+                    if targets.contains(&(Ref::New(*name), *f)) {
+                        fields.insert((Ref::New(*name), *f), v.clone());
+                    }
                 }
             }
             Op::Set { node, field: 7, to } => {
@@ -1297,7 +1623,46 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             _ => {}
         }
     }
-    format!(r#"{{"ok":true,"kinds":{}}}"#, kinds.is_some())
+    // `kind.in-use`: a removed definition's kind is still the kind of a thing the batch leaves.
+    for (i, full) in &definitions_gone {
+        let left = |mut r: Ref| {
+            for _ in 0..=crate::world_model::DEPTH_LIMIT {
+                if gone.contains(&r) {
+                    return false;
+                }
+                let up = match r {
+                    Ref::New(n) => new.get(&n).map(|(_, p)| *p),
+                    Ref::Node(id) => nodes.get(&id).and_then(|h| h.parent).map(Ref::Node),
+                };
+                let Some(up) = up else { return true };
+                r = up;
+            }
+            true
+        };
+        let users = nodes
+            .iter()
+            .filter(|(_, h)| h.kind == *full)
+            .map(|(id, _)| Ref::Node(*id))
+            .chain(
+                new.iter()
+                    .filter(|(_, (k, _))| k == full)
+                    .map(|(n, _)| Ref::New(*n)),
+            );
+        if let Some(u) = users.into_iter().find(|r| left(*r)) {
+            let d = format!(
+                "{} is still a {}; remove what uses it first",
+                ref_text(u),
+                plain(full)
+            );
+            return no(Some(*i), "kind.in-use", &d);
+        }
+    }
+    let defines: Vec<String> = made.iter().map(|m| json_str(m)).collect();
+    format!(
+        r#"{{"ok":true,"kinds":{},"defines":[{}]}}"#,
+        kinds.is_some(),
+        defines.join(",")
+    )
 }
 
 /// A declared bare argument name is bytes; a valid thing id keeps its existing array form.
@@ -1351,6 +1716,24 @@ fn numbered(
                 },
                 _ => return Err(JsError::new("param-unsupported")),
             },
+            // E14b: a slot of another thing, `{"node": "<id>", "slot": n}` (the slot's number in that thing's entry,
+            // 1, 2, ...), goes as `[id, n]`.
+            Json::Obj(m) if m.len() == 2 => {
+                let get = |k: &str| m.iter().find(|(n, _)| n == k).map(|(_, v)| v);
+                match (get("node"), get("slot")) {
+                    (Some(Json::Str(id)), Some(Json::Int(n))) if *n >= 1 => match node(id)? {
+                        Some(Target::Node(id)) => Value::Array(vec![
+                            id.to_value(),
+                            Value::Uint(
+                                u64::try_from(*n)
+                                    .map_err(|_| JsError::new("param-out-of-range"))?,
+                            ),
+                        ]),
+                        _ => return Err(JsError::new("param-unsupported")),
+                    },
+                    _ => return Err(JsError::new("param-unsupported")),
+                }
+            }
             _ => return Err(JsError::new("param-unsupported")),
         })
     }

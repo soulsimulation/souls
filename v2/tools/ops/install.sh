@@ -8,14 +8,18 @@
 #   bash install.sh check                       the test: nothing it writes is today's system's (a repo checkout)
 #   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
 #                                               puts a bundle together (the workflow)
+#   bash install.sh origin <out>                the origin's files alone (release.sh bundle's origin.tar)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
-# What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
+# What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd and
+# its uploads checker assets-check,
+# directoryd, register-world, deploy, gateway-upgrade, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
-# souls-directory and souls-origin.
-# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
+# souls-directory, souls-origin, souls-agents and souls-alarms (with its drop-in).
+# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing but the alarm daemon
+# (souls-alarms, O2 #2731), which it enables and starts: it wakes only worlds that went to sleep, and with none it
+# waits. Uninstall stops and disables it. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
 set -euo pipefail
@@ -28,14 +32,16 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world publish-template)
+PROGRAMS=(supervisor worldd gatewayd assets-check directoryd register-world deploy gateway-upgrade import-world publish-template)
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service souls-alarms.service)
 DROPIN=$UNITS/worldd@.service.d
+ALARMS_DROPIN=$UNITS/souls-alarms.service.d
+ALARMS=souls-alarms.service
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
-OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
+OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN" "tree $ALARMS_DROPIN")
 for u in "${UNIT_FILES[@]}"; do OWNED+=("file $UNITS/$u"); done
 
 die() {
@@ -116,6 +122,15 @@ ensure_once() {
   act "file $p $m $o:$g (once)" bash -c 'umask 077; printf "%s\n" "$1" > "$2" && chown "$3" "$2" && chmod "$4" "$2"' _ "$text" "$p" "$o:$g" "$m"
 }
 
+# ensure_key <path>: 64 random hex digits, root:souls 640, written when absent and never overwritten. The view key
+# (V13b): the directory signs a signed-in page's view tokens with it and every world's gateway checks them, so all of
+# them name this one file (directory.args, gateway-<world>.env). Without it the page's sign-in gets no view token.
+ensure_key() {
+  local p=$1
+  [ -e "$R$p" ] && return 0
+  act "file $p 640 root:$ACCOUNT (once, a new key)" bash -c 'umask 077; od -An -tx1 -N32 /dev/urandom | tr -d " \n" > "$1" && chown "root:$2" "$1" && chmod 640 "$1"' _ "$p" "$ACCOUNT"
+}
+
 # ensure_tree <source dir> <path>: every file of the source, root-owned and world-readable; files the source lacks go.
 ensure_tree() {
   local src=$1 dst=$2 f rel
@@ -133,7 +148,7 @@ ensure_tree() {
   done < <(cd "$R$dst" && find . -mindepth 1 | sed 's|^\./||' | sort -r)
 }
 
-DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, is in souls-origin.service
+DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, and the agents' relay's, 7330, are in their units
 # The directory's arguments, written once. It listens on this machine's IPv4 loopback address, as localhost resolves
 # (directoryd takes an address, not a name).
 directory_args() {
@@ -147,7 +162,7 @@ directory_args() {
 # Arguments for souls-directory.service (directoryd; v2/crates/directoryd/src/accounts/start.rs). Written once by
 # the install, never overwritten. Add the sign-in provider (--issuer <https origin> --parties <origin,...>) before
 # starting it; only the configured origin mounts sign-in (docs/operations/auth.md).
-DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory
+DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory --view-key $ETC/view.key --mailbox-key $ETC/mailbox.key
 EOF
 }
 SECRETS="# Secrets for Engine v2's programs, KEY=value lines (root only; systemd reads it before a unit drops to souls)."
@@ -210,6 +225,10 @@ install_all() {
   local build
   build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
   ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
+  ensure_key "$ETC/view.key"
+  # The mailbox key (R13): the gateways' bearer for the directory's /v1/mailbox/*, so an owner's message from the page
+  # reaches the Soul's client; without it every send is refused `no-mailbox`.
+  ensure_key "$ETC/mailbox.key"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
   ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Browser provider: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
@@ -224,6 +243,10 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # The alarm daemon runs as root (it starts worlds) in the group souls, its socket group-writable, so a world and its
+  # gateway, both the user souls, can reach it.
+  ensure_dir "$ALARMS_DROPIN" 755 root root "tree $ALARMS_DROPIN"
+  ensure_file "$from/units/alarms-install.conf" "$ALARMS_DROPIN/10-install.conf" 644 root root
   # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
   # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
   local l limits
@@ -234,6 +257,15 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
     UNITS_CHANGED=1
   fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
+  # The one unit it starts (see the top): enabled at boot, started now, restarted when its unit or drop-in changed.
+  if [ -n "$R" ] || ! systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then
+    act "enable $ALARMS" systemctl enable --quiet "$ALARMS"
+  fi
+  if [ -n "$R" ] || ! systemctl is-active --quiet "$ALARMS"; then
+    act "start $ALARMS" systemctl start "$ALARMS"
+  elif [ "$UNITS_CHANGED" = 1 ]; then
+    act "restart $ALARMS" systemctl restart "$ALARMS"
+  fi
 }
 
 # The machine: Linux with systemd 254 or later (worldd@ uses RestartSteps) and cgroup v2; node for the origin.
@@ -271,6 +303,11 @@ units_quiet() {
 # apply takes them back as its own. Removing the data is a production delete, the owner's to do by hand.
 uninstall() {
   local item keep=0
+  # The alarm daemon is the install's own to stop (it started it); every other unit is the operator's.
+  if recorded "file $UNITS/$ALARMS"; then
+    if systemctl is-active --quiet "$ALARMS"; then act "stop $ALARMS" systemctl stop "$ALARMS"; fi
+    if systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then act "disable $ALARMS" systemctl disable --quiet "$ALARMS"; fi
+  fi
   units_quiet
   [ -f "$STATE" ] || {
     echo "nothing installed (no $STATE)"
@@ -315,6 +352,8 @@ check() {
   bundle "$tmp/b" "$tmp/bins" "$tmp/page" "" "$tmp/client" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
   grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
+  grep -qxF "would file $ETC/view.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the view key missing from plan"
+  grep -qxF "would file $ETC/mailbox.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the mailbox key missing from plan"
   cp -R "$tmp/root" "$tmp/placed"
   mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
@@ -336,7 +375,7 @@ check() {
     ! grep -qE "^would (dir|perms) $ETC " "$tmp/etc.plan2" || die "check: a re-install changes a 751 $ETC"
   )
   echo "check: $ETC is 751 after a fresh install and after a re-install over 750"
-  for p in import-accounts import-world publish-template; do
+  for p in import-world publish-template; do
     cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
     grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
@@ -352,7 +391,7 @@ check() {
     perms() {
       if [ -n "$(find "$1" -prune -perm 755)" ]; then echo '755 root root'; else echo '644 root root'; fi
     }
-    for p in import-accounts import-world; do
+    for p in import-world; do
       CHANGES=0
       ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/missing"
       [ "$CHANGES" = 1 ] || die "check: missing $p was not planned"
@@ -369,7 +408,7 @@ check() {
       [ "$CHANGES" = 1 ] || die "check: $p mode was not repaired"
     done
   )
-  echo 'check: both importers bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
+  echo 'check: the importer bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
   ours=$tmp/ours theirs=$tmp/theirs
   {
     awk '$1 == "would" && $2 ~ /^(dir|file)$/ {print "path " $3} $1 == "would" && $2 == "user" {print "user " $3}' "$tmp/plan"
@@ -403,15 +442,22 @@ check() {
   return $bad
 }
 
+# The origin's files, as the install and a release's move (v2/tools/ops/release/release.sh) put them in $LIB/origin.
+origin_files() {
+  local out=${1:?origin <out>}
+  rm -rf "$out"
+  mkdir -p "$out"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/"
+  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/"
+}
+
 bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
   mkdir -p "$out/bin" "$out/units"
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
-  rm -rf "$out/origin" "$out/web"
-  mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
-  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
+  rm -rf "$out/web"
+  origin_files "$out/origin"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
   cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
@@ -465,7 +511,7 @@ main() {
       machine
       preflight
       install_all "${from:?apply --from <bundle>}"
-      echo "applied: $CHANGES changes (nothing started)"
+      echo "applied: $CHANGES changes (nothing started but $ALARMS)"
       ;;
     uninstall)
       [ -z "$R" ] || die "INSTALL_ROOT is for plans only"
@@ -476,8 +522,9 @@ main() {
       ;;
     check) check ;;
     bundle) bundle "$@" ;;
+    origin) origin_files "$@" ;;
     remote) remote "$@" ;;
-    *) die "plan|apply|uninstall|check|bundle|remote (see the top of $0)" ;;
+    *) die "plan|apply|uninstall|check|bundle|origin|remote (see the top of $0)" ;;
   esac
 }
 

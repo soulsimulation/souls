@@ -1,0 +1,179 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Conference controls: each form and refusal once.",
+  "cases": [
+    {
+      "name": "post_question_allowed",
+      "act": {
+        "this": "t1",
+        "form": "post_question",
+        "args": {
+          "words": "w_next_steps"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "post_question_busy",
+      "act": {
+        "this": "t1",
+        "form": "post_question",
+        "args": {
+          "words": "w_next_steps"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question",
+            "fields": {
+              "words": "Existing question",
+              "pending": true
+            },
+            "links": {
+              "asker": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0
+      }
+    },
+    {
+      "name": "withdraw_question_author",
+      "act": {
+        "this": "t1",
+        "form": "withdraw_question"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question",
+            "fields": {
+              "words": "Next steps?",
+              "pending": true
+            },
+            "links": {
+              "asker": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "withdraw_question_empty",
+      "act": {
+        "this": "t1",
+        "form": "withdraw_question"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_linked",
+        "need": 0
+      }
+    },
+    {"name":"mark_answered_author","act":{"this":"t1","form":"mark_answered"},"state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":true,"answered":false,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"asker":{"sees":["public"]},"expect":{"verdict":"yes"}},
+    {"name":"mark_answered_outsider","act":{"this":"t1","form":"mark_answered"},"state":{"actor":"b2","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":true,"answered":false,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"not_linked","need":0}},
+    {"name":"mark_answered_no_question","act":{"this":"t1","form":"mark_answered"},"state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":false,"answered":false}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"not_linked","need":0}},
+    {"name":"mark_answered_not_pending","act":{"this":"t1","form":"mark_answered"},"state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":false,"answered":false,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"field_differs","need":1}},
+    {"name":"mark_answered_repeat","act":{"this":"t1","form":"mark_answered"},"state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":true,"answered":true,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"field_differs","need":2}}
+  ]
+}

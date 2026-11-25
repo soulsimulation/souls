@@ -1,8 +1,8 @@
-// Clip kit (#2280): signed in as admin, who owns two Souls, follow another user's Soul from the search (Ctrl+K). The
+// Clip kit (#2280; 0.135 P6 on the new engine): signed in as admin, who owns two Souls, follow another user's Soul from the search (Ctrl+K). The
 // navbar keeps admin's Souls the whole time; before the fix the follow reconnected and they dropped out for a moment.
 import { cast } from '../_shared/cast.mjs';
 
-cast({ souls: [{ name: 'Ada', owner: 'admin' }, { name: 'Bo', owner: 'admin' }, { name: 'Mira', owner: 'mira' }] });
+await cast({ souls: [{ name: 'Ada', owner: 'admin' }, { name: 'Bo', owner: 'admin' }, { name: 'Mira', owner: 'mira' }] });
 
 export default async function steps(page, { mark }) {
   await page.waitForTimeout(2500);                        // the navbar with admin's Souls, before the follow

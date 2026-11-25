@@ -1,0 +1,28 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ground_paint",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      20000,
+      100,
+      20000
+    ]
+  },
+  "text": {
+    "card": "Ground laid with a material: sand, gravel, moss, mud, rock or snow.",
+    "ground": "ground",
+    "sand": "sand",
+    "gravel": "gravel",
+    "moss": "moss"
+  },
+  "card": {
+    "text": "card",
+    "category": "ground",
+    "synonyms": [
+      "sand",
+      "gravel",
+      "moss"
+    ]
+  }
+}

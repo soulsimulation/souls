@@ -16,10 +16,20 @@ gateway: [gateway-upgrade.md](runbook/gateway-upgrade.md) (O16); the machine's l
 
 `release-v2.yml` refuses a head where any of these has no successful run, one line per check by name
 (`refused: release.missing-check: <name> has not passed at <sha>`). The list is read from between the markers below;
-change it here.
+change it here. The merge queue's green `ci` run at the head counts for `ci-ok` and the five v2 legs (0.133 R13): a
+pull request enters the queue only with `ci-ok` green at its own head, which needs every v2 leg its paths select, the
+queue's run checks that the combined code compiles, and the queued commit lands on main as itself. Main's own push run
+is often cancelled by the next merge and runs no leg its paths do not select, so a merged fix needs no re-run. Plainly:
+the v2 legs' tests ran on each pull request's own head, not on the tree that ships; the merge queue only compiled
+that tree (`cargo check`).
+`scrub-guard` and `gitleaks` must still pass at the head (the queue runs them).
 
 <!-- release-checks -->
-- `v2`: the whole of `v2/tools/ci.sh` (build, types, fmt, clippy, tests, the page's and client's tests)
+- `v2-rust`: one of the five CI legs that together run `v2/tools/ci.sh` (`.github/scripts/ci-scope.mjs` `V2_LEGS`)
+- `v2-sim`: another of those legs
+- `v2-worldd`: another of those legs
+- `v2-wasm`: another of those legs
+- `v2-client`: another of those legs
 - `ci-ok`: the light set of every change (build and types, bundle, smoke, affected tests)
 - `scrub-guard`: no device details, secrets or personal data in the tree
 - `gitleaks`: no secrets
@@ -36,24 +46,55 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    checks above passed at it.
 2. **Build once.** At that commit: the world process (`worldd`), the gateway (`gatewayd`), the page (`v2/web`'s
    build, as `page.tar`) and the served client (`v2/client/served/build.mjs`, stamped with the version: `eden.mjs`,
-   `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), with the tools that
-   move them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
+   `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), the directory
+   (`directoryd`), the viewers' origin (its files as the install places them, `install.sh origin`, as `origin.tar`) and
+   their two unit files (`souls-directory.service`, `souls-origin.service`, as `units.tar`), with the tools that move
+   them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
    (`1220` and 64 hex), as O1 names a build, and each served file by name, version, hash and length (`served`). The
    bundle is the run's artifact.
 3. **Stage.** The bundle goes to the machine over ssh; each artifact lands at `$WORLDS_ROOT/builds/<hash>/<name>`
    (`/var/lib/souls/worlds`) only if its bytes hash to the manifest's, and `worldd schemas` must run there first (a
    binary built against a newer system library than the machine's does not start: `release.will-not-start`). The
-   release's record (manifest, tools, `release.sh`) is `/var/lib/souls/releases/<sha>/`. It prints the staged files'
+   release's record (manifest, tools, `release.sh`) is `/var/lib/souls/releases/<sha>/`, with `world-aside` among its
+   tools and, under `reseed/`, Eden's reseed, its undo and the kinds at the commit. It prints the staged files'
    hashes against the manifest's. A dry run stops here: builds by hash are inert until a pin names one.
+   - **Reseed (input `reseed`).** When this build cannot read Eden's store (`header-mismatch`), `reseed=fresh` starts
+     Eden fresh on it before the move ([cutover.md](cutover.md#a-fresh-eden-on-a-new-build-0132)): `release.sh reseed
+     <sha> check`, then `run`; a dry run runs only the check. A label resumes a reseed that stopped; `fresh` refuses,
+     naming the label to resume, when Eden is already pinned to this build or a reseed to it is not undone. Eden is
+     the canary of the move that follows. The label and the undo line reach the summary even when it stops. Its undo
+     is `rollback-v2.yml -f reseed=<label>`, which takes a turn in the `release` group. Store calls retry a dropped
+     connection, a stall or a 5xx with back-off (world-aside's `tried`).
 4. **Move.** The canary world (input `canary`, default the first by name) by `deploy`: rehearsal, pin, restart, the
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
-   `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
-   then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`).
+   `gateway-upgrade` (never in the same step as a world's deploy: the step lock), after `mailbox apply` gave the
+   owner's messages their settings where missing (the mailbox key, made once; `--mailbox-key` in `directory.args`;
+   `--mailbox <directory> --mailbox-key` in each `gateway-<world>.env`; a rerun restarts a gateway or the directory
+   that had already moved when its file changed); then the page (`/usr/local/lib/souls/web`);
+   then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`);
+   last the directory (`souls-directory`), then the viewers' origin (`souls-origin`). For each, the release's program
+   (`/usr/local/lib/souls/directoryd`, the folder `/usr/local/lib/souls/origin`) and unit file go in beside the old ones
+   and are renamed over them (`systemctl daemon-reload` when the unit file changed), the unit is restarted once (a
+   blip of a second or two; the page tries again), and it must answer as healthy within 30 s: the directory `401` to
+   `POST /v1/account/session` without a token, the origin `200` for the first world's stream pointer
+   (`/w/<world>/<views/world.json stream>pointer`, or `/v1/feed` when no world has a stream). When it does not, its
+   previous program and unit go back, it is restarted on them, and the release stops with
+   `release.directory-unhealthy` or `release.origin-unhealthy`, saying what the previous one answers.
+   Then `mailbox check`: one owner's message, for a grant no Soul holds (nothing reads it; it expires unread), sent
+   through each world's gateway with a view token minted from the install's view key, must be accepted; any refusal
+   (`no-mailbox`, `not-taken`, unreachable) stops the release with `release.mailbox-unreachable`.
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
    enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
    so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
+   **The body catalogue** (`release.sh bodies`): before the deploys, each world's folder gets the page's `bodies.json`
+   (the body files the bundle built, `assets/bodies/`) when it has none, or when the release's admits every body its
+   own does; its deploy's restart reads it (worldd reads `bodies.json` only at start), so `wear` admits the presets.
+   A fork keeps its own (its boot pins it), and so does a world whose catalogue has a body the release's lacks (a Soul
+   wearing it could not start). After the page moves, each world of the launcher's cutover binding that names no
+   catalogue gets `bodiesDir` `/usr/local/lib/souls/web/assets/bodies`, served at `/w/<slug>/v2/bodies/` and named in
+   its page's `v2Bodies` ([cutover.md](cutover.md)); the launcher reads the binding again within a second.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already
@@ -64,6 +105,16 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    The viewers' origin serves the entry in the feed (`/v1/feed`, today's shape) on its next read, and the page the
    release moved carries the changelog with this release's section compiled in (`/changelog`, `/changelog.md`), both
    from `v2/tools/origin/site.mjs` (O23).
+
+## Called by release.yml
+
+`release.yml` calls this workflow twice (`v2=true` by default) so one dispatch takes a sha through both releases
+([docs/release.md](../../docs/release.md#a-patch-release-in-one-run)): `part=stage` (its **v2** job) builds and stages
+beside today's ship, under ship's own conditions, and `part=move` (**v2-move**) runs only after ship's verdict: the
+reseed when asked, then the move and the news entry. `release.yml`'s preflight runs the checks above first, so a
+refusal stops both releases before anything moves. Called, it runs in `release.yml`'s turn on the machine (a
+concurrency group of its own), always against `production`; its own tag, Release and changelog steps are skipped,
+and `release.yml`'s publish makes them once, after both releases passed and Eden's page answers.
 
 ## A rollback
 
@@ -92,21 +143,23 @@ and a `systemctl` that plays systemd's part), and is release.sh's transport for 
 ```sh
 cd v2 && cargo build --release -p worldd -p gatewayd -p supervisor -p directoryd
 cargo build --release -p ops --bin deploy --bin gateway-upgrade
-bash tools/ops/install.sh bundle <install> target/release <page dist>
+bash tools/ops/install.sh bundle <install> target/release <page folder>  # the body files: tools/ops/release/bodies.ts
 bash tools/ops/release/scratch.sh up <dir> <install> <eden facts.json> ../content/kinds
 export RELEASE_SSH="bash tools/ops/release/scratch.sh ssh" RELEASE_TARGET=<dir>
-bash tools/ops/release/release.sh bundle <out> <sha> <version> <bins> <page dist> client
+bash tools/ops/release/release.sh bundle <out> <sha> <version> <bins> <page folder> client
 bash tools/ops/release/release.sh remote stage <out>
 bash tools/ops/release/release.sh remote move <sha>
 bash tools/ops/release/scratch.sh down <dir>
 ```
 
-The facts file is N1's export (`v2/tools/import-eden`). `<bins>` holds `worldd`, `gatewayd`, `deploy` and
-`gateway-upgrade`; `scratch.sh build <dir> <label> [plant|mute]` makes a `worldd` that runs the machine's, or one that
+The facts file is N1's export (`v2/tools/import-eden`). `<bins>` holds `worldd`, `gatewayd`, `directoryd`,
+`deploy` and `gateway-upgrade`; `scratch.sh build <dir> <label> [plant|mute]` makes a `worldd` that runs the machine's, or one that
 dies when served (`plant`), or one that never serves (`mute`).
 
 ## Known limits
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- `install.sh apply` with an older bundle writes its own page over a released one.
+- `install.sh apply` with an older bundle writes its own page, directoryd, origin and their units over released ones.
+- The scratch machine runs no directory and no origin (`scratch.sh` sets `RELEASE_SERVICES` empty), so its move skips
+  them; `release.test.mjs` proves that step with stand-ins for `systemctl` and `curl`.

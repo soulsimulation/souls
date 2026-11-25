@@ -3,8 +3,8 @@
   "kind": "eden:interval_station",
   "owner": "thing",
   "state": {
-    "intervals": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
-    "last_move": { "n": 2, "type": "enum", "values": ["none", "stretch", "jacks", "dance"], "default": "none", "audience": { "rule": "everyone" } }
+    "intervals": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "last_move": { "n": 29, "type": "enum", "values": ["none", "stretch", "jacks", "dance"], "default": "none", "audience": { "rule": "everyone" } }
   },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 1500], "yaw_mdeg": 180000 }

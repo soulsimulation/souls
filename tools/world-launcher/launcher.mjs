@@ -5,17 +5,21 @@
 //
 //   node tools/world-launcher/launcher.mjs [--port 4980] [--data <dir>] [--range 5101-5149]
 //        [--auth-env <clerk.env> --public-origin https://sim.eden.art] [--soul-skill <skill.md>] [--soul-instructions <instructions.md>]
+//        [--templates-dir <dir>]   genesis templates from another folder (default worlds/templates; a staged scene's own)
 //
 //   GET  /                       the web app (homepage: worlds + New world)
 //   GET  /changelog              the public changelog: CHANGELOG.md rendered into the web build (apps/web/changelog.html)
 //   GET  /robots.txt, /sitemap.xml  what crawlers are told (crawl.mjs): public pages and listed worlds only; an unlisted
 //                                world's every response is X-Robots-Tag noindex, as is every /__sim JSON answer
-//   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities
+//   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities; with the worlds that have only a new-engine route (D2)
 //   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
 //   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
-//                                from each world's store (a sleeping world stays asleep); 401 signed out. GET /__sim/soul-photo/
+//                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
 //                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
+//                                with a cutover binding (or --create-on-new-engine, SOULS_V2_CREATE=1; off: --no-create-on-new-engine,
+//                                SOULS_V2_CREATE=0): the directory's create makes it
+//                                on the new engine, owned by the signed-in person; served and listed once its route is (0.135 W1)
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
 //   GET  /__sim/whoami           {address}: the address this request is keyed on (first X-Forwarded-For entry, else the peer)
@@ -41,7 +45,7 @@
 //                                POST /__sim/worlds 503 site.creation-paused, with Retry-After; healthz `site` shows both
 //   POST /__sim/op/set-read-workers operator only: {slug, readWorkers: 0-4|null} → Stage B read workers from its next boot
 //                                (0 = off; null = the launcher's default: 1 with SIM_READ_WORKER=1, else off)
-//                                at its URL (listing.mjs; bench worlds and "… (scratch)" names are unlisted by default)
+//                                at its URL (listing.mjs; bench worlds, dev and test addresses and "… (scratch)" names are unlisted by default)
 //   POST /__sim/op/archive-world operator only: {slug, reason?} → stop it, move <data>/worlds/<slug> to <data>/archive/<id>/world,
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
@@ -58,7 +62,10 @@
 //   cobuilders/remove {account}, transfer {to?}, offers/cancel; anyone with the link: GET offer?code=, POST offer/accept
 //   {code} (signed in: that is the consent); a co-builder's agent: POST cobuild/pair/start|poll, approved by the co-builder
 //   (POST cobuild/pair/approve {code}).
-//   /w/<slug>/*                  proxied to that world (HTTP, SSE, WebSocket); started on demand
+//   /w/<slug>/*                  proxied to that world (HTTP, SSE, WebSocket); started on demand. A world with only a new-engine route (no registry row,
+//                                no binding; cutover.mjs withRouteOnly) starts nothing: its old page is built here (D2);
+//                                nor does a world its binding routes to the new engine (moved, D2b): answered here alone,
+//                                its /asset-view/<sha>.glb and /assets/<sha>.<ext> from the release and the upload store (moved-assets.mjs)
 //
 // --base /worlds puts all of the above under one path prefix (/worlds/, /worlds/__sim/…, /worlds/w/<slug>/…,
 // /worlds/assets/…), so one reverse-proxy rule serves the launcher beside another release on the same origin
@@ -95,6 +102,7 @@
 // and takes them over one at a time (handover below), so the port never closes and no world has two writers.
 //
 // Local only: binds 127.0.0.1, edge minds (owners' agents think; the world pays for none), no credentials, no tunnels.
+import { isMain } from '../lib/is-main.mjs';
 import { authorizedPartiesOverride, publicAuthEnvironment } from './clerk-public-env.mjs';
 import { satelliteSettings, primarySignInPage } from './clerk-satellite.mjs';
 import { execFileSync } from 'node:child_process';
@@ -116,12 +124,14 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSy
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence } from './cutover.mjs';
+import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
+import { movedAssets } from './moved-assets.mjs';
+import { placeShots } from './place-shots.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -130,15 +140,14 @@ import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
-import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
-import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
-import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
+import { defaultSiteLog, withInlineConfig, withWorldMeta } from './page-meta.mjs';
+import { addressKey, forwardedAddress } from './address-key.mjs';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
 import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
-import { accountSouls, soulPhoto } from './my-souls.mjs';
+import { accountSouls, directorySouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
 /** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
@@ -165,7 +174,7 @@ export function withHeap(d, heapMb) {
   return d;
 }
 /** How a world the launcher cannot reach right now is reported (children.mjs ensure() error codes; LOAD-CONTRACT §4). */
-const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'world.waking' };   // #2367 A2: no room after a wait: retriable, world.waking   // #2233 A2: no room to load it: retriable   // #2304: a load past the hold: retriable
+const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'world.waking', 'new-engine': 'world.new-engine' };   // D2b: a moved world, never started here   // #2367 A2: no room after a wait: retriable, world.waking   // #2233 A2: no room to load it: retriable   // #2304: a load past the hold: retriable
 /** The dark soul.slow-down hint on C2 reads at amber (lane srv-shed; LOAD-CONTRACT §2b "Refusal shapes"). */
 const SLOW_DOWN_HINT = Object.freeze({ header: 'soul.slow-down', retryAfterMs: 5000, message: 'The world is busy and asked you to slow down for 5 s between reads' });
 /** LOAD-CONTRACT §1 levels; at HOT ones the proxy sheds C2 and caches C3 for 2 s. After a restart, C1/C2 ramp up over RAMP_MS. */
@@ -292,13 +301,19 @@ export async function openLauncher(cfg = {}) {
   const dataDir = resolve(cfg.dataDir ?? join(root, '.lane/launcher'));
   const webDir = resolve(cfg.webDir ?? join(root, 'apps/web/dist'));
   const templatesDir = resolve(cfg.templatesDir ?? join(root, 'worlds/templates'));
+  // 24 Nov: a moved world's models and pictures, from the release's core assets and the box's shared upload store, as
+  // its old process served them (moved-assets.mjs)
+  const shots = placeShots({ dir: join(dataDir, 'place-shots'), log: (s) => log(s) });   // a moved world's kept Explore pictures (place-shots.mjs)
+  const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent
   // #887: the site admin's vetoes apply to thumbnails as to every upload. The site log is the one the worlds share: by
   // default <data>/worlds/assets/moderation-site.jsonl (each world's DATA_DIR/../assets), unless the environment names it.
   const vetoed = adminVetoes({ ttlMs: cfg.moderationVetoTtlMs, siteLog: cfg.moderationSiteLog ?? (process.env.SIM_MODERATION_SITE_LOG || process.env.ASSET_DIR ? defaultSiteLog() : join(dataDir, 'worlds', 'assets', 'moderation-site.jsonl')) });
   const worldModeration = (w) => (w ? { file: join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf(w) } : null);
-  const thumbView = (w) => thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) });
+  // a world with neither picture shows its fullest kept Explore place picture (a moved world's, place-shots.mjs), never grey
+  const thumbView = (w) => { const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) }), c = t.thumbnail || !moved(w) ? null : shots.cover(w.slug);
+    return c ? { thumbnail: `${wp(w.slug)}${c}`, thumbnailSource: 'place' } : t; };
   const marsWebDir = cfg.marsWebDir ?? (existsSync(join(root, '.lane/mars-web')) ? join(root, '.lane/mars-web') : undefined);
   const log = cfg.log ?? ((s) => console.log(`[launcher] ${s}`));
   const flood = process.env.SIM_FLOOD === '0' ? () => null : launcherFlood({ log, limits: cfg.floodLimits });   // P2 coarse ceiling, see flood.mjs
@@ -323,7 +338,10 @@ export async function openLauncher(cfg = {}) {
   if (oldRoot && !authEnvFile) throw new Error('launcher: --old-worlds-root needs --auth-env (the original worlds sign in with Clerk)');
   const redirects = oldRoot ? redirectSwitch(join(dataDir, 'redirects.json'), log) : null;
   const registry = new Registry(dataDir);
-  const cutover = cutoverFence({ binding: cfg.cutoverBinding, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
+  const cutover = cutoverFence({ binding: cfg.cutoverBinding, log, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
+  /** D2b (0.134): a registry world its binding routes to the new engine (switched): the launcher never starts, wakes or
+   *  keeps its old process; its page, views and reads are answered here (oldCold). A world turned back is old again. */
+  const moved = (w) => !!w && !w.routeOnly && !!cutover?.v2Stream(w);
   const accountPolicy = creationPolicy(cfg);
   /** Handover state (keeper.mjs): 'active' → 'preparing' → 'retired' (or back to 'active' when the next one fails). */
   let phase = 'active', retiredTo = null, gate = null, retiredPidFile = null, handBack = null;
@@ -333,7 +351,7 @@ export async function openLauncher(cfg = {}) {
   let canaryRun = null;
   const waitHandBack = async (slug, e) => (e.code === 'handed-back' || canaryRun?.slug === slug) && (await canaryRun?.passed) === false && handedBack();
   const adopting = Array.isArray(cfg.adopt) ? cfg.adopt : null;
-  const createLimit = cfg.createLimit ?? Infinity, made = new Map();
+  const createLimit = cfg.createLimit ?? Infinity, made = new Map(), issued = new Map();   // issued (W1): key → {slug, at} of creates begun here
   /** #2538: free MB on the data disk, read at most every 30 s (cfg.diskFreeMb: tests' fake reading); low under --disk-min-free-mb. */
   const diskMinFreeMb = cfg.diskMinFreeMb ?? 0, diskFree = cfg.diskFreeMb ?? (() => { const s = statfsSync(dataDir); return Math.floor(Number(s.bavail) * Number(s.bsize) / 1048576); });
   let diskSeen = { at: -Infinity, mb: Infinity };
@@ -405,6 +423,7 @@ export async function openLauncher(cfg = {}) {
     maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0 || heldForDue(slug), /* #2490 */ sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
     /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); if (unloadStill && s.status === 'running') loaded(slug); wakeParked(slug); },
     /* #2304: at most loadParallel worlds load at once, in order of reason */ loadParallel: cfg.loadParallel ?? 4,
+    /* D2b (0.134): a world moved to the new engine never gets an old process */ refuse: (w) => moved(w),
     ...(unloadStill ? { beforeStop: (k) => recordHorizon(k), afterRelease: (slug) => moveOnHandover(slug) } : {}) });
   const worldEnv = (w) => ({ ...w, dataDir: registry.worldDir(w.slug), bodyCollectionPath: join(dataDir, 'body-collections.sqlite'), templateFile: w.template && w.template !== 'empty' ? templateList({ all: true }).find((t) => t.id === w.template)?.file ?? null : null });
 
@@ -430,11 +449,13 @@ export async function openLauncher(cfg = {}) {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
     const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0 };   // #2233 A3: state; status kept for old readers
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0, ...(moved(w) ? { status: 'running', state: 'running', engine: 'new' } : {}) };   // #2233 A3: state; status kept for old readers; D2b: a moved world is live on the new engine, as a world with no old twin
   };
   async function worldsJson() {
-    await Promise.all(registry.worlds.map(refreshStats));
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(registry.worlds, (w) => stats.get(w.slug)?.souls ?? w.souls).map(describe), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    // D2: the directory names the worlds with no old twin; the list waits for it only until it has answered once
+    const asked = cutover?.routeOnly().length ? directoryWorlds() : null;
+    await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], (w) => stats.get(w.slug)?.souls ?? w.souls).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */
@@ -498,7 +519,7 @@ export async function openLauncher(cfg = {}) {
     const creator = !op && auth ? await verifiedCreator(authorization, auth.child, publicOrigin, root) : null;
     if (!op && auth && !creator) return [401, { ok: false, code: 'signin-required', message: 'your sign-in was not accepted; sign in again' }];
     const name = typeof body?.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
-    if (!name || name.length > 60) return [400, { ok: false, code: 'invalid', message: 'name: 1–60 characters' }];
+    if (!name || name.length > 40) return [400, { ok: false, code: 'invalid', message: 'name: 1–40 characters' }];   // the form's limit, and the new engine's label
     // Hidden fixtures remain unavailable to public creation; only the existing
     // direct-loopback operator route may explicitly select one.
     const templates = templateList({ all: !!op });
@@ -672,12 +693,16 @@ export async function openLauncher(cfg = {}) {
     if (!tok || tok.startsWith('god_')) return null;
     const account = auth ? await verifiedCreator(authorization, auth.child, publicOrigin, root) : tok.startsWith('dev:') && tok.length > 4 ? `dev:${tok.slice(4, 40)}` : null;
     if (!account) return null;
-    const worlds = registry.worlds.filter((w) => !w.fork && !closing.has(w.slug));
+    const all = registry.worlds.filter((w) => !w.fork && !closing.has(w.slug));
+    // MS (0.132.1): a moved world's Souls are the new engine's, listed by its directory; its old store is not read
+    const moved = new Map(all.flatMap((w) => { const v2 = cutover?.v2World(w); return v2 ? [[v2, w]] : []; }));
+    const worlds = all.filter((w) => ![...moved.values()].includes(w));
+    const newEngine = moved.size ? movedSouls(tok, moved) : Promise.resolve([]);
     const opts = { file: (w) => join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf, url: (w) => describe(w).url,
       photo: (w, id, hash) => `${B}/__sim/soul-photo/${w.slug}/${encodeURIComponent(id)}/${hash}.png` };
     const souls = accountSouls(worlds, account, opts);
     const live = [...new Set(souls.flatMap((s) => s.worlds.map((x) => x.slug)))].filter((slug) => pool.status(slug).status === 'running');
-    if (!live.length) return souls;
+    if (!live.length) return [...souls, ...await newEngine];
     const current = new Map();
     await Promise.all(live.map(async (slug) => {
       try {
@@ -686,7 +711,244 @@ export async function openLauncher(cfg = {}) {
         current.set(slug, new Map((Array.isArray(me?.souls) ? me.souls : []).flatMap((s) => typeof s?.profile?.photo?.hash === 'string' ? [[s.id, s.profile.photo.hash]] : [])));
       } catch { /* its stored portrait stands */ }
     }));
-    return accountSouls(worlds, account, { ...opts, current });
+    return [...accountSouls(worlds, account, { ...opts, current }), ...await newEngine];
+  }
+  // MS (0.132.1): the directory's list of the person's own Souls (`POST /v1/account/souls`), asked with their own sign-in
+  // as the directory checks it (a local dev sign-in as its test person, as the page's view-token exchange does), so it
+  // answers that account's Souls and no one else's. `moved` maps a new-engine world name to its launcher world.
+  const directoryUrl = (cfg.v2DirectoryUrl ?? process.env.SOULS_V2_DIRECTORY ?? 'http://127.0.0.1:7310').replace(/\/$/, '');   // the install's (v2/docs/runbook/install.md)
+  async function movedSouls(tok, moved) {
+    const dev = !auth && tok.startsWith('dev:');
+    try {
+      const r = await fetch(`${directoryUrl}/v1/account/souls`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${tok}` }) }, body: JSON.stringify(dev ? { test_person: tok.slice(4, 40) } : {}) });
+      return r.ok ? directorySouls((await r.json())?.souls, moved, (w) => describe(w).url) : [];
+    } catch { return []; }   // the directory unreachable: the moved world's Souls are not listed, every other world's are
+  }
+  /** A world the new engine runs: the signed-in person's agents (the page's "your agents", join-api.ts) are the directory's
+   *  account logins (account.rs: POST /v1/account/agents, POST /v1/account/agents/<id>/revoke), asked there with their own
+   *  sign-in as movedSouls asks; the page's GET list and POST revoke keep their old shape and paths. */
+  async function movedAgents(req, res, rest) {
+    if (req.method !== (rest === '/v1/account/agents' ? 'GET' : 'POST')) { json(res, 405, { ok: false, code: 'method', message: 'Method not allowed.' }, { 'cache-control': 'no-store' }); return; }
+    const tok = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1], dev = !auth && !!tok?.startsWith('dev:');
+    if (!tok) { json(res, 401, { ok: false, code: 'signin-required', message: 'Sign in first.' }, { 'cache-control': 'no-store' }); return; }
+    try {
+      const r = await fetch(`${directoryUrl}${rest}`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${tok}` }) }, body: JSON.stringify(dev ? { test_person: tok.slice(4, 40) } : {}) });
+      res.writeHead(r.status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(await r.text());
+    } catch { json(res, 503, { ok: false, code: 'directory.unreachable', message: 'Your agents cannot be read just now; try again.' }, { 'retry-after': '5', 'cache-control': 'no-store' }); }
+  }
+  /** A world the new engine runs: the page's sign-in check (ClerkBridge, GET /v1/account/session -> {accountId, issuer,
+   *  subject}) is the directory's (`POST /v1/account/session`, which verifies the token and answers {account}); the
+   *  issuer and subject are the verified token's own. Without it a signed-in person stayed "Sign in" (24 Nov). */
+  async function movedSession(req, res) {
+    if (req.method !== 'GET') { json(res, 405, { ok: false, code: 'method', message: 'Method not allowed.' }, { 'cache-control': 'no-store' }); return; }
+    const tok = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
+    if (!tok || (!auth && tok.startsWith('dev:'))) { json(res, 401, { ok: false, code: 'account-signin-required', message: 'Sign in first.' }, { 'cache-control': 'no-store' }); return; }
+    try {
+      const r = await fetch(`${directoryUrl}/v1/account/session`, { method: 'POST', signal: AbortSignal.timeout(3000), headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` }, body: '{}' });
+      const body = await r.json().catch(() => null);
+      if (!r.ok || typeof body?.account !== 'string') { json(res, r.status === 401 ? 401 : 503, { ok: false, code: body?.refused ?? 'directory.unreachable', message: 'Sign in first.' }, { 'cache-control': 'no-store' }); return; }
+      const claims = JSON.parse(Buffer.from(tok.split('.')[1] ?? '', 'base64url').toString('utf8'));   // verified by the directory just now
+      json(res, 200, { accountId: body.account, issuer: claims.iss, subject: claims.sub }, { 'cache-control': 'no-store' });
+    } catch { json(res, 503, { ok: false, code: 'directory.unreachable', message: 'Signing in is not possible just now; try again.' }, { 'retry-after': '5', 'cache-control': 'no-store' }); }
+  }
+  // D2 (0.134): a world with no old twin, one the routes file routes to the new engine and no binding binds (cutover.mjs
+  // withRouteOnly). It has no registry row and no old process: the launcher serves its page (routeOnlyPage) and lists it.
+  // Its name, template and unlisted flag come from the directory's world list (`GET /v1/worlds`, asked at most every
+  // 10 s); while the directory has not answered, its slug names it.
+  const directory = { at: 0, rows: new Map(), asking: null };
+  function directoryWorlds() {
+    if (Date.now() - directory.at > 10_000 && !directory.asking) {
+      directory.asking = fetch(`${directoryUrl}/v1/worlds`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (Array.isArray(j?.worlds)) directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x])); }, () => {})
+        .finally(() => { directory.at = Date.now(); directory.asking = null; });
+    }
+    return directory.asking ?? Promise.resolve();
+  }
+  function routeOnlyWorld(slug) {
+    if (!slug || !SLUG_RE.test(slug) || registry.resolveSlug(slug) || !cutover?.routeOnly().includes(slug)) return null;
+    void directoryWorlds();   // (at most every 10 s; this answer uses what the directory last said)
+    const row = directory.rows.get(slug), made = Number(row?.made);
+    return { slug, worldId: routeOnlyId(slug), routeOnly: true, name: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : slug,
+      template: typeof row?.template === 'string' ? row.template : null, createdAt: Number.isFinite(made) && made > 0 ? (made < 1e12 ? made * 1000 : made) : 0,
+      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
+  }
+  const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
+  /** Whether a world is served without an old process: a world with no old twin, or (D2b, 0.134) a moved world, one its
+   *  binding routes to the new engine, whose old process is never started (the pool's `refuse`). Its page is the
+   *  launcher's own and its views the published ones, else none: the page draws it from its stream (0.135 W2, with the
+   *  world's own defs since #4588), so nothing of it waits for, or wakes, an old process (cutover.mjs handle `cold`). */
+  const oldCold = (w) => !!w && (!!w.routeOnly || moved(w));
+  /** A world with no old twin as the world list shows it (the fields `describe` gives an old world's row). */
+  const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
+    basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
+    templateName: templateList({ all: true }).find((x) => x.id === w.template)?.name ?? w.template, createdAt: w.createdAt, owner: null, god: w.god,
+    entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
+  /** The page config of a world the new engine runs (routed, with or without an old twin), else null: every field an old
+   *  world's config gives (apps/server http.ts configOf), from the launcher's sign-in, the registry (or the directory's
+   *  row) and the route (cutover.mjs v2Fields), never from the old process. The page inlines it (routeOnlyPage) and the
+   *  world's `/v1/config` answers it beside the served client's `soulClient` (cutover.mjs handle), so a page that reads
+   *  the route gets what the inline config says. A moved world's old approvals and profile edits are refused (409, writes
+   *  go to the new engine), so it names none (`accountApproval`, `soulProfile`: null). */
+  function movedConfig(w) {
+    const stream = cutover?.v2Stream(w);
+    if (!stream) return null;
+    const p = auth?.public, base = `${publicOrigin}${wp(w.slug)}`;
+    return { authProvider: p ? 'clerk' : 'dev', authenticationOrigin: p ? publicOrigin : '', clerkPublishableKey: p?.clerkPublishableKey ?? '', clerkIssuer: p?.clerkIssuer ?? '',
+      ...(p?.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}), privyAppId: '',
+      publicUrl: base, worldURL: base, instructionsURL: `${base}/instructions.md`, accountAuthRequired: !!p, accountApproval: null, soulProfile: null,
+      worldId: w.routeOnly ? w.worldId : worldIdOf(w), worldKey: w.slug, worldEngine: true, worldName: w.name ?? w.slug,
+      worldPath: wp(w.slug), authReady: true, devAuth: !p, inviteRequired: false, build: BUILD, v2Stream: stream, ...(cutover.v2Fields(w) ?? {}) };
+  }
+  /** D2: the page of a world with no old twin: the old page (the web build's index.html) with the world's own title and
+   *  links, and the inline config an old world wrote (its name, path, sign-in) with the new engine's fields (cutover.mjs
+   *  v2Fields). The page then reads the stream and draws from it alone (0.135 W2); there is no old view to read.
+   *  24 Nov: also the page of a world routed to the new engine (its registry id and name; D2b: always, a crawler's too),
+   *  so a moved world's page never waits for, or wakes, its old process; its views are the published ones, else the
+   *  stream's (cutover.mjs handle, `cold`). */
+  function routeOnlyPage(req, res, w, rest) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
+    const stream = cutover?.v2Stream(w);
+    if (!stream) return false;
+    let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
+    const base = `${publicOrigin}${wp(w.slug)}`;
+    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), movedConfig(w)));
+    const head = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new' };
+    res.writeHead(200, w.routeOnly ? { ...head, ...(isUnlisted(w) ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
+    return true;
+  }
+  /** 24 Nov: the page's polled old reads of a moved world whose old process sleeps (oldCold), in the shapes the old
+   *  process gives (apps/server http.ts, god/routes.ts, god/context-views.ts), so none is a 404 (live: Mars's page
+   *  logged one every poll, and its Explore said "Locations are temporarily unavailable"): visitors as a world without
+   *  travel (`available: false`: the page stops asking, SoulTravel.tsx); seq from the published snapshot (the page then
+   *  never resyncs for nothing, WorldEntityLayer.ts); context as Explore lists it, the places of the published snapshot (WorldContextViews.ts). */
+  function coldRead(res, w, rest, url) {
+    if (rest === '/v1/world/visitors') { json(res, 200, { contract: 'travel/1', world: worldIdOf(w), available: false, open: false, visitors: [], recent: [] }); return true; }
+    // D2b: with no snapshot published, seq 0 (no entities): the page's heartbeat (WorldEntityLayer.ts) never resyncs on
+    // it, and the poll is never a 404 (the release walk fails on any same-origin 404)
+    if (rest === '/v1/world/seq') { json(res, 200, (w.routeOnly ? null : cutover?.publishedSeq(w)) ?? { seq: 0, entities: 0 }); return true; }
+    if (rest !== '/v1/world/context') return false;
+    // Explore's places, from the published snapshot (cutover.mjs snapshotPlaces), paged and searched as context-views.ts
+    // pages them: 100 a page, a cursor naming its listing, 409 when the listing it names is gone.
+    const pub = w.routeOnly ? null : cutover?.publishedPlaces(w);
+    if (!pub) {
+      // D2b: nothing published: a listing with no places (revision 0), "no places", never "temporarily unavailable"
+      const q = url.searchParams.get('q'), ref = url.searchParams.get('ref');
+      json(res, 200, { contract: 'world-context/1', revision: 0, listingRevision: createHash('sha256').update(JSON.stringify([w.routeOnly ? w.worldId : worldIdOf(w), 0, q, ref])).digest('hex'),
+        source: 'authored-meaning', scope: ref ? 'exact' : q ? 'search-all' : 'semantic', targets: [], total: 0, nextCursor: null });
+      return true;
+    }
+    const q = searchText((url.searchParams.get('q') ?? '').trim()), ref = url.searchParams.get('ref'), cursor = url.searchParams.get('cursor');
+    const found = pub.places.filter((p) => (ref ? p.target.ref === ref : q ? p.text.includes(q) : p.shown)).map((p) => p.target);
+    const listing = createHash('sha256').update(JSON.stringify([worldIdOf(w), pub.seq, q, ref, found.map((t) => t.ref)])).digest('hex');
+    const at = cursor ? /^([a-f0-9]{64}):(\d+)$/.exec(cursor) : null;
+    if (cursor && at?.[1] !== listing) { json(res, 409, { ok: false, code: 'context.changed', message: 'Meaning or listing access changed; start a fresh context query' }, { 'cache-control': 'no-store' }); return true; }
+    const offset = at ? Number(at[2]) : 0, page = found.slice(offset, offset + 100);
+    json(res, 200, { contract: 'world-context/1', revision: pub.seq, listingRevision: listing, source: 'authored-meaning', scope: ref ? 'exact' : q ? 'search-all' : 'semantic',
+      targets: page, total: found.length, nextCursor: offset + page.length < found.length ? `${listing}:${offset + page.length}` : null }, { 'cache-control': 'no-store' });
+    return true;
+  }
+  /** D2b: Explore's place pictures of a world with no old process (POST /v1/world/context/views {refs}), in
+   *  god/context-views.ts's shape: the kept picture of a place as it is now (place-shots.mjs), else `unavailable` with
+   *  `draw: 'page'`, and the page draws that place itself (WorldContextViews.ts drain; before 25 Nov every card stayed a
+   *  generic house). At most 64 KB of body is read; anything unreadable is no refs. */
+  async function noPictures(req, res, slug, w) {
+    let body = '';
+    try { for await (const c of req) { body += c; if (body.length > 65_536) break; } } catch { /* gone */ }
+    let refs = [];
+    try { const r = JSON.parse(body)?.refs; if (Array.isArray(r)) refs = r.filter((x) => typeof x === 'string' && x.length <= 256).slice(0, 64); } catch { /* no refs */ }
+    json(res, 200, { views: shots.views(slug, refs, w.routeOnly ? null : cutover?.publishedPlaces(w)?.places) }, { 'cache-control': 'no-store' });
+  }
+  /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
+   *  (`me.userId`, `me.short`), so the page shows the visitor signed in. Their Souls there are the new engine's (the
+   *  directory's My Souls), not listed here. Clerk: verified as the launcher's owner routes verify; locally, the dev
+   *  sign-in's `dev:<name>`. */
+  async function routeOnlyMe(res, authorization) {
+    const tok = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
+    const id = !tok ? null : auth ? await verifiedCreator(authorization, auth.child, publicOrigin, root) : /^dev:[^\s:]{1,36}$/.test(tok) ? tok : null;
+    if (!id) { json(res, 401, { ok: false, code: 'signin-required', message: 'Sign in first.' }, { 'cache-control': 'no-store' }); return; }
+    let h = 2166136261; for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }   // apps/server ownerShort
+    json(res, 200, { me: { userId: id, short: `u${(h >>> 0).toString(36)}`, souls: [] }, souls: [] }, { 'cache-control': 'no-store' });
+  }
+
+  // W1 (0.135): a signed-in person's New world, made on the new engine. With `v2Create` (on wherever a cutover binding
+  // is in place; see v2CreateOn), POST /__sim/worlds asks the directory's create (`POST /v1/worlds`,
+  // {key, name, template, label}) as that person, so the world is theirs from its name record on. Each request asks
+  // with the token it carries and stays under a minute (a Clerk session token lives about 60 s; Cloudflare gives a
+  // request 100 s), so a create that takes longer is resumable:
+  // - the first ask mints the click's key and the world's address (slug); every answer that is not final carries both;
+  // - `world-starting` (placement forks the template, starts the world and registers its route), or a route not yet in
+  //   the routes file, answers 202 `world.starting`: the page asks again with the same key and slug and a fresh token,
+  //   and the directory answers that key with the same world (never a second one, never `<slug>-2`);
+  // - no answer, or `store-unreachable`, is asked again with the same key within the request; still nothing: 503 with
+  //   the key, as resumable as 202 (whether the world was begun is not known, so nothing says it was not);
+  // - made and routed: 201, the world served at /w/<slug>/ and listed as a world with no old twin (D2).
+  // On (Gene's yes, 24 Nov) wherever a cutover binding is in place, as on soul.game; off with --no-create-on-new-engine
+  // or SOULS_V2_CREATE=0, and on without a binding only by --create-on-new-engine or SOULS_V2_CREATE=1.
+  const v2CreateSet = cfg.v2Create ?? (process.env.SOULS_V2_CREATE ? process.env.SOULS_V2_CREATE === '1' : undefined);
+  const v2CreateOn = () => v2CreateSet ?? !!cutover?.bound?.();
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  const KEY_RE = /^[0-9a-f]{32}$/;
+  /** A resume's {key, slug} is taken only as this launcher gave it back (`issued`), and, since `issued` does not survive
+   *  a restart, only for an address the name's own create could have chosen: slugFor's base for the name (never a
+   *  reserved or shadowing name) or base-N, and no old world's or archived world's. A made-up address is refused before
+   *  the directory is asked. */
+  function resumable(name, key, slug) {
+    if (typeof key !== 'string' || !KEY_RE.test(key) || typeof slug !== 'string' || !SLUG_RE.test(slug)) return false;
+    const known = issued.get(key);
+    if (known && known.slug !== slug) return false;
+    const base = slugFor(name), n = slug.startsWith(`${base}-`) ? slug.slice(base.length + 1) : null;
+    if (slug !== base && !(n && /^[1-9][0-9]{0,3}$/.test(n) && Number(n) >= 2)) return false;
+    return !registry.slugs().has(slug) && !archivedSlugs(dataDir).has(slug);
+  }
+  const transientAnswer = (r, d) =>!r || r.status === 502 || r.status === 504 || (r.status === 503 && d.refused === 'store-unreachable');
+  async function createOnNewEngine(body, authorization) {
+    const tok = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
+    if (!tok || (!auth && !/^dev:[^\s:]{1,36}$/.test(tok))) return [401, { ok: false, code: 'signin-required', message: 'sign in first: a new world belongs to whoever makes it' }];
+    if (!cutover) return [503, { ok: false, code: 'creation.new-engine-unconfigured', message: 'This site has no new-engine routes file, so it cannot make a world on the new engine. Nothing was made.' }];
+    const name = typeof body?.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
+    if (!name || name.length > 40) return [400, { ok: false, code: 'invalid', message: 'name: 1–40 characters' }];
+    const template = typeof body?.template === 'string' && body.template ? body.template : 'empty';
+    const resume = body?.key !== undefined || body?.slug !== undefined;
+    if (resume && !resumable(name, body.key, body.slug))
+      return [400, { ok: false, code: 'invalid', message: 'key and slug: the ones a 202 or 503 answer for this world gave' }];
+    let key = body?.key, slug = body?.slug;
+    if (!resume) {
+      await directoryWorlds();
+      const taken = new Set([...registry.slugs(), ...archivedSlugs(dataDir), ...cutover.routeOnly(), ...directory.rows.keys()]);
+      slug = slugFor(name, taken); key = randomBytes(16).toString('hex');
+    }
+    // the directory's test sign-in stands for the local dev sign-in (as My Souls asks it); a provider token goes as it is
+    const bearer = !auth ? `test:${tok.slice(4)}` : tok;
+    const until = Date.now() + (cfg.v2CreateBudgetMs ?? 60_000), poll = cfg.v2CreatePollMs ?? 1000;
+    const starting = [202, { ok: true, code: 'world.starting', starting: true, key, slug, retry_after: 2,
+      message: 'Your world is still starting. It will appear on the world list when it is ready.' }];
+    let r = null, d = {};
+    for (;;) {
+      r = await fetch(`${directoryUrl}/v1/worlds`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ key, name: slug, template, label: name }), signal: AbortSignal.timeout(Math.max(1000, Math.min(20_000, until - Date.now()))) }).catch(() => null);
+      d = await r?.json().catch(() => ({})) ?? {};
+      if (!transientAnswer(r, d) || until - Date.now() <= poll) break;
+      await pause(poll);
+    }
+    if (transientAnswer(r, d))
+      return [503, { ok: false, code: 'directory.unreachable', key, slug, retry_after: 5, message: 'The directory did not answer in time. Ask again: the same world is asked for, never a second one.' }];
+    if (r.status === 503 && d.refused === 'world-starting') return starting;
+    if (r.status !== 200 || d.world?.name !== slug) {
+      const status = r.status === 401 ? 401 : r.status === 429 ? 429 : r.status === 409 ? 409 : r.status === 503 ? 503 : 400;
+      return [status, { ok: false, code: d.refused ?? `directory.${r.status}`, message: `the new engine did not make the world: ${d.refused ?? r.status}${d.detail ? ` (${d.detail})` : ''}`, ...(d.retry_after ? { retry_after: d.retry_after } : {}) }];
+    }
+    // placement registers the route; the world is served and listed from the moment the routes file names it
+    while (!cutover.routeOnly().includes(slug)) {
+      if (Date.now() + poll > until) return starting;
+      await pause(poll);
+    }
+    // the list's copy of the directory's rows, from an ask that starts after the row exists
+    await directory.asking; directory.at = 0; await directoryWorlds();
+    log(`created ${slug} (${template}) on the new engine, its creator ${d.world.creator}`);
+    return [201, { ok: true, slug, url: auth ? `${wp(slug)}/?new=1` : `${wp(slug)}/?dev=1&new=1`, claimed: true, engine: 'new', world: describeRouteOnly(routeOnlyWorld(slug)) }];
   }
   /** `readBody` runs only once the owner is known (null: over the size limit). Every await is followed by a check that
    *  the world was not archived meanwhile, so nothing is written into a folder that has moved (the restore would refuse). */
@@ -768,6 +1030,18 @@ export async function openLauncher(cfg = {}) {
     return true;
   }
   const inside = (base, rel) => { const p = normalize(join(base, rel)); return p === base || p.startsWith(base + sep) ? p : null; };
+  // 0.133.2 hotfix: the site-level Mars static files the old root world's server answered (apps/server/src/mars-static.ts):
+  // /mars-assets/<file> from mars-web's top level (the static and campus manifests, the Draco decoders), and the published
+  // /browser, /engine, /history, /2020, /models derivatives. With no old process left for a moved world they were a 404
+  // here (the release's Mars web overlay fetches the manifests); now this release's mars-web answers them, same cache.
+  const MARS_STATIC_CACHE = 'public, max-age=86400, stale-while-revalidate=604800';
+  const marsRoot = marsWebDir ? resolve(marsWebDir) : null;
+  const marsStatic = (path) => {
+    if (!marsRoot || /[\\%]|\.\./.test(path)) return null;
+    if (/^\/mars-assets\/[a-zA-Z0-9_./-]+\.(glb|json|webp|png|jpe?g|svg|bin|js|wasm)$/.test(path)) return inside(marsRoot, path.slice('/mars-assets'.length));
+    return /^\/(browser|modular|engine|history|2020|models)\/[a-zA-Z0-9_./-]+\.(glb|json|webp|png|jpe?g|svg|bin)$/.test(path) || path === '/data/manifest.json' ? inside(marsRoot, path) : null;
+  };
+  const serveMarsStatic = (req, res, path) => { const f = marsStatic(path); return !!f && serveFile(res, f, MARS_STATIC_CACHE, req); };
 
   // ---------- proxy
   // Shared static files (/modular, /engine, …) come from a running world on this release's server. An old-world fork
@@ -779,9 +1053,9 @@ export async function openLauncher(cfg = {}) {
     try { return await pool.ensure(worldEnv(w)); } catch { return anyRunning(); }
   };
   const anyRunning = () => {
-    const up = registry.worlds.filter((w) => pool.status(w.slug).status === 'running');
+    const up = registry.worlds.filter((w) => pool.status(w.slug).status === 'running' && !moved(w));   // D2b: never a moved world's
     let w = up.find((x) => !x.fork) ?? up[0];
-    if (!w) { const frozen = registry.worlds.filter((x) => pool.state(x.slug)?.frozen); w = frozen.find((x) => !x.fork) ?? frozen[0]; if (w) pool.thaw(pool.state(w.slug)); }   // all asleep: wake one
+    if (!w) { const frozen = registry.worlds.filter((x) => pool.state(x.slug)?.frozen && !moved(x)); w = frozen.find((x) => !x.fork) ?? frozen[0]; if (w) pool.thaw(pool.state(w.slug)); }   // all asleep: wake one
     return w ? pool.status(w.slug).port ?? null : null;
   };
   // P2: a public page GET must not rewrite worlds.json synchronously each time (a look loop would): one save per 2 s at most
@@ -868,12 +1142,12 @@ export async function openLauncher(cfg = {}) {
   }
   /** #2304 A3: a world's page (the web build's, with the world's own title and links) and the build's files, served here
    *  for a world that is not up. False: not a page or a file of the build (the caller loads the world, or refuses). */
-  function worldPage(req, res, slug, w, rest) {
+  function worldPage(req, res, slug, w, rest, filesOnly = false) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     const head = { 'x-sim-cache': 'unloaded' };
     if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
     if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
-    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
+    if (filesOnly || !(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
     res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
@@ -964,7 +1238,7 @@ export async function openLauncher(cfg = {}) {
     const due = [], deadlines = []; let roomed = false;
     for (const [slug, h] of horizons) {
       const w = registry.get(slug);
-      if (!w) { horizons.delete(slug); saveHorizons(); continue; }
+      if (!w || moved(w)) { horizons.delete(slug); saveHorizons(); continue; }   // D2b: a moved world has no alarm here
       if (!sleeping(slug) || pool.state(slug)?.stopping || alarmLoading.has(slug)) continue;
       // #2475 A1: a world stopped while not still (unloaded to make room, or not saying) is due at once: it loads again
       // as soon as there is room, in the background rank, one per pass, and never unloads another world for it
@@ -1015,7 +1289,7 @@ export async function openLauncher(cfg = {}) {
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null, pageBodies = null } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
@@ -1032,10 +1306,17 @@ export async function openLauncher(cfg = {}) {
       headers['server-timing'] = headers['server-timing'] ? `${headers['server-timing']}, ${mine}` : mine;
       if (soul && account) ceilings.learn(soul, account);   // lane L1: the account a Soul token belongs to (never shown to the client)
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
+      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
+      if (pageStream && r.statusCode === 200 && /^text\/html\b/.test(headers['content-type'] ?? '') && !headers['content-encoding']) {
+        const chunks = []; r.on('data', (c) => chunks.push(c)); r.on('error', () => res.destroy());
+        // B3-1: the whole page is sent with its length, so a chunked answer's transfer-encoding goes (both is an invalid response)
+        const { 'transfer-encoding': _te, ...whole } = headers;
+        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream, pageBodies)); res.writeHead(200, robotsOf(slug, { ...whole, 'content-length': String(body.length) })).end(body); });
+        return;
+      }
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
       if (onData) r.on('data', onData);
-      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       r.pipe(res);
     });
     // A world that was just handed over (or restarted) refused the connection before answering: a GET/HEAD is asked again
@@ -1092,8 +1373,19 @@ export async function openLauncher(cfg = {}) {
   }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
-    if (cutover?.handle(req, res, w, url)) return;
+    if (cutover?.handle(req, res, w, url, { cold: oldCold(w), config: () => movedConfig(w) })) return;
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
+    const v2 = w ? null : routeOnlyWorld(slug);
+    if (v2) {
+      // D2: a world with no old twin: its page and the web build's files here; its client, bodies and refused writes
+      // answered by the fence above; anything else an old world would have answered is not here
+      const rest = url.pathname.slice(wp(slug).length) || '/';
+      if (routeOnlyPage(req, res, v2, rest) || worldPage(req, res, slug, v2, rest)) return;
+      if (rest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
+      if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, v2, rest, url)) return;
+      if (req.method === 'POST' && rest === '/v1/world/context/views') { await noPictures(req, res, slug, v2); return; }
+      json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
+    }
     if (!w) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
@@ -1139,9 +1431,27 @@ export async function openLauncher(cfg = {}) {
     // #2304 A3/A4: a world that is not up serves its page and the web build's files from here, without loading it: to a
     // declared crawler always (and nothing else: a crawler never loads a world, nor thaws one), to anyone with
     // --unload-still. The world loads when the page's live connection or its first data request arrives.
+    // 24 Nov: a visitor's page of a world routed to the new engine whose old process is not awake (oldCold) is the launcher's own
+    // (routeOnlyPage: the world's inline config with its stream), with the build's files, and loads nothing: the bare
+    // page said "There is no world at this address" (its /v1/config is the new client's), and loading the old world for
+    // its page cost about 3 s and made the page depend on it (#4561).
     const crawler = crawlerAgent(req.headers['user-agent']), k0 = pool.state(slug);
+    // Its other old reads are answered as a world's with no old twin (its sign-in here, the rest 404 world.new-engine), so
+    // none of them (the page's visitors, context, seq) wakes it either: the page draws the world from its stream.
+    // D2b (0.134): every request of a moved world is answered here, a crawler's too: anything else is 404 world.new-engine
+    // (Explore's place pictures among them: the page keeps those places as text), and its old process never starts.
+    if (moved(w)) {
+      if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
+      if (movedAsset(req, res, edgeRest) || shots.serve(req, res, slug, edgeRest)) return;
+      if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
+      if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, w, edgeRest, url)) return;
+      if (req.method === 'POST' && edgeRest === '/v1/world/context/views') { await noPictures(req, res, slug, w); return; }
+      json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
+    }
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
-      if (worldPage(req, res, slug, w, edgeRest)) return;
+      // #4561: a visitor's page of a routed world is never the bare one (its /v1/config is the new client's: "There is no
+      // world at this address"); with no old views published it loads the world (above: published, the launcher's page)
+      if (worldPage(req, res, slug, w, edgeRest, !crawler && !!cutover?.v2Stream(w))) return;
       if (crawler) { json(res, 503, { ok: false, code: 'world.unloaded', slug, message: 'This world is not loaded; its page is served without it.' }, { 'retry-after': '3600', 'cache-control': 'no-store' }); return; }
     }
     const resident = residentRead(edgeRest, req.method);
@@ -1197,15 +1507,22 @@ export async function openLauncher(cfg = {}) {
     // reached it, is kept; arrivals while it is asked wait for it (a wave costs one build). The world's other routes are
     // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
     // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
-    let keep;
+    // #4177: the page of a world routed to v2 names its stream in its inline config (written as it leaves, never kept)
+    let keep, pageStream = null, pageBodies = null;
     if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
+      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Fields(w) : null;   // B3-2b: v2Bodies, v2Gateway, v2Directory
+      // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
+      if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; })
+        .then((m) => { if (m?.unwritable) log(`cutover: ${slug}'s static views held in memory, served as published: cutover.static-unwritable (${m.unwritable}); give the binding a staticDir under the unit's ReadWritePaths`); })
+        .catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
       if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
       if (kept) {
         const { 'server-timing': _t, 'x-robots-tag': _r, ...headers } = kept.headers;
         if (headers['x-sim-page'] !== 'index' || req.url.includes('?')) headers['x-robots-tag'] = NOINDEX;   // as apps/server/src/http.ts (INDEXABLE)
-        res.writeHead(200, robotsOf(slug, { ...headers, 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(kept.body);
+        const body = pageStream ? Buffer.from(withV2Stream(kept.body.toString('utf8'), pageStream, pageBodies)) : kept.body;
+        res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length), 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(body);
         return;
       }
       // the first arrival asks the world; the flight ends with the kept page, or with nothing (not the page, an error, gone)
@@ -1226,7 +1543,7 @@ export async function openLauncher(cfg = {}) {
     }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
-    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, pageStream, pageBodies, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Boot, throttling and pool waits may have crossed the switch. Admission is checked again before forwarding.
     if (cutover?.handle(req, res, w, url)) return;
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
@@ -1384,6 +1701,17 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      // B3-2c: the site's public sign-in fields, in the shape the new system's pages read them (v2/web/src/source/signin.ts
+      // SignInConfig, as v2/tools/origin/site.mjs answers): the pairing card (`/pair`, the directory's) then signs in with
+      // this site's own provider session, the one the old page holds, and approves with it as a bearer. No secret here.
+      if (path === '/v1/auth/config' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = auth?.public, host = String(req.headers.host ?? '');
+        const loopback = /^(?:localhost|127\.(?:\d{1,3}\.){2}\d{1,3})(?::\d+)?$/.test(host) || host.startsWith('[::1]');
+        if (!p || (p.clerkPublishableKey.startsWith('pk_test_') && !loopback)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+        else json(res, 200, { authProvider: 'clerk', clerkPublishableKey: p.clerkPublishableKey, clerkIssuer: p.clerkIssuer,
+          ...(p.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}) }, { 'x-content-type-options': 'nosniff' });
+        return;
+      }
       if (path === '/__sim/op/cutover' && req.method === 'GET') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
         try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }
@@ -1391,13 +1719,19 @@ export async function openLauncher(cfg = {}) {
         return;
       }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
-      if (cutoverSlug && cutover?.handle(req, res, registry.get(registry.resolveSlug(cutoverSlug)), url)) return;
+      const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
+      // before the fence, which refuses a moved world's writes: its agents' revoke is the directory's, not the old world's
+      const agentsRest = cutoverSlug ? path.replace(/^\/(?:w|__sim\/worlds)\/[^/]+/, '') : '';
+      if (cutoverWorld && /^\/v1\/account\/agents(?:\/[^/]{1,128}\/revoke)?$/.test(agentsRest) && cutover.v2Stream(cutoverWorld)) { await movedAgents(req, res, agentsRest); return; }
+      if (cutoverWorld && agentsRest === '/v1/account/session' && cutover.v2Stream(cutoverWorld)) { await movedSession(req, res); return; }
+      if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld), config: () => movedConfig(cutoverWorld) })) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
       }
       if (outside) {
         if (path === '/healthz' && direct(req)) { json(res, 200, { ok: true, service: 'world-launcher', base: B, build: BUILD }); return; }
         const p = (req.method === 'GET' || req.method === 'HEAD') && /^\/(modular|mars-assets|engine|browser|models|history|2020|world-assets)\/|^\/data\/manifest\.json$/.test(path) && anyRunning();
+        if ((req.method === 'GET' || req.method === 'HEAD') && serveMarsStatic(req, res, path)) return;
         if (p) { proxyHttp(req, res, p, { noindex: true }); return; }
         json(res, 404, { ok: false, code: 'not-found', message: `this server answers under ${B}/` }); return;
       }
@@ -1455,9 +1789,25 @@ export async function openLauncher(cfg = {}) {
         // per-client creation limit (production): the first x-forwarded-for hop is the visitor Caddy saw
         const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
-        if (recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
-        const run = creating.then(() => createWorld(body, req.headers.authorization)); creating = run.catch(() => {});
-        const out = await run; if (out[0] === 201) { made.set(who, [...recent, Date.now()]); worldsCreated++; }
+        // W1: asking again for a world this launcher began (the key it gave back, within 10 minutes) is not another create
+        for (const [k, v] of issued) if (Date.now() - v.at > 10 * 60_000) issued.delete(k);
+        const v2Create = v2CreateOn();
+        const again = v2Create && typeof body?.key === 'string' && issued.get(body.key)?.slug === body.slug;
+        if (!again && recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
+        // counted from the ask, so creates still in flight count; given back (this one slot) when the answer is a plain
+        // refusal or the create throws
+        const slot = { at: Date.now() }; if (!again) made.set(who, [...recent, slot.at]);
+        const giveBack = () => { const list = made.get(who) ?? [], i = list.indexOf(slot.at); if (i >= 0) list.splice(i, 1); };
+        let out = null;
+        try {
+          // W1: on the new engine the directory makes creates one at a time itself, and placement may take minutes
+          const run = v2Create ? createOnNewEngine(body, req.headers.authorization) : creating.then(() => createWorld(body, req.headers.authorization));
+          if (!v2Create) creating = run.catch(() => {});
+          out = await run;
+        } finally { if (!again && (!out || (out[0] >= 400 && !out[1].key))) giveBack(); }
+        if (out[1].key) issued.set(out[1].key, { slug: out[1].slug, at: issued.get(out[1].key)?.at ?? Date.now() });
+        else issued.delete(body?.key);   // made (201) or finally refused: nothing left to resume
+        if (out[0] === 201) worldsCreated++;
         json(res, out[0], out[1], out[1].retry_after ? { 'retry-after': String(out[1].retry_after) } : {}); return;
       }
       if (path === '/__sim/op/create-world' && req.method === 'POST') {
@@ -1574,7 +1924,11 @@ export async function openLauncher(cfg = {}) {
       }
       const one = path.match(/^\/__sim\/worlds\/([a-z][a-z0-9-]{0,31})(\/previews)?$/);
       if (one && req.method === 'GET') {
-        const w = registry.get(one[1]); if (!w) { json(res, 404, { ok: false, code: 'not-found' }); return; }
+        const w = registry.get(one[1]);
+        // W1: a world with no old twin (D2) is described as the list describes it; nothing of an old world was seen
+        const v2 = w || one[2] ? null : routeOnlyWorld(one[1]);
+        if (v2) { json(res, 200, { world: describeRouteOnly(v2), seen: { looks: 0, lastLookAt: null, agentSeenAt: null, previews: 0 } }); return; }
+        if (!w) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         await refreshStats(w);
         const s = seenOf(w.slug);
         if (one[2]) {
@@ -1668,6 +2022,7 @@ export async function openLauncher(cfg = {}) {
         // lacks still goes to a world below.
         if (path.startsWith('/modular/') && marsWebDir && !/[\\%]|\.\./.test(path) && /\.(glb|json|bin|webp|png|jpe?g|svg)$/i.test(path)) { const f = inside(join(marsWebDir, 'modular'), path.slice('/modular'.length)); if (f && serveFile(res, f, 'public, max-age=86400, stale-while-revalidate=604800', req)) return; }
         if (path.startsWith('/world-assets/')) { const f = inside(join(root, 'worlds'), decodeURIComponent(path.slice('/world-assets'.length))); if (f && serveFile(res, f, 'public, max-age=3600', req)) return; }
+        if (serveMarsStatic(req, res, path)) return;
       }
       // Anything else a world page asks for (Mars assets, engine files, …): any running world serves it (base stripped).
       // Original worlds at the root: the world the laptop proxy sent that path to (woken if asleep), as before the move.
@@ -1750,7 +2105,7 @@ export async function openLauncher(cfg = {}) {
   const writeProblems = () => { try { writeFileSync(`${problemsFile}.tmp`, JSON.stringify({ at: new Date().toISOString(), problems: pool.problems() }) + '\n'); renameSync(`${problemsFile}.tmp`, problemsFile); } catch { /* next time */ } };
   writeProblems(); const problemsTimer = setInterval(writeProblems, cfg.problemsEveryMs ?? 10_000); problemsTimer.unref();
   // #2304 A5: with --unload-still nothing loads at start but what an alarm or a request asks for
-  const wakeRecent = () => { if (unloadStill) return; for (const w of [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w), { reason: 'background' }).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
+  const wakeRecent = () => { if (unloadStill) return; for (const w of [...registry.worlds].filter((x) => !moved(x)).sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w), { reason: 'background' }).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
   if (!adopting) wakeRecent();   // a handover wakes nothing until it has taken over (takeOverAll)
   // #2235: every registered world keeps living. Every keepAliveMs, one registered world with no process (never booted
   // since this launcher started, put to sleep to make room, or crashed past its restarts) is booted, most recent first,
@@ -1766,7 +2121,7 @@ export async function openLauncher(cfg = {}) {
     // (a failed takeover, still adopted, or a world going back to the previous launcher: ensure refuses those, so they
     // are passed over rather than picked every round ahead of older worlds)
     // #2299: a world unloaded as still is not booted here (its alarm or its next use loads it); a crashed one still is
-    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status) && !pool.state(x.slug)?.adopted && !pool.state(x.slug)?.handedBack && !unloaded(x.slug));
+    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => !moved(x) && ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status) && !pool.state(x.slug)?.adopted && !pool.state(x.slug)?.handedBack && !unloaded(x.slug));
     if (!w || !pool.roomFor(w.slug).ok) return;
     keeping = true;
     pool.ensure(worldEnv(w), { passive: true, reason: 'background' }).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
@@ -1789,7 +2144,9 @@ export async function openLauncher(cfg = {}) {
   // #2299: still worlds leave memory (unloadSweep) and come back on their alarm (alarmScan); the alarms are the recorded
   // horizons, read back from <data>/horizons.json at start, so they survive a restart of this launcher
   let unloading = false;
-  const lookTimer = setInterval(() => { lookAtWorlds().catch(() => {}); }, cfg.lookEveryMs ?? PSS_EVERY_MS); lookTimer.unref?.();   // #2233
+  // D2b: an old process of a world switched while it ran (the binding is read again live) is stopped: it saves and exits
+  const retireMoved = () => { for (const w of registry.worlds) { const k = pool.state(w.slug); if (k?.child && !k.adopted && !k.stopping && !k.stopped && moved(w)) { log(`${w.slug} runs on the new engine: its old process stops`); pool.stop(w.slug).catch((e) => log(`${w.slug}: its old process did not stop: ${e.message}`)); } } };
+  const lookTimer = setInterval(() => { retireMoved(); lookAtWorlds().catch(() => {}); }, cfg.lookEveryMs ?? PSS_EVERY_MS); lookTimer.unref?.();   // #2233
   const stillTimer = unloadStill ? setInterval(() => { if (unloading) return; unloading = true; unloadSweep().catch((e) => log(`unloading still worlds: ${e.message}`)).finally(() => { unloading = false; }); }, STILL.everyMs) : null;
   const alarmTimer = unloadStill ? setInterval(() => alarmScan(), STILL.alarmMs) : null;
   stillTimer?.unref(); alarmTimer?.unref();
@@ -1965,7 +2322,7 @@ function serveKeeper(l, stop) {
   process.send({ t: 'ready', build: l.build, pid: process.pid });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const range = flag('range')?.split('-').map(Number);
@@ -1976,7 +2333,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       publicOrigin: flag('public-origin'), clerkSatellite: flag('clerk-satellite'), clerkLegacySatellites: flag('clerk-legacy-satellites'), clerkSignInUrl: flag('clerk-sign-in-url'), authEnvFile: flag('auth-env') ?? flag('auth-env-file'), devAuth: argv.includes('--dev-auth') ? true : undefined,
       maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'), diskMinFreeMb: num('disk-min-free-mb'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
-      marsWebDir: flag('mars-web'), cobuilders: argv.includes('--cobuilders') ? true : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;
     const stop = (why, gentle) => { if (stopping) return; stopping = true; console.log(`[launcher] ${why}: stopping worlds…`); void l.close(gentle ? { gentle } : {}).then(() => process.exit(0)); };

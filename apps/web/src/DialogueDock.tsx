@@ -2,7 +2,7 @@ import {useEffect,useLayoutEffect,useMemo,useRef,useState,type RefObject} from '
 import {createPortal} from 'react-dom';
 import type {TalkLine} from '@souls/protocol';
 import type {WorldViewerHandle,WorldViewerState} from './WorldViewer.ts';
-import {createDialogueStore,hearingLabel,ingestDialogue,joinNames,participants,threadSoulColours,type DialogueEdgeMessage,type DialogueLine,type DialogueStore,type DialogueThread} from './dialogue-threads.ts';
+import {createDialogueStore,hearingLabel,ingestDialogue,keepDialogue,keptDialogue,joinNames,participants,threadSoulColours,type DialogueEdgeMessage,type DialogueLine,type DialogueStore,type DialogueThread} from './dialogue-threads.ts';
 import {dialogueRequests,speakingNow} from './dialogue-speaking.ts';
 import './DialogueDock.css';
 
@@ -18,10 +18,12 @@ type Props={root:RefObject<HTMLDivElement|null>;scope:string;edge:readonly Dialo
 
 /** Threads open only from a selected Soul or a nearby group marker. */
 export function DialogueDock({root,scope,edge,talk,state,active,handle,nameOf}:Props){
- const stores=useRef<{scope:string;store:DialogueStore}|null>(null);
- if(stores.current?.scope!==scope)stores.current={scope,store:createDialogueStore()};
+ const stores=useRef<{scope:string;store:DialogueStore;kept:DialogueEdgeMessage[]}|null>(null);
+ // the aloud lines this tab kept for the world (a reload), folded in first as replay
+ if(stores.current?.scope!==scope){const store=createDialogueStore(),kept=scope?keptDialogue(scope):[];ingestDialogue(store,kept);stores.current={scope,store,kept};}
  const store=stores.current.store;
  const version=useMemo(()=>{ingestDialogue(store,edge??[],talk);return store.version;},[store,edge,talk]);
+ useEffect(()=>{const s=stores.current;if(s?.scope)s.kept=keepDialogue(s.scope,s.kept,edge??[]);},[version]);
  const [focus,setFocus]=useState<string|null>(null);
  const [soulContext,setSoulContext]=useState<string|null>(null);
  const [top,setTop]=useState(90);

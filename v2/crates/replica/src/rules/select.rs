@@ -1,5 +1,6 @@
-//! A thing argument the act leaves out, chosen by its selector as worldd chooses it (`select_thing`, #3914) and as
-//! today's form rules do (`chosenSlots`, `selectThing`): the same set, order and rank, read from the input alone.
+//! An argument the act leaves out, chosen as worldd chooses it and as today's form rules do (`chosenSlots`,
+//! `selectThing`), read from the input alone: a body slot from this thing's free ones (worldd `Acts`, #3802), and a
+//! thing by its selector (`select_thing`, #3914), the same set, order and rank.
 
 use super::json::Value;
 use super::{has, sees_audience, sorted};
@@ -17,6 +18,91 @@ pub(super) enum Choice {
     None(String),
     /// A choice inside a closed container the asker does not see into: the world's to make.
     Unknown(String),
+    /// A body slot left out with none of this thing's free, by argument name: refused `slot_taken` before any need.
+    NoSlot(String),
+}
+
+/// `selectsBodySlot`: argument `key` is a slot chosen from this thing's free ones, which the form seats the actor in
+/// (a sit or lie step's slot, or a reparent of the actor into it).
+fn selects_body_slot(form: &Value, key: &str) -> bool {
+    let t = has(form.get("takes"), key);
+    let select = t.and_then(|t| t.get("select"));
+    if t.and_then(|t| t.get("type")).and_then(Value::str) != Some("slot")
+        || has(select, "of").and_then(Value::str) != Some("free_slots")
+        // A seat of another thing (`in`: `parent` or `here`, E14b) is the world's to choose (worldd `other_seat`).
+        || matches!(has(select, "in").and_then(Value::str), Some("parent" | "here"))
+    {
+        return false;
+    }
+    let is_arg = |r: Option<&Value>| has(r, "arg").and_then(Value::str) == Some(key);
+    let list = |k: &str| form.get(k).and_then(Value::arr).unwrap_or(&[]);
+    list("steps").iter().any(|s| {
+        matches!(s.get("step").and_then(Value::str), Some("sit" | "lie")) && is_arg(s.get("slot"))
+    }) || list("effects").iter().any(|e| {
+        e.get("change").and_then(Value::str) == Some("reparent")
+            && e.get("what").and_then(Value::str) == Some("actor")
+            && is_arg(e.get("into"))
+    })
+}
+
+/// `chosenSlots`' body half: each body slot argument left out, the free one nearest the actor (from the slot's stand
+/// point, else the slot) when the input places both the actor and this thing, else the first free in the entry's
+/// order. `Err` names an argument with no slot free.
+fn chosen_slots(
+    entry: &Value,
+    form: &Value,
+    this: &Value,
+    actor: Option<&Value>,
+    args: &mut Vec<(String, Value)>,
+) -> Result<bool, String> {
+    let mut changed = false;
+    for key in sorted(form.get("takes")) {
+        if args.iter().any(|(k, _)| k == key) || !selects_body_slot(form, key) {
+            continue;
+        }
+        let slots = entry.get("slots");
+        let free: Vec<&str> = slots
+            .and_then(Value::obj)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|(name, d)| {
+                let taken = has(this.get("slots"), name)
+                    .and_then(Value::arr)
+                    .map_or(0, |l| l.len() as i128);
+                d.get("admits").and_then(Value::str) == Some("body")
+                    && matches!(d.get("most"), Some(Value::Int(m)) if taken < *m)
+            })
+            .map(|(name, _)| name.as_str())
+            .collect();
+        let Some(first) = free.first() else {
+            return Err(key.to_owned());
+        };
+        let (origin, me) = (
+            at(this.get("at_mm")),
+            at(actor.and_then(|a| a.get("at_mm"))),
+        );
+        let far = |name: &str| -> Option<i128> {
+            let d = has(slots, name)?;
+            let stand = d
+                .get("stand")
+                .and_then(Value::str)
+                .and_then(|p| has(entry.get("points"), p));
+            let p = at(stand.map_or(d.get("at_mm"), |s| s.get("at_mm")))?;
+            let (o, m) = (origin?, me?);
+            Some((0..3).map(|k| (m[k] - (o[k] + p[k])).pow(2)).sum())
+        };
+        let mut best = *first;
+        for name in &free {
+            if let (Some(a), Some(b)) = (far(name), far(best))
+                && a < b
+            {
+                best = name;
+            }
+        }
+        args.push((key.to_owned(), Value::s(best)));
+        changed = true;
+    }
+    Ok(changed)
 }
 
 /// The nodes a node holds as the input states them: its children, what rests loose in it and its slots' occupants.
@@ -134,7 +220,8 @@ fn select_thing(select: &Value, this: &str, state: &Value) -> Option<Option<Stri
     Some(pick.map(|(_, id)| id.clone()))
 }
 
-/// `chosenSlots`' thing half: each thing argument the act leaves out that its form describes by a selector.
+/// `chosenSlots`: each body slot argument the act leaves out (its body half), then each thing argument the act leaves
+/// out that its form describes by a selector.
 pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Value>) -> Choice {
     let this = act.get("this").and_then(Value::str).unwrap_or_default();
     let Some(entry) = has(has(state.get("nodes"), this), "kind")
@@ -154,7 +241,17 @@ pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Va
         .and_then(Value::obj)
         .map(<[_]>::to_vec)
         .unwrap_or_default();
-    let mut changed = false;
+    let nodes = state.get("nodes");
+    let actor = has(
+        nodes,
+        state.get("actor").and_then(Value::str).unwrap_or_default(),
+    );
+    let mut changed = match has(nodes, this).map(|n| chosen_slots(entry, form, n, actor, &mut args))
+    {
+        Some(Ok(c)) => c,
+        Some(Err(key)) => return Choice::NoSlot(key),
+        None => false,
+    };
     for key in sorted(form.get("takes")) {
         let Some(t) = has(form.get("takes"), key) else {
             continue;
@@ -162,7 +259,8 @@ pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Va
         let Some(select) = t.get("select") else {
             continue;
         };
-        if has(given, key).is_some() || t.get("type").and_then(Value::str) != Some("thing") {
+        if args.iter().any(|(k, _)| k == key) || t.get("type").and_then(Value::str) != Some("thing")
+        {
             continue;
         }
         if select.get("in").and_then(Value::str) == Some("this")

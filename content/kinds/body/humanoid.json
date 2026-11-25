@@ -132,6 +132,70 @@
       ],
       "effects": []
     },
+    "nod": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "nod"
+        }
+      ],
+      "effects": []
+    },
+    "nod_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "nod",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "shake_head": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "shake_head"
+        }
+      ],
+      "effects": []
+    },
+    "shake_head_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "shake_head",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
     "stretch": {
       "who": "anyone",
       "starts": "act",
@@ -165,25 +229,31 @@
     "dance": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
           "field": "posture",
           "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
         }
       ],
       "steps": [
         {
           "step": "move",
-          "move": "dance"
-        },
-        {
-          "step": "wait",
-          "us": 3000000
-        },
-        {
-          "step": "move",
-          "move": "dance"
+          "move": "dance",
+          "for_s": {
+            "arg": "for",
+            "default": 10
+          }
         }
       ],
       "effects": []
@@ -670,10 +740,200 @@
           "event": "took_hold_to_push"
         }
       ]
+    },
+    "jumping_jacks": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jumping_jacks"
+        }
+      ],
+      "effects": []
+    },
+    "yoga": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "yoga"
+        }
+      ],
+      "effects": []
+    },
+    "push_ups": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "push_ups"
+        }
+      ],
+      "effects": []
+    },
+    "sit_ups": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "sit_ups"
+        }
+      ],
+      "effects": []
+    },
+    "exercise": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "each": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jumping_jacks",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "push_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "sit_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        }
+      ],
+      "effects": []
+    },
+    "sing": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "sing"
+        }
+      ],
+      "effects": []
+    },
+    "listen": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "listen"
+        }
+      ],
+      "effects": []
+    },
+    "tell_story": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tell_story"
+        }
+      ],
+      "effects": []
+    },
+    "stargaze": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "stargaze"
+        }
+      ],
+      "effects": []
     }
   },
   "text": {
-    "card": "A body on its own: gestures, postures, going to things, carrying, pushing."
+    "card": "A body on its own: gestures, postures, going to things, carrying, pushing.",
+    "put_down_first": "Put down what you hold first (set-down <its id> here), then send it again: a dance or a workout takes both hands."
   },
   "card": {
     "text": "card"

@@ -9,7 +9,7 @@ import {seesawAngle, swingAngle} from './play-motion.ts';
 // roots, contacts, seats and hands stay the engine's; engine hand points / grips always win over this layer.
 
 /** Overlay ids drawn on top of their base posture (sit / idle / sit-ground). */
-export const ACTIVITY_OVERLAYS: ReadonlySet<string> = new Set(['row', 'ride', 'read', 'browse', 'write', 'play-piano', 'play-music', 'paint', 'eat', 'drink', 'cook', 'play-game', 'craft', 'post-letter', 'wave', 'operate', 'use-computer', 'sing', 'listen', 'fish', 'feed', 'garden', 'chalk', 'swing', 'seesaw', 'picnic', 'tell-story', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point', 'pick-up', 'put-down', 'hug', 'handshake', 'high-five', 'give', 'take']);
+export const ACTIVITY_OVERLAYS: ReadonlySet<string> = new Set(['row', 'ride', 'read', 'browse', 'write', 'play-piano', 'play-music', 'paint', 'eat', 'drink', 'cook', 'play-game', 'craft', 'post-letter', 'wave', 'operate', 'use-computer', 'sing', 'listen', 'fish', 'feed', 'garden', 'chalk', 'swing', 'seesaw', 'picnic', 'tell-story', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point', 'pick-up', 'put-down', 'hug', 'handshake', 'high-five', 'give', 'take', 'shrug', 'look-around', 'slump', 'look', 'touch']);
 /** Whole-body ids: the body point stays put and the viewer lays the body out from it along pose.yaw. */
 export const LYING: ReadonlySet<string> = new Set(['lie', 'nap', 'situps', 'bench-press', 'hammock', 'stargaze']);
 export const FACE_DOWN: ReadonlySet<string> = new Set(['pushups']);
@@ -17,7 +17,7 @@ export const FACE_DOWN: ReadonlySet<string> = new Set(['pushups']);
 export const CYCLES: ReadonlySet<string> = new Set(['dance', 'jumping-jacks', 'jump', 'stretch', 'yoga', 'pull-ups', 'dips', 'lift-weights', 'play-volleyball', 'play-frisbee', 'play-petanque']);
 /** Seat height used for sitting on the ground (pelvis on the grass). */
 export const GROUND_SEAT = 0.04;
-export const PROPS = ['book', 'brush', 'pen', 'letter', 'cup', 'plate', 'tool', 'cards', 'flower', 'food', 'frisbee', 'boule', 'dumbbell', 'rod', 'bread', 'spoon', 'guitar', 'bass', 'violin', 'viola', 'cello', 'flute', 'drumsticks'] as const;
+export const PROPS = ['book', 'tome', 'basket', 'brush', 'pen', 'letter', 'cup', 'plate', 'tool', 'cards', 'flower', 'food', 'frisbee', 'boule', 'dumbbell', 'rod', 'bread', 'spoon', 'guitar', 'bass', 'violin', 'viola', 'cello', 'flute', 'drumsticks'] as const;
 export type PropKind = (typeof PROPS)[number];
 const DEFAULT_PROP: Record<string, PropKind> = { read: 'book', browse: 'book', write: 'pen', paint: 'brush', eat: 'plate', drink: 'cup', cook: 'tool', 'play-game': 'cards', craft: 'tool', 'post-letter': 'letter', fish: 'rod', feed: 'bread', garden: 'tool', picnic: 'food' };
 
@@ -45,6 +45,14 @@ export type FrameOpts = { groundSeat?: boolean; since?: number; gap?: number;ins
 const GAP: Record<string, number> = { hug: 0.52, handshake: 0.85, 'high-five': 0.75, give: 0.9, take: 0.9 };
 /** #1977: a rider's hand on a basket's front rim, from the body root: [forward, outward, height above the floor]. */
 export const RIDE_RIM_HAND: HandGoal = [0.3, 0.16, 1.04];
+/** A thing carried in one hand (the engine's `human.prop` with no activity that poses the hands): that hand at the
+ *  engine's carry point (mars/viewer/engine/body/model.ts carryHand: 0.28 m ahead, 0.16 m out, 1.0 m up on a 1.75 m
+ *  body), as a goal from its shoulder like the frames below: the forearm forward, the elbow bent. */
+export const CARRY_HAND: HandGoal = [0.28, -0.03, -0.34];
+/** The hand a carried prop is in: a plate in the left (as placeProp puts it), everything else in the right. */
+export const carrySide = (kind: PropKind): 'left' | 'right' => (kind === 'plate' ? 'left' : 'right');
+/** The prop drawn for a carried `kind` outside the activities that use it: a book is carried closed, read open. */
+export const carriedProp = (kind: PropKind, activity: string): PropKind => (kind === 'book' && activity !== 'read' && activity !== 'browse' ? 'tome' : kind);
 /** Shoulder height and half width the hand goals below are written for (BODY_MODEL: shoulders at 1.34 m). */
 const SH = 1.34, HALF = 0.19;
 /** core/piano@1 highest keys: black centre .795 m + half thickness .01 m. */
@@ -89,6 +97,10 @@ export function idPhase(id: string): number { let h = 2166136261; for (let i = 0
 export const MIC_HAND: HandGoal = [0.55 - 0.252 - 0.014, 0.024, 1.402];
 const SING_REACH = 1.1;
 export const SING_LET_GO = 1.0;
+/** One-off gestures whose pose is still out when their move ends (a greeting's bow and point are 1.15 s, their arcs
+ *  2.5 s), and the seconds such a gesture takes to come back after it ends (`released`), from where it was at `priorAge`. */
+export const RETURNS: ReadonlySet<string> = new Set(['bow', 'point']);
+export const GESTURE_RETURN = 0.5;
 /** Singing at a mic stand: the right hand eases onto the mic and holds it there; the left hangs easy and moves a little
  *  with the beat; she sways with the beat (one sway over two beats, eased in), leans a little toward the mic, her head
  *  lifts a touch on each sung note and her chest rises on the in-breath where a phrase ends (the rigs have no jaw). On
@@ -112,6 +124,13 @@ export function activityFrame(activity: string, base: string, seconds: number, i
   const gap = Math.max(0.3, Math.min(1.6, opts.gap ?? GAP[activity] ?? 0.9)), mid = gap / 2;
   const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.min(1, since / a)) * (1 - S(Math.max(0, since - b) / 0.5));
   const f: ActivityFrame = { hands: null, feetOut: 0, hop: 0, lean: 0, side: 0, lying: null, look: 0 };
+  if (opts.released !== undefined && RETURNS.has(activity)) {
+    const out = activityFrame(activity, base, seconds, id, { ...opts, released: undefined, since: opts.priorAge });
+    if (!out) return out;
+    const w = 1 - S(Math.min(1, opts.released / GESTURE_RETURN));
+    out.lean *= w; out.look *= w; out.side *= w; out.handW = [w, w];
+    return out;
+  }
   const down = seated ? -0.36 : -0.34;
   if(opts.game&&['play-frisbee','play-petanque','play-volleyball'].includes(activity)){
     const g=opts.game,shownTick=opts.gameTick??0,tick=g.releaseFrameTick??shownTick,dt=opts.gameDt??.05;
@@ -254,6 +273,13 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     // together/1 gestures (ACTIVITIES-v1 §6a): Core faces the body to the partner/target; the arms do the rest
     case 'nod': f.hands = null; f.look = 0.28 * Math.max(0, Math.sin(t * 6)); return f;
     case 'shake-head': f.hands = null; f.side = 0.05 * Math.sin(t * 9); f.look = 0.05; return f;
+    // 0.134 B2: small poses of their own for moves that borrowed another's
+    case 'shrug': { const k = env(0.35, 1.0);
+      f.hands = [[0.18, 0.22 * k, -0.6 + 0.28 * k], [0.18, 0.22 * k, -0.6 + 0.28 * k]]; f.side = 0; f.look = -0.08 * k; f.hop = 0.03 * k; return f; }
+    case 'look-around': f.hands = null; f.side = 0.07 * Math.sin(since * 1.4); f.look = -0.12 + 0.08 * Math.sin(since * 0.9); return f;
+    case 'slump': { const k = env(0.8, 3.5); f.lean = 0.28 * k; f.look = 0.4 * k; f.hands = [[0.02, 0.02, -0.64], [0.02, 0.02, -0.64]]; return f; }
+    case 'look': { const k = env(0.3, 1.2); f.hands = null; f.look = -0.14 * k; f.lean = -0.03 * k; return f; }
+    case 'touch': { const k = env(0.35, 0.9); f.hands = [null, [0.1 + 0.4 * k, 0.04, -0.6 + 0.3 * k]]; f.lean = 0.1 * k; f.look = 0.2 * k; return f; }
     case 'lie': f.lying = { face: 'back', raise: 0 }; f.hands = [[0.42, 0.1, -0.3], [0.42, 0.1, -0.3]]; return f;
     case 'nap': f.lying = { face: 'back', raise: 0 }; f.hands = [[0.3, -0.12, 0.06], [0.34, -0.08, 0.06]]; return f;
     case 'situps': { const k = S(tri(t * 0.55)); f.lying = { face: 'back', raise: 1.1 * k }; f.hands = [[0.1, -0.12, 0.15], [0.1, -0.12, 0.15]]; return f; }
@@ -303,6 +329,10 @@ export function makeProp(kind: PropKind): THREE.Group {
       const tilt = new THREE.Group(); tilt.rotation.z = -0.85; g.add(tilt); // top edge tipped away: the open pages face the reader's eyes
       for (const s of [-1, 1]) { const leaf = new THREE.Group(); leaf.rotation.y = s * 0.18; leaf.add(part(k.box, M.page, 0.014, 0.29, 0.2, 0, 0, s * 0.102)); leaf.add(part(k.box, M.cover, 0.01, 0.3, 0.208, 0.01, 0, s * 0.106)); tilt.add(leaf); }
       break; }
+    case 'tome': // a closed book carried in one hand, upright, its spine in the palm (held, not read: `book` is the open one)
+      g.add(part(k.box, M.cover, 0.17, 0.24, 0.045, 0.06, 0.07, 0)); g.add(part(k.box, M.page, 0.16, 0.23, 0.036, 0.066, 0.07, 0)); break;
+    case 'basket': // a small basket hanging from the hand by its handle
+      g.add(part(k.cyl, M.wood, 0.13, 0.14, 0.13, 0, -0.2, 0)); g.add(part(k.box, M.wood, 0.014, 0.2, 0.014, 0, -0.06, 0)); break;
     case 'cup': g.add(part(k.cyl, M.cup, 0.04, 0.1, 0.04, 0, 0.03, 0)); g.add(part(k.cyl, M.tea, 0.034, 0.005, 0.034, 0, 0.08, 0)); break;
     case 'plate': g.add(part(k.cyl, M.plate, 0.12, 0.015, 0.12, 0.04, -0.02, 0)); g.add(part(k.box, M.food, 0.09, 0.03, 0.07, 0.04, 0.0, 0)); break;
     case 'brush': g.add(part(k.cyl, M.wood, 0.008, 0.26, 0.008, 0.06, 0.06, 0, -0.9)); g.add(part(k.cyl, M.paint, 0.012, 0.04, 0.012, 0.16, 0.13, 0, -0.9)); break;

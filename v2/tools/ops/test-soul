@@ -7,7 +7,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { open, realpath, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../tools/lib/is-main.mjs';
 
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -39,6 +40,12 @@ export async function run(args, request = fetch) {
   }
   if (out !== undefined) throw new Error('Use --out only with test-soul pair');
   if (action === 'retire-all' && first && args.length === 2) {
+    // One pass in the directory, which writes the world's files once; a directory from before it retires one by one.
+    try {
+      return await post('/v1/pair/operator/retire-all', { world: first });
+    } catch (e) {
+      if (e.message !== 'not-found') throw e;
+    }
     const { souls } = await post('/v1/pair/operator/list', {});
     const mine = souls.filter((s) => s.world === first);
     for (const s of mine) await post('/v1/pair/operator/retire', { soul: s.soul });
@@ -104,7 +111,7 @@ async function pairAll(world, n, post) {
   return lines.join('');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   run(process.argv.slice(2)).then((v) => console.log(JSON.stringify(v))).catch((e) => {
     console.error(JSON.stringify({ refused: e.message }));
     process.exitCode = 1;

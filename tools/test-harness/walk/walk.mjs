@@ -14,6 +14,7 @@
 // "Worse" per place (the top segment of a thing's path, e.g. hillside-home-7): more bad destinations (not walkable both
 // ways: nav.disconnected / nav.one-way / nav.no-standing-room), more one-ways, more goalless things (no walk goal at all),
 // more floating root things, or a float that rose by more than FLOAT_RISE_M.
+import { isMain } from '../../lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
@@ -126,7 +127,7 @@ export function readReports(dir, worlds = WORLDS) {
   return Object.fromEntries(worlds.map(w => [w.name, merge(w.name, files.filter(f => f.startsWith(`${w.name}.`) && /\.\d+-\d+\.json$/.test(f.slice(w.name.length))).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8'))))]));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), from = a.includes('--from') ? resolve(a[a.indexOf('--from') + 1]) : null;
   const dir = from ?? join(ROOT, '.lane/walk', new Date().toISOString().replace(/[:.]/g, '-'));
   const only = a.includes('--world') ? a[a.indexOf('--world') + 1].split(',') : null, worlds = only ? WORLDS.filter(w => only.includes(w.name)) : WORLDS;

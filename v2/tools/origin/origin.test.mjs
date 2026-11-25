@@ -3,11 +3,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { get } from 'node:http';
+import { Agent, get } from 'node:http';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
-import { createOrigin } from './origin.mjs';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+import { COMPRESS_FROM, IMMUTABLE, REVALIDATE, createOrigin } from './origin.mjs';
 import { readWorldRoutes } from './world-routes.mjs';
 import { localAddresses, worldAddress } from '../../web/src/source/address.ts';
 import { updateWorldRoute } from '../ops/proxy/route-config.mjs';
@@ -243,6 +245,49 @@ test('V9b: only public history/live refreshes its cache and strong ETag across e
   assert.equal((await fetch(`${url}.tmp`)).status, 404);
 });
 
+test('V4: a day\'s event index is served at the day\'s URL, as a file or beside its split hours as `day`', async () => {
+  const events = join(dir, 'w', 'split-instance', 'history', 'history', 'everyone', 'events');
+  mkdirSync(join(events, '00020781'), { recursive: true });
+  writeFileSync(join(events, '00020781', 'day'), 'day index');
+  writeFileSync(join(events, '00020781', '05'), 'hour five');
+  writeFileSync(join(events, '00020782'), 'whole day');
+  const at = `${new URL(base).origin}/w/split-instance/history/history/everyone/events/`;
+  const get = async (p) => { const r = await fetch(at + p); return [r.status, await r.text()]; };
+  assert.deepEqual(await get('00020781'), [200, 'day index']);
+  assert.deepEqual(await get('00020781/05'), [200, 'hour five']);
+  assert.deepEqual(await get('00020782'), [200, 'whole day']);
+  assert.equal((await get('00020783'))[0], 404);
+});
+
+test('V4: history objects rewritten in place are revalidated (no-cache, 304 on their ETag); content-addressed bundles and the header stay immutable', async () => {
+  const history = join(dir, 'w', 'cache-instance', 'history');
+  const files = {
+    'history/everyone/events/00020781/day': 'day', 'history/everyone/events/00020781/05': 'hour',
+    'history/everyone/events/00020782': 'whole day', 'history/everyone/counts/day/00020781': 'counts',
+    'history/everyone/counts/year/0057': 'year', 'bundles/00020781/index': 'bundle index', 'bundles/00020781/123': 'open bundle',
+    [`bundles/00020781/123-${'ab'.repeat(32)}`]: 'sealed bundle', header: 'header',
+  };
+  for (const [k, v] of Object.entries(files)) { mkdirSync(join(history, k, '..'), { recursive: true }); writeFileSync(join(history, k), v); }
+  const at = `${new URL(base).origin}/w/cache-instance/history/`;
+  for (const k of ['history/everyone/events/00020781', 'history/everyone/events/00020781/05', 'history/everyone/events/00020782',
+    'history/everyone/counts/day/00020781', 'history/everyone/counts/year/0057', 'bundles/00020781/index', 'bundles/00020781/123']) {
+    const r = await fetch(at + k);
+    assert.equal(r.status, 200, k); await r.arrayBuffer();
+    assert.equal(r.headers.get('cache-control'), REVALIDATE, k);
+    const again = await fetch(at + k, { headers: { 'if-none-match': r.headers.get('etag') } });
+    assert.equal(again.status, 304, k);
+    assert.equal(again.headers.get('etag'), r.headers.get('etag'), k);
+  }
+  writeFileSync(join(history, 'history/everyone/events/00020782'), 'whole day, later');
+  const later = await fetch(at + 'history/everyone/events/00020782', { headers: { 'if-none-match': `"${createHash('sha256').update('whole day').digest('hex')}"` } });
+  assert.equal(later.status, 200); assert.equal(await later.text(), 'whole day, later');
+  for (const k of [`bundles/00020781/123-${'ab'.repeat(32)}`, 'header']) {
+    const r = await fetch(at + k);
+    assert.equal(r.status, 200, k); await r.arrayBuffer();
+    assert.equal(r.headers.get('cache-control'), IMMUTABLE, k);
+  }
+});
+
 test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {
   const at = base.slice(0, base.indexOf('/', 'http://'.length)), html = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   for (const path of ['/nope', '/l/old-lab', '/w/eden/nope', '/preview/w/eden/no/such/page', '/nope?x=1', '/w/eden/%3Cb%3E']) {
@@ -277,7 +322,8 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
     const url = `http://127.0.0.1:${s.address().port}/${stream}/9`;
     try {
-      const rs = await Promise.all(Array.from({ length: 40 }, () => fetch(url)));
+      // as they are: an encoded body's length is its own (the test after this one)
+      const rs = await Promise.all(Array.from({ length: 40 }, () => fetch(url, { headers: { 'accept-encoding': 'identity' } })));
       for (const r of rs) {
         assert.equal(r.status, 200);
         assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(big).digest('hex')}"`);
@@ -305,4 +351,141 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     }
   }
   rmSync(name);
+});
+
+const raw = (url, headers = {}) => new Promise((ok, no) => get(url, { headers }, (res) => {
+  const chunks = [];
+  res.on('data', (c) => chunks.push(c)).on('end', () => ok({ res, body: Buffer.concat(chunks) }));
+}).on('error', no));
+const packable = Buffer.from(Array.from({ length: 4000 }, (_, i) => `node ${i % 97} at ${i % 13}\n`).join(''));
+
+test('a large immutable file goes br, else gzip, to a reader that takes it; as it is to one that does not; its ETag is the decoded bytes\' hash', async () => {
+  writeFileSync(join(dir, stream, 'big'), packable);
+  const etag = `"${createHash('sha256').update(packable).digest('hex')}"`;
+  const br = await raw(`${base}/big`, { 'accept-encoding': 'gzip, deflate, br' });
+  assert.equal(br.res.headers['content-encoding'], 'br');
+  assert.equal(br.res.headers.vary, 'accept-encoding');
+  assert.equal(br.res.headers.etag, `W/${etag}`, 'an encoded copy\'s tag is weak');
+  assert.equal(br.res.headers['cache-control'], 'public, max-age=31536000, immutable, no-transform');
+  assert.equal(Number(br.res.headers['content-length']), br.body.length);
+  assert.ok(br.body.length < packable.length / 4);
+  assert.deepEqual(brotliDecompressSync(br.body), packable);
+  const gz = await raw(`${base}/big`, { 'accept-encoding': 'gzip, br;q=0' });
+  assert.equal(gz.res.headers['content-encoding'], 'gzip');
+  assert.deepEqual(gunzipSync(gz.body), packable);
+  const plain = await raw(`${base}/big`);
+  assert.equal(plain.res.headers['content-encoding'], undefined);
+  assert.equal(plain.res.headers.vary, 'accept-encoding');
+  assert.equal(plain.res.headers.etag, etag, 'the bytes as they are keep the strong tag');
+  assert.deepEqual(plain.body, packable);
+  const small = await raw(`${base}/7`, { 'accept-encoding': 'br' });
+  assert.equal(small.res.headers['content-encoding'], undefined);
+  assert.deepEqual(small.body, part);
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}/big`)).arrayBuffer()), packable); // fetch decodes it
+});
+
+test('one Range gets those bytes of the decoded file (206), never encoded; an invalid one is ignored (200); a range past the end is a no-store 416', async () => {
+  writeFileSync(join(dir, stream, 'big'), packable);
+  const head = await raw(`${base}/big`, { range: 'bytes=0-15', 'accept-encoding': 'br' });
+  assert.equal(head.res.statusCode, 206);
+  assert.equal(head.res.headers['content-range'], `bytes 0-15/${packable.length}`);
+  assert.equal(head.res.headers['content-encoding'], undefined);
+  assert.deepEqual(head.body, packable.subarray(0, 16));
+  assert.deepEqual((await raw(`${base}/big`, { range: 'bytes=-4' })).body, packable.subarray(-4));
+  const invalid = await raw(`${base}/big`, { range: 'bytes=5-3' });
+  assert.equal(invalid.res.statusCode, 200);
+  assert.deepEqual(invalid.body, packable);
+  const past = await raw(`${base}/big`, { range: `bytes=${packable.length}-` });
+  assert.equal(past.res.statusCode, 416);
+  assert.equal(past.res.headers['cache-control'], 'no-store');
+  assert.equal(past.res.headers['content-range'], `bytes */${packable.length}`);
+});
+
+test('a viewer that takes nothing for stallMs is let go; a slow one that keeps taking finishes; an idle keep-alive stays', async () => {
+  const big = Buffer.alloc(16 << 20, 3), name = join(dir, stream, '10');
+  writeFileSync(name, big);
+  const { server: s, stats } = createOrigin(dir, {}, { stallMs: 300 });
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const port = s.address().port, path = `/${stream}/10`;
+  try {
+    // Asks for 16 MB and never reads: the origin closes it, rather than holding the socket and its buffer for as long
+    // as the reader stays connected.
+    // (The paused reader cannot see its socket close, so this watches the origin's side.)
+    const c = connect(port, '127.0.0.1', () => { c.pause(); c.write(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`); });
+    c.on('error', () => {});
+    const connections = () => new Promise((ok) => s.getConnections((_, n) => ok(n)));
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000 && (stats.stalled < 1 || (await connections()) > 0)) await new Promise((ok) => setTimeout(ok, 50));
+    c.destroy();
+    assert.equal(stats.stalled, 1, 'a stalled reader is let go');
+    assert.equal(await connections(), 0, 'and its connection is closed');
+    // Reads 16 MB a slice at a time with a pause after each, taking far longer than stallMs in all: never let go.
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const t1 = Date.now();
+    const body = await new Promise((ok, no) => {
+      get({ port, host: '127.0.0.1', path, agent }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => { chunks.push(c); res.pause(); setTimeout(() => res.resume(), 2); });
+        res.on('end', () => ok(Buffer.concat(chunks)));
+        res.on('error', no);
+      }).on('error', no);
+    });
+    assert.ok(Date.now() - t1 > 300, `the slow read took longer than stallMs (${Date.now() - t1} ms)`);
+    assert.ok(big.equals(body), 'the slow reader got every byte');
+    assert.equal(stats.stalled, 1);
+    // Idle past stallMs between requests: the connection is kept (keepAliveTimeout governs idle, not stallMs).
+    await new Promise((ok) => setTimeout(ok, 600));
+    const reused = await new Promise((ok, no) => {
+      const r = get({ port, host: '127.0.0.1', path: `/${stream}/7`, agent }, (res) => { res.resume(); res.on('end', () => ok(r.reusedSocket)); });
+      r.on('error', no);
+    });
+    assert.equal(reused, true, 'an idle keep-alive connection outlives stallMs');
+    agent.destroy();
+  } finally {
+    s.close();
+    rmSync(name);
+  }
+});
+
+test('concurrent encoded requests for one file share one compression, and a later one compresses nothing', async () => {
+  writeFileSync(join(dir, stream, 'shared'), packable);
+  const { server: s, stats } = createOrigin(dir);
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const url = `http://127.0.0.1:${s.address().port}/${stream}/shared`;
+  try {
+    const rs = await Promise.all(Array.from({ length: 20 }, () => raw(url, { 'accept-encoding': 'br' })));
+    for (const r of rs) { assert.equal(r.res.headers['content-encoding'], 'br'); assert.deepEqual(brotliDecompressSync(r.body), packable); }
+    assert.equal(stats.compressions, 1, '20 concurrent br requests, one compression');
+    await raw(url, { 'accept-encoding': 'br' });
+    assert.equal(stats.compressions, 1, 'a held copy is not compressed again');
+    await raw(url, { 'accept-encoding': 'gzip' });
+    assert.equal(stats.compressions, 2, 'gzip is its own copy');
+  } finally {
+    s.close();
+  }
+});
+
+test('V4: a large rewritten history object\'s 304 carries the ETag and Vary its 200 would, weak when encoded (br, gzip, identity)', async () => {
+  const history = join(dir, 'w', 'big-history', 'history', 'history', 'everyone', 'events');
+  mkdirSync(history, { recursive: true });
+  writeFileSync(join(history, '00020781'), packable);
+  assert.ok(packable.length >= COMPRESS_FROM);
+  const url = `${new URL(base).origin}/w/big-history/history/history/everyone/events/00020781`;
+  const strong = `"${createHash('sha256').update(packable).digest('hex')}"`;
+  for (const [accept, encoding, etag] of [['gzip, deflate, br', 'br', `W/${strong}`], ['gzip, br;q=0', 'gzip', `W/${strong}`], ['identity', undefined, strong]]) {
+    const ok = await raw(url, { 'accept-encoding': accept });
+    assert.equal(ok.res.statusCode, 200, accept);
+    assert.equal(ok.res.headers['content-encoding'], encoding, accept);
+    assert.equal(ok.res.headers.etag, etag, accept);
+    assert.equal(ok.res.headers.vary, 'accept-encoding', accept);
+    assert.equal(ok.res.headers['cache-control'], REVALIDATE, accept);
+    for (const held of [etag, strong, `W/${strong}`]) {
+      const again = await raw(url, { 'accept-encoding': accept, 'if-none-match': held });
+      assert.equal(again.res.statusCode, 304, `${accept} ${held}`);
+      assert.equal(again.res.headers.etag, ok.res.headers.etag, `${accept} ${held}`);
+      assert.equal(again.res.headers.vary, ok.res.headers.vary, `${accept} ${held}`);
+      assert.equal(again.res.headers['cache-control'], REVALIDATE, `${accept} ${held}`);
+      assert.equal(again.body.length, 0);
+    }
+  }
 });

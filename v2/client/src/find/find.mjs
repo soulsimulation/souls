@@ -39,17 +39,38 @@ const wordsOf = (row) => {
   return w;
 };
 
-/** The rows the words find, best first (then by name), at most `limit`, and how many more there were. */
-export function find(rows, words, { limit = 8, within } = {}) {
-  const q = tokensOf(words), out = [];
+/** A kind entry's own words for what its things are and do (souls-entry/1): its card's category and synonyms, and its
+ *  forms' names, so `find instrument` finds a piano, `find food` an apple and `find drink` a cup. They score as what
+ *  the row says it is (1): below every name, id and kind. */
+export function kindWordsOf(e) {
+  if (!e || typeof e !== 'object') return [];
+  const said = (key) => (typeof e.text?.[key] === 'string' ? e.text[key] : key);
+  return [e.card?.category, ...(e.card?.synonyms ?? []).map(said), ...Object.keys(e.forms ?? {})].flatMap(tokensOf);
+}
+
+/** Where a row is, by the names above it: the nearest three that are names, not a kind and number the copy gave a
+ *  nameless node (`floor 844`, `ground 1`), so a bookcase is `Living, eden-house-1`; nothing but those, the nearest two. */
+export function placeName(path) {
+  const named = path.filter((n) => !/^[a-z_]+ \d+$/.test(n));
+  return (named.length ? named.slice(-3) : path.slice(-2)).reverse().join(', ');
+}
+
+/** The rows the words find, best first (then nearest, then by name), at most `limit`, and how many more there were.
+ *  `metres(row)`, when given, is how far the row is from the asker: each found row carries it (world-wide, no radius).
+ *  `kinds`, the kind entries by kind, adds each kind's words (`kindWordsOf`). */
+export function find(rows, words, { limit = 8, within, metres, kinds } = {}) {
+  const q = tokensOf(words), out = [], kindWords = new Map();
   if (!q.length) return { found: [], note: 'Say what to find.' };
   for (const row of rows) {
     if (within && !within.has(row.id)) continue;
-    const w = wordsOf(row), full = w.name.join(' ') === q.join(' '), inside = nameIn(q, w.name);
+    const k = row.entry ?? row.kind;
+    if (kinds && !kindWords.has(k)) kindWords.set(k, kindWordsOf(kinds[k]));
+    const own = wordsOf(row), kw = kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+    const full = w.name.join(' ') === q.join(' '), inside = nameIn(q, w.name);
     const s = full ? 100 + score(q, w) : inside ? 50 + inside : score(q, w);
-    if (s) out.push({ s, row });
+    if (s) out.push({ s, row, m: metres?.(row) ?? Infinity });
   }
-  out.sort((a, b) => b.s - a.s || String(a.row.name).localeCompare(String(b.row.name), 'en', { numeric: true }));
-  const found = out.slice(0, limit).map(({ row }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.soul ? { soul: row.soul, parent: row.parent } : {}), ...(row.path?.length ? { in: row.path.slice(-2).reverse().join(', ') } : {}) }));
+  out.sort((a, b) => b.s - a.s || a.m - b.m || String(a.row.name).localeCompare(String(b.row.name), 'en', { numeric: true }));
+  const found = out.slice(0, limit).map(({ row, m }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.soul ? { soul: row.soul, parent: row.parent } : {}), ...(row.path?.length ? { in: placeName(row.path) } : {}), ...(Number.isFinite(m) ? { metres: Math.round(m) } : {}) }));
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}) };
 }

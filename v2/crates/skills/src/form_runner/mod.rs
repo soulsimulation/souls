@@ -19,10 +19,14 @@
 //!   walk or the move ended with (`out-of-reach`, `claim-taken`, ...). A form writes no exit.
 //!
 //! - **The effect's instant** (F2, #2767). The effect lands once, at the contact instant of the form's hand step (its
-//!   first `move` step: the world wakes the runner with [`Woke::Contact`] when that move's start-up ends), or, in a
-//!   form with no hand step, when the last step ends. The runner only says when ([`Runner::take_effect`]); the world
-//!   writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped before that instant, a run has no
-//!   effect; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one field each.
+//!   last step, when that is a `move`, `take`, `put`, `sit` or `use_held` step, or a `sit` or `lie` followed only by
+//!   waits, whose posture outlives the run: the world wakes the runner with [`Woke::Contact`] when that move's
+//!   start-up ends), or, in any other form whose last step is not a hand step (a move then a wait, a repeated move
+//!   then a rise), when the last step ends (E7). The runner only says when
+//!   ([`Runner::take_effect`]); the world writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped
+//!   before that instant, a run has no effect, so a Soul that leaves during a later step (a wait, the next of several
+//!   moves) gets none; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one
+//!   field each.
 //!
 //! - **Leaving** (F3, #2768). The Soul's leave ([`Woke::Leave`]) is taken at once and ends the run `left` at the next
 //!   stable moment: at once during a walk or a pause, and during a move at its next phase boundary (its contact or its
@@ -117,22 +121,35 @@ pub enum Step {
         at: Vec3,
         on: Option<Id>,
         approach: bool,
+        /// The way the body faces once there (0.135): its stand point's `yaw_mdeg` turning the node's +z, 1 m long,
+        /// in the node's axes and turned with `at` ([`turn`]). None: toward the point, or the thing's origin for a
+        /// body standing on the point (the world's turn, `sim::forms`).
+        face: Option<Vec3>,
     },
-    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
+    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact. With
+    /// `repeat`, µs, the move starts again as each ends, with no pause, until that long has passed since the step
+    /// began: the last whole move ends the step (a dance for a minute, [`for_us`]).
     Move {
         name: Name,
         at: Option<Name>,
         on: Option<Id>,
+        repeat: Option<Micros>,
     },
     /// A `take` or `put` that names no move: a hand step whose contact is its start.
     Hand,
     /// A pause of a fixed length, µs.
     Wait(Micros),
-    /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
-    /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`. With `stand`, the body is handed
+    /// Sit, or lie, in slot `slot` of the node (C17), or of thing `on` (a slot argument on another thing, E14): B3's
+    /// seat taken by B2's sit or lie move, as the gateway's sit takes it. It lies when the slot's posture is `lie` or
+    /// the step is a `lie` (for a slot of another thing, when the step is a `lie`). With `stand`, the body is handed
     /// into a standing slot on its feet by the same hand-off (C33, #3598): no form writes this step, the binding adds
     /// it for a form's `reparent` of the actor into a standing slot ([`bind_with`]).
-    Sit { slot: u64, lie: bool, stand: bool },
+    Sit {
+        slot: u64,
+        lie: bool,
+        stand: bool,
+        on: Option<Id>,
+    },
     /// Rise (C25, #3496): out of the body's seat by B3's rise, onto its stand point; up from a ground posture a
     /// `settle` took; nothing for a body already standing, as today's `stand` is. The form's `reparent` of the actor
     /// to `here` is the rise's own hand-off.
@@ -166,13 +183,16 @@ pub const SIT_REACH: i64 = 600_000 - crate::route::AT_GOAL;
 
 /// An argument of a Soul's act, as the world hands it to the forms (F14, #3384): a name from the kind's own lists (a
 /// `part`, `slot`, `field` or `value` argument), a thing by its id (`thing`), words kept by their reference (`text`:
-/// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`).
+/// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`). A
+/// `slot` argument on another thing (`Slot`: a lecture's seat on a bench of its hall, a collage's patch on a board,
+/// 0.135 E14) is that thing's id and the slot's number, 1 up in that thing's entry's order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Arg {
     Name(String),
     Node(Id),
     Text(Id),
     Int(i64),
+    Slot(Id, u64),
 }
 
 /// A form's arguments by name.
@@ -243,6 +263,34 @@ fn point(entry: &Value, p: &str) -> Result<Vec3, Refusal> {
     }
 }
 
+/// The way a body standing at point `p` faces (0.135): the point's `yaw_mdeg` (a slot's: its stand point's) turning
+/// the kind's +z, 1 m long, in the kind's axes; none when the point names no yaw.
+fn facing(entry: &Value, p: &str) -> Result<Option<Vec3>, Refusal> {
+    let points = entry.get("points");
+    let stand = entry
+        .get("slots")
+        .and_then(|s| s.get(p))
+        .and_then(|s| s.get("stand"))
+        .and_then(Value::str);
+    let yaw = points
+        .and_then(|s| s.get(p))
+        .or_else(|| stand.and_then(|s| points.and_then(|x| x.get(s))))
+        .and_then(|x| x.get("yaw_mdeg"));
+    let Some(Value::Int(mdeg)) = yaw else {
+        return Ok(None);
+    };
+    let bad = |e: replica::pose::PoseRefusal| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: {e:?}"),
+    };
+    let mdeg = i64::try_from(*mdeg).map_err(|_| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: yaw_mdeg out of range"),
+    })?;
+    let q = Quat::from_yaw_mdeg(mdeg).map_err(bad)?;
+    q.rotate(Vec3::new(0, 0, 1_000_000)).map(Some).map_err(bad)
+}
+
 /// A move named in a form: a bare name is in the `souls` namespace, as the engine's moves are (B2).
 fn move_name(t: &str) -> Result<Name, Refusal> {
     if t.contains(':') {
@@ -252,8 +300,52 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
     }
 }
 
+/// How often a repeated move's record for viewers is written again, µs: a viewer who comes in mid-dance draws it
+/// within this long, and an hour's dance is 240 records, not one a move.
+pub const REWRITE_US: Micros = 15_000_000;
+
+/// The most a repeated move may go on, s (an hour): a Soul asked to keep on until told to stop asks for this, and
+/// its `stop` ends it sooner.
+pub const FOR_MOST_S: i64 = 3_600;
+
+/// A move step's `for_s` (0.135): how long the move repeats, whole seconds from 1 to [`FOR_MOST_S`], as µs. Written
+/// out, or `{"arg": a, "default": n}`: the act's whole number `a` (a `count` it takes, or the same digits as a name,
+/// as `act dance for=60` sends them), else `default`. Refused `out-of-range`, `arg-not-a-number`, `arg-missing` (no
+/// argument and no default) or `step-malformed`.
+fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
+    let n = match v {
+        Value::Int(n) => i64::try_from(*n).unwrap_or(i64::MAX),
+        _ => {
+            let Some(a) = v.get("arg").and_then(Value::str) else {
+                return refuse(
+                    "step-malformed",
+                    "move.for_s: whole seconds or {\"arg\": name, \"default\": seconds}",
+                );
+            };
+            match (args.get(a), v.get("default")) {
+                (Some(Arg::Int(n)), _) => *n,
+                (Some(Arg::Name(t)), _) => match t.parse::<i64>() {
+                    Ok(n) if t.bytes().all(|b| b.is_ascii_digit()) => n,
+                    _ => return refuse("arg-not-a-number", format!("{a}: {t}")),
+                },
+                (Some(_), _) => return refuse("arg-not-a-number", a),
+                (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
+                (None, _) => return refuse("arg-missing", a),
+            }
+        }
+    };
+    if !(1..=FOR_MOST_S).contains(&n) {
+        return refuse(
+            "out-of-range",
+            format!("for: {n} s; from 1 to {FOR_MOST_S} s"),
+        );
+    }
+    Ok(n * 1_000_000)
+}
+
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
-/// it names, a thing argument as the thing itself (`on`; its own origin, read when the step starts). Refused
+/// it names, a thing argument as the thing itself (`on`; its own origin, read when the step starts), a slot argument on
+/// another thing as that thing (the world aims a walk before a sit at the seat's own stand point). Refused
 /// `arg-missing` for an argument not given, `point-unknown` for a name the kind does not declare, `step-malformed`
 /// for any other value. Returns the name, its place in µm and the thing.
 fn aim(
@@ -274,7 +366,7 @@ fn aim(
     };
     match args.get(a) {
         Some(Arg::Name(p)) => named(p),
-        Some(Arg::Node(id)) => Ok((a_name(a)?, Vec3::ZERO, Some(*id))),
+        Some(Arg::Node(id) | Arg::Slot(id, _)) => Ok((a_name(a)?, Vec3::ZERO, Some(*id))),
         Some(_) => refuse(
             "step-malformed",
             format!("{what}: argument {a} is not a place"),
@@ -351,11 +443,16 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
+                    let face = match on {
+                        None => facing(entry, point.as_str())?,
+                        Some(_) => None,
+                    };
                     Ok(Step::WalkTo {
                         point,
                         at,
                         on,
                         approach: false,
+                        face,
                     })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
@@ -370,6 +467,15 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                     let named = match at.get("arg").and_then(Value::str) {
                         Some(a) => match args.get(a) {
                             Some(Arg::Name(n)) => n.as_str(),
+                            // A seat of another thing (E14): its number is that thing's; it lies by a `lie` step.
+                            Some(&Arg::Slot(on, slot)) => {
+                                return Ok(Step::Sit {
+                                    slot,
+                                    lie: kind == "lie",
+                                    stand: false,
+                                    on: Some(on),
+                                });
+                            }
                             Some(_) => {
                                 return refuse(
                                     "step-malformed",
@@ -390,6 +496,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         slot,
                         lie: kind == "lie" || posture == Some("lie"),
                         stand: false,
+                        on: None,
                     })
                 }
                 "move" | "take" | "put" => {
@@ -404,6 +511,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
+                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?,
                     })
                 }
                 "wait" => match s.get("us") {
@@ -428,14 +536,16 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         .collect::<Result<Vec<_>, _>>()?;
     approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
-    if let Some((_, slot)) = stand_in(entry, f, args)? {
+    let into = stand_in(entry, f, args)?;
+    if let Some((_, slot)) = into {
         bound.push(Step::Sit {
             slot,
             lie: false,
             stand: true,
+            on: None,
         });
     }
-    if rises_out(f) {
+    if rises_out(f, into.is_some()) {
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
@@ -445,14 +555,17 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
 /// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
 /// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
 /// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
-/// (`held_by_actor`: a cup's sip, a kettle's pour) does not walk.
+/// (`held_by_actor` with no `thing`: a cup's sip, a kettle's pour) does not walk; one that needs a thing argument in
+/// the hand (a sink's `wash` of a held bowl) still walks to its own point (0.135 E20).
 fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
     let held = f
         .get("needs")
         .and_then(Value::arr)
         .unwrap_or(&[])
         .iter()
-        .any(|n| n.get("need").and_then(Value::str) == Some("held_by_actor"));
+        .any(|n| {
+            n.get("need").and_then(Value::str) == Some("held_by_actor") && n.get("thing").is_none()
+        });
     let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
         return Ok(());
     };
@@ -469,6 +582,7 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
             at: Vec3::new(to.x, 0, to.z),
             on: None,
             approach: true,
+            face: None,
         };
         bound.insert(k, step);
     }
@@ -519,6 +633,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
                 approach: false,
+                face: None,
             };
             bound.insert(k, step);
             k += 1;
@@ -580,21 +695,25 @@ fn stand_in(entry: &Value, f: &Value, args: &Args) -> Result<Option<(usize, u64)
     Ok(None)
 }
 
-/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here` and has no `rise`,
-/// `sit` or `lie` step of its own.
-fn rises_out(f: &Value) -> bool {
+/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here`, or into a standing
+/// slot (`standing`: a stage's `step_up` from one spot to another, 0.135 E17), and has no `rise`, `sit` or `lie` step of
+/// its own. Its run starts with a rise, done at once for a body standing, so a body in a slot of the thing is stood up
+/// by the rise move before the form's own walk, never walked by legs the slot holds.
+fn rises_out(f: &Value, standing: bool) -> bool {
     let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    effects.iter().any(|e| {
-        e.get("change").and_then(Value::str) == Some("reparent")
-            && e.get("what").and_then(Value::str) == Some("actor")
-            && e.get("into").and_then(Value::str) == Some("here")
-    }) && !steps.iter().any(|s| {
-        matches!(
-            s.get("step").and_then(Value::str),
-            Some("rise" | "sit" | "lie")
-        )
-    })
+    (standing
+        || effects.iter().any(|e| {
+            e.get("change").and_then(Value::str) == Some("reparent")
+                && e.get("what").and_then(Value::str) == Some("actor")
+                && e.get("into").and_then(Value::str) == Some("here")
+        }))
+        && !steps.iter().any(|s| {
+            matches!(
+                s.get("step").and_then(Value::str),
+                Some("rise" | "sit" | "lie")
+            )
+        })
 }
 
 /// Turns the points bound `steps` walk to by `q`, the orientation of the node the form is done at (C13, #3440): an
@@ -607,13 +726,18 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            face,
             ..
         } = s
         {
-            *at = q.rotate(*at).map_err(|e| Refusal {
+            let unturnable = |e: replica::pose::PoseRefusal| Refusal {
                 name: "point-unturnable",
                 detail: format!("{}: {e:?}", point.as_str()),
-            })?;
+            };
+            *at = q.rotate(*at).map_err(unturnable)?;
+            if let Some(f) = face {
+                *f = q.rotate(*f).map_err(unturnable)?;
+            }
         }
     }
     Ok(())
@@ -628,8 +752,10 @@ pub enum Effect {
     Add { field: u64, by: i64 },
     /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
     /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    /// The field is named, not numbered: the two ends may be of kinds that number it differently, and the world finds
+    /// its number on each end's own kind (E5).
     Transfer {
-        field: u64,
+        field: Name,
         from: Of,
         into: Of,
         amount: Amount,
@@ -640,8 +766,9 @@ pub enum Effect {
     Remove { what: Of },
     /// A `take` step's transfer (B4's, at its contact): `what` into a free hand of the body.
     Take { what: Of },
-    /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
-    Put { what: Of, slot: u64 },
+    /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node, or of
+    /// thing `on` (a slot argument on another thing, E14).
+    Put { what: Of, slot: u64, on: Option<Id> },
     /// A link of type `ty` (the tree's, `replica::audience::link_type`) from the actor to the node, owned by the node
     /// and seen by everyone (F15): its end the actor's Soul when `soul`, else its body. At most `most` of that type
     /// on the node (the kind's `most`, C24).
@@ -850,6 +977,8 @@ pub fn bind_effects_with(
 
 /// A form's arguments as an intent carries them (C12, #3427): things by id, and slots of the node by number, 1, 2, ...
 /// in the entry's order, each as the slot's name ([`Arg::Name`]). A number the kind has no slot for is `slot-unknown`.
+/// An argument given both as a thing and as a number is that slot of that thing ([`Arg::Slot`], E14: a seat on a
+/// bench of the hall), numbered in that thing's entry, which the world checks when the seat is taken.
 pub fn args_in(
     entry: &Value,
     things: &BTreeMap<String, Id>,
@@ -861,6 +990,10 @@ pub fn args_in(
         .map(|(k, id)| (k.clone(), Arg::Node(*id)))
         .collect();
     for (k, &n) in slots {
+        if let Some(&on) = things.get(k) {
+            args.insert(k.clone(), Arg::Slot(on, n));
+            continue;
+        }
         let slot = usize::try_from(n)
             .ok()
             .and_then(|n| n.checked_sub(1))
@@ -964,19 +1097,21 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     name: "step-malformed",
                     detail: "put.slot: a slot or {\"arg\": name}".into(),
                 })?;
-                let slot = match into.get("arg").and_then(Value::str) {
+                let (slot, on) = match into.get("arg").and_then(Value::str) {
                     Some(a) => match args.get(a) {
-                        Some(Arg::Name(n)) => slot_n(entry, n)?,
+                        Some(Arg::Name(n)) => (slot_n(entry, n)?, None),
+                        Some(&Arg::Slot(on, slot)) => (slot, Some(on)),
                         Some(_) => {
                             return refuse("step-malformed", format!("argument {a} is not a slot"));
                         }
                         None => return refuse("arg-missing", a),
                     },
-                    None => slot_n(entry, text(Some(into), "put.slot")?)?,
+                    None => (slot_n(entry, text(Some(into), "put.slot")?)?, None),
                 };
                 out.push(Effect::Put {
                     what: what(s, into)?,
                     slot,
+                    on,
                 });
             }
             _ => {}
@@ -1012,7 +1147,7 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                 return refuse("effect-not-built", "transfer into_field");
             }
             ("transfer", _) => Effect::Transfer {
-                field: field_n(entry, text(e.get("field"), "transfer.field")?)?,
+                field: a_name(text(e.get("field"), "transfer.field")?)?,
                 from: of(e.get("from"), args)?,
                 into: of(e.get("into"), args)?,
                 amount: match e.get("amount") {
@@ -1135,19 +1270,21 @@ fn reparent_alone(entry: &Value, e: &Value, args: &Args) -> Result<Effect, Refus
             "a thing set down where there is no slot (E4)",
         ),
         (false, _) => {
-            let slot = match into.get("arg").and_then(Value::str) {
+            let (slot, on) = match into.get("arg").and_then(Value::str) {
                 Some(a) => match args.get(a) {
-                    Some(Arg::Name(n)) => slot_n(entry, n)?,
+                    Some(Arg::Name(n)) => (slot_n(entry, n)?, None),
+                    Some(&Arg::Slot(on, slot)) => (slot, Some(on)),
                     Some(_) => {
                         return refuse("effect-malformed", format!("argument {a} is not a slot"));
                     }
                     None => return refuse("arg-missing", a),
                 },
-                None => slot_n(entry, text(Some(into), "reparent.into")?)?,
+                None => (slot_n(entry, text(Some(into), "reparent.into")?)?, None),
             };
             Ok(Effect::Put {
                 what: of(e.get("what"), args)?,
                 slot,
+                on,
             })
         }
     }
@@ -1688,7 +1825,8 @@ pub struct Runner {
     timer: Option<Id>,
     ended: bool,
     planning: bool,
-    /// The hand step: the first `move` (or [`Step::Hand`]) step, whose contact is the effect's instant.
+    /// The hand step: the last step, when it is a `move`, [`Step::Hand`], `sit` or `use_held` step, or a `sit` followed
+    /// only by waits, whose contact is the effect's instant; with none, the effect's instant is the last step's end.
     hand: Option<usize>,
     /// The effect's instant came and the world has not taken it; `effected` once it came.
     effect: bool,
@@ -1698,16 +1836,41 @@ pub struct Runner {
     /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
     /// point again from the floor it came onto.
     again: bool,
+    /// When the step in progress began, µs: a repeated move ([`Step::Move`]'s `repeat`) goes on until its length
+    /// has passed since then.
+    since: Micros,
+    /// The move asked for last is a repeat of the step's move that writes no record for viewers: neither its first nor
+    /// one [`REWRITE_US`] after the last record ([`Runner::repeat`]).
+    again_move: bool,
+    /// When the step's record for viewers was last written, µs.
+    recorded: Micros,
+    /// A seat of another thing was handed in after the Soul left (E14): once the sit's move ends, the run takes the
+    /// body out again by a rise, then ends `left`.
+    backing: bool,
+    /// That rise is under way: the run ends `left` when it ends, not at its contact, so the world writes the body
+    /// standing (the rise's `done`) before the run is over.
+    rising_out: bool,
 }
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
-        let hand = steps.iter().position(|s| {
-            matches!(
-                s,
-                Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
-            )
-        });
+        // The last step's contact: a hand step with a step after it (a wait, the next of repeated moves, a rise)
+        // would land the effect before the run is done, so a Soul that leaves then would keep it (E7). A seat taken
+        // and then only waited in is the one exception: the posture outlives the run, so its contact stays the
+        // effect's instant (a swing's link to its swinger), and a leave during the waits keeps it (rule 10).
+        let hand = steps
+            .iter()
+            .rposition(|s| {
+                matches!(
+                    s,
+                    Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
+                )
+            })
+            .filter(|&i| {
+                i + 1 == steps.len()
+                    || matches!(steps[i], Step::Sit { .. })
+                        && steps[i + 1..].iter().all(|s| matches!(s, Step::Wait(_)))
+            });
         Runner {
             steps,
             node,
@@ -1721,6 +1884,11 @@ impl Runner {
             effected: false,
             leaving: false,
             again: false,
+            since: 0,
+            again_move: false,
+            recorded: 0,
+            backing: false,
+            rising_out: false,
         }
     }
 
@@ -1749,6 +1917,19 @@ impl Runner {
     pub fn next_step(&self) -> Option<&Step> {
         self.step()?;
         self.steps.get(self.at + 1)
+    }
+
+    /// The step in progress is a repeated move (a dance for a minute): when the step began and its length, µs, and
+    /// whether the move asked for last writes no record for viewers. The world writes a record at the first move and
+    /// again at the first repeat [`REWRITE_US`] after the last one, each planned to the latest the step can end, and
+    /// none for the other repeats; the run's end cuts it (0.135).
+    pub fn repeat(&self) -> Option<(Micros, Micros, bool)> {
+        match self.step()? {
+            Step::Move {
+                repeat: Some(r), ..
+            } => Some((self.since, *r, self.again_move)),
+            _ => None,
+        }
     }
 
     /// The number of the step in progress, if the run has not ended.
@@ -1818,6 +1999,12 @@ impl Runner {
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));
                     }
+                    // The planner's own refusal (the ground changed under the walk, its answer failed), approach or
+                    // not: the form ends with that cause (S13d).
+                    replica::host::WalkPlan::Refused(why) => {
+                        self.planning = false;
+                        return self.end(host, why);
+                    }
                     replica::host::WalkPlan::Legs(l) => {
                         self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
@@ -1828,13 +2015,20 @@ impl Runner {
                     }],
                 };
                 self.planning = false;
-                Next::Walk(Box::new(Route::new(
-                    legs,
-                    self.limits.speed,
-                    self.limits.tick,
-                )))
+                let mut walk = Route::new(legs, self.limits.speed, self.limits.tick);
+                // A walk right before a move ends on the point the move is reached from, as a walk to a granted
+                // standing spot does (0.135 E20): AT_GOAL short of it, the move's point can be out of its reach.
+                if matches!(self.steps.get(self.at + 1), Some(Step::Move { .. })) {
+                    walk.arrive = crate::route::AT_SPOT;
+                }
+                Next::Walk(Box::new(walk))
             }
-            Step::Move { name: mv, at, on } => {
+            Step::Move {
+                name: mv, at, on, ..
+            } => {
+                self.since = host.now();
+                self.again_move = false;
+                self.recorded = self.since;
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
@@ -1843,11 +2037,16 @@ impl Runner {
                     at,
                 }
             }
-            Step::Sit { slot, lie, stand } => {
+            Step::Sit {
+                slot,
+                lie,
+                stand,
+                on,
+            } => {
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Sit {
-                    node: self.node,
+                    node: on.unwrap_or(self.node),
                     slot,
                     lie,
                     stand,
@@ -1910,10 +2109,38 @@ impl Runner {
             return self.end(host, name("left"));
         }
         if self.leaving {
+            // A seat of another thing (E14) that its sit hands the body into after the Soul left has no effect, so the
+            // Soul would keep that thing's seat with nothing it did there: the sit's move ends, then a rise takes the
+            // body out onto the seat's stand point by B3's own rise (no teleport), and the run ends `left`.
+            let other_seat = matches!(
+                step,
+                Some(Step::Sit {
+                    on: Some(_),
+                    stand: false,
+                    ..
+                })
+            );
             return match why {
                 Woke::Timer(id) if self.timer == Some(id) => {
                     self.timer = None;
                     self.end(host, name("left"))
+                }
+                Woke::Contact if self.rising_out => Next::Sleep,
+                Woke::Contact if other_seat && !self.effected => {
+                    self.backing = true;
+                    Next::Sleep
+                }
+                Woke::Moved(how) if self.backing && how.as_str() == "done" => {
+                    self.backing = false;
+                    if let Some(t) = self.timer.take() {
+                        host.clear_timer(t);
+                    }
+                    self.timer =
+                        Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                    // The step in progress is the rise now, so the world writes the body standing when it ends.
+                    self.steps[self.at] = Step::Rise;
+                    self.rising_out = true;
+                    Next::Rise
                 }
                 Woke::Contact | Woke::Moved(_) => self.end(host, name("left")),
                 _ => Next::Sleep,
@@ -1941,6 +2168,34 @@ impl Runner {
             {
                 self.effect_now();
                 Next::Sleep
+            }
+            // A repeated move that ran to its end starts again at once while its length has not passed.
+            (
+                Woke::Moved(how),
+                Some(Step::Move {
+                    name: mv,
+                    at,
+                    on,
+                    repeat: Some(r),
+                }),
+            ) if how.as_str() == "done" && host.now().saturating_sub(self.since) < r => {
+                if let Some(t) = self.timer.take() {
+                    host.clear_timer(t);
+                }
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                // A record again once REWRITE_US have passed since the last, so a viewer who comes in mid-dance (a
+                // page opened, reloaded or caught up) is given it within that long; else none.
+                let now = host.now();
+                self.again_move = now.saturating_sub(self.recorded) < REWRITE_US;
+                if !self.again_move {
+                    self.recorded = now;
+                }
+                Next::Move {
+                    name: mv,
+                    node: on.unwrap_or(self.node),
+                    at,
+                }
             }
             (
                 Woke::Moved(how),

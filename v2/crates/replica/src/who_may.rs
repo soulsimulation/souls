@@ -8,7 +8,7 @@
 //! | `who` | passes when | covers |
 //! |---|---|---|
 //! | `anyone` (the default) | always | owning does not lock |
-//! | `holder` | the thing is in one of the actor's hands (holding is a parent, T2) | pouring what you hold |
+//! | `holder` | the thing is in one of the actor's hands (holding is a parent, T2), or the actor sits in its `vehicle.drive` slot while it is in nobody's hand | pouring what you hold, steering what you ride |
 //! | `world` | never for a Soul's act: only a timer starts it | what happens on its own |
 //! | `{"link": <type>}` | the actor, or the actor's Soul, is an end of a link of that type on the thing | its owner, a member, the Soul whose turn it is, a role, a relation its creator set |
 //!
@@ -230,9 +230,10 @@ pub fn who_may_parts(
                 let v = h.and_then(|h| h.get(n)).cloned().unwrap_or(Value::Null);
                 read.push(read_pair(format!("{actor_id}/hand/{n}"), v));
             }
-            let holds = names
+            let in_hand = names
                 .iter()
                 .any(|n| h.and_then(|h| h.get(n)).and_then(Value::str) == Some(this));
+            let holds = in_hand || rides(entry, thing, this, actor_id, nodes, &mut read);
             (holds, None, None)
         }
         Who::Link(t) => {
@@ -305,6 +306,57 @@ pub fn who_may_parts(
             _ => refuse(vec![], read),
         },
     }
+}
+
+/// The actor sits in the slot the thing's `vehicle.drive` names while the thing is in nobody's hand (E10, E10b): a
+/// vehicle's rider holds it, a passenger does not, and a vehicle in someone's hand is that body's alone, so there is
+/// never a second holder. As `sim::forms::may` decides it on the tree, and `whoMay` on this copy.
+fn rides(
+    entry: &Value,
+    thing: &Value,
+    this: &str,
+    actor: &str,
+    nodes: Option<&Value>,
+    read: &mut Vec<Value>,
+) -> bool {
+    let Some(drive) = entry
+        .get("vehicle")
+        .and_then(|v| v.get("drive"))
+        .and_then(Value::str)
+    else {
+        return false;
+    };
+    if entry.get("slots").and_then(|s| s.get(drive)).is_none() {
+        return false;
+    }
+    let riders = thing
+        .get("slots")
+        .and_then(|s| s.get(drive))
+        .and_then(Value::arr)
+        .unwrap_or(&[]);
+    read.push(read_pair(
+        format!("{this}/slot/{drive}/occupants"),
+        Value::Arr(riders.to_vec()),
+    ));
+    if !riders.iter().any(|r| r.str() == Some(actor)) {
+        return false;
+    }
+    for holder in sorted(nodes) {
+        let hands = nodes
+            .and_then(|n| n.get(holder))
+            .and_then(|n| n.get("hands"));
+        if hands.is_some_and(|h| h.obj().is_none()) {
+            continue;
+        }
+        let in_hand = sorted(hands)
+            .into_iter()
+            .find(|k| hands.and_then(|h| h.get(k)).and_then(Value::str) == Some(this));
+        if let Some(hand) = in_hand {
+            read.push(read_pair(format!("{holder}/hand/{hand}"), Value::s(this)));
+            return false;
+        }
+    }
+    true
 }
 
 /// [`who_may`] on JSON text, answering JSON text: what the client calls from the WASM build.
@@ -387,10 +439,32 @@ pub fn ownership_by(
     fields: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
     parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
 ) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    marks_by(
+        node,
+        |id| {
+            fields(id).map(|f| {
+                let mut m = std::collections::BTreeMap::new();
+                for k in [F_OWNER, F_ACCESS] {
+                    m.extend(f.get(&k).map(|v| (k, v.clone())));
+                }
+                m
+            })
+        },
+        parent,
+    )
+}
+
+/// [`ownership_by`] from each node's two marks alone (C6): `marks` answers a node's [`F_OWNER`] and [`F_ACCESS`]
+/// fields, none when the node is not there, so no node's other fields are copied.
+fn marks_by(
+    node: crate::ids::Id,
+    marks: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
+    parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
     let mut at = Some(node);
     let mut steps = 0;
     while let Some(id) = at {
-        let f = fields(id)?;
+        let f = marks(id)?;
         let owner = f.get(&F_OWNER).and_then(|v| Owner::read(v).ok()).flatten();
         let access = match f.get(&F_ACCESS) {
             Some(crate::encode::Value::Uint(a)) => *a,
@@ -414,9 +488,19 @@ pub fn ownership(
     node: crate::ids::Id,
 ) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
     let n = |id| tree.handle(id).and_then(|h| tree.node(h));
-    ownership_by(
+    // Each node's two marks only: an ancestor's other fields (a room's, the ground's) are never copied (C6: at 500
+    // agents a whole copy per ancestor per act was an eighth of the clock thread).
+    marks_by(
         node,
-        |id| n(id).map(|x| x.fields().clone()),
+        |id| {
+            n(id).map(|x| {
+                let f = x.fields();
+                [F_OWNER, F_ACCESS]
+                    .into_iter()
+                    .filter_map(|k| f.get(&k).map(|v| (k, v.clone())))
+                    .collect()
+            })
+        },
         |id| n(id).and_then(|x| x.parent()),
     )
 }

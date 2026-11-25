@@ -31,7 +31,12 @@ and rolling builds (O1, O7) are not here.
    The token names the claim; the machine is only where it runs, so two processes on one machine, or one machine
    claiming again, are two claims. Of two writers that start at once, the store lets exactly one through; the other
    is refused (`precondition-failed`, HTTP 412). A machine that claims again keeps nothing on its disk at or after its
-   new takeover.
+   new takeover. A world serves before its claim is held (R17, 0.133): a start whose store does not answer listens
+   at once and claims on its shipping thread, tried with back-off until the store answers. The records it writes
+   meanwhile wait on its disk and are shipped under that claim, its history archive writes nothing until the claim is
+   held, and acts with stakes (rule 2) stay fenced, since the mark cannot move before it. Any refusal of the claim
+   other than a store out of reach (`restart-gap`, another writer's claim, a record that does not decode) still ends
+   the start by name.
 6. **A lease is for liveness, never for safety.** It is elapsed time on the writer's own machine, never a comparison
    of clocks across machines, counted from when its last renewing write was sent. A writer renews by moving the mark,
    or, with nothing new, by rewriting the record (a heartbeat, which changes its bytes: rule 10). Past its lease it
@@ -98,6 +103,27 @@ pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (
 own disk, unacknowledged; a ships, and the store refuses the mark (`precondition-failed`); a reader keeps epoch 1's 0
 to 2 and epoch 2's 3, and ignores epoch 1's 3 as `superseded-epoch`; c then claims epoch 3, and the reader keeps and
 ignores the same. The modelled store refuses the stale writer.
+
+## What a served world syncs, and when
+
+14. **The clock thread never waits for a disk** (#4134; `v2/crates/worldd/src/answers.rs`). Each sync is on a
+    thread of its own, and the first point of rule 1 is reached in this order:
+    - **Words** (K16's text store, `log.text/`): the clock queues an intent's words and goes on with the reference;
+      the store's writer thread appends and syncs what has queued, once per batch.
+    - **The tick's records** (the log): the answers thread first waits until every word the tick queued is on the
+      disk, then appends the tick's input record and part, and the log's writer thread syncs them, once per batch.
+      So the log never holds a reference to words a crash would lose.
+    - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
+      on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
+      process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
+      log rather than leave a world that ticks and answers nothing.
+    - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
+      are all on the disk.
+
+    A tick never waits for a sync, so a busy disk delays answers, never the world. A tick's words read as
+    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
+    the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
+    every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
 
 ## What would quietly break this
 

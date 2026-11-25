@@ -26,6 +26,8 @@ pub const PICTURE_BYTES: u64 = 262_144;
 pub const PICTURE_SIDE: u64 = 512;
 /// The most characters a description may have.
 pub const DESCRIPTION_MOST: usize = 280;
+/// How long a pending request shows on the world page of a signed-in person asking from its address (seconds).
+pub const WAITING_WITHIN: u64 = 600;
 
 /// The tables this module adds to the pairing store.
 pub(super) const SCHEMA: &str = "
@@ -152,12 +154,65 @@ impl Pairing {
             .filter(|g| g.starts_with("creator-"))
     }
 
+    /// Notes the address a pending request (by its code) was asked from (first day, 25 Nov: the approval card comes
+    /// up on the world page the owner already has open). Kept in memory, for [`WAITING_WITHIN`] seconds.
+    pub fn ask_from(&self, code: &str, from: std::net::IpAddr, now: u64) {
+        let mut a = self.askers.lock().expect("askers");
+        a.retain(|_, (_, at)| now.saturating_sub(*at) < WAITING_WITHIN);
+        // Only this card's hint is capped; a request past it is still answered by its link.
+        if a.len() < 4096 {
+            a.insert(code.to_string(), (from, now));
+        }
+    }
+
+    /// The Soul requests still pending for `world`, asked from `from` in the last [`WAITING_WITHIN`] seconds, newest
+    /// first: `(code, device, label, soul, age, former)`. The card shows the code for the owner to match.
+    #[allow(clippy::type_complexity)]
+    pub fn waiting(
+        &self,
+        world: &str,
+        from: std::net::IpAddr,
+        now: u64,
+    ) -> Result<Vec<(String, String, String, Option<String>, u64, Option<String>)>, &'static str>
+    {
+        let mut codes: Vec<(String, u64)> = {
+            let a = self.askers.lock().expect("askers");
+            a.iter()
+                .filter(|(_, (ip, at))| *ip == from && now.saturating_sub(*at) < WAITING_WITHIN)
+                .map(|(c, (_, at))| (c.clone(), *at))
+                .collect()
+        };
+        codes.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut out = Vec::new();
+        for (code, _) in codes {
+            let row: Option<(String, String, Option<String>, i64)> = {
+                let db = self.db.lock().expect("the store");
+                store(
+                    db.query_row(
+                        "SELECT r.device, r.label, r.soul, r.created_at FROM pair_requests_v1 r
+                           JOIN pair_request_worlds_v1 w ON w.code = r.code
+                          WHERE r.code = ?1 AND w.world = ?2 AND r.state = 'pending' AND r.scope = 'soul'",
+                        params![code, world],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    )
+                    .optional(),
+                )?
+            };
+            if let Some((device, label, soul, created)) = row {
+                let former = self.former_of(&code)?.map(|(_, f)| f);
+                let age = now.saturating_sub(created.max(0) as u64);
+                out.push((code, device, label, soul, age, former));
+            }
+        }
+        Ok(out)
+    }
+
     /// Keeps the world a pending request (by its code) was made for.
     pub fn ask_world(&self, code: &str, world: &str) -> Result<(), &'static str> {
         if !is_world(world) {
             return Err("world");
         }
-        self.authority(Some(world))?;
+        self.placed(world)?;
         store(self.db.lock().expect("the store").execute(
             "INSERT OR REPLACE INTO pair_request_worlds_v1(code, world) VALUES (?1, ?2)",
             params![code, world],
@@ -338,7 +393,10 @@ impl Pairing {
         }
         Self::import_profile(&tx, grant, &world, &name, &description)?;
         store(tx.commit())?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        let worlds = Self::worlds_of(&db, grant)?;
+        self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
     }
 
     /// The owner of the unretired Soul `grant`, if it is `account`'s; refused by name otherwise.
@@ -351,63 +409,78 @@ impl Pairing {
         }
     }
 
+    /// Every placed world's Souls file.
+    pub(super) fn all_world_souls(
+        db: &rusqlite::Connection,
+        rows: &std::collections::BTreeMap<String, super::authority::Authority>,
+    ) -> std::io::Result<()> {
+        for (key, authority) in rows {
+            if key == &authority.world {
+                Self::world_souls(db, rows, authority)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// One placed world's Souls file, beside its tokens file: its Souls' notices only. `rows` (the registry) tells
+    /// which world a Soul's world name, alias or instance is.
+    pub(super) fn world_souls(
+        db: &rusqlite::Connection,
+        rows: &std::collections::BTreeMap<String, super::authority::Authority>,
+        authority: &super::authority::Authority,
+    ) -> std::io::Result<()> {
+        let mut text = String::from("# World-bound Soul lifecycle notices\n");
+        let mut query = db.prepare("SELECT grant_text,world,retired_at IS NOT NULL,name,description FROM soul_profiles_v1 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1").map_err(std::io::Error::other)?;
+        let found = query
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, bool>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .map_err(std::io::Error::other)?;
+        for row in found {
+            let (grant, world, retired, name, description) = row.map_err(std::io::Error::other)?;
+            if world
+                .as_ref()
+                .and_then(|world| rows.get(world))
+                .is_none_or(|bound| bound.world != authority.world)
+            {
+                continue;
+            }
+            if retired {
+                text.push_str(&format!("retired {grant}\n"));
+            } else {
+                let hex = |word: Option<String>| {
+                    word.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()))
+                };
+                text.push_str(&format!(
+                    "words {grant} {} {}\n",
+                    hex(name),
+                    hex(description)
+                ));
+            }
+        }
+        let name = format!(
+            "{}.souls",
+            authority
+                .tokens
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        let file = authority.tokens.with_file_name(name);
+        let temporary = file.with_extension("souls-tmp");
+        crate::durable::replace(&file, &temporary, text.as_bytes())
+    }
+
     /// Writes the Souls file beside the gateway's tokens file (W11b), when there is one.
     pub(super) fn write_souls(&self, db: &rusqlite::Connection) -> std::io::Result<()> {
         if let Some(authorities) = self.authorities().map_err(std::io::Error::other)? {
-            for (key, authority) in authorities.iter() {
-                if key != &authority.world {
-                    continue;
-                }
-                let mut text = String::from("# World-bound Soul lifecycle notices\n");
-                let mut query = db.prepare("SELECT grant_text,world,retired_at IS NOT NULL,name,description FROM soul_profiles_v1 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1").map_err(std::io::Error::other)?;
-                let rows = query
-                    .query_map([], |r| {
-                        Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, Option<String>>(1)?,
-                            r.get::<_, bool>(2)?,
-                            r.get::<_, Option<String>>(3)?,
-                            r.get::<_, Option<String>>(4)?,
-                        ))
-                    })
-                    .map_err(std::io::Error::other)?;
-                for row in rows {
-                    let (grant, world, retired, name, description) =
-                        row.map_err(std::io::Error::other)?;
-                    if world
-                        .as_ref()
-                        .and_then(|world| authorities.get(world))
-                        .is_none_or(|bound| bound.world != authority.world)
-                    {
-                        continue;
-                    }
-                    if retired {
-                        text.push_str(&format!("retired {grant}\n"));
-                    } else {
-                        let hex = |word: Option<String>| {
-                            word.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()))
-                        };
-                        text.push_str(&format!(
-                            "words {grant} {} {}\n",
-                            hex(name),
-                            hex(description)
-                        ));
-                    }
-                }
-                let name = format!(
-                    "{}.souls",
-                    authority
-                        .tokens
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                );
-                let file = authority.tokens.with_file_name(name);
-                let temporary = file.with_extension("souls-tmp");
-                std::fs::write(&temporary, text)?;
-                std::fs::rename(temporary, file)?;
-            }
-            return Ok(());
+            return Self::all_world_souls(db, &authorities);
         }
         let Some(tokens) = &self.tokens_file else {
             return Ok(());
@@ -448,8 +521,7 @@ impl Pairing {
             }
         }
         let tmp = file.with_extension("souls-tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(tmp, file)
+        crate::durable::replace(&file, &tmp, text.as_bytes())
     }
 
     /// Whether `account` holds as many unretired Souls as one account may (#3720).
@@ -497,7 +569,10 @@ impl Pairing {
              ON CONFLICT(grant_text) DO UPDATE SET name = COALESCE(?2, name), description = COALESCE(?3, description)",
             params![grant, p.name, p.description],
         ))?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        let worlds = Self::worlds_of(&db, grant)?;
+        self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
     }
 
     /// `account` sets its Soul's picture: G6's check with a portrait's limits, then the hold point. The stripped
@@ -617,6 +692,43 @@ impl Pairing {
     pub fn retire(&self, account: &str, grant: &str, now: u64) -> Result<(), &'static str> {
         self.owned(account, grant)?;
         let db = self.db.lock().expect("the store");
+        let worlds = Self::retire_row(&db, account, grant, now)?;
+        self.publish_removal(&db, &worlds, true, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")?;
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
+    }
+
+    /// Retires each of `grants` as [`Pairing::retire`] does, in one transaction, then writes each world's files once
+    /// for them all, not once per Soul. The grants are `account`'s active Souls, as the caller read them.
+    pub(super) fn retire_many(
+        &self,
+        account: &str,
+        grants: &[String],
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let mut db = self.db.lock().expect("the store");
+        let tx = store(db.transaction())?;
+        let mut worlds = std::collections::BTreeSet::new();
+        for grant in grants {
+            worlds.extend(Self::retire_row(&tx, account, grant, now)?);
+        }
+        store(tx.commit())?;
+        self.publish_removal(&db, &worlds, true, || {
+            self.write_tokens(&db).map_err(|_| "tokens-file")?;
+            self.write_souls(&db).map_err(|_| "souls-file")
+        })
+    }
+
+    /// The store's half of a retire: the token's hash and world tokens go, the profile is marked retired. The worlds
+    /// whose files then change.
+    fn retire_row(
+        db: &rusqlite::Connection,
+        account: &str,
+        grant: &str,
+        now: u64,
+    ) -> Result<std::collections::BTreeSet<String>, &'static str> {
+        let worlds = Self::worlds_of(db, grant)?;
         store(db.execute(
             "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
             params![grant, account],
@@ -630,7 +742,6 @@ impl Pairing {
             "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
             params![grant],
         ))?;
-        self.write_tokens(&db).map_err(|_| "tokens-file")?;
-        self.write_souls(&db).map_err(|_| "souls-file")
+        Ok(worlds)
     }
 }

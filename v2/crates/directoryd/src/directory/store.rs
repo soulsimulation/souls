@@ -18,6 +18,18 @@ pub fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
+/// R18: the longest wait a store's `Retry-After` asks for that is honoured; a longer one is cut to it.
+pub const RETRY_AFTER_MAX: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// R18: the wait a `store-unreachable` refusal carries from the store's `Retry-After` (a rate-limited store, HTTP 429
+/// or 503 Slow Down), which [`super::s3::S3`] writes into its detail as `retry after <s> s`; at most
+/// [`RETRY_AFTER_MAX`]. `None` when the store gave none: the caller's own waits apply.
+pub fn retry_after(e: &Refusal) -> Option<std::time::Duration> {
+    let (_, rest) = e.detail.rsplit_once("retry after ")?;
+    let secs: u64 = rest.strip_suffix(" s")?.parse().ok()?;
+    Some(std::time::Duration::from_secs(secs).min(RETRY_AFTER_MAX))
+}
+
 /// An object as read: its ETag (the version a conditional write names) and its bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Object {
@@ -35,7 +47,8 @@ pub enum When<'a> {
 
 /// An object store. Refusals by name: `precondition-failed` (the condition did not hold: HTTP 412, or 409 while
 /// another conditional write to the key is in flight, or 404 for `If-Match` on a key that is gone),
-/// `store-unreachable` (no answer, or the store says it is unavailable), `store-error` (any other answer).
+/// `store-unreachable` (no answer, or the store says it is unavailable or rate-limits: a 5xx or a 429),
+/// `store-error` (any other answer).
 pub trait Store {
     /// The object at `key`, or `None` when there is none.
     fn get(&self, key: &str) -> R<Option<Object>>;
@@ -57,6 +70,21 @@ pub trait Store {
             format!("{key}: this store does not delete"),
         )
     }
+
+    /// The object at `key`'s length and ETag, without its bytes, or `None` when there is none. A store with no cheaper
+    /// way reads the object.
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        Ok(self.get(key)?.map(|o| (o.bytes.len() as u64, o.etag)))
+    }
+
+    /// Copies the object at `from` to `to`, a key that has none, inside the store; returns the copy's ETag. A store
+    /// with no copy of its own reads the object and writes it create-only.
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        let Some(o) = self.get(from)? else {
+            return refuse("store-error", format!("{from}: no object to copy"));
+        };
+        self.put(to, &o.bytes, When::Absent)
+    }
 }
 
 /// Several machines' directories over one store.
@@ -75,6 +103,14 @@ impl<T: Store + ?Sized> Store for &T {
 
     fn delete(&self, key: &str) -> R<()> {
         (**self).delete(key)
+    }
+
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        (**self).head(key)
+    }
+
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        (**self).copy(from, to)
     }
 }
 

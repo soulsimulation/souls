@@ -11,9 +11,10 @@
 // and dependencies, plus pnpm-lock.yaml), kept in dist/client/.sim-build.json. When the stamp matches and the
 // character set is complete the run is one directory walk (a few thousand stats, well under a second), no build.
 // When the media is not pulled yet it warns and builds nothing (`pnpm dev` keeps starting, as with the media check).
+import { isMain } from '../lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,6 +64,19 @@ export function inputStamp(viewer = VIEWER, extra = [join(ROOT, 'pnpm-lock.yaml'
   return createHash('sha256').update(rows.sort().join('\n')).digest('hex');
 }
 
+/** The page's Draco decoder (LiveWorld: `/mars-assets/draco/`), which the launcher answers from this site's `draco/`. The
+ *  release's site gets it from the origin (assets-overlay.mjs); a local one had none, so on a world with no old process
+ *  every Draco model failed to decode (Little Martians stayed teal spheres). Copied from the three the page decodes with. */
+export const DRACO = join(ROOT, 'apps/web/node_modules/three/examples/jsm/libs/draco/gltf');
+export function addDraco(out, from = DRACO) {
+  if (!existsSync(from)) return;
+  mkdirSync(join(out, 'draco'), { recursive: true });
+  for (const name of ['draco_decoder.js', 'draco_decoder.wasm', 'draco_wasm_wrapper.js']) {
+    const src = join(from, name), dst = join(out, 'draco', name);
+    if (!existsSync(dst) || statSync(dst).size !== statSync(src).size) copyFileSync(src, dst);
+  }
+}
+
 const readStamp = out => { try { return JSON.parse(readFileSync(join(out, STAMP), 'utf8')).inputs; } catch { return undefined; } };
 
 function viteBuild(viewer) {
@@ -87,16 +101,17 @@ export function main(argv = process.argv.slice(2), log = console.log, { viewer =
   const source = missingCharacters(join(viewer, 'public'), set);
   if (source.length) { log(`warning: ${source.length} character files missing from ${PUBLIC} (people will not render); run pnpm assets:pull`); return 0; }
   const stamp = inputStamp(viewer, extra);
-  if (!force && readStamp(out) === stamp && !missingCharacters(out, set).length) return 0;
+  if (!force && readStamp(out) === stamp && !missingCharacters(out, set).length) { addDraco(out); return 0; }
   const t0 = Date.now();
   build(viewer);
   const missing = missingCharacters(out, set);
   if (missing.length) { log(`mars-web: the build left ${missing.length} character files out of ${relative(ROOT, out)} (first: ${missing.slice(0, 3).join(', ')})`); return 1; }
+  addDraco(out);
   writeFileSync(join(out, STAMP), JSON.stringify({ inputs: stamp }) + '\n');
   log(`mars-web: built ${relative(ROOT, out)} in ${((Date.now() - t0) / 1000).toFixed(1)} s (${set.length} character files)`);
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   try { process.exitCode = main(); } catch (e) { console.error(e.message); process.exitCode = 1; }
 }

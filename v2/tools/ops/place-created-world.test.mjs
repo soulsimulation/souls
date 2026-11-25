@@ -97,6 +97,11 @@ test('configuration-only placement writes exact existing units without reading o
     const env=await readFile(join(root,'etc/souls',`gateway-${f.instance}.env`),'utf8');
     assert.match(env,new RegExp(`--creator ${'2'.repeat(32)}-0 --directory localhost:7310`));
     assert.match(env,new RegExp(` --entries /var/lib/souls/worlds/worlds/${f.instance}/entries `),'#3760: the gateway serves the world\'s kind entries');
+    assert.match(env,/ --view-key \/etc\/souls\/view\.key /,'the gateway checks the page\'s view tokens with the install\'s key');
+    assert.match(env,new RegExp(` --uploads /var/lib/souls/worlds/worlds/${f.instance}/uploads `),'#1960: the creator\'s uploads are on, kept in the world\'s folder');
+    assert.match(env,/ --mailbox localhost:7310 --mailbox-key \/etc\/souls\/mailbox\.key\n$/,'R13: the owner\'s messages reach the world\'s Souls through the installed directory');
+    assert.match(await readFile(join(root,'etc/souls/view.key'),'utf8'),/^[0-9a-f]{64}$/,'made once when absent: 64 hex digits');
+    assert.match(await readFile(join(root,'etc/souls/mailbox.key'),'utf8'),/^[0-9a-f]{64}$/,'the mailbox key too');
     const again=spawnSync('/bin/bash',args,{env:{...process.env,PLACE_ROOT:root},encoding:'utf8'});assert.equal(again.status,0,again.stderr);
   } finally {await rm(f.dir,{recursive:true,force:true});}
 });

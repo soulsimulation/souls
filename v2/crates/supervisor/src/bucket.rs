@@ -6,6 +6,8 @@
 //! O9's folder store. Neither the URL nor a key is ever printed: [`Bucket::what`] names the kind of store only. The
 //! type is [`directoryd::backup::Bucket`], shared with O20b's shipper.
 
+use std::io::Write as _;
+
 use directoryd::directory::store::{Object, R, Store, When};
 
 /// The offsite bucket, or a folder standing in for it: O20b's type (#3523), one for both (O3c's `parse` and `list`).
@@ -52,6 +54,23 @@ pub const WAITS: [std::time::Duration; 3] = [
 
 std::thread_local! {
     static PATIENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// What this thread's patient reads say before each wait ([`waiting_says`]).
+    static ON_WAIT: std::cell::RefCell<Option<WaitSays>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Told the refusal and the wait before a patient read waits to try again.
+type WaitSays = Box<dyn Fn(&replica::effects::Refusal, std::time::Duration)>;
+
+/// R18: runs `f` with `say` told of each wait of this thread's patient reads, as it begins, so a gauge names the
+/// fault from the first unanswered try, not only once the reads give up.
+pub fn waiting_says<T>(
+    say: impl Fn(&replica::effects::Refusal, std::time::Duration) + 'static,
+    f: impl FnOnce() -> T,
+) -> T {
+    let before = ON_WAIT.with(|w| w.replace(Some(Box::new(say))));
+    let out = f();
+    ON_WAIT.with(|w| *w.borrow_mut() = before);
+    out
 }
 
 /// Runs `f` with this thread's reads through a [`Patient`] store tried again when the store is out of reach (#1960):
@@ -65,7 +84,8 @@ pub fn patiently<T>(f: impl FnOnce() -> T) -> T {
 }
 
 /// A store whose reads (`get`, `list`) made [`patiently`] are tried again after each of `waits` while the store
-/// answers `store-unreachable` (no answer in time, or a 5xx); then that refusal, as the store gave it. Any other
+/// answers `store-unreachable` (no answer in time, a 5xx or a 429; a `Retry-After` longer than the wait is waited
+/// instead, up to [`directoryd::directory::store::RETRY_AFTER_MAX`]); then that refusal, as the store gave it. Any other
 /// answer, a refusal or not, is the store's at once. Writes and deletes pass through untouched.
 #[derive(Clone)]
 pub struct Patient<S> {
@@ -89,12 +109,22 @@ impl<S> Patient<S> {
                     let Some(wait) = waits.next() else {
                         return Err(e);
                     };
-                    eprintln!(
+                    // R18: a rate-limited store's `Retry-After`, when longer, bounded.
+                    let wait = (*wait)
+                        .max(directoryd::directory::store::retry_after(&e).unwrap_or_default());
+                    // R18: a closed stderr never panics the start's thread.
+                    let _ = writeln!(
+                        std::io::stderr(),
                         "store: out of reach ({}), trying again in {} s",
                         e.detail,
                         wait.as_secs_f32()
                     );
-                    std::thread::sleep(*wait);
+                    ON_WAIT.with(|w| {
+                        if let Some(say) = &*w.borrow() {
+                            say(&e, wait);
+                        }
+                    });
+                    std::thread::sleep(wait);
                 }
                 answer => return answer,
             }
@@ -191,6 +221,72 @@ mod tests {
             "under the URL's prefix"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 0.132.1: a world's store reads a whole object past ureq's 10 MiB cap (a fresh Eden's stream-recovery object is
+    /// 11.8 MB), where the directory's client is refused it; a store that does not answer is still out of reach
+    /// within the 5 s it always had.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // a real store's timeout is real time
+    fn a_world_store_reads_an_object_past_ten_mib_and_still_times_out() {
+        let s = StandIn::start(10).expect("a stand-in");
+        let big: Vec<u8> = (0..30u32 << 20).map(|i| (i % 251) as u8).collect();
+        let plain = Bucket::parse(&s.url("souls"), keys).expect("settings");
+        plain.put("big", &big, When::Absent).expect("written");
+        assert_eq!(
+            plain.get("big").expect_err("ureq's cap").name,
+            "store-unreachable"
+        );
+        let world = Bucket::parse(&s.url("souls"), keys)
+            .expect("settings")
+            .for_world();
+        assert_eq!(world.get("big").expect("read").map(|o| o.bytes), Some(big));
+        // Both tries held (the read and the one sent again at 2 s, `s3.rs` HEDGE).
+        s.stall_reads(2, std::time::Duration::from_secs(7), "/big");
+        let begun = std::time::Instant::now();
+        assert_eq!(
+            world.get("big").expect_err("stalled").name,
+            "store-unreachable"
+        );
+        assert!(
+            begun.elapsed() < std::time::Duration::from_secs(7),
+            "{:?}",
+            begun.elapsed()
+        );
+    }
+
+    /// 25 Nov 2026: the offsite bucket holds about one authenticated request in a hundred past 5 s, each one alone
+    /// (`s3.rs` HEDGE). A read held past 2 s is sent once more and answered by that second try, inside the 5 s a read
+    /// always had, for the directory's client and a world's alike, and a listing page too.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // a real store's timeout is real time
+    fn a_read_the_store_holds_is_sent_again_and_answered_within_its_five_seconds() {
+        use std::time::{Duration, Instant};
+        let s = StandIn::start(10).expect("a stand-in");
+        let plain = Bucket::parse(&s.url("souls"), keys).expect("settings");
+        plain.put("small", b"bytes", When::Absent).expect("written");
+        let world = Bucket::parse(&s.url("souls"), keys)
+            .expect("settings")
+            .for_world();
+        for (who, store) in [("directory", &plain), ("world", &world)] {
+            s.stall_reads(1, Duration::from_secs(8), "/small");
+            let begun = Instant::now();
+            let got = store.get("small").expect("answered by the second try");
+            let took = begun.elapsed();
+            assert_eq!(got.map(|o| o.bytes), Some(b"bytes".to_vec()), "{who}");
+            assert!(
+                took >= Duration::from_secs(2) && took < Duration::from_secs(5),
+                "{who}: {took:?}"
+            );
+            s.stall_reads(1, Duration::from_secs(8), "prefix=sm");
+            let begun = Instant::now();
+            assert_eq!(store.list("sm").expect("listed"), ["small"], "{who}");
+            assert!(begun.elapsed() < Duration::from_secs(5), "{who}");
+        }
+        // Unheld, a read is one request, answered at once.
+        let begun = Instant::now();
+        assert!(world.get("small").expect("read").is_some());
+        assert!(begun.elapsed() < Duration::from_secs(1));
     }
 
     /// A3: a refusal never carries the address or a key; unsigned requests are refused by the stand-in.

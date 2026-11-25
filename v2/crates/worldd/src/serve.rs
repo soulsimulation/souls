@@ -9,9 +9,14 @@
 //!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
 //!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
-//!   lines for the creator's local checks of the existing boot registrations and admissions.
+//!   lines for the creator's local checks of the existing boot registrations and admissions. `activities.json`
+//!   (written at each start, [`served_activities`]): the activities as this start serves them, which the gateway
+//!   hands its clients with the entries.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
-//!   live world). The world as built is read from it at each start: its header and the walkers' town.
+//!   live world). The world as built is read from it at each start: its rules and the walkers' town.
+//! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
+//!   world under it, never under one rebuilt from the build's code ([`own_header`], [`adopt`]). `header.kinds`: the
+//!   owner of each kind it pins, `<full pin> <owner>` a line.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
@@ -19,6 +24,9 @@
 //!   holds the world from empty and a stream written from it draws the whole world. Once compacted (`compactor`,
 //!   #3837), the bytes before `log.cut` are a hole and the log is read from the cut.
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
+//! - `facts.courses`: the facts as a start uses them (punts' moorings, rides' courses, entries' kinds), kept by the
+//!   first start and keyed by the facts' and entries' SHA-256; a later start with the same reads it instead of cutting
+//!   a town for them (S5, [`courses_cached`]). Deleting it only makes the next start slower.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
 //! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
@@ -39,7 +47,11 @@
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
-//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
+//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is. A start with no
+//! `views/world.json` waits at most 10 s for its public stream's first flush; a stream still rebuilding a long history
+//! then (a rehearsal's scratch copy) or held by a stalled store finishes after the world listens, its health
+//! `stream` `recovering` until it serves: with no pointer while a stalled store holds it, and while a long history is
+//! rebuilt with a pointer that names the stream still being written.
 //!
 //! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
 //! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
@@ -74,8 +86,11 @@
 //! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
 //! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
 //! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
-//! offer or a proposal on the ground (where bodies are born) makes its node there. A start prints `activities: <plain
-//! names>`.
+//! offer or a proposal on the ground (where bodies are born) makes its node there. The entry's own thing takes it as a
+//! child too (B10, #4239): one offered or proposed at the thing is the thing's, and each member holds its role's link
+//! (the entry's link of the role's name) on the thing while it is a member (`sim::activity`). Its entry's slots that admit a
+//! thing are its slots, numbered as the entry numbers them, so a carry's load rides its first (0.135 C4,
+//! `content/kinds/construction/carry.json`). A start prints `activities: <plain names>`.
 //! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
 //! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
 //! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
@@ -88,6 +103,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -101,13 +117,14 @@ use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
 use directoryd::worlds::list::creator_of as directory_creator_of;
-use replica::activity::{ActivityKind, Role};
+use replica::activity::{ActivityKind, Role, RoleLink};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::edit::World as Editing;
 use replica::effects::{Effect, Header, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
+use replica::moves::Move;
 use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
@@ -126,6 +143,7 @@ use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
+use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
 #[cfg(test)]
@@ -151,6 +169,107 @@ fn stamp(stage: &str) {
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
+/// How long a world with no public pointer waits for its stream's first flush before it listens with the stream still
+/// recovering. A new world's first flush takes well under a second; a long history rebuilt from record 0 (Eden's
+/// rehearsal copy, 77k records: over 600 s) or a stalled store never holds the world's start.
+const STREAM_FIRST_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+/// R12: the waits after each refused recovery of the public stream, ms; the last repeats until it serves.
+const STREAM_RETRY_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
+
+/// R17: a start's claim or archive open refused for a reason other than a store that does not answer (R18: or the
+/// shipper's refused push while the world runs). The process
+/// ends with it by name (`worldd serve: <refusal>`, exit 1) as a refused start did before; the unit restarts it.
+fn refused_at_start(e: Refusal) -> ! {
+    // R18: start-up errors are written so that a closed stderr cannot panic the thread that says them.
+    let _ = writeln!(std::io::stderr(), "worldd serve: {}", refusal(e));
+    std::process::exit(1)
+}
+
+/// R18: the shipping thread (the claim, then the forwarding of records) or the shipper's own thread panicked. Before
+/// the claim the world would serve unclaimed and its archive wait for ever (`held`); after it nothing would ship, the
+/// marks would freeze, the log would grow for ever and acts with stakes would wait for ever. The process ends by name,
+/// `worldd serve: shipping-panicked: <message>`, exit 1, and the unit restarts it.
+fn shipping_panicked(panic: &(dyn std::any::Any + Send)) -> ! {
+    let said = panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    let _ = writeln!(std::io::stderr(), "worldd serve: shipping-panicked: {said}");
+    std::process::exit(1)
+}
+
+/// R17: waits until the world's claim is held (`claimed`, set by the shipping thread), so the archive publishes
+/// nothing for a world whose claim the store has not yet given.
+fn held(claimed: &std::sync::atomic::AtomicBool) {
+    while !claimed.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// R17: one of the start's reads of the store, tried until the store answers. While it answers `store-unreachable`
+/// (no answer in time, or a 5xx), `gauge` says `degraded` with the fault and the next try, after each of
+/// [`STREAM_RETRY_MS`] (the last repeats), and the start's progress is said meanwhile: never an exit on a slow store,
+/// so never a crash loop. Any other answer is `f`'s at once; `gauge` then says `current`, or `stopped` with the fault.
+fn until_answered<T>(
+    what: &str,
+    gauge: &'static measures::Stream,
+    mut f: impl FnMut() -> Result<T, Refusal>,
+) -> Result<T, Refusal> {
+    let mut tries = 0u64;
+    // R18: every unanswered try the gauge is told of, the patient read's and this loop's, counted once.
+    let unanswered = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    loop {
+        // R18: `degraded` from a patient read's first unanswered try, so a long run of them (a rate-limited store)
+        // names its fault in health.json, not only `recovering`.
+        let counted = std::rc::Rc::clone(&unanswered);
+        let tried = supervisor::bucket::waiting_says(
+            move |e, wait| {
+                counted.set(counted.get() + 1);
+                gauge.degraded(&refusal(e.clone()), counted.get(), wait.as_millis() as u64);
+            },
+            &mut f,
+        );
+        match tried {
+            Err(e) if e.name == "store-unreachable" => {
+                tries += 1;
+                // R18: a rate-limited store's `Retry-After`, when longer, bounded.
+                let after = directoryd::directory::store::retry_after(&e)
+                    .map_or(0, |d| d.as_millis() as u64);
+                let wait =
+                    STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)].max(after);
+                let fault = refusal(e);
+                unanswered.set(unanswered.get() + 1);
+                gauge.degraded(&fault, unanswered.get(), wait);
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "worldd: {what} waits for the store: {fault}; try {tries} unanswered, the next in {wait} ms"
+                );
+                for _ in 0..wait / 100 {
+                    crate::progress();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            Ok(v) => {
+                gauge.current();
+                if tries > 0 {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: {what}: the store answered after {tries} unanswered tries"
+                    );
+                }
+                return Ok(v);
+            }
+            Err(e) => {
+                gauge.stopped(&refusal(e.clone()));
+                return Err(e);
+            }
+        }
+    }
+}
+/// R15: how long a world going to sleep waits for its stream's backup, at most: under the sleep watch's 5 s wait for
+/// the stream's answer (`sleep.rs` STREAM_WITHIN), with room for the sleeping pointer's own write.
+const SLEEP_DRAIN: std::time::Duration = std::time::Duration::from_secs(3);
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 #[cfg(test)]
 const BOUND: usize = 1 << 16;
@@ -233,11 +352,20 @@ fn conversation() -> R<ActivityKind> {
     ActivityKind::from_value(&v.value).map_err(refusal)
 }
 
+/// The give's kind (0.133 R4), as its fixture writes it: an offer that hands a held thing over when accepted.
+fn give() -> R<ActivityKind> {
+    let bytes = fixture_bytes(include_str!("../../replica/fixtures/activities/give.diag"))
+        .map_err(refusal)?;
+    let v = decode(&bytes).map_err(|e| format!("the give's kind: {e:?}"))?;
+    ActivityKind::from_value(&v.value).map_err(refusal)
+}
+
 /// The activity kinds a world's entries declare (C30, #3556): one for each entry whose `roles` (SA-G1a) name two or
 /// more roles (B5 refuses a kind of one), `<entry kind>_activity`, pinned by the hash of its entry's roles. A role
 /// is `<namespace>:<role>`, standing at its entry's first slot (`souls:here` when it has none) and claiming one hand,
 /// so a member walks, sits and talks while it plays; an offer lapses after a minute and a leave takes at most 0.4 s,
-/// as a conversation's. The `now` line (SA-G1b) is not a role.
+/// as a conversation's. A role's `move` (0.134 T1) names a content move, `souls:<move>`, its member aims at the other
+/// member when the activity starts. The `now` line (SA-G1b) is not a role.
 pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
     let mut by_kind = BTreeMap::new();
     for (kind, entry) in entries {
@@ -253,23 +381,125 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         }
         let ns = kind.split_once(':').map_or("world", |(n, _)| n);
         let mut out = Vec::new();
+        // 0.134 T3: a role's link's `most` is how many take it (a dance's offer, to several); `on_beat` puts its move
+        // on the world's beat.
+        let (mut most, mut beat, mut follows) = (0, false, None);
         for (role, v) in &roles {
+            most += match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("most"))
+            {
+                Some(Json::Int(n)) => usize::try_from(*n).map_err(|_| "a role's most")?,
+                _ => 1,
+            };
+            beat |= v.get("on_beat") == Some(&Json::Bool(true));
+            // 0.135 G2: the role that follows the other's member.
+            if v.get("follows") == Some(&Json::Bool(true)) {
+                follows = Some(Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?);
+            }
+            // A role in the activity's own slots (`this`) is placed in its first; one near it (`here`) is not.
             let slot = v
                 .get("places")
+                .filter(|p| p.get("in").and_then(Json::str) == Some("this"))
                 .and_then(|p| p.get("slots"))
                 .and_then(Json::arr)
                 .and_then(|s| s.first())
                 .and_then(Json::str);
             let place = slot.map_or("souls:here".to_owned(), |s| format!("{ns}:{s}"));
+            let mv = match v.get("move") {
+                None => None,
+                Some(m) => {
+                    let m = m.str().ok_or("a role's move is a name")?;
+                    Some(Name::new(&format!("souls:{m}")).ok_or("a role's move")?)
+                }
+            };
+            // 0.135 G3: where its members stand, from its slots in the activity's own frame (a slot's stand point,
+            // else the slot itself), mm to µm, in the order its places list them; and, for a role near the activity
+            // (`here`), how near its middle a member is walked to its stand (`within_mm`).
+            let mm = |v: Option<&Json>| match v {
+                Some(Json::Int(n)) => i64::try_from(*n).ok().map(|n| n * 1000),
+                _ => None,
+            };
+            let within = v.get("places").and_then(|p| mm(p.get("within_mm")));
+            let stands = match v.get("places") {
+                Some(p) => p
+                    .get("slots")
+                    .and_then(Json::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(Json::str)
+                    .filter_map(|slot| {
+                        let s = entry.get("slots")?.get(slot)?;
+                        let at = s
+                            .get("stand")
+                            .and_then(Json::str)
+                            .and_then(|n| entry.get("points")?.get(n))
+                            .unwrap_or(s);
+                        let a = at.get("at_mm")?.arr()?;
+                        let yaw = match at.get("yaw_mdeg") {
+                            Some(Json::Int(n)) => i64::try_from(*n).ok()?,
+                            _ => 0,
+                        };
+                        Some((Vec3::new(mm(a.first())?, mm(a.get(1))?, mm(a.get(2))?), yaw))
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            // B10 (#4239): a role is one of the entry's links (SA-G1a); a member holds it on the entry's own thing
+            // while it is a member of an activity offered or proposed there.
+            let link = match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("from"))
+                .and_then(Json::str)
+            {
+                Some(from @ ("body" | "soul")) => Some(RoleLink {
+                    ty: Name::new(&replica::audience::link_type(kind, role))
+                        .ok_or("a role's link")?,
+                    soul: from == "soul",
+                    on: kind.clone(),
+                    most: match entry
+                        .get("links")
+                        .and_then(|l| l.get(role))
+                        .and_then(|l| l.get("most"))
+                    {
+                        Some(Json::Int(n)) => u64::try_from(*n).ok(),
+                        _ => None,
+                    },
+                }),
+                _ => None,
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
                 claims: vec![Want::One(Class::Manipulator)],
+                mv,
+                stands,
+                within,
+                link,
             });
         }
+        // 0.135 G3: the stands its roles resolve to (from the entry's slots and points) are part of what is pinned; a
+        // kind whose roles name none keeps the pin of its roles alone.
+        let stands = if out.iter().any(|r| !r.stands.is_empty()) {
+            let role = |r: &Role| {
+                r.stands
+                    .iter()
+                    .map(|(p, yaw)| format!("{},{},{},{yaw}", p.x, p.y, p.z))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            };
+            format!(
+                "/stands/{}",
+                out.iter().map(role).collect::<Vec<_>>().join("|")
+            )
+        } else {
+            String::new()
+        };
         let pin = to_hex(&sha256(
             format!(
-                "souls/activity/{kind}/{}",
+                "souls/activity/{kind}/{}{stands}",
                 Json::Obj(roles.into_iter().cloned().collect()).to_json()
             )
             .as_bytes(),
@@ -283,34 +513,156 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 roles: out,
                 proposal_lasts: 60_000_000,
                 leave_within: 400_000,
+                most,
+                beat,
+                follows,
             },
         );
     }
     Ok(by_kind.into_values().collect())
 }
 
+/// The served activities' file in a world's folder, beside `world.kinds`: `gatewayd --entries` serves it with the
+/// entries (`v2/crates/gatewayd/src/entries.rs`).
+pub const ACTIVITIES_FILE: &str = "activities.json";
+
+/// The activities a start serves from its entries, as an agent decides from them (`souls-activities/1`): for each,
+/// its entry's `kind`, the `name` it is served by (the engine's pin, the header's after [`adopt`]), its `word` (its
+/// plain name with dashes), its `card` (the entry's card text), its `roles` and how many each takes, the role the
+/// offerer plays (the first one member plays) and how many it asks; `near_m`, how close (m) two members stand for its
+/// moves to reach, the shortest reach among its roles' moves (none: no distance is checked); and `at`, the kind of
+/// thing it is played at when its entry plays it through forms (`crate::engine::at_its_thing`), else none: anywhere.
+fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: &[Move]) -> Json {
+    let by_kind: BTreeMap<&str, &Json> = entries.iter().map(|(k, e)| (k.as_str(), e)).collect();
+    let entries_obj = Json::Obj(entries.to_vec());
+    let mut out = Vec::new();
+    for a in kinds {
+        let Some(kind) = plain(a.name.as_str()).strip_suffix("_activity") else {
+            continue;
+        };
+        let Some(entry) = by_kind.get(kind) else {
+            continue;
+        };
+        let most = |r: &str| match entry
+            .get("links")
+            .and_then(|l| l.get(r))
+            .and_then(|l| l.get("most"))
+        {
+            Some(Json::Int(n)) => *n,
+            _ => 1,
+        };
+        let roles: Vec<(String, i128)> = a
+            .roles
+            .iter()
+            .map(|r| {
+                let n = r.name.as_str();
+                (n.to_owned(), most(n.split_once(':').map_or(n, |(_, r)| r)))
+            })
+            .collect();
+        let card = entry
+            .get("card")
+            .and_then(|c| c.get("text"))
+            .and_then(Json::str)
+            .and_then(|t| entry.get("text")?.get(t)?.str())
+            .or_else(|| entry.get("text")?.get("card")?.str())
+            .unwrap_or("");
+        // A dance's moves are each at its own body (on the beat): the engine checks no distance at its accept.
+        let reach = a
+            .roles
+            .iter()
+            .filter(|_| !a.beat)
+            .filter_map(|r| r.mv.as_ref())
+            .filter_map(|mv| moves.iter().find(|m| m.name == *mv))
+            .map(|m| m.reach)
+            .min();
+        // Offered (`activity:offer`) only as the engine takes an offer: a pair's kind, or a crew's three roles, the
+        // third taken by several (`sim::activity::offer`); any other is proposed at its thing, and has no offerer.
+        let crew = roles.len() == 3 && a.most > 3;
+        let offerer = (roles.len() == 2 || crew)
+            .then(|| {
+                roles
+                    .iter()
+                    .take(2)
+                    .find(|(_, m)| *m == 1)
+                    .map(|(n, _)| n.clone())
+            })
+            .flatten();
+        let asks: i128 = roles
+            .iter()
+            .filter(|(n, _)| Some(n) != offerer.as_ref())
+            .map(|(_, m)| m)
+            .sum();
+        let mut o = vec![
+            ("kind".to_owned(), Json::s(kind)),
+            ("name".to_owned(), Json::s(a.name.as_str())),
+            (
+                "word".to_owned(),
+                Json::s(&kind.rsplit(':').next().unwrap_or(kind).replace('_', "-")),
+            ),
+            ("card".to_owned(), Json::s(card)),
+            (
+                "roles".to_owned(),
+                Json::Arr(
+                    roles
+                        .iter()
+                        .map(|(n, m)| Json::object([("role", Json::s(n)), ("most", Json::Int(*m))]))
+                        .collect(),
+                ),
+            ),
+            ("asks".to_owned(), Json::Int(asks)),
+        ];
+        if let Some(r) = offerer {
+            o.push(("offerer".to_owned(), Json::Str(r)));
+        }
+        if let Some(r) = reach {
+            // µm to m, to the centimetre.
+            o.push((
+                "near_m".to_owned(),
+                Json::Num(format!("{}.{:02}", r / 1_000_000, (r % 1_000_000) / 10_000)),
+            ));
+        }
+        if let Some(at) = worldd::engine::at_its_thing(&entries_obj, &a.name) {
+            o.push(("at".to_owned(), Json::s(at)));
+        }
+        out.push(Json::Obj(o));
+    }
+    Json::object([
+        ("format", Json::s("souls-activities/1")),
+        ("activities", Json::Arr(out)),
+    ])
+}
+
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
 /// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
-fn with_punts(facts: &str) -> R<String> {
+///
+/// With the facts' terrain when it read it (S12): the punts change no ground, so [`with_rides`] reads it from here
+/// rather than loading the facts again.
+fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
-        return Ok(facts.to_owned());
+        return Ok((facts.to_owned(), None));
     };
     // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
     let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
     let root = *im.nodes.get("world").ok_or("the facts have no world")?;
     let header = import_eden::header(root, &im.rules)?;
     let next = im.tree.to_state().next;
-    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
-        .map_err(|e| format!("the town: {e:?}"))?;
+    // On the start's threads (S12): the same town as on one.
+    let mut town = Town::new_on(
+        im.tree,
+        ground,
+        Doors::new(header, im.rules, next),
+        sim::ground::START_THREADS,
+    )
+    .map_err(|e| format!("the town: {e:?}"))?;
     let view = town.view();
     let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
         view.stand_near(ground, p, 0, None).is_some()
     });
     if moorings.is_empty() {
-        return Ok(facts.to_owned());
+        return Ok((facts.to_owned(), Some(terrain)));
     }
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
@@ -404,7 +756,7 @@ fn with_punts(facts: &str) -> R<String> {
             _ => return Err(format!("the facts have no '{key}' list")),
         }
     }
-    Ok(f.to_json())
+    Ok((f.to_json(), Some(terrain)))
 }
 
 /// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
@@ -469,7 +821,12 @@ fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
 /// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
 /// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
-fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+/// `terrain` is the facts' ground's terrain when [`with_punts`] read it, else it is read here.
+fn with_rides(
+    facts: &str,
+    entries: &[(String, Json)],
+    terrain: Option<Option<sim::ground::Terrain>>,
+) -> R<String> {
     let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
         .iter()
         .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
@@ -478,11 +835,16 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
     if rides.is_empty() {
         return Ok(facts.to_owned());
     }
-    let im = import_eden::load(facts)?;
-    let Some(&ground) = im.nodes.get("ground") else {
-        return Ok(facts.to_owned());
+    let terrain = match terrain {
+        Some(t) => t,
+        None => {
+            let im = import_eden::load(facts)?;
+            let Some(&ground) = im.nodes.get("ground") else {
+                return Ok(facts.to_owned());
+            };
+            sim::ground::Terrain::of(&im.tree, ground)?
+        }
     };
-    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
         return Err("the facts are not an object".into());
@@ -512,10 +874,19 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
     let mut k = 0;
     for t in things.iter_mut() {
         let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
-        let Some(ride) = t
-            .get("def")
+        // The entry a thing names of its own (its world's map: Eden's launch balloon is an `eden:balloon`), else its
+        // kind's, as `import_eden::entry_name` reads the thing.
+        let own = t
+            .get("entry")
             .and_then(Json::str)
-            .and_then(|d| names.get(d))
+            .map(|e| replica::world_model::plain(e).to_owned());
+        let Some(ride) = own
+            .or_else(|| {
+                t.get("def")
+                    .and_then(Json::str)
+                    .and_then(|d| names.get(d))
+                    .cloned()
+            })
             .and_then(|n| rides.get(n.as_str()))
         else {
             continue;
@@ -572,9 +943,132 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
+/// Where `worldd serve` keeps [`courses`]' answer for its facts and entries (S5): `<world>/facts.courses`.
+static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The cache's format and the meaning of what it holds: bump it whenever [`courses`], the punts' moorings or the
+/// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
+/// never read as now's. The build's own hash is in the key too ([`build_id`]), so a deploy of a new build computes them
+/// again.
+const COURSES_FORMAT: &str = "souls/facts-courses/2";
+
+/// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
+/// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
+fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let (punts, terrain) = with_punts(facts)?;
+    stamp("facts: punts");
+    let rides = with_rides(&punts, entries, terrain)?;
+    stamp("facts: rides");
+    with_entry_kinds(&rides, entries)
+}
+
+/// This build's id: the launcher's hash (`WORLDD_BUILD`), else the crate's version with this program's length and
+/// modification time (S12), read from its metadata only, so `worldd seed` keeps [`courses`] under the key the
+/// launched world reads and every start of the same binary agrees. Hashing the binary's bytes instead cost about 10 s
+/// per start for a debug build.
+fn build_id() -> String {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        std::env::var("WORLDD_BUILD").unwrap_or_else(|_| {
+            let version = env!("CARGO_PKG_VERSION");
+            std::env::current_exe()
+                .and_then(std::fs::metadata)
+                .map(|m| {
+                    let at = m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |d| d.as_nanos());
+                    format!("{version}-{}-{at}", m.len())
+                })
+                .unwrap_or_else(|_| version.to_owned())
+        })
+    })
+    .clone()
+}
+
+/// The cache key of `facts` and `entries` for this build.
+fn courses_key(facts: &str, entries: &[(String, Json)]) -> String {
+    let build = build_id();
+    let mut key = format!(
+        "{COURSES_FORMAT}.{build}.{}",
+        to_hex(&sha256(facts.as_bytes()))
+    );
+    for (k, e) in entries {
+        key.push('.');
+        key.push_str(&to_hex(&sha256(format!("{k}\0{}", e.to_json()).as_bytes())));
+    }
+    to_hex(&sha256(key.as_bytes()))
+}
+
+/// [`courses`] once per facts, entries and build (S5, 0.133): its answer is a function of them alone, so `worldd serve`
+/// keeps it in `cache` (`<key> <SHA-256 of the text>`, then the text), and a start with the same reads it back. A
+/// cache that is missing, of other facts, entries or build, or torn (its text not its hash) is computed again, and
+/// rewritten synced (`view_out::write_whole`). Returns the text and whether it came from the cache.
+fn courses_cached(
+    cache: Option<&Path>,
+    facts: &str,
+    entries: &[(String, Json)],
+) -> R<(String, bool)> {
+    let Some(path) = cache else {
+        return Ok((courses(facts, entries)?, false));
+    };
+    let key = courses_key(facts, entries);
+    if let Ok(text) = std::fs::read_to_string(path)
+        && let Some((head, out)) = text.split_once('\n')
+        && let Some((k, hash)) = head.split_once(' ')
+        && k == key
+        && hash == to_hex(&sha256(out.as_bytes()))
+    {
+        return Ok((out.to_owned(), true));
+    }
+    let out = courses(facts, entries)?;
+    let kept = format!("{key} {}\n{out}", to_hex(&sha256(out.as_bytes())));
+    // Best effort: a world that cannot keep it computes it at its next start too.
+    if let Err(e) = view_out::write_whole(path, kept.as_bytes()) {
+        eprintln!("worldd: the facts' courses are not kept: {}", refusal(e));
+    }
+    Ok((out, false))
+}
+
+/// The slots of activity `name`'s entry that admit a thing, numbered as the entry numbers its slots (1, 2, ... in its
+/// order): a carry's load rides its first (0.135 C4, `sim::activity::carry::SLOT`).
+fn thing_slots(
+    entries: &[(String, Json)],
+    name: &str,
+) -> BTreeMap<u64, std::collections::BTreeSet<String>> {
+    let entry = entries
+        .iter()
+        .find(|(k, _)| format!("{k}_activity") == plain(name));
+    let slots = entry.and_then(|(_, e)| e.get("slots")).and_then(Json::obj);
+    (1..)
+        .zip(slots.unwrap_or(&[]))
+        .filter(|(_, (_, s))| s.get("admits").and_then(Json::str) == Some("thing"))
+        .map(|(n, _)| (n, ["thing".to_owned()].into()))
+        .collect()
+}
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_entry_kinds(&with_rides(&with_punts(facts)?, entries)?, entries)?;
-    let mut im = import_eden::load(facts)?;
+    build_with(COURSES_CACHE.get().map(PathBuf::as_path), facts, entries)
+}
+
+/// [`build`] with its facts' courses kept in `cache` (S5).
+fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
+    let (prepared, kept) = courses_cached(cache, facts, entries)?;
+    stamp("facts: courses");
+    // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
+    let texts: Vec<(String, String)> = entries
+        .iter()
+        .map(|(k, e)| (k.clone(), e.to_json()))
+        .collect();
+    // A kept text that does not load is never the start's end: it is computed again.
+    let mut im = match import_eden::load_with(&prepared, &texts) {
+        Err(e) if kept => {
+            eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
+            import_eden::load_with(&courses(facts, entries)?, &texts)?
+        }
+        im => im?,
+    };
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
         println!(
@@ -583,7 +1077,7 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
             replica::world_model::show(id)
         );
     }
-    let mut activities = vec![conversation()?];
+    let mut activities = vec![conversation()?, give()?];
     activities.extend(activity_kinds(entries)?);
     stamp("activities");
     for a in &activities {
@@ -592,8 +1086,9 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
             Kind {
                 owner: "activity".into(),
                 children: Default::default(),
-                slots: Default::default(),
+                slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
+                fields: Default::default(),
             },
         );
     }
@@ -617,6 +1112,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
             kind.children.insert("body".into());
             boot_body.push(name.clone());
             for a in &activities {
+                kind.children.insert(plain(a.name.as_str()).to_owned());
+            }
+        }
+        // B10: an entry's own thing takes its activity too, so one offered or proposed at the thing is that thing's
+        // (its roles' links are written on it).
+        for a in &activities {
+            if a.roles
+                .iter()
+                .any(|r| r.link.as_ref().is_some_and(|l| l.on == plain(name)))
+            {
                 kind.children.insert(plain(a.name.as_str()).to_owned());
             }
         }
@@ -670,9 +1175,193 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     })
 }
 
+/// The owner of each kind a header pins, `<full pin> <owner>` a line (K16): kept beside the world's header as
+/// `header.kinds`, so a later build pairs a kind it changed with the world's revision only when both are owned alike.
+fn owners_text(built: &Built) -> String {
+    built
+        .header
+        .kinds
+        .iter()
+        .filter_map(|k| {
+            Some(format!(
+                "{} {}\n",
+                k.as_str(),
+                built.rules.kinds.get(k.as_str())?.owner
+            ))
+        })
+        .collect()
+}
+
+/// [`owners_text`] read back. A missing or unreadable file gives none, and then no kind is paired.
+fn owners(dir: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(dir.join("header.kinds"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(k, o)| (k.to_owned(), o.to_owned()))
+        .collect()
+}
+
+/// Keeps `built`'s header as the world's own (K16): `header.kinds`, then `header`, each written whole.
+fn keep_header(dir: &Path, built: &Built) -> R<()> {
+    view_out::write_whole(&dir.join("header.kinds"), owners_text(built).as_bytes())
+        .map_err(refusal)?;
+    view_out::write_whole(&dir.join("header"), built.header.stored()).map_err(refusal)
+}
+
+/// The world's own header (K16, 0.133): the one its log's parts name, kept in `<dir>/header` since the seed wrote it.
+/// A build never rebuilds it, so a change to how code or entries become kinds no longer refuses an existing world
+/// (`header-mismatch`, twice on Eden on 23 Nov). A world seeded before K16 keeps no header file: this build's is its
+/// own only if its log names it, and is then kept (`header-missing` otherwise). What is still checked, and why:
+///
+/// - its hash is the one the log's parts name (`header-mismatch`; each part names its header, and replay refuses a
+///   part naming another), from the newest part (the import's on a fresh world; a tick's is small, the import's may be
+///   megabytes). A log compacted to a checkpoint with nothing written since holds no part: then this is not checked;
+/// - its schema is one this build applies ([`Header::read`]'s `schema-unknown`): the effects are read by it;
+/// - its lineage and zone are the world's, as the facts' root and `world.json`'s name give them
+///   (`world-identity-mismatch`): not another world's.
+///
+/// Its kinds may differ from this build's: [`adopt`] reconciles them, with the owners `header.kinds` keeps.
+fn own_header(
+    dir: &Path,
+    built: &Built,
+    records: &[Vec<u8>],
+) -> R<(Header, BTreeMap<String, String>)> {
+    let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
+        Some(bytes) => Some(replica::effects::Part::read(bytes).map_err(refusal)?.header),
+        None => None,
+    };
+    let path = dir.join("header");
+    let header = match std::fs::read(&path) {
+        Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if named.as_ref() != Some(&built.header.hash().to_bytes()) {
+                return Err(format!(
+                    "header-missing: the log names header {}, the world keeps none, and this build's is {}: \
+                     reseed the world",
+                    named.as_deref().map_or("none".into(), to_hex),
+                    to_hex(&built.header.hash().to_bytes())
+                ));
+            }
+            keep_header(dir, built)?;
+            println!("header: kept this build's, the one the log names");
+            built.header.clone()
+        }
+        Err(e) => return Err(io(&path)(e)),
+    };
+    if let Some(named) = named
+        && header.hash().to_bytes() != named
+    {
+        return Err(format!(
+            "header-mismatch: {} is header {}, the log names {}",
+            path.display(),
+            to_hex(&header.hash().to_bytes()),
+            to_hex(&named)
+        ));
+    }
+    if header.zone != built.root || header.lineage != built.header.lineage {
+        return Err("world-identity-mismatch: the header is another world's".into());
+    }
+    Ok((header, owners(dir)))
+}
+
+/// Serves the built world under its own `header` (K16). A kind this build pins by another revision than the header
+/// (its definition changed in code or in an entry) is paired with the header's by plain name, when each side has
+/// exactly one unmatched revision of that name and `owners` (the world's `header.kinds`) gives the world's revision
+/// this build's owner: its rules are this build's definition under the header's pin, and the activity and body kinds
+/// the engine makes and `world.kinds`' boot activity lines name the header's pin. `world.kinds`' kind lines and boot
+/// targets keep this build's defined pins, so the creator's client still loads it. Any other unmatched revision is not
+/// guessed: one only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per
+/// act); one only the header pins has no rules (`kind-unknown`, per act). When the header is this build's, nothing
+/// changes. Prints what differs, each paired pin in full.
+fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
+    if header.stored() == built.header.stored() {
+        return;
+    }
+    let unmatched = |of: &Header, by: &Header| -> BTreeMap<String, Vec<String>> {
+        let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for k in of.kinds.iter().filter(|k| !by.kinds.contains(k)) {
+            m.entry(plain(k.as_str()).to_owned())
+                .or_default()
+                .push(k.as_str().to_owned());
+        }
+        m
+    };
+    let (mut world, mut build) = (
+        unmatched(&header, &built.header),
+        unmatched(&built.header, &header),
+    );
+    // This build's pin -> the world's, for each plain name with one unmatched revision on each side, owned alike.
+    let mut renames = BTreeMap::new();
+    for (name, ours) in &build {
+        if let (Some(theirs), [ours]) = (world.get(name), ours.as_slice())
+            && let [theirs] = theirs.as_slice()
+            && let Some(kind) = built.rules.kinds.get(ours).cloned()
+            && owners.get(theirs) == Some(&kind.owner)
+        {
+            built.rules.kinds.insert(theirs.clone(), kind);
+            renames.insert(ours.clone(), theirs.clone());
+        }
+    }
+    for (ours, theirs) in &renames {
+        build.remove(plain(ours));
+        world.remove(plain(theirs));
+    }
+    for a in &mut built.activities {
+        if let Some(k) = renames.get(a.name.as_str()).and_then(|k| Name::new(k)) {
+            a.name = k;
+        }
+    }
+    if let Some(k) = renames.get(&built.body_kind) {
+        built.body_kind = k.clone();
+    }
+    built.kinds_text = built
+        .kinds_text
+        .lines()
+        .map(|l| {
+            match l
+                .strip_prefix("# souls-boot-activity ")
+                .and_then(|p| p.split_once(' '))
+            {
+                Some((target, a)) => format!(
+                    "# souls-boot-activity {target} {}\n",
+                    renames.get(a).map_or(a, String::as_str)
+                ),
+                None => format!("{l}\n"),
+            }
+        })
+        .collect();
+    let list =
+        |m: &BTreeMap<String, Vec<String>>| m.values().flatten().cloned().collect::<Vec<_>>();
+    let (anew, unknown) = (list(&build), list(&world));
+    let taken: Vec<String> = renames
+        .iter()
+        .map(|(ours, theirs)| format!("{theirs} as {ours}"))
+        .collect();
+    println!(
+        "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
+         pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
+        to_hex(&header.hash().to_bytes()),
+        to_hex(&built.header.hash().to_bytes()),
+        taken.len(),
+        taken.join(", "),
+        anew.len(),
+        anew.join(", "),
+        unknown.len(),
+        unknown.join(", ")
+    );
+    built.header = header;
+}
+
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
 /// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
-fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
+/// `classes` are the body classes whose grounds are cut with them (S12).
+fn recovered_towns(
+    built: &Built,
+    initial: &Replica,
+    records: &[Vec<u8>],
+    classes: &[replica::kinds::sizes::Size],
+) -> R<(Town, Town)> {
     let mut live = initial.frozen();
     for bytes in records {
         crate::progress();
@@ -687,8 +1376,14 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         live.tree().next(),
     );
     stamp("log applied");
-    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
-        .map_err(|e| format!("the recovered town: {e}"))?;
+    let towns = Town::with_planner_classes_on(
+        live.tree().frozen(),
+        built.ground,
+        doors,
+        sim::ground::START_THREADS,
+        classes.iter().copied(),
+    )
+    .map_err(|e| format!("the recovered town: {e}"))?;
     stamp("town and planner");
     Ok(towns)
 }
@@ -958,6 +1653,13 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         entries(Path::new(e), &mut found)?;
     }
+    // C13's stand-point repair first: the header is built from the entries the folder keeps, the ones `serve` builds
+    // its rules from at each start. Built before the repair, an activity's stands (G3) differed from its rules (0.132.1).
+    if arg(args, "--entries").is_some() {
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
+    }
     let built = build(&text, &found)?;
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
@@ -965,10 +1667,6 @@ fn seed_in(args: &[String]) -> R<String> {
         std::fs::write(dir.join("bodies.json"), text).map_err(io(&dir))?;
     }
     if arg(args, "--entries").is_some() {
-        // C13: preserve the current main stand-point repair while keeping activity loading above.
-        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
-            println!("stand point: {line}");
-        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
@@ -992,6 +1690,11 @@ fn seed_in(args: &[String]) -> R<String> {
             std::fs::write(&p, &bytes).map_err(io(&p))?;
         }
         println!("hatches: {}", modules.len());
+        // The facts' courses kept for this build (S12), from the entries as `serve` reads them back: its first start
+        // reads them instead of cutting the punts' town again.
+        let mut kept = Vec::new();
+        entries(&dir.join("entries"), &mut kept)?;
+        courses_cached(Some(&dir.join("facts.courses")), &text, &kept)?;
     }
     // The Souls: ids of a scope of their own (not the tree's minter's), a token each.
     let name = instance(built.root);
@@ -1022,9 +1725,11 @@ fn seed_in(args: &[String]) -> R<String> {
     // The log, its first record the import's part: the world from empty.
     let (mut log, _) =
         Log::open(FileStore::open(&dir.join("log")).map_err(refusal)?, EPOCH).map_err(refusal)?;
-    let n = log.append(built.part).map_err(refusal)?;
+    let n = log.append(built.part.clone()).map_err(refusal)?;
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
+    // Its header, the one the part names (K16): every start serves the world under it.
+    keep_header(&dir, &built)?;
     // The world's one creator (G7b), if named: `serve` takes its edits.
     let creator = match arg(args, "--creator") {
         Some(c) => format!(", \"creator\": \"{c}\"", c = creator_of(c).map(|_| c)?),
@@ -1103,12 +1808,16 @@ fn born(
     Ok(out)
 }
 
-/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body.
+/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body. A row
+/// with no body may carry `look`, a humanoid look's params as JSON text (#3998's, at most `skills::wear::LOOK_MOST`
+/// bytes, one object): the body is born wearing it, as if its Soul's first act had been `life:look` (old Eden's
+/// residents, each made in today's editor).
 fn imported_births(
     dir: &Path,
     header: &replica::effects::Header,
     catalogue: &skills::wear::Catalogue,
     born: &mut BTreeMap<Id, [u8; 32]>,
+    looks: &mut BTreeMap<Id, Vec<u8>>,
 ) -> R<()> {
     let path = dir.join("births.json");
     let metadata = match std::fs::symlink_metadata(&path) {
@@ -1163,12 +1872,13 @@ fn imported_births(
         return Err(bad.into());
     }
     let mut seen = BTreeMap::new();
+    let mut new_looks = BTreeMap::new();
     for row in rows {
         let fields = row.obj().ok_or(bad)?;
         if !(3..=4).contains(&fields.len())
             || fields
                 .iter()
-                .any(|(k, _)| !["soul", "entry", "asked", "body"].contains(&k.as_str()))
+                .any(|(k, _)| !["soul", "entry", "asked", "body", "look"].contains(&k.as_str()))
         {
             return Err(bad.into());
         }
@@ -1193,6 +1903,20 @@ fn imported_births(
             ),
             Some(_) => return Err("body-births-unknown".into()),
         };
+        let look = match row.get("look") {
+            None => None,
+            Some(Json::Str(text))
+                if choice.is_none()
+                    && text.len() <= skills::wear::LOOK_MOST
+                    && json::parse(text).is_ok_and(|v| v.obj().is_some()) =>
+            {
+                Some(text.as_bytes().to_vec())
+            }
+            Some(_) => return Err("body-births-look".into()),
+        };
+        if let Some(look) = look {
+            new_looks.insert(soul, look);
+        }
         if seen.insert(soul, choice).is_some() {
             return Err("body-births-duplicate".into());
         }
@@ -1207,65 +1931,46 @@ fn imported_births(
             born.insert(soul, hash);
         }
     }
+    looks.extend(new_looks);
     Ok(())
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it. The planner keeps its own town and all declared seats are registered.
+/// where the log last had it. The planner keeps its own town and all declared seats are registered. `entry` is where
+/// the world's Souls are born on its ground: a restart's last resort for a body it cannot place on its own ground.
+#[allow(clippy::too_many_arguments)]
 fn bodies(
     town: Town,
     planner: Town,
     ground: Id,
+    entry: Vec3,
     placed: &Placed,
     places: Vec<PlaceAt>,
+    runs: Vec<(Id, sim::courses::rides::SeatRun)>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
 ) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
     })?;
+    // Each recorded body is placed on its own, so one never stops the others starting (a local failure never stops
+    // unrelated actors), and always at a point it may stand on: where the log had it; off its floor, by the restart
+    // rule (`Bodies::add_body_at_built`, E11d); a body that cannot be placed on its own ground at all (its floor or seat
+    // gone) at the world's entry (`Bodies::add_body_at_entry`), named. Only a body with no recorded build is left out.
     let mut at = Vec::new();
+    let mut lost = Vec::new();
     for (id, (pose, _)) in placed {
-        let build = builds.get(id).copied().ok_or_else(|| Refusal {
-            name: "body-unknown",
-            detail: "recorded build missing".into(),
-        })?;
-        let (node, point, facing) = match pose.support {
-            replica::pose::Support::Surface { surface, .. } => {
-                (surface, pose.position, pose.orientation)
+        match recorded_body(&town, &places, *id, pose, builds) {
+            Ok(one) => at.push(one),
+            Err(r) => {
+                eprintln!(
+                    "worldd: {} cannot be placed where the log had it: {}",
+                    replica::world_model::show(*id),
+                    refusal(r)
+                );
+                lost.push((*id, *pose));
             }
-            replica::pose::Support::Slot => {
-                let site = places
-                    .iter()
-                    .find(|p| {
-                        p.thing == pose.frame.node
-                            && pose.frame.slot.is_none_or(|s| s == p.place.slot)
-                    })
-                    .ok_or_else(|| Refusal {
-                        name: "place-unknown",
-                        detail: "recorded support unavailable".into(),
-                    })?;
-                (site.floor, site.stand()?, site.facing)
-            }
-            replica::pose::Support::Volume { .. }
-            | replica::pose::Support::Track
-            | replica::pose::Support::None => {
-                return Err(Refusal {
-                    name: "recorded-body-support",
-                    detail: "unsupported native body support".into(),
-                });
-            }
-        };
-        let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
-            name: "body-class-unprepared",
-            detail: "recorded body".into(),
-        })?;
-        let surface = surfaces.get(&node).ok_or_else(|| Refusal {
-            name: "no-surface",
-            detail: "recorded ground".into(),
-        })?;
-        let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
-        at.push((moved, build));
+        }
     }
     // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
     let mut moving = Vec::new();
@@ -1281,19 +1986,124 @@ fn bodies(
             }
         }
     }
+    let owns: Vec<(Id, sim::slots::Footprint)> = places
+        .iter()
+        .map(|p| (p.thing, p.floor))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|(thing, floor)| (thing, worldd::places::footprint(&town.tree, thing, floor)))
+        .collect();
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, own) in owns {
+        b.slots.footprint(thing, own);
     }
     for (thing, course) in moving {
         let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
         b.slots.moving(thing, &course, home)?;
     }
+    // The seats that move with their cabins (N14): boarded and left only where they stand at a stop.
+    for (thing, r) in runs {
+        b.slots.trip_ends(thing, r.ends.clone());
+        if let Err(e) = b.slots.run(thing, r.slot, &r.course, r.stops, &r.own) {
+            eprintln!("worldd: a ride's slot run did not load: {}", refusal(e));
+        }
+    }
 
     for (a, build) in at {
-        b.add_body_at_built(family.clone(), a, placed, build)?;
+        let id = a.id;
+        if let Err(r) = b.add_body_at_built(family.clone(), a, placed, build) {
+            eprintln!(
+                "worldd: {} cannot be added where the log had it: {}",
+                replica::world_model::show(id),
+                refusal(r)
+            );
+            if let Some((pose, _)) = placed.get(&id) {
+                lost.push((id, *pose));
+            }
+        }
+    }
+    for (id, pose) in lost {
+        let placed_at = match builds.get(&id) {
+            Some(&build) => b.add_body_at_entry(family.clone(), id, build, entry, &pose),
+            None => Err(Refusal {
+                name: "body-unknown",
+                detail: "recorded build missing".into(),
+            }),
+        };
+        match placed_at {
+            Ok(()) => eprintln!(
+                "worldd: {} placed at the world's entry (resume-entry)",
+                replica::world_model::show(id)
+            ),
+            Err(r) => eprintln!(
+                "worldd: {} was not placed again, left out: {}",
+                replica::world_model::show(id),
+                refusal(r)
+            ),
+        }
     }
     Ok(b)
+}
+
+/// One recorded body placed again for [`bodies`]: on its recorded ground, or by its seat's stand point when it sat,
+/// with its build. A body killed off its floor (mid-climb out of a seat, E11d) is placed where it was
+/// (`sim::slots::placed_off`); `Bodies::add_body_at_built` resumes it.
+fn recorded_body(
+    town: &Town,
+    places: &[PlaceAt],
+    id: Id,
+    pose: &replica::pose::Pose,
+    builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
+) -> Result<(sim::mover::Body, replica::kinds::sizes::Build), Refusal> {
+    let build = builds.get(&id).copied().ok_or_else(|| Refusal {
+        name: "body-unknown",
+        detail: "recorded build missing".into(),
+    })?;
+    let (node, point, facing) = match pose.support {
+        replica::pose::Support::Surface { surface, .. } => {
+            (surface, pose.position, pose.orientation)
+        }
+        replica::pose::Support::Slot => {
+            let site = places
+                .iter()
+                .find(|p| {
+                    p.thing == pose.frame.node && pose.frame.slot.is_none_or(|s| s == p.place.slot)
+                })
+                .ok_or_else(|| Refusal {
+                    name: "place-unknown",
+                    detail: "recorded support unavailable".into(),
+                })?;
+            (site.floor, site.stand()?, site.facing)
+        }
+        replica::pose::Support::Volume { .. }
+        | replica::pose::Support::Track
+        | replica::pose::Support::None => {
+            return Err(Refusal {
+                name: "recorded-body-support",
+                detail: "unsupported native body support".into(),
+            });
+        }
+    };
+    let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
+        name: "body-class-unprepared",
+        detail: "recorded body".into(),
+    })?;
+    let surface = surfaces.get(&node).ok_or_else(|| Refusal {
+        name: "no-surface",
+        detail: "recorded ground".into(),
+    })?;
+    let frame = Frame { node, slot: None };
+    // A body that sat stands at its seat's stand point until its seat is held again, or for good when the seat is gone
+    // or taken: at a point it may stand on.
+    let moved = if pose.support == replica::pose::Support::Slot {
+        worldd::bodies::legal_near(surface, id, frame, point, facing, build)?
+    } else {
+        sim::slots::placed_off(surface, id, frame, point, facing, build)?
+    };
+    Ok((moved, build))
 }
 
 /// The world's store; its reads at the start are made [`patiently`] (#1960).
@@ -1393,10 +2203,18 @@ struct Again {
     header: Vec<u8>,
 }
 impl Again {
+    /// The public copy of `key`: its bytes checked ([`Again::check`]), then placed ([`Again::place`]), either refusal
+    /// returned (the tests' strict form of [`Again::mirrored`]).
+    #[cfg(test)]
     fn mirror(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
         if !history_public_key(key) {
             return Ok(());
         }
+        self.check(key, bytes)?;
+        self.place(key, bytes)
+    }
+    /// A public key's bytes are what they say they are. A refusal here is a corrupt archive, and ends the start.
+    fn check(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
         let fail = |detail: &str| Refusal {
             name: "history-export",
             detail: detail.into(),
@@ -1444,21 +2262,57 @@ impl Again {
             }
             _ => return Err(fail("public key refused")),
         }
+        Ok(())
+    }
+    /// Where the public copy of `key` sits in the export directory: at its key, except a day's event index once an
+    /// hour of that day has an object of its own (V4, an hour of [`replica::history::events::SPLIT`] events or more).
+    /// The day's key then names the directory of its hours, so its index sits in it as [`EVENTS_DAY_FILE`] (no hour's
+    /// name), and the viewers' origin serves it at the day's URL (`v2/tools/origin/origin.mjs`).
+    fn public_path(&self, key: &str) -> PathBuf {
+        let path = self.public.join(key);
+        if is_events_day(key) && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+            path.join(EVENTS_DAY_FILE)
+        } else {
+            path
+        }
+    }
+    /// Writes the checked `bytes` of `key` into the export directory: no symlink followed, an immutable copy never
+    /// changed. A refusal here is the mirror's alone; the store holds the key.
+    fn place(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
+        let fail = |detail: &str| Refusal {
+            name: "history-export",
+            detail: detail.into(),
+        };
+        let parts: Vec<_> = key.split('/').collect();
         let mut path = self.public.clone();
-        for component in std::iter::once("").chain(key.split('/').take(key.split('/').count() - 1))
-        {
-            if !component.is_empty() {
-                path.push(component);
+        // The export directory itself, then each directory of the key.
+        for at in 0..parts.len() {
+            if at > 0 {
+                path.push(parts[at - 1]);
             }
             match std::fs::symlink_metadata(&path) {
                 Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+                // The first hour of a day split off after the day's index was placed: the index moves into the day's
+                // directory, beside its hours.
+                Ok(m)
+                    if at > 0
+                        && m.is_file()
+                        && !m.file_type().is_symlink()
+                        && is_events_day(&parts[..at].join("/")) =>
+                {
+                    let aside = path.with_extension("tmp");
+                    std::fs::rename(&path, &aside)
+                        .and_then(|()| std::fs::create_dir(&path))
+                        .and_then(|()| std::fs::rename(&aside, path.join(EVENTS_DAY_FILE)))
+                        .map_err(|_| fail("cannot move the day index beside its hours"))?;
+                }
                 Ok(_) => return Err(fail("directory symlink or type mismatch")),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path)
                     .map_err(|_| fail("cannot create export directory"))?,
                 Err(_) => return Err(fail("cannot inspect export directory")),
             }
         }
-        let path = self.public.join(key);
+        let path = self.public_path(key);
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err(fail("file symlink or type mismatch"));
@@ -1483,42 +2337,326 @@ impl Again {
                     name: "history-export",
                     detail: "public object disappeared".into(),
                 })?;
-                self.mirror(&key, &object.bytes)?;
+                self.mirrored(&key, &object.bytes)?;
+            }
+        }
+        Ok(())
+    }
+    /// [`Again::mirror`], whose placing ends nothing: the store holds the key, a public copy that cannot be placed is
+    /// skipped, counted in `health.json` (`history_export`) and logged once per key. A local failure never stops the
+    /// world. Bytes that fail their check are refused as before: a corrupt archive stops at the start.
+    fn mirrored(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
+        if !history_public_key(key) {
+            return Ok(());
+        }
+        self.check(key, bytes)?;
+        if let Err(e) = self.place(key, bytes) {
+            let fault = refusal(e);
+            if measures::HISTORY_EXPORT.fault(key, &fault) {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "worldd: the public history skips {key}, the world goes on: {fault}"
+                );
             }
         }
         Ok(())
     }
 }
-impl Store for Again {
-    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
-        self.store.get(key)
-    }
-    fn list(&self, prefix: &str) -> Result<Vec<String>, Refusal> {
-        self.store.list(prefix)
-    }
-    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
-        let result = match self.store.put(key, bytes, when) {
-            Err(e) if e.name == "precondition-failed" && when == When::Absent => {
-                match self.store.get(key)? {
-                    Some(old) if old.bytes == bytes => Ok(old.etag),
-                    Some(old) if history_mutable_key(key) => {
-                        self.store.put(key, bytes, When::Is(&old.etag))
+
+/// A day's event index in the export directory, once that day's key is the directory of its split hours.
+const EVENTS_DAY_FILE: &str = "day";
+
+/// Whether `key` is a day's object of the public event index (`history/everyone/events/<day>`).
+fn is_events_day(key: &str) -> bool {
+    key.strip_prefix("history/everyone/events/")
+        .is_some_and(|day| !day.contains('/') && history_public_key(key))
+}
+std::thread_local! {
+    /// The waits between a running archiver's tries of a call the store does not answer ([`persistently`]).
+    static PERSIST: std::cell::Cell<Option<&'static [u64]>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with this thread's [`Again`] calls tried until the store answers them, after each of `waits` ms (the last
+/// repeats): a running archiver's write is never given up on, so the archiver never stops on a store out of reach,
+/// and the parts that come meanwhile wait in its queue, in order. The archive's open is not run so: it is tried whole
+/// ([`until_answered`]).
+fn persistently<T>(waits: &'static [u64], f: impl FnOnce() -> T) -> T {
+    let before = PERSIST.with(|p| p.replace(Some(waits)));
+    let out = f();
+    PERSIST.with(|p| p.set(before));
+    out
+}
+
+impl Again {
+    /// `call`, tried again while it answers `store-unreachable` when this thread runs [`persistently`] (else once):
+    /// `archive` in `health.json` says `behind` with the fault and the next try meanwhile, and `current` once answered.
+    fn answered<T>(&self, mut call: impl FnMut() -> Result<T, Refusal>) -> Result<T, Refusal> {
+        let Some(waits) = PERSIST.with(std::cell::Cell::get) else {
+            return call();
+        };
+        let mut tries = 0u64;
+        loop {
+            match call() {
+                Err(e) if e.name == "store-unreachable" && !waits.is_empty() => {
+                    tries += 1;
+                    // A rate-limited store's `Retry-After`, when longer, bounded (R18).
+                    let after = directoryd::directory::store::retry_after(&e)
+                        .map_or(0, |d| d.as_millis() as u64);
+                    let wait = waits[(tries as usize - 1).min(waits.len() - 1)].max(after);
+                    let fault = refusal(e);
+                    measures::ARCHIVE.behind(&fault, tries, wait);
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: the archive is behind, the world goes on: {fault}; try {tries} unanswered, the next in {wait} ms"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(wait));
+                }
+                answer => {
+                    if tries > 0 && answer.is_ok() {
+                        measures::ARCHIVE.current();
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "worldd: the archive caught up: the store answered after {tries} unanswered tries"
+                        );
                     }
-                    _ => Err(e),
+                    return answer;
                 }
             }
-            other => other,
-        }?;
-        self.mirror(key, bytes)?;
+        }
+    }
+}
+
+impl Store for Again {
+    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
+        self.answered(|| self.store.get(key))
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>, Refusal> {
+        self.answered(|| self.store.list(prefix))
+    }
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
+        // A try the store did not answer may have been done: a later try refused on its condition is then read back,
+        // and these bytes there are this write's.
+        let mut unanswered = false;
+        let result = self.answered(|| {
+            let tried = match self.store.put(key, bytes, when) {
+                Err(e)
+                    if e.name == "precondition-failed" && (when == When::Absent || unanswered) =>
+                {
+                    match self.store.get(key)? {
+                        Some(old) if old.bytes == bytes => Ok(old.etag),
+                        Some(old) if when == When::Absent && history_mutable_key(key) => {
+                            self.store.put(key, bytes, When::Is(&old.etag))
+                        }
+                        _ => Err(e),
+                    }
+                }
+                other => other,
+            };
+            if tried.as_ref().is_err_and(|e| e.name == "store-unreachable") {
+                unanswered = true;
+            }
+            tried
+        })?;
+        self.mirrored(key, bytes)?;
         Ok(result)
     }
 }
 
 /// Where each record on the disk goes off the machine: the shipper, and the archiver (parts only, numbered among
 /// the parts).
+/// The most bytes of parts that wait in the archiver's channel. Past it the parts stay in the log on the disk, which the
+/// compactor keeps until they are archived, and the archiver reads them from there once it has taken those queued: a
+/// store out of reach for hours costs this much memory at most, never the log's rate times the outage.
+const ARCHIVE_WINDOW: u64 = 64 << 20;
+
+/// What [`Off`] hands the archiver and what it leaves for it in the log, shared by the two.
+struct Handover {
+    window: u64,
+    state: std::sync::Mutex<Handing>,
+}
+
+#[derive(Default)]
+struct Handing {
+    /// Parts in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
+    queued: u64,
+    queued_bytes: u64,
+    /// While parts are not sent: the first record left in the log, and its number in the archive.
+    left: Option<(u64, u64)>,
+    /// The record after the last one handed or left, and the archive's number after it.
+    end: u64,
+    next: u64,
+}
+
+impl Handover {
+    fn new(window: u64) -> Arc<Handover> {
+        Arc::new(Handover {
+            window,
+            state: std::sync::Mutex::default(),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Handing> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn gauge(h: &Handing) {
+        let in_log = h.left.map_or(0, |(from, _)| h.end.saturating_sub(from));
+        measures::ARCHIVE_QUEUE.set(h.queued, h.queued_bytes, in_log);
+    }
+
+    /// Record `record`, the archive's `number`: sent on `tx`, unless the channel holds the window already or parts
+    /// are left in the log, when it is left there too.
+    fn hand(&self, tx: &Sender<(u64, Vec<u8>)>, record: u64, number: u64, bytes: &[u8]) {
+        let mut h = self.lock();
+        let len = bytes.len() as u64;
+        if h.left.is_none() && h.queued > 0 && h.queued_bytes + len > self.window {
+            h.left = Some((record, number));
+        }
+        if h.left.is_none() {
+            h.queued += 1;
+            h.queued_bytes += len;
+            if tx.send((number, bytes.to_vec())).is_err() {
+                h.queued -= 1;
+                h.queued_bytes -= len;
+            }
+        }
+        (h.end, h.next) = (record + 1, number + 1);
+        Handover::gauge(&h);
+    }
+
+    /// The archiver took a part of `len` bytes from the channel.
+    fn took(&self, len: usize) {
+        let mut h = self.lock();
+        h.queued = h.queued.saturating_sub(1);
+        h.queued_bytes = h.queued_bytes.saturating_sub(len as u64);
+        Handover::gauge(&h);
+    }
+
+    /// What is left in the log for the archiver: its first record and number, and the record after the last.
+    fn left(&self) -> Option<(u64, u64, u64)> {
+        let h = self.lock();
+        h.left.map(|(from, number)| (from, number, h.end))
+    }
+
+    /// The archiver read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
+    /// the last record taken, parts are sent again from the next.
+    fn read_to(&self, reached: u64, number: u64) -> Result<(), Refusal> {
+        let mut h = self.lock();
+        if reached >= h.end {
+            if number != h.next {
+                return Err(Refusal {
+                    name: "archive-handover",
+                    detail: format!(
+                        "read from the log to {number}, the world handed to {}",
+                        h.next
+                    ),
+                });
+            }
+            h.left = None;
+        } else {
+            h.left = Some((reached, number));
+        }
+        Handover::gauge(&h);
+        Ok(())
+    }
+}
+
+/// A record of the log and its number.
+type Numbered = (u64, Vec<u8>);
+
+/// The world's log read forward from the disk a batch at a time, for the parts left there ([`Handover`]). Its place
+/// is kept between batches; the first read starts at the log's cut, or its first record. Offsets and record numbers
+/// never change when the log is compacted (`sim::log::compact`), and the compactor keeps every record the archive has
+/// not closed, so what it reads is there.
+struct LogReader {
+    path: PathBuf,
+    at: Option<sim::log::At>,
+}
+
+impl LogReader {
+    /// The bytes one batch reads; a record longer than that is read whole.
+    const BATCH: usize = 8 << 20;
+
+    /// The records from `from` (at most up to `end`) in the next batch, each with its number, and the record after the
+    /// last one read.
+    fn batch(&mut self, from: u64, end: u64) -> Result<(Vec<Numbered>, u64), Refusal> {
+        use sim::log::{At, HEAD_LEN, HEADER_LEN, MAX_RECORD};
+        use std::io::{Read, Seek, SeekFrom};
+        let fault = |detail: String| Refusal {
+            name: "archive-log",
+            detail,
+        };
+        let io = |e: std::io::Error| fault(format!("{}: {e}", self.path.display()));
+        let mut file = std::fs::File::open(&self.path).map_err(io)?;
+        let mut header = [0u8; HEADER_LEN];
+        file.read_exact(&mut header).map_err(io)?;
+        let at = match self.at {
+            Some(at) if at.record <= from => at,
+            _ => match sim::log::compact::read_cut(&self.path)? {
+                Some(cut) => cut.at,
+                None => At {
+                    record: 0,
+                    offset: HEADER_LEN as u64,
+                    crc: sim::log::Header::new(u64::from_le_bytes(
+                        header[16..24].try_into().expect("8 bytes"),
+                    ))
+                    .salt,
+                },
+            },
+        };
+        if at.record > from {
+            return Err(fault(format!(
+                "record {from} is before the log's cut at {}",
+                at.record
+            )));
+        }
+        let mut chunk = Self::BATCH;
+        loop {
+            file.seek(SeekFrom::Start(at.offset)).map_err(io)?;
+            let mut tail = Vec::new();
+            (&mut file)
+                .take(chunk as u64)
+                .read_to_end(&mut tail)
+                .map_err(io)?;
+            let found = sim::log::recover_from(&header, &tail, at)?.ok_or_else(|| {
+                fault(format!("the log does not continue at record {}", at.record))
+            })?;
+            if found.records.is_empty() {
+                if tail.len() < chunk || chunk > MAX_RECORD {
+                    self.at = Some(at);
+                    return Ok((Vec::new(), at.record));
+                }
+                chunk *= 2;
+                continue;
+            }
+            let (mut out, mut next, mut offset) = (Vec::new(), at, 0usize);
+            for (k, bytes) in found.records.into_iter().enumerate() {
+                let record = at.record + k as u64;
+                if record >= end {
+                    break;
+                }
+                let crc =
+                    u32::from_le_bytes(tail[offset + 8..offset + 12].try_into().expect("4 bytes"));
+                offset += HEAD_LEN + bytes.len();
+                next = At {
+                    record: record + 1,
+                    offset: at.offset + offset as u64,
+                    crc,
+                };
+                if record >= from {
+                    out.push((record, bytes));
+                }
+            }
+            self.at = Some(next);
+            return Ok((out, next.record));
+        }
+    }
+}
+
 struct Off {
     ship: Sender<Item>,
     archive: Option<Sender<(u64, Vec<u8>)>>,
+    handover: Arc<Handover>,
     parts: u64,
     based: bool,
     archive_base: u64,
@@ -1534,7 +2672,7 @@ impl Off {
             if let Some(crate::compactor::Archive::Parts(p)) = &self.floor {
                 p.sent(record, self.parts);
             }
-            let _ = a.send((self.parts, bytes.to_vec()));
+            self.handover.hand(a, record, self.parts, bytes);
             self.parts += 1;
         }
     }
@@ -1556,7 +2694,7 @@ impl Off {
         if let Some(a) = &self.archive {
             if self.based {
                 if record >= self.archive_base {
-                    let _ = a.send((record, bytes.to_vec()));
+                    self.handover.hand(a, record, record, bytes);
                 }
             } else if !input {
                 self.part(record, bytes);
@@ -1579,55 +2717,125 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
 /// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
 /// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
-/// in `rx` in order (#3746).
+/// in `feed` in order (#3746): at most [`ARCHIVE_WINDOW`] of them in memory, the rest read from the log ([`Handover`]). An open the store does not answer is tried again until it does (R17, `archive` in
+/// `health.json`); once open, each call the store does not answer is tried again after each of `waits` ms until it
+/// does ([`persistently`]), so a store out of reach never stops the archiver (`archive` says `behind` meanwhile).
 fn archiving(
-    open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
-    rx: Receiver<(u64, Vec<u8>)>,
+    mut open: impl FnMut() -> Result<Archiver<Again>, Refusal> + Send + 'static,
+    mut feed: Feed,
     text: Arc<sim::text::Store>,
     closed: impl Fn(u64) + Send + 'static,
+    waits: &'static [u64],
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
+    measures::ARCHIVE.recovering();
     std::thread::spawn(move || {
-        // A fork's open is the world's start too: its reads are patient (#1960).
-        let mut a = patiently(open)?;
-        // How far its closed objects reach, for the log's compactor (#3837).
-        let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
-        publish(&a);
-        let mut indexed = a.shelf.writes.bundles;
-        let (mut fresh, mut viewed) = (false, std::time::Instant::now());
-        loop {
-            if a.is_based() && a.refresh_redactions(text.redactions())? {
+        // The open is the world's start too: its reads are patient (#1960), and tried again until answered (R17).
+        let a = until_answered("the archive", &measures::ARCHIVE, || patiently(&mut open))?;
+        // Once open, each of its calls is tried until the store answers it: the archiver never stops on a store out
+        // of reach, and parts wait in `rx` meanwhile, in order. Any other refusal still ends it, named in health.json.
+        persistently(waits, || archive_parts(a, &mut feed, &text, &closed))
+            .inspect_err(|e| measures::ARCHIVE.stopped(&refusal(e.clone())))
+    })
+}
+
+/// The archiver's loop once open ([`archiving`]).
+fn archive_parts(
+    mut a: Archiver<Again>,
+    feed: &mut Feed,
+    text: &sim::text::Store,
+    closed: &impl Fn(u64),
+) -> Result<(), Refusal> {
+    // How far its closed objects reach, for the log's compactor (#3837).
+    let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
+    publish(&a);
+    let mut indexed = a.shelf.writes.bundles;
+    let (mut fresh, mut viewed) = (false, std::time::Instant::now());
+    // Whether the last batch read from the log moved on: the next is read at once.
+    let mut reading = false;
+    loop {
+        if a.is_based() && a.refresh_redactions(text.redactions())? {
+            fresh = true;
+        }
+        let wait = if reading {
+            std::time::Duration::ZERO
+        } else {
+            shipping::POLL * 20
+        };
+        match feed.rx.recv_timeout(wait) {
+            Ok((n, bytes)) => {
+                feed.handover.took(bytes.len());
+                if a.is_based() {
+                    a.refresh_redactions(text.redactions())?;
+                }
+                a.push(n, bytes)?;
                 fresh = true;
             }
-            match rx.recv_timeout(shipping::POLL * 20) {
-                Ok((n, bytes)) => {
-                    if a.is_based() {
-                        a.refresh_redactions(text.redactions())?;
-                    }
-                    a.push(n, bytes)?;
-                    fresh = true;
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    if a.is_based() {
-                        a.refresh_redactions(text.redactions())?;
-                    }
-                    return a.flush();
-                }
+            // The channel is empty: what was sent before parts were left in the log is taken, so they come next.
+            Err(RecvTimeoutError::Timeout) => {
+                reading = from_log(&mut a, feed, text)?;
+                fresh |= reading;
             }
-            if a.shelf.writes.bundles != indexed {
-                a.shelf.flush()?;
-                indexed = a.shelf.writes.bundles;
-            }
-            publish(&a);
-            if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                a.publish_open()?;
-                for (k, v) in a.open_views()? {
-                    a.shelf.put_view(&k, &v)?;
+            Err(RecvTimeoutError::Disconnected) => {
+                while from_log(&mut a, feed, text)? {}
+                if a.is_based() {
+                    a.refresh_redactions(text.redactions())?;
                 }
-                (fresh, viewed) = (false, std::time::Instant::now());
+                return a.flush();
             }
         }
-    })
+        if a.shelf.writes.bundles != indexed {
+            a.shelf.flush()?;
+            indexed = a.shelf.writes.bundles;
+        }
+        publish(&a);
+        if fresh && viewed.elapsed() >= VIEWS_EVERY {
+            a.publish_open()?;
+            for (k, v) in a.open_views()? {
+                a.shelf.put_view(&k, &v)?;
+            }
+            (fresh, viewed) = (false, std::time::Instant::now());
+        }
+    }
+}
+
+/// Where the archiver's parts come from: the channel, and the log for those left there ([`Handover`]). A fork's
+/// archive (`based`) is handed records from `base` on, inputs too, by record; any other is handed parts (records that
+/// are not inputs), numbered among the parts.
+struct Feed {
+    rx: Receiver<(u64, Vec<u8>)>,
+    handover: Arc<Handover>,
+    log: LogReader,
+    based: bool,
+    base: u64,
+}
+
+/// One batch of the parts left in the log, pushed in order; whether the read moved on.
+fn from_log(
+    a: &mut Archiver<Again>,
+    feed: &mut Feed,
+    text: &sim::text::Store,
+) -> Result<bool, Refusal> {
+    let Some((from, number, end)) = feed.handover.left() else {
+        return Ok(false);
+    };
+    let before = feed.log.at.map(|at| at.record);
+    let (records, reached) = feed.log.batch(from, end)?;
+    let mut next = number;
+    for (record, bytes) in records {
+        if feed.based {
+            if record < feed.base {
+                continue;
+            }
+            a.refresh_redactions(text.redactions())?;
+            a.push(record, bytes)?;
+            next = record + 1;
+        } else if !recorder::is_input(&bytes) {
+            a.push(next, bytes)?;
+            next += 1;
+        }
+    }
+    feed.handover.read_to(reached.max(from), next)?;
+    Ok(feed.log.at.map(|at| at.record) != before)
 }
 
 fn archive_bridge(
@@ -1794,48 +3002,122 @@ fn off_machine(
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
     let store: Bucket = Shared(Arc::new(Patient::new(
-        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
+        supervisor::bucket::Bucket::from_spec(spec)
+            .map_err(refusal)?
+            .for_world(),
     )));
     println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
+    // A fork's archive base decides how its records go to the archive, so it is read before the world listens: tried
+    // until the store answers, never an exit on a slow one (R17). An unforked world reads nothing here.
     let fork_base = checkpoint
-        .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
+        .map(|newest| {
+            until_answered("the fork's archive base", &measures::ARCHIVE, || {
+                fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered)
+            })
+        })
         .transpose()
         .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store.clone(), machine);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
-    match d.world(&lineage, zone) {
-        Err(e) if e.name == "record-missing" => {
-            // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
-            let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
-            let mut build = vec![0x12, 0x20];
-            build.extend_from_slice(&sha256(pin.as_bytes()));
-            d.set_build(&lineage, zone, &build).map_err(refusal)?;
-        }
-        Err(e) => return Err(refusal(e)),
-        Ok(_) => {}
-    }
     let end = first + records.len() as u64;
-    let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
-    let from = claim.takeover.from;
-    println!(
-        "shipping: epoch {} from record {from} of {end}",
-        claim.takeover.epoch
+    // R17: the claim and the shipper's open read the store, so they are made on the shipper's own thread, tried until
+    // the store answers, while the world listens and serves. Records wait in `ship` meanwhile, every one from the
+    // log's first; the shipper passes over those its claim already holds. Until it opens, its marks hold the whole
+    // log from the compactor.
+    let (ship, items) = channel::<Item>();
+    let mark = shipping::Mark::default();
+    let shared = mark.clone();
+    let (claim_store, header, checkpoints) = (
+        store.clone(),
+        built.header.stored().to_vec(),
+        dir.join("checkpoints"),
     );
-    let shipper = Shipper::open(
-        d,
-        claim,
-        lineage,
-        zone,
-        built.header.stored(),
-        from,
-        Wall::start(),
-    )
-    .map_err(refusal)?
-    .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
-    let (ship, mark, h) = shipper.spawn();
-    report("the shipper", h);
+    let claim = move || -> Result<Shipper<Bucket, Wall>, Refusal> {
+        let mut d = Directory::new(claim_store.clone(), machine.clone());
+        match d.world(&lineage, zone) {
+            Err(e) if e.name == "record-missing" => {
+                // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
+                let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
+                let mut build = vec![0x12, 0x20];
+                build.extend_from_slice(&sha256(pin.as_bytes()));
+                d.set_build(&lineage, zone, &build)?;
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+        let claim = shipping::take_over(&mut d, &lineage, zone, first..end)?;
+        let from = claim.takeover.from;
+        let _ = writeln!(
+            std::io::stdout(),
+            "shipping: epoch {} from record {from} of {end}",
+            claim.takeover.epoch
+        );
+        Ok(
+            Shipper::open(d, claim, lineage, zone, &header, from, Wall::start())?
+                .checkpoints(&checkpoints, shipping::CHECKPOINT_GAP_US)
+                .sharing(&shared),
+        )
+    };
+    measures::SHIPPING.recovering();
+    // Set once the claim is held; the archive writes nothing before it.
+    let claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let claiming = Arc::clone(&claimed);
+    let opening = std::thread::Builder::new()
+        .name("shipping".into())
+        .spawn(move || -> Result<(), Refusal> {
+            // R18: a test's forced panic on this thread, before the claim (`tests/serve.rs`); a debug build's only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("WORLDD_TEST_PANIC_SHIPPING").is_some() {
+                panic!("WORLDD_TEST_PANIC_SHIPPING");
+            }
+            // Only a store that does not answer is waited for. Any other refusal (`restart-gap`, another machine's
+            // claim, a record that does not decode) ends the process by name, as before R17: serving on with no claim
+            // would number new records over ones already off the machine.
+            let shipper = until_answered("shipping", &measures::SHIPPING, || patiently(&claim))
+                .unwrap_or_else(|e| refused_at_start(e));
+            // The claim is held: the archive may write.
+            claiming.store(true, std::sync::atomic::Ordering::SeqCst);
+            let (to, _, h) = shipper.spawn();
+            // R18: the shipper stopping while the world runs (a panic, or a refused push such as `ship-gap`) would
+            // freeze its marks, so it ends the process by name. Only its last flush, once the records' sender is
+            // dropped as the world ends, is said and passed over.
+            let ending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let ended = Arc::clone(&ending);
+            std::thread::spawn(move || match h.join() {
+                Err(panic) => shipping_panicked(panic.as_ref()),
+                Ok(Err(e)) if !ended.load(std::sync::atomic::Ordering::SeqCst) => {
+                    refused_at_start(e)
+                }
+                Ok(Err(e)) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: the shipper's last flush: {}",
+                        refusal(e)
+                    );
+                }
+                Ok(Ok(_)) => {}
+            });
+            let mut lost = false;
+            for item in items {
+                if to.send(item).is_err() {
+                    lost = true;
+                    break;
+                }
+            }
+            if !lost {
+                ending.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            drop(to);
+            Ok(())
+        })
+        .map_err(|e| e.to_string())?;
+    // R18: a panic on the shipping thread ends the process by name; its refusals already do (`refused_at_start`).
+    std::thread::spawn(move || {
+        if let Err(panic) = opening.join() {
+            shipping_panicked(panic.as_ref());
+        }
+    });
     let mut based = false;
     let mut archive_base = 0;
     let again = Again {
@@ -1847,12 +3129,25 @@ fn off_machine(
         header: built.header.stored().to_vec(),
     };
     let mut archive_floor = None;
+    let handover = Handover::new(ARCHIVE_WINDOW);
+    let feed = |rx, based, base| Feed {
+        rx,
+        handover: Arc::clone(&handover),
+        log: LogReader {
+            path: dir.join("log"),
+            at: None,
+        },
+        based,
+        base,
+    };
     let archive = if let Some(base) = fork_base {
         // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
         archive_base = base.record;
         let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
+        let claimed = Arc::clone(&claimed);
         let open = move || {
+            held(&claimed);
             let mut a =
                 Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
             archive_bridge(&store, &mut a, &header, first)?;
@@ -1872,7 +3167,13 @@ fn off_machine(
         let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
         report(
             "the archiver",
-            archiving(open, rx, Arc::clone(&text), publish),
+            archiving(
+                open,
+                feed(rx, true, archive_base),
+                Arc::clone(&text),
+                publish,
+                &STREAM_RETRY_MS,
+            ),
         );
         Some(tx)
     } else if let Some(kind) = built
@@ -1882,11 +3183,24 @@ fn off_machine(
         .find(|k| k.as_str().starts_with("souls:place@"))
         .cloned()
     {
-        again
-            .put("header", built.header.stored(), When::Absent)
-            .map_err(refusal)?;
-        let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
-        again.restore_public().map_err(refusal)?;
+        // R17: its open reads the store (the header, the bundle index, the public history), so it runs on the
+        // archiver's thread as a fork's does; parts wait in `rx` meanwhile, in order.
+        // It writes nothing before the world's claim is held. As with the claim, only a store that does not answer
+        // is waited for; any other refusal ends the process by name, as before R17.
+        let (header, claimed) = (built.header.clone(), Arc::clone(&claimed));
+        let open = move || {
+            held(&claimed);
+            let opened = (|| -> Result<Archiver<Again>, Refusal> {
+                again.put("header", header.stored(), When::Absent)?;
+                let a = Archiver::open(again.clone(), "", &header, zone, kind.clone())?;
+                again.restore_public()?;
+                Ok(a)
+            })();
+            match opened {
+                Err(e) if e.name != "store-unreachable" => refused_at_start(e),
+                opened => opened,
+            }
+        };
         let (tx, rx) = channel();
         let parts = Arc::new(crate::compactor::Parts::new(parts_from));
         let reach = Arc::clone(&parts);
@@ -1894,7 +3208,13 @@ fn off_machine(
         archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(move || Ok(a), rx, Arc::clone(&text), publish),
+            archiving(
+                open,
+                feed(rx, false, 0),
+                Arc::clone(&text),
+                publish,
+                &STREAM_RETRY_MS,
+            ),
         );
         Some(tx)
     } else {
@@ -1903,26 +3223,16 @@ fn off_machine(
     let mut off = Off {
         ship,
         archive,
+        handover,
         parts: parts_from,
         based,
         archive_base,
         mark,
         floor: archive_floor,
     };
+    // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
     for (k, bytes) in records.iter().enumerate() {
-        let record = first + k as u64;
-        let input = recorder::is_input(bytes);
-        if record >= from {
-            off.take(record, bytes, input);
-        } else if off.based {
-            if let Some(a) = &off.archive
-                && record >= off.archive_base
-            {
-                let _ = a.send((record, bytes.clone()));
-            }
-        } else if !input {
-            off.part(record, bytes);
-        }
+        off.take(first + k as u64, bytes, recorder::is_input(bytes));
     }
     Ok(off)
 }
@@ -1935,16 +3245,42 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
+    // R17: one try at the start: the list and the name record, two reads of up to the client's 5 s each, so about 10 s
+    // at most before listening. A store that does not answer starts the world with no creator known (edits fail
+    // closed), `degraded` in health.json, and the creator's thread tries again until the store answers.
+    let (first, waiting) = match read() {
+        Ok(c) => {
+            measures::CREATOR.current();
+            (c, false)
+        }
+        Err(e) if e.name == "store-unreachable" => {
+            let fault = refusal(e);
+            measures::CREATOR.degraded(&fault, 1, STREAM_RETRY_MS[0]);
+            eprintln!(
+                "worldd: the creator's record waits for the store: {fault}; the world starts without it"
+            );
+            (None, true)
+        }
+        Err(e) => return Err(refusal(e)),
+    };
     let creator = Arc::new(Creator::with_reader(
-        patiently(|| read()).map_err(refusal)?,
+        first,
         Arc::new(move || admission().ok().flatten()),
     ));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
-    println!("creator: {}", say(creator.get()));
+    println!("creator: {}", say(first));
     let watched = Arc::clone(&creator);
     std::thread::Builder::new()
         .name("creator".into())
         .spawn(move || {
+            if waiting
+                && let Ok(c) = until_answered("the creator's record", &measures::CREATOR, || {
+                    patiently(|| read())
+                })
+                && watched.set(c)
+            {
+                println!("creator: {}", say(c));
+            }
             loop {
                 std::thread::sleep(CREATOR_EVERY);
                 match read() {
@@ -1962,12 +3298,15 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 /// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
 /// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
 /// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
-/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
+/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516). With
+/// `--sleep <alarm daemon's socket> [--world-name <name>]` (O2, the launcher's), a still world with nothing due for a
+/// minute goes to sleep and exits 75 (`sleep.rs`); its name is its folder's unless given.
 pub fn run(args: &[String]) -> i32 {
+    crate::stopped::install(); // D6: a SIGTERM or SIGINT leaves one line naming it
     match serve(args) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("worldd serve: {e}");
+            let _ = writeln!(std::io::stderr(), "worldd serve: {e}");
             1
         }
     }
@@ -1985,7 +3324,8 @@ fn serve(args: &[String]) -> R<()> {
     }
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
-         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>] \
+         [--sleep <alarm socket> [--world-name <name>]]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -2003,12 +3343,26 @@ fn serve(args: &[String]) -> R<()> {
         Err(e) => return Err(format!("body-catalogue: {e}")),
     };
     let mut born = born(&meta, &catalogue)?;
+    // The body classes its catalogue admits, their grounds cut with the towns (S12).
+    let classes: Vec<_> = catalogue.classes().collect();
     let facts = dir.join("facts.json");
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
         entries(&dir.join("entries"), &mut kinds)?;
     }
     stamp("entries");
+    let _ = COURSES_CACHE.set(dir.join("facts.courses"));
+    // S5: a world's newest checkpoint is read while its facts are built (a fork reads its own below), once for the
+    // towns and the stream and once for the engine, which takes its own copy.
+    let read_newest = || {
+        let d = dir.join("checkpoints");
+        std::thread::spawn(move || match d.is_dir() {
+            true => sim::checkpoint::restore(&d),
+            false => Ok(None),
+        })
+    };
+    let restoring = (meta.get("fork") != Some(&Json::Bool(true))).then(read_newest);
+    let engine_restoring = Some(read_newest());
     let built = build(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
@@ -2067,6 +3421,12 @@ fn serve(args: &[String]) -> R<()> {
     // Shared with the public stream's thread, which reads it after the world has started (#3746).
     let found = Arc::new(found);
     let store = log.close();
+    // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
+    // A fork's is its `header`, checked above against this build's kinds.
+    if stored_header.is_none() {
+        let (header, owners) = own_header(&dir, &built, &found.records)?;
+        adopt(&mut built, header, &owners);
+    }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
@@ -2117,8 +3477,14 @@ fn serve(args: &[String]) -> R<()> {
         stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
-            .map_err(|e| format!("the fork's town: {e}"))?;
+        let towns = Town::with_planner_classes_on(
+            live.tree().frozen(),
+            built.ground,
+            doors,
+            sim::ground::START_THREADS,
+            classes.iter().copied(),
+        )
+        .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
         let resumed = initial.frozen();
         (
@@ -2133,10 +3499,11 @@ fn serve(args: &[String]) -> R<()> {
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
         // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
         // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
-        let restored = match dir.join("checkpoints") {
-            d if d.is_dir() => sim::checkpoint::restore(&d).map_err(refusal)?,
-            _ => None,
-        };
+        let restored = restoring
+            .ok_or("checkpoint-restore-missing")?
+            .join()
+            .map_err(|_| "checkpoint-restore-panicked")?
+            .map_err(refusal)?;
         match restored {
             Some(r) => {
                 if r.root.version.lineage != built.header.lineage
@@ -2154,7 +3521,7 @@ fn serve(args: &[String]) -> R<()> {
                 let record = r.root.record;
                 let at =
                     Replica::restored(initial.header().clone(), r.tree, r.root.version.sequence);
-                let towns = recovered_towns(&built, &at, found.after(record))?;
+                let towns = recovered_towns(&built, &at, found.after(record), &classes)?;
                 (initial, Some((at, record)), None, None, towns)
             }
             None if found.first > 0 => {
@@ -2164,22 +3531,31 @@ fn serve(args: &[String]) -> R<()> {
                 ));
             }
             None => {
-                let towns = recovered_towns(&built, &initial, &found.records)?;
+                let towns = recovered_towns(&built, &initial, &found.records, &classes)?;
                 (initial, None, None, None, towns)
             }
         }
     };
     // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
-    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, planner)) = started;
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
-    town.prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
-    planner
-        .prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
+    // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
+    let runs = worldd::places::runs(&town, &kinds, &places);
+    let trips = worldd::places::ride_trips(&town, &kinds, &places);
     stamp("places to sit placed");
+    for (thing, r) in &runs {
+        // As a balloon's loop is printed (`with_rides`): where a client's own timetable can be checked.
+        println!(
+            "ride slot: {} slot {}, lap {} us from {} us, {} stops to get on and off at",
+            replica::world_model::show(*thing),
+            r.slot,
+            r.course.load().map_or(0, |t| t.period),
+            r.course.t0,
+            r.stops.len()
+        );
+    }
     let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
@@ -2187,10 +3563,25 @@ fn serve(args: &[String]) -> R<()> {
         places.len(),
         things
     );
+    // The activities as served (after `adopt`, so by the header's pins), read before the entries become the rules.
+    let served = served_activities(
+        &kinds,
+        &built.activities,
+        &worldd::moves::library().map_err(refusal)?,
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
     };
+    // The joined-part rule the world checks every write on (B18, B20 #3356), read from its entries.
+    let joined = sim::structure::Structure::from_entries(&rules.kinds);
+    let (bays, standing, bearing) = joined.kinds();
+    println!(
+        "joined parts: bays [{}], standing [{}], bearing [{}]",
+        bays.join(", "),
+        standing.join(", "),
+        bearing.join(", ")
+    );
     let bucket = arg(args, "--store")
         .cloned()
         .or_else(|| std::env::var("WORLDD_STORE").ok())
@@ -2217,28 +3608,29 @@ fn serve(args: &[String]) -> R<()> {
             let parts_from = sim::log::compact::read_cut(&log_path)
                 .map_err(refusal)?
                 .map_or(0, |c| c.note);
-            // The start's reads of the store are patient: one slow answer does not end the world (#1960).
-            Some(patiently(|| {
-                off_machine(
-                    spec,
-                    &machine,
-                    &built,
-                    &name,
-                    &dir,
-                    SourceContext {
-                        recovered: &found,
-                        parts_from,
-                        checkpoint: checkpoint.as_deref(),
-                        text: Arc::clone(&text),
-                    },
-                )
-            })?)
+            // R17: no read of the store here ends the world. The claim, the shipper and the archive open on their own
+            // threads, tried until the store answers (`shipping` and `archive` in health.json); only a fork's archive
+            // base is read before listening, tried the same way.
+            Some(off_machine(
+                spec,
+                &machine,
+                &built,
+                &name,
+                &dir,
+                SourceContext {
+                    recovered: &found,
+                    parts_from,
+                    checkpoint: checkpoint.as_deref(),
+                    text: Arc::clone(&text),
+                },
+            )?)
         }
         None => None,
     };
     let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
     let (tx, synced) = channel();
-    imported_births(&dir, initial.header(), &catalogue, &mut born)?;
+    let mut looks = BTreeMap::new();
+    imported_births(&dir, initial.header(), &catalogue, &mut born, &mut looks)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
     cfg.closed = closed_kinds.clone();
@@ -2246,6 +3638,7 @@ fn serve(args: &[String]) -> R<()> {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
+    cfg.restoring = engine_restoring;
     let compact_after = arg(args, "--compact-after")
         .map_or(Ok(crate::compactor::MIN_DEAD), |n| {
             n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
@@ -2283,13 +3676,16 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
     println!("{backup}");
     cfg.synced = Some(tx);
+    // A failed log or text store ends the process by name; the unit restarts the world from its log (#4134).
+    cfg.halted = Some(answers::exit_on_halt());
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
     cfg.hatches = hatches(&dir.join("hatches"))?;
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
-    // standalone seeded-world fallback. Lookup failures have already refused startup above.
+    // standalone seeded-world fallback. A lookup refused above ended the start; one the store did not answer (R17)
+    // left no creator known until it does, so edits fail closed meanwhile.
     if let Some(c) = creator {
         cfg.edits = Some(Editing {
             // Not read: the checker takes the creator from `cfg.creator`.
@@ -2305,6 +3701,12 @@ fn serve(args: &[String]) -> R<()> {
     }
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
+    // The activities as this start serves them, which the gateway hands out with the entries (`activities.json`).
+    // Whole or not at all: the gateway may read it at any moment.
+    let served_path = dir.join(ACTIVITIES_FILE);
+    let tmp = served_path.with_extension("json.tmp");
+    std::fs::write(&tmp, served.to_json()).map_err(io(&tmp))?;
+    std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
 
@@ -2325,9 +3727,29 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
-    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.wear = Some(answers::Wearing {
+        catalogue,
+        born,
+        looks,
+    });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-        let b = bodies(town, planner, ground, placed, places.clone(), builds);
+        let b = bodies(
+            town,
+            planner,
+            ground,
+            entry,
+            placed,
+            places.clone(),
+            runs.clone(),
+            builds,
+        )
+        .map(|mut b| {
+            // A balloon's trip ends when it is home again: what its start form set goes back.
+            for (thing, ends) in &trips {
+                b.slots.trip_ends(*thing, ends.clone());
+            }
+            b
+        });
         stamp("places to sit registered");
         b
     }));
@@ -2339,18 +3761,22 @@ fn serve(args: &[String]) -> R<()> {
         level: Level::Full,
         audience: Audience::Everyone,
     };
+    let stream_spec = bucket
+        .as_deref()
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()));
     let stream_store = Patient::new(
-        supervisor::bucket::Bucket::from_spec(
-            bucket
-                .as_deref()
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    format!("folder:{}", dir.join(".stream-recovery-store").display())
-                })
-                .as_str(),
-        )
-        .map_err(refusal)?,
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
     );
+    // R15: the stream's backup to the store, on its own thread with its own client.
+    let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
+        .map_err(refusal)?
+        .for_world();
+    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
+    // store moved to another bucket is learned again rather than fenced on.
+    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2429,12 +3855,15 @@ fn serve(args: &[String]) -> R<()> {
     let views_dir = views.clone();
     // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
     // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
-    // for the stream's first flush, which on a fresh world has no history to replay.
+    // for the stream's first flush, which on a fresh world has no history to replay, at most STREAM_FIRST_WITHIN.
     let pointer_path = views.join("world.json");
     let fresh = !pointer_path.exists();
-    let (ready_tx, ready_rx) = channel::<()>();
+    // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
+    let (ready_tx, ready_rx) = channel::<bool>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
+    // What a closed container holds stays out of the public stream too (#3948).
+    let stream_closed = closed_kinds.clone();
     // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
     public_history_live(
         &dir,
@@ -2446,6 +3875,8 @@ fn serve(args: &[String]) -> R<()> {
     )?;
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
+    // O2 (0.133 S3b): the sleep watch asks the public stream to say the world is still until its next due change.
+    let (sleep_tx, sleep_rx) = channel::<crate::sleep::Ask>();
     // Shipping/archive delivery remains independent of a stopped public observer.
     std::thread::Builder::new()
         .name("synced".into())
@@ -2464,45 +3895,137 @@ fn serve(args: &[String]) -> R<()> {
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
-                let start = view_out::PublicStart {
-                    root: &views_dir,
-                    header: &stream_header,
-                    key,
-                    initial: stream_initial,
-                    record: stream_record,
-                    checkpoint: stream_checkpoint,
-                    text: stream_text,
-                    names: stream_names,
-                    clock_seed: stream_clock,
-                    history: Some(&*stream_found),
-                };
-                // Its recovery reads are the world's start: patient (#1960).
-                let mut writer = patiently(|| view_out::PublicWriter::open(start, stream_store))?;
-                // Both the pointer and placement bootstrap resolve the existing strict public history export.
-                let history = "history/";
-                let pointer = format!(
-                    "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
-                    stream::dir(&stream_header, &key)
-                );
-                view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
-                // Physical cursor includes input records; public effect versions are independently validated by the
-                // observer.
-                writer.bridge_to(stream_found.first)?;
-                for (offset, bytes) in stream_found.records.iter().enumerate() {
-                    let record = stream_found.first + offset as u64;
-                    if record >= writer.source_cursor() {
-                        writer.push(record, bytes)?;
+                let recover = || -> Result<_, Refusal> {
+                    let start = view_out::PublicStart {
+                        root: &views_dir,
+                        header: &stream_header,
+                        key,
+                        initial: stream_initial.frozen(),
+                        record: stream_record,
+                        checkpoint: stream_checkpoint.clone(),
+                        text: stream_text.clone(),
+                        names: stream_names.clone(),
+                        clock_seed: stream_clock,
+                        history: Some(&*stream_found),
+                    };
+                    // Its recovery reads are the world's start: patient (#1960). Its recovery chain is written to the
+                    // spool beside `views/` and backed up to the store behind the stream (R15).
+                    let mut writer = patiently(|| {
+                        view_out::PublicWriter::open_spooled(
+                            start,
+                            &stream_store,
+                            stream_closed.clone(),
+                            Some((
+                                view_out::backup_beside(&views_dir),
+                                backup_identity.clone(),
+                            )),
+                        )
+                    })?;
+                    // Both the pointer and placement bootstrap resolve the existing strict public history export.
+                    let history = "history/";
+                    let pointer = format!(
+                        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
+                        stream::dir(&stream_header, &key)
+                    );
+                    view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
+                    // Physical cursor includes input records; public effect versions are independently validated by
+                    // the observer.
+                    writer.bridge_to(stream_found.first)?;
+                    for (offset, bytes) in stream_found.records.iter().enumerate() {
+                        let record = stream_found.first + offset as u64;
+                        if record >= writer.source_cursor() {
+                            writer.push(record, bytes)?;
+                        }
                     }
+                    writer.flush()?;
+                    Ok(writer)
+                };
+                // R12: a refused recovery (the store out of reach or refusing, as a read past its cap did on 23 Nov)
+                // never ends the world, which systemd would only start again into the same refusal. It stays up,
+                // degraded: no public pointer, so no viewers; `health.json` names the fault; tried again with back-off
+                // until the store answers. Records wait in `stream_rx` meanwhile.
+                measures::STREAM.recovering();
+                let mut tries = 0u64;
+                let mut writer = loop {
+                    match recover() {
+                        Ok(w) => break w,
+                        Err(e) => {
+                            tries += 1;
+                            let wait = STREAM_RETRY_MS[(tries as usize - 1).min(STREAM_RETRY_MS.len() - 1)];
+                            let fault = refusal(e);
+                            // Degraded before the pointer goes: the main thread's check of it reads both.
+                            measures::STREAM.degraded(&fault, tries, wait);
+                            let _ = std::fs::remove_file(views_dir.join("world.json"));
+                            eprintln!(
+                                "worldd: the public stream is degraded, no viewers: {fault}; try {tries} refused, the next in {wait} ms"
+                            );
+                            let _ = ready_tx.send(false);
+                            // The wait, answering each ask to sleep meanwhile: a degraded stream writes no sleeping
+                            // pointer, so the world stays awake.
+                            for _ in 0..wait / 100 {
+                                if let Ok((_, answer)) =
+                                    sleep_rx.recv_timeout(std::time::Duration::from_millis(100))
+                                {
+                                    let _ = answer.send(Err(format!("stream-degraded: {fault}")));
+                                }
+                            }
+                        }
+                    }
+                };
+                // An ask made during the last try is as old as that try, its asker likely gone: answered no, never
+                // taken for a sleep the world would not make (the stream would stop with it).
+                while let Ok((_, answer)) = sleep_rx.try_recv() {
+                    let _ = answer.send(Err("stream-recovering: asked before it served".to_owned()));
                 }
-                writer.flush()?;
+                measures::STREAM.serving();
+                if tries > 0 {
+                    eprintln!("worldd: the public stream recovered after {tries} refused tries");
+                }
+                // R15: from here the store is the backup's: a stall or refusal delays only it, never a part.
+                measures::BACKUP.backup(&view_out::BackupState::Current);
+                writer.back_up(
+                    backup_store,
+                    Box::new(|state| measures::BACKUP.backup(&state)),
+                )?;
+                // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
+                // unit's 10 s stop timeout; best effort.
+                // A stopping world writes nothing new to `views/`: the stream thread is asked to stop cutting first, and
+                // the drain backs up only what is already spooled.
+                let stopping = Arc::new((
+                    std::sync::atomic::AtomicBool::new(false),
+                    std::sync::atomic::AtomicBool::new(false),
+                ));
+                if let Some(d) = writer.drainer() {
+                    let stopping = Arc::clone(&stopping);
+                    crate::stopped::on_stop(move || {
+                        use std::sync::atomic::Ordering;
+                        stopping.0.store(true, Ordering::Release);
+                        let parked = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                        while !stopping.1.load(Ordering::Acquire) && std::time::Instant::now() < parked {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
+                        let held = d.drain(std::time::Duration::from_secs(8));
+                        eprintln!(
+                            "worldd: the public stream's backup {} before the stop",
+                            if held { "is current" } else { "is still behind" }
+                        );
+                    });
+                }
                 let published = |w: &view_out::PublicWriter<_>| {
                     stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
                 };
                 published(&writer);
                 stamp("public stream");
-                let _ = ready_tx.send(());
+                let _ = ready_tx.send(true);
                 drop(stream_found);
                 loop {
+                    // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
+                    if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
+                        stopping.1.store(true, std::sync::atomic::Ordering::Release);
+                        loop {
+                            std::thread::park();
+                        }
+                    }
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
                         Ok((record, bytes)) => {
                             if record >= writer.source_cursor() {
@@ -2521,19 +4044,51 @@ fn serve(args: &[String]) -> R<()> {
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
+                    // Going to sleep (S4w, #2731): what is waiting first, then the pointer still until `due`; once
+                    // written, the world exits and this thread with it. Refused (`stream-sleep`): it stays awake.
+                    if let Ok((due, answer)) = sleep_rx.try_recv() {
+                        while let Ok((record, bytes)) = stream_rx.try_recv() {
+                            if record >= writer.source_cursor() {
+                                writer.push(record, &bytes)?;
+                            }
+                        }
+                        let slept = writer.sleep(answers::now(), due).map_err(refusal);
+                        let done = slept.is_ok();
+                        // R15: before the world exits to sleep, its backup is given a little time to hold the spool's
+                        // head, so a move finds the store current; best effort, and well inside the sleep watch's own
+                        // wait for this answer (`sleep.rs` STREAM_WITHIN, 5 s).
+                        if done && let Some(d) = writer.drainer() {
+                            d.drain(SLEEP_DRAIN);
+                        }
+                        // The sleep is taken only when the watch hears it; one that gave up waiting stays awake, and so
+                        // does the stream: its next idle writes the pointer without the sleep.
+                        let heard = answer.send(slept).is_ok();
+                        published(&writer);
+                        if done && heard {
+                            return Ok(());
+                        }
+                    }
                     writer.idle(answers::now())?;
                     published(&writer);
                 }
             })();
             if let Err(e) = result {
-                eprintln!(
-                    "worldd: the public stream stopped, the world goes on: {}",
-                    refusal(e)
-                );
+                let fault = refusal(e);
+                measures::STREAM.stopped(&fault);
+                eprintln!("worldd: the public stream stopped, the world goes on: {fault}");
             }
         })
         .map_err(|e| e.to_string())?;
-    if fresh && ready_rx.recv().is_err() {
+    // A fresh world waits for its stream's first flush, or for its first refused try (R12): then it listens degraded,
+    // with no pointer, and the stream thread tries again until it serves. The wait is bounded ([`STREAM_FIRST_WITHIN`]):
+    // a world with a history and no pointer (a rehearsal's scratch copy, a folder whose views were lost) rebuilds its
+    // stream from record 0, which takes Eden minutes, and a stalled store holds the recovery's reads. Such a world
+    // listens with its stream still `recovering`: no pointer while the store holds it, or a pointer naming the stream
+    // still being rebuilt.
+    if fresh
+        && let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =
+            ready_rx.recv_timeout(STREAM_FIRST_WITHIN)
+    {
         return Err(
             "public-stream: stopped before its first flush; the world is not servable".into(),
         );
@@ -2544,7 +4099,10 @@ fn serve(args: &[String]) -> R<()> {
     while world.beat.read().0 < 0 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    if !pointer_path.is_file() {
+    if !pointer_path.is_file()
+        && !measures::STREAM.is_degraded()
+        && !measures::STREAM.is_recovering()
+    {
         return Err(format!(
             "public-pointer-missing: {}",
             pointer_path.display()
@@ -2555,6 +4113,23 @@ fn serve(args: &[String]) -> R<()> {
     stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
+    // O2 (0.133 S3b): asleep when still and nothing is due for a minute (`sleep.rs`).
+    if let Some(alarms) = arg(args, "--sleep") {
+        let name = arg(args, "--world-name").cloned().unwrap_or_else(|| {
+            dir.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+        });
+        crate::sleep::watch(
+            name,
+            PathBuf::from(alarms),
+            Arc::clone(&world.quiet),
+            world.durable.clone(),
+            sleep_tx,
+            STARTED.get().map_or(0, |t| {
+                i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)
+            }),
+        );
+    }
     for stream in listener.incoming().flatten() {
         let door = door.clone();
         std::thread::spawn(move || answers::serve(door, stream));
@@ -2634,6 +4209,151 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
+    #[test]
+    fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let entries = vec![
+            (
+                "eden:dance_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/dance_together.json"
+                )),
+            ),
+            (
+                "eden:handshake".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/handshake.json"
+                )),
+            ),
+            (
+                "eden:high_five".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/high_five.json"
+                )),
+            ),
+            (
+                "eden:hug".to_owned(),
+                read(include_str!("../../../../content/kinds/together/hug.json")),
+            ),
+            (
+                "eden:hold_hands".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/hold_hands.json"
+                )),
+            ),
+            (
+                "eden:follow".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/follow.json"
+                )),
+            ),
+        ];
+        let client = include_str!("../../../client/src/together/together.mjs");
+        let kinds = activity_kinds(&entries).unwrap();
+        for (k, mv) in kinds
+            .iter()
+            .zip(["dance", "", "handshake", "high_five", "hold_hand", "hug"])
+        {
+            println!("{}", k.name.as_str());
+            assert_eq!(k.roles.len(), 2);
+            // 0.135 G2: following names no move; its first role follows.
+            if mv.is_empty() {
+                assert!(k.roles.iter().all(|r| r.mv.is_none()));
+                assert_eq!(k.follows.as_ref().map(Name::as_str), Some("eden:one"));
+                continue;
+            }
+            assert_eq!(k.follows, None);
+            // 0.135 G3: hold hands' two stand shoulder to shoulder, facing one way; the dance's eight in a ring.
+            if mv == "hold_hand" {
+                let s: Vec<(Vec3, i64)> = k.roles.iter().flat_map(|r| r.stands.clone()).collect();
+                assert_eq!(
+                    s,
+                    vec![
+                        (Vec3::new(-225_000, 0, 0), 0),
+                        (Vec3::new(225_000, 0, 0), 0)
+                    ]
+                );
+            }
+            if mv == "dance" {
+                assert_eq!(k.roles.iter().map(|r| r.stands.len()).sum::<usize>(), 8);
+            }
+            // 0.134 T3: the dance takes up to eight, on the beat; each touch is a pair.
+            let dance = mv == "dance";
+            assert_eq!((k.most, k.beat), if dance { (8, true) } else { (2, false) });
+            for r in &k.roles {
+                assert_eq!(
+                    r.mv.as_ref().map(Name::as_str),
+                    Some(format!("souls:{mv}").as_str())
+                );
+            }
+        }
+        // 0.135 G3: and 0.135 E1's two, whose pins hold their stands too.
+        let more = [
+            (
+                "eden:fist_bump".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/fist_bump.json"
+                )),
+            ),
+            (
+                "eden:harvest_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/harvest_together.json"
+                )),
+            ),
+        ];
+        // The client offers them by the names the world serves (`activities.json`), never its own copy of a pin.
+        let all: Vec<_> = entries.iter().chain(&more).cloned().collect();
+        let kinds: Vec<_> = kinds
+            .into_iter()
+            .chain(activity_kinds(&more).unwrap())
+            .collect();
+        let served = served_activities(&all, &kinds, &worldd::moves::library().unwrap());
+        assert_eq!(
+            served.get("format").and_then(Json::str),
+            Some("souls-activities/1")
+        );
+        let list = served.get("activities").and_then(Json::arr).unwrap();
+        assert_eq!(list.len(), kinds.len());
+        for (a, k) in list.iter().zip(&kinds) {
+            assert_eq!(a.get("name").and_then(Json::str), Some(k.name.as_str()));
+            assert!(!client.contains(k.name.as_str()), "no pin in the client");
+        }
+        let one = |kind: &str| {
+            list.iter()
+                .find(|a| a.get("kind").and_then(Json::str) == Some(kind))
+                .unwrap()
+        };
+        let hug = one("eden:hug");
+        assert_eq!(hug.get("word").and_then(Json::str), Some("hug"));
+        assert_eq!(
+            hug.get("card").and_then(Json::str),
+            Some("A hug for two: offer it, and it starts when the other accepts.")
+        );
+        assert_eq!(hug.get("offerer").and_then(Json::str), Some("eden:one"));
+        assert_eq!(hug.get("asks"), Some(&Json::Int(1)));
+        assert!(
+            hug.get("near_m").is_some() && hug.get("at").is_none(),
+            "a hug is anywhere, within its reach"
+        );
+        assert_eq!(one("eden:dance_together").get("asks"), Some(&Json::Int(7)));
+        assert!(
+            one("eden:dance_together").get("near_m").is_none(),
+            "a dance checks no distance"
+        );
+        assert!(
+            one("eden:follow").get("near_m").is_none(),
+            "following checks no distance"
+        );
+        assert_eq!(
+            one("eden:harvest_together").get("at").and_then(Json::str),
+            Some("eden:harvest_together"),
+            "a harvest is played at its basket"
+        );
+    }
 
     #[test]
     fn v9b_public_history_live_binds_restored_header_and_refuses_unsafe_exports() {
@@ -2760,14 +4480,16 @@ mod tests {
         let digest = to_hex(&sha256(text.as_bytes()));
         let valid = make(&lineage, &zone, &digest, &row);
         let mut born = BTreeMap::new();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        let mut looks = BTreeMap::new();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert!(
             born.is_empty(),
             "absent private file leaves defaults unchanged"
         );
         std::fs::write(dir.join("births.json"), &valid).unwrap();
-        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
         assert_eq!(born.get(&soul), Some(&[0x11; 32]));
+        assert!(looks.is_empty(), "a row with a body carries no look");
         for invalid in [
             make(&"00".repeat(16), &zone, &digest, &row),
             make(&lineage, "invalid", &digest, &row),
@@ -2782,13 +4504,55 @@ mod tests {
         ] {
             std::fs::write(dir.join("births.json"), invalid).unwrap();
             let before = born.clone();
-            assert!(imported_births(&dir, &header, &catalogue, &mut born).is_err());
+            assert!(imported_births(&dir, &header, &catalogue, &mut born, &mut looks).is_err());
             assert_eq!(born, before, "no partial installation on refusal");
+        }
+        // Old Eden's residents: a row with no body may carry a look, and its body is born wearing it.
+        let other = Id::new(Scope([0x4c; 16]), 0).unwrap();
+        let other_text = directoryd::accounts::principal_text(other);
+        let look = r#"{"hair":"bob","height":1.7}"#;
+        let quoted = |t: &str| Json::Str(t.into()).to_json();
+        let looked = |l: &str| {
+            format!(
+                r#"{{"soul":"{other_text}","entry":"{zone}","asked":0,"look":{}}}"#,
+                quoted(l)
+            )
+        };
+        let both = format!("{row},{}", looked(look));
+        std::fs::write(
+            dir.join("births.json"),
+            make(&lineage, &zone, &digest, &both),
+        )
+        .unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born, &mut looks).unwrap();
+        assert_eq!(looks.get(&other).map(Vec::as_slice), Some(look.as_bytes()));
+        assert!(!born.contains_key(&other));
+        let long = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+        for invalid in [
+            row.replace(
+                r#""asked":0"#,
+                &format!(r#""asked":0,"look":{}"#, quoted(look)),
+            ),
+            looked("[1]"),
+            looked(&long),
+        ] {
+            let mut fresh = BTreeMap::new();
+            std::fs::write(
+                dir.join("births.json"),
+                make(&lineage, &zone, &digest, &invalid),
+            )
+            .unwrap();
+            assert!(
+                imported_births(&dir, &header, &catalogue, &mut BTreeMap::new(), &mut fresh)
+                    .is_err(),
+                "{invalid}"
+            );
+            assert!(fresh.is_empty(), "no partial installation on refusal");
         }
         std::fs::write(dir.join("births.json"), valid).unwrap();
         let mut explicit = BTreeMap::from([(soul, [0x22; 32])]);
         assert!(
-            imported_births(&dir, &header, &catalogue, &mut explicit)
+            imported_births(&dir, &header, &catalogue, &mut explicit, &mut looks)
                 .unwrap_err()
                 .contains("contradictory")
         );
@@ -2815,7 +4579,7 @@ mod tests {
         let built = build(&facts.text, &[]).unwrap();
         let initial = Replica::start(built.header.stored()).unwrap();
         let (before, _) =
-            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
         assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
@@ -2842,7 +4606,7 @@ mod tests {
         )
         .unwrap();
         let records = vec![built.part.clone(), edited.stored().to_vec()];
-        let (mut town, mut planner) = recovered_towns(&built, &initial, &records).unwrap();
+        let (mut town, mut planner) = recovered_towns(&built, &initial, &records, &[]).unwrap();
         for one in [&mut town, &mut planner] {
             one.prepare_classes([Size::Large]).unwrap();
             assert_eq!(one.tree.to_state(), live.tree().to_state());
@@ -2855,7 +4619,7 @@ mod tests {
         }
         let mut invalid = records;
         invalid.push(vec![0xff]);
-        assert!(recovered_towns(&built, &initial, &invalid).is_err());
+        assert!(recovered_towns(&built, &initial, &invalid, &[]).is_err());
     }
 
     #[test]
@@ -2928,6 +4692,7 @@ mod tests {
         let mut off = Off {
             ship,
             archive: Some(archive),
+            handover: Handover::new(ARCHIVE_WINDOW),
             parts: 0,
             based: true,
             archive_base: 4,
@@ -2954,6 +4719,7 @@ mod tests {
         let mut legacy = Off {
             ship,
             archive: Some(archive),
+            handover: Handover::new(ARCHIVE_WINDOW),
             parts: 0,
             based: false,
             archive_base: 4,
@@ -2972,6 +4738,369 @@ mod tests {
         assert_eq!(archived.try_recv().unwrap(), (1, part));
         assert!(archived.try_recv().is_err());
         assert_eq!(legacy.parts, 2);
+    }
+
+    /// Eden, 24 Nov: one archive write the store never answered (`timeout: receive response` on the open day's
+    /// counts) ended the archiver's thread, and the world ran on with no bundle or day index written for hours. On the
+    /// S3 stand-in, while a world's parts come, writes refused (503) and writes done whose answers are lost: the
+    /// archiver never stops, says it is behind in `health.json` meanwhile, and every object, bundle and day index
+    /// lands with the bytes a store that always answered holds.
+    #[test]
+    fn an_archiver_keeps_going_through_a_store_that_does_not_answer_and_every_bundle_lands() {
+        use archive::script;
+        use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
+        use directoryd::directory::store::Memory;
+        let dir = std::env::temp_dir().join(format!("archiver-persists-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A world over four minutes, a tick a second: four bundles' windows, the last one open until the flush.
+        let parts = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
+        let logged = std::rc::Rc::clone(&parts);
+        let mut w = script::world(
+            1,
+            2,
+            Some(Box::new(move |b: &[u8]| {
+                logged.borrow_mut().push(b.to_vec())
+            })),
+        );
+        for t in 0..240u64 {
+            script::tick(&mut w, t * 20, 2, 30 * 20);
+        }
+        let parts = parts.borrow().clone();
+        let root = w.tree.node(w.tree.root()).unwrap().id();
+        let kind = w.tree.node(w.tree.root()).unwrap().kind().clone();
+        // What a store that always answers holds.
+        let memory = Memory::default();
+        let mut reference = Archiver::open(&memory, "", &w.header, root, kind.clone()).unwrap();
+        for (n, p) in parts.iter().enumerate() {
+            reference.push(n as u64, p.clone()).unwrap();
+        }
+        reference.flush().unwrap();
+        let expected: Vec<String> = memory.list("").unwrap();
+        assert!(
+            expected
+                .iter()
+                .filter(|k| k.starts_with("bundles/"))
+                .count()
+                >= 5,
+            "four bundles and a day index: {expected:?}"
+        );
+
+        let s = StandIn::start(1000).unwrap();
+        let keys = |k: &str| match k {
+            "AWS_ACCESS_KEY_ID" => KEY_ID.to_owned(),
+            "AWS_SECRET_ACCESS_KEY" => "stand-in-secret".to_owned(),
+            _ => String::new(),
+        };
+        let bucket = supervisor::bucket::Bucket::parse(&format!("{}/w", s.url("souls")), keys)
+            .unwrap()
+            .for_world();
+        let again = Again {
+            store: Under {
+                store: Shared(Arc::new(Patient::new(bucket))),
+                prefix: "h/w/".into(),
+            },
+            public: dir.join("history"),
+            header: w.header.stored().to_vec(),
+        };
+        let (header, opening) = (w.header.clone(), again.clone());
+        let open = move || Archiver::open(opening.clone(), "", &header, root, kind.clone());
+        let text = Arc::new(
+            sim::text::Store::open_dir(
+                &dir.join("log.text"),
+                replica::ids::Minter::new(Scope([7; 16])),
+            )
+            .unwrap(),
+        );
+        // The world's log on the disk, as the world writes it: the archiver reads from it what it is not handed.
+        let (mut log, _) = Log::open(FileStore::open(&dir.join("log")).unwrap(), EPOCH).unwrap();
+        for p in &parts {
+            log.append(p.clone()).unwrap();
+        }
+        log.wait_durable(parts.len() as u64).unwrap();
+        // A window of 16 KiB: the parts past it stay in the log while the store is out.
+        let (tx, rx) = channel();
+        let handover = Handover::new(16 << 10);
+        let feed = Feed {
+            rx,
+            handover: Arc::clone(&handover),
+            log: LogReader {
+                path: dir.join("log"),
+                at: None,
+            },
+            based: false,
+            base: 0,
+        };
+        let (ship, _shipped) = channel();
+        let mut off = Off {
+            ship,
+            archive: Some(tx),
+            handover: Arc::clone(&handover),
+            parts: 0,
+            based: false,
+            archive_base: 0,
+            mark: shipping::Mark::default(),
+            floor: None,
+        };
+        // Production's fault was on a write. The store refuses every write (503) while the world hands its parts over.
+        s.refuse_writes(usize::MAX, 503, "");
+        let h = archiving(open, feed, text, |_| {}, &[10, 20, 40]);
+        let largest = parts.iter().map(Vec::len).max().unwrap() as u64;
+        let (mut most, mut in_log) = (0, 0);
+        for (n, p) in parts.iter().enumerate() {
+            off.take(n as u64, p, false);
+            let state = handover.lock();
+            most = most.max(state.queued_bytes);
+            in_log = in_log.max(state.left.map_or(0, |(from, _)| state.end - from));
+        }
+        println!("in memory at most {most} B; in the log at most {in_log} records");
+        assert!(
+            most <= (16 << 10) + largest,
+            "memory stays in the window: {most}"
+        );
+        assert!(
+            in_log > 100,
+            "the parts past the window wait in the log: {in_log}"
+        );
+        // The archiver reads on from the log and meets the store out: it says so, and waits. (The deadline only stops a
+        // hung test.)
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !measures::ARCHIVE.is_behind() {
+            assert!(
+                std::time::Instant::now() < end,
+                "the archiver meets the refusals"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!h.is_finished(), "it keeps trying");
+        // The store answers again, then loses the answers to writes it did, and the archiver catches up from the log.
+        s.refuse_writes(0, 503, "");
+        s.fail_writes(40, Fail::Lost);
+        drop(off);
+        h.join()
+            .unwrap()
+            .expect("the archiver never stops on a store that does not answer");
+        let state = handover.lock();
+        assert_eq!(
+            (state.queued, state.queued_bytes, state.left),
+            (0, 0, None),
+            "nothing is counted as waiting once all is taken"
+        );
+        for key in &expected {
+            let want = memory.get(key).unwrap().unwrap().bytes;
+            let got = again.get(key).unwrap();
+            assert_eq!(got.map(|o| o.bytes), Some(want), "{key} lands");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The parts left in the log are read from it a batch at a time, from its cut once it is compacted, with the bytes
+    /// the world wrote; a record before the cut is refused by name, never read as something else.
+    #[test]
+    fn the_archivers_log_reader_reads_on_from_a_compacted_log() {
+        let dir = std::env::temp_dir().join(format!("archiver-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records: Vec<Vec<u8>> = (0..50u8).map(|i| vec![i; 1000 + i as usize]).collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records[..30] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(30).unwrap();
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: None,
+        };
+        let (first, reached) = reader.batch(0, 10).unwrap();
+        assert_eq!(reached, 10);
+        assert_eq!(
+            first,
+            (0..10)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        );
+        // Compacted at record 10, then written on.
+        let durable = log.durable_mark();
+        let cut = sim::log::compact::Cut {
+            at: reader.at.unwrap(),
+            note: 0,
+        };
+        durable.compact(
+            sim::log::compact::prepare(&path, cut, durable.at())
+                .unwrap()
+                .unwrap(),
+        );
+        for r in &records[30..] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(50).unwrap();
+        // The writer finishes the compaction just after its sync; the deadline only stops a hung test.
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match durable.compacted() {
+                Some(done) => break assert!(done.is_ok(), "compacted: {done:?}"),
+                None => {
+                    assert!(std::time::Instant::now() < end, "the compaction finishes");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+        let mut fresh = LogReader { path, at: None };
+        let (rest, reached) = fresh.batch(10, 50).unwrap();
+        assert_eq!(reached, 50);
+        assert_eq!(
+            rest,
+            (10..50)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        );
+        // The first reader goes on from its own place, across the compaction.
+        assert_eq!(reader.batch(10, 50).unwrap().0, rest);
+        let mut early = LogReader {
+            path: dir.join("log"),
+            at: None,
+        };
+        assert_eq!(early.batch(5, 50).unwrap_err().name, "archive-log");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A part handed to an archiver that is gone is not counted as waiting.
+    #[test]
+    fn a_part_the_channel_refuses_is_not_counted_as_queued() {
+        let handover = Handover::new(1 << 20);
+        let (tx, rx) = channel();
+        handover.hand(&tx, 0, 0, b"one");
+        drop(rx);
+        handover.hand(&tx, 1, 1, b"two");
+        let h = handover.lock();
+        assert_eq!((h.queued, h.queued_bytes, h.end, h.next), (1, 3, 2, 2));
+    }
+
+    /// Eden, 25 Nov: a day's event index was a file in the public mirror, and an hour of that day split off (V4, 1,000
+    /// events or more) wanted the same path as a directory, which ended the process. Both are exported now: the day's
+    /// index moves into the day's directory as `day` (the origin serves it at the day's URL), in either order. A copy
+    /// that cannot be placed is skipped, counted and logged once; bytes that fail their check still stop the start.
+    #[test]
+    fn a_day_index_and_its_split_hour_never_end_the_world() {
+        use directoryd::directory::store::Store;
+        use replica::history::events::{Counts, EventIndex, Span, events_key};
+        let header =
+            Header::read(&fixture_bytes(replica::effects::FIXTURE_HEADER).unwrap()).unwrap();
+        let dir = std::env::temp_dir().join(format!("split-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bucket = Shared(Arc::new(Patient::new(
+            supervisor::bucket::Bucket::parse(
+                &format!("folder:{}", dir.join("store").display()),
+                |_| String::new(),
+            )
+            .unwrap(),
+        )));
+        let public = dir.join("public");
+        let adapter = Again {
+            store: Under {
+                store: bucket.clone(),
+                prefix: "w/".into(),
+            },
+            public: public.clone(),
+            header: header.stored().to_vec(),
+        };
+        let (day, hour) = (20781, 5);
+        let day_bytes = EventIndex {
+            day,
+            hour: None,
+            split: vec![hour],
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let hour_bytes = EventIndex {
+            day,
+            hour: Some(hour),
+            split: Vec::new(),
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let (day_key, hour_key) = (events_key(day, None), events_key(day, Some(hour)));
+        // Eden's mirror: the day's index placed as a file before its hour split off (the folder store here cannot hold
+        // both keys either, so that state is set by hand; the bucket behind a world is an object store).
+        std::fs::create_dir_all(public.join(&day_key).parent().unwrap()).unwrap();
+        std::fs::write(public.join(&day_key), &day_bytes).unwrap();
+        adapter.put(&hour_key, &hour_bytes, When::Absent).unwrap();
+        assert_eq!(std::fs::read(public.join(&hour_key)).unwrap(), hour_bytes);
+        assert_eq!(
+            std::fs::read(public.join(&day_key).join("day")).unwrap(),
+            day_bytes
+        );
+        assert!(!public.join(&day_key).with_extension("tmp").exists());
+        // Later writes of the day's index land beside its hours.
+        let later = EventIndex {
+            day,
+            hour: None,
+            split: vec![hour, hour + 1],
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        adapter.mirror(&day_key, &later).unwrap();
+        assert_eq!(
+            std::fs::read(public.join(&day_key).join("day")).unwrap(),
+            later
+        );
+        // The other order: an hour first, then its day's index.
+        let day2 = day + 1;
+        let hour2 = EventIndex {
+            day: day2,
+            hour: Some(hour),
+            split: Vec::new(),
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let day2_bytes = EventIndex {
+            day: day2,
+            hour: None,
+            split: vec![hour],
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        adapter
+            .mirror(&events_key(day2, Some(hour)), &hour2)
+            .unwrap();
+        adapter
+            .mirror(&events_key(day2, None), &day2_bytes)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(public.join(events_key(day2, None)).join("day")).unwrap(),
+            day2_bytes
+        );
+        assert_eq!(
+            std::fs::read(public.join(events_key(day2, Some(hour)))).unwrap(),
+            hour2
+        );
+        // A copy that cannot be placed (here a file where a directory goes) is skipped: the write answers, and the
+        // key is counted, held, and so logged once.
+        let counts_key = "history/everyone/counts/day/00020781";
+        std::fs::write(public.join("history/everyone/counts"), b"in the way").unwrap();
+        let before = measures::HISTORY_EXPORT.count();
+        let counts = Counts::new(Span::Day(day)).to_bytes().unwrap();
+        adapter.put(counts_key, &counts, When::Absent).unwrap();
+        assert!(measures::HISTORY_EXPORT.count() > before);
+        assert!(!measures::HISTORY_EXPORT.fault(counts_key, "again"));
+        adapter.restore_public().unwrap();
+        // Bytes that fail their check are refused, in the running archiver and at a start: a corrupt archive stops.
+        let corrupt = events_key(day + 2, None);
+        let refused = adapter
+            .put(&corrupt, b"not an index", When::Absent)
+            .unwrap_err();
+        assert_ne!(refused.name, "history-export");
+        assert!(!public.join(&corrupt).exists());
+        assert_eq!(adapter.restore_public().unwrap_err(), refused);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3482,7 +5611,7 @@ mod tests {
         let built = build(&facts.text, &[]).unwrap();
         let initial = Replica::start(built.header.stored()).unwrap();
         let (mut town, mut planner) =
-            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
         let mut copy = town.copy().unwrap();
         for t in [&mut town, &mut planner, &mut copy] {
             t.prepare_classes([replica::kinds::sizes::Size::Large])
@@ -3517,6 +5646,69 @@ mod tests {
         assert!(cloned.iter().any(|a| !a.contains("None None")));
         assert_eq!(cloned, assembled);
         assert_eq!(ask(&mut town), assembled);
+    }
+
+    /// S5: a kept courses text is the bytes [`courses`] computes; a torn cache, changed entries, or a kept text that
+    /// does not load are computed again, never a start's end.
+    #[test]
+    fn s5_kept_courses_equal_the_computed_and_a_torn_stale_or_bad_cache_is_computed_again() {
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let entries = |extra: &str| {
+            vec![(
+                "testworld:planter".to_owned(),
+                replica::rules::json::parse(&format!(r#"{{"kind":"testworld:planter"{extra}}}"#))
+                    .expect("an entry"),
+            )]
+        };
+        let (a, b) = (entries(""), entries(r#","note":"changed""#));
+        let dir = std::env::temp_dir().join(format!("s5-courses-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let path = dir.join("facts.courses");
+        let fresh = courses(&facts, &a).expect("computed");
+        assert_eq!(
+            courses_cached(None, &facts, &a).expect("no cache"),
+            (fresh.clone(), false)
+        );
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("kept"),
+            (fresh.clone(), false)
+        );
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("a hit"),
+            (fresh.clone(), true)
+        );
+        // Torn: cut short, as a crash mid-write without the sync would leave it.
+        let whole = std::fs::read(&path).expect("the cache");
+        std::fs::write(&path, &whole[..whole.len() / 2]).expect("torn");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("torn"),
+            (fresh.clone(), false)
+        );
+        // Other entries: computed for them, not the kept text.
+        let other = courses(&facts, &b).expect("computed");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &b).expect("stale"),
+            (other, false)
+        );
+        // A kept text that matches its key and hash but does not load: the start computes it again.
+        let bad = "not facts";
+        let key = courses_key(&facts, &a);
+        std::fs::write(
+            &path,
+            format!("{key} {}\n{bad}", to_hex(&sha256(bad.as_bytes()))),
+        )
+        .expect("bad");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("read"),
+            (bad.to_owned(), true)
+        );
+        let built = build_with(Some(&path), &facts, &a).expect("built again");
+        assert_eq!(
+            built.header.hash(),
+            build_with(None, &facts, &a).expect("built").header.hash()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #1960: a creator places a thing of a kind the world has an entry for but no seeded thing of. Without the
@@ -3601,8 +5793,8 @@ mod tests {
         let built = build(&facts, &entries).expect("builds");
         assert_eq!(
             built.activities.len(),
-            2,
-            "conversation and entry runtime pins"
+            3,
+            "conversation, give and entry runtime pins"
         );
         let prefix = imported.kind_lines.join("\n") + "\n";
         assert!(
@@ -3622,6 +5814,7 @@ mod tests {
                         children: Default::default(),
                         slots: Default::default(),
                         hands: None,
+                        fields: Default::default(),
                     },
                 );
             }
@@ -3686,5 +5879,1035 @@ mod conversation_tests {
             let held = body.plan(1, &kind.shape(role)).unwrap();
             assert_eq!(held.holds, vec![Name::new("souls:voice").unwrap()]);
         }
+    }
+}
+
+/// K16: the world's own header and its reconciliation with this build ([`own_header`], [`adopt`]).
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    fn built() -> Built {
+        build(&testworld::generate(1, 0).unwrap().text, &[]).unwrap()
+    }
+
+    /// `h` with its record changed by `f`.
+    fn header_with(h: &Header, f: impl FnOnce(&mut BTreeMap<u64, Value>)) -> Header {
+        let Value::Map(mut m) = decode(h.stored()).unwrap().value else {
+            panic!("a header is a map")
+        };
+        f(&mut m);
+        Header::read(&encode(&Value::Map(m)).unwrap()).unwrap()
+    }
+
+    fn kinds_of(h: &Header, f: impl FnOnce(&mut Vec<String>)) -> Header {
+        header_with(h, |m| {
+            let mut k: Vec<String> = h.kinds.iter().map(|k| k.as_str().to_owned()).collect();
+            f(&mut k);
+            m.insert(
+                6,
+                Value::Array(
+                    k.into_iter()
+                        .map(|k| Value::Text(Name::new(&k).unwrap()))
+                        .collect(),
+                ),
+            );
+        })
+    }
+
+    /// A pin of `plain` at a made-up revision.
+    fn pin(plain: &str, byte: u8) -> String {
+        format!("{plain}@1220{}", to_hex(&[byte; 32]))
+    }
+
+    /// A part with no effects that names `h`.
+    fn naming(h: &Header) -> Vec<u8> {
+        encode(&Value::Map(
+            [
+                (1, Value::Bytes(h.hash().to_bytes())),
+                (2, Value::Array(Vec::new())),
+            ]
+            .into(),
+        ))
+        .unwrap()
+    }
+
+    fn folder(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("k16-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn owners_of(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, o)| ((*k).to_owned(), (*o).to_owned()))
+            .collect()
+    }
+
+    /// `b` with two revisions of `eden:hall` pinned, as Eden's facts have (`core:hall` at 2 and 4).
+    fn with_two_halls(mut b: Built) -> (Built, String, String) {
+        let place = b
+            .rules
+            .kinds
+            .values()
+            .find(|k| k.owner == "place")
+            .unwrap()
+            .clone();
+        let (h1, h2) = (pin("eden:hall", 1), pin("eden:hall", 2));
+        let mut other = place.clone();
+        other.children.insert("hall-two-only".into());
+        b.rules.kinds.insert(h1.clone(), place);
+        b.rules.kinds.insert(h2.clone(), other);
+        b.header = kinds_of(&b.header, |k| k.extend([h1.clone(), h2.clone()]));
+        (b, h1, h2)
+    }
+
+    #[test]
+    fn the_header_the_log_names_is_the_worlds_and_a_world_with_none_keeps_this_builds() {
+        let b = built();
+        let d = folder("keep");
+        let (h, owners) = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap();
+        assert_eq!(h.stored(), b.header.stored());
+        assert_eq!(std::fs::read(d.join("header")).unwrap(), b.header.stored());
+        assert_eq!(owners, self::owners(&d));
+        assert_eq!(
+            owners.len(),
+            b.header.kinds.len(),
+            "every pinned kind's owner"
+        );
+        // The next start reads it.
+        let (again, _) = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap();
+        assert_eq!(again.stored(), b.header.stored());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_header_file_the_log_does_not_name_is_refused_header_mismatch() {
+        let b = built();
+        let d = folder("tampered");
+        let other = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        std::fs::write(d.join("header"), other.stored()).unwrap();
+        let e = own_header(&d, &b, std::slice::from_ref(&b.part)).unwrap_err();
+        assert!(e.starts_with("header-mismatch: "), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn another_worlds_header_is_refused_world_identity_mismatch() {
+        let b = built();
+        let d = folder("identity");
+        let lineage = Scope([9; 16]);
+        let other = header_with(&b.header, |m| {
+            m.insert(3, Value::Bytes(lineage.0.to_vec()));
+            m.insert(4, Id::new(lineage, 0).unwrap().to_value());
+        });
+        std::fs::write(d.join("header"), other.stored()).unwrap();
+        let e = own_header(&d, &b, &[naming(&other)]).unwrap_err();
+        assert!(e.starts_with("world-identity-mismatch: "), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_header_file_and_a_log_naming_another_is_refused_header_missing() {
+        let b = built();
+        let d = folder("missing");
+        let older = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        let e = own_header(&d, &b, &[naming(&older)]).unwrap_err();
+        assert!(e.starts_with("header-missing: "), "{e}");
+        assert!(!d.join("header").exists(), "nothing is kept");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_log_compacted_with_no_part_since_keeps_its_header_file() {
+        let b = built();
+        let d = folder("compacted");
+        let older = kinds_of(&b.header, |k| {
+            k.pop();
+        });
+        // With no part, a missing file is not taken on trust.
+        let e = own_header(&d, &b, &[]).unwrap_err();
+        assert!(
+            e.starts_with("header-missing: the log names header none"),
+            "{e}"
+        );
+        std::fs::write(d.join("header"), older.stored()).unwrap();
+        let (h, _) = own_header(&d, &b, &[]).unwrap();
+        assert_eq!(h.stored(), older.stored());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn this_builds_header_changes_nothing() {
+        let mut b = built();
+        let (rules, text, header) = (
+            b.rules.kinds.clone(),
+            b.kinds_text.clone(),
+            b.header.clone(),
+        );
+        adopt(&mut b, header.clone(), &BTreeMap::new());
+        assert_eq!(b.rules.kinds, rules);
+        assert_eq!(b.kinds_text, text);
+        assert_eq!(b.header.stored(), header.stored());
+    }
+
+    #[test]
+    fn one_of_two_revisions_changed_pairs_only_the_changed_one() {
+        let (mut b, h1, h2) = with_two_halls(built());
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2);
+            k.push(h3.clone());
+        });
+        let (one, two) = (b.rules.kinds[&h1].clone(), b.rules.kinds[&h2].clone());
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "place")]));
+        assert_eq!(b.rules.kinds[&h3], two, "the changed revision's rules");
+        assert_eq!(b.rules.kinds[&h1], one, "the unchanged one keeps its own");
+        assert_eq!(b.header.stored(), world.stored());
+    }
+
+    #[test]
+    fn both_revisions_changed_are_not_guessed() {
+        let (mut b, h1, h2) = with_two_halls(built());
+        let (h3, h4) = (pin("eden:hall", 3), pin("eden:hall", 4));
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h1 && *k != h2);
+            k.extend([h3.clone(), h4.clone()]);
+        });
+        adopt(&mut b, world, &owners_of(&[(&h3, "place"), (&h4, "place")]));
+        assert!(!b.rules.kinds.contains_key(&h3) && !b.rules.kinds.contains_key(&h4));
+    }
+
+    #[test]
+    fn a_revision_owned_otherwise_is_not_paired() {
+        let (mut b, _, h2) = with_two_halls(built());
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2);
+            k.push(h3.clone());
+        });
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "thing")]));
+        assert!(!b.rules.kinds.contains_key(&h3));
+        // And with no owners kept, nothing is paired either.
+        let (mut b, _, _) = with_two_halls(built());
+        adopt(&mut b, world, &BTreeMap::new());
+        assert!(!b.rules.kinds.contains_key(&h3));
+    }
+
+    #[test]
+    fn a_changed_activity_is_made_and_offered_by_the_worlds_pin() {
+        let mut b = built();
+        let ours = b.activities[0].name.as_str().to_owned();
+        let theirs = pin(plain(&ours), 7);
+        let world = kinds_of(&b.header, |k| {
+            for n in k.iter_mut().filter(|n| **n == ours) {
+                *n = theirs.clone();
+            }
+        });
+        let text = b.kinds_text.clone();
+        adopt(&mut b, world, &owners_of(&[(&theirs, "activity")]));
+        assert_eq!(b.activities[0].name.as_str(), theirs);
+        assert_eq!(b.rules.kinds[&theirs], b.rules.kinds[&ours]);
+        assert!(
+            b.kinds_text
+                .lines()
+                .any(|l| l.starts_with("# souls-boot-activity ") && l.ends_with(&theirs)),
+            "the boot activity lines name the world's pin"
+        );
+        // Everything else, kind lines and boot targets included, is as this build wrote it.
+        assert_eq!(b.kinds_text, text.replace(&ours, &theirs));
+    }
+}
+
+/// S10c: the edit checker's lazy body snapshot (S10) in lockstep, on a world with bodies: the checker waits for the
+/// bodies at a job's tick however long the tick takes, so a run fed the same inputs writes the same log.
+#[cfg(test)]
+mod s10c_lockstep {
+    use super::*;
+    use replica::edit::wire::{VERB, parameters};
+    use replica::edit::{Op, Ref, Spot};
+    use replica::effects::{Actor, Body as EffectBody, Change, Part};
+    use replica::ids::Version;
+    use replica::intents::{Intent, Target};
+    use replica::pose::{Quat, Support};
+
+    /// The most world time a step waits for its answers, in ticks.
+    const MOST_TICKS: i64 = 2_000;
+
+    /// N2's test world with a rack bay at its build site (as `tests/edit_served.rs`'s yard world), the construction
+    /// entries and the body's, a beam taken in a hand by a form. The facts, the entries and the bay's slots by name.
+    fn yard() -> (String, Vec<(String, Json)>, BTreeMap<String, u64>) {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(root.join("construction"))
+            .unwrap()
+            .map(|f| f.unwrap().path())
+            .collect();
+        paths.sort();
+        paths.push(root.join("body/humanoid.json"));
+        let mut entries = Vec::new();
+        let mut bay = None;
+        for p in paths {
+            let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+            if p.ends_with("rack_beam.json") {
+                let form = json::parse(
+                    r#"{"take": {"who": "anyone", "starts": "act", "needs": [{"need": "hand", "free": true}],
+                        "steps": [{"step": "take"}],
+                        "effects": [{"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}]}}"#,
+                )
+                .unwrap();
+                if let Json::Obj(o) = &mut e {
+                    o.push(("forms".into(), form));
+                }
+            }
+            if p.ends_with("rack_bay.json") {
+                bay = Some(e.to_json());
+            }
+            let kind = e.get("kind").and_then(Json::str).unwrap().to_owned();
+            entries.push((kind, e));
+        }
+        let kind = replica::kinds::entry::entry_to_kind(&bay.unwrap()).unwrap();
+        let mut kinds = replica::kinds::Kinds::default();
+        kinds.load(&[("rack_bay", kind.as_str())]);
+        let def = kinds
+            .admits()
+            .into_keys()
+            .find_map(|k| {
+                kinds
+                    .get(&k)
+                    .filter(|d| d.name.as_str().starts_with("mars:rack_bay@"))
+            })
+            .expect("the bay's kind");
+        let slots: Vec<(u64, String, [i64; 3])> = def
+            .slots
+            .iter()
+            .map(|(n, s)| {
+                (
+                    *n,
+                    s.name.as_ref().unwrap().as_str().to_owned(),
+                    s.at_mm.unwrap_or([0, 0, 0]),
+                )
+            })
+            .collect();
+        let numbers = slots.iter().map(|s| (s.1.clone(), s.0)).collect();
+        let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let Json::Obj(top) = &mut f else {
+            panic!("facts")
+        };
+        let num = |v: i64| Json::Int(i128::from(v));
+        for (k, v) in top.iter_mut() {
+            match (k.as_str(), v) {
+                ("kinds", Json::Arr(a)) => a.push(
+                    json::parse(&format!(
+                        r#"{{"ref": "testworld-rack-bay@1", "hash": "{}", "name": "mars:rack_bay", "form": "point"}}"#,
+                        to_hex(&sha256(b"souls/testworld/testworld-rack-bay@1"))
+                    ))
+                    .unwrap(),
+                ),
+                ("things", Json::Arr(a)) => {
+                    let slots = slots
+                        .iter()
+                        .map(|(n, id, at)| {
+                            Json::Obj(vec![
+                                ("n".into(), num(*n as i64)),
+                                ("id".into(), Json::s(id)),
+                                ("kind".into(), Json::s("bay")),
+                                ("at".into(), Json::Arr(at.iter().map(|&v| num(v)).collect())),
+                                ("yaw".into(), num(0)),
+                                ("capacity".into(), num(1)),
+                            ])
+                        })
+                        .collect();
+                    a.push(Json::Obj(vec![
+                        ("id".into(), Json::s("site-bay")),
+                        ("def".into(), Json::s("testworld-rack-bay@1")),
+                        ("ref".into(), Json::s("testworld-rack-bay@1")),
+                        ("parent".into(), Json::Null),
+                        (
+                            "pose".into(),
+                            Json::Arr([65_000, 0, -24_000, 0].iter().map(|&v| num(v)).collect()),
+                        ),
+                        ("scale_ppm".into(), num(1_000_000)),
+                        ("name".into(), Json::s("the site's rack bay")),
+                        ("slots".into(), Json::Arr(slots)),
+                    ]));
+                }
+                _ => {}
+            }
+        }
+        (f.to_json(), entries, numbers)
+    }
+
+    fn int(v: i64) -> Value {
+        u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+    }
+
+    /// An act's final answer: its kind (1 a receipt, 2 a refusal), its reason (read in a failure's message) and its
+    /// entries.
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct Got {
+        kind: u64,
+        reason: String,
+        entries: Vec<u64>,
+    }
+
+    fn read(frame: &[u8]) -> Got {
+        let Value::Map(m) = decode(frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer: {m:?}")
+        };
+        Got {
+            kind: match a.get(&3) {
+                Some(Value::Uint(k)) => *k,
+                _ => 0,
+            },
+            reason: match a.get(&4) {
+                Some(Value::Text(t)) => t.as_str().to_owned(),
+                _ => String::new(),
+            },
+            entries: match a.get(&5) {
+                Some(Value::Array(e)) => e
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::Uint(n) => Some(*n),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
+        }
+    }
+
+    /// The yard world served in lockstep in this process, as `serve` builds it: the engine, a static creator's edits,
+    /// births by the entry, and the bodies on the served town and planner.
+    struct Lock {
+        world: answers::World,
+        store: sim::log::Mem,
+        initial: Replica,
+        built: Built,
+        tick: i64,
+        /// How many ticks after the last run an intent sent now is taken.
+        ahead: i64,
+        sequences: BTreeMap<Id, u64>,
+    }
+
+    impl Lock {
+        fn start(facts: &str, entries: &[(String, Json)], creator: Id) -> Lock {
+            let mut kinds = entries.to_vec();
+            let built = build(facts, &kinds).unwrap();
+            replica::kinds::entry::family_forms(&mut kinds, plain(&built.body_kind));
+            let initial = Replica::start(built.header.stored()).unwrap();
+            let (mut log, _) = Log::open(sim::log::Mem::with(Vec::new()), EPOCH).unwrap();
+            let n = log.append(built.part.clone()).unwrap();
+            log.wait_durable(n + 1).unwrap();
+            let store = log.close();
+            let (mut town, planner) =
+                recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
+            let (places, ..) = worldd::places::register(&mut town, &kinds);
+            let runs = worldd::places::runs(&town, &kinds, &places);
+            let rules = Rules {
+                kinds: Json::Obj(kinds),
+                moves: Json::Obj(Vec::new()),
+            };
+            let mut cfg = Config::new(built.header.lineage, EPOCH);
+            cfg.lockstep = true;
+            cfg.measures = false;
+            cfg.engine = Some((built.rules.clone(), built.activities.clone()));
+            cfg.edits = Some(Editing {
+                creator,
+                kinds: built.rules.kinds.clone(),
+            });
+            let ground = built.ground;
+            let entry = Vec3::new(36_000_000, 0, -20_000_000);
+            cfg.join = Some(Join {
+                entry: (ground, entry),
+                family: humanoid().unwrap(),
+                kind: Name::new(&built.body_kind).unwrap(),
+                per_tick: 8,
+            });
+            cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
+                bodies(town, planner, ground, entry, placed, places, runs, builds)
+            }));
+            let world = answers::start(initial.frozen(), rules, store.clone(), cfg).unwrap();
+            Lock {
+                world,
+                store,
+                initial,
+                built,
+                tick: 0,
+                ahead: 1,
+                sequences: BTreeMap::new(),
+            }
+        }
+
+        fn records(&self) -> Vec<Vec<u8>> {
+            let log = self.store.0.lock().unwrap().bytes.clone();
+            sim::log::recover(&log).unwrap().records
+        }
+
+        /// The world as its log has it now.
+        fn replay(&self) -> Replica {
+            let mut r = self.initial.frozen();
+            for rec in self.records() {
+                if !recorder::is_input(&rec) {
+                    let p = Part::read(&rec).unwrap();
+                    if !p.effects.is_empty() {
+                        r.apply(&p).unwrap();
+                    }
+                }
+            }
+            r
+        }
+
+        /// `actor`'s intent (its id `who`), taken at the next tick; its answers on the receiver.
+        fn send(
+            &mut self,
+            (actor, who): (Actor, Id),
+            verb: &str,
+            target: Option<Id>,
+            parameters: BTreeMap<u64, Value>,
+            planned: u64,
+        ) -> Receiver<Vec<u8>> {
+            let sequence = self.sequences.entry(who).or_insert(0);
+            *sequence += 1;
+            let lineage = self.built.header.lineage;
+            let i = Intent {
+                actor,
+                verb: Name::new(verb).unwrap(),
+                target: target.map(Target::Node),
+                parameters,
+                sequence: *sequence,
+                basis: Version {
+                    lineage,
+                    zone: Id::new(lineage, 0).unwrap(),
+                    epoch: EPOCH,
+                    sequence: planned,
+                }
+                .to_value(),
+                // Lockstep world time starts at 0: an expiry far ahead, the same in every run.
+                expiry: i64::MAX,
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+                reflex: false,
+            };
+            let (reply, rx) = channel();
+            self.world
+                .events
+                .send(answers::Event::ArrivalAt {
+                    tick: self.tick + self.ahead,
+                    bytes: encode(&i.to_value()).unwrap(),
+                    reply,
+                })
+                .unwrap();
+            rx
+        }
+
+        fn soul(
+            &mut self,
+            soul: Id,
+            verb: &str,
+            target: Option<Id>,
+            p: BTreeMap<u64, Value>,
+        ) -> Receiver<Vec<u8>> {
+            self.send((Actor::Soul(soul), soul), verb, target, p, 0)
+        }
+
+        fn walk(&mut self, soul: Id, at: Vec3) -> Receiver<Vec<u8>> {
+            let g = self.built.ground;
+            self.soul(
+                soul,
+                "eden:walk",
+                Some(g),
+                BTreeMap::from([(1, Value::Array(vec![int(at.x), int(0), int(at.z)]))]),
+            )
+        }
+
+        /// Runs ticks until each of `rxs` has its final answer, in order.
+        fn answers(&mut self, rxs: Vec<Receiver<Vec<u8>>>) -> Vec<Got> {
+            let mut got: Vec<Option<Got>> = rxs.iter().map(|_| None).collect();
+            let mut ran = 0;
+            while got.iter().any(Option::is_none) {
+                assert!(ran < MOST_TICKS, "no answer in {ran} ticks: {got:?}");
+                self.tick += 10;
+                ran += 10;
+                let (done, rx) = channel();
+                self.world
+                    .events
+                    .send(answers::Event::RunTo {
+                        tick: self.tick,
+                        done,
+                    })
+                    .unwrap();
+                rx.recv().unwrap();
+                for (rx, g) in rxs.iter().zip(got.iter_mut()) {
+                    for frame in rx.try_iter() {
+                        if answers::progress_of(&frame).is_none() {
+                            *g = Some(read(&frame));
+                        }
+                    }
+                }
+            }
+            got.into_iter().map(Option::unwrap).collect()
+        }
+
+        fn one(&mut self, rx: Receiver<Vec<u8>>) -> Got {
+            self.answers(vec![rx]).pop().unwrap()
+        }
+
+        fn body_of(&self, soul: Id) -> Id {
+            let r = self.replay();
+            let t = r.tree();
+            t.links_at(soul)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body")
+        }
+
+        /// Where `id` is in the open ground's frame.
+        fn at(&self, id: Id) -> Vec3 {
+            let r = self.replay();
+            let t = r.tree();
+            sim::ground::scene::xform_to(
+                t,
+                t.handle(id).unwrap(),
+                t.handle(self.built.ground).unwrap(),
+            )
+            .unwrap()
+            .pos
+        }
+
+        /// The node of a kind starting `prefix` the entries numbered `entries` created.
+        fn created(&self, entries: &[u64], prefix: &str) -> Id {
+            for rec in self.records() {
+                if recorder::is_input(&rec) {
+                    continue;
+                }
+                for e in Part::read(&rec).unwrap().effects {
+                    if !entries.contains(&e.envelope.sequence) {
+                        continue;
+                    }
+                    if let EffectBody::Changes(cs) = e.body {
+                        for c in cs {
+                            if let Change::Create { node, kind, .. } = c.change
+                                && kind.as_str().starts_with(prefix)
+                            {
+                                return node;
+                            }
+                        }
+                    }
+                }
+            }
+            panic!("no {prefix} created by {entries:?}")
+        }
+
+        fn bytes(self) -> Vec<u8> {
+            let b = self.store.0.lock().unwrap().bytes.clone();
+            self.world.stop();
+            b
+        }
+    }
+
+    /// The activity kind named `plain_name` as the world pins it, as an intent names it.
+    fn built_activity(built: &Built, plain_name: &str) -> Value {
+        let a = built
+            .activities
+            .iter()
+            .find(|a| plain(a.name.as_str()) == plain_name)
+            .unwrap_or_else(|| panic!("the world pins {plain_name}"));
+        let hex = a.name.as_str().split_once('@').unwrap().1;
+        Value::Array(vec![
+            Value::Text(Name::new(plain_name).unwrap()),
+            Value::Bytes(from_hex(hex).unwrap()),
+        ])
+    }
+
+    /// One run: three Souls join; two take frame A off the yard's stand as a crew, carry it to the bay and seat it in
+    /// `upright_a` (a crew's seating, checked with the bodies); the third takes a beam in its hand and sets it down (a
+    /// set-down); the world's creator places an upright on the open ground (an edit). The log's bytes.
+    fn run(facts: &str, entries: &[(String, Json)], slots: &BTreeMap<String, u64>) -> Vec<u8> {
+        let creator = Id::new(Scope([0x5c; 16]), 1).unwrap();
+        let mut w = Lock::start(facts, entries, creator);
+        let im = import_eden::load(facts).unwrap();
+        let (bay, fa, b3) = (
+            im.nodes["site-bay"],
+            im.nodes["yard-frame-1"],
+            im.nodes["yard-beam-3"],
+        );
+        let g = w.built.ground;
+        let souls: Vec<Id> = (1..=3)
+            .map(|k| Id::new(Scope([0x5d; 16]), k).unwrap())
+            .collect();
+        let joins = souls
+            .iter()
+            .map(|s| w.soul(*s, answers::JOIN, None, BTreeMap::new()))
+            .collect();
+        for got in w.answers(joins) {
+            assert_eq!(got.kind, 1, "joined: {got:?}");
+        }
+        let v3 = |x, z| Vec3::new(x, 0, z);
+        let ends = |at: Vec3| (v3(at.x, at.z - 2_200_000), v3(at.x, at.z + 2_200_000));
+        // The crew to frame A's ends, the third Soul beside beam 3.
+        let (p, q) = ends(w.at(fa));
+        let beam = w.at(b3);
+        let walks = vec![
+            w.walk(souls[0], p),
+            w.walk(souls[1], q),
+            w.walk(souls[2], v3(beam.x + 700_000, beam.z)),
+        ];
+        for got in w.answers(walks) {
+            assert_eq!(got.kind, 1, "walked: {got:?}");
+        }
+        let carry = built_activity(&w.built, "mars:carry_activity");
+        let second = w.body_of(souls[1]);
+        let rx = w.soul(
+            souls[0],
+            "activity:offer",
+            Some(g),
+            BTreeMap::from([
+                (1, carry),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![second.to_value()])),
+            ]),
+        );
+        let got = w.one(rx);
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let crew = w.created(&got.entries, "mars:carry_activity@");
+        let rx = w.soul(souls[1], "activity:accept", Some(crew), BTreeMap::new());
+        let got = w.one(rx);
+        assert_eq!(got.kind, 1, "accepted: {got:?}");
+        let take = w.soul(
+            souls[0],
+            "part:take",
+            Some(crew),
+            BTreeMap::from([(1, fa.to_value())]),
+        );
+        let hand = w.soul(souls[2], "mars:take", Some(b3), BTreeMap::new());
+        for got in w.answers(vec![take, hand]) {
+            assert_eq!(got.kind, 1, "taken: {got:?}");
+        }
+        // The crew to the slot; the beam set down; the creator's upright on the open ground.
+        let ua = {
+            let r = w.replay();
+            let t = r.tree();
+            sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+                .unwrap()
+                .into_iter()
+                .find(|(n, _)| *n == slots["upright_a"])
+                .unwrap()
+                .1
+        };
+        let (p, q) = ends(ua);
+        let upright = w
+            .built
+            .rules
+            .kinds
+            .keys()
+            .find(|k| k.starts_with("mars:rack_upright@"))
+            .unwrap()
+            .clone();
+        let place = |x: i64| Op::Place {
+            name: 1,
+            kind: Name::new(&upright).unwrap(),
+            parent: Ref::Node(g),
+            at: Spot {
+                slot: None,
+                position: v3(x, -30_000_000),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: g,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let planned = w.replay().version();
+        // Body-reading jobs in consecutive ticks (the set-down, then two edits): each reads its own tick's bodies.
+        let mut rxs = vec![
+            w.walk(souls[0], p),
+            w.walk(souls[1], q),
+            w.soul(
+                souls[2],
+                "hands:set-down",
+                Some(b3),
+                BTreeMap::from([(1, Value::Text(Name::new("place:here").unwrap()))]),
+            ),
+        ];
+        for (k, x) in [50_000_000, 54_000_000].into_iter().enumerate() {
+            w.ahead = 2 + k as i64;
+            rxs.push(w.send(
+                (Actor::Creator(creator), creator),
+                VERB,
+                None,
+                parameters(&[place(x)]),
+                planned,
+            ));
+        }
+        w.ahead = 1;
+        let got = w.answers(rxs);
+        println!("S10c: walks, set-down, edits: {got:?}");
+        for g in &got {
+            assert_eq!(g.kind, 1, "done: {g:?}");
+        }
+        let rx = w.soul(
+            souls[0],
+            "part:put",
+            Some(crew),
+            BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots["upright_a"]))]),
+        );
+        let got = w.one(rx);
+        println!("S10c: seated: {got:?}");
+        assert_eq!(got.kind, 1, "seated: {got:?}");
+        w.bytes()
+    }
+
+    #[test]
+    fn s10c_a_lockstep_edit_set_down_and_seating_with_bodies_log_the_same_bytes_twice() {
+        let (facts, entries, slots) = yard();
+        let a = run(&facts, &entries, &slots);
+        let b = run(&facts, &entries, &slots);
+        println!("S10c: logs of {} and {} bytes", a.len(), b.len());
+        assert_eq!(sha256(&a), sha256(&b), "the same inputs write the same log");
+    }
+
+    /// N2's test world built as `serve` builds it, with its building's floor and that floor's door end: the shape of
+    /// the hello-hamlet world whose saved state bricked on restart (a body logged on the cottage's floor 0.77 m past
+    /// the floor's door end, mid-crossing, so every restart refused every move).
+    fn door_world() -> (Town, Town, Id, Vec<PlaceAt>, Id, Vec3, Id) {
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let floor = imported.nodes["building/floor-1"];
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part), &[]).unwrap();
+        let (places, ..) = worldd::places::register(&mut town, &[]);
+        let (link, door) = town
+            .buildings
+            .iter()
+            .flat_map(|b| b.links.iter())
+            .find_map(|l| {
+                let e = l.ends.iter().flatten().find(|e| e.floor == floor)?;
+                Some((l.id, e.middle()))
+            })
+            .expect("the building's floor has a door");
+        let ground = built.ground;
+        (town, planner, floor, places, link, door, ground)
+    }
+
+    /// A point 765 mm past the floor's door end (the saved row's offset), straight out of the floor: of the four ways
+    /// along the axes, the one farthest from any point the floor holds.
+    fn past_door(town: &Town, floor: Id, door: Vec3) -> Vec3 {
+        let surface = &town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&floor];
+        let off = |p: &Vec3| {
+            let (_, n) = sim::ground::exits::nearest(surface.pieces(), *p).unwrap();
+            (i128::from(n.x - p.x)).pow(2) + (i128::from(n.z - p.z)).pow(2)
+        };
+        let p = [(765_000, 0), (-765_000, 0), (0, 765_000), (0, -765_000)]
+            .into_iter()
+            .map(|(dx, dz)| Vec3::new(door.x + dx, door.y, door.z + dz))
+            .max_by_key(off)
+            .unwrap();
+        let here = Frame {
+            node: floor,
+            slot: None,
+        };
+        let probe = Id::new(Scope([7; 16]), 99).unwrap();
+        assert!(
+            surface
+                .place(probe, here, p, replica::pose::Quat::IDENTITY)
+                .is_err_and(|r| r.name == "off-surface"),
+            "a point past the door end, off the floor"
+        );
+        p
+    }
+
+    fn standing(node: Id, at: Vec3) -> replica::pose::Pose {
+        replica::pose::Pose {
+            frame: Frame { node, slot: None },
+            position: at,
+            orientation: replica::pose::Quat::IDENTITY,
+            support: replica::pose::Support::Surface {
+                surface: node,
+                height: 0,
+            },
+        }
+    }
+
+    /// The minimised fixture of the bricked world's saved state: two bodies logged standing, one on the floor past its
+    /// door end (off its surface), one on the open ground, and a third with no recorded build. The restart starts the
+    /// first two (the first resumed by E11d's rule, the second where it stood) and leaves the third out by name: one
+    /// bad row never stops the others.
+    #[test]
+    fn a_body_logged_off_its_ground_is_restored_and_never_stops_the_others() {
+        use replica::kinds::sizes::Build;
+        let (town, planner, floor, places, _, door, ground) = door_world();
+        let past = past_door(&town, floor, door);
+        let off = Id::new(Scope([7; 16]), 1).unwrap();
+        let fine = Id::new(Scope([7; 16]), 2).unwrap();
+        let unknown = Id::new(Scope([7; 16]), 3).unwrap();
+        let gone = Id::new(Scope([7; 16]), 4).unwrap();
+        let on_ground = Vec3::new(-40_000_000, 0, 30_000_000);
+        let no_floor = Id::new(Scope([7; 16]), 77).unwrap();
+        let placed: Placed = BTreeMap::from([
+            (off, (standing(floor, past), None)),
+            (fine, (standing(ground, on_ground), None)),
+            (unknown, (standing(ground, on_ground), None)),
+            (gone, (standing(no_floor, past), None)),
+        ]);
+        let builds = BTreeMap::from([
+            (off, Build::STANDARD),
+            (fine, Build::STANDARD),
+            (gone, Build::STANDARD),
+        ]);
+        let entry = Vec3::new(-38_000_000, 0, 30_000_000);
+        let mut b = bodies(
+            town,
+            planner,
+            ground,
+            entry,
+            &placed,
+            places,
+            Vec::new(),
+            &builds,
+        )
+        .expect("the bodies start");
+        // A body whose floor is gone stands at the world's entry, named, and an entry on it says so.
+        let (enode, eat) = b.pose(gone).expect("a body whose floor is gone stands");
+        assert_eq!(enode, ground, "on the ground");
+        let ground_surface = &b
+            .town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&ground];
+        let probe = Id::new(Scope([7; 16]), 98).unwrap();
+        assert!(
+            ground_surface
+                .place(
+                    probe,
+                    Frame {
+                        node: ground,
+                        slot: None
+                    },
+                    eat,
+                    replica::pose::Quat::IDENTITY
+                )
+                .is_ok(),
+            "at a point it may stand on: {eat:?}"
+        );
+        assert!(
+            b.resumed.contains(&(gone, "resume-entry")),
+            "{:?}",
+            b.resumed
+        );
+        b.begin(0);
+        b.step(50_000);
+        let said: Vec<_> = b
+            .wind_log
+            .iter()
+            .filter(|e| e.envelope.node == gone)
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == worldd::unstick::RESTARTED)
+            .collect();
+        assert_eq!(said.len(), 1, "one entry on the body: {said:?}");
+        let (node, _) = b.pose(off).expect("the body logged off its floor started");
+        assert_eq!(node, floor, "on its own floor's frame");
+        // E11d's resume: carried on to the floor's nearest legal point (a way out through the door), never refused.
+        assert!(
+            b.runner.controller.carried(off) || b.resumed.iter().any(|(i, _)| *i == off),
+            "resumed by rule: {:?}",
+            b.resumed
+        );
+        let (gnode, gat) = b.pose(fine).expect("the other body started");
+        assert_eq!((gnode, gat.x, gat.z), (ground, on_ground.x, on_ground.z));
+        assert!(
+            b.pose(unknown).is_none(),
+            "a body that cannot be placed is left out"
+        );
+    }
+
+    /// The write path: a body carried across a link is not logged while it is carried (its pose then follows the
+    /// line past its floor's edge), so a kill mid-crossing restarts it where it last stood.
+    #[test]
+    fn a_body_crossing_a_link_is_logged_where_it_last_stood() {
+        use replica::kinds::sizes::Build;
+        let (town, planner, floor, places, link, door, ground) = door_world();
+        let surface = &town
+            .surfaces_for(replica::kinds::sizes::Size::Standard)
+            .unwrap()[&floor];
+        let body = Id::new(Scope([7; 16]), 1).unwrap();
+        let (_, inside) = sim::ground::exits::nearest(surface.pieces(), door).unwrap();
+        let recorded = surface
+            .place_built(
+                body,
+                Frame {
+                    node: floor,
+                    slot: None,
+                },
+                inside,
+                replica::pose::Quat::IDENTITY,
+                Build::STANDARD,
+            )
+            .unwrap()
+            .pose;
+        let placed: Placed = BTreeMap::from([(body, (recorded, None))]);
+        let builds = BTreeMap::from([(body, Build::STANDARD)]);
+        let mut b = bodies(
+            town,
+            planner,
+            ground,
+            Vec3::ZERO,
+            &placed,
+            places,
+            Vec::new(),
+            &builds,
+        )
+        .unwrap();
+        assert!(b.moved().is_empty());
+        // Out through the door and on past its end, at 1 m/s: half a second in, it is still crossing.
+        let past = past_door(&b.town, floor, door);
+        let far = Vec3::new(past.x * 2 - door.x, past.y, past.z * 2 - door.z);
+        b.runner
+            .controller
+            .carry(
+                body,
+                sim::controller::Track {
+                    link: Some(link),
+                    line: vec![door, past, far],
+                    speed: 1_000_000,
+                    to: ground,
+                    arrive: None,
+                    hold: false,
+                },
+            )
+            .unwrap();
+        b.begin(0);
+        for n in 1..=10 {
+            b.step(n * 50_000);
+        }
+        let now = b.runner.controller.body(body).unwrap().pose;
+        assert_ne!(
+            now.position, recorded.position,
+            "the body moved along the carry"
+        );
+        assert!(b.runner.controller.carried(body), "still crossing");
+        assert!(b.moved().is_empty(), "nothing logged mid-crossing");
+        assert_eq!(
+            b.placed()[&body].0,
+            recorded,
+            "the checkpoint keeps where it last stood"
+        );
     }
 }

@@ -39,7 +39,8 @@ function page(provider: Provider) {
 test('V13c A2: the provider script is the one today\'s site loads, behind the same configuration', () => {
   assert.equal(frontendApi(KEY), HOST);
   assert.deepEqual(providerScript(CFG, 'https://world.example.test'), {
-    src: `https://${HOST}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`,
+    src: `https://${HOST}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`,
+    uiSrc: `https://${HOST}/npm/@clerk/ui@1/dist/ui.browser.js`,
     attributes: { 'data-clerk-publishable-key': KEY },
   });
   // The same rule as today's site: no provider without `clerk`, its key and its issuer.
@@ -50,7 +51,8 @@ test('V13c A2: the provider script is the one today\'s site loads, behind the sa
   const live = `pk_live_${btoa('clerk.soul.example$')}`;
   const sat = { ...CFG, clerkPublishableKey: live, clerkSatellite: { domain: 'world.example.test', signInUrl: 'https://soul.example/sign-in' } };
   assert.deepEqual(providerScript(sat, 'https://world.example.test'), {
-    src: 'https://clerk.world.example.test/npm/@clerk/clerk-js@5/dist/clerk.browser.js',
+    src: 'https://clerk.world.example.test/npm/@clerk/clerk-js@6/dist/clerk.browser.js',
+    uiSrc: 'https://clerk.world.example.test/npm/@clerk/ui@1/dist/ui.browser.js',
     attributes: { 'data-clerk-publishable-key': live, 'data-clerk-domain': 'world.example.test' },
   });
 });
@@ -65,9 +67,10 @@ test('V13c A2: a signed-in owner signs in from the script: the exchange carries 
   };
   const { env, appended } = page(provider);
   const session = await providerSession(CFG, env);
-  assert.deepEqual(appended, [{ src: `https://${HOST}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`,
-    attrs: { 'data-clerk-publishable-key': KEY }, async: true, crossOrigin: 'anonymous' }]);
-  assert.deepEqual(loaded, {});
+  assert.deepEqual(appended, [{ src: `https://${HOST}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`,
+    attrs: { 'data-clerk-publishable-key': KEY }, async: true, crossOrigin: 'anonymous' },
+  { src: `https://${HOST}/npm/@clerk/ui@1/dist/ui.browser.js`, attrs: {}, async: true, crossOrigin: 'anonymous' }]);
+  assert.deepEqual(loaded, { ui: { ClerkUI: undefined } });
   assert.ok(session && 'bearer' in session);
   // The session's token goes to the directory as the bearer, fresh each exchange; never in an address.
   const sent: { url: string; auth: string | undefined }[] = [];
@@ -91,7 +94,7 @@ test('V13c A2: signed out, the provider\'s sign-in opens and returns to this pag
   };
   const { env } = page(provider);
   assert.equal(await providerSession(CFG, env), null);
-  assert.deepEqual(opened, { afterSignInUrl: PAGE, afterSignUpUrl: PAGE });
+  assert.deepEqual(opened, { forceRedirectUrl: PAGE, signUpForceRedirectUrl: PAGE });
   const bare = page(provider);
   assert.equal(await providerSession({}, bare.env), null);
   assert.deepEqual(bare.appended, []);

@@ -53,6 +53,10 @@ export type NodeRec = {
   /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
    *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
   fields?: Fields;
+  /** A creator's kind (`souls:kind`, #3697): the full name it defines (field 1) and its canonical `souls-entry/1`
+   *  record (field 2), for the page's kind catalogue (`kinds/catalogue.ts`). */
+  defines?: string;
+  entry?: Uint8Array;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
@@ -69,9 +73,16 @@ export type SaidRec = { speaker: string; at: number; length: number; reach: numb
 /** A private turn's public record (`souls:said-privately`, #3775): the conversation and its members; never words. */
 export type Private = { conversation: string; members: string[] };
 
+/** A run's move as it started (`souls:form-move`, #3741): the body, B2's record (times world µs) and the thing it acts
+ * on; the run or activity it belongs to (0.134: dancers on one beat share it); when a held move was let go, the same
+ * record again with when and how it ended (0.134 T2). And a run's ending (`souls:form-ended`): the body, when and how.
+ * The page draws gestures from these alone. */
+export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null; run?: string; ended?: { at: number; how: string } };
+export type RunEndRec = { body: string; at: number; how: string };
+
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[] };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[] };
 
 /** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
  * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */

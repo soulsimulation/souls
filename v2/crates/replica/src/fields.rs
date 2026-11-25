@@ -46,6 +46,7 @@ const RESERVED: &[Reserved] = &[
     r(30, "worldd::words::NAME", On::Body),
     r(31, "worldd::words::DESCRIPTION", On::Body),
     r(32, "skills::wear::BODY", On::Body),
+    r(33, "skills::wear::LOOK", On::Body),
     r(crate::host::F_CROSSING, "host::F_CROSSING", On::Body),
     r(crate::host::F_WAITING, "host::F_WAITING", On::Body),
     r(crate::host::F_TURNS, "host::F_TURNS", On::Link),
@@ -100,11 +101,15 @@ const RESERVED: &[Reserved] = &[
     // Kept for fields in review (21 Nov): a place's aliases (#3904), district plans, build claims and land-use zones
     // on the zone's root (#3879, #3913), and the owner and access marks any node may carry (#3913).
     r(101, "F_ALIASES (#3904)", On::Place),
+    r(102, "import_eden::F_DEF_BODIES", On::Thing),
+    r(103, "import_eden::F_GROUND_PALETTE", On::Thing),
     r(140, "edit::claims F_DISTRICTS (#3879)", On::Place),
     r(141, "edit::claims F_CLAIMS (#3879)", On::Place),
     r(142, "F_ZONES (#3913)", On::Place),
     r(143, "who_may::F_OWNER (#3913)", On::Thing),
     r(144, "who_may::F_ACCESS (#3913)", On::Thing),
+    // 0.134 R4: a creator's tint on a thing or one of its parts (`souls-god recolor`).
+    r(crate::tint::F_TINT, "tint::F_TINT", On::Thing),
 ];
 
 /// Every engine-reserved node field number above the import's, in the order listed.

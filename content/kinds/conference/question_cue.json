@@ -1,0 +1,116 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:question_cue",
+  "owner": "thing",
+  "links": {
+    "asker": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "chair": {
+      "n": 2,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_asker": {
+      "role": "stand",
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_chair": {
+      "role": "stand",
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "asker": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "stand": "by_asker"
+    },
+    "chair": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "stand": "by_chair"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      1600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "asker": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "asker"
+        ],
+        "within_mm": 3000
+      },
+      "move": "wave"
+    },
+    "chair": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "chair"
+        ],
+        "within_mm": 3000
+      },
+      "move": "point"
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Wave to request recognition; an accepting chair points toward you.",
+    "conference": "conference",
+    "recognition": "recognition cue",
+    "rules": "Offer this cue to the person chairing. If they accept, you are asked to walk to separate standing places. You wave while they point toward you. Either person may leave."
+  },
+  "card": {
+    "text": "card",
+    "category": "conference",
+    "synonyms": [
+      "recognition"
+    ]
+  }
+}

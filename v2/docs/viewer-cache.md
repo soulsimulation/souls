@@ -13,7 +13,13 @@ price are the owner's (C4 on #2636).
    them. A world that stops or restarts never stops the origin, and an origin under load never slows the world.
    Every request for one immutable file shares one buffer of it (the newest 64 MB stay held, `ORIGIN_CACHE_MB`), so
    a join wave all asking for a 9 MB baseline costs the origin one copy, not one per request (#4018). Each request
-   still checks the file on disk; the pointer is read afresh every time.
+   still checks the file on disk; the pointer is read afresh every time. A body goes out 256 KB at a time, and a
+   reader that takes nothing for 20 s is let go (its connection closed, counted as `stalled`; the page starts again
+   from the newest baseline), so a stalled viewer never holds a socket and an old baseline for as long as it stays
+   connected. A slow reader that keeps taking bytes is never let go. With compression (item 2): a stalled reader of
+   an encoded copy pins only that copy (about 1.1 MB for Eden's 9 MB baseline), a 206 pins the whole decoded buffer
+   for up to the 20 s, and the encoded copies add at most about 0.32 times the held bytes a process when readers ask
+   for both br and gzip.
    **Several processes share its port** (Linux, Node 22.12 or later: `listen({ reusePort })`), so the kernel spreads
    viewers' connections across them and no process sits in their path; one thread saturated near 1,000 viewers
    (#4018). `ORIGIN_PROCESSES` sets how many; the default is the host's cores less `ORIGIN_RESERVE_CORES` (2, what
@@ -21,16 +27,25 @@ price are the owner's (C4 on #2636).
    the default is 1. The process started by the unit only starts them and starts again, a second later, any that
    ends, while the others serve. Each holds its own buffers (`ORIGIN_CACHE_MB`, 32 a process when there are
    several). `ORIGIN_STATS` gets `bytes` summed over the processes and `processes`, one row each: pid, requests by
-   kind, disk reads, bytes, processor seconds, resident bytes and restarts.
-2. **Three kinds of answer, and nothing else:**
+   kind, readers let go (`stalled`), disk reads, bytes, processor seconds, resident bytes and restarts.
+2. **These answers, and nothing else:**
 
    | Request | Status | `Cache-Control` |
    |---|---|---|
    | A part (`<stream>/<n>`) or a bundle's header (`…/headers/<hash>`) | 200 | `public, max-age=31536000, immutable, no-transform` |
    | The pointer (`<stream>/pointer`) | 200 | `public, max-age=1, no-transform` |
+   | A world's history object rewritten in place: `history/everyone/events/…`, `history/everyone/counts/…`, `bundles/<day>/index`, an open bundle `bundles/<day>/<start>` | 200, or 304 when `If-None-Match` names its ETag | `public, no-cache, no-transform` |
+   | A sealed bundle (`bundles/<day>/<start>-<sha256>`) or a world's history `header` | 200 | `public, max-age=31536000, immutable, no-transform` |
+   | One valid `Range` on an immutable file (a crossing reader asks for a baseline's first 16 bytes) | 206, those bytes of the decoded file, never encoded | `public, max-age=31536000, immutable, no-transform` |
+   | A `Range` that starts past the end of an immutable file | 416, `Content-Range: bytes */<size>` | `no-store` |
    | Anything not there, a temporary file (`*.tmp`), a URL with a query string, a path outside the directory | 404 | `no-store` |
 
-   Every 200 is `application/octet-stream` with a strong `ETag`: the SHA-256 of its bytes, in hex.
+   Every 200 and 206 is `application/octet-stream` with an `ETag`: the SHA-256 of its decoded bytes, in hex, strong
+   on the bytes as they are. An immutable file of 16 KiB or more that packs well (a generation's `baseline`, 8.97 MB
+   on Eden: 1.11 MB as brotli, 1.83 MB as gzip) goes `Content-Encoding: br`, else `gzip`, to a reader whose
+   `Accept-Encoding` takes it, with `Vary: Accept-Encoding` and the same hash as a weak tag (`W/"<hash>"`: a strong
+   tag names one representation's bytes, RFC 9110 8.8.3). It is compressed once a process and held with its buffer.
+   An invalid range (first after last) or more than one is ignored: the whole file, 200.
 3. **The pointer's max-age is half a period, rounded up to a whole second.** `max-age` takes whole seconds
    (RFC 9111), and half of V1's 0.5 s period rounds down to 0, which would send every pointer read to the origin. One
    second is the shortest that keeps the origin's pointer reads per cache node at about one a second whatever the
@@ -72,11 +87,11 @@ each part.
 
 | Rule | Why | On nginx |
 |---|---|---|
-| Key on the path alone | one entry per part | `proxy_cache_key $uri;` |
+| Key on the path, and keep the origin's `Vary: Accept-Encoding` | one entry per part; a baseline's br, gzip and plain copies apart | `proxy_cache_key $uri;` (nginx keeps a variant per `Vary`) |
 | Honour the origin's `Cache-Control`; keep no error | a kept 404 hides a part that now exists (Fact 3: Cloudflare keeps a 404 3 min, CloudFront 10 s, Bunny 5 s by default) | the default honours it; `proxy_cache_valid 404 0;` |
 | Collapse concurrent misses into one origin request | 2,000 readers asking for a new part at once are one origin request a node | `proxy_cache_lock on;` and, for the pointer's expiry, `proxy_cache_use_stale updating; proxy_cache_background_update on;` |
 | Keep extensionless binary files | parts and the pointer have no extension (Fact 3: Cloudflare does not cache them by default; a cache rule must make them eligible) | the default |
-| Never recompress or transform | the ETag is the bytes' hash; parts are already packed (Fact 8) | `no-transform` is sent; `gzip off;` |
+| Never recompress or transform | the ETag is the decoded bytes' hash; parts are already packed (Fact 8); the origin encodes a baseline itself | `no-transform` is sent; `gzip off;` |
 | Keep connections open | a reader makes about three requests a second | `keepalive` to the origin, HTTP/1.1 or 2 to readers |
 
 **Origin requests per part are at most the number of cache nodes**, not one: each edge location (or nginx machine)

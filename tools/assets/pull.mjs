@@ -12,6 +12,7 @@
 // (<cache>/<sha[:2]>/<sha>, one copy for every checkout on the machine); else --from <tree> (another checkout that has
 // the file); else GET <url> (stalls time out, transient failures are retried). Every byte that lands is checked against
 // sha256 + size of the decoded file. Exit 1 lists every path that is missing or wrong, with the reason.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -19,11 +20,13 @@ import { homedir } from 'node:os';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const MANIFEST = join(ROOT, 'tools/assets/manifest.json');
 export const SETS = ['web', 'runtime', 'test'];
+/** Sets pulled only when named with --set: `import`, the importers' kept outputs (R9a, v2/tools/import-world/README.md). */
+export const OPTIONAL_SETS = ['import'];
 export const defaultCache = () => process.env.SIM_ASSETS_CACHE || join(homedir(), '.cache/sim-assets');
 const SHA = /^[0-9a-f]{64}$/;
 const MAX_CONCURRENCY = 32;
@@ -49,7 +52,7 @@ export async function loadManifest(file = MANIFEST) {
   for (const f of m.files) {
     if (typeof f.path !== 'string' || f.path.startsWith('/') || f.path.split('/').includes('..') || seen.has(f.path)) throw Error(`bad or duplicate path in manifest: ${f.path}`);
     seen.add(f.path);
-    if (!SETS.includes(f.set)) throw Error(`${f.path}: unknown set ${f.set}`);
+    if (!SETS.includes(f.set) && !OPTIONAL_SETS.includes(f.set)) throw Error(`${f.path}: unknown set ${f.set}`);
     if (f.symlink !== undefined) { if (typeof f.symlink !== 'string' || f.symlink.startsWith('/')) throw Error(`${f.path}: bad symlink`); continue; }
     if (!SHA.test(f.sha256) || !Number.isSafeInteger(f.bytes) || f.bytes < 0 || !/^https:\/\/[^/]+\/\S+$/.test(f.url)) throw Error(`${f.path}: entry needs sha256, bytes and an https url`);
   }
@@ -227,7 +230,7 @@ function parse(argv) {
       case '--offline': o.offline = true; break;
       case '--quiet': o.quiet = true; break;
       case '--all': o.sets = SETS; break;
-      case '--set': o.sets = val(i, a).split(','); i++; if (o.sets.some(s => !SETS.includes(s))) throw Error(`--set takes ${SETS.join(',')}`); break;
+      case '--set': o.sets = val(i, a).split(','); i++; if (o.sets.some(s => !SETS.includes(s) && !OPTIONAL_SETS.includes(s))) throw Error(`--set takes ${[...SETS, ...OPTIONAL_SETS].join(',')}`); break;
       case '--only': o.only.push(...val(i, a).split(',').filter(Boolean)); i++; break;
       case '--dest': o.dest = resolve(val(i, a)); i++; break;
       case '--cache': o.cache = resolve(val(i, a)); i++; break;
@@ -269,4 +272,4 @@ const readHelp = () => {
   return `see the header of ${relative(process.cwd(), src)} and tools/assets/README.md`;
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(e => { console.error(`assets: ${e.message}`); process.exitCode = 2; });
+if (isMain(import.meta.url)) main().catch(e => { console.error(`assets: ${e.message}`); process.exitCode = 2; });

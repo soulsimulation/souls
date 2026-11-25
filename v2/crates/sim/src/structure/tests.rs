@@ -61,6 +61,14 @@ fn rack(height: i64, crew: u64) -> Rack {
         .expect("the construction kinds")
         .map(|e| e.expect("an entry").path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // An activity's entry (its `roles`, 0.135 C4's carry) is not a rack kind.
+        .filter(|p| {
+            let json = std::fs::read_to_string(p).expect("read");
+            replica::rules::json::parse(&json)
+                .expect("json")
+                .get("roles")
+                .is_none()
+        })
         .map(|p| {
             let mut json = std::fs::read_to_string(&p).expect("read");
             if p.ends_with("rack_upright.json") {
@@ -69,7 +77,10 @@ fn rack(height: i64, crew: u64) -> Rack {
                     .replacen("\"default\": 1,", &format!("\"default\": {crew},"), 1);
             }
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, entry_to_kind(&json).expect("an entry"))
+            (
+                name,
+                entry_to_kind(&without_roles(&json)).expect("an entry"),
+            )
         })
         .collect();
     files.sort();
@@ -138,6 +149,7 @@ fn rules(rack: &Rack, souls: &[Id]) -> Rules {
         children: children.iter().map(|c| (*c).to_owned()).collect(),
         slots: BTreeMap::new(),
         hands: None,
+        fields: Default::default(),
     };
     kinds.insert(PLACE.into(), kind("place", &["thing", "body"]));
     kinds.insert(WALKER.into(), kind("family", &[]));
@@ -909,12 +921,12 @@ fn leave_one(crew: u64) -> Result<(), (String, String, Id)> {
     acts.start(&mut tree, &mut c, ask(0, 3_000), act)
         .expect("started");
     acts.structure = rack.structure;
-    let (moves, mut due) = (Moves::new(), DueList::new());
+    let (mut moves, mut due) = (Moves::new(), DueList::new());
     let before = tree.to_state();
     let r = acts.leave(
         &mut tree,
         &mut c,
-        &moves,
+        &mut moves,
         &mut due,
         &mut mint,
         ask(1, 4_000),
@@ -1039,4 +1051,14 @@ fn a3_each_check_counts_once_and_none_runs_when_no_bay_changes() {
 fn speed_bar_a3_one_check_under_a_millisecond_at_p99() {
     let (.., ns) = full_bay_checks(10_000);
     assert!(pct(&ns, 99) < 1_000_000, "p99 {} ns", pct(&ns, 99));
+}
+
+/// An entry without its `roles`: they make the crew's activity kind (`worldd::serve::activity_kinds`), not the kind's
+/// meaning, so K3's reader is given the rest (0.135 A2).
+fn without_roles(json: &str) -> String {
+    let mut e = replica::rules::json::parse(json).expect("an entry");
+    if let replica::rules::json::Value::Obj(o) = &mut e {
+        o.retain(|(k, _)| k != "roles");
+    }
+    e.to_json()
 }

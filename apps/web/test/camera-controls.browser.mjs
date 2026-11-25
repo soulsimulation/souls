@@ -21,7 +21,7 @@ try{
  const context=await browser.newContext({viewport:{width:1200,height:850}});
  await context.addInitScript(()=>{localStorage.setItem('sim.dev','admin');localStorage.setItem('sim.authUi','1');});
  assert.equal((await context.request.post(base+'/w/eden/v1/admin',{headers:{authorization:'Bearer dev:admin'},data:{action:'clock_rate',rate:4}})).status(),200);
- page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'/w/eden?rewind=1');
+ page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'/w/eden');
  await page.locator('[data-viewer-status]').filter({hasText:'Live'}).waitFor({timeout:120000});
  const broadcast=page.locator('.viewer-broadcast');
  check('Broadcast is an on/off pill beside Live in the top bar; no camera mode menu',await broadcast.getAttribute('aria-pressed')==='true'&&await page.getByRole('radiogroup').count()===0&&await data('mode')==='broadcast');
@@ -61,7 +61,7 @@ try{
  check('The × on the Following chip ends Follow',await page.locator('.viewer-following').count()===0);
  // History still works beside the new chrome.
  await page.waitForFunction(()=>Number(document.querySelector('.viewer-history')?.dataset.viewerTick)>=1300,null,{timeout:90000});
- await page.getByRole('button',{name:'Back 1 min',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='history',null,{timeout:60000});
+ await page.locator('.world-time-button').click();await page.getByRole('button',{name:'Back 1 min',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='history',null,{timeout:60000});
  await page.getByRole('button',{name:'Return to live',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.viewer-history')?.dataset.viewerPresentation==='live');
  await page.screenshot({path:run+'/desktop-camera.png'});
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Close panel',exact:true}).click().catch(()=>{});await page.waitForTimeout(600);

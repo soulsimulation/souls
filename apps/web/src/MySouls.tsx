@@ -6,7 +6,7 @@ import {orderedSoulIds,readSoulRecency,selectedSoulIds} from './soul-recency.ts'
 import type {PublicSoul} from '@souls/protocol';
 import {worldKey,worldPath} from './world-path.ts';
 import {requestSoulConversations} from './dialogue-speaking.ts';
-import {soulAvatars} from './SoulAvatars.ts';
+import {soulAvatars, wantPortrait} from './SoulAvatars.ts';
 import {soulAvatarImage} from './soul-avatar-source.ts';
 import type {Api} from './useSouls.ts';
 import {useOwnedAgentPresence} from './agent-presence.ts';
@@ -26,6 +26,7 @@ export function useMySouls(){
 export function SoulAvatar({soul}:{soul:PublicSoul}){
  const [failedPhoto,setFailedPhoto]=useState<string|null>(null);
  const [,refresh]=useState(0);useEffect(()=>{const change=()=>refresh(n=>n+1);soulAvatars.events.addEventListener('change',change);return()=>soulAvatars.events.removeEventListener('change',change);},[]);
+ useEffect(()=>wantPortrait(soul.id),[soul.id]);  // the world draws a body portrait only while one shows
  const image=soulAvatarImage(soul,worldPath,soulAvatars.images.get(soul.id),failedPhoto),source=soulAvatars.sources.get(soul.id);let hash=0;for(const c of soul.id)hash=(hash*31+c.charCodeAt(0))>>>0;
  return image?<img key={image.key} className="soul-avatar" src={image.src} data-avatar-source={image.kind} data-profile-photo-hash={image.hash} data-avatar-entity={image.kind==='generated'?source?.entityId:undefined} data-avatar-model={image.kind==='generated'?source?.model:undefined} data-avatar-body-root={image.kind==='generated'?source?.bodyRoot:undefined} onError={image.kind==='profile-photo'?()=>setFailedPhoto(image.key):undefined} alt=""/>:<span className="soul-avatar initials" style={{background:`hsl(${hash%360} 38% 46%)`}} aria-hidden="true">{soul.name.split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>;
 }
@@ -39,17 +40,18 @@ export function chipState(link:ReturnType<typeof ownerLink>,body:Body|null):Chip
 const CHIP_WORD:Record<ChipState,string>={pairing:'pairing request waiting',connected:'connected',zombie:'disconnected, zombie',asleep:'disconnected, asleep',disconnected:'disconnected'};
 const CHIP_MARK:Partial<Record<ChipState,{cls:string;text:string}>>={pairing:{cls:'my-souls-pair',text:'!'},asleep:{cls:'my-souls-zz',text:'zz'},zombie:{cls:'my-souls-zz my-souls-zombie',text:'≈'}};
 /** B3: a click opens the Soul's card (select) and flies the camera to follow it (follow → requestFollowSoul). */
-export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,recencyKey='sim.soul-recency.'+worldKey,selectedId,reconnecting=false}:{ids:readonly string[];souls:ReadonlyMap<string,PublicSoul>;select:(id:string)=>void;follow?:(id:string)=>void;present?:ReadonlySet<string>;api?:Api;bodies?:ReadonlyMap<string,Body>;newSoul?:ReactNode;recencyKey?:string;selectedId?:string|null;reconnecting?:boolean}){
+export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,recencyKey='sim.soul-recency.'+worldKey,selectedId,reconnecting=false,arriving}:{ids:readonly string[];arriving?:ReadonlyMap<string,string|null>;souls:ReadonlyMap<string,PublicSoul>;select:(id:string)=>void;follow?:(id:string)=>void;present?:ReadonlySet<string>;api?:Api;bodies?:ReadonlyMap<string,Body>;newSoul?:ReactNode;recencyKey?:string;selectedId?:string|null;reconnecting?:boolean}){
  const [recent,setRecent]=useState(()=>readSoulRecency(recencyKey));
  const remember=(id:string)=>setRecent(prev=>selectedSoulIds(id,prev,ids));
  useEffect(()=>{if(!ids.length)return;try{localStorage.setItem(recencyKey,JSON.stringify(recent.filter(id=>ids.includes(id))));}catch{}},[recent,recencyKey,ids.join(',')]);
  useEffect(()=>{if(selectedId&&ids.includes(selectedId))remember(selectedId);},[selectedId,ids.join(',')]);
- const pinned=orderedSoulIds(ids,recent).flatMap(id=>{const soul=souls.get(id);return soul?[soul]:[];});
+ // First day (25 Nov): an owned Soul with no body in this world's view yet is listed as arriving, never left out
+ const pinned=orderedSoulIds(ids,recent).flatMap(id=>{const soul=souls.get(id);return soul?[soul]:arriving?.has(id)&&ID.test(id)?[{id,name:arriving.get(id)??'Your new Soul'} as PublicSoul]:[];});
  const agent=useOwnedAgentPresence(api,pinned.slice(0,3).map(s=>s.id));
  const stateOf=(soul:PublicSoul)=>{const here=agent(soul.id);return chipState(ownerLink(here?.link??null,here),newest(readBody((soul as PublicSoul&{body?:unknown}).body),bodies?.get(soul.id)??null));};
  const open=(id:string)=>{remember(id);select(id);follow?.(id);};
- const chip=(soul:PublicSoul,close?:()=>void)=>{const st=stateOf(soul),mark=st?CHIP_MARK[st]:undefined,dim=st==='zombie'||st==='asleep'||st==='disconnected';
-  return <button type="button" key={soul.id} className={(present&&!present.has(soul.id))||dim?'my-souls-away':undefined} data-link-state={st??undefined} onContextMenu={e=>{e.preventDefault();remember(soul.id);select(soul.id);requestSoulConversations(soul.id);}} title={`${soul.name}${st?` · ${CHIP_WORD[st]}`:''} · Soul details · right-click for conversations`} aria-label={`Open ${soul.name}${st?` (${CHIP_WORD[st]})`:''}`} onClick={()=>{open(soul.id);close?.();}}><SoulAvatar soul={soul}/>{close&&<span>{soul.name}</span>}{mark&&<span className={mark.cls} aria-hidden="true">{mark.text}</span>}</button>;};
+ const chip=(soul:PublicSoul,close?:()=>void)=>{const here=souls.has(soul.id),st=here?stateOf(soul):null,mark=st?CHIP_MARK[st]:undefined,dim=st==='zombie'||st==='asleep'||st==='disconnected';
+  return <button type="button" key={soul.id} className={(present&&!present.has(soul.id))||dim||!here?'my-souls-away':undefined} data-link-state={st??undefined} data-soul-id={soul.id} data-arriving={here?undefined:'1'} onContextMenu={e=>{e.preventDefault();remember(soul.id);select(soul.id);requestSoulConversations(soul.id);}} title={`${soul.name}${st?` · ${CHIP_WORD[st]}`:''} · Soul details · right-click for conversations`} aria-label={`Open ${soul.name}${st?` (${CHIP_WORD[st]})`:''}`} onClick={()=>{open(soul.id);close?.();}}><SoulAvatar soul={soul}/>{close&&<span>{soul.name}</span>}{mark&&<span className={mark.cls} aria-hidden="true">{mark.text}</span>}</button>;};
  // #1391 part b: the phone menu's Souls section, open by default, up to 5 with Show more / Show fewer (hud-menu.ts slot)
  const slot=useSyncExternalStore(subscribeMenuSoulsSlot,menuSoulsSlot,menuSoulsSlot);
  const [listOpen,setListOpen]=useState(true),[expanded,setExpanded]=useState(false);

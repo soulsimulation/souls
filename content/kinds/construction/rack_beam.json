@@ -55,6 +55,18 @@
  "geometry": {
   "bounds_mm": [51, 102, 2743]
  },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"beam": "#e0782a", "clip": "#3b3d40"},
+   "tags": ["rack", "beam"],
+   "shapes": [
+    {"kind": "box", "at": [0, 51, 0], "size": [51, 102, 2623], "tint": "beam"},
+    {"kind": "box", "at": [0, 51, -1341], "size": [51, 102, 60], "tint": "clip"},
+    {"kind": "box", "at": [0, 51, 1341], "size": [51, 102, 60], "tint": "clip"}
+   ]
+  }
+ },
  "motion": {
   "how": "two_hands"
  },
@@ -62,7 +74,7 @@
   "ever": true
  },
  "text": {
-  "card": "card"
+  "card": "A 2.7 m rack beam: two carry it, then seat it between two standing frames."
  },
  "card": {
   "text": "card"

@@ -10,7 +10,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -54,9 +55,8 @@ async function waitFor(f, ms = 30_000) {
 
 const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 
-after(() => {
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+after(async () => {
+  await stopThenRemove(procs, dir);
 });
 
 /** N2's test world (seed 1), born on its open ground, with one entry of two roles. */
@@ -123,7 +123,7 @@ test('the actual served header activity pin passes strict wire admission with ex
   }
 });
 
-test('A1 to A3: two joined Souls converse, a bystander hears no private turn, and an entry\'s activity is offered and joined', async () => {
+test('A1 to A3: two joined Souls converse, a bystander hears no private turn, and an entry\'s activity is offered and joined, or withdrawn before it is answered', async () => {
   const w = await configuredWorld();
 
   // A1: the world, seeded with no Soul and served, loads the conversation's kind and the entry's activity kind.
@@ -278,13 +278,29 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     const [r1, r2] = Object.keys(roles).filter((k) => k !== 'now').map((k) => `${ns}:${k}`);
     const [offered] = await a.act({ op: 'act', verb: 'activity:offer', target: ba.parent, params: { 1: kindName, 2: r1, 3: [bb.id] } });
     assert.equal(offered.outcome, 'receipt', `the ${plainGame} offer lands`);
-    const asked2 = await b.waitEvent((e) => e.kind === 'conversation' && e.what === 'invited' && e.conversation !== conv);
+    // 0.135: an entry's activity reaches the asked Soul as that activity (its word), not as a conversation.
+    const word = plainGame.replace(/^.*:/, '').replace(/_activity$/, '').replace(/_/g, '-');
+    const asked2 = await b.waitEvent((e) => e.kind === 'together' && e.what === 'offered' && e.touch === word);
     console.log('offered', JSON.stringify(asked2), 'roles', r1, r2);
-    const [joined] = await b.act({ op: 'act', verb: 'activity:accept', target: asked2.conversation });
+    assert.ok(!b.events.some((e) => e.kind === 'conversation' && e.what === 'invited' && e.conversation === asked2.offer), 'not as a conversation');
+    const [joined] = await b.act({ op: 'act', verb: 'activity:accept', target: asked2.offer });
     assert.equal(joined.outcome, 'receipt', `the ${plainGame} is joined`);
-    const rows = await waitFor(async () => (await a.find(plainGame.split(':')[1])).find((r) => r.id === asked2.conversation));
+    const rows = await waitFor(async () => (await a.find(plainGame.split(':')[1])).find((r) => r.id === asked2.offer));
     console.log('activity', JSON.stringify(rows));
-    for (const s of [a, b]) await s.act({ op: 'act', verb: 'activity:leave', target: asked2.conversation });
+    for (const s of [a, b]) await s.act({ op: 'act', verb: 'activity:leave', target: asked2.offer });
+
+    // #4700: an offer taken back before it is answered. The first offers again and withdraws it by its word; the
+    // second's accept of it is then refused by name, and nobody is in it.
+    await a.act({ op: 'act', verb: 'activity:offer', target: ba.parent, params: { 1: kindName, 2: r1, 3: [bb.id] } });
+    const again = await b.waitEvent((e) => e.kind === 'together' && e.what === 'offered' && e.touch === word && e.offer !== asked2.offer);
+    await waitFor(async () => (await a.find(plainGame.split(':')[1])).some((r) => r.id === again.offer));
+    const [withdrawn] = await a.act({ op: 'give', do: 'withdraw', offer: word });
+    assert.equal(withdrawn.outcome, 'receipt', `withdrawn: ${JSON.stringify(withdrawn)}`);
+    const [late] = await b.act({ op: 'act', verb: 'activity:accept', target: again.offer });
+    assert.equal(late.outcome, 'refusal', `accepted after a withdraw: ${JSON.stringify(late)}`);
+    assert.equal(b.events.findLast((e) => e.kind === 'answer')?.reason, 'offer-withdrawn', 'refused by name');
+    await waitFor(async () => !(await a.find(plainGame.split(':')[1])).some((r) => r.id === again.offer));
+    console.log('withdrawn before answered: accept refused offer-withdrawn; the offer is gone');
   } finally {
     for (const s of [a, b, c]) {
       const st = await request(s.rt.socket, { op: 'status' }).catch(() => null);

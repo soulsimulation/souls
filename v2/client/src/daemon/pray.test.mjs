@@ -8,7 +8,7 @@
 import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { DEFAULT_PKG, call, request } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE } from '../brief/brief.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -134,10 +135,9 @@ before(async () => {
 after(async () => {
   creator?.close();
   await ask({ op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
   if (process.env.G11_REPORT) console.log(JSON.stringify(report, null, 1));
   if (process.env.G11_DEBUG) console.log(logs.map((l) => l.text).join('\n---\n'), readFileSync(rt.log, 'utf8'));
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 const PRAYER = `let the river run clear ${randomBytes(6).toString('hex')}`;

@@ -38,7 +38,7 @@
         "change": "set",
         "node": "t1",
         "field": "sand",
-        "n": 1,
+        "n": 28,
         "to": "bottom"
        }
       ],
@@ -83,7 +83,7 @@
         "change": "set",
         "node": "t1",
         "field": "sand",
-        "n": 1,
+        "n": 28,
         "to": "top"
        }
       ],
@@ -111,7 +111,7 @@
         "change": "set",
         "node": "t1",
         "field": "sand",
-        "n": 1,
+        "n": 28,
         "to": "bottom"
        }
       ],
@@ -140,7 +140,7 @@
         "change": "set",
         "node": "t1",
         "field": "sand",
-        "n": 1,
+        "n": 28,
         "to": "top"
        }
       ],
@@ -168,7 +168,7 @@
         "change": "set",
         "node": "t1",
         "field": "sand",
-        "n": 1,
+        "n": 28,
         "to": "bottom"
        }
       ],

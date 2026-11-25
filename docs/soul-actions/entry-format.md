@@ -51,7 +51,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
-| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
+| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
 | 10 | (referenced kinds) | Engine v2 T3's table of the kinds this one names, written by the encoder, never in the file |
@@ -80,6 +80,26 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
+width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
+hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
+`state.hold_crew`'s, how many hold it standing: 0.135 C6, so a part one holds standing can take four to carry). Before the
+lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
+too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-load-blocked`).
+A straight way that clips is searched for one that turns the load (0.135 R2: through a door narrower than its length,
+carried in line, each move checked as a step is); no such way is `carry-load-blocked`, a search past its small budget
+(a door near the lift, a few milliseconds) `carry-unproven`. The sweep and the search run off the world's clock, so
+many lifts at once never make a tick late: a lift that names a destination is answered when its way comes back (at
+the next tick when the search is quick), and one whose way has not come back by the act's deadline is refused
+`carry-way-late`. A way found is said to the carry's audience at the lift (`souls:carry-way`, each pose where the front
+and the back carriers stand), and the carriers walk it.
+While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
+load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
+(`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
+Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
+a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
+`content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and
+its first slot admitting a `thing` is where the load rides.
 `loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
 ([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
 owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
@@ -136,6 +156,27 @@ may take it while it runs) or `optional`. `places` says where a member may be: `
 order listed, each admitting a body; `in: "here"`, body slots of things in the same place within `within_mm` (whole
 millimetres above zero) of the activity, nearest first. Either may name a `posture` (`sit`, `lie`). Entering is an
 ordinary form that links the role to the actor and reparents the actor into a slot argument; the world moves no body.
+On the new engine (0.135 G3), a role's `slots` (`in: "here"` may list them too) are where its members stand when the
+activity starts: each slot's `stand` point, else the slot, in the activity's own frame. If all members stand on one
+floor, each walks to its stand and turns to its facing before the moves begin; a member farther than `within_mm`
+from their middle, or anyone when they stand on different floors or one is seated, stays where it is.
+On the new engine (0.135 B10), an activity offered or proposed at the entry's own thing (the offer's target is the thing)
+is that thing's: a Soul that offers in a role, or accepts or joins one, holds the role's link on the thing while it is a
+member, so the kind's forms that ask for it (`who: {"link": "<role>"}`, `"need": "linked"`) pass for it and refuse others
+by name. Its leave, or the offer's lapse or decline, takes the link down. Offered on the open ground, it links nothing.
+A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
+at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does. The accept checks the move's
+reach from the places the two will take, not from where they stand (0.134 item 5), so two who walked up to each other
+can touch; each may step at most the move's reach to its place, so a pair farther apart is refused `together.too-far`
+before anyone moves. A walk to a place ends within 5 cm of it, so a kind's places sit at least 10 cm inside its moves'
+reach.
+A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.
+`"on_beat": true` (0.134 T3) puts the move on the world's beat: each member's begins on one beat, at its own body, and
+again on the next beat after it ends, until the member leaves. The role's link `most` is how many take it, so a dance
+(`dance_together`) offered to several takes up to eight.
+`"follows": true` (0.135 G2) marks the role whose member follows the other's: once the offer is accepted, the follower's
+own `souls:follow` order (`v2/docs/intents.md` rule 5) walks it along the leader's trail, 1 to 2.5 m behind, until either
+leaves, the follower acts on its own, or the order ends (`follow`).
 Starting, leaving and ending are SA-G1b's and B5's; the rules are `packages/form-rules/src/activity.ts`. Section 17 is
 meaning, so covered by the hash.
 
@@ -151,7 +192,21 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
 `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
-stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+stops). On Engine v2 a ride whose stops are one point, that does not return and whose ground is `air` (a balloon) flies a
+loop from its stop and back, the thing and its riders together (`sim::courses::rides::course`, from the entry the thing
+names, its world's map's included): it waits a minute at its stop each lap, a rider boards and leaves only there, a
+form asked while it is away is refused `boarding-frame-away` saying in how many seconds it is back, and its trip ends
+when it is home again (below). A ride whose stops differ moves its seats, never the thing (N14, `sim::courses::rides::seat_runs`):
+across and back (`returns` true, a cable car) each seat waits at the stop its `stand` names, then runs to each other stop
+keeping its offset from the stop's stand point and its height over the floor there; round a ring (`returns` false, three
+or more seats, a big wheel or a carousel) the seats turn one step at a time between their declared points. Each waits
+3 minutes at a stop. So a ride's seat is declared where it waits for riders, beside its stop and within standing reach.
+The old page draws a cabin at each seat that moves, unless the ride's def has cars of its own (a big wheel's gondolas). A rider
+boards only at its seat's own stop, gets off at any stop within reach, and is carried on between them (a rise there is
+refused `boarding-frame-away`; a form that sits is refused before any walk while no cabin waits at its stop, saying
+when the next is back). A trip ends when the seats next come to a stop: the fields its `start` form `set` (a bool or a
+whole number, such as `under_way`) go back to their defaults, so a ride set off once is boarded again. A kind is a
+vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
 (SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
@@ -354,7 +409,11 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   Its effect is a `transfer` of `water` (grams) out of the tap and into the kettle until it is full, so a need for water
   on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
-  by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
+  by name, `at` a point, `toward` an argument; moves are their own data, SA-D4; `for_s` repeats it back to back, with
+  no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`: the
+  humanoid's `dance for=60` dances a minute, and a leave or `stop` ends it at the move's next phase; the log holds a
+  record of it for viewers at its start and every 15 s (a viewer who comes in mid-dance draws it from the next), each
+  planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
 - **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
@@ -589,7 +648,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
-| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`: 32 forms, 48 for a body's family, which cannot be split) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
 | `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |

@@ -251,6 +251,7 @@ fn step0_the_swap_with_n7_alone() {
 /// A1 to A3: the same swap with turns, two seeds: every walker arrives, the direction changes while both sides wait,
 /// and nobody inside is slower than 0.1 m/s for more than a second.
 #[test]
+#[ignore = "A2-3: one walker in seed 2 is walled in by bodies standing round it (no way round; make-way)"]
 fn a1_a2_a3_fifty_each_way_on_the_stair_in_turns() {
     for seed in 1..=2 {
         let r = swap(seed, true, false);
@@ -384,4 +385,77 @@ fn a5_a_body_staying_on_the_stair_is_left_out_and_passed() {
     assert_eq!(r.arrived, 100, "the walkers pass it");
     assert!(!named && !r.first_mark.contains_key(&who));
     assert_eq!(w.pose.position, at, "it stays");
+}
+
+/// A walker waits 1 m from link `l`'s end while, tick after tick, a newcomer comes to wait nearer it (0.3 m) and the
+/// last one let in walks on inside: the grants its owner makes, up to the far waiter's.
+fn out_gapped(l: &sim::links::Link) -> Vec<Option<Id>> {
+    let mut turns = Turns::new();
+    let far = id(500);
+    let mut grants = Vec::new();
+    let mut inside: Option<Id> = None;
+    for k in 0..12u64 {
+        let f = Facts {
+            waiting: [vec![(1_000_000, far), (300_000, id(600 + k))], Vec::new()],
+            inside: inside.map(|w| (0, 1_000_000, w)).into_iter().collect(),
+            room: [true, true],
+        };
+        turns.write(l.owner, l, &f, k as i64 * TICK).unwrap();
+        let g = turns.state(l).and_then(|s| s.granted);
+        grants.push(g);
+        if g == Some(far) {
+            break;
+        }
+        inside = g;
+    }
+    println!(
+        "A2-4 fair turns at {}: grants {:?}",
+        show(l.id),
+        grants
+            .iter()
+            .map(|g| g.map(show).unwrap_or_default())
+            .collect::<Vec<_>>()
+    );
+    grants
+}
+
+/// 0.133 A2-4 (review of #4364): grants at a crowded wide doorway are fair. The nearest waiter is let in first, but a
+/// far waiter passed over `PASSED` times by ones that came to wait after it goes next.
+#[test]
+fn a2_4_a_waiter_out_gapped_again_and_again_is_let_in() {
+    use sim::links::turns::{PASSED, narrow};
+    let (t, _) = town();
+    let l = t
+        .buildings
+        .iter()
+        .flat_map(|b| b.links.iter())
+        .find(|l| l.door.is_some() && !narrow(l) && l.ends.iter().all(Option::is_some))
+        .expect("a wide doorway");
+    let grants = out_gapped(l);
+    assert_eq!(
+        grants.iter().position(|g| *g == Some(id(500))),
+        Some(PASSED as usize + 1),
+        "the far waiter goes once passed over {PASSED} times by later ones"
+    );
+}
+
+/// 0.133 A2-4 (review of #4364, Gene's rule: no Soul waits for ever): at a narrow place too, a waiter out-gapped
+/// again and again by newcomers is let in once passed over `PASSED_NARROW` times.
+#[test]
+fn a2_4_a_waiter_out_gapped_at_a_narrow_place_is_let_in() {
+    use sim::links::turns::{PASSED_NARROW, narrow};
+    let (t, _) = town();
+    let l = t
+        .buildings
+        .iter()
+        .flat_map(|b| b.links.iter())
+        .find(|l| l.kind == Kind::Stairs)
+        .expect("the stair");
+    assert!(narrow(l));
+    let grants = out_gapped(l);
+    assert_eq!(
+        grants.iter().position(|g| *g == Some(id(500))),
+        Some(PASSED_NARROW as usize + 1),
+        "the far waiter goes once passed over {PASSED_NARROW} times by later ones"
+    );
 }

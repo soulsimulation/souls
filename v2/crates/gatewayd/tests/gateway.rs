@@ -80,7 +80,10 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
             if s.read_exact(&mut bytes).await.is_err() {
                 break;
             }
-            let i = Intent::read(&bytes).unwrap();
+            // The gateway's handover ask (`world_link::handover_ask`) comes first on each connection.
+            let Ok(i) = Intent::read(&bytes) else {
+                continue;
+            };
             let answer = if i.verb.as_str() == REFUSED {
                 Answer::Refused {
                     actor: i.actor,
@@ -89,6 +92,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
                     op: None,
+                    detail: None,
                 }
             } else if i.sequence >= 100 {
                 sequence += 1;
@@ -99,6 +103,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
                     op: None,
+                    detail: None,
                 }
             } else {
                 sequence += 1;
@@ -397,10 +402,10 @@ fn unix_us() -> i64 {
         .as_micros() as i64
 }
 
-/// A stand-in world that takes `n` intents, never answers, then goes away for good.
+/// A stand-in world that takes `n` intents (after the gateway's handover ask), never answers, then goes away for good.
 async fn mute_world(listener: UnixListener, n: usize) {
     let (mut s, _) = listener.accept().await.unwrap();
-    for _ in 0..n {
+    for _ in 0..=n {
         let mut len = [0u8; 4];
         s.read_exact(&mut len).await.unwrap();
         let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
@@ -789,6 +794,99 @@ async fn r4_scripted_run_for_the_usage_rollup() {
     println!("r4: {} lines under {}", lines.len(), root.display());
 }
 
+/// O2 (#2731) A4: the world is asleep (nothing listens on its socket). With a wake set, an agent's sync request (a
+/// client syncs before its first intent) is answered `world.restarting` and asks the wake; an intent is held, asks no
+/// second wake, and the world, started a second later, answers it within 3 s.
+#[tokio::test]
+// The test measures how long the answer took in real time (the wall-clock rule, K7).
+#[allow(clippy::disallowed_methods)]
+async fn o2_an_agents_sync_or_intent_wakes_a_sleeping_world_once() {
+    use replica::sync::wire;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+    const WAKE: Duration = Duration::from_secs(1);
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(30));
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-o2.sock");
+    let _ = std::fs::remove_file(&path);
+    let gw = Gateway::new(tokens, BUILD.to_vec(), Arc::new(|_: &str| {}));
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let (p, n, rt) = (
+        path.clone(),
+        wakes.clone(),
+        tokio::runtime::Handle::current(),
+    );
+    gw.link.set_wake(Arc::new(move || {
+        n.fetch_add(1, Ordering::SeqCst);
+        let p = p.clone();
+        rt.spawn(async move {
+            tokio::time::sleep(WAKE).await;
+            world(
+                UnixListener::bind(&p).unwrap(),
+                Arc::new(AtomicUsize::new(0)),
+            )
+            .await;
+        });
+    }));
+    tokio::spawn(world_link::run(gw.clone(), path));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
+    let (mut ws, o) = connect(&url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+
+    // An agent's sync request asks the wake: its client sends no intent before it has synced.
+    put(
+        &mut ws,
+        encode(&Value::Map([(wire::ASK, Value::Uint(1))].into())).unwrap(),
+    )
+    .await;
+    let answer = next(&mut ws).await.unwrap();
+    let Value::Map(m) = &answer else {
+        panic!("{answer:?}")
+    };
+    assert!(
+        matches!(m.get(&wire::REFUSED), Some(Value::Text(n)) if n.as_str() == world_link::RESTARTING)
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(wakes.load(Ordering::SeqCst), 1, "the sync asked no wake");
+    assert!(!gw.link.up());
+
+    // A4: an intent wakes it and is answered within 3 s; a second one asks no second wake. Held while the world is
+    // away, an intent keeps its deadline (C8): these expire a minute on, so the gateway's own deadline is 10 s.
+    let live = |sequence: u64| {
+        let mut v = decode(&intent(soul(30), sequence)).unwrap().value;
+        if let Value::Map(m) = &mut v {
+            m.insert(
+                7,
+                Value::Uint(u64::try_from(unix_us() + 60_000_000).unwrap()),
+            );
+        }
+        encode(&v).unwrap()
+    };
+    let sent = Instant::now();
+    put(&mut ws, live(1)).await;
+    put(&mut ws, live(2)).await;
+    let first = next(&mut ws).await.unwrap();
+    let took = sent.elapsed();
+    let second = next(&mut ws).await.unwrap();
+    assert_eq!(
+        [frame_sequence(&first), frame_sequence(&second)],
+        [Some(1), Some(2)]
+    );
+    assert!(
+        frame_version(&first).is_some(),
+        "the world's receipt, not the gateway's refusal"
+    );
+    assert!(took < Duration::from_secs(3), "answered in {took:?}");
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    println!(
+        "o2: an intent to a sleeping world answered in {} ms (the world up {} ms after the wake)",
+        took.as_millis(),
+        WAKE.as_millis()
+    );
+}
+
 /// O16 (#2809): a stopping gateway closes every signed-in socket with 1012, Service Restart; the client reconnects.
 #[tokio::test]
 async fn o16_a_stopping_gateway_closes_each_socket_with_1012() {
@@ -814,11 +912,16 @@ async fn o16_a_stopping_gateway_closes_each_socket_with_1012() {
 /// answer, `worldd::answers::progress`: T10's accepted with field 5), then goes away.
 async fn busy_world(listener: UnixListener, left: u64) {
     let (mut s, _) = listener.accept().await.unwrap();
-    let mut len = [0u8; 4];
-    s.read_exact(&mut len).await.unwrap();
-    let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
-    s.read_exact(&mut bytes).await.unwrap();
-    let i = Intent::read(&bytes).unwrap();
+    let i = loop {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).await.unwrap();
+        let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut bytes).await.unwrap();
+        // The gateway's handover ask comes first.
+        if let Ok(i) = Intent::read(&bytes) {
+            break i;
+        }
+    };
     let Value::Map(mut answer) = (Answer::Accepted {
         actor: i.actor,
         sequence: i.sequence,

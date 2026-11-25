@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Only the reviewed physical fixture (the Eden pier bench); credentials remain inside the God CLI.
+import { isMain } from '../lib/is-main.mjs';
 import {readFileSync,writeFileSync,renameSync,unlinkSync,existsSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {resolve,dirname} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {WorldModel,applyBatch,hashOf,buildLibrary,coreLibrary} from '../../packages/world-compiler/src/index.ts';
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
@@ -86,7 +87,7 @@ export function parseFixtureArgs(args){
  if(!['plan','apply'].includes(mode)||positional.length!==4||!expectedWorldId?.trim()||!APPROVED[key])throw Error('plan|apply <eden-2026> <god-folder> <receipt> --expected-world-id <live-id>');
  return{mode,key,folder,receiptPath,expectedWorldId};
 }
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+if(isMain(import.meta.url)){
  const{mode,key,folder,receiptPath,expectedWorldId}=parseFixtureArgs(process.argv.slice(2));
  const current=cli(folder,['snapshot']);target(current,expectedWorldId);
  if(mode==='plan'){

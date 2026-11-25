@@ -23,6 +23,20 @@
  "geometry": {
   "bounds_mm": [1419, 300, 600]
  },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"wood": "#a07a4f"},
+   "tags": ["rack", "stand", "timber"],
+   "shapes": [
+    {"kind": "box", "at": [0, 50, 0], "size": [1419, 100, 600], "tint": "wood"},
+    {"kind": "box", "at": [-680, 200, -150], "size": [60, 200, 120], "tint": "wood"},
+    {"kind": "box", "at": [-680, 200, 150], "size": [60, 200, 120], "tint": "wood"},
+    {"kind": "box", "at": [680, 200, -150], "size": [60, 200, 120], "tint": "wood"},
+    {"kind": "box", "at": [680, 200, 150], "size": [60, 200, 120], "tint": "wood"}
+   ]
+  }
+ },
  "motion": {
   "how": "fixed"
  },
@@ -30,7 +44,7 @@
   "ever": true
  },
  "text": {
-  "card": "card"
+  "card": "A stand that holds two rack frames upright until a crew takes one to its bay."
  },
  "card": {
   "text": "card"

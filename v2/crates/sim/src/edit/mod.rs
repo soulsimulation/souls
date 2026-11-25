@@ -172,6 +172,38 @@ fn plan_with(
     guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
+    // A doorway's row is read at its first end, in field 22, with at least five values after its link (`ground::scene`,
+    // a door's removal): a doorway link, or a link with a door, owned by its second end, or a doorway link whose row
+    // is elsewhere or short, would leave its floor unreadable and its door unremovable (#3934 review).
+    for (i, op) in checked.edit.ops.iter().enumerate() {
+        use crate::ground::scene::{DOORWAY, F_DOORWAYS};
+        let Op::Link {
+            ty,
+            owner,
+            field,
+            row,
+            door,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        let doorway = ty.as_str() == DOORWAY;
+        let why = if *owner == replica::world_model::End::Second
+            && (door.is_some() || *field == F_DOORWAYS || doorway)
+        {
+            "a doorway link is owned by its first end, where its row is read"
+        } else if doorway && (*field != F_DOORWAYS || row.len() < 5) {
+            "a doorway link writes a row of at least 5 values to field 22"
+        } else {
+            continue;
+        };
+        return Err(Refused {
+            op: Some(i),
+            name: "edit.link",
+            detail: why.to_owned(),
+        });
+    }
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);
     let bytes = encode(&Value::Map(BTreeMap::from([
@@ -225,7 +257,7 @@ fn on_ground(copy: &Replica, ground: Id, part: &Part) -> Result<(), Refused> {
 fn names(checked: &Checked, minter: &mut Minter) -> Result<BTreeMap<u64, Id>, Refused> {
     let mut names = BTreeMap::new();
     for op in &checked.edit.ops {
-        if let Op::Place { name, .. } | Op::Doorway { name, .. } = op {
+        if let Op::Place { name, .. } | Op::Doorway { name, .. } | Op::Link { name, .. } = op {
             let id = minter
                 .mint()
                 .map_err(|e| refused("edit.ids-exhausted", e.to_string()))?;
@@ -285,8 +317,9 @@ pub fn commit_classes(
         classes,
     )
 }
+/// [`commit_classes`], with the world's structure rule checked on the write (B18; a running world's, B20 #3356).
 #[allow(clippy::too_many_arguments)]
-fn commit_guarded_classes(
+pub fn commit_guarded_classes(
     live: &mut Replica,
     minter: &mut Minter,
     planned: &Planned,
@@ -466,6 +499,70 @@ fn effects(
             ));
             continue;
         }
+        if let Op::Link {
+            name,
+            ty,
+            ends,
+            owner,
+            field: on,
+            row,
+            door,
+        } = op
+        {
+            // #3728: the link, its row appended to its owner's field, and the door standing in it naming it.
+            use crate::ground::scene::F_OPEN_DOOR_LINK;
+            let end = usize::from(*owner == replica::world_model::End::Second);
+            let (both, link) = ([id(ends[0]), id(ends[1])], names[name]);
+            let (at, seen) = (both[end], audience(ends[end]));
+            let mut rows = match field(tree, &fields, at, *on) {
+                Value::Array(rows) => rows,
+                _ => Vec::new(),
+            };
+            rows.push(Value::Array(
+                std::iter::once(link.to_value())
+                    .chain(row.iter().cloned())
+                    .collect(),
+            ));
+            let rows = Value::Array(rows);
+            fields.insert((at, *on), rows.clone());
+            if end == 0 && *on == crate::ground::scene::F_DOORWAYS {
+                linked.insert(link, both);
+            }
+            groups.push((
+                at,
+                seen,
+                vec![
+                    Change::Link {
+                        link,
+                        ty: ty.clone(),
+                        ends: both,
+                        owner: *owner,
+                        audience: seen,
+                    },
+                    Change::Set {
+                        node: at,
+                        field: *on,
+                        to: rows,
+                        by: None,
+                    },
+                ],
+            ));
+            if let Some(door) = door {
+                let d = id(*door);
+                fields.insert((d, F_OPEN_DOOR_LINK), link.to_value());
+                groups.push((
+                    d,
+                    audience(*door),
+                    vec![Change::Set {
+                        node: d,
+                        field: F_OPEN_DOOR_LINK,
+                        to: link.to_value(),
+                        by: None,
+                    }],
+                ));
+            }
+            continue;
+        }
         let (writer, seen_by, change) = match op {
             Op::Place {
                 name,
@@ -513,6 +610,24 @@ fn effects(
                 };
                 (n, audience(*node), change)
             }
+            Op::Rows {
+                node,
+                field: on,
+                rows,
+            } => {
+                // #3728: the field with the rows merged in, as one set (`replica::edit::merged_rows`); the check has
+                // refused rows that do not merge, so the field as it is stands in for none.
+                let n = id(*node);
+                let now = field(tree, &fields, n, *on);
+                let to = replica::edit::merged_rows(Some(&now), rows).unwrap_or(now);
+                let change = Change::Set {
+                    node: n,
+                    field: *on,
+                    to,
+                    by: None,
+                };
+                (n, audience(*node), change)
+            }
             Op::Remove { node } => {
                 let n = id(*node);
                 use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
@@ -548,7 +663,7 @@ fn effects(
                 }
                 (n, audience(*node), Change::Remove { node: n })
             }
-            Op::Doorway { .. } => unreachable!("handled above"),
+            Op::Doorway { .. } | Op::Link { .. } => unreachable!("handled above"),
         };
         match &change {
             Change::Create {
@@ -612,11 +727,171 @@ fn int(n: i64) -> Value {
 }
 
 #[cfg(test)]
+mod defined_tests;
+
+#[cfg(test)]
 mod doorway_lowering_tests {
     use super::*;
     use crate::ground::scene::{F_DOORWAYS, F_OPEN_DOOR_LINK, F_SOLIDS};
     use replica::edit::{DOOR_GEOMETRY, DoorGeometry, Edit};
     use replica::effects::Actor;
+
+    /// #3728: a link operation lowers to the link, its row appended to the owner's field and the door naming it, in
+    /// one part that passes its canonical reader; nothing else (no wall is cut).
+    #[test]
+    fn a_link_lowers_to_its_link_its_row_and_its_door() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+        let door = im.nodes["door-building-to-b"];
+        let leaf = im.tree.node(im.tree.handle(door).unwrap()).unwrap();
+        let old = replica::effects::read_id(&leaf.fields()[&F_OPEN_DOOR_LINK]).unwrap();
+        let (ty, [from, to], owner, _) = im.tree.link(old).unwrap();
+        let owner_rows = |tree: &replica::tree::Tree| match tree
+            .node(tree.handle(from).unwrap())
+            .unwrap()
+            .fields()
+            .get(&F_DOORWAYS)
+            .cloned()
+        {
+            Some(Value::Array(rows)) => rows,
+            _ => Vec::new(),
+        };
+        let row = owner_rows(&im.tree)
+            .into_iter()
+            .find_map(|r| match r {
+                Value::Array(r) if r.first() == Some(&old.to_value()) => Some(r[1..].to_vec()),
+                _ => None,
+            })
+            .expect("the doorway's row at its owner");
+        let checked = Checked {
+            edit: Edit {
+                claim: None,
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Link {
+                    name: 1,
+                    ty: ty.clone(),
+                    ends: [Ref::Node(from), Ref::Node(to)],
+                    owner,
+                    field: F_DOORWAYS,
+                    row: row.clone(),
+                    door: Some(Ref::Node(door)),
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::new(),
+        };
+        let link = Id::new(Scope([0xee; 16]), 1).unwrap();
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::from([(1, link)]), 0);
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(lowered.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .unwrap();
+        let part = Part::read(&bytes).expect("the lowered link's part passes its canonical reader");
+        let mut want = owner_rows(&im.tree);
+        want.push(Value::Array(
+            std::iter::once(link.to_value()).chain(row).collect(),
+        ));
+        let mut seen = Vec::new();
+        for effect in &part.effects {
+            let Body::Changes(changes) = &effect.body else {
+                continue;
+            };
+            for c in changes {
+                match &c.change {
+                    Change::Link { link: id, ends, .. } => {
+                        assert_eq!((*id, *ends, effect.envelope.node), (link, [from, to], from));
+                        seen.push("link");
+                    }
+                    Change::Set {
+                        node,
+                        field: F_DOORWAYS,
+                        to: Value::Array(rows),
+                        ..
+                    } => {
+                        assert_eq!(
+                            (*node, rows),
+                            (from, &want),
+                            "the row is appended, the others kept"
+                        );
+                        seen.push("row");
+                    }
+                    Change::Set {
+                        node,
+                        field: F_OPEN_DOOR_LINK,
+                        to: v,
+                        ..
+                    } => {
+                        assert_eq!((*node, v), (door, &link.to_value()));
+                        seen.push("door");
+                    }
+                    other => panic!("a link changes nothing else: {other:?}"),
+                }
+            }
+        }
+        assert_eq!(seen, ["link", "row", "door"]);
+    }
+
+    /// #3728: a rows operation lowers to one set of the whole field, each row merged over the one with its first two
+    /// values (a land edit's changed tiles), the other rows kept.
+    #[test]
+    fn rows_lower_to_one_set_of_the_merged_field() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let wall = im.nodes["building"];
+        let Value::Array(rows) = im
+            .tree
+            .node(im.tree.handle(wall).unwrap())
+            .unwrap()
+            .fields()[&F_SOLIDS]
+            .clone()
+        else {
+            panic!("solid rows")
+        };
+        let Value::Array(mut first) = rows[0].clone() else {
+            panic!("a row")
+        };
+        first.push(Value::Uint(1));
+        let added = Value::Array(vec![Value::Nint(9_999), Value::Nint(9_999)]);
+        let checked = Checked {
+            edit: Edit {
+                claim: None,
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Rows {
+                    node: Ref::Node(wall),
+                    field: F_SOLIDS,
+                    rows: vec![Value::Array(first.clone()), added.clone()],
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::new(),
+        };
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::new(), 0);
+        let mut want = rows.clone();
+        want[0] = Value::Array(first);
+        want.push(added);
+        let sets: Vec<_> = lowered
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Changes(c) => Some(c),
+                _ => None,
+            })
+            .flatten()
+            .map(|c| c.change.clone())
+            .collect();
+        assert_eq!(sets.len(), 1);
+        assert!(
+            matches!(&sets[0], Change::Set { node, field: F_SOLIDS, to: Value::Array(r), .. } if *node == wall && *r == want)
+        );
+    }
 
     #[test]
     fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {

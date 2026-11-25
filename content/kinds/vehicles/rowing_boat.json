@@ -3,7 +3,7 @@
   "kind": "eden:rowing_boat",
   "owner": "thing",
   "state": {},
-  "points": {"landing":{"role":"stand","at_mm":[0,0,2400],"yaw_mdeg":180000}},
+  "points": {"landing":{"role":"stand","at_mm":[0,0,2400],"yaw_mdeg":180000},"oar_grips":{"role":"contact","at_mm":[0,600,300]}},
   "slots": {
     "oars": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,100],"stand":"landing","board_mm":4000},
     "bow": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,900],"stand":"landing","board_mm":4000},
@@ -35,7 +35,7 @@
         "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [],
-      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "steps": [{"step":"move","move":"steer","at":"oar_grips","toward":{"arg":"toward"}}],
       "effects": []
     }
   },

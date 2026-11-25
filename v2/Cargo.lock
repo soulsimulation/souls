@@ -359,6 +359,7 @@ dependencies = [
 name = "gatewayd"
 version = "0.0.0"
 dependencies = [
+ "assets",
  "axum",
  "futures-util",
  "getrandom 0.3.4",
@@ -553,18 +554,6 @@ dependencies = [
  "i_key_sort",
  "i_overlay",
  "i_tree",
-]
-
-[[package]]
-name = "import-accounts"
-version = "0.0.0"
-dependencies = [
- "directoryd",
- "replica",
- "ring",
- "rusqlite",
- "serde_json",
- "skills",
 ]
 
 [[package]]
@@ -1104,6 +1093,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
+name = "team-gate"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "gatewayd",
+ "import-eden",
+ "replica",
+ "sim",
+ "testworld",
+ "tokio",
+ "tokio-tungstenite",
+ "worldd",
+]
+
+[[package]]
 name = "templates"
 version = "0.0.0"
 dependencies = [
@@ -1509,6 +1514,7 @@ dependencies = [
  "futures-util",
  "gatewayd",
  "import-eden",
+ "libc",
  "replica",
  "rustix",
  "sim",

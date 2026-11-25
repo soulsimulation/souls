@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { BRIEF_MOST } from '../brief/brief.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -80,9 +81,8 @@ before(async () => {
 
 after(async () => {
   await ask({ op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
   if (process.env.R13_REPORT) console.log(JSON.stringify(report));
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('A1 (the daemon\'s half): a rule fires and the open reader returns its wake within 5 s', async () => {
@@ -144,6 +144,16 @@ test('A4, A5: a mailbox message reaches the agent, its act closes it with the ou
   const closed = await waitFor(async () => { const r = await mailbox('read', { id }); return r.state !== 'open' && r; });
   report.closed = { state: closed.state, outcome: closed.outcome };
   assert.equal(closed.state, 'done');
+  // Q1: an errand's later step on the message its first step's end closed goes unlinked and says so; a later reply is
+  // refused `mail-closed`, and the close stands.
+  const later = await ask({ op: 'act', verb: 'r2:switch_on', target: LAMP, for: id });
+  assert.deepEqual([later.ok, later.unlinked?.for, later.unlinked?.closed], [true, id, 'done'], JSON.stringify(later));
+  // the agent is told its owner will not see the reply (the mailbox takes no word on a closed message)
+  const reply = await ask({ op: 'ack', id, reply: 'it is on', close: 'done' });
+  assert.deepEqual([reply.ok, reply.code, reply.shown, reply.sent, reply.closed], [false, 'mail-closed', false, false, 'done'], JSON.stringify(reply));
+  assert.match(reply.detail, /will not see/);
+  await sleep(1200); // past a mailbox read
+  assert.equal((await mailbox('read', { id })).state, 'done', 'still closed done, once');
   // Once only: a second message's act that is refused closes that one `failed`.
   const two = await mailbox('put', { soul: GRANT, text: 'again' });
   await waitFor(async () => (await ask({ op: 'wait', seconds: 1 }, 6000)).events.some((e) => e.kind === 'mail' && e.id === two.id));
@@ -205,8 +215,8 @@ test('C15 (#3685): pending lists what is open and what arrived; ack answers with
   await listedWith(lamp.id);
   assert.equal((await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP, for: lamp.id })).ok, true);
   const rides = await ask({ op: 'ack', id: lamp.id, reply: 'switching it off' });
-  // The act's answer may already have closed it (a lamp answers within milliseconds): then there is nothing to answer.
-  assert.ok(rides.open || rides.code === 'mail-not-found', JSON.stringify(rides));
+  // The act's answer may already have closed it (a lamp answers within milliseconds): then the agent is told it was.
+  assert.ok(rides.open || rides.code === 'mail-closed', JSON.stringify(rides));
   const byAct = await read(lamp.id);
   assert.notEqual(byAct.outcome, 'replied', 'closed once, by its act');
 });

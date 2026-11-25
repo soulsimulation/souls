@@ -4,7 +4,7 @@
 // worldd serve and gatewayd; the act must be sent before the held answer is released.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { decode, idText } from '../brief/copy.mjs';
 import { call, DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { addEntry } from './schedule.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const TICK = 50_000;
 const v2 = resolve(dirname(new URL(import.meta.url).pathname), '../../..');
@@ -84,7 +85,6 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
     procs.push(p);
     return { p, text: () => text };
   };
-  const kill = (p) => new Promise((ok) => { if (p.exitCode !== null || p.signalCode !== null) return ok(); p.once('exit', ok); p.kill('SIGKILL'); });
   const ask = (q) => request(rt.socket, q, 30_000);
   let proxy;
   try {
@@ -125,8 +125,10 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
     const target = await waitFor(() => JSON.parse(readFileSync(rt.state, 'utf8')).schedule?.targets?.[entry.key]);
     assert.equal(target.realMs, moment / 1000);
     const at = target.realMs;
-    // Hold a sync answer from 1.8 s before the moment until 0.5 s after it: at least one beat falls inside.
-    await waitFor(() => Date.now() >= at - 1_800, 30_000);
+    // Hold a sync answer from before the moment until 0.5 s after it: at least one beat falls inside. A copy confirmed
+    // within 1 s answers a look without asking (#4716), so the hold starts once the copy is older than that: the look
+    // then asks, and its sync is the one held (from 2.8 s before the moment, by 1.8 s before it at the latest).
+    await waitFor(async () => Date.now() >= at - 2_800 && (await ask({ op: 'status' })).age > 1_000, 30_000);
     proxy.hold = true;
     const looked = ask({ op: 'look' }).catch(() => null); // brings the copy current: a sync whose answer is held
     await waitFor(() => proxy.heldAt !== null, 5_000);
@@ -142,7 +144,6 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
   } finally {
     await ask({ op: 'stop' }).catch(() => {});
     proxy?.close();
-    for (const p of procs) await kill(p);
-    rmSync(dir, { recursive: true, force: true });
+    await stopThenRemove(procs, dir, { signal: 'SIGKILL' });
   }
 });

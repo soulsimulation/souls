@@ -44,6 +44,7 @@ import { createRig, libAction, type Rig, type Template } from './people.ts';
 import { CLIP_BODY, CLIP_FADE, IDLE_VARIANTS, SPRINT_SPEED, clipTime, libraryPick, pickClip, type LibraryPick } from './clip-library.ts';
 import {HumanActorAppearance} from './human-appearance.ts';
 import {applyHumanFinish} from './content/details/human-presets/finish.ts';
+import {BODY_DRAW,mergeRigBody,setBodyMerged} from './body-merge.ts';
 import { disposeSkeletons } from '../../lib/three-resources.ts';
 import { seatHeight } from './fixtures.ts';
 import {blendWaterFoot} from './water-foot-blend.ts';
@@ -64,14 +65,16 @@ import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shor
 import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
-import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
+import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, type PostureChange, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
 import type { RpsState } from '../../engine/social/rps.ts';
 import {recordedGame,type RecordedGame} from './recorded-games.ts';
 import {runningGaitAt} from './running-gait.ts';
+import { chooseGait, type GaitChoice } from './gait-choice.ts';
 import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
@@ -170,12 +173,16 @@ type View = {
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
   propWanted?: string;
+  /** Take time (s) the body began to carry its prop in one hand (the carry pose eases in from it). */
+  carrySince?: number;
   instrument?:string;
   game?:RecordedGame;
   gameTick?:number;
   gameDt?:number;
   groundSeat?: boolean;
   running?: boolean;
+  /** Walk or jog for a stretch (gait-choice.ts): the drawn gait, since when, and a change waiting out its dwell. */
+  gait?: GaitChoice;
   /** todo (leisure): the dock bicycle under a cycling body, metres ridden (turns the cranks), when it last cycled (s). */
   bike?: THREE.Group; ridden?: number; bikeAt?: number;
   prop?: { kind: PropKind; obj: THREE.Object3D };
@@ -185,6 +192,8 @@ type View = {
    *  and base before it (crossfade), the paired-gesture partner and where it is, metres walked, speaking now. */
   since?: number;
   prevAct?: string;
+  /** posture-transition.ts: the latest change of posture (activity before it, its base, the activity after) and its age. */
+  postureChange?: PostureChange;
   waveSamples?: readonly WaveSample[];
   waveClock?: number;
   waveEvents?: {start:number;end?:number}[];
@@ -192,6 +201,8 @@ type View = {
   waveRestAge?: number;
   prevBase?: string;
   prevDuration?: number;
+  /** The last drawn one-off gesture (activity-poses.ts RETURNS): its age and the take time it was drawn at. */
+  gesture?: { act: string; age: number; at: number };
   prevInstrument?: string;
   restAge?: number;
   restFrom?: number;
@@ -240,7 +251,9 @@ export type Diag = {
   handGame?: HandGameDiag;
 };
 /** Where an arm's target came from: engine hand points, a grip slot, or private frame/balance/ground-sleep contacts. */
-type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | null;
+type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | 'carry' | null;
+/** Seconds a carried thing's hand takes to come up to the carry point once it is held. */
+const CARRY_EASE = 0.4;
 /**
  * One person in a random-access frame (take replay / scrubbing). `walk` is the Walk clip weight
  * (0–1) and `walkDist` the metres walked along the track so far, so the Walk phase is a pure
@@ -302,7 +315,7 @@ export type SampledHuman = {
   game?:RecordedGame;
   gameTick?:number;
   gameDt?:number;
-  /** Ground speed (m/s) over ±0.15 s; running above RUN_SPEED plays the Run clip. */
+  /** Ground speed (m/s) over ±0.15 s; running (gait-choice.ts: above 2.3 m/s, for a stretch) plays the Run clip. */
   speed?: number;
   /** together/1: the other body of a paired gesture (hug, handshake, high-five, give/take, dance together). */
   partner?: string;
@@ -314,6 +327,9 @@ export type SampledHuman = {
   /** Seconds since `activity` began in this take, and the activity / base before it (library clip crossfades and
    *  one-shots); absent when the activity began before the take. */
   activityAge?: number;
+  /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
+   *  the activity it went into and its age (s); absent when there was none in the last second or so. */
+  postureChange?: PostureChange;
   prevActivity?: string;
   /** Release-only shared-wave timing; derived from recorded activity history, never a renderer wall clock. */
   waveSamples?: readonly WaveSample[];
@@ -347,7 +363,6 @@ const OVERLAYS = new Set(['eat', 'serve', 'drink', ...ACTIVITY_OVERLAYS]);
 const CUP_LIPS = { fwd: 0.1, up: 0.02 } as const;
 /** #2197: where the eating palm stops, from the head bone: in front of the chin, with the food above it at the lips. */
 const EAT_PALM = { fwd: 0.11, up: -0.06, side: 0.02 } as const;
-const RUN_SPEED = 2.3; // m/s: faster than any walk
 const INTERACT = new Set(['browse', 'post-letter', 'give', 'take', 'hand-over']);
 const PELVIS = 0.09; // m from the hip joints down to the sitting surface (thigh/buttock thickness)
 const PALM_LIFT = 0.02; // m: palm centre above a surface the hand lies flat on (half a hand's thickness)
@@ -538,7 +553,9 @@ export class HumanViews {
   private syncAppearance(v:View,key:string|undefined){
     if(!this.humanPresets||v.appearance&&v.appearanceSoulKey===key)return;
     if(v.appearance&&!v.appearance.retire())return; // retain foreign-reference quarantine, never stack owners
-    v.appearanceSoulKey=key;v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    v.appearanceSoulKey=key;const a=v.appearance=new HumanActorAppearance(v.rig.model,v.rig.appearance,key);
+    // a preset recolours the body's own primitives: draw those while it is attached (body-merge.ts)
+    void a.ready.then(()=>{if(v.appearance===a)setBodyMerged(v.rig,a.snapshot().state!=='attached');});
   }
 
   /** Stair flights people may be on (the Spatial scene's usable stairs links; call when they change). */
@@ -586,6 +603,7 @@ export class HumanViews {
 
   private make(id: string, s: Snap, activity: string,publicSoulKey?:string,bodyModel?:string): View {
     const rig = createRig(bodyModel?this.bodyTemplates.get(bodyModel)!:templateFor(id, this.templates)!);
+    mergeRigBody(rig);   // a classic body's primitives draw as one (body-merge.ts)
     rig.holder.name = id;
     rig.holder.traverse(o=>{
       o.userData.entity=id;const m=o as THREE.SkinnedMesh,p=THREE.SkinnedMesh.prototype;
@@ -639,6 +657,8 @@ export class HumanViews {
       const inst = Math.hypot(e.pose.p[0] - c.p[0], e.pose.p[2] - c.p[2]) / DT;
       const ground = act === 'ride' || act === 'row' ? 0 : e.human.speed ?? inst; // a vehicle carries a rider: no gait from its motion
       v.speed += (ground - v.speed) * 0.6;
+      if (act !== v.activity && postureKind(act, base) !== postureKind(v.activity, v.base)) { const was = v.postureChange; v.postureChange = { from: v.activity, ...(v.base ? { fromBase: v.base } : {}), to: act, age: 0, ...(was && was.age < ACT_HISTORY ? { before: { ...was, before: undefined } } : {}) }; }
+      else if (v.postureChange) { v.postureChange.age += DT; if (v.postureChange.before) v.postureChange.before.age += DT; }
       if (act !== v.activity) {
         const clock=world.tick*DT;
         if(v.activity==='wave'&&v.waveEvents?.length)v.waveEvents[v.waveEvents.length-1].end=clock;
@@ -675,7 +695,7 @@ export class HumanViews {
       v.base = base;
       v.propWanted = (e.human as { prop?: string }).prop;
       v.instrument=(e.human as {instrument?:string}).instrument;v.game=recordedGame((e.human as {game?:unknown}).game)??undefined;v.gameTick=world.tick;v.gameDt=DT;
-      v.running = act === 'jog' || act === 'run' || ground > RUN_SPEED;
+      v.gait = chooseGait(v.gait, v.speed, world.tick * DT, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.grip = e.human.grip?.entity;
       v.gripSlot = e.human.grip?.slot;
       v.on = e.human.on;
@@ -883,8 +903,10 @@ export class HumanViews {
     for (const f of frame) {
       if(f.bodyModel?!this.bodyTemplates.has(f.bodyModel):!templateFor(f.id,this.templates))continue;
       seen.add(f.id);
-      const act = f.activity ?? 'idle';
-      const base = baseOf(act, f.baseActivity);
+      // a record that goes straight between standing and a seat draws the old engine's own sit-down / stand-up phase
+      const pc = f.postureChange, seatMove = pc ? postureNow(pc, f.activity ?? 'idle', f.baseActivity) : null;
+      const act = seatMove?.activity ?? f.activity ?? 'idle';
+      const base = baseOf(act, seatMove?.activity ?? f.baseActivity);
       let v = this.views.get(f.id);
       const wanted=f.bodyModel?this.bodyTemplates.get(f.bodyModel):templateFor(f.id,this.templates);
       // A live arrival can finish many unique templates together. Defer only new rigs, keeping every existing actor
@@ -916,9 +938,10 @@ export class HumanViews {
       if (v.groundSeat) v.seat = GROUND_SEAT;
       v.propWanted = f.prop;
       v.instrument=f.instrument;v.game=f.game;v.gameTick=f.gameTick;v.gameDt=f.gameDt;
-      v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
-      v.since = f.activityAge;
+      v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
+      v.since = seatMove?.activity ? seatMove.since : f.activityAge;
+      v.postureChange = seatMove?.activity ? undefined : f.postureChange;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
       v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
@@ -1036,11 +1059,30 @@ export class HumanViews {
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
     const fluteRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='flute'&&v.since!==undefined&&v.since<.8;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
-    const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
+    // A one-off gesture's age (a bow, a point) is the take's, else carried on from this body's last frame of it: a live
+    // take window can begin inside it with no history (its age unknown, its arc restarted at a random phase). One that
+    // ends while still out then comes back from where it was over GESTURE_RETURN, on the same clock, not in one frame.
+    const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
+    if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
+    const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
+    const act0: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
+      : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+    // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
+    // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
+    const pn = lib.posture, own = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
+    const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity)
+      && postureKind(v.prevAct, v.prevBase) === 'stand' && postureKind(v.activity, v.base) === 'stand' ? v.prevAct : null;
+    const act: ActivityFrame | null = !own ? act0
+      : pn?.tilt ? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
+      : pn?.flat ? blendFrames(null, activityFrame(pn.flat.act, v.base, tSec, pairPhase, { actorId: h.name }), pn.flat.k)
+      : pn ? blendFrames(null, act0, pn.settle)
+      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name }), act0, smooth(v.since! / ACT_BLEND))
+      : act0;
+    const tilt = pn?.tilt ? pn.tilt.k : 1;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
     h.rotation.z = 0; h.rotation.x = 0;
     let lieFloor = h.position.y;
@@ -1051,7 +1093,7 @@ export class HumanViews {
       if (act.lying.face === 'back') { h.rotation.z = Math.PI / 2; h.position.x += c * hip; h.position.z += s * hip; const fit = lyingFloor(h.position.y, h.position.x, h.position.z, c, s); lieFloor = fit.y + (v.bench ?? 0); h.position.y = lieFloor + 0.1;
         // on a slope the whole body lies along the ground (head uphill or down), not level above its highest point
         if (fit.k !== 0 && !v.bench) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-s, 0, c), Math.atan(fit.k))); }
-      else { h.rotation.z = -(Math.PI / 2 - act.lying.raise); h.position.y += 0.06; }
+      else { h.rotation.z = -(Math.PI / 2 - act.lying.raise) * tilt; h.position.y += 0.06 * tilt; }
     } else if (act && act.hop > 0) h.position.y += act.hop;
     // leisure: a rider moves with the swing or the see-saw plank they sit on (play-motion.ts); the scenery seat follows
     if (act?.ride) { const seat = playSeatAt(act.ride.kind, h.position.x, h.position.z); if (seat) rideSeat(h, seat, act.ride.angle); }
@@ -1211,7 +1253,14 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const wantProp = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    // a thing the body carries (the engine's prop) with no activity posing the hands is in one hand at the carry point,
+    // standing or walking (below); a book is carried closed and read open
+    const held = !!propKind && propKind === v.propWanted;
+    const carried = held && !act?.hands && !clipBody && sitW === 0 && !fp && !gait;
+    if (!carried) v.carrySince = undefined; else if (v.carrySince === undefined || v.carrySince > tSec) v.carrySince = tSec;
+    const carryW = carried ? smooth(Math.min(1, (tSec - v.carrySince!) / CARRY_EASE)) : 0;
+    const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
@@ -1463,6 +1512,18 @@ export class HumanViews {
       });
       closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
+    } else if (carried && carryW > 0) {
+      // a carried thing: its hand at the carry point from its own shoulder (forearm forward, elbow bent), walking or
+      // standing; the other arm keeps the clip (its walk swing, its idle). The prop follows the drawn palm (below).
+      source = 'carry';
+      const side = carrySide(wantProp!), i = v.arms.findIndex((_, k) => armSide(v, k) === side);
+      if (i >= 0) {
+        const arm = v.arms[i], out = side === 'left' ? -1 : 1;
+        const t = arm.upper.getWorldPosition(V()).addScaledVector(_fwd, CARRY_HAND[0]).addScaledVector(_right, out * CARRY_HAND[1]).addScaledVector(UP, CARRY_HAND[2]);
+        targets[i] = t;
+        armTo(arm, t, carryW, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5));
+      }
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
     } else if (sitW > 0 && !seatClip) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
@@ -1572,12 +1633,19 @@ export class HumanViews {
     const sh = v.shore, buoyant = sh?.mode === 'buoyant';
     const water = !engineHands && sh && buoyant ? (v.activity === 'swim' ? 'swim' as const : v.activity === 'tread' ? 'tread' as const : undefined) : undefined;
     const phaseId = v.partner && v.partner < v.rig.holder.name ? v.partner : v.rig.holder.name;
-    const one = (pick: LibraryPick | null, since: number | undefined): LibOne | null => {
+    const one = (pick: LibraryPick | null, since: number | undefined, phase = v.sleepPose?.standingFraction): LibOne | null => {
       if (!pick || (engineHands && pick.body !== 'seat' && pick.body !== 'ground-seat')) return null;
       const clip = pickClip(pick, v.rig.holder.name), act = libAction(v.rig, clip);
       if (!act) return null;
-      return { pick, act, clip, time: clipTime(pick, act.getClip().duration, t, phaseId, since, v.sleepPose?.standingFraction) };
+      return { pick, act, clip, time: clipTime(pick, act.getClip().duration, t, phaseId, since, phase) };
     };
+    // posture-transition.ts: a change of posture with no phase of its own in the record is drawn over the next second;
+    // getting up from the back or lying down on it is LayToIdle by phase in place of the activity's own frame
+    const pc = v.postureChange;
+    const pn = pc && !v.sleepPose && !engineHands && !water ? postureNow(pc, v.activity, v.base) : null;
+    out.posture = pn?.activity ? null : pn; // a seat's own phase is drawn as that activity (setFrame)
+    const rise = out.posture?.rise;
+    if (rise !== undefined && (out.cur = one({ clip: 'LayToIdle', mode: 'phase', body: 'lie' }, undefined, rise))) { out.rise = rise; out.still = true; return out; }
     const ctx = (activity: string, base: string, ground: boolean) => ({ activity, base, ground, seated: SEATED.has(base) && !ground, speaking: !!v.speaking, speed: v.speed, partner: !!v.partner });
     out.cur = one(libraryPick({ ...ctx(v.activity, v.base, !!v.groundSeat), ...(v.sleepPose ? { sleep: v.sleepPose.standingFraction } : {}), ...(water ? { water } : {}) }), v.since);
     if (v.since !== undefined && v.since < CLIP_FADE && v.prevAct !== undefined && v.prevAct !== v.activity) {
@@ -1622,12 +1690,14 @@ export class HumanViews {
       } else if (body === 'lie' && one === lib.cur) {
         const p0 = clipProbe(t, 'LayToIdle', 0);
         if (!p0) continue;
-        // rising (sleep → standing): keep the lying heading and hips-over-point layout, easing to the plain stance by the end
-        const up = one.pick.mode === 'phase' ? smooth(((v.sleepPose?.standingFraction ?? 0) - 0.55) / 0.45) : 0;
+        // rising (sleep → standing, or a posture change getting up from the back): keep the lying heading and hips-over-point
+        // layout, easing to the plain stance by the end; lying down (posture-transition.ts) is the same, run backwards
+        const frac = lib.rise ?? v.sleepPose?.standingFraction ?? 0;
+        const up = one.pick.mode === 'phase' ? smooth((frac - 0.55) / 0.45) : 0;
         const phi = Math.atan2(p0.head.z - p0.hip.z, p0.head.x - p0.hip.x);
         // lie / nap: hips over the body point, head along −yaw (as the procedural layout); a sleeper on a mat: feet at the
         // body point, head along +yaw (as the engine's prone sleep pose, so the body stays on its mat)
-        const sleeper = one.pick.mode === 'phase', want = sleeper ? 0 : Math.PI;
+        const sleeper = one.pick.mode === 'phase' && lib.rise === undefined, want = sleeper ? 0 : Math.PI;
         const turnBy = lerpAngle(want - phi, 0, up) * wgt, ly = yaw + turnBy;
         h.rotation.y = -ly;
         const c = Math.cos(ly), s = Math.sin(ly), k = (1 - up) * wgt;
@@ -1637,7 +1707,7 @@ export class HumanViews {
         h.position.x -= ox * k; h.position.z -= oz * k;
         const ec = Math.cos(yaw), es = Math.sin(yaw);
         const fit = lyingFloor(h.position.y, h.position.x + ox, h.position.z + oz, ec, es), bench = v.bench ?? 0, floor = fit.y + bench;
-        const rest = smooth(1 - (v.sleepPose?.standingFraction ?? 0) / 0.35) * wgt;
+        const rest = smooth(1 - frac / 0.35) * wgt;
         // on a slope the body lies along the ground (as the procedural lying layout, WN3-3b)
         if (fit.k !== 0 && !bench && rest > 0) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-es, 0, ec), Math.atan(fit.k) * rest));
         h.updateMatrixWorld(true);
@@ -1763,7 +1833,9 @@ export class HumanViews {
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 type LibOne = { pick: LibraryPick; act: THREE.AnimationAction; clip: string; time: number };
-type LibPlan = { cur: LibOne | null; prev: LibOne | null; fade: number; sleep: boolean; still: boolean; water: boolean };
+type LibPlan = { cur: LibOne | null; prev: LibOne | null; fade: number; sleep: boolean; still: boolean; water: boolean;
+  /** posture-transition.ts: the posture change drawn now, and LayToIdle's standing fraction while getting up or lying down. */
+  posture?: PostureNow | null; rise?: number };
 /** Playback rate of an idle variant clip. Idle_LookAround_Loop at the library's speed drops a hand from the head to the
  *  hip at up to 0.19 m per 50 ms (0.164–0.172 on 1.72 m bodies; entry 33, take 08: 0.158 m per 50 ms 1.2 s after a torch put-out; take 02:
  *  0.164), faster than any hand reach or release (≤ 0.15); at 0.7 it peaks at ≤ 0.14 on 1.65–1.85 m bodies (idle-gesture-speed.test.ts). */
@@ -1956,7 +2028,7 @@ function skinnedPoints(rig: Rig, stride: number, out: (p: THREE.Vector3, part: B
   const p = V(), idx = new THREE.Vector4(), wt = new THREE.Vector4();
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const indices=Array.from({length:Math.ceil(pos.count/stride)},(_,i)=>i*stride);let at=0;
     eachSkinnedWorld([{mesh:m,idx:indices}],p,p=>{
@@ -1982,7 +2054,7 @@ const standingShapes=new WeakMap<Template,StandingShape>();
  * Attribute replacement/version changes invalidate the cache (kit shape edits and geometry updates). */
 function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
  const meshes:THREE.SkinnedMesh[]=[];
- rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh)meshes.push(o as THREE.SkinnedMesh);});
+ rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh&&!o.userData[BODY_DRAW])meshes.push(o as THREE.SkinnedMesh);});
  const attributes=(m:THREE.SkinnedMesh)=>[...Object.values(m.geometry.attributes),...Object.values(m.geometry.morphAttributes).flat()];
  const version=(a:THREE.BufferAttribute|THREE.InterleavedBufferAttribute)=>'version'in a?a.version:a.data.version;
  const old=standingShapes.get(rig.template);
@@ -2013,7 +2085,7 @@ function surfaceRefs(rig: Rig) {
   rig.holder.updateMatrixWorld(true);
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex) return;
+    if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
     const contacts:{i:number;part:'foot'|'hand'}[]=[];
     for (let i = 0; i < pos.count; i++) {

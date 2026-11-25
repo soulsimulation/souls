@@ -327,6 +327,7 @@ fn joined_server(d: &Path, fault: ProbeFault) -> World {
                             now: i.basis.clone(),
                             changed: Vec::new(),
                             op: None,
+                            detail: None,
                         };
                         encode(&Value::Map(BTreeMap::from([
                             (1, i.basis.clone()),
@@ -875,4 +876,56 @@ fn o18d_a4_scratch_rehearsal_commits_and_retires_its_own_probe() {
         before,
         "served users are not driven by rehearsal"
     );
+}
+
+/// 0.133 release blocker (24 Nov): a failed rehearsal left its scratch probe receipt pending, and its scratch build was
+/// gone. The next rehearsal of that build waited on the dead scratch socket to retire a body that lived only in the
+/// scratch copy, and refused `canary.probe-pending` every time. Now it drops that receipt with the copy, by name, and
+/// rehearses fresh: its own probe commits and retires, and no probe body stays.
+#[test]
+fn a_stale_scratch_receipt_with_no_scratch_world_is_dropped_and_the_rehearsal_runs_fresh() {
+    use std::os::unix::fs::PermissionsExt;
+    const CHILD: &str = "SOULS_STALE_SCRATCH_RECEIPT_CHILD";
+    if let Some(d) = std::env::var_os(CHILD).map(PathBuf::from) {
+        let _world = joined_server(&d, ProbeFault::None);
+        loop {
+            std::thread::park();
+        }
+    }
+    let d = dir("stale-scratch");
+    let state = d.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let world = joined_server(&state, ProbeFault::None);
+    let user = Id::new(Scope([0x78; 16]), 1).unwrap();
+    seed_user(&state, user);
+    world.stop();
+    let before = user_snapshot(&state, &[user]);
+    let script = d.join("build");
+    let exe = std::env::current_exe().unwrap();
+    let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+    std::fs::write(&script, format!("#!/bin/sh\nexport {CHILD}=\"$3\"\nexec {quoted} --exact a_stale_scratch_receipt_with_no_scratch_world_is_dropped_and_the_rehearsal_runs_fresh --nocapture\n")).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // What the failed rehearsal left: a pending join receipt and its socket's file, no world behind it.
+    let scratch = d.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let stale = Id::new(Scope([0x99; 16]), 1).unwrap();
+    let receipt = encode(&Value::Map(BTreeMap::from([
+        (1, stale.to_value()),
+        (2, Value::Uint(1)),
+        (3, Value::Uint(1)),
+    ])))
+    .unwrap();
+    std::fs::write(scratch.join("operator.probe"), receipt).unwrap();
+    drop(UnixListener::bind(scratch.join("gateway.sock")).unwrap());
+    let mut probe = Probe::operator(&probe_receipt(&state)).unwrap();
+    let t = std::time::Instant::now();
+    let r = supervisor::deploy::rehearse(&script, &state, &scratch, 0, &canary(100), &mut probe)
+        .expect("a fresh rehearsal, not canary.probe-pending");
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "no wait on the dead socket"
+    );
+    assert!(r.dropped_probe && r.served_kept && r.copied > 0, "{r:?}");
+    assert!(!scratch.join("operator.probe").exists());
+    no_probe_bodies_except(&scratch, &before.keys().copied().collect());
 }

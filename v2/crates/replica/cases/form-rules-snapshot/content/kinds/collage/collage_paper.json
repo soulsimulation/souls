@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "colour": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "red",
@@ -17,7 +17,7 @@
       }
     },
     "shape": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "wide",

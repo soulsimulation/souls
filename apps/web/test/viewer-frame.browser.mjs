@@ -29,7 +29,7 @@ try {
   // Advance recorded history sooner in this fake-only development fixture.
   assert.equal((await owner.request.post(base+'/w/eden/v1/admin', {headers:{authorization:'Bearer dev:admin'},data:{action:'clock_rate',rate:4}})).status(),200);
   page = await owner.newPage(); page.on('pageerror', e => errors.push(e.message));
-  await page.goto(base + '/w/eden?rewind=1');
+  await page.goto(base + '/w/eden');
   // VF1: arriving is one calm card (no warnings, no "Held"), gone once the first frame is drawn.
   const arrival = await page.waitForFunction(() => { const c = document.querySelector('.viewer-arrival[data-done="false"]'); return c && { card: c.textContent, status: document.querySelector('[data-viewer-status]')?.textContent, cls: document.querySelector('[data-viewer-status]')?.className, reasons: document.querySelectorAll('.viewer-reason').length, text: document.body.innerText }; }).then(h => h.jsonValue());
   check('Arrival shows one loading card and a neutral pill, never Held or Reconnecting', /^Loading Eden/.test(arrival.card) && arrival.status === 'Loading…' && arrival.cls === 'loading' && arrival.reasons === 0 && !/Held|Reconnecting/.test(arrival.text));
@@ -71,15 +71,16 @@ try {
   check('Resize places actual actor beside desktop drawer', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: output + '/desktop-follow.png' });
   await page.waitForFunction(() => Number(document.querySelector('.viewer-history')?.getAttribute('data-viewer-tick')) > 1600, null, {timeout:120000});
+  await page.locator('.time-pill').click(); // every time control is in the panel the pill opens
   await page.getByRole('button', { name: 'Back 1 min', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation') === 'history');
   check('Typed history seek reports actual drawn tick', Number(await page.locator('.viewer-history').getAttribute('data-viewer-tick')) >= 0);
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
   check('History seek truthfully reports automatic playback', true);
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).click();
-  await page.getByRole('button', { name: 'Play recording', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Play recording', exact: true }).click();
-  await page.getByRole('button', { name: 'Pause recording', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
   check('Typed playback pause and resume acknowledged', true);
   await page.getByRole('button', { name: 'Return to live', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation') === 'live');
@@ -113,7 +114,7 @@ try {
   const broken = await browser.newContext();
   await broken.addInitScript(() => { const get = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function(kind, ...args) { return kind.startsWith('webgl') ? null : get.call(this,kind,...args); }; });
   page = await broken.newPage(); page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(base + '/w/eden?rewind=1');
+  await page.goto(base + '/w/eden');
   await page.getByText('This browser could not start 3D graphics.', {exact:true}).waitFor();
   check('Graphics failure is stated plainly, not as a loading card', await page.locator('.viewer-arrival').count() === 0 && await page.locator('[data-viewer-status]').textContent() === 'View unavailable');
   check('Graphics startup failure remains visible with null drawn tick', await page.locator('.viewer-history').getAttribute('data-viewer-tick') === '');

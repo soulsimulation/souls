@@ -33,40 +33,54 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
   building stands on the ground, and its rooms stand on a floor of that building. Things and bodies stand in rooms.
 - A thing can only go in something whose kind admits it. `describe` shows each kind's `admits`: a kind name, or a
   category (`thing`, `body`) that admits every kind of that sort.
-- Use the kinds the world already pins. Pick the kind that already offers what Souls should do with it; you cannot
-  invent kinds here. `describe` lists their full names, including hashes: copy a full name when several revisions
-  share a name. A short name works only when it identifies one pinned kind.
-- Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
+- Use a kind the world already has when one offers what Souls should do with it; when none does, define your own
+  (below). `describe` lists every kind's full name, including its hash: copy a full name when several revisions share
+  a name. A short name works only when it identifies one kind.
+- Positions and lengths are metres, everywhere the command takes or prints them (`--at x,y,z`, `--gap`, `--dist`,
+  zones, claims, a batch's `at`, `describe`): `x` east, `y` up, `z` south, in the parent's frame. A room's floor is `y` 0.
 - Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
 
 ## Verbs
 
 | Verb | What it does |
 | --- | --- |
-| `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
+| `place <kind> --in <id> [--at x,y,z] [--slot n] [--title '<name>'] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id. `--title` is the name Souls see it by and can call it (`rack frame 1`) |
+| `place <kind> --path '[[x,z],...]' [--width m]` | a road, footpath, hedge or wall along a line (metres), on the open ground unless `--in` |
+| `place <kind> --area '[[x,z],...]' \| --rect cx,cz,w,d \| --circle cx,cz,r` | a lawn, pitch, bed or named area (`eden:place`, with `--field 15=<its kind>`) over an area |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
+| `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
+| `select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m]` | what matches (id, kind, name, spot in metres); add `--remove` or `--by dx,dz [--yaw r]` to remove or move all of it in one edit |
+| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
-| `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
+| `about <id> --title '<t>' [--alias '<a>' ...]` | a place's or a thing's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
+| `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
+| `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
+| `upload <file.glb\|png\|jpg>` | a model or a picture, through the world's check: `{hash, state}` |
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
-| `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist mm]` | beside another, in the same parent (default east, 1000 mm; north is -z) |
+| `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist m]` | beside another, in the same parent (default east, 1 m; north is -z) |
 | `place <kind> --on <id>` | in or on another, in its first free slot a thing may take |
 | `place ... --facing <id\|n\|e\|s\|w>`, `move <id> --facing ...` | turned to face another thing or a compass point |
+| `place <kind> --in <id> --at x,y,z --row <n> --gap <m> [--along x\|z]` | a row of `n`, `--gap` metres apart, centred on `--at` (along x unless `--along z`): one batch, all or none; `names` are `1..n` west to east |
+| `place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <m>[,<m>]` | a grid, `C` along x and `R` along z, centred on `--at`; at most 64 things. With `--facing n\|e\|s\|w` they all face it. If any spot is refused, nothing is placed and the refusal names the op (`check` first to see) |
 | `undo` | the newest edit taken back; the answer's `changed` says what changed |
 | `redo` | the newest undo done again, with the same ids; a new edit clears it |
 | `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
 | `undo --build <name>` | the whole build undone, step by step, while its steps are your newest edits |
 | `build claim <part> --area x0,z0,x1,z1 --helper [--ttl <minutes>]` | a claim with a helper: prints the helper's home (`SOULS_HOME=<folder>`); a sub-agent run there builds only inside that claim, until it lapses (default 120 minutes) |
 | `build rewind <build> --to <step> [--dry]` | undoes every edit of that build after the step, newest first (`--dry` lists them) |
+| `build start <name> --steps a,b,c [--brief '<words>']` | a build session, on its first step: until `build done`, every edit you send carries its name and current step without `--build --step`. One open at a time |
+| `build step <step>` · `build show [<name>]` · `build done [<name>]` | move on to the next step; its steps, each done, open or waiting, with the edits sent and refused under it; close it (edits are as written again) |
 | `describe` | what is there, and what each kind admits |
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
 | `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 | `event <room or ground id> '<words>' --when HH:MM [--for <minutes>] [--at x,y,z]` | an event on the world's calendar there, beside its notice board (not under it): its words are kept for everyone, and `whatson` lists it. HH:MM is its next one in world time |
 | `time <HH:MM \| live>` | the hour the page shows the sky at, for a staged scene (`time 18:30` for a sunset); `live` shows the world's own time. Display only: world time never stops or changes speed, and Souls' clocks and calendars are unchanged |
+| `status` · `quit` | your daemon: where it is (connected, its copy); ended, until your next command starts it again |
 | `trace [n]` | your last `n` commands here (20, at most 200), newest first: time, verb, result and refusal. If you see the same refusal again and again, stop and read its `fix` |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
@@ -88,8 +102,8 @@ A batch is a JSON list. Each operation is one of:
 
 ```json
 {"op": "place", "name": 1, "kind": "room", "in": "<id>", "at": [0, 0, 0]}
-{"op": "move", "node": "<id or name>", "at": [1000, 0, 500]}
-{"op": "set", "node": "<id or name>", "field": 1, "value": 1}
+{"op": "move", "node": "<id or name>", "at": [1, 0, 0.5]}
+{"op": "set", "node": "<id or name>", "field": 4, "value": {"words": "the old mill"}}
 {"op": "remove", "node": "<id or name>"}
 ```
 
@@ -97,11 +111,83 @@ A batch is a JSON list. Each operation is one of:
 for example placing a thing `"in": 1` inside the room the same batch places. The answer maps each name to the id the
 world gave it: `"names": {"1": "<id>", "2": "<id>"}`.
 
+A place may add `"title": "<words>"`: the name Souls see the thing by in `look` and `find`, and can call it by
+(`part take <crew> "rack frame 1"`). It is field 4 as words, as `about --title` sets it later. A field's plain string
+is a name (`namespace:name`), never words: `"fields": {"4": "frame 1"}` is refused.
+
 Example: a room with two things in it, in one step.
 
 ```
 node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>"},{"op":"place","name":2,"kind":"<kind>","in":1,"at":[1000,0,1000]},{"op":"place","name":3,"kind":"<kind>","in":1,"at":[-1000,0,1000]}]'
 ```
+
+## Kinds of your own
+
+When the world has no kind for what you need, define one. It is kept in the world as data (a `souls:kind` node at
+the root, which `describe` shows), and from then on you place it like any other kind.
+
+- **A kit** is the quickest: a name and its shapes, in metres, with `y` = 0 the ground, `+y` up and the front `+z`.
+  ```json
+  {"name": "birdbath", "box": [1, 1.2, 1],
+   "shapes": [{"kind": "cyl", "at": [0, 0.4, 0], "r": 0.18, "h": 0.8, "material": "stone"},
+              {"kind": "lathe", "at": [0, 0.8, 0], "profile": [[0, 0], [0.45, 0.05], [0.5, 0.15]], "material": "stone"}]}
+  ```
+  `define-kit birdbath.kit.json --ns garden` makes the kind `garden:birdbath`; then
+  `place garden:birdbath --in <room id> --at 1000,0,1000`. Shapes: `box`, `wedge`, `rbox`, `cyl`, `cone`, `capsule`,
+  `sphere`, `ring`, `torus`, `arch`, `lathe`, `extrude`, `loft`, `sweep`; each needs `at`. Angles (`yaw`, `pitch`,
+  `roll`, `arc`) are radians. Write each shape out: `repeat`, `radial`, `mirror` and `$params` are refused
+  (`kit.program`). A kit's `actions`, `components` or `state` are not carried, and the answer lists them in
+  `not_carried`.
+- **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
+  `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
+  millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass, and a `create` names
+  the made kind's full name (`namespace:name@hash`, from `describe`). Souls then use them as they use the world's own:
+  `inspect <id>` lists each form as an offer, `act <form>:<id>` runs it, and a wrong act is refused by the same name.
+- **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
+- **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
+  `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.
+- **Removing a kind:** `remove <its souls:kind id>`, once nothing of that kind is left and no other kind's form
+  creates it, or in the same batch as the last of them (`kind.in-use`).
+
+## Export and import
+
+- `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
+  default: kinds, places, fields and poses, and the world's public names.
+- `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
+  What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
+  changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
+  `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
+  ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+
+## Furnishing
+
+- `node souls-god.mjs furnish <building or room id> [--style <s>]` furnishes a building's rooms (or one room) with
+  today's recipes: the building's own style (townhouse, cottage, shop and 36 more), or `--style`. Each piece goes in
+  the room's free space, out of doorways and off the stairs; a piece that does not fit, or whose kind the world does
+  not pin, is dropped and named in the answer. A piece already there (by its recipe name) is left as it is.
+- `check furnish <id>` shows what it would place, and sends nothing.
+
+## Growing the world
+
+- `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
+- `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
+  `--bounds x0,z0,x1,z1` (metres) to cover a box.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
+  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
+  land edit, so a ground past about 16 MB is refused `edit.too-large`.
+
+## Your own models and pictures
+
+`upload models/kalama.glb` (or a `.png` or `.jpg`) sends the file through the world's check: it is measured, its
+metadata (camera, place, author) is stripped, and it passes the world's hold point. The answer is
+`{"ok": true, "hash": "1220…", "state": "allowed", "url": "…"}`: an allowed upload is served at `url`, by its hash. A
+`"held"` upload is kept for the owner's review and is not shown until they release it; say so when you report.
+
+Get the file within budget before sending it: a model at most 3 MB and 80,000 triangles, self-contained (every
+texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A refusal names what was over
+(`upload.size`, `upload.triangle-budget`, `upload.texture-side`, `upload.external-resource`, `upload.format`, ...).
 
 ## Answers and refusals
 
@@ -118,14 +204,24 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
+| `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
+| `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
+| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
+| `kind.audience` | a kind is defined for everyone |
+| `kind.namespace` | that namespace is not yours |
+| `kind.collision` | that kind is defined already: place it by the name `describe` lists |
+| `kind.in-use` | things of that kind are still placed, or another kind's form still creates it |
+| `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 | `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
 | `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
+| `solid-into-slot` | a Soul's form would put a thing of your kind that has solids into a slot with a fixed point, where it would stand unjudged: such a thing is made into a hand and set down, which is judged |
 | `undo.conflict` | something the undo would change has changed since: put it back by hand |
 
 ## Good habits
 
 - `describe` first; `check` anything unsure; then send. A `check` costs nothing.
 - Build a room and its contents in one batch, so it never stands half built.
-- Space things at least 500 mm apart, inside the room, on the floor (`y` 0), unless a slot holds them.
+- Space things at least 0.5 m apart, inside the room, on the floor (`y` 0), unless a slot holds them.
 - After building, `describe` once and confirm each id you were given is where you meant.
 - Report what you built: each thing's kind and id.

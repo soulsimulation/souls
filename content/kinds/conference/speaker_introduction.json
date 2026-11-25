@@ -1,0 +1,116 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:speaker_introduction",
+  "owner": "thing",
+  "links": {
+    "announcer": {
+      "n": 2,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "guest": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_guest": {
+      "role": "stand",
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 180000
+    },
+    "by_host": {
+      "role": "stand",
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    }
+  },
+  "slots": {
+    "announcer": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1100,
+        0,
+        0
+      ],
+      "stand": "by_host"
+    },
+    "guest": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1100,
+        0,
+        0
+      ],
+      "stand": "by_guest"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3200,
+      100,
+      1800
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "announcer": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "announcer"
+        ],
+        "within_mm": 3000
+      },
+      "move": "point"
+    },
+    "guest": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "guest"
+        ],
+        "within_mm": 3000
+      },
+      "move": "bow"
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A host points to a consenting guest, who returns a brief bow.",
+    "conference": "conference",
+    "speaker_introduction": "speaker introduction",
+    "rules": "Offer an introduction to a nearby guest; they may accept or decline. When accepted, ordinary movement admission asks both to take separate standing places. The host points toward the guest and the guest bows toward the host. Either may leave, and the introduction ends after both brief gestures finish. Introduce only what you know about the guest."
+  },
+  "card": {
+    "text": "card",
+    "category": "conference",
+    "synonyms": [
+      "speaker_introduction"
+    ]
+  }
+}

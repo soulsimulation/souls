@@ -37,16 +37,17 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 
 | eden-god | souls-god | Status |
 |---|---|---|
-| `place <def> --at x,z` | `place <kind> --in <id> --at x,y,z` (mm in the parent) | done |
-| `place --near/--inside/--on/--along/--against/--between/--facing/--count/--row/--grid` | none | gap: #3694 (beside, on, facing) |
+| `place <def> --at x,z` | `place <kind> --in <id> --at x,y,z` (metres in the parent) | done |
+| `place --near/--inside/--on/--along/--against/--between/--facing/--count/--row/--grid` | `place --beside/--on/--facing`; `--row n --gap m [--along x\|z]` and `--grid CxR --gap m` as one all-or-none batch (R8a) | partial: near, inside, along, against, between and count no task |
 | `place <path-def> --from --to`, `place <area-def> --rect/--circle/--area` | none | gap: roads and areas; zones in #3700, the rest no task |
 | `move <ref> --by / relations / --in` | `move <id> --at` (same parent) | partial: `--by` and relations with #3694; a new parent is a crossing |
-| `set --param --state`, `recolor` | `set <id> <field number> <value>` | partial: named params and colour no task |
+| `set --param --state` | `set <id> <field number> <value>` | partial: named params no task |
+| `recolor` | `recolor <id> '#rrggbb' [--part <part>]`: a tint on the thing or one named part (field 145, `replica::tint`), the world's creator only (`edit.tint-malformed` for one that does not read); the old page multiplies the picture by it; `undo` takes it back | done (0.134 R4) |
 | `remove` | `remove <id>` (and its subtree) | done |
 | `clone`, `select [filters] [--remove ...]` | `batch` | partial: no task |
 | `plan`, `preview`, `commit`, `act`, `dryrun` | `check` (on the copy, free) and `batch` (all or none) | done |
 | `group`, `undo`, `redo` | none on the wire; the engine has them (G4, `sim::edit::undo`) | gap: #3694 |
-| `build start/step/check/show/wait/resume/continue/pause/done/abandon` | none | gap: #3694 (a build with steps) |
+| `build start/step/check/show/wait/resume/continue/pause/done/abandon` | `build start <name> --steps a,b,c [--brief]`, `build step`, `build show`, `build done` (R8e), kept in the creator's home; every edit carries the session's build and step | partial: check, wait, resume, continue, pause and abandon no task |
 | `build district` | none | gap: #3701 |
 | `build claim/release`, `--helper` | none | gap: #3701 (claims), #3727 (helpers) |
 | `build rewind` | none | gap: #3727 |

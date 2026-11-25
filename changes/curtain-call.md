@@ -1,0 +1,4 @@
+---
+type: feature
+---
+Adds a curtain-call activity for two to four consenting participants to repeat the existing bow and leave independently. Nearby standing participants are asked to take separate places through ordinary movement admission.

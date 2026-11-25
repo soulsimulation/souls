@@ -1136,6 +1136,7 @@ fn measure(
                 at,
                 on: None,
                 approach: false,
+                face: None,
             }];
             if turned {
                 skills::form_runner::turn(&mut steps, place.orientation).unwrap();
@@ -2559,7 +2560,12 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         copy_dir(&recorded, &dir);
-        for gone in ["views", ".stream-recovery-store", "gateway.sock"] {
+        for gone in [
+            "views",
+            ".stream-recovery-store",
+            "stream-backup",
+            "gateway.sock",
+        ] {
             let p = dir.join(gone);
             let _ = std::fs::remove_dir_all(&p);
             let _ = std::fs::remove_file(&p);
@@ -2813,6 +2819,44 @@ fn c22_an_area_off_a_things_floors_is_walked_to_on_the_ground() {
         "at the flight's foot: {at:?}"
     );
     back.expect("round the back of the house, done");
+}
+
+/// #3983: the roof stairs of eden-house-3 and eden-house-4 (today's e_303f348f and e_f071fa8e, 4.2 m long and
+/// 2.82 m high) climb from the west garden onto their bedroom wing's flat roof, 2.82 m up. Born west of each
+/// flight's foot, a Soul goes up (`go_up` to `top`) and ends on that roof (e_3d52ac7f's and e_0c946e80's floor-1).
+/// Each flight's top is 0.51 m short of the roof's edge and its landing 10 mm short, so nothing of it overlaps the
+/// roof (the office's landing overlaps its roof by 0.48 m); the top is carried along the flight onto the roof's
+/// standing ground, which starts within the 1 m a flight's top may be carried (`sim::links`, #3979). Their kind borrows `eden:stair_flight`'s entry through Eden's map, as live Eden's import does: the facts must be
+/// exported with `--map content/worlds/eden/map.json` (without it, `go_up` ends `no_such_kind`).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3983_the_courtyard_houses_roof_stairs_go_up_onto_their_roofs() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let mut ends = Vec::new();
+    for (house, at, stairs, roof) in [
+        (
+            "eden-house-3",
+            "22.0,30.27",
+            "e_303f348f",
+            "e_3d52ac7f/floor-1",
+        ),
+        (
+            "eden-house-4",
+            "42.0,30.27",
+            "e_f071fa8e",
+            "e_0c946e80/floor-1",
+        ),
+    ] {
+        let (up, end) = act_ending(&facts, at, stairs, "eden:go_up", &format!("i3983{house}"));
+        ends.push((house, im.nodes[roof], up, end));
+    }
+    for (house, roof, up, end) in ends {
+        up.unwrap_or_else(|e| panic!("{house}: up the stairs, done: {e}"));
+        let (node, at) = end.expect("the body's end");
+        assert_eq!(node, roof, "{house}: on the bedroom wing's roof: {at:?}");
+        assert_eq!(at.y, 2_820_000, "{house}: 2.82 m up: {at:?}");
+    }
 }
 
 /// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,
@@ -3333,7 +3377,10 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         vec![3, 3, 3, 1],
         "steered, stopped, landed, its own loop again"
     );
-    assert_eq!(logged[1].2, 2, "the stop: one station, where it is, held");
+    assert!(
+        logged[1].2 >= 2,
+        "the stop: held where it is, then its way home"
+    );
     assert_eq!(streamed, logged, "the public stream carries every course");
     let out = out.expect("the public stream carries the rider into slot 1 and out of it");
     let h = samples[out].1;
@@ -3976,7 +4023,8 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
         projected.len() >= 3,
         "the balloons' courses (and the punts') are in the public stream"
     );
-    // Board in the balloon's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
+    // Board in the balloon's boarding stop (its first minute each lap, `rides::BOARDING`): wait for the next when less
+    // than 50 s are left.
     let phase = |t: i64| (t - t0).rem_euclid(period);
     let p = phase(answers::now());
     if p > 10_000_000 {
@@ -3988,10 +4036,11 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     println!("board it by its own form: {boarded:?}");
     let seated_in = last_frames(&dir).into_values().find(|f| f.0 == balloon);
     println!("the rider's frame: {seated_in:?}");
-    // Aloft: 60 s into the lap it is on its ring, and its rider with it.
+    // Aloft: half a minute after its stop it is on its ring, and its rider with it.
+    let aloft_at = sim::courses::rides::BOARDING + 30_000_000;
     let p = phase(answers::now());
-    if p < 60_000_000 {
-        std::thread::sleep(Duration::from_micros((60_000_000 - p) as u64));
+    if p < aloft_at {
+        std::thread::sleep(Duration::from_micros((aloft_at - p) as u64));
     }
     let aloft = soul.act("eden:rise", None, BTreeMap::new());
     // Where its course has the balloon now, as the page reads it from the public stream.
@@ -4020,7 +4069,10 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     println!("the public stream: into the balloon {into:?}, out of it {out:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(rides.len(), 3, "the three festival balloons fly loops");
+    assert!(
+        rides.len() >= 3,
+        "the three festival balloons fly loops (and the Eden balloon, where the facts name its entry)"
+    );
     for (name, [x, z], period, _) in &rides {
         assert!(
             projected
@@ -4123,4 +4175,67 @@ fn c25_doors_from_either_side() {
         wrong.extend(served_family(at, tag, cases));
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// verdelis-eden (24 Nov, review of #4574): a world entered under a roof wider than the birth ring (a 40 m hall over
+/// the entry at (0, 0), a doorway in its south wall) births its Souls on the hall's floor. Seeded
+/// and served by `worldd` from a facts file of its own: no Eden facts needed.
+#[test]
+fn a_join_under_a_wide_roof_is_born_on_its_floor() {
+    let facts = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [{"ref": "core-hall@1", "hash": "aa", "name": "core:hall", "form": "point"}],
+  "things": [
+    {"id": "e_hall", "def": "core-hall@1", "ref": "core-hall@1", "parent": null, "pose": [0, 0, 0, 0],
+     "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "wide-hall",
+     "floors": [{"level": 0, "y": 0, "polygon": [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]]}],
+     "rooms": [{"id": "hall", "name": "Hall", "floor": 0, "pose": [0, 0, 0, 0], "height": 4000,
+                "polygon": [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]]}],
+     "openings": [{"id": "door", "kind": "door", "at": [0, 20050], "yaw": 0, "width": 1000, "height": 2100, "sill": 0,
+                   "level": 0, "from": "hall", "fromWall": true, "state": "always", "inRoom": [0, 0, 20050, 0]}],
+     "solids": [[-10250, 20050, 9750, 50, 0, 0, 4000, 5, 0], [10250, 20050, 9750, 50, 0, 0, 4000, 5, 0],
+                [0, -20050, 20100, 50, 0, 0, 4000, 5, 0], [20050, 0, 50, 20100, 0, 0, 4000, 5, 0],
+                [-20050, 0, 50, 20100, 0, 0, 4000, 5, 0]]}
+  ],
+  "doors": [],
+  "places": [],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+  "bake": {"things": 1, "doors": 0, "rooms": 1, "floors": 1, "floor surfaces": 1, "solids": 5, "slots": 0, "windows": 0, "doorways": 1},
+  "byRef": {"core-hall@1": 1}
+}"#;
+    let path = std::env::temp_dir().join(format!("wide-hall-{}.facts.json", std::process::id()));
+    std::fs::write(&path, facts).unwrap();
+    let im = import_eden::load(facts).expect("the hall loads");
+    let floor = im.nodes["e_hall/floor-0"];
+    let (_served, _soul, dir) = serve(
+        path.to_str().unwrap(),
+        "0,0",
+        "wide-hall",
+        im.nodes["world"].scope(),
+    );
+    let born = track(&dir);
+    println!("born: {:?}", born.last());
+    let &(_, node, x, z) = born.last().expect("the body's row");
+    assert_eq!(
+        node, floor,
+        "on the hall's floor, not the open ground cut out under it"
+    );
+    assert!(x.abs() < 17.0 && z.abs() < 17.0, "by the entry: ({x}, {z})");
+    // A second Soul, born beside the first: the floor's ring, a free place.
+    let mut other = Client(
+        UnixStream::connect(dir.join("gateway.sock")).unwrap(),
+        Id::new(Scope([0xc1; 16]), 2).unwrap(),
+        0,
+        im.nodes["world"].scope(),
+    );
+    other
+        .0
+        .set_read_timeout(Some(Duration::from_secs(90)))
+        .unwrap();
+    other.act(JOIN, None, BTreeMap::new()).expect("born too");
+    let rows = track(&dir);
+    let nodes: std::collections::BTreeSet<Id> = rows.iter().map(|r| r.1).collect();
+    assert_eq!(nodes, [floor].into(), "both on the floor");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&dir);
 }

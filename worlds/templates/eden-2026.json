@@ -109809,6 +109809,264 @@
           }
         }
       ]
+    },
+    {
+      "note": "Useful facilities in existing places: classroom conference podium, office living-room television, commons shared kitchen stove and performance-stage speaker. Existing games, gardens, campfire seating, instruments and computers are reused.",
+      "group": "eden-4385-facilities",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/podium@1",
+          "name": "classroom-conference-podium",
+          "in": {
+            "parent": "eden-classroom-1",
+            "slot": "classroom"
+          },
+          "p": [
+            0,
+            0,
+            -7
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "core/television@1",
+          "name": "office-lounge-television",
+          "in": {
+            "parent": "eden-office-1",
+            "slot": "reception"
+          },
+          "p": [
+            4.1,
+            0,
+            -1.6
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/stove@1",
+          "name": "commons-shared-kitchen-stove",
+          "p": [
+            -24,
+            0,
+            2.7
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "core/speaker@1",
+          "name": "performance-stage-speaker",
+          "p": [
+            96.2,
+            0,
+            -31.5
+          ],
+          "r": 3.141592653589793
+        }
+      ]
+    },
+    {
+      "note": "One radio console in Eden House 1 living room",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/radio@2",
+          "name": "eden-house-1-radio",
+          "in": {
+            "parent": "eden-house-1",
+            "slot": "living"
+          },
+          "p": [
+            1.5,
+            0,
+            -1.1
+          ],
+          "r": 0
+        }
+      ]
+    },
+    {
+      "note": "One existing carryable cup on the empty Eden House 1 kitchen counter. Existing placements, paths and stands are unchanged.",
+      "group": "eden-house-1-cup",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/cup@2",
+          "name": "eden-house-1-carry-cup",
+          "in": {
+            "parent": "eden-house-1-kitchen/eden-house-1-counter",
+            "slot": "top"
+          },
+          "p": [
+            0,
+            0,
+            0
+          ],
+          "r": 0
+        }
+      ]
+    },
+    {
+      "note": "Existing question-request fixture beside the classroom conference podium",
+      "group": "eden-4808-question",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-conference_question",
+            "version": 1,
+            "description": "Post a question, mark it answered, then withdraw your request.",
+            "tags": [
+              "furniture",
+              "conference"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.03,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.06,
+                      0.6
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.45,
+                      -0.035
+                    ],
+                    "size": [
+                      0.08,
+                      0.84,
+                      0.08
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.36,
+                      0.1
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0.055
+                    ],
+                    "size": [
+                      0.52,
+                      0.28,
+                      0.01
+                    ],
+                    "tint": "paper"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.81,
+                      0.065
+                    ],
+                    "size": [
+                      0.18,
+                      0.06,
+                      0.02
+                    ],
+                    "tint": "blue",
+                    "role": "light"
+                  }
+                ],
+                "looks_table": [
+                  {
+                    "part": "light",
+                    "field": "pending",
+                    "do": "tint",
+                    "at": {
+                      "false": "#5b91c4",
+                      "true": "#e5ac3e"
+                    }
+                  },
+                  {
+                    "part": "light",
+                    "field": "answered",
+                    "do": "tint",
+                    "at": {
+                      "true": "#76ad73"
+                    }
+                  }
+                ],
+                "looks_units": {}
+              }
+            },
+            "params": {},
+            "palette": {
+              "frame": "#43505a",
+              "paper": "#f5ead1",
+              "amber": "#e5ac3e",
+              "blue": "#5b91c4",
+              "green": "#76ad73",
+              "red": "#bc5955"
+            },
+            "state": {
+              "pending": {
+                "type": "bool",
+                "default": false
+              },
+              "answered": {
+                "type": "bool",
+                "default": false
+              }
+            },
+            "size": {
+              "box": [
+                0.6,
+                1.1,
+                0.6
+              ]
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/conference_question@1",
+          "name": "classroom-conference-question",
+          "in": {
+            "parent": "eden-classroom-1",
+            "slot": "classroom"
+          },
+          "p": [
+            2.2,
+            0,
+            -7
+          ],
+          "r": 0
+        }
+      ]
     }
   ]
 }

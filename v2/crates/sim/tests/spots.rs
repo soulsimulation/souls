@@ -13,8 +13,9 @@ use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::world_model::show;
 use sim::host::Runner;
+use sim::links::Kind;
 use sim::spots::{CLEAR, Entry, Target, to_segment};
-use sim::walk::town::Town;
+use sim::walk::town::{Town, level_part};
 use std::collections::BTreeMap;
 
 const SPEED: i64 = 1_400_000; // µm a second: today's walking pace
@@ -243,7 +244,8 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line.
+/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; on
+/// a building's floor, a flight's line where it lies from a step below the place to a body's height above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -268,16 +270,29 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
+                        let reach = if l.kind == Kind::Step {
+                            CLEAR / 2
+                        } else {
+                            l.width / 2 + CLEAR / 2
+                        };
+                        let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
                         for s in l.line.windows(2) {
                             let (a, c) = if *node == t.ground {
                                 (b.place.point(s[0]).unwrap(), b.place.point(s[1]).unwrap())
                             } else {
                                 (s[0], s[1])
                             };
-                            assert!(
-                                to_segment(p.at, a, c) >= l.width / 2 + CLEAR / 2,
-                                "A3: a place on a link's line"
-                            );
+                            let part = if flight && *node != t.ground {
+                                level_part(a, c, p.at.y)
+                            } else {
+                                Some((a, c))
+                            };
+                            if let Some((a, c)) = part {
+                                assert!(
+                                    to_segment(p.at, a, c) >= reach,
+                                    "A3: a place on a link's line"
+                                );
+                            }
                         }
                     }
                 }
@@ -756,4 +771,229 @@ fn a_door_is_reached_from_a_room_on_either_side() {
             "{side}: {p:?} on the body's own side of the door"
         );
     }
+}
+
+/// One walker sent from `(sx, 0)` to the point `(0, 0)` on the open ground, bodies standing still (no order) at `by`,
+/// run until its walk ends: the runner and the town after.
+fn sent_past(sx: i64, by: &[(i64, i64)]) -> (Runner, Town) {
+    let (mut t, _) = town();
+    let g = t.ground;
+    let mut c = Runner::new(TICK);
+    let w = stand(&t, id(1), g, Vec3::new(sx, 0, 0));
+    send(
+        &mut c,
+        w,
+        SPEED,
+        Target::new(g, Vec3::new(0, 0, 0)),
+        id(1000),
+    )
+    .unwrap();
+    for (k, &(x, z)) in by.iter().enumerate() {
+        let b = stand(&t, id(10 + k as u64), g, Vec3::new(x, 0, z));
+        c.add_body(common::humanoid(), b).unwrap();
+    }
+    for _ in 0..600 {
+        if c.runs.is_empty() {
+            break;
+        }
+        c.tick(&mut t).unwrap();
+    }
+    (c, t)
+}
+
+/// Whether the walk ended short of its goal, as near as the crowd allows (`F_SHORT` on its body, 0.133 A2-4).
+fn short(c: &Runner) -> bool {
+    c.fields
+        .get(&id(1))
+        .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+}
+
+/// 0.133 A2-4 (review of #4364): a walk to its own granted spot, free and reachable, is never ended short by bodies
+/// at rest near its line. One bystander in line, a pair with a gap a body passes through, and a row of three before
+/// the spot: each walk ends a plain `done` on its spot, which it holds, settled.
+#[test]
+fn a2_4_a_walk_to_a_free_spot_arrives_past_bodies_near_its_line() {
+    type Case = (&'static str, &'static [(i64, i64)]);
+    let cases: [Case; 4] = [
+        ("one bystander 2 m short, in line", &[(-2_000_000, 0)]),
+        ("one bystander 0.5 m short, in line", &[(-500_000, 0)]),
+        (
+            "a pair 0.5 m apart across the line, 1.5 m short",
+            &[(-1_500_000, -250_000), (-1_500_000, 250_000)],
+        ),
+        (
+            "a row of three 0.4 m apart across the line, 1.5 m short",
+            &[
+                (-1_500_000, -400_000),
+                (-1_500_000, 0),
+                (-1_500_000, 400_000),
+            ],
+        ),
+    ];
+    for (label, by) in cases {
+        let (c, _) = sent_past(-6_000_000, by);
+        let p = c.controller.body(id(1)).unwrap().pose.position;
+        let spot = c.granted.get(&id(1)).copied();
+        let off = spot.map(|s| flat(p, s));
+        println!(
+            "A2-4 {label}: ended {:?}; at ({}, {}) mm; short {}; spot {spot:?}, {off:?} µm off",
+            c.ended.get(&id(1)),
+            p.x / 1000,
+            p.z / 1000,
+            short(&c)
+        );
+        assert!(
+            matches!(c.ended.get(&id(1)), Some((_, Progress::Done))),
+            "{label}: done"
+        );
+        assert!(!short(&c), "{label}: a plain done, not short");
+        assert!(
+            off.is_some_and(|o| o <= skills::route::AT_SPOT),
+            "{label}: on its spot: {off:?}"
+        );
+        assert!(c.settled(id(1)), "{label}: settled on its spot");
+    }
+}
+
+/// 0.133 A2-4 (review of #4364): a walk whose granted spot a body at rest stands on ends short of it, as near as the
+/// crowd allows, and gives the spot back: it is not settled, and the spot is released at the next tick.
+#[test]
+fn a2_4_a_walk_ended_short_of_its_spot_releases_it() {
+    let (mut c, mut t) = sent_past(-6_000_000, &[(0, 0)]);
+    let p = c.controller.body(id(1)).unwrap().pose.position;
+    println!(
+        "A2-4 spot taken: ended {:?}; {} mm from the point; spot {:?}; short {}",
+        c.ended.get(&id(1)),
+        flat(p, Vec3::new(0, 0, 0)) / 1000,
+        c.granted.get(&id(1)),
+        short(&c)
+    );
+    assert!(matches!(c.ended.get(&id(1)), Some((_, Progress::Done))));
+    assert!(short(&c), "ended short of its spot");
+    assert!(!c.settled(id(1)), "not settled on a spot it never reached");
+    assert!(!c.granted.contains_key(&id(1)), "its grant is given back");
+    c.tick(&mut t).unwrap();
+    assert!(
+        t.spots
+            .record
+            .iter()
+            .any(|e| matches!(e, Entry::Release { who, .. } if *who == id(1))),
+        "the spot is released"
+    );
+}
+
+/// 0.133 A2-5 (review of #4399): the town's own overflow grounds. A point on the open ground overflows round itself;
+/// a point on a building's floor onto the open ground, at that point in the ground's frame (as the ground's own read
+/// of a standing point there gives it).
+#[test]
+fn a2_5_the_town_overflows_onto_the_open_ground() {
+    let (mut t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let q = Vec3::new(500_000, 0, -3_000_000);
+    let (on_ground, from_floor, stood) = t.with_ground(|_, g| {
+        (
+            g.overflow_at(ground, Vec3::new(1_000_000, 0, 2_000_000)),
+            g.overflow_at(f0, q),
+            g.stand(f0, q),
+        )
+    });
+    println!(
+        "A2-5 overflow grounds: {on_ground:?}; from the floor {from_floor:?}; the floor point {stood:?}"
+    );
+    assert_eq!(
+        on_ground,
+        vec![(ground, Vec3::new(1_000_000, 0, 2_000_000))]
+    );
+    let (_, world) = stood.expect("a body stands there");
+    assert_eq!(from_floor.len(), 1);
+    assert_eq!(from_floor[0].0, ground, "onto the open ground");
+    assert!(
+        flat(from_floor[0].1, world) <= 1_000,
+        "the same point, in the ground's frame: {:?} {world:?}",
+        from_floor[0].1
+    );
+}
+
+/// 0.133 A2-5 (review of #4399), through the runner: more walkers sent to one point on the square than it has places.
+/// Those granted overflow points walk there, end `done` as near as the crowd allows (`F_SHORT`) and hold them,
+/// settled; none is refused.
+#[test]
+fn a2_5_walkers_beyond_a_full_place_end_done_on_overflow_points() {
+    let (mut t, nodes) = town();
+    let ground = nodes["ground"];
+    let target = Target::new(ground, Vec3::ZERO);
+    let mut c = Runner::new(TICK);
+    // A first walker, for the table's size.
+    send(
+        &mut c,
+        stand(&t, id(1), ground, Vec3::new(0, 0, -12_000_000)),
+        SPEED,
+        target,
+        id(5001),
+    )
+    .unwrap();
+    c.tick(&mut t).unwrap();
+    c.tick(&mut t).unwrap();
+    let places = t.spots.table(&target).expect("the table").places.len();
+    let n = places + 12;
+    let mut k = 1;
+    'all: for row in 0..40i64 {
+        for col in 0..30i64 {
+            if k >= n {
+                break 'all;
+            }
+            let at = Vec3::new(
+                -17_400_000 + col * 1_200_000,
+                0,
+                -14_000_000 - row * 1_200_000,
+            );
+            send(
+                &mut c,
+                stand(&t, id(1 + k as u64), ground, at),
+                SPEED,
+                target,
+                id(5001 + k as u64),
+            )
+            .unwrap();
+            k += 1;
+        }
+    }
+    for _ in 0..4_000 {
+        if c.runs.is_empty() {
+            break;
+        }
+        c.tick(&mut t).unwrap();
+    }
+    let who: Vec<Id> = (0..n).map(|k| id(1 + k as u64)).collect();
+    let refused = who
+        .iter()
+        .filter(|w| matches!(c.ended.get(w), Some((_, Progress::Failed(_)))))
+        .count();
+    let over: Vec<Id> = who
+        .iter()
+        .copied()
+        .filter(|w| matches!(t.spots.granted(*w, &target), Some(Ok(g)) if g.overflow))
+        .collect();
+    let done = over
+        .iter()
+        .filter(|w| {
+            matches!(c.ended.get(w), Some((_, Progress::Done)))
+                && c.fields
+                    .get(w)
+                    .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+                && c.settled(**w)
+        })
+        .count();
+    println!(
+        "A2-5 through the runner: {places} places, {n} sent; refused {refused}; on overflow points {}, of them done short and settled {done}; still walking {}",
+        over.len(),
+        c.runs.len()
+    );
+    assert_eq!(refused, 0, "none refused");
+    assert!(over.len() >= 12, "the last sent overflow: {}", over.len());
+    assert_eq!(
+        done,
+        over.len(),
+        "each arrived, done as near as the crowd allows, holding its point"
+    );
 }

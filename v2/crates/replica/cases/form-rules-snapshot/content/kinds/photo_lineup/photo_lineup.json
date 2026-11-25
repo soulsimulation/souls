@@ -1,0 +1,160 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:photo_lineup",
+  "owner": "thing",
+  "links": {
+    "starter": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "participant": {
+      "n": 2,
+      "from": "body",
+      "most": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_lead": {
+      "role": "stand",
+      "at_mm": [
+        -1800,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_p1": {
+      "role": "stand",
+      "at_mm": [
+        -600,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_p2": {
+      "role": "stand",
+      "at_mm": [
+        600,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_p3": {
+      "role": "stand",
+      "at_mm": [
+        1800,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    }
+  },
+  "slots": {
+    "lead": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1800,
+        0,
+        0
+      ],
+      "stand": "by_lead"
+    },
+    "p1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -600,
+        0,
+        0
+      ],
+      "stand": "by_p1"
+    },
+    "p2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        600,
+        0,
+        0
+      ],
+      "stand": "by_p2"
+    },
+    "p3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1800,
+        0,
+        0
+      ],
+      "stand": "by_p3"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      4600,
+      100,
+      1600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "starter": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "lead"
+        ],
+        "within_mm": 3000
+      },
+      "move": "wave",
+      "on_beat": true
+    },
+    "participant": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "p1",
+          "p2",
+          "p3"
+        ],
+        "within_mm": 3000
+      },
+      "move": "wave",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Up to four Souls wave in a photo lineup; offer, accept or leave.",
+    "photo_lineup": "photo lineup",
+    "group_photo": "group photo",
+    "rules": "Two to four accepted members repeat the existing wave gesture. Nearby standing members on the same floor are asked to walk to separate places in one row through ordinary movement admission. Their declared native forward direction is the same. Each person may leave independently. This activity has no camera, shutter, saved picture, held pose, enforced visual facing or shared animation phase.",
+    "activity": "activity"
+  },
+  "card": {
+    "text": "card",
+    "category": "activity",
+    "synonyms": [
+      "photo_lineup",
+      "group_photo"
+    ]
+  }
+}

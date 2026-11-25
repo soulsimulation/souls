@@ -17,5 +17,5 @@ test('SDK receives the full pairing fragment and return query, and its sync URL 
   assert.deepEqual(calls, [{ signInForceRedirectUrl: href, signUpForceRedirectUrl: href }, sync]);
   calls.length = 0;
   startClerkSignIn(clerk, satellite, 'https://primary.example.test/w/eden/#join', url => calls.push(url));
-  assert.deepEqual(calls, [['modal', { afterSignInUrl: 'https://primary.example.test/w/eden/#join', afterSignUpUrl: 'https://primary.example.test/w/eden/#join' }]]);
+  assert.deepEqual(calls, [['modal', { forceRedirectUrl: 'https://primary.example.test/w/eden/#join', signUpForceRedirectUrl: 'https://primary.example.test/w/eden/#join' }]]);
 });

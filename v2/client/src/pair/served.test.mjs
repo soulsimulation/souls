@@ -7,7 +7,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { pair } from './pair.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -62,8 +63,7 @@ function souls(home, args) {
 
 after(async () => {
   if (daemon) await request(daemon.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
-  if (process.env.SERVED_HISTORY_KEEP !== '1') rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir, { keep: process.env.SERVED_HISTORY_KEEP === '1' });
 });
 
 test('A2: pairing to worldd serve writes the history it advertises, and history --at <place> answers after scripted acts', async () => {
@@ -170,8 +170,11 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
     answers.push(...(await request(daemon.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && sent.includes(e.sequence)));
     observed.answers = answers.slice(0, 4).map((a) => ({ answer: Number.isInteger(a.answer) ? a.answer : null,
       reason: ['completed', 'started', 'accepted', 'act-deadline', 'act-cancelled', 'out-of-reach', 'intent.expired', 'intent.stale-seq', 'intent.no-body', 'intent.ids-exhausted', 'intent.not-a-form-on-a-node'].includes(a.reason) ? a.reason : 'other' }));
-    return answers.length === sent.length;
-  });
+    // A walk is answered accepted as its route is planned (C20, W11 #4087), then at its end: count the ends.
+    return new Set(answers.filter((a) => a.answer !== 3).map((a) => a.sequence)).size === sent.length;
+    // 0.133 Q2: a walk to the building goes in, to its main room (the stair hall, by its front door): from -40,30 that
+    // is 39.4 s of walking (worldd `moves` q2_), so the ends get 90 s, not 30
+  }, 90_000);
 
   // `history --at <place>`: the world's own place, which holds everything, answers from the archive with both walks'
   // ends, by the Soul, and the world's day, light and weather; the index is written as it stands every 5 s.

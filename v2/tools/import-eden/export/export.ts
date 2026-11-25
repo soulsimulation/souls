@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { WorldModel, applyBatch, coreLibrary, correctKitDefines, type Entity } from '../../../../packages/world-compiler/src/index.ts';
 import { TileSampler, mediaTile, tileOf } from '../../../../packages/ground/src/index.ts';
+import { entriesIn, withMap, withThings } from './with.ts';
 
 type V2 = [number, number];
 type Pose = { x: number; y: number; z: number; yaw: number };
@@ -39,7 +40,8 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 // database (v2/tools/import-world/export/backup.ts) in place of the template's replay.
 const BACKUP = arg('--backup', '');
 const backup = await import('../../import-world/export/backup.ts');
-const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+// `--assets <dir>`: the world's asset store, where its footprint uploads' physics are kept (backup.ts).
+const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json'), arg('--assets', '')) : null;
 const text = live ? '' : readFileSync(TEMPLATE, 'utf8');
 const g = live ? { batches: [] } : JSON.parse(text);
 const t0 = performance.now();
@@ -51,6 +53,12 @@ if (!live) m.library = coreLibrary();
 // and revision, `def` and `entry`), as a backup's do (X6); a kind with no row names none and keeps its own name.
 const MAP = live ? '' : arg('--map', '');
 const entryOf = MAP ? backup.entryMap(MAP) : null;
+// A row may name the kind its copies are (`kind`): the rack yard's stand, frames, beams and bay are the construction kinds.
+const kindOf = backup.kindMap(arg('--map', live ? 'content/worlds/eden/map.json' : ''));
+// What a placed copy holds when the world starts (the map's `with` rows: a stand's guitar, a piano's bench), each made a
+// thing of its entry's kind (with.ts).
+const withOf = MAP ? withMap(MAP) : null;
+const entries = withOf ? entriesIn('content/kinds') : new Map();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -73,6 +81,10 @@ const isDoorDef = (d: { components: Record<string, unknown>; form: string; name:
 const WATER_KINDS = /^core-(lake|river|pond)$/;
 
 const kinds = new Map<string, { ref: string; hash: string; name: string; form: string; layer: string | null; door: boolean; mesh: boolean; slots: number }>();
+/** The defs the world defines itself (a template's `define`), which no page carries: each kept once, by ref, on the open
+ *  ground (`ground.defs`, the tree's field 102), so removing any thing of one never loses it. */
+const CORE = coreLibrary(), ownDefs = new Map<string, string>();
+const keepOwn = (d: { ref: string }) => { if (!CORE.get(d.ref) && !ownDefs.has(d.ref)) ownDefs.set(d.ref, JSON.stringify(d)); };
 const defOf = (e: Entity) => { const d = m.resolvedDef(e.def); if (!d) throw new Error(`${e.id}: def ${e.def} unresolved`); return d; };
 const bakeOf = (e: Entity) => m.bake(defOf(e), e.params ?? {}, e.seed ?? 0, e.shape);
 
@@ -99,10 +111,16 @@ const things: unknown[] = [];
 /** Every door, gate and arch opening, in the world frame, for pairing door things with their doorways. */
 const doorways: { thing: string; opening: string; x: number; z: number; y: number; width: number }[] = [];
 const doorThings: { id: string; x: number; y: number; z: number }[] = [];
+// A Soul's body (today's `core/humanoid@<n>`, a live world's residents) is not a thing: it is listed by its id, name and
+// pose for the record, and its Soul comes back through the directory (v2/tools/ops/cutover/eden-residents.mjs).
+const isBody = (e: Entity) => /^core[-/]humanoid@\d+$/.test(e.def);
+const residents: { id: string; name?: string; world: number[] }[] = [];
 for (const e of m.entities.values()) {
+  if (isBody(e)) { residents.push({ id: e.id, ...(e.name ? { name: e.name } : {}), world: out(world.get(e.id)!) }); continue; }
   const d = defOf(e), b = bakeOf(e), s = scale.get(e.id)!, wp = world.get(e.id)!;
   const ref = d.ref;
-  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
+  keepOwn(d);
+  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindOf(ref) ?? kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
   // Its tree parent: the room it sits in (a room slot), else its parent thing (with the slot, if any), else the ground.
   const parent = e.in.parent === 'world' ? null : e.in.parent;
   const pe = parent ? m.entities.get(parent)! : undefined;
@@ -126,15 +144,26 @@ for (const e of m.entities.values()) {
     ...(isWorldShape ? { worldShape: true } : {}),
     ...live?.thing(e, d),
     ...(entryOf?.(ref) ? { entry: entryOf(ref) } : {}),
+    // W3 (0.135): its def's params as today's model holds them, as JSON text (the facts reader takes whole numbers only),
+    // which the tree keeps as field 19 so a page drawing from the stream alone draws it as today's page does
+    ...(e.params && Object.keys(e.params).length ? { params: JSON.stringify(e.params) } : {}),
   };
   if (isDoorDef(d as never)) {
     const v = e.state?.open ?? (d.state as Record<string, { default?: unknown } | undefined>)?.open?.default;
     rec.door = { open: v !== false };
     doorThings.push({ id: e.id, x: wp.x, y: wp.y, z: wp.z });
   }
+  // #4784: its state as today's page draws it (the entity's, over its def's defaults; bools and whole numbers), which
+  // the import gives to its entry's fields of that meaning, so a lamp on today starts on and a burning fire lit
+  const captured = Object.fromEntries(Object.entries({ ...Object.fromEntries(Object.entries((d.state ?? {}) as Record<string, { default?: unknown }>).map(([k, f]) => [k, f?.default])), ...(e.state ?? {}) })
+    .filter(([, v]) => typeof v === 'boolean' || (typeof v === 'number' && Number.isSafeInteger(v))));
+  if (Object.keys(captured).length) rec.state = captured;
   if (e.shape) rec.shape = { ...(e.shape.path ? { path: e.shape.path.map(pt) } : {}), ...(e.shape.area ? { area: e.shape.area.map(pt) } : {}), ...(e.shape.width !== undefined ? { width: mm(e.shape.width) } : {}) };
   const geo = isWorldShape ? ((v: number) => mm(v)) : S, G = isWorldShape ? pt : P;
-  if (b.colliders.length) rec.solids = b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
+  // Only a solid or surface thing's colliders block, as today's engine bridge takes them (engine-bridge.ts): scenery
+  // (decor) is walked through, so a decor mesh's bounds (verdelis-eden's dome glass) never fill the ground under it.
+  const layer = (d as { layer?: string }).layer;
+  if (b.colliders.length && (layer === 'solid' || layer === 'surface')) rec.solids =b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
   if (b.surfaces?.length) rec.floors = b.surfaces.map((f) => ({ level: f.level, y: geo(f.y), polygon: f.polygon.map(G), ...(f.tag ? { tag: f.tag } : {}), ...(f.abs ? { abs: true } : {}) }));
   if (b.rooms?.length) rec.rooms = b.rooms.map((r) => {
     const sl = b.slots.find((x) => x.kind === 'room' && x.id === r.id);
@@ -166,6 +195,12 @@ for (const e of m.entities.values()) {
   if (slots.length) rec.slots = b.slots.flatMap((x, i) => x.kind === 'room' ? [] : [{ n: i + 1, id: x.id, kind: x.kind, at: [S(x.p[0]), S(x.p[1]), S(x.p[2])], yaw: mdeg(x.yaw), ...(x.capacity !== undefined ? { capacity: x.capacity } : {}) }]);
   if (b.water && WATER_KINDS.test(d.name)) rec.water = { level: mm(b.water.level), ...(b.water.area ? { area: b.water.area.map(pt) } : {}), ...(b.water.path ? { path: b.water.path.map(pt), width: mm(b.water.width ?? 0) } : {}), ...(b.water.levels ? { levels: b.water.levels.map(mm) } : {}) };
   things.push(rec);
+  for (const w of withOf ? withThings({ id: e.id, name: e.name, entry: rec.entry as string | undefined, parent, slot: rec.slot, pose: rel, world: wp, scale: s }, withOf(ref), entries, out) : []) {
+    if (!kinds.has(w.kind.ref)) kinds.set(w.kind.ref, w.kind);
+    const held = (rec.slots ??= []) as { n: number }[];
+    if (w.slot && !held.some((x) => x.n === w.slot!.n)) held.push(w.slot);
+    things.push(w.thing);
+  }
 }
 /** The room on the opening's floor with the wall edge nearest its centre (def frame), or undefined if none is within 0.5 m. */
 function wallRoom(rooms: { id: string; floor: number; polygon: V2[] }[], o: Opening): string | undefined {
@@ -226,7 +261,7 @@ type Place = { id: string; of: string; kind: string; entity: string; name: strin
 const places: Place[] = [];
 const label = (e: Entity, d: { name: string }) => e.name ?? `${shortDef(d.name)} ${e.id}`;
 for (const e of m.entities.values()) {
-  if (e.in.parent !== 'world') continue;
+  if (e.in.parent !== 'world' || isBody(e)) continue;
   const d = defOf(e), b = bakeOf(e), name = label(e, d), short = shortDef(d.name), wp = world.get(e.id)!;
   if (b.water && WATER_KINDS.test(d.name)) {
     const w = b.water;
@@ -255,7 +290,7 @@ for (const e of m.entities.values()) {
 // landmarks: a named point thing at least 1.5 m wide standing on its own (not in another named place), no furniture
 const outer = places.slice();
 for (const e of m.entities.values()) {
-  if (e.in.parent !== 'world' || !e.name) continue;
+  if (e.in.parent !== 'world' || !e.name || isBody(e)) continue;
   const d = defOf(e); if (d.form !== 'point' || d.tags.includes('local-fixture') || NOT_LANDMARKS.test(shortDef(d.name))) continue;
   const c = d.components as Record<string, unknown>; if (c.carryable || c.seat || c.item || c.opening) continue;
   const b = bakeOf(e); if (b.rooms?.length) continue;   // a building is a place of rooms, not a landmark
@@ -269,23 +304,35 @@ for (const e of m.entities.values()) {
 const bake: Record<string, number> = {}, byRef: Record<string, number> = {};
 const add = (k: string, n = 1) => { bake[k] = (bake[k] ?? 0) + n; };
 for (const e of m.entities.values()) {
+  if (isBody(e)) continue;
   const d = m.resolvedDef(e.def)!, b = m.bake(d, e.params ?? {}, e.seed ?? 0, e.shape);
-  add('things'); byRef[d.ref] = (byRef[d.ref] ?? 0) + 1;
+  // keyed by the def as the thing names it (its facts' `def`, the tree's def field): an old spelling (`core/humanoid@1` for
+  // `core-humanoid@1`) is counted under the same name on both sides (W2b, 0.133)
+  add('things'); byRef[e.def] = (byRef[e.def] ?? 0) + 1;
   if (isDoorDef(d as never)) add('doors');
   add('rooms', b.rooms?.length ?? 0);
   add('floors', new Set([...(b.rooms ?? []).map((r) => r.floor), ...(b.surfaces ?? []).map((s) => s.level), ...(b.links ?? []).flatMap((l) => [l.from, l.to])]).size);
   add('floor surfaces', b.surfaces?.length ?? 0);
-  add('solids', b.colliders.length);
+  // what blocks, as the things' records write it: a decor thing's colliders are none
+  const layer = (d as { layer?: string }).layer;
+  add('solids', layer === 'solid' || layer === 'surface' ? b.colliders.length : 0);
   add('slots', b.slots.filter((x) => x.kind !== 'room').length);
   for (const o of b.openings ?? []) add(o.kind === 'window' ? 'windows' : 'doorways');
   for (const l of b.links ?? []) add(`stairs:${l.kind}`);
+  // the map's `with` things it holds (with.ts): each a thing, and a slot its def does not bake is the holder's too
+  for (const w of withOf?.(d.ref) ?? []) {
+    add('things'); byRef[w.entry] = (byRef[w.entry] ?? 0) + 1;
+    const n = w.slot === undefined ? 0 : Object.keys(entries.get(entryOf?.(d.ref) ?? '')?.entry.slots ?? {}).indexOf(w.slot) + 1;
+    if (n > b.slots.filter((x) => x.kind !== 'room').length) add('slots');
+  }
 }
 
 // --- Sky (V19c, #3521) ---------------------------------------------------------------------------------------------
 // How today's page draws this world's sky: the date it is drawn on (`state.time.calendar`), its palette
 // (`state.sky.palette`), and today's morning mist (`atmosphere/weather.ts` `morningMist`: peaking at 06:30, gone 2.5 h
 // either side, at full strength), which today's page draws on every world but the desert palette's.
-const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown } };
+const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown }; ground?: { palette?: unknown } };
+const groundPalette = ws.ground?.palette;
 const palette = typeof ws.sky?.palette === 'string' ? ws.sky.palette : null;
 const sky = {
   ...(typeof ws.time?.calendar === 'string' ? { calendar: ws.time.calendar } : {}),
@@ -299,12 +346,15 @@ const file = {
   ...(live ? live.head : { template: { path: TEMPLATE, sha256: sha(text), batches: g.batches.length } }),
   seed: live ? m.seed : SEED, entities: m.entities.size, bake, byRef, sky,
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
-  things, doors: doorPairs,
+  things, doors: doorPairs, ...(residents.length ? { residents } : {}),
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.
-  ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles },
+  // its palette (`state.ground.palette`), which the page colours the ground and its cover by (the import's F_GROUND_PALETTE)
+  ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles,
+    ...(typeof groundPalette === 'string' ? { palette: groundPalette } : {}),
+    defs: [...ownDefs].sort(([a], [b]) => (a < b ? -1 : 1)).map(([ref, body]) => ({ ref, body })) },
   places: places.map((p) => ({ ...p, ...(p.polygon ? { polygon: p.polygon.map(pt) } : {}), ...(p.line ? { line: p.line.map(pt), width: mm(p.width ?? 0) } : {}) })),
 };
 mkdirSync(dirname(OUT), { recursive: true });
 const json = JSON.stringify(file);
 writeFileSync(OUT, json);
-console.log(JSON.stringify({ out: OUT, bytes: json.length, sha256: sha(json), replayMs, entities: m.entities.size, kinds: kinds.size, doors: doorPairs.length, doorsPaired: doorPairs.filter((p) => p.thing).length, places: places.length, tiles: tiles.length }));
+console.log(JSON.stringify({ out: OUT, bytes: json.length, sha256: sha(json), replayMs, entities: m.entities.size, residents: residents.length, kinds: kinds.size, doors: doorPairs.length, doorsPaired: doorPairs.filter((p) => p.thing).length, places: places.length, tiles: tiles.length }));

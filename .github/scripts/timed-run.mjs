@@ -38,7 +38,7 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page', 'v2-bench'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'viewers', 'counted', 'clip', 'page', 'v2-bench'];
 /** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, eden?, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
@@ -75,8 +75,6 @@ export const ARG_ALLOW = {
   'slopes-profile': {},
   load: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--boots': int(1, 5), '--souls': (v) => ['0', '10'].includes(v), '--profile': FLAG, '--short': FLAG },
   settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': (v) => ['0', '10', '0,10'].includes(v), '--settle-min': int(1, 20), '--short': FLAG },
-  hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
-  colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
   // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing
   // #2512: up to 10,000 viewers on --drivers processes, slow readers, a world restart mid-window, the drivers against a stub
   viewers: { '--viewers': list(/^(10000|[1-9]\d{0,3}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
@@ -187,7 +185,7 @@ export function parseInputs(env) {
 export const target = (inp) => checkoutRef(inp.arm === 'base' ? inp.base : inp.ref);
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
-export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, load: 2, settled: 2, hundred: 220, colocate: 71, viewers: 3, counted: 1, clip: 1, page: 1 };
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, load: 2, settled: 2, viewers: 3, counted: 1, clip: 1, page: 1 };
 /** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
  *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
@@ -201,8 +199,6 @@ export function commandLine(inp, { out, port }) {
     case 'slopes-profile': return ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', ...r, '--out', join(out, 'slopes'), '--port', p, ...inp.args];
     case 'load': return ['tools/bench/capacity/load/load.mjs', '--out', join(out, 'load'), '--port', p, ...inp.args];   // #2232: its boots are the repeats
     case 'settled': return ['tools/bench/capacity/settled/settled.mjs', '--out', join(out, 'settled'), '--port', p, ...inp.args];   // #2240: no repeats
-    case 'hundred': return ['tools/bench/capacity/hundred/hundred.mjs', '--out', join(out, 'hundred'), '--port', p, ...inp.args];   // #2301: launcher +0, control +1, worlds +2…
-    case 'colocate': return ['tools/bench/capacity/colocate/colocate.mjs', '--out', join(out, 'colocate'), '--port', p, ...inp.args];   // #2300: no repeats
     case 'viewers': return ['tools/bench/capacity/viewers/viewers.mjs', ...r, '--out', join(out, 'viewers'), '--port', p, ...inp.args];   // #2308
     case 'page': return ['tools/test-harness/page-souls.mjs', ...r, '--out', join(out, 'page'), '--port', p, ...inp.args];   // #2554
     case 'counted': throw new Error('counted runs its kit\'s steps: countedSteps');
@@ -318,8 +314,6 @@ export const PUBLISH = {
   load: ['load/results.json', 'load/REPORT.md', 'load.log'],
   settled: ['settled/results.json', 'settled/REPORT.md', 'settled.log'],
   // #2475 A3: the launcher's own log (what loaded or unloaded each world, and why), scrubbed like every text file
-  hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred/launcher.log', 'hundred.log'],
-  colocate: ['colocate/results.json', 'colocate/REPORT.md', 'colocate.log'],
   viewers: ['viewers/results.json', 'viewers/REPORT.md', 'viewers/*/world.log', 'viewers/*/stall-*.json', 'viewers.log'],
   // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
@@ -460,7 +454,8 @@ async function runCounted(inp, rec, out, env) {
   if (bad.length || cell.steps.length !== steps.length) throw new Error(`${inp.cell}: the kit's ${bad[0]?.step ?? 'steps'} exited non-zero`);
 }
 /** One proof clip of the ref (cwd: its checkout). The recorder and the kit come from this workflow's commit; the ref boots
- *  a fake-mind dev world of the kit's template; HOME is inside the per-run directory (the kit's Soul and god folders);
+ *  its old page on a new-engine world of the kit's template (0.135 P6; a kit whose verbs have no new-engine form is listed
+ *  with `skip` in its kit.json and refused, by name); HOME is inside the per-run directory (the kit's Soul and god folders);
  *  the recorder must find a hardware GL renderer (SIM_PROOF_GPU=hardware, exit 5 otherwise). */
 async function runClip(inp, rec, out, env) {
   const kitName = inp.args[inp.args.indexOf('--kit') + 1], ctl = resolve(import.meta.dirname, '../..');
@@ -477,28 +472,30 @@ async function runClip(inp, rec, out, env) {
   }
   let renderNodes = []; try { renderNodes = readdirSync('/dev/dri').filter((f) => f.startsWith('renderD')); } catch { /* none */ }
   console.log(`render nodes: ${renderNodes.length}`);
-  const port = await freePorts(1), dir = join(out, 'clip'); mkdirSync(dir, { recursive: true });
-  const { startWorld } = await import(pathToFileURL(resolve('tools/god-skill/dev-world.mjs')).href);
+  if (k.skip) throw new Error(`clip kit ${kitName} is listed and skipped on the new engine: ${k.skip}`);
+  const dir = join(out, 'clip'); mkdirSync(dir, { recursive: true });
+  // 0.135 P6: the ref's old page on a new-engine world of the kit's template (tools/playtest/arena/new-engine/old-page.mjs:
+  // run.sh with the template exported, the launcher's copy for the page's shell, a front door, v2-switch), fake minds
+  const { startOldPage } = await import(pathToFileURL(resolve('tools/playtest/arena/new-engine/old-page.mjs')).href);
   const t0 = Date.now(), saved = { BRAIN_MODE: process.env.BRAIN_MODE, HOME: process.env.HOME };
   let world;
   Object.assign(process.env, { BRAIN_MODE: 'fake', HOME: env.HOME });
-  // #2302: `eden: true` boots the native Eden core (commons, ground, classroom) as the live Eden runs, with fake minds
-  const eden = k.eden === true ? { ENABLE_LIVING_WORLD: '1', ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_EDEN_NEWCOMER_READER: '1', ENABLE_NATIVE_SLEEP_SNAPSHOT_READER: '1', ENABLE_EDEN_LECTURE_READER: '1', ENABLE_EDEN_EXPANSION_GROUND_READER: '1', APPLY_EDEN_EXPANSION_CHECKPOINT: '1', MIND_DRIVER: 'edge' } : {};
-  try { world = await startWorld({ slug: k.eden === true ? 'eden' : 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0', ...eden } }); }
+  try { world = await startOldPage({ template: `worlds/templates/${k.template}.json`, dir: join(env.PER_RUN, 'world'), log: (s) => console.log(`world: ${s}`) }); }
   finally { for (const [key, v] of Object.entries(saved)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; } }
-  console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template})`);
+  console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template}, new engine)`);
   const clipFile = join(dir, `${kitName}-${viewport}.mp4`), log = createWriteStream(join(out, 'clip.log'));
-  const argv = ['.claude/skills/proof/record.mjs', '--url', `${world.base}?dev=1`, '--steps', join(kit, 'steps.mjs'), '--out', clipFile, '--viewport', viewport,
+  const argv = ['.claude/skills/proof/record.mjs', '--url', `${world.page}?dev=1`, '--steps', join(kit, 'steps.mjs'), '--out', clipFile, '--viewport', viewport,
     ...(k.timeOfDay ? ['--time-of-day', String(k.timeOfDay)] : []), ...(k.fromLoad ? ['--from-load'] : []),
     ...Object.entries(k.localStorage ?? {}).flatMap(([key, v]) => ['--local-storage', `${key}=${v}`])];
-  const renv = { ...env, SIM_PROOF_GPU: 'hardware', CLIP_WORLD: world.base, CLIP_CHECKOUT: resolve('.'), CLIP_WORK: join(env.PER_RUN, 'clip-work') };
+  const v2 = { page: world.world.page, world: world.world.world, directory: world.world.directory, gateway: world.world.gateway };
+  const renv = { ...env, SIM_PROOF_GPU: 'hardware', CLIP_WORLD: world.page.replace(/\/$/, ''), CLIP_V2: JSON.stringify(v2), CLIP_CHECKOUT: resolve('.'), CLIP_WORK: join(env.PER_RUN, 'clip-work') };
   mkdirSync(renv.CLIP_WORK, { recursive: true });
   console.log(`clip: record.mjs --steps <kit>/${kitName}/steps.mjs --viewport ${viewport}`);
   const t1 = Date.now(), child = spawn(process.execPath, argv, { env: renv, stdio: ['ignore', 'pipe', 'pipe'] });
   for (const st of [child.stdout, child.stderr]) st.on('data', (b) => { log.write(b); process.stdout.write(b); });
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
   const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); log.end();
-  try { process.kill(-world.child.pid, 'SIGTERM'); } catch { try { world.child.kill('SIGTERM'); } catch { /* gone */ } }
+  await world.stop();
   const made = readdirSync(dir).find((f) => /\.(mp4|webm)$/.test(f)) ?? null, side = made ? readJ(join(dir, `${made}.json`)) : {};
   let timing = null;
   if (made) {

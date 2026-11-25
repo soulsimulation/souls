@@ -136,7 +136,8 @@ impl State<'_> {
     /// Node `id` as `{kind, fields, links, slots}`; `None` for a node not in the tree.
     fn record(&self, id: Id) -> Option<Vec<(String, Value)>> {
         let n = self.tree.handle(id).and_then(|h| self.tree.node(h))?;
-        let kind = plain(n.kind().as_str()).to_owned();
+        // The entry the node goes by (#3980): one it borrows (field 27) names its fields, else its kind's.
+        let kind = plain(import_eden::entry_name(n.kind().as_str(), n.fields())).to_owned();
         let mut out = vec![("kind".to_owned(), Value::s(&kind))];
         if let Some(entry) = self.entry(&kind) {
             let stored = n.fields();
@@ -184,7 +185,12 @@ impl State<'_> {
             {
                 let slot = i as u64 + 1;
                 let mut in_it: Vec<Value> = Vec::new();
-                if let Some(b) = self.bodies.and_then(|b| b.slots.holder_in(id, slot)) {
+                // Every body in it: a slot of several places holds several (E16).
+                for b in self
+                    .bodies
+                    .map(|b| b.slots.holders_in(id, slot))
+                    .unwrap_or_default()
+                {
                     in_it.push(Value::Str(key(b)));
                 }
                 for (s, c) in &children {
@@ -329,6 +335,25 @@ pub fn check(
                 s.add(*id);
                 Value::Str(key(*id))
             }
+            // A slot of another thing is R2's `{node, slot}`, the slot by its name in that thing's entry (E14b).
+            Arg::Slot(id, n) => {
+                s.add(*id);
+                let name = tree
+                    .handle(*id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|t| {
+                        s.entry(import_eden::entry_name(t.kind().as_str(), t.fields()))
+                            .and_then(|e| e.get("slots"))
+                            .and_then(Value::obj)
+                            .and_then(|o| o.get(usize::try_from(*n).ok()?.checked_sub(1)?))
+                            .map(|(name, _)| name.clone())
+                    })
+                    .unwrap_or_else(|| n.to_string());
+                Value::Obj(vec![
+                    ("node".into(), Value::Str(key(*id))),
+                    ("slot".into(), Value::Str(name)),
+                ])
+            }
             Arg::Text(id) => Value::Str(key(*id)),
             Arg::Int(n) => Value::Int(i128::from(*n)),
         };
@@ -387,7 +412,7 @@ pub fn check(
     let this_kind = tree
         .handle(node)
         .and_then(|h| tree.node(h))
-        .map(|n| plain(n.kind().as_str()).to_owned())
+        .map(|n| plain(import_eden::entry_name(n.kind().as_str(), n.fields())).to_owned())
         .unwrap_or_default();
     let narrowed = decided_needs(entry, form);
     let (form_entry, index): (&Value, Option<&[usize]>) = match &narrowed {

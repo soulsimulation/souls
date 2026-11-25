@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../history/day.mjs';
-import { posesOf, rowsOf } from './copy.mjs';
+import { allFields, posesOf, rowsOf } from './copy.mjs';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc');
@@ -50,4 +50,17 @@ test('rows read after every step of a walk keep the heap flat', () => {
   assert.equal(rows.size, 2002);
   assert.deepEqual(rows.get('73636f7065-2').pos, [300, 0, 0], 'the body where its last step put it');
   assert.deepEqual(posesOf(copy).get('73636f7065-101').at, [1, 0, 0]);
+});
+
+// #4713: the open ground's terrain tiles are a record of their own, named by the ground's key 0.
+test('a node\'s fields read its big field from its own record', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return h; };
+  const copy = { record: (h) => held.get(h) };
+  const tiles = [[0, 0, Buffer.from('heights'), Buffer.from('classes')]];
+  const big = put(new Map([[1, [scope, 1]], [5, new Map([[1, 1]])], [6, new Map([[25, tiles]])]]));
+  const ground = new Map([[0, [[25, Buffer.from(big, 'hex')]]], [1, [scope, 1]], [6, new Map([[24, 64000]])], [10, []]]);
+  const f = allFields(copy, ground);
+  assert.equal(f.get(24), 64000);
+  assert.deepEqual(f.get(25).map(([x, z]) => [x, z]), [[0, 0]]);
+  assert.equal(allFields({ record: () => undefined }, ground).has(25), false, 'not held: left out');
 });

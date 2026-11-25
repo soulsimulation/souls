@@ -53,19 +53,61 @@ a log's only text is `namespace:name`. Kinds are named as the world's Soul Actio
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
 
+A thing starts in the state today's world draws it in (#4784). The exporter writes its captured state as `state`: the
+entity's bools and whole numbers over its def's defaults. Seeding with the world's entries (`load_with`), the import
+gives each value to the thing's entry field with the same meaning, for fields numbered 28 and up: the same name; a
+burning or running bool by either name (`on`, `lit`); a lamp's `level` from `on` (the entry's top level, or 0). So a
+lamp that is on today starts on, and a fire that is burning starts lit. A world imported before this change gets the
+same state once from `v2/tools/ops/seed-captured-state.mjs --template <template> [--dry-run]`, run as its creator. It
+sends creator edits that set only fields the world has never set, so it leaves alone anything a Soul has changed, and
+running it twice is safe.
+
+A thing whose def has params (a building's size, storeys, material and roof, a tree's species, a door's size) keeps them
+as field 19, today's JSON text as bytes, as the exporter writes them (`params`, W3): the old page draws a world from its
+stream alone with them (`apps/web/src/v2-engine/source/stream-scene.ts`). Facts exported before W3 carry none. A def the
+world defines itself (a template's `define`, which no page's library has: hello-hamlet's reading room) is kept once on
+the open ground as field 102, `[[ref, def] …]` with each whole stored def as JSON text (the exporter's `ground.defs`, the
+defs the world places), so that page draws it as the world's own page does (its roof) and not from the thing's solids.
+On the ground and not on a thing, removing any thing of the def never loses it. It is in every baseline: Eden-2026's
+31 such defs are about 64 KB of a baseline of about 9 MB. The open ground also keeps the world's ground palette as field
+103, `souls:<palette>` (today's `state.ground.palette`, the exporter's `ground.palette`: a Mars camp's `desert`), which
+that page colours the ground and its cover by; facts exported without one leave it out and the page draws grass.
+
 A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
 world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for
 a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entries this way
 (`content/worlds/mars/map.json`). worldd and the client look an entry up by that name, else by the kind's own. A
 borrowed seat or bed is set at the thing's own slot of the same number (its def's geometry), with the entry's stand
-offset from it; an entry seat the thing has no slot for is not offered.
+offset from it; an entry seat the thing has no slot for is not offered. A ride on its course whose own def declares
+no slots at all (Eden's launch balloon, mapped to `eden:balloon`) takes the entry's seats as the entry places them; its
+course comes from the entry it names too (`worldd serve`'s `with_rides`), so a world seeded before that offers the
+balloon's seats only once it is seeded again.
+
+A map row's `with` names what a placed copy holds when the world starts, which today's def draws as part of it: the
+guitar in its stand's cradle, the bass in its stand, a piano's bench at its seat. The exporter makes each a thing of
+that entry's own kind (`export/with.ts`: kind `<entry>`, ref `entry:<entry>`, hash its entry file's): in the holder's
+slot (the slot added to the holder's facts at its entry's point, since its def bakes none), or beside it (`at_mm`,
+`yaw_mdeg` in its frame, a child of its own parent). The stand's `take` then finds a guitar there.
+A row may instead name the kind its copies are (`kind`): a kind that joins parts (a frame stand, a rack frame, a beam,
+a bay; `content/kinds/construction`) is read by its own name, so a copy that only borrowed its entry would never join.
+The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
+`--map content/worlds/mars/map.json` it is a yard a crew builds from; without the map it is plain things.
+
+A Soul is not a thing (25 Nov): a live world's Souls' bodies (`core/humanoid@<n>`, Eden's 22 residents, ids
+`h_<old Soul id>`) are not exported as things but listed under `residents` (id, name, pose), and the loader leaves any
+the facts still list out of the tree (`Import::residents`, printed under "Souls' bodies left out"), with the bake's
+counts less them. A thing standing on such a body is refused by name. The Souls come back through the directory,
+unpaired, with `v2/tools/ops/cutover/eden-residents.mjs` (`v2/docs/cutover.md`).
 
 Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
 own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a
 thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that
 floor, in the room there that holds it. The open ground is cut out under such a floor and a roof is no ground, so
 otherwise nobody could stand by them. A lawn's or a path's low floor is ground cover and keeps its things on the
-open ground, and so does a decor thing (a cableway reaches far past its valley station).
+open ground. A decor thing at the root is placed on the floor too (verdelis-eden's bubbles and succulents under its
+dome, 24 Nov), unless a point its kind's entry declares is off that floor: a cableway reaches far past its valley
+station, so it stays on the open ground. That needs the world's entries (`load_with`, as `worldd seed` loads); with
+none (`load`) a decor thing stays where it is, and a decor thing in a building's slot keeps its slot.
 
 Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
 (radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand
@@ -75,7 +117,9 @@ there, and returns one line for each point moved or left; `worldd seed --entries
 One thing per slot (C9, #3397): today a slot may hold several things (a desk's top, a hall's planter spots), the tree
 one. The first thing in the facts keeps the slot; each later one stays a plain child of the same parent at its own
 place, standing on it, and the load prints it under "left out of a full slot" with what holds the slot (29 in Eden
-2026), so K11's auditor finds no `slot-over-full`.
+2026), so K11's auditor finds no `slot-over-full`. None of Eden's 29 is lost or has a free slot to go to: each parent
+has one slot of that kind (a desk's, a table's or a counter's top, a building's roof). The 8 on a top stay on it
+where they were. The 21 on a roof are put on the roof's floor by C27 below, like the thing that holds the slot.
 
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.

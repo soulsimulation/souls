@@ -1,0 +1,11 @@
+{
+  "format": "souls-move/1",
+  "move": "hold_hand",
+  "claims": ["manipulator"],
+  "blocks": ["manipulator"],
+  "cancels_on": ["claim_taken", "out_of_reach"],
+  "effector": "hand",
+  "reach_mm": 600,
+  "contact": "hand_left",
+  "phases": { "start_up_us": 600000, "hold_us": 400000 }
+}

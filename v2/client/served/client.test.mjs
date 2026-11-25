@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -14,9 +14,10 @@ import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../src/daemon/client.mjs';
-import { runtimeOf } from '../src/home/home.mjs';
+import { findHome, runtimeOf } from '../src/home/home.mjs';
 import { build } from './build.mjs';
 import { answer } from './serve.mjs';
+import { stopThenRemove } from '../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -25,6 +26,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dir = mkdtempSync(join(tmpdir(), 'souls-r17-'));
 const procs = [];
 const sha = (b) => createHash('sha256').update(b).digest('hex');
+const real = (p) => realpathSync(p);
 
 function run(path, args, ready, opts = {}) {
   const p = spawn(path, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -88,10 +90,9 @@ before(async () => {
   site = `http://127.0.0.1:${server.address().port}/local`;
 });
 
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
   server?.close();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 const folder = join(dir, 'empty'), home = join(folder, '.souls');
@@ -143,7 +144,8 @@ test('A1: the one line, in an empty folder, ends with a running client', async (
   rt = runtimeOf(home, soul);
 
   const status = await eden('status');
-  assert.equal(status.started, true, JSON.stringify(status));
+  // #4766: once approved, the pairing starts the daemon itself, so `status` may find it running already.
+  assert.ok(status.started === true || status.pid > 0, JSON.stringify(status));
   assert.match(commandOf(daemonPid(soul)), /bin\/client\/1\.0\.0-[0-9a-f]{16}\/v2\/client\/src\/daemon\/daemon\.mjs/, 'the daemon runs from the served client');
   assert.match(commandOf(daemonPid(soul)), /bin\/lib\/[0-9a-f]{16}/, 'with the library fetched by hash');
   await waitFor(async () => (await request(rt.socket, { op: 'status' })).connected);
@@ -208,4 +210,33 @@ test('A3: a changed bundle, or a redirect, writes nothing', async () => {
   await request(rt.socket, { op: 'stop' }).catch(() => {});
   await waitFor(() => !existsSync(rt.lock));
   gw.kill();
+});
+
+test('0.133 Q2: the one line, in an empty folder below a Souls home, pairs into a home of its own; that home is not written to', async () => {
+  const below = join(folder, 'projects', 'another');
+  mkdirSync(below, { recursive: true });
+  const before = snapshot();
+  assert.equal((await ran('curl', ['-fsSO', `${site}/eden.mjs`], { cwd: below })).status, 0);
+  const gwPort = await freePort();
+  // no SOULS_HOME: the client finds the home above it, as on a person's machine
+  const r = await ran(process.execPath, ['eden.mjs', 'pair', `${site}?gateway=ws://127.0.0.1:${gwPort}/v2/ws`], { cwd: below, env: { PATH: process.env.PATH, HOME: dir } });
+  const asked = JSON.parse(r.stdout.trim().split('\n').at(-1));
+  assert.equal(asked.step, 'approve', r.stdout + r.stderr);
+  // before its approval the new `.souls` is no home yet: a lookup from below still stops at it, never the one above
+  assert.equal(findHome({ cwd: below, env: {}, homedir: dir }), join(real(below), '.souls'), 'the nearest .souls that exists');
+  assert.equal(readFileSync(join(below, '.souls', '.gitignore'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#')).join(), '*', 'a new home keeps itself out of git');
+  const approve = await fetch(`${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
+  assert.equal(approve.status, 200);
+  await waitFor(() => existsSync(join(below, '.souls', 'credentials.json')));
+  assert.ok(existsSync(join(below, '.souls', 'bin', 'eden.mjs')), 'the client installed in the new home');
+  assert.deepEqual(snapshot(), before, 'the home above is byte-identical');
+
+  // a creator's pairing through the loader (`god pair`) pairs in this folder's own home too, never the one above
+  const god = join(folder, 'projects', 'a-god');
+  mkdirSync(god, { recursive: true });
+  assert.equal((await ran('curl', ['-fsSO', `${site}/eden.mjs`], { cwd: god })).status, 0);
+  const g = await ran(process.execPath, ['eden.mjs', 'god', 'pair', `${site}?gateway=ws://127.0.0.1:${gwPort}/v2/ws`, '--creator', `creator-${'cd'.repeat(16)}-1`], { cwd: god, env: { PATH: process.env.PATH, HOME: dir } });
+  assert.ok(existsSync(join(god, '.souls', 'pairing.log')), `the creator's pairing is in its own home: ${g.stdout}${g.stderr}`);
+  assert.ok(existsSync(join(god, '.souls', '.gitignore')));
+  assert.deepEqual(snapshot(), before, 'the home above is byte-identical');
 });

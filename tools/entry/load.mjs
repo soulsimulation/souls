@@ -25,6 +25,7 @@
 //   `entry` marks it as loaded from an entry.
 // Not loaded, and named in the output: forms (running them is SA-F3a), and points, links and children (new engine only:
 // a def of today has nothing to carry them).
+import { isMain } from '../lib/is-main.mjs';
 import {spawnSync} from 'node:child_process';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
@@ -133,7 +134,7 @@ export async function load(target, {world, at, kind, root: rootDir = 'content/ki
   return results;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), flag = k => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const target = argv.find((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && argv[i - 1] !== '--plan'));
   if (!target) { console.error('usage: node tools/entry/load.mjs <family|folder|file> [--world <seat|url>] [--at x,z] [--kind <name>] [--root content/kinds] [--plan]'); process.exit(2); }

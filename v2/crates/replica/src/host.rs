@@ -83,6 +83,9 @@ pub const F_HELD: u64 = 46;
 pub const F_SETTLED: u64 = 47;
 /// The world-assigned queue spot on a body, `[x, y, z]` in its floor frame (B7).
 pub const F_LINE: u64 = 48;
+/// A field a walker sets on its own body when its walk ended as near its goal as the crowd there allows, not at it
+/// (0.133 A2-4): 1. The world names it in the walk's `done` and takes it off.
+pub const F_SHORT: u64 = 49;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +101,9 @@ pub enum WalkPlan {
     Pending,
     Unplanned,
     Legs(Vec<(Vec3, Option<Id>)>),
+    /// The planner refused the walk by this name (the ground changed under it, its answer failed): the form ends with
+    /// it, not with no way (S13d).
+    Refused(Name),
 }
 
 /// The one interface a skill touches the world through (rule 7). The world implements it; a test implements a fake.

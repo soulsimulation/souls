@@ -5,14 +5,14 @@ import type { ClerkSatellite } from '../clerk-satellite.ts';
 import { EdenMark } from '../EdenMark.tsx';
 import { BASE } from '../base-path.ts';
 import { whenVisible } from '../poll-pace.ts';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 import { AccountPicture } from '../AccountPicture.tsx';
 import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
-export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
+export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | 'place' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
 /** How people sign in on this launcher's worlds (the public Clerk settings; never a secret). */
 export type LauncherAuth = { provider: 'clerk' | 'dev'; clerkSatellite?: ClerkSatellite; clerkPublishableKey?: string; clerkIssuer?: string; authenticationOrigin?: string };
 export type LauncherList = { contract: 'local-worlds/1'; launcher: string; worlds: LauncherWorldCard[]; templates: LauncherTemplate[]; auth?: LauncherAuth };
@@ -79,6 +79,8 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
             : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
         </div>
       </header>
+      {/* Souls are for agents: the one line to hand an agent comes first, above the worlds */}
+      <ForAgents/>
       {worlds.length === 0 && (
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
@@ -96,7 +98,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
             {/* #887: the owner's picture, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
             {w.thumbnail && <img className="lh-thumb" src={w.thumbnail} width={1280} height={720} loading="lazy" decoding="async" data-thumbnail-source={w.thumbnailSource ?? ''}
-              alt={w.thumbnailSource === 'owner' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
+              alt={w.thumbnailSource !== 'template' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
             <span className="lh-label-over">
               <h2>{w.name}{w.nameTag && <span className="lh-tag" data-name-tag={w.nameTag}>{w.nameTag}</span>}</h2>
               {shared.has(w.name) && <p className="lh-world-slug" title={`World address: ${w.slug}`}>{w.slug}</p>}
@@ -111,10 +113,9 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       </div>
       {/* #2466: the signed-in person's own Souls, below the worlds, only when they have some */}
       <HomeSouls/>
-      <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
       <footer className="lh-footer">
-        <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
+        <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href={`${BASE}/docs/terms#terms`} data-terms-link="1">Terms</a><a href={`${BASE}/docs/terms#privacy`} data-privacy-link="1">Privacy</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
         <p className="lh-credit">Souls is an experiment by <a href="https://genekogan.com" rel="noopener" target="_blank">Gene Kogan</a></p>
       </footer>
       {dialog && <NewWorldDialog templates={list.templates} onClose={() => { setDialog(false); const q = new URLSearchParams(location.search); if (q.has('new')) history.replaceState(null, '', location.pathname); }} />}
@@ -156,12 +157,16 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
   const [timeZone, setTimeZone] = useState(browserTimeZone);
   const zones = useMemo(timeZoneNames, []);
   const zoneOk = isTimeZoneName(timeZone.trim());
-  const [state, setState] = useState<{ phase: 'edit' | 'creating' | 'error'; message?: string; started?: number }>({ phase: 'edit' });
+  const [state, setState] = useState<{ phase: 'edit' | 'creating' | 'starting' | 'error'; message?: string; started?: number }>({ phase: 'edit' });
   const [now, setNow] = useState(Date.now());
   const input = useRef<HTMLInputElement>(null);
+  // closing (Cancel, Escape, the backdrop) works while creating too: the page stops asking; a world already begun still
+  // appears on the list when it is ready
+  const closed = useRef(false);
+  const close = useCallback(() => { closed.current = true; onClose(); }, [onClose]);
   useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { if (state.phase !== 'creating') return; const t = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(t); }, [state.phase]);
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && state.phase !== 'creating') onClose(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [state.phase, onClose]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [close]);
   const slugPreview = name.trim().toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28);
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,19 +182,36 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         const n = godName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36);
         if (n) { localStorage.setItem('sim.dev', n); creator = n; headers = { authorization: `Bearer dev:${n}` }; }
       }
-      const r = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined, timeZone: timeZone.trim() }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d.url) throw new Error(d.message ?? `the launcher answered ${r.status}`);
-      location.href = d.url;
-    } catch (err) { setState({ phase: 'error', message: String((err as Error).message) }); }
+      // 0.135 W1: a world on the new engine may still be starting (202, or 503 with its key): ask again for the same world,
+      // with its key and address and a fresh sign-in token each time, until it is made; after five minutes the dialog
+      // says it is still starting and can be closed (the world appears on the list when it is ready)
+      const deadline = Date.now() + 5 * 60_000;
+      let resume: { key: string; slug: string } | null = null;
+      for (;;) {
+        if (resume) { const fresh = await userAuthHeaders(); if (fresh.authorization) headers = fresh; }
+        const r: Response = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined, timeZone: timeZone.trim(), ...(resume ?? {}) }) });
+        const d: { url?: string; key?: string; slug?: string; retry_after?: number; message?: string } = await r.json().catch(() => ({}));
+        if (closed.current) return;
+        if (r.ok && d.url) { location.href = d.url; return; }
+        if ((r.status === 202 || r.status === 503) && typeof d.key === 'string' && typeof d.slug === 'string') {
+          const wait = Math.min(10, Math.max(1, Number(d.retry_after) || 2)) * 1000;
+          if (Date.now() + wait > deadline) { setState({ phase: 'starting', message: 'Your world is still starting. It will appear on the world list when it is ready.' }); return; }
+          resume = { key: d.key, slug: d.slug };
+          await new Promise((ok) => setTimeout(ok, wait));
+          if (closed.current) return;
+          continue;
+        }
+        throw new Error(d.message ?? `the launcher answered ${r.status}`);
+      }
+    } catch (err) { if (!closed.current) setState({ phase: 'error', message: String((err as Error).message) }); }
   };
   const secs = state.started ? Math.round((now - state.started) / 1000) : 0;
   return (
-    <div className="lh-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && state.phase !== 'creating') onClose(); }}>
+    <div className="lh-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <form className="lh-dialog" role="dialog" aria-modal="true" aria-labelledby="lh-dialog-title" data-new-world-dialog="1" onSubmit={create}>
         <h2 id="lh-dialog-title">A new world</h2>
         <label className="lh-label" htmlFor="lh-name">Name</label>
-        <input id="lh-name" ref={input} data-world-name="1" value={name} maxLength={60} placeholder="e.g. Willow Hollow" onChange={(e) => setName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
+        <input id="lh-name" ref={input} data-world-name="1" value={name} maxLength={40} placeholder="e.g. Willow Hollow" onChange={(e) => setName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
         <p className="lh-slug dim">{slugPreview ? <>It will live at <code>{BASE}/w/{/^[a-z]/.test(slugPreview) ? slugPreview : 'world-' + slugPreview}</code></> : <>&nbsp;</>}</p>
         <label className="lh-label" htmlFor="lh-god">Your name, as its god <span className="lh-opt">(shown on the world list)</span></label>
         <input id="lh-god" data-god-name="1" value={godName} maxLength={32} placeholder="e.g. Gene" onChange={(e) => setGodName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
@@ -208,9 +230,10 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         </fieldset>
         <p className="lh-after dim">Next: the world opens and gives you one line to paste to your agent (Claude Code, Codex…). Approve the code it shows, and it starts building.</p>
         {state.phase === 'error' && <p className="bad" data-create-error="1">Could not create the world: {state.message}</p>}
+        {state.phase === 'starting' && <p className="lh-wait" data-create-starting="1">{state.message}</p>}
         <div className="lh-actions">
-          <button type="button" className="lh-cancel" onClick={onClose} disabled={state.phase === 'creating'}>Cancel</button>
-          <button type="submit" className="lh-create" data-create="1" disabled={state.phase === 'creating' || !name.trim() || !zoneOk}>{state.phase === 'creating' ? `Starting the world… ${secs}s` : 'Create world'}</button>
+          <button type="button" className="lh-cancel" data-cancel="1" onClick={close}>{state.phase === 'starting' ? 'Close' : 'Cancel'}</button>
+          <button type="submit" className="lh-create" data-create="1" disabled={state.phase === 'creating' || state.phase === 'starting' || !name.trim() || !zoneOk}>{state.phase === 'creating' ? `Starting the world… ${secs}s` : 'Create world'}</button>
         </div>
         {state.phase === 'creating' && <p className="lh-wait dim">A world takes 10–30 seconds to start the first time{template !== 'empty' ? ' (the template is being built through the same validated edits your agent will use)' : ''}.</p>}
       </form>

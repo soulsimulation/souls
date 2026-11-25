@@ -49,7 +49,9 @@ blocks as they are, so two PRs that change form rules never collide on eden.mjs.
 - **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
   opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
   checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
-- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+- **Stamp**: the same sync pull request stamps the client when it changed since the last release
+  (`release-client.mjs stamp`), and release.yml refuses a head whose copy is stale or unstamped (`release-client.mjs
+  check`), so the client a world serves
   (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
 
 Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
@@ -95,6 +97,32 @@ The gate never writes the baseline; only a reviewed commit does.
 The comparison runs in two places: the CI job `types-web`, on the build it already makes, so growth fails `ci-ok` on the
 PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
 `types-web`.
+
+## Controls gate
+
+`tools/test-harness/e2e-controls/controls.mjs` opens every moved world's page (`/w/<slug>/` whose config carries
+`v2Stream`) in headless Chromium and clicks each main header control. Time: the header's one time control is the pill
+(it must read "Live", with no other time control beside it); every time control is pressed in the panel it opens: Pause
+(the pill reads "Recorded · <clock>" and the clock holds), Play (it runs), Back 1 min (it must land about 60 s earlier
+on the same page, never "could not be loaded"), Back again, From the start, Link to this moment (the button says
+"Copied"; the link opened in a new tab must show that moment) and Return to live (the pill reads "Live"). Then the
+Broadcast menu, the sound switch, Explore, its places, following a Soul from
+Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
+failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
+only exception and is empty. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
+401, `/mars-assets/static-manifest.json` is 200. It only clicks: it never submits a form or signs in, so run it against
+production any time:
+
+```sh
+node tools/test-harness/e2e-controls/controls.mjs                       # production, every moved world
+node tools/test-harness/e2e-controls/controls.mjs --slugs eden --origin https://soul.game --out .local/e2e-controls/now
+```
+
+It writes `<out>/<slug>/verdict.json`, one screenshot per step and `<out>/summary.json` (default out
+`.local/e2e-controls/<time>`), and exits 1 on any failure. Playwright comes from `mars/viewer` (`SHIP_PLAYWRIGHT_FROM`
+points elsewhere). In a release it is the `controls` job of `release.yml`, after the activation and the engine move,
+and `publish` needs it: a failure publishes nothing and the summary gives the rollback. `eyes_only=true` runs it alone
+against the live site.
 
 ## Replay corpus
 
@@ -154,69 +182,50 @@ The engine's own browser tests are in `mars/viewer/e2e/`.
 
 ## CI window
 
-Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap, about 20 concurrent jobs. A server change selects about ten
-heavy legs, so with several workers pushing, unready PRs used to starve the merge path. Pull request runs are
-therefore **windowed**:
+Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci` once, with no label**:
 
-- **Every PR push** runs the cheap jobs, `scope` and `repo` (the tooling tests), and the separate `security` (gitleaks,
-  path-guard, scrub-guard), `proof` and `changelog` workflows.
-- **Heavy jobs** (the `qualify` matrix and the browser `smoke`) run only inside the window: the PR is not a draft
-  and carries `merge:ready` or `ci:run`. Outside the window, a run whose paths selected heavy jobs is **deferred**.
-  The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
-  skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
-  tools-only PRs select no heavy jobs and are never deferred.
+- **A ready PR** runs `scope`, `repo`, the light `qualify` legs its paths pick and the browser `smoke`, plus the
+  separate `security` (gitleaks, path-guard, scrub-guard), `proof` and `changelog` workflows. Labels start no run.
+- **A draft** runs `scope` and `repo` only. When its paths select heavier jobs, `ci-ok` fails as "Full CI deferred"
+  until it is marked ready for review, which starts a full run. Docs or tools-only drafts are never deferred.
+- **The merge queue runs no test again; it compiles the group.** A PR enters only with its required checks green at
+  its head, so a `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke`. Two PRs green alone can still
+  combine into code that does not build, so `group-check` compiles the combined code: `cargo check --workspace
+  --all-targets --locked` of `v2/` and `tsc --noEmit -p apps/web`, each only when the group changed what it builds
+  from (`groupChecks` in `.github/scripts/ci-scope.mjs`). It runs on the self-hosted pool with its toolchain and cargo
+  target kept per runner, and `ci-ok` waits for it. The push to main that lands it runs its paths' light set; that,
+  the daily full run and the remote gate are the net after merging.
+- **`proof-ok` and `fragment` never block.** Both report success on every PR and merge group: no proof tier, journal
+  entry, maintainer sign-off or changelog fragment is required. `fragment` logs a warning for a malformed fragment.
 - **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
-  merge no slower than lanes implement). No `pull_request`, merge-group or push run runs the `qualify` legs that
-  `ci-scope.mjs` marks `heavy: true` (`packages`, which includes the walk, the `launcher-*` legs, the server shards and
-  the `soul-actions-*` legs), even inside the window. They run in the daily scheduled run on main (see CI on main below), in a
-  manual run, and in the remote gate before every release. On a PR, in the queue and on main, `ci-ok` passes when every
-  job that ran passed: the light legs the paths pick (`types-web`, which includes the bundle check, `web`, `client-cli`,
-  `native`, `latency`, `docs-reference`, `soul-tools`), the smoke, `scope` and `repo`. A change whose paths pick only
-  heavy legs has nothing of its own to run and is never deferred. The step summary lists the legs left to the daily
-  run. The decision is `lightOnly` in `.github/scripts/ci-scope.mjs`.
-- **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
-  a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
-  doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
-  does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
-  the window, its later pushes run its jobs as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
-- **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
-  without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
-  nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
-- **A label on a green head costs about a minute.** When the head's newest `ci` run passed, a label run (a window
-  label's included) runs only `scope` and `ci-ok`: no `qualify` leg, no smoke and no `repo`, since the tree is the
-  one that passed. A push, a head whose newest run failed or is still going, a closed window and every merge-group
-  run do their jobs as usual. `scope` reads the earlier runs with `GH_TOKEN` over the REST API (`ci-scope.mjs green`),
-  not the `gh` CLI, which the light runners don't have. The `proof` and `changelog` workflows still re-run on every
-  label in about a minute, because their answer depends on labels (`no-changelog`, `approved:maintainer`, `tier:Tn`,
-  `proof:waived`); `security` doesn't run on labels.
+  merge no slower than lanes implement). No `pull_request` or push run runs the `qualify` legs that `ci-scope.mjs`
+  marks `heavy: true` (`packages`, which includes the walk, the `launcher-*` legs, the server shards and the
+  `soul-actions-*` legs). They run in the daily scheduled run on main (see CI on main below), in a manual run, and in
+  the remote gate before every release. The step summary lists the legs left to the daily run. The decision is
+  `lightOnly` in `.github/scripts/ci-scope.mjs`.
+- **Kinds' case files run only when they can change.** The `kinds` leg runs `tools/entry/*.test.mjs` and the
+  form-rules tests over `packages/form-rules/cases`. Only a change under `content/kinds/`, `packages/form-rules/` or
+  `tools/entry/` picks it; a full-scope diff (the lockfile, `.github/`, an unmapped path) does not (`pathsOnly` in
+  `ci-scope.mjs`). The daily full run always runs it.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
-  own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
-  result, but it doesn't count for the queue.
-- Pushes to main, the daily run, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its
-  daily full-scope runs, which the merge train reads (see CI on main below). A merge-group run is path-scoped over
-  everything in the group since `main`, without the heavy legs, and
-  `proof-ok` is skipped there (no runner; a skipped required check counts as passing), because a PR passes it at its
-  head to enter the queue.
+  own `ci.yml`, heavy legs included. It tells you the result, but it doesn't count for the queue.
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
 `AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
-bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
-`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
+bundle). It runs `repo`, `soul-tools` (the one launcher test that reads `content/kinds`, among others), `kinds` (the
+entry tests and the form-rules tests) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
 keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
 and the usual path map decides; a changelog fragment beside other files selects nothing itself (since 21 Nov; before,
 it read as an unmapped path and every PR with a fragment ran every job). `content/kinds` and `content/moves` also run
 the v2 legs, which load them. The list is
-`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a merge group selects the same light set.
+`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a merge selects the same light set.
 
-Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
-`merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
-`merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
-the replaced failure as stale (#909). But the train's 15-minute head wait can be shorter than a PR run, so a PR that
-is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
+To merge, enqueue the PR: `gh pr merge <n> --squash` (add `--auto` to enqueue once its checks are green), or label it
+`merge:ready` for the merge train, which does the same. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
 
-**CI on main.** A push to main runs the light set its paths pick, the same selection as its merge group. Push runs
+**CI on main.** A push to main runs the light set its paths pick. Push runs
 share one concurrency group, `ci-main`, and a newer push cancels an older one still running, so when merges land
 quickly only the newest main commit is tested. The full battery, every leg, runs once a day on main: the scheduled run
 at 06:23 UTC (`schedule` in `ci.yml`), in its own group, `ci-daily`, which nothing cancels. A manual run
@@ -369,32 +378,46 @@ gh workflow run capacity-qualify.yml -f ref=<branch> -f quiet_host=true \
 
 ## A hundred worlds at once (#2301)
 
-`tools/bench/capacity/hundred/hundred.mjs` demonstrates the still-worlds tranche (#2241) end to end through the
-checkout's own launcher, fake minds, every file under its `--out`. It builds the fixture (100 small `hello-hamlet`
-worlds and 4 `eden-2026` worlds, one or two Souls each, booted once from genesis and stopped), then: every world's agent
-acts at seeded gaps of 2 to 10 minutes for an hour with world memory for about 25 small worlds (A6); all agents stop
-together and every listening world has a reminder due at one shared instant, then a crawler fetches every page (A7);
-every world should unload (A3); one world listens with a reminder inside the gap (A5); after an hour, one act each to a
-sleeping Soul in a small and an Eden world (A4); and for three sampled worlds a twin, the fixture's start state ticked
-straight through (`SIM_SKIP=0`) over the world's own log, must reach the state hash the jumped world wrote (A2). A8 is
-worked out by hand from its report.
+The bench that booted a hundred old-engine worlds (`tools/bench/capacity/hundred/`), and the co-location bench
+(`colocate/`), were removed with v1 (0.134 D3): they measured the old engine's worlds, which no longer run. Their
+reports stay in #2301 and #2451.
 
-Run it on a `souls-timed` runner through the timed-run workflow (command `hundred`; the report, `results.json` and the
-log are the artifact; Soul folders and world data stay on the runner):
+## The 0.132 check (F5)
 
-```bash
-gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short'                 # A9: under 20 min, 6 + 1 worlds
-gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--fixture-only'          # A1 alone: build the 104 worlds
-gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short --small 3 --eden 1 --active-min 4'
+`node tools/release/check-0132.mjs` checks 0.132's "Done when" lines 2 to 4 on a local Eden on the new engine. Eden runs
+behind the local front door (`v2/tools/ops/proxy/soul-game.caddy` with the run's addresses) and is switched with
+`tools/world-launcher/v2-switch.mjs`. Local only, fake minds, its own folder under `.local/check-0132/`.
+
+```sh
+node tools/release/check-0132.mjs --bin <release worldd, gatewayd, directoryd, driver> --pkg <replica wasm package> \
+  --card <v2/web build> [--mars-web <mars/viewer/dist/client>] [--facts <eden facts>] [--agents 100] [--seconds 600] \
+  [--only 2,3,4] [--keep]
 ```
 
-`--short` uses short knobs, stated in the report: agents act every 0.5 to 1.5 minutes for 6, the wind-down is shortened
-with `SIM_BODY_KNOBS` (silent 1 minute, walked out within 2; dev worlds only), a still world unloads after 1 quiet
-minute instead of 10, and the gap is 3 minutes. The full run (no `--short`: 60 active minutes, the real one-hour
-wind-down, a one-hour gap) takes about three and a half hours; the timed-run job allows `hundred` 270 minutes (every
-other command keeps 120). A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
-wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
-parts that need it are reported as not shown, never as passed.
+- **2.** A fresh agent pairs at `/pair` (the served client, approved in a real browser) and then walks, sits, lies,
+  takes, carries, puts down, says and gestures. Each step must show on the old page within 2 s. One uncut clip of the
+  page goes to `clip/`.
+- **3.** `--agents` seeded Souls are driven by the driver (`loads.mjs mix-<n>-even-every4`, `--trace`). It counts:
+  - intents never answered;
+  - acts not answered within 10 s;
+  - pairs of bodies closer than 0.3 m in two chunks running, sampled on the page.
+- **4.** A browser smoke of home, sign-in, sound, music and the camera.
+
+It prints a pass/fail table and writes `report.json` and `table.md`. Exit 0 when every line passes. The browser uses
+the first of the proof recorder's GPU flag sets (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) whose
+`WEBGL_debug_renderer_info` names a hardware renderer; with none, or `--gl soft`, lines 3 and 4 run on SwiftShader and
+line 2 is not reported.
+
+On the shared build machine, with its GPU, one command provisions everything in the run's own directory (node 22,
+pnpm install, media, the old page and the character set, Playwright's Chromium, the release builds and replica's WASM,
+the new page, caddy), runs the check and removes the run's world folders and checkout after:
+
+```sh
+gh workflow run timed-run.yml --ref main -f command=check-0132 -f ref=main -f args='--agents 100 --seconds 600 --only 2,3,4'
+gh run download <run-id> -D .local/check-0132-<run-id>   # report.json, table.md, check.log, clip/*.webm
+```
+
+The table is also in the run's summary.
 
 ## Playtests and the swarm director
 
@@ -433,8 +456,13 @@ sign-off; T4 is the release head. "Done" means walked on the real URL with real 
 
 When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
 `tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
-`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
-push it to an `agent/` branch, then dispatch the timed run from that branch:
+`{"sim.dev": "admin"}`, and `steps.mjs`), push it to an `agent/` branch, then dispatch the timed run from that branch.
+The runner brings up the ref's old page on a new-engine world of the template
+(`tools/playtest/arena/new-engine/old-page.mjs`, built in the job); `_shared/cast.mjs` pairs the kit's Souls through
+the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. The
+ride kits board by the ride's `board` form, waiting while it is away on its course (`_shared/ride.mjs`). A kit whose
+verbs have no new-engine form yet (the television, the core ferris wheel) carries `skip` in its kit.json, saying why
+and what is missing, and the runner refuses it by name:
 
 ```bash
 gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'

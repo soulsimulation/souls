@@ -25,7 +25,7 @@ export function coreAssets(): Record<string, AssetInfo> {
 }
 
 export type Upload = { sha: string; kind: string; ext: string; bytes: number; name: string | null };
-type MapRow = { def: string; entry?: string; waiting?: string; issue?: number; note?: string };
+type MapRow = { def: string; entry?: string; kind?: string; waiting?: string; issue?: number; note?: string };
 
 /** The world ids a backup file holds (one, for a world's own sim.db). */
 export function worldsIn(path: string): string[] {
@@ -51,8 +51,29 @@ export function entryMap(mapPath: string): (ref: string) => string | undefined {
   return (ref) => by.get(mapKey(ref));
 }
 
-/** The model, the facts file's head, and what each thing adds to its record (its uploads, its entry or why none). */
-export function fromBackup(path: string, world: string, mapPath: string) {
+/** A world map's kind for each def ref whose copies are that kind (rows with a `kind`). A kind that joins parts (a rack
+ *  frame, a beam, a frame stand, a bay) is read by its own name, so its copies are of it rather than borrowing its entry. */
+export function kindMap(mapPath: string): (ref: string) => string | undefined {
+  if (!existsSync(mapPath)) return () => undefined;
+  const rows = (JSON.parse(readFileSync(mapPath, 'utf8')).rows as MapRow[]).filter((r) => r.kind);
+  const by = new Map(rows.map((r) => [mapKey(r.def), r.kind!]));
+  return (ref) => by.get(mapKey(ref));
+}
+
+/** A footprint upload's physics as the world's asset store keeps it (`<sha>.meta.json`, which AssetStore.info reads):
+ *  the walls, rooms, openings and slots a mesh def names by its `footprint`. */
+function footprintBaked(dir: string, sha: string): AssetInfo['baked'] | undefined {
+  const f = join(dir, `${sha}.meta.json`);
+  if (!existsSync(f)) return undefined;
+  try { return (JSON.parse(readFileSync(f, 'utf8')) as { baked?: AssetInfo['baked'] }).baked; }
+  catch (e) { throw new Error(`footprint-unreadable: ${sha}: ${(e as Error).message}`); }
+}
+
+/** The model, the facts file's head, and what each thing adds to its record (its uploads, its entry or why none).
+ *  `assetsDir` is the world's asset store (v1's `worlds/assets`): a footprint upload's physics are read from it. A mesh
+ *  def that names a footprint whose physics are not at hand is refused, never baked as one box over its bounds: that
+ *  box would block a whole building, as it did verdelis-eden's dome over its entry (24 Nov). */
+export function fromBackup(path: string, world: string, mapPath: string, assetsDir = '') {
   const db = open(path);
   try {
     const worlds = (db.prepare('SELECT world_id FROM world_meta_v1').all() as { world_id: string }[]).map((r) => r.world_id);
@@ -68,9 +89,16 @@ export function fromBackup(path: string, world: string, mapPath: string) {
     // The compiler's asset lookup: the repository's core index (as AssetStore reads it: the extra indexes beside it,
     // then the core index over them) and this world's uploads.
     const core = coreAssets();
-    const own = new Map(uploads.map((u) => [u.sha, { tris: u.tris, bytes: u.bytes, textures: u.textures, box: JSON.parse(u.box),
-      ...(u.kind === 'image' && (u.ext === 'png' || u.ext === 'jpg') ? { image: { ext: u.ext } } : {}) } as AssetInfo]));
+    const own = new Map(uploads.map((u) => {
+      const baked = u.kind === 'footprint' && assetsDir ? footprintBaked(assetsDir, u.sha) : undefined;
+      return [u.sha, { tris: u.tris, bytes: u.bytes, textures: u.textures, box: JSON.parse(u.box),
+        ...(u.kind === 'image' && (u.ext === 'png' || u.ext === 'jpg') ? { image: { ext: u.ext } } : {}),
+        ...(baked ? { baked } : {}) } as AssetInfo];
+    }));
     const assets = (sha: string) => own.get(sha) ?? core[sha];
+    const missing = [...new Set(defs.map((d) => d.make).filter((mk) => mk.kind === 'mesh' && mk.footprint && !assets(mk.footprint)?.baked)
+      .map((mk) => (mk as { footprint: string }).footprint))].sort();
+    if (missing.length) throw new Error(`footprint-missing: ${missing.join(', ')}: a mesh def names a footprint whose physics are not at hand; pass --assets <the world's asset store>`);
     const library = coreLibrary();
     const m = WorldModel.fromSnapshot({ constants: meta.constants, state: meta.state, seed: meta.seed, seq: meta.seq, editSeq: meta.editSeq, defs, defRefs: meta.defRefs, entities, ground: meta.ground }, assets, library);
 
@@ -81,7 +109,7 @@ export function fromBackup(path: string, world: string, mapPath: string) {
     const thing = (e: Entity, d: { ref: string; make: unknown }) => {
       const asset = named([d.make, e.state, e.params]);
       const row = map?.get(mapKey(d.ref));
-      const none = !map ? 'no map in the repository' : !row ? 'no row in the map' : row.entry ? null : `waiting${row.waiting ? ' ' + row.waiting : ''}${row.issue ? ` (#${row.issue})` : ''}`;
+      const none = !map ? 'no map in the repository' : !row ? 'no row in the map' : row.entry || row.kind ? null : `waiting${row.waiting ? ' ' + row.waiting : ''}${row.issue ? ` (#${row.issue})` : ''}`;
       return { ...(asset.length ? { asset } : {}), ...(row?.entry ? { entry: row.entry } : {}), ...(none ? { noEntry: none } : {}) };
     };
     const file = readFileSync(path);

@@ -8,7 +8,9 @@
 //! who, size and kind. A5: an edit planned against an older version.
 
 use replica::apply::Replica;
-use replica::edit::{Edit, NODES_MOST, OPS_MOST, Op, Ref, Refused, Spot, World, check};
+use replica::edit::{
+    Edit, NODES_MOST, OPS_MOST, Op, Ref, Refused, Spot, WRITTEN_MOST, World, check,
+};
 use replica::effects::{
     Actor, Body, Cause, Effect, FIXTURE_HEADER, Header, Part, State, fixture_bytes,
 };
@@ -27,6 +29,8 @@ use std::time::Duration;
 use worldd::views::{Delivery, Subscriber, Tier};
 
 const FIELD: u64 = 1;
+/// A tick's room in the test of the write rule's room.
+const ROOM: usize = 1 << 20;
 
 fn spot(x: i64, slot: Option<u64>) -> Spot {
     Spot {
@@ -85,6 +89,7 @@ impl W {
             children: names(children),
             slots: slots.into_iter().map(|(s, l)| (s, names(l))).collect(),
             hands: None,
+            fields: Default::default(),
         };
         let kinds = BTreeMap::from([
             (
@@ -245,8 +250,8 @@ impl W {
     }
 
     /// Ends the tier and the log; the archive (the disk read back and applied from the start) equals the live state,
-    /// and holds each edit's effects under its cause.
-    fn close(self) {
+    /// and holds each edit's effects under its cause. Returns the archive: the world as a restart reads it back.
+    fn close(self) -> Replica {
         let stats = self.tier.close();
         assert_eq!(stats.fault, None);
         let mut disk = self.log.close();
@@ -286,6 +291,7 @@ impl W {
             self.committed.len(),
             state.next
         );
+        archive
     }
 
     /// A room under the root with a crate in it and a key in the crate's slot: the batch's minted ids.
@@ -534,6 +540,137 @@ fn a4_another_actor_an_oversized_batch_and_an_unknown_kind_are_refused_by_name()
         .expect_err("refused");
     assert_eq!((r.op, r.name), (Some(0), "edit.too-many-nodes"));
     assert_eq!(w.log_hash(), log);
+    w.close();
+}
+
+// --- #3956: no batch outgrows a log record -------------------------------------------------------------------------
+
+/// A set over the batch limit, and rows that would grow a field past it, are refused `edit.too-large`; a rows
+/// operation with no rows is refused `edit.rows`. Nothing refused reaches the log.
+#[test]
+fn a_batch_writing_more_than_a_record_holds_and_empty_rows_are_refused_by_name() {
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    let log = w.log_hash();
+    let v = w.live.version();
+    let big = Value::Bytes(vec![1; WRITTEN_MOST + 1]);
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Set {
+                node: Ref::Node(cr),
+                field: FIELD,
+                to: big,
+            }],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(0), "edit.too-large"), "{r:?}");
+    // Two halves, each under the limit, over it together; and rows merged into a field already near it.
+    let half = || Value::Bytes(vec![2; WRITTEN_MOST / 2 + 1]);
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: half(),
+                },
+                Op::Set {
+                    node: Ref::Node(room),
+                    field: FIELD,
+                    to: half(),
+                },
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.too-large"), "{r:?}");
+    let row = |k: u64, len: usize| {
+        Value::Array(vec![
+            Value::Uint(k),
+            Value::Uint(0),
+            Value::Bytes(vec![3; len]),
+        ])
+    };
+    let rows = |rows: Vec<Value>| Op::Rows {
+        node: Ref::Node(cr),
+        field: FIELD,
+        rows,
+    };
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: Value::Array(Vec::new()),
+                },
+                rows(Vec::new()),
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.rows"), "{r:?}");
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: Value::Array(vec![row(0, WRITTEN_MOST / 2)]),
+                },
+                rows(vec![row(1, WRITTEN_MOST / 2)]),
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.too-large"), "{r:?}");
+    assert_eq!(w.log_hash(), log, "nothing refused reached the log");
+    w.close();
+}
+
+/// Defence in depth: a tick's writes that together would outgrow its one log record are refused `part.too-large` on
+/// the write path, before they reach the live world, even when each batch passed its check; the next tick's room
+/// takes the same batch. A small room stands in for a record's (`sim::commit::TICK_PARTS_MOST`), as the rule is the
+/// same.
+#[test]
+fn writes_past_a_ticks_record_are_refused_before_the_live_world() {
+    let mut w = W::new();
+    let (_, cr, _) = w.furnish();
+    sim::commit::open_room(ROOM);
+    let set = |n: u8| Op::Set {
+        node: Ref::Node(cr),
+        field: FIELD,
+        to: Value::Bytes(vec![n; ROOM / 3]),
+    };
+    let mut n = 0u8;
+    let (r, before) = loop {
+        n += 1;
+        let before = (
+            w.log_hash(),
+            state_hash(w.live.tree()).expect("a hash"),
+            w.live.version(),
+        );
+        match w.edit(w.creator(), w.live.version(), vec![set(n)]) {
+            Ok(_) => assert!(n < 8, "a tick's room is bounded"),
+            Err(r) => break (r, before),
+        }
+    };
+    assert_eq!(r.name, "part.too-large", "{r:?}");
+    assert!(n > 1, "the first batch fits");
+    let after = (
+        w.log_hash(),
+        state_hash(w.live.tree()).expect("a hash"),
+        w.live.version(),
+    );
+    assert_eq!(after, before, "nothing reached the log or the live world");
+    sim::commit::open_room(ROOM);
+    w.edit(w.creator(), w.live.version(), vec![set(n)])
+        .expect("the next tick takes it");
     w.close();
 }
 
@@ -996,6 +1133,437 @@ fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claim
     w.close();
 }
 
+fn points(list: &[[i64; 2]]) -> Value {
+    Value::Array(
+        list.iter()
+            .map(|p| Value::Array(vec![mm(p[0]), mm(p[1])]))
+            .collect(),
+    )
+}
+
+/// A road at its parent's origin, as the creator's `place --path` lays one (#3962): its line (field 16) and the
+/// ribbon outline (field 11) of a line along x, `width` mm wide, all in mm.
+fn road(name: u64, kind: &Name, parent: Ref, line: &[[i64; 2]], width: i64) -> Op {
+    let h = width / 2;
+    let left = line.iter().map(|p| [p[0], p[1] + h]);
+    let right = line.iter().rev().map(|p| [p[0], p[1] - h]);
+    Op::Place {
+        name,
+        kind: kind.clone(),
+        parent,
+        at: spot(0, None),
+        audience: Audience::Everyone,
+        fields: BTreeMap::from([
+            (11, points(&left.chain(right).collect::<Vec<_>>())),
+            (16, points(line)),
+        ]),
+    }
+}
+
+#[test]
+fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 7).expect("an id");
+    let as_helper = Actor::Creator(helper);
+    // Before any claim, the lead lays a road at the ground's origin, x 120..180 mm along z 30 mm.
+    let v = w.live.version();
+    let lead = w
+        .edit(
+            w.creator(),
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[120, 30], [180, 30]],
+                4,
+            )],
+        )
+        .expect("the lead's road");
+    let built = lead.names[&1];
+    // The lead's yard (x 100..200, z -10..10 mm) and the helper's house (x 100..200, z 20..40 mm): neither holds the
+    // origin, where every shape stands.
+    let yard = claim_row("c:yard", "part:yard", [100, -10, 200, 10]);
+    let mut house = match claim_row("c:house", "part:house", [100, 20, 200, 40]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    house.push(text(&format!(
+        "helper:h{}-{}",
+        replica::encode::to_hex(&helper.scope().0),
+        helper.counter()
+    )));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![yard, Value::Array(house)]),
+        )],
+    )
+    .expect("claimed");
+    let v = w.live.version();
+    // A road across the yard, under no claim: its middle point is inside, so it is refused.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[50, 0], [150, 0], [250, 0]],
+                4,
+            )],
+        )
+        .expect_err("across the yard");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    // The helper's road inside its own claim is built; one that leaves it is not.
+    w.edit_under(
+        as_helper,
+        v,
+        vec![road(
+            1,
+            &room,
+            Ref::Node(w.root),
+            &[[110, 25], [190, 25]],
+            4,
+        )],
+        Some("c:house"),
+    )
+    .expect("the helper's road inside its claim");
+    let v = w.live.version();
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[150, 30], [250, 30]],
+                4,
+            )],
+            Some("c:house"),
+        )
+        .expect_err("out of its claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    // The lead's road now lies in the house claim: the lead may not move, remove or reshape it under no claim.
+    for op in [
+        Op::Move {
+            node: Ref::Node(built),
+            at: spot(5_000, None),
+        },
+        Op::Remove {
+            node: Ref::Node(built),
+        },
+        Op::Set {
+            node: Ref::Node(built),
+            field: 16,
+            to: points(&[[120, 30], [170, 30]]),
+        },
+    ] {
+        let r = w.edit(w.creator(), v, vec![op]).expect_err("in the house");
+        assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    }
+    // An undo or redo that lays it again is refused too.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("in the house");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // The helper moves it 10 mm along, inside; 60 mm takes its far end out (x 180..240 mm); then removes it.
+    w.edit_under(
+        as_helper,
+        v,
+        vec![Op::Move {
+            node: Ref::Node(built),
+            at: spot(10_000, None),
+        }],
+        Some("c:house"),
+    )
+    .expect("moved inside");
+    let v = w.live.version();
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![Op::Move {
+                node: Ref::Node(built),
+                at: spot(60_000, None),
+            }],
+            Some("c:house"),
+        )
+        .expect_err("moved out");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    w.edit_under(
+        as_helper,
+        v,
+        vec![Op::Remove {
+            node: Ref::Node(built),
+        }],
+        Some("c:house"),
+    )
+    .expect("the helper removes it");
+    w.close();
+}
+
+#[test]
+fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    use replica::world_model::End;
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 9).expect("an id");
+    let link = |name: u64, ends: [Id; 2], owner: End, door: Option<Id>| Op::Link {
+        name,
+        ty: Name::new("eden:stairs").expect("a name"),
+        ends: ends.map(Ref::Node),
+        owner,
+        field: 21,
+        row: vec![Value::Uint(1)],
+        door: door.map(Ref::Node),
+    };
+    // Two rooms at x 3 and 7 mm (inside the claim to come), two at x 30 and 40 mm (outside it), and a link the lead
+    // makes from the first, before any claim: what an undo of it, or a redo, would write.
+    let v = w.live.version();
+    let built = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                place(1, &room, Ref::Node(w.root), spot(3_000, None)),
+                place(2, &room, Ref::Node(w.root), spot(7_000, None)),
+                place(3, &room, Ref::Node(w.root), spot(30_000, None)),
+                place(4, &room, Ref::Node(w.root), spot(40_000, None)),
+                place(5, &room, Ref::Node(w.root), spot(50_000, None)),
+            ],
+        )
+        .expect("built");
+    let [a, b, c, d, e] = [1, 2, 3, 4, 5].map(|n| built.names[&n]);
+    let v = w.live.version();
+    let lead = w
+        .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
+        .expect("the lead's link, before the claim");
+    let v = w.live.version();
+    let far = w
+        .edit(w.creator(), v, vec![link(1, [d, b], End::First, None)])
+        .expect("the lead's link owned outside the claim to come, before it");
+    let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    row.push(text(&format!(
+        "helper:h{}-{}",
+        replica::encode::to_hex(&helper.scope().0),
+        helper.counter()
+    )));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![Value::Array(row)]),
+        )],
+    )
+    .expect("claimed with a helper");
+    let v = w.live.version();
+    let log = w.log_hash();
+    // Under no claim: a link owned inside the claim, whose far end is inside it, or whose door is inside it, is
+    // refused; one outside it is not.
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
+        .expect_err("owned inside the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, a], End::Second, None)])
+        .expect_err("owned by its second end, inside the claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, a], End::First, None)])
+        .expect_err("owned outside the claim, its far end inside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(b))])
+        .expect_err("its door inside the claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Under the claim, by its helper: a link owned outside it, or with its door outside it, is refused.
+    let as_helper = Actor::Creator(helper);
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [c, a], End::First, None)],
+            Some("c:house"),
+        )
+        .expect_err("owned outside the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [a, c], End::First, None)],
+            Some("c:house"),
+        )
+        .expect_err("owned inside the claim, its far end outside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [a, b], End::First, Some(e))],
+            Some("c:house"),
+        )
+        .expect_err("its door outside the claim");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    // A doorway link, or a link with a door, owned by its second end is refused: its row is read at its first end.
+    let doorway = Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::Second,
+        field: 22,
+        row: vec![Value::Uint(1)],
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![doorway])
+        .expect_err("a doorway owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, d], End::Second, Some(e))])
+        .expect_err("a link with a door, owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    // A doorway link owned by its first end still writes a row of at least 5 values to field 22, where it is read.
+    let first = |field: u64, row: Vec<Value>| Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::First,
+        field,
+        row,
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![first(21, vec![Value::Uint(1); 6])])
+        .expect_err("a doorway's row in another field");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![first(22, vec![Value::Uint(1)])])
+        .expect_err("a doorway's row too short to read");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    assert_eq!(w.log_hash(), log, "refusals write nothing");
+    // The lead links outside every claim, and the helper inside its own.
+    w.edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(e))])
+        .expect("outside every claim");
+    let v = w.live.version();
+    w.edit_under(
+        as_helper,
+        v,
+        vec![link(1, [a, b], End::First, None)],
+        Some("c:house"),
+    )
+    .expect("the helper links inside its claim");
+    // The lead's link written again (a redo) now lands inside the claim: refused, as an undo's would be.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // So is one owned outside it whose far end is inside it.
+    let r = judge_effects(&w.live, &far.part.effects).expect_err("its far end inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    w.close();
+}
+
+#[test]
+fn a3728_a_rows_edit_is_judged_as_a_set_of_its_field() {
+    use replica::edit::claims::F_CLAIMS;
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let pair = |k: u64| Value::Array(vec![Value::Uint(k), Value::Uint(0)]);
+    // A room at x 5 mm with a field of rows, then a claim over it.
+    let v = w.live.version();
+    let built = w
+        .edit(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+        )
+        .expect("built");
+    let inside = built.names[&1];
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Set {
+            node: Ref::Node(inside),
+            field: 90,
+            to: Value::Array(vec![pair(1)]),
+        }],
+    )
+    .expect("a field of rows");
+    let v = w.live.version();
+    let claims = Value::Array(vec![claim_row("c:house", "part:house", [0, -10, 10, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed");
+    let v = w.live.version();
+    let log = w.log_hash();
+    // Rows into a node inside the claim, under no claim: refused as its set would be.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(inside),
+                field: 90,
+                rows: vec![pair(2)],
+            }],
+        )
+        .expect_err("inside a claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    // Rows into the claim list: what they would make is read as claims, so an overlap is refused by name.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(w.root),
+                field: F_CLAIMS,
+                rows: vec![claim_row("c:yard", "part:yard", [5, -10, 20, 10])],
+            }],
+        )
+        .expect_err("an overlapping claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claim-malformed"), "{r:?}");
+    // Under the claim, rows into the world's own fields are the lead's.
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(w.root),
+                field: F_CLAIMS,
+                rows: vec![claim_row("c:yard", "part:yard", [20, -10, 30, 10])],
+            }],
+            Some("c:house"),
+        )
+        .expect_err("the root under a claim");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    assert_eq!(w.log_hash(), log, "refusals write nothing");
+    // A well-formed claim added as a row commits.
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Rows {
+            node: Ref::Node(w.root),
+            field: F_CLAIMS,
+            rows: vec![claim_row("c:yard", "part:yard", [20, -10, 30, 10])],
+        }],
+    )
+    .expect("a second claim, as a row");
+    w.close();
+}
+
 #[test]
 fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
@@ -1205,6 +1773,111 @@ fn a1_a_private_mark_is_its_owners_alone_and_passes_down_to_what_is_inside() {
     w.close();
 }
 
+// --- 0.134 R4: a creator's tint ---------------------------------------------------------------------------------
+
+/// A tint of rows `[part, rgb]`.
+fn tint(rows: &[(&str, u64)]) -> Value {
+    Value::Array(
+        rows.iter()
+            .map(|(p, c)| Value::Array(vec![text(p), Value::Uint(*c)]))
+            .collect(),
+    )
+}
+
+/// The tint a node holds, if any.
+fn tint_of(live: &Replica, id: Id) -> Option<Value> {
+    let Some(Value::Map(n)) = live.node(id) else {
+        panic!("the node")
+    };
+    let Some(Value::Map(fields)) = n.get(&6) else {
+        return None;
+    };
+    fields.get(&replica::tint::F_TINT).cloned()
+}
+
+/// R4: the creator's recolour of a thing and of one part commits as one set each, seen by the client's replica, the
+/// public stream and the log (`W::edit` compares all three); anyone else's is refused by name, and so is a tint that
+/// does not read, with nothing written; the log read back from the disk, as a restart reads it, holds the tint.
+#[test]
+fn r4_a_recolour_is_the_creators_alone_logged_streamed_and_kept_across_a_restart() {
+    use replica::tint::F_TINT;
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    assert_eq!(tint_of(&w.live, cr), None, "an old thing has no tint");
+    let set = |to: Value| Op::Set {
+        node: Ref::Node(cr),
+        field: F_TINT,
+        to,
+    };
+    let v = w.live.version();
+    w.edit(w.creator(), v, vec![set(tint(&[("tint:whole", 0xff0000)]))])
+        .expect("the creator recolours the crate");
+    let seat = tint(&[("tint:whole", 0xff0000), ("part:seat", 0x0000ff)]);
+    let v = w.live.version();
+    w.edit(w.creator(), v, vec![set(seat.clone())])
+        .expect("and its seat");
+    assert_eq!(tint_of(&w.live, cr), Some(seat.clone()));
+    assert_eq!(
+        tint_of(&w.client, cr),
+        Some(seat.clone()),
+        "the client's copy"
+    );
+
+    let log = w.log_hash();
+    let v = w.live.version();
+    let other = Id::new(Scope([0xc0; 16]), 2).expect("an id");
+    for actor in [Actor::Creator(other), Actor::Soul(other), Actor::World] {
+        let r = w
+            .edit(actor, v, vec![set(tint(&[("tint:whole", 0x00ff00)]))])
+            .expect_err("not the creator");
+        assert_eq!(r.name, "edit.not-the-creator", "{actor:?}");
+    }
+    for bad in [
+        Value::Uint(0xff0000),
+        tint(&[("tint:whole", 0x100_0000)]),
+        tint(&[("part:seat", 1), ("part:seat", 2)]),
+    ] {
+        let r = w
+            .edit(w.creator(), v, vec![set(bad.clone())])
+            .expect_err("malformed");
+        assert_eq!((r.op, r.name), (Some(0), "edit.tint-malformed"), "{bad:?}");
+    }
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(cr),
+                field: F_TINT,
+                rows: vec![Value::Array(vec![text("part:seat"), Value::Uint(7)])],
+            }],
+        )
+        .expect_err("a second seat row");
+    assert_eq!(r.name, "edit.tint-malformed");
+    // Nor a link's row (R4 review): its row would land in the owner's field 145 as `[link, ...]`.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Link {
+                name: 1,
+                ty: Name::new("test:link").expect("a name"),
+                ends: [Ref::Node(cr), Ref::Node(room)],
+                owner: replica::world_model::End::First,
+                field: F_TINT,
+                row: vec![Value::Uint(7)],
+                door: None,
+            }],
+        )
+        .expect_err("a link into the tint");
+    assert_eq!((r.op, r.name), (Some(0), "edit.tint-malformed"));
+    assert_eq!(w.log_hash(), log, "nothing refused reached the log");
+    assert_eq!(tint_of(&w.live, cr), Some(seat.clone()));
+
+    let reread = w.close();
+    assert_eq!(tint_of(&reread, cr), Some(seat), "kept across a restart");
+}
+
 #[test]
 fn a2_zones_are_named_land_uses_with_an_outline() {
     use replica::edit::claims::F_ZONES;
@@ -1244,4 +1917,194 @@ fn a2_zones_are_named_land_uses_with_an_outline() {
         assert_eq!(r.name, "edit.zone-malformed", "{r:?}");
     }
     w.close();
+}
+
+// --- #3934 review: a removal's unlink rewrites a far owner, which the claim check judges too ------------------------
+
+/// N2's test world as imported, on a copy that edits commit to: its doorways are real links.
+struct Doorways {
+    live: Replica,
+    root: Id,
+    /// The leaf of the test world's door to b.
+    leaf: Id,
+    world: World,
+    minter: Minter,
+    intents: Minter,
+    at: i64,
+}
+
+impl Doorways {
+    fn new() -> Doorways {
+        let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+            .expect("the test world loads");
+        let root = im.nodes["world"];
+        let h = import_eden::header(root, &im.rules).expect("a header");
+        let next = im.tree.to_state().next;
+        let leaf = im.nodes["door-building-to-b"];
+        Doorways {
+            live: Replica::restored(h, im.tree, next),
+            root,
+            leaf,
+            world: World {
+                creator: Id::new(Scope([0xc0; 16]), 1).expect("an id"),
+                kinds: BTreeMap::new(),
+            },
+            minter: Minter::new(Scope([0x77; 16])),
+            intents: Minter::new(Scope([0x11; 16])),
+            at: 0,
+        }
+    }
+
+    fn planned(&mut self, ops: Vec<Op>, claim: Option<&str>) -> Result<Planned, Refused> {
+        let copy = self.live.frozen();
+        let checked = check(
+            Edit {
+                claim: claim.map(|c| Name::new(c).expect("a name")),
+                intent: self.intents.mint().expect("an id"),
+                actor: Actor::Creator(self.world.creator),
+                planned: self.live.version(),
+                ops,
+            },
+            &copy,
+            &self.world,
+        )?;
+        plan(checked, &copy, None)
+    }
+
+    fn edit(&mut self, ops: Vec<Op>, claim: Option<&str>) -> Result<Committed, Refused> {
+        let planned = self.planned(ops, claim)?;
+        self.at += 1_000;
+        commit(&mut self.live, &mut self.minter, &planned, &[], self.at)
+    }
+
+    /// Where `node`'s origin is on the root's ground (x, z mm), as the claim check reads it: an edit of it under the
+    /// far-away probe claim is refused naming its point.
+    fn probe(&mut self, node: Id) -> (i64, i64) {
+        let r = self
+            .planned(
+                vec![Op::Set {
+                    node: Ref::Node(node),
+                    field: 200,
+                    to: Value::Uint(1),
+                }],
+                Some("c:probe"),
+            )
+            .err()
+            .expect("outside the probe");
+        assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+        let n = |k: &str| -> i64 {
+            let at = r.detail.find(k).expect("a coordinate") + k.len();
+            r.detail[at..]
+                .split(' ')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .expect("a number")
+        };
+        (n("x "), n("z "))
+    }
+}
+
+#[test]
+fn a3934_removing_a_node_that_names_a_claimed_doorway_is_judged_where_the_doorway_is() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    const F_DOOR_LINK: u64 = 7;
+    let mut w = Doorways::new();
+    let root = w.root;
+    // The doorway the test world's door to b opens, and its owning end, whose field 22 lists it.
+    let tree = w.live.tree();
+    let leaf = tree
+        .node(tree.handle(w.leaf).expect("the leaf"))
+        .expect("the leaf");
+    let link_value = leaf.fields()[&F_DOOR_LINK].clone();
+    let link = replica::effects::read_id(&link_value).expect("a link");
+    let (_, [owner, _], ..) = tree.link(link).expect("the doorway");
+    let probe = Value::Array(vec![claim_row(
+        "c:probe",
+        "part:probe",
+        [900_000_000, 900_000_000, 900_000_001, 900_000_001],
+    )]);
+    w.edit(vec![set_root(root, F_CLAIMS, probe)], None)
+        .expect("the probe claim");
+    let (ox, oz) = w.probe(owner);
+    // A childless node far from the owner, with no door of its own.
+    let tree = w.live.tree();
+    let mut candidates: Vec<Id> = Vec::new();
+    let mut stack = vec![tree.root()];
+    while let Some(h) = stack.pop() {
+        let kids = tree.children(h).unwrap_or_default();
+        if let Some(n) = tree.node(h)
+            && kids.is_empty()
+            && n.parent().is_some()
+            && !n.fields().contains_key(&F_DOOR_LINK)
+            && !n.fields().contains_key(&replica::edit::DOOR_GEOMETRY)
+        {
+            candidates.push(n.id());
+        }
+        stack.extend(kids.iter().copied());
+    }
+    candidates.sort();
+    let (outside, (px, pz)) = candidates
+        .into_iter()
+        .find_map(|c| {
+            let p = w.probe(c);
+            ((p.0 - ox).abs() + (p.1 - oz).abs() > 5_000).then_some((c, p))
+        })
+        .expect("a node far from the doorway");
+    let aim = |node: Id| Op::Set {
+        node: Ref::Node(node),
+        field: F_DOOR_LINK,
+        to: link_value.clone(),
+    };
+    let remove = |node: Id| Op::Remove {
+        node: Ref::Node(node),
+    };
+    // The same removal before the claim, on a copy: what a redo would write again.
+    let mut scratch = Doorways {
+        live: w.live.frozen(),
+        root,
+        leaf: w.leaf,
+        world: w.world.clone(),
+        minter: Minter::new(Scope([0x78; 16])),
+        intents: Minter::new(Scope([0x12; 16])),
+        at: w.at,
+    };
+    let unlinked = scratch
+        .edit(vec![aim(outside), remove(outside)], None)
+        .expect("unclaimed, the removal unlinks the doorway");
+    assert!(scratch.live.tree().link(link).is_none(), "unlinked");
+    // The lead claims the doorway's owner.
+    let house = claim_row("c:house", "part:house", [ox - 1, oz - 1, ox + 1, oz + 1]);
+    w.edit(
+        vec![set_root(root, F_CLAIMS, Value::Array(vec![house.clone()]))],
+        None,
+    )
+    .expect("claimed");
+    // Under no claim: aiming and removing in one batch, or the removal after the aim, is refused where the doorway is.
+    let r = w
+        .edit(vec![aim(outside), remove(outside)], None)
+        .expect_err("the removal unlinks a claimed doorway");
+    assert_eq!((r.op, r.name), (Some(1), "edit.claimed"), "{r:?}");
+    assert!(r.detail.contains("c:house"), "{}", r.detail);
+    w.edit(vec![aim(outside)], None)
+        .expect("aiming alone writes only the outside node");
+    let r = w
+        .edit(vec![remove(outside)], None)
+        .expect_err("the removal unlinks a claimed doorway");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    assert!(w.live.tree().link(link).is_some(), "the doorway stands");
+    // An undo or a redo writing the same removal is refused too.
+    let r = judge_effects(&w.live, &unlinked.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Under another claim holding the removed node: the doorway's owner is outside it.
+    let yard = claim_row("c:yard", "part:yard", [px - 1, pz - 1, px + 1, pz + 1]);
+    w.edit(
+        vec![set_root(root, F_CLAIMS, Value::Array(vec![house, yard]))],
+        None,
+    )
+    .expect("a second claim");
+    let r = w
+        .edit(vec![remove(outside)], Some("c:yard"))
+        .expect_err("the owner is outside c:yard");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    assert!(w.live.tree().link(link).is_some(), "the doorway stands");
 }

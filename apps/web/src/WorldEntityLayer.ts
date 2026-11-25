@@ -1,5 +1,5 @@
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
-import {lockPose} from './gen-mesh/vocab-look.ts';
+import {lockPose, paletteTint} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';
 // The entity world's picture (spec <eden4>/28 §8): terrain baked from the
 // same ground recipe the server uses, water, a horizon ring, and one mesh per
@@ -10,6 +10,8 @@ import { noteModeration, noteSnapshotVersion } from './moderation-hidden.ts';
 import { godFeature, isFlagDef } from './god-ui/features.ts';
 import { loadSnapshot } from './snapshot-wire.ts';
 import { snapshotModel } from './snapshot-model.ts';
+import { fixTerrain, fixedTerrain, oldViews, streamScene, streamSceneAsked } from './v2-engine/source/scene-offer.ts';
+import type { StreamSnapshot } from './v2-engine/source/stream-scene.ts';
 import type { SnapshotDecoder, SnapshotDelta } from './snapshot-delta.ts';
 import * as THREE from 'three';
 import { TILE_M, TILE_N, Terrain, groundForTile, heightAt, waterLevelAt, type Ground } from '@souls/ground';
@@ -29,7 +31,7 @@ import {isGrowingDef, plantGroup, plantLookOf, posePlants, type PlantGroup, type
 import {itemDiffAhead} from './item-diff-clock.ts';
 import {beginOpeningMotion,stepOpeningMotion,type OpeningMotion} from './opening-motion.ts';
 import { EntityInstancer, instanceable } from './EntityInstancer.ts';
-import { terrainColorFor, terrainColorDeferred, groundRealismFor } from './gen-mesh/ground-palette.ts';
+import { terrainColorFor, terrainColorDeferred, groundRealismFor, horizonBaseFor } from './gen-mesh/ground-palette.ts';
 import { mottleSector } from './gen-mesh/terrain-mottle.ts';
 import { applyWorldRealism } from './WorldEdenRealism.ts';
 import { stepSurfaceKit } from './WorldEdenSurfaceKit.ts';
@@ -245,6 +247,8 @@ export class WorldEntityLayer {
   }
   stairDiagnostics(){return this.stairContacts.diagnostics();}
   private immutable=false;
+  /** W2: the world was drawn from its v2 stream (no captured snapshot to resync from). */
+  private fromStream=false;
   contextObjects(id:string):THREE.Object3D[]{const object=this.drawn.get(id)?.obj;return object?[object]:[];}
   /** Stable immutable render IDs derive from entity identity and mesh hierarchy, never Three UUIDs. */
   contextMeshes(): { id: string; entity: string; mesh: THREE.Mesh }[] {
@@ -494,7 +498,7 @@ export class WorldEntityLayer {
    *  on the phone tier it stays frozen and nothing flashes. Used after a missed diff, a seq ahead of ours on the heartbeat,
    *  or a moderation change (G8: the server-filtered picture removes what was hidden). No easing for things already drawn. */
   async resync() {
-    if (this.immutable || this.resyncing || !this.signal) return;
+    if (this.immutable || this.fromStream || this.resyncing || !this.signal) return;
     this.clearSupplementalStairs();
     this.resyncing = true;
     try {
@@ -562,7 +566,7 @@ export class WorldEntityLayer {
     if (retargeted.size) for (const e of m.entities.values()) if (!upserted.has(e.id) && retargeted.has(e.def)) queue.push({ id: e.id, ease: false });
     if (lit) this.lightSeq++;
     if (delta.defs.some((d) => m.defs.get('sha:' + d.hash) === (d as unknown)) || retargeted.size || groundChanged || stateChanged || constantsChanged) changed = true;
-    if (groundChanged) { this.rebuildTerrain(); this.rebuildWater(); this.buildHorizon(); this.sites.refreshAll(true); } else if (paletteChanged) this.rebuildTerrain();
+    if (groundChanged) { this.rebuildTerrain(); this.rebuildWater(); this.buildHorizon(); this.sites.refreshAll(true); } else if (paletteChanged) { this.rebuildTerrain(); this.buildHorizon(); }
     const seen = new Set<string>();
     for (let i = 0; i < queue.length;) {
       const until = performance.now() + RESYNC_SLICE_MS;
@@ -582,12 +586,16 @@ export class WorldEntityLayer {
     // lane L3h: the first start takes the snapshot GET index.html sent at page entry (snapshot-prefetch.ts), one request
     // lane W1/O2: the page's edge-cacheable snapshot URL when the server named one (its `now` is then as old as the copy)
     // lane W3: in its wire form (snapshot-wire.ts: defs and ground as cached content-addressed parts)
-    try { if(frozen){this.immutable=true;snap=structuredClone(frozen);onSnapshot?.();}else{ const decoder = await this.snapshotDecoder(); const got = await loadSnapshot(this.api('/v1/world/snapshot'), signal, true, async (pieces) => { arrivalMark('snapshot-received'); const snapshot = await decoder.initial(pieces, signal); arrivalMark('snapshot-decoded'); return snapshot; }); onSnapshot?.(); if (!got || signal.aborted) return; const r = got.response; noteSnapshotVersion(r.headers.get('x-moderation-version')); snap = got.snap as unknown as EntitySnapshot;
-      ageNow(snap, r); }} catch { onSnapshot?.(); return; }
+    try { if(frozen){this.immutable=true;snap=structuredClone(frozen);onSnapshot?.();}else{ const decoder = await this.snapshotDecoder(); const got = streamSceneAsked() || !oldViews() ? null : await loadSnapshot(this.api('/v1/world/snapshot'), signal, true, async (pieces) => { arrivalMark('snapshot-received'); const snapshot = await decoder.initial(pieces, signal); arrivalMark('snapshot-decoded'); return snapshot; });
+      // W2 (0.135): a world with no captured snapshot (made on the new engine) is drawn from its stream (stream-scene.ts)
+      const fromStream = got ? null : await streamScene(signal); this.fromStream = !!fromStream; onSnapshot?.(); if (fromStream) snap = fromStream as unknown as EntitySnapshot; else {
+      if (!got || signal.aborted) return; const r = got.response; noteSnapshotVersion(r.headers.get('x-moderation-version')); snap = got.snap as unknown as EntitySnapshot;
+      ageNow(snap, r); }}} catch { onSnapshot?.(); return; }
     if (signal.aborted || snap.contract !== 'world/1') return;
     noteUploadSizes(snap.assetBytes);   // CDN4
     // Keep the old model visible until all new records exist; aborting a sliced load cannot publish half a world.
     try { this.model = await snapshotModel({ constants: snap.constants, state: snap.state, seed: snap.seed ?? 'viewer', seq: snap.counter ?? 0, editSeq: snap.seq, defs: snap.defs, entities: snap.entities, ground: snap.ground }, signal, nextTask); } catch (error) { if (signal.aborted) return; throw error; }
+    if (this.fromStream) fixTerrain(this.model.terrain, (snap as unknown as StreamSnapshot).heights);
     arrivalMark('snapshot-model-ready');
     // PERF-STREAM: by distance from here on (a frozen context capture is never streamed: it draws the whole world once)
     this.streaming = this.immutable ? null : this.streamOption();
@@ -796,11 +804,12 @@ export class WorldEntityLayer {
       this.recordedItems.delete(id);this.missingItemAt.delete(id);this.overrides.delete(id);this.overrideYaw.delete(id);if(d)d.settled=false;
     }
   }
-  /** Names of world-level god things with a native ride twin: the god's balloons (def carrier + tag balloon). */
+  /** Names of world-level god things with a native ride twin: the god's balloons (def carrier + tag balloon). One with no
+   *  name (a new-engine world's balloon, recorded under its thing's id) goes by its id. */
   rideNames(): string[] {
     if (!this.model) return [];
     const out: string[] = [];
-    for (const e of this.model.entities.values()) { if (!e.name || e.in.parent !== 'world') continue; const def = this.model.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideBalloonDef(def)) out.push(e.name); }
+    for (const e of this.model.entities.values()) { if (e.in.parent !== 'world') continue; const def = this.model.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideBalloonDef(def)) out.push(e.name || e.id); }
     return out;
   }
   /** D1: native carrier ids of world-level god rides that are not balloons (a ferris wheel, a carousel): the thing stays
@@ -837,8 +846,11 @@ export class WorldEntityLayer {
       for (const e of m.entities.values()) if (e.name && e.in.parent === 'world' && !map.has(e.name)) map.set(e.name, e);
       this.names = { key, size: m.entities.size, map };
     }
-    return this.names.map.get(name);
+    const top = m.entities.get(name);   // a ride with no name goes by its id (rideNames)
+    return this.names.map.get(name) ?? (top && !top.name && top.in.parent === 'world' ? top : undefined);
   }
+  /** K4 (0.135): the id of the top-level thing named `name` (a new-engine world records a ride under its thing's id). */
+  idNamed(name: string): string | undefined { return this.entityNamed(name)?.id; }
   /** PERF-STREAM: the records a scan of the world's lights should visit: under streaming only the drawn things (a lamp beyond
    *  the ring lights nothing anyone sees); else null (every record, as before). world-env.ts. */
   lightCandidates(): Iterable<Entity> | null {
@@ -1384,7 +1396,8 @@ export class WorldEntityLayer {
     return c;
   }
 
-  /** A box worth looking at first: the placed things if any, else the middle of the world. */
+  /** A box worth looking at first: the placed things if any (each at least 10 m round its origin, and all of its
+   *  footprint: a 20 m box round RnA Studio's origin put the arrival eye against its wall), else the middle of the world. */
   viewBounds(): [number, number, number, number] {
     if (!this.model) return [-60, -60, 60, 60];
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -1393,6 +1406,7 @@ export class WorldEntityLayer {
       const d = this.model.resolvedDef(e.def); if (!d || d.components.landform || d.make.kind === 'gen' && (d.make.gen === 'landform/1' || d.make.gen === 'lake/1')) continue;
       if (e.shape && 'area' in e.shape) { for (const [x, z] of e.shape.area) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); } continue; }
       const wp = this.model.worldPose(e); x0 = Math.min(x0, wp.x - 10); z0 = Math.min(z0, wp.z - 10); x1 = Math.max(x1, wp.x + 10); z1 = Math.max(z1, wp.z + 10);
+      try { for (const b of this.model.footprint(e, d)) { const r = Math.hypot(b.half[0], b.half[1]); x0 = Math.min(x0, b.c[0] - r); z0 = Math.min(z0, b.c[1] - r); x1 = Math.max(x1, b.c[0] + r); z1 = Math.max(z1, b.c[1] + r); } } catch { /* no colliders: its origin box stands */ }
     }
     if (!Number.isFinite(x0)) { const h = Math.min(120, this.model.constants.extent / 4); return [-h, -h, h, h]; }
     return [x0, z0, x1, z1];
@@ -1527,7 +1541,7 @@ export class WorldEntityLayer {
     const x0 = tx0 * TILE_M, z0 = tz0 * TILE_M, w = (tx1 - tx0 + 1) * TILE_M, d = (tz1 - tz0 + 1) * TILE_M;
     const nx = w / step, nz = d / step;
     // P7 coarse (phone arrival, far sectors): heights straight from the ground recipe at `step` m, no tile bakes
-    const coarse = step !== TERRAIN_STEP || direct ? coarseHeights(m.terrain.ground, x0, z0, nx, nz, step) : null;
+    const coarse = (step !== TERRAIN_STEP || direct) && !fixedTerrain(m.terrain) ? coarseHeights(m.terrain.ground, x0, z0, nx, nz, step) : null;
     const pos = new Float32Array((nx + 1) * (nz + 1) * 3), col = new Float32Array((nx + 1) * (nz + 1) * 3);
     const c = new THREE.Color();
     const palette = (m.state as { ground?: { palette?: string } }).ground?.palette;
@@ -1597,15 +1611,17 @@ export class WorldEntityLayer {
     const pos: number[] = [], col: number[] = [], idx: number[] = [];
     const c = new THREE.Color();
     const seed = hashSeed(m.seed);
+    // its near colour is the world's ground (a desert world's horizon is desert), fading into the sky's haze
+    const near = new THREE.Color(horizonBaseFor((m.state as { ground?: { palette?: string } }).ground?.palette)), haze = new THREE.Color(0x9fb3c8);
     // t4-phone: the inner ring's heights from the ground recipe at each point (no bake of every tile along the world's edge:
     // ~0.1 s of 4x CPU before a phone's poster); the same heights as the tiles' within their 1 m interpolation
-    const edgeHeight = (x: number, z: number) => heightAt(groundForTile(m.terrain.ground, Math.floor(x / TILE_M), Math.floor(z / TILE_M)), x, z);
+    const edgeHeight = (x: number, z: number) => fixedTerrain(m.terrain) ? m.terrain.sample(x, z) : heightAt(groundForTile(m.terrain.ground, Math.floor(x / TILE_M), Math.floor(z / TILE_M)), x, z);
     for (let r = 0; r <= rings; r++) for (let s = 0; s <= segs; s++) {
       const a = (s / segs) * Math.PI * 2, d = edge(a), inner = d + half * 0.02, outer = d + half * 2.2, radius = inner + (outer - inner) * (r / rings);
       const f = r / rings, bump = Math.sin(a * 7 + seed) * 0.5 + Math.sin(a * 13 + seed * 1.7) * 0.3 + Math.sin(a * 29 + seed * 0.3) * 0.2;
       const h = r === 0 ? edgeHeight(cx + Math.cos(a) * (d - 1), cz + Math.sin(a) * (d - 1)) : m.constants.base + Math.max(0, bump) * half * 0.25 * Math.sin(Math.PI * f) + f * 8;
       pos.push(cx + Math.cos(a) * radius, h, cz + Math.sin(a) * radius);
-      c.set(0x6f8f6a).lerp(new THREE.Color(0x9fb3c8), f * 0.9); col.push(c.r, c.g, c.b);
+      c.set(near).lerp(haze, f * 0.9); col.push(c.r, c.g, c.b);
     }
     for (let r = 0; r < rings; r++) for (let s = 0; s < segs; s++) { const a = r * (segs + 1) + s, b = a + 1, cc = a + segs + 1, d = cc + 1; idx.push(a, b, cc, b, d, cc); }
     const g = new THREE.BufferGeometry();
@@ -1737,9 +1753,10 @@ export class WorldEntityLayer {
     const ctx: MeshCtx = {
       canonicalContext: this.immutable, def, entity: e, params, args: def.make.kind === 'gen' ? ((def.make.args ?? {}) as Record<string, unknown>) : {},
       baked: m.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), model: m, materials: this.lib,
-      tint: (key, fallback) => { if (!key) return fallback; const v = params[key]; return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback; },
+      // R4: a creator's recolour of one of the def's palette keys (`souls-god recolor --part <key>`) is that part's colour
+      tint: paletteTint(def, params, e.state),
     };
-    try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
+    try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; obj.userData.entity ??= e.id; /* K4: a click on it names its entity (the camera follows one the takes carry) */ const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
   }
 
   private material(key: string, make: () => THREE.Material) { let m = this.materials.get(key); if (!m) { m = make(); this.materials.set(key, m); } return m; }

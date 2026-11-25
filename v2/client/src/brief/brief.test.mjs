@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock } from './brief.mjs';
+import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock, heldBy } from './brief.mjs';
 import { changedBetween, decode, entryKind } from './copy.mjs';
 
 const eden = JSON.parse(readFileSync(new URL('./eden-busiest-room.json', import.meta.url), 'utf8'));
@@ -95,4 +95,48 @@ test('a node names its entry by field 27 (a Mars chair borrows eden:chair); with
   assert.equal(entryKind(node([[27n, 'eden:chair']])), 'eden:chair');
   assert.equal(entryKind(node([])), 'eden:mars_field_chair');
   assert.equal(entryKind(new Map([[2, 'eden:bench@cd']])), 'eden:bench');
+});
+
+test('D7: a seated Soul\'s brief names its seat and the room around it, found by its Soul as the daemon names itself', () => {
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 2 },
+    { id: 'f', name: 'floor 2', kind: 'eden:floor', parent: 'g', path: ['ground 1'], children: 1 },
+    { id: 'r', name: 'Reading', kind: 'eden:room', parent: 'f', path: ['ground 1', 'floor 2'], children: 3 },
+    { id: 'c', name: 'library-armchair-sage', kind: 'eden:armchair', parent: 'r', path: ['ground 1', 'floor 2', 'Reading'], children: 1 },
+    { id: 'c2', name: 'library-armchair-rose', kind: 'eden:armchair', parent: 'r', path: ['ground 1', 'floor 2', 'Reading'], children: 0 },
+    { id: 'body-2', name: 'body 2', kind: 'souls:body', soul: 'soul-7', parent: 'c', path: ['ground 1', 'floor 2', 'Reading', 'library-armchair-sage'], children: 0 },
+    { id: 'lamp', name: 'reading lamp', kind: 'eden:lamp', parent: 'r', path: ['ground 1', 'floor 2', 'Reading'], children: 0 },
+  ]);
+  const b = brief(rows, { me: 'soul-7' });
+  assert.equal(b.room.name, 'Reading', 'the room, not the ground');
+  assert.deepEqual(b.seat, { name: 'library-armchair-sage', kind: 'eden:armchair', id: 'c' });
+  assert.deepEqual(b.here, ['library-armchair-rose', 'reading lamp'], 'what is in the room, not my seat');
+  assert.equal(brief(rows, { me: 'body-2' }).seat.id, 'c', 'by the body\'s own id too');
+  const standing = new Map(rows);
+  standing.set('body-2', { ...rows.get('body-2'), parent: 'r' });
+  const s = brief(standing, { me: 'soul-7' });
+  assert.deepEqual([s.room.name, s.seat], ['Reading', undefined], 'standing in the room: no seat');
+  // The sit's receipt names the seat that holds the body: here the fallback, the first choice being held.
+  const r = { verbs: ['eden:sit', 'eden:sit'], target: 'c2 c' };
+  assert.deepEqual(heldBy(rows, 'soul-7', r), { rank: 1, verb: 'eden:sit', id: 'c', name: 'library-armchair-sage', fallback: true });
+  assert.equal(heldBy(rows, 'soul-7', { verbs: ['eden:sit'], target: 'c' }).fallback, false, 'the first choice');
+  assert.equal(heldBy(standing, 'soul-7', r), null, 'standing: no target holds the body');
+});
+
+test('D12: a Soul lying in a bed names its bed and the bedroom around it, not the ground under the house', () => {
+  // As a served Eden's copy holds it: the body in the bed's slot, the bed in Bedroom 2, on a floor of a house on the ground.
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 2 },
+    { id: 'h', name: 'hillside-home-14', kind: 'eden:house', parent: 'g', path: ['ground 1'], children: 1 },
+    { id: 'f', name: 'floor 5583', kind: 'eden:floor', parent: 'h', path: ['ground 1', 'hillside-home-14'], children: 1 },
+    { id: 'r', name: 'Bedroom 2', kind: 'eden:room', parent: 'f', path: ['ground 1', 'hillside-home-14', 'floor 5583'], children: 2 },
+    { id: 'bed', name: 'bedroom-2-bed', kind: 'eden:bed', parent: 'r', path: ['ground 1', 'hillside-home-14', 'floor 5583', 'Bedroom 2'], children: 1 },
+    { id: 'lamp', name: 'bedside lamp', kind: 'eden:lamp', parent: 'r', path: ['ground 1', 'hillside-home-14', 'floor 5583', 'Bedroom 2'], children: 0 },
+    { id: 'body-0', name: 'body 0', kind: 'souls:body', soul: 'soul-3', parent: 'bed', path: ['ground 1', 'hillside-home-14', 'floor 5583', 'Bedroom 2', 'bedroom-2-bed'], children: 0 },
+  ]);
+  const b = brief(rows, { me: 'soul-3' });
+  assert.equal(b.room.name, 'Bedroom 2', 'the bedroom, not the ground');
+  assert.deepEqual(b.seat, { name: 'bedroom-2-bed', kind: 'eden:bed', id: 'bed' }, 'the bed that holds the body');
+  assert.deepEqual(b.here, ['bedside lamp'], 'what is in the room, not my bed');
+  assert.deepEqual(heldBy(rows, 'soul-3', { verbs: ['eden:lie'], target: 'bed' }), { rank: 0, verb: 'eden:lie', id: 'bed', name: 'bedroom-2-bed', fallback: false });
 });

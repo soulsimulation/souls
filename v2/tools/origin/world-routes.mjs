@@ -5,6 +5,8 @@ import { request } from 'node:http';
 export const WORLD_ROUTES = '/var/lib/souls/routes/worlds.json';
 const WORLD = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(\/.*)?$/;
 const local = (host) => host === 'localhost' || host === '[::1]' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host);
+/** K3 (0.133): an allowed upload a creator's kind names (gatewayd's `GET /v2/uploads/<hash>`, immutable by hash). */
+const UPLOAD = /^\/v2\/uploads\/1220[0-9a-f]{64}$/;
 const publicPath = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(s) && !s.split('/').some(p => p === '.' || p === '..');
 
 /** Only operator/placement-owned file bytes may name native listeners. Invalid metadata refuses closed. */
@@ -24,13 +26,16 @@ export function readWorldRoutes(file) {
 const reply = (res, status, refused, head = false) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'x-content-type-options': 'nosniff' }).end(head ? undefined : JSON.stringify({ refused }));
 const socketReply = (socket, status, refused) => socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n${JSON.stringify({ refused })}`);
 
-/** The public bootstrap and exactly three native gateway endpoints (the socket, the creator token, the entries), on canonical and preview world paths. */
+/** A creator's own gateway endpoints (#1960), each a POST: an upload (#3697), a bulk edit (#3695), a helper's token (#3727). */
+const CREATOR_POSTS = ['/v2/creator-token', '/v2/creator-upload', '/v2/creator-edit', '/v2/creator-helper'];
+
+/** The public bootstrap and the native gateway endpoints (the socket, the creator's posts, the entries, the kinds text, allowed uploads), on canonical and preview world paths. */
 export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTES) {
   const selected = (req) => {
     const url = new URL(req.url, 'http://origin'), match = WORLD.exec(url.pathname);
     if (!match) return null;
     const [, preview = '', world, path = '/'] = match, base = `/${preview}w/${world}`;
-    if (!['/v1/bootstrap', '/views/world.json', '/v2/ws', '/v2/creator-token', '/v2/entries'].includes(path)) return null;
+    if (!['/v1/bootstrap', '/views/world.json', '/v2/ws', '/v2/entries', '/v2/kinds', ...CREATOR_POSTS].includes(path) && !UPLOAD.test(path)) return null;
     let entry;
     try { entry = readWorldRoutes(file)[world]; } catch { return { status: 503, refused: 'world-routing-unconfigured' }; }
     if (!entry) return { status: 404, refused: 'world-not-routed' };
@@ -62,11 +67,16 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
       res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'x-content-type-options': 'nosniff' }).end(req.method === 'HEAD' ? undefined : body);
       return true;
     }
-    // #3760: a paired client's kind entries (GET, revalidated by its tag) pass through as the gateway answers them.
-    const entries = path === '/v2/entries' && req.method === 'GET';
-    if (!entries && (path !== '/v2/creator-token' || req.method !== 'POST')) { reply(res, 405, path === '/v2/ws' ? 'websocket-required' : 'method'); return true; }
-    const upstream = request(new URL(path, entry.gateway), { method: req.method, headers: headers(req), timeout: 5000 }, answer => {
-      res.writeHead(answer.statusCode, { ...answer.headers, 'cache-control': entries ? 'private, no-cache' : 'no-store', 'x-robots-tag': 'noindex, nofollow' }); answer.pipe(res);
+    // #3760: a paired client's kind entries (GET, revalidated by its tag) pass through as the gateway answers them, and
+    // so does a creator's kinds text (#1960).
+    const entries = (path === '/v2/entries' || path === '/v2/kinds') && req.method === 'GET';
+    // K3: an allowed upload's bytes, which the page draws a creator's kind with; cached as the gateway says (immutable)
+    const upload = UPLOAD.test(path) && (req.method === 'GET' || req.method === 'HEAD');
+    if (!entries && !upload && (!CREATOR_POSTS.includes(path) || req.method !== 'POST')) { reply(res, 405, path === '/v2/ws' ? 'websocket-required' : 'method'); return true; }
+    // An upload's check and a bulk edit's answer take longer than a token's (the client waits 30 s and 10 s).
+    const within = path === '/v2/creator-upload' ? 35_000 : path === '/v2/creator-edit' ? 15_000 : 5000;
+    const upstream = request(new URL(path, entry.gateway), { method: req.method, headers: headers(req), timeout: within }, answer => {
+      res.writeHead(answer.statusCode, { ...answer.headers, ...(upload ? {} : { 'cache-control': entries ? 'private, no-cache' : 'no-store' }), 'x-robots-tag': 'noindex, nofollow' }); answer.pipe(res);
     });
     upstream.on('timeout', () => upstream.destroy());
     upstream.on('error', () => { if (res.destroyed) return; if (!res.headersSent) reply(res, 502, 'gateway-unreachable'); else res.destroy(); });

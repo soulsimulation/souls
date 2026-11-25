@@ -158,6 +158,8 @@ struct Bench {
     ground: BTreeMap<Id, Surface>,
     now: Micros,
     asked: u64,
+    /// The places a form's sit takes, when the bench has any (E7).
+    slots: Option<crate::slots::Slots>,
 }
 
 impl Bench {
@@ -221,6 +223,7 @@ impl Bench {
             ground: BTreeMap::from([(id(1), surface)]),
             now: 0,
             asked: 0,
+            slots: None,
         }
     }
 
@@ -236,7 +239,10 @@ impl Bench {
                 moves: &mut self.moves,
                 library: &self.library,
                 seed: 1,
-                places: None,
+                places: self.slots.as_mut().map(|slots| super::Places {
+                    slots,
+                    floors: &self.ground,
+                }),
             },
             &mut self.forms,
         )
@@ -416,7 +422,7 @@ fn a1_a_form_that_fails_before_its_contact_links_nothing() {
     let now = b.now;
     {
         let (mut w, forms) = b.world();
-        forms.leave(&mut w, id(2), now).expect("left");
+        forms.leave(&mut w, id(2), None, now).expect("left");
     }
     assert_eq!(b.run(), "left");
     assert!(
@@ -473,4 +479,118 @@ fn a1_a_link_effect_binds_only_from_a_link_the_kind_declares_and_seen_by_everyon
         "a link seen by its members needs its audience node (T8)"
     );
     assert!(bind_effects_with(&entry, "leave", &BTreeMap::new()).is_ok());
+}
+
+/// The rack given a seat and a swing's two forms, as content's swings write them: `swing` takes the seat then waits
+/// 30 s, linking its swinger; `get_off` is the swinger's alone, a rise that unlinks it.
+fn swing_entry() -> json::Value {
+    let forms = r#""slots": { "place": { "admits": "body", "posture": "sit", "most": 1 } },
+  "forms": {
+    "swing": { "who": "anyone", "steps": [{ "step": "sit", "slot": "place" }, { "step": "wait", "us": 30000000 }],
+      "effects": [{ "change": "link", "link": "user", "from": "actor", "event": "began" }] },
+    "get_off": { "who": { "link": "user" }, "steps": [{ "step": "rise" }],
+      "effects": [{ "change": "unlink", "link": "user", "from": "actor", "event": "got_off" }] },"#;
+    let text = ENTRY.replacen(r#""forms": {"#, forms, 1);
+    assert_ne!(text, ENTRY);
+    parse(&text).expect("JSON")
+}
+
+impl Bench {
+    /// The rack's seat (the chair fixture's place), its stand point where body 2 stands.
+    fn sit_place(&mut self) {
+        const CHAIR: &str = include_str!("../../../replica/fixtures/seats/chair.diag");
+        let place = replica::moves::Place::from_value(
+            &decode(&fixture_bytes(CHAIR).expect("bytes"))
+                .expect("decodes")
+                .value,
+        )
+        .expect("the chair's place");
+        let at = |point| crate::slots::PlaceAt {
+            thing: id(100),
+            place: place.clone(),
+            point,
+            facing: Quat::IDENTITY,
+            floor: id(1),
+            more: Vec::new(),
+        };
+        let stand = at(Vec3::new(0, place.height, 0)).stand().expect("a stand");
+        let mut slots = crate::slots::Slots::new();
+        slots
+            .add(at(Vec3::new(-stand.x, place.height, -stand.z)))
+            .expect("a place");
+        self.slots = Some(slots);
+    }
+
+    /// Soul 51 on body 2 asks for form `form` of the rack through who may ([`Forms::commit`]).
+    fn commit(&mut self, form: &str) -> Result<super::Asked, replica::effects::Refusal> {
+        self.asked += 1;
+        let mut digest = [0; 32];
+        digest[..8].copy_from_slice(&self.asked.to_le_bytes());
+        let intent = Intent {
+            id: Id::new(Scope([0xf6; 16]), self.asked).expect("an id"),
+            expiry: Micros::MAX / 2,
+            actor: Actor::Soul(soul(51)),
+            digest,
+        };
+        let entry = self.entry.clone();
+        let now = self.now;
+        let (mut w, forms) = self.world();
+        let asked = forms.commit(
+            &mut w,
+            &BTreeMap::new(),
+            &|_| None,
+            id(2),
+            id(100),
+            &entry,
+            form,
+            intent,
+            Limits::default(),
+            now,
+        );
+        self.flush();
+        asked
+    }
+
+    fn until(&mut self, t: Micros) {
+        while self.now < t {
+            self.tick();
+        }
+    }
+}
+
+/// E7 review: a seat taken and then only waited in (a swing) links its swinger at the seat's contact, not after the
+/// wait, since the posture outlives the run. So 10 s into a 30 s swing the swinger may `get_off`; and a Soul whose
+/// swing is left at 10 s stays linked, and may get off after.
+#[test]
+fn e7_a_swing_links_its_swinger_at_the_seat_so_get_off_works_mid_swing_or_after_a_leave() {
+    for leave in [false, true] {
+        let mut b = Bench::new();
+        b.entry = swing_entry();
+        b.sit_place();
+        assert!(matches!(b.commit("swing"), Ok(super::Asked::Started(_))));
+        b.until(10_000_000);
+        assert_eq!(b.forms.at(id(2)), Some(1), "{leave}: in the swing's wait");
+        assert_eq!(b.links(id(100), USER).len(), 1, "linked at the sit");
+        if leave {
+            let now = b.now;
+            {
+                let (mut w, forms) = b.world();
+                forms.leave(&mut w, id(2), None, now).expect("left");
+            }
+            assert_eq!(b.run(), "left");
+            assert_eq!(
+                b.links(id(100), USER).len(),
+                1,
+                "a left swing keeps its link"
+            );
+        }
+        let off = b.commit("get_off");
+        println!("leave {leave}: get_off at {} µs: {off:?}", b.now);
+        assert!(
+            matches!(off, Ok(super::Asked::Started(_))),
+            "{leave}: {off:?}"
+        );
+        assert_eq!(b.run(), "done", "{leave}: got off");
+        assert_eq!(b.links(id(100), USER), vec![], "{leave}: unlinked");
+    }
 }

@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +16,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { requestOf, worldOf } from './souls.mjs';
+import { ACT_WAIT_MS, actEnd, actWaitMs, lookParams, pairingState, requestOf, worldOf } from './souls.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -56,13 +57,16 @@ function souls(home, args) {
   return JSON.parse(r.stdout.trim().split('\n').at(-1));
 }
 
-/** The answer event for `sequence`, read from the daemon. */
+/** The answer event that ends `sequence`, read from the daemon: a walk's or a form's accepted (kind 3, sent as its
+ *  run starts, W11 #4087) is read past to its receipt or refusal; an act has at most one. */
 const got = []; // every answer read, kept: one read may take the answers of several intents
 async function answerOf(rt, sequence) {
-  return waitFor(async () => {
+  const end = await waitFor(async () => {
     got.push(...(await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
-    return got.find((e) => e.sequence === sequence);
+    return got.find((e) => e.sequence === sequence && e.answer !== 3);
   }, 60_000);
+  assert.ok(got.filter((e) => e.sequence === sequence && e.answer === 3).length <= 1, `one accepted at most: ${sequence}`);
+  return end;
 }
 
 const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
@@ -80,8 +84,7 @@ before(async () => {
 
 after(async () => {
   for (const rt of daemons) await request(rt.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('the arguments: pair takes a world url, can and act take act words; a world url names its directory and gateway', () => {
@@ -96,10 +99,80 @@ test('the arguments: pair takes a world url, can and act take act words; a world
   assert.deepEqual(requestOf(['conversations']).req, { op: 'converse', do: 'list' });
   assert.deepEqual(requestOf(['act', 'sit:ab-1', 'walk:ab-2']).req, { op: 'act', acts: ['sit:ab-1', 'walk:ab-2'] });
   assert.deepEqual(requestOf(['can', 'fill:ab-1', 'ab-2']).req, { op: 'can', acts: ['fill:ab-1', 'ab-2'] });
+  // G3: look set takes a preset's name or a params file, and waits for the receipt.
+  const set = requestOf(['look', 'set', 'punk']);
+  assert.deepEqual([set.req, set.wait], [{ op: 'look-set', params: '{"preset":"punk"}' }, true]);
+  assert.deepEqual(requestOf(['look']).req, { op: 'look' }, 'look alone is the brief');
+  assert.equal(requestOf(['look', 'set']).refused, 'look-set-usage');
+  const files = { 'mine.json': '{"frame":"fem","hair":"bob"}', 'list.json': '[1]', 'big.json': JSON.stringify({ hair: 'x'.repeat(2100) }) };
+  const read = (f) => { if (!(f in files)) throw new Error('no file'); return files[f]; };
+  assert.deepEqual(lookParams('mine.json', read), { params: '{"frame":"fem","hair":"bob"}' });
+  assert.equal(lookParams('list.json', read).refused, 'look-params');
+  assert.equal(lookParams('big.json', read).refused, 'look-params');
+  assert.equal(lookParams('nowhere.json', read).refused, 'look-set-usage');
+  // D1: --wait is the command's, not an act word.
+  const waited = requestOf(['act', 'sit:ab-1', '--wait', '--for', 'm1']);
+  assert.deepEqual([waited.req, waited.wait], [{ op: 'act', acts: ['sit:ab-1'], for: 'm1' }, true]);
+  assert.equal(requestOf(['act', 'sit:ab-1']).wait, undefined);
   assert.deepEqual(requestOf(['pair', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden' });
+  // First run: the new Soul's name rides on pair, either side of the url.
+  assert.deepEqual(requestOf(['pair', 'https://soul.game/eden', '--name', 'Ada']).req, { op: 'pair', url: 'https://soul.game/eden', name: 'Ada' });
+  assert.deepEqual(requestOf(['pair', '--name', 'Ada', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden', name: 'Ada' });
   assert.deepEqual(worldOf('https://soul.game/eden'), { directory: 'https://soul.game', world: 'eden', gateway: 'wss://soul.game/v2/ws' });
   assert.deepEqual(worldOf('http://127.0.0.1:9/local?gateway=ws://127.0.0.1:8/v2/ws'), { directory: 'http://127.0.0.1:9', world: 'local', gateway: 'ws://127.0.0.1:8/v2/ws' });
   assert.throws(() => worldOf('eden'), { code: 'pair-names-a-world' });
+});
+
+test('first run: before approval, look and status say plainly where the pairing stands', () => {
+  const home = mkdtempSync(join(tmpdir(), 'souls-waiting-'));
+  assert.equal(pairingState(home), null); // no pairing started here
+  const line = (v) => JSON.stringify(v) + '\n';
+  writeFileSync(join(home, 'pairing.log'), line({ ok: true, step: 'approve', link: 'https://soul.game/pair?code=ABCD-EFGH', code: 'ABCD-EFGH' }));
+  const waiting = pairingState(home);
+  assert.deepEqual([waiting.in_world, waiting.pairing, waiting.code], [false, 'waiting', 'ABCD-EFGH']);
+  assert.match(waiting.say, /waiting for your owner to approve.*ABCD-EFGH/);
+  writeFileSync(join(home, 'pairing.log'), line({ ok: true, step: 'approve', code: 'ABCD-EFGH' }) + line({ ok: false, code: 'expired_token' }));
+  assert.deepEqual([pairingState(home).pairing, pairingState(home).code], ['refused', 'expired_token']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('D1: act --wait returns the final phase, the refusal, or after its window a still-running line with how to check', async () => {
+  const sent = { ok: true, sequence: 7, sent: true };
+  const daemon = (answers) => async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() }, ...(r.quiet ? {} : { at: 'v9', changed: { n: 1 } }) });
+  let polls = 0;
+  const done = await actEnd(daemon(() => (++polls < 3 ? [{ answer: 'accepted' }] : [{ answer: 'accepted' }, { answer: 'receipt' }])), sent, { sleep: async () => {} });
+  // D7: the seat a fallback took, named on the answer as the receipt names it.
+  const held = { rank: 1, verb: 'eden:sit', id: 'ab-2', name: 'sage armchair', fallback: true };
+  const seated = await actEnd(async (r) => ({ ok: true, receipt: { sequence: 7, answers: [{ answer: 'receipt' }], ...(r.quiet ? {} : { held }) } }), sent, { sleep: async () => {} });
+  assert.deepEqual(seated.held, held);
+  assert.deepEqual([done.ok, done.phase, done.sequence, done.at, done.changed], [true, 'done', 7, 'v9', { n: 1 }], 'what changed comes with the last answer');
+  const refused = await actEnd(daemon(() => [{ answer: 'refused', reason: 'seat.taken' }]), sent, { sleep: async () => {} });
+  assert.deepEqual([refused.ok, refused.phase, refused.code, refused.reason], [false, 'refused', 'seat.taken', 'seat.taken']);
+  // A walk the world's ladder ended (N1's goal-unreachable, named like walk.blocked): what it waited for, from the receipt.
+  const why = '12.4 m from its leg\'s end';
+  const stuck = await actEnd(async (r) => ({ ok: true, receipt: { sequence: 7, answers: [{ answer: 'refused', reason: 'goal-unreachable' }], ...(r.quiet ? {} : { why }) } }), sent, { sleep: async () => {} });
+  assert.deepEqual([stuck.ok, stuck.phase, stuck.code, stuck.why, stuck.try], [false, 'refused', 'goal-unreachable', why, undefined]);
+  let t = 0;
+  const still = await actEnd(daemon(() => [{ answer: 'accepted' }]), sent, { ms: 60_000, now: () => t, sleep: async (ms) => { t += ms; } });
+  assert.deepEqual([still.ok, still.stillRunning, still.phase], [true, true, 'running']);
+  assert.match(still.detail, /still running after 60 s: check with `receipt 7`/);
+  const notSent = { ok: false, code: 'stopped-locally', sent: false };
+  assert.equal(await actEnd(async () => assert.fail('nothing asked'), notSent), notSent, 'a local refusal is returned as it is');
+});
+
+test('0.135: act --wait waits out a declared for=<seconds> and a margin, so a dance for a minute comes back done', async () => {
+  const req = (...words) => requestOf(['act', ...words, '--wait']).req;
+  assert.equal(actWaitMs(req('wave')), ACT_WAIT_MS);
+  assert.equal(actWaitMs(req('dance', 'for=10')), ACT_WAIT_MS, 'a short one keeps the usual window');
+  assert.equal(actWaitMs(req('dance', 'for=60')), 75_000);
+  assert.equal(actWaitMs(req('dance', 'for=3600')), 3_615_000);
+  // The minute's dance ends 60.8 s after it was sent: inside its window it is `done`, never still running.
+  let t = 0;
+  const sent = { ok: true, sequence: 7, sent: true };
+  const answers = () => (t < 60_800 ? [{ answer: 'accepted' }] : [{ answer: 'accepted' }, { answer: 'receipt' }]);
+  const done = await actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() } }), sent,
+    { ms: actWaitMs(req('dance', 'for=60')), now: () => t, sleep: async (ms) => { t += ms; } });
+  assert.deepEqual([done.phase, done.stillRunning], ['done', undefined]);
 });
 
 test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {
@@ -211,6 +284,20 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
     assert.ok(got.answer > 1 && typeof got.reason === 'string' && got.reason.length > 0, `refused by name: ${JSON.stringify(got)}`);
   }
 
+  // R1b: an act the world refuses names one offer of the same thing that would work, from this client's own offers:
+  // a form the rules pass on the copy before a move they cannot judge here, never one needing arguments, never the
+  // refused verb, walking there last.
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  writeFileSync(join(home, 'kinds', 'chair.json'), JSON.stringify({ format: 'souls-entry/1', kind: bare.kind, owner: 'thing',
+    slots: { seat: { admits: 'body', posture: 'sit', most: 1 } },
+    forms: { tidy: { who: 'anyone', starts: 'act', takes: { grams: { type: 'count' } }, needs: [], steps: [], effects: [] },
+      rest: { who: 'anyone', starts: 'act', needs: [], steps: [], effects: [] } } }));
+  const refusedHere = souls(home, ['act', `carrier:stop:${room}`, '--wait']);
+  assert.deepEqual([refusedHere.ok, refusedHere.phase], [false, 'refused'], JSON.stringify(refusedHere));
+  assert.deepEqual(refusedHere.try, { act: `rest:${room}`, name: 'rest', checked: 'yes' }, JSON.stringify(refusedHere.try));
+  assert.deepEqual(souls(home, ['receipt', String(refusedHere.sequence)]).receipt.try, refusedHere.try, 'the receipt names it too');
+  rmSync(join(home, 'kinds'), { recursive: true });
+
   // #3705: `stop` ends this Soul's own walk where it stands (a souls:cancel naming it); `receipt` shows its answers,
   // `events --since` lists what came without taking it, `conversations` lists the copy's, and `quit` is the daemon's.
   const cursor = souls(home, ['events']).cursor;
@@ -240,14 +327,21 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(talks.ok, true, JSON.stringify(talks));
   assert.deepEqual(talks.conversations, souls(home, ['converse', 'list']).conversations, 'the same as converse list');
 
-  const walk = souls(home, ['act', chair]);
-  assert.equal(walk.ok, true, JSON.stringify(walk));
-  const walked = await answerOf(rt, walk.sequence);
-  assert.equal(walked.answer, 1, `the walk ends with a receipt: ${JSON.stringify(walked)}`);
-  const sit = souls(home, ['act', `sit:${chair}`, `sit:${named['the chair in the square']}`]);
-  assert.equal(sit.ok, true, JSON.stringify(sit));
-  const sat = await answerOf(rt, sit.sequence);
-  assert.equal(sat.answer, 1, `the sit ends with a receipt: ${JSON.stringify(sat)}`);
+  // 0.135 G1: a walk names its gait, sent as parameter 2 (`gait:jog`); an unknown gait is refused by name.
+  const jog = souls(home, ['act', chair, 'gait=jog', '--wait']);
+  assert.deepEqual([jog.ok, jog.phase], [true, 'done'], `the jog ends with a receipt: ${JSON.stringify(jog)}`);
+  const sprint = souls(home, ['act', chair, 'gait=sprint', '--wait']);
+  assert.deepEqual([sprint.ok, sprint.phase, sprint.reason], [false, 'refused', 'move.unknown-gait'], JSON.stringify(sprint));
+
+  // D1: act --wait returns once the receipt has its final phase, or the world's refusal by name.
+  const walk = souls(home, ['act', chair, '--wait']);
+  assert.deepEqual([walk.ok, walk.phase, walk.receipt?.answers.at(-1).answer], [true, 'done', 'receipt'], `the walk ends with a receipt: ${JSON.stringify(walk)}`);
+  const sit = souls(home, ['act', `sit:${chair}`, `sit:${named['the chair in the square']}`, '--wait']);
+  assert.deepEqual([sit.ok, sit.phase], [true, 'done'], `the sit ends with a receipt: ${JSON.stringify(sit)}`);
+  assert.equal(typeof sit.changed, 'object', 'the answer closes as any command does');
+  const notCarrier = souls(home, ['act', `carrier:stop:${room}`, '--wait']);
+  assert.deepEqual([notCarrier.ok, notCarrier.phase, typeof notCarrier.code], [false, 'refused', 'string'], JSON.stringify(notCarrier));
+  assert.equal(notCarrier.code, notCarrier.reason);
   // A thing argument the copy cannot name is refused before anything is sent.
   assert.equal(souls(home, ['act', `fill:${chair}`, named['the chair in the square']]).code, 'act-arg-unnamed');
 });
@@ -285,4 +379,22 @@ test('A1: pair <world url> prints the link and code and returns; once the owner 
   assert.ok(answered.answer >= 1, JSON.stringify(answered));
   const secret = creds.souls[soul].local.token.split('.')[1];
   assert.ok(!readFileSync(join(home, 'pairing.log'), 'utf8').includes(secret), 'the token is not in the pairing\'s log');
+
+  // 0.133 Q2: a client started in an empty folder below a folder that holds a Souls home pairs into a new home of its
+  // own; the parent's home is not written to (every file byte-identical before and after).
+  const parent = join(dir, 'someone'), child = join(parent, 'projects', 'new-soul');
+  mkdirSync(join(parent, '.souls', 'souls', 's_theirs', 'memory'), { recursive: true });
+  writeFileSync(join(parent, '.souls', 'config.json'), JSON.stringify({ worlds: { eden: { url: 'https://example.invalid/w/eden' } }, souls: { s_theirs: { world: 'eden' } } }, null, 1));
+  writeFileSync(join(parent, '.souls', 'souls', 's_theirs', 'memory', 'self.md'), 'their own words\n');
+  mkdirSync(child, { recursive: true });
+  const files = (root) => { const out = {}; const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const f = join(d, e.name); if (e.isDirectory()) walk(f); else out[f] = createHash('sha256').update(readFileSync(f)).digest('hex'); } }; walk(root); return out; };
+  const before = files(join(parent, '.souls'));
+  const r = spawnSync(process.execPath, [CLI, 'pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`], { cwd: child, env: { PATH: process.env.PATH, HOME: parent, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+  const own = JSON.parse(r.stdout.trim().split('\n').at(-1));
+  assert.equal(own.step, 'approve', JSON.stringify(own));
+  const approved = await fetch(new URL('/v1/pair/approve', directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: own.code, confirm: true, test_person: 'owner' }) });
+  assert.equal(approved.status, 200);
+  await waitFor(() => existsSync(join(child, '.souls', 'credentials.json')));
+  assert.deepEqual(files(join(parent, '.souls')), before, "the parent folder's home is byte-identical");
+  assert.ok(!existsSync(join(parent, '.souls', 'credentials.json')) && !existsSync(join(parent, '.souls', 'pairing.log')), 'nothing new in it');
 });

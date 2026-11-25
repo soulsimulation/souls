@@ -11,6 +11,25 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 [docs/README.md](docs/README.md). Checkout placement and recovery:
 [workspace relocation](docs/process/workspace-relocation.md).
 
+## Where the project is
+
+- **Pre-alpha, zero users.** Nothing here is in production use. Accounts, Souls and world histories are disposable:
+  never write migration code for them; wipe and re-pair. A bug or a half-finished feature on the live site is
+  acceptable. A delay is not. Speed comes first; safety is restored by fixing what breaks, the same day.
+- **Scope: swap the engine, keep the product.** The work is a scalable engine and a fuller Soul Actions system
+  (`v2/`), fed into the product that already exists. The web app (`apps/web`: renderer, camera, sound, music, home,
+  sign-in, panels) stays and is fed from the new engine; it is never re-made. The new Soul client (`v2/client`) and
+  the new creator client stay. Rebuild a working thing only when that makes it better or is needed to connect it,
+  and say the cost first.
+- **Releases, in order:** 0.132 Core (Eden on the new engine, on the old page), 0.133 Robust (every world moved,
+  limits met), 0.134 Complete (Soul Actions expansion, v1 deleted), 0.135 Super (group scenarios). Fixes between
+  them take a third number.
+- **Parts:** engine, world model, Soul Actions, Soul gateway and Soul API, Soul client, creator client, public
+  stream, scene renderer, camera, app shell, identity and directory, infrastructure. Every task names its part and
+  its release.
+- **Terms:** intent (what a Soul's controller asks), receipt (the world's record of one intent, through its
+  phases), event and event log (what happened), kind (a sort of thing), Soul API, Soul gateway.
+
 ## Setup and everyday commands
 
 - Node ≥ 22.18 runs TypeScript by type stripping: no `enum`, no parameter properties, no other non-erasable syntax.
@@ -46,34 +65,19 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 - Skipped, `FIXME` and `TODO` checks count as unproved. Golden baselines change only with proof of an intended change.
 - Contract: [docs/architecture/engine-contract.md](docs/architecture/engine-contract.md).
 
-## Gates every change keeps green
+## Checks
 
-Startup mode (Gene, 18 Nov): per change the light set; the full battery daily and before release; a red daily run
-gets a same-day fix. [docs/testing.md](docs/testing.md#ci-window)
-
-- **Exact-head CI and the merge queue:** every PR passes `ci` at its exact head and again in the merge group; nothing
-  merges around them. Before pushing a `v2/` change, run `v2/tools/ci.sh quick` (format, no-kind-names, Clippy on
-  the changed crates, about a minute). [docs/testing.md](docs/testing.md#pre-push-quick-check)
-- **Served-world end-to-end:** the served-world e2e CI test (`ci/served-world-e2e`, being added) runs real Soul
-  actions through pairing and join against the public stream on every v2 PR; a full-Eden served smoke runs on every
-  release head.
-- **Flaky tests:** a test that fails twice gets a fix lane at once. Never weaken a test, skip it or raise a timeout to
-  make it pass.
-- **Independent review:** non-mechanical merges and core-engine changes get an independent review before they land.
-- **Walk (V3-walk):** `node tools/test-harness/walk/walk.mjs`. CI runs it in the heavy `packages` leg: in the daily
-  full battery on main (06:23 UTC), on manual dispatch and in the release gate, not per change. A deliberate change
-  updates the baseline with `--write`, in its own reviewed commit. [docs/testing.md](docs/testing.md#walk-gate)
-- **Bundle (V3-bundle):** `node tools/test-harness/bundle-budget/budget.mjs --build --check`, per change (the light
-  `types-web` leg). The baseline changes only in its own commit (`--write`); the gate never writes it.
-  [docs/testing.md](docs/testing.md#bundle-gate)
-- **Conformance pins:** a changed library def revision needs a new supplement in
-  `packages/conformance/conformance/`, in the same change, with its reason. Never edit older supplements.
-- **Full gate:** the [remote gate](docs/testing/remote-gate.md) runs the complete suite for a release head: 0 new
-  failures, 0 blockers, 0 unexpected skips. Don't re-run passing checks without a source change.
-- **Engine v2 (`v2/`):** a change only there is T1, runs CI's `v2` job alone (`v2/tools/ci.sh`) and no walk, bundle,
-  conformance or remote gate; the core's strict tiers switch on at the cut-over. Trunk and tranche rules:
-  [v2/docs/TRUNK.md](v2/docs/TRUNK.md), [v2/docs/tranche/FORMAT.md](v2/docs/tranche/FORMAT.md).
-  [docs/testing.md](docs/testing.md#ci-window)
+- **One check before merging:** `ci` on the pull request: build, plus the tests for the area the change touches.
+  Before pushing a `v2/` change, run `v2/tools/ci.sh quick`. There is no second run in a merge queue.
+- **Style never blocks.** Formatting, lint, changelog and description problems are fixed automatically or left as
+  advice. A green, working change is never held for them.
+- **Objects are tested when they change.** A kind's case files run when that kind is added or edited, when the
+  rules that read it change, and nightly. Keep case files to a small sample per kind.
+- **The net is after merging.** The full battery (walk, bundle, conformance, full Eden) runs nightly on main. A red
+  nightly run gets a fix the same day. A real browser looks at the real address after every deploy.
+- **Flaky tests:** fix or delete within the day. Never raise a timeout to pass.
+- **Baselines and conformance pins** change in the same pull request as the change that moves them, with one line
+  saying why.
 
 ## God mode build safety and seats
 
@@ -99,92 +103,46 @@ gets a same-day fix. [docs/testing.md](docs/testing.md#ci-window)
 - Directed live casts: `node tools/playtest/playtest.mjs direct <cast>`, or the `souls-director` skill from a chat
   session. [docs/testing/swarm-director.md](docs/testing/swarm-director.md)
 
-## Cloud spend
+## How work is done
 
-- The remote gate runs once per release head against a cached baseline; candidates use scoped gates. Never gate perf
-  experiments or docs/tools-only changes. Respect the shared concurrency cap.
-  [docs/process/modal-policy.md](docs/process/modal-policy.md)
-
-## Agent lifecycle
-
-[Planning and intake](docs/process/planning.md) separates direction, backlog, ready work and portable handoffs.
-For an agenda with multiple workers, follow the [development coordinator](docs/process/development-coordinator.md)
-contract; fresh sessions recover its dated agenda and assignments before dispatch.
-
-- Stay within the requested outcome. Prefer independently reviewable, single-digit-hour slices; finish one active
-  implementation before starting another. Get Gene's approval before substantial scope expansion or an out-of-scope
-  prerequisite; explain the smallest necessary addition. Routine in-scope repairs need no new permission.
-- A task issue is a lane's scope: its Acceptance and an estimate in agent-hours. One lane works one task issue, does
-  what the acceptance asks and stops. Edit the files the fix needs and list them in the PR: there is no per-file
-  permission and no file ownership, conflicts are resolved at merge, and one writer per worktree. The estimate is
-  not a limit: report on the issue when stuck or about 2× over, then continue unless told to stop. Work Gene
-  ordered needs no re-approval. Two failed fix attempts on one functional failure get an independent diagnosis;
-  environment, load and setup failures don't count. [Lane rules](.claude/agents/lane.md)
-- Locks only for heavy builds (the Saturn cargo slots); browser runs, node tests and single serves run freely. Proof
-  harnesses accept real-run evidence: attempt limits, fingerprints and descriptor pins never block a passing capture.
-- No long-lived stacks: a stacked branch lands within about 4 hours or merges into main early, and the integrator
-  lands the base first. A PR that leaves the merge queue unmerged gets `queue:dropped` and a comment with the reason automatically.
-- Continue to the authorized endpoint, including checks, proof and review fixes; do not stop at routine milestones
-  unless Gene requested review stops. Use an available goal mechanism for sustained work, otherwise a durable issue
-  checkpoint. Goals never override budgets, genuine blockers or merge/release approvals. See [bounded execution](docs/process/planning.md#bounded-execution).
-- Prefer isolated work on independent features in the development/release coordinator's chosen order. Check overlaps
-  at dispatch, shared-contract changes and integration; avoid continuous cross-worker synchronization. If no coordinator
-  is assigned, finish the bounded issue to its authorized endpoint and leave an integration handoff; do not assume release authority.
-- Work starts from an issue you claim (assign + `agent:claimed`); one branch `agent/<issue>-<slug>` and worktree per
-  issue; small PRs; unfinished work behind a flag. Proof goes in the PR, not the tree: no status, brief, prompt or
-  report files. No scheduled agents: the maintainer or authorized development owner starts bounded work within
-  the agreed agenda.
-- Never edit shared append-only files: changelog fragments go in `changes/`, conformance changes in a new supplement,
-  generated output is built in CI, baselines are regenerated in their own commit. `eden.mjs` is built in CI and
-  synced on main by a bot PR; PRs don't commit its rebuilt blocks (#3118).
-- Ready PRs get `merge:ready`; the merge train merges them (T0–T2 on green, as is when they merge cleanly and touch no
-  engine or other strict path; T3–T4 rebased, re-tested and after the maintainer).
-  [docs/process/agent-workflow.md](docs/process/agent-workflow.md)
-- Each PR names its proof tier ([PROOF-POLICY.yml](docs/process/PROOF-POLICY.yml); `node tools/proof/tier.mjs`) and
-  adds a changelog fragment in [`changes/`](changes/README.md) unless it is labelled `no-changelog`.
-- "Done" means walked on the real URL with real input; a scripted e2e alone doesn't count. Visual evidence is uncut,
-  real-speed video. [docs/process/](docs/process/agent-lifecycle.md)
-- Bug fixes need no approval from Gene. A defect a lane finds on the way is fixed in the same pull request, listed
-  under "Also fixed", when the fix is small (about 30 minutes or 50 lines), keeps the tier and stays in the area;
-  otherwise it gets its own small pull request, no issue. File an issue only for work that will not start today, needs
-  Gene's decision or exceeds about 2 hours. Destructive production deletes need the maintainer's explicit yes.
-- Issues state the problem and acceptance criteria before work starts. A PR body needs the issue link, a one-line
-  summary and the CI run link (the proof bot adds it); a fuller journal entry is optional. `proof-ok` blocks only on
-  those, a privacy finding and the T3–T4 maintainer sign-off; the rest is advice. A green, reviewed PR is never
-  blocked by its description. [docs/process/agent-workflow.md](docs/process/agent-workflow.md#pr-body)
-- Repo skills in `.claude/skills/` (plain Markdown, readable by any agent): `journal`, `epic`, `triage`, `finish`,
-  `proof`, `e2e`, `souls-director`, `coordinator-handoff`. Agent definitions in `.claude/agents/`: `coordinator`,
-  `lane`, `reviewer`.
+- **A task is one issue:** what is wrong or wanted, how we will know it is done, its part, its release, and a
+  ceiling in agent-hours. One lane works one task, does what it asks and stops. The ceiling is a limit, not a
+  target; at about twice the ceiling, say so on the issue and carry on unless told to stop.
+- **Stay in scope.** A small defect found on the way (about 30 minutes) is fixed in the same pull request. Anything
+  larger is a new task. Widening scope or rebuilding a working thing needs Gene's yes, with the cost stated.
+- **One branch `agent/<issue>-<slug>` and one worktree per task.** Small pull requests. Unfinished work sits behind
+  a flag. No status, brief or report files in the tree.
+- **A pull request says:** the issue, one line on what changed, and how it was checked. Add one short clip, taken
+  on the old page, only when a viewer would see the change.
+- **Merging:** when `ci` is green and the change does what the task asked, the coordinator merges it. Engine-core
+  changes get one independent read first. Nothing else needs a label, a tier or a sign-off.
+- **Done** means seen working on the real address with real input.
+- Never commit secrets or bypass the secret scanner. Never publish device details (see above).
+- Repo skills in `.claude/skills/`: `first-day`, `e2e`, `souls-director`, `entry`, `coordinator-handoff`. Agent definitions in
+  `.claude/agents/`: `coordinator`, `lane`, `reviewer`.
 
 ## Development coordinator
 
-These rules bind whoever coordinates an agenda. They hold across handoffs and context compactions; after either,
-re-read the agenda issue before dispatching anything.
-
-- The agenda is the pinned coordination issue (#1960 as of November 2026): Gene's decisions, the lanes and their
-  order, and every task. Dispatch only tasks listed there. New work enters by adding a task issue to it.
-- Dispatch one task issue per lane, in the agenda's order. Review each pull request against the issue's Acceptance,
-  and send back work that goes beyond the acceptance. Never extend a task by message: edit the issue
-  or open a new one. A follow-up dispatched from a finding carries its bounds in the dispatch brief; its PR is the
-  record.
-- Stay thin: dispatch, review, sign, keep the merge queue moving through a steward, and release. Do not do a
-  lane's work. Stop dispatching while more than eight pull requests are ready and unmerged.
-- After each wave of dispatches and each release, post a checkpoint on the agenda issue; with each release, the
-  table of tasks merged since the last one, with estimate, hours taken and how each ended. A successor starts from
-  that issue, so a handoff packet carries state (pull requests, heads, what is running) and never rules.
-- Nothing stays unfiled or stale: at each release the steward gives every open issue without a milestone, and
-  every pull request untouched for seven days, an outcome (close with a reason, park, backlog, or propose as a
-  task). An issue where a Soul or a world can get stuck goes to the top whatever its age.
-- Gene alone decides scope, priority, spend and production machines. Do not re-ask what the agenda lists as
-  decided. [Coordinator contract](docs/process/development-coordinator.md)
+- **The plan lives in two places.** The pinned agenda issue lists the releases, the lanes and every task. The
+  master view is Gene's page: his inbox, the blueprint, and the state of every part and lane. Keep both true.
+- **Talk to Gene through the master view's inbox.** A decision or an action he must take is one inbox item with
+  the choice stated and a recommendation. Read his answers and notes there at the start of every wave. Do not ask
+  what is already decided; decide small things yourself and record them.
+- **Stay thin:** dispatch one task per lane, read each result against its task, merge, release. Do not do a lane's
+  work. Run as many lanes as have independent tasks and the usage budget allows.
+- **After each wave:** update the tasks and lanes on the master view, and leave one short update in the inbox. No
+  separate checkpoint documents.
+- **Gene alone decides** scope, priority, spend and anything that deletes data on the production machine.
+  [Coordinator contract](docs/process/development-coordinator.md)
 
 ## Release and operations
 
-- The development coordinator is the release owner and runs releases end to end, following the current topology in
-  the release doc: gate receipt, build of exactly HEAD of a clean tree, CDN-first assets, staged `ship.sh` with
-  backups, healthz, walks, cdn-walk, rollback on failure, changelog. Production deletes need Gene's explicit yes. On a
-  classifier refusal, report the exact step and the workaround tried; never hand back silently.
-  [docs/release.md](docs/release.md#release-owner)
+- A release is main at a green nightly, built once, deployed, then looked at in a real browser on the real
+  address: the world draws, a Soul moves, sign-in works, the home page is intact. If not, switch back and fix.
+- **First day comes first.** A release is not done until the `first-day` skill passes on the real address: a fresh
+  agent that knows nothing of this repository takes a new person from New Soul to a named Soul they can see and
+  instruct, approved on the page. Judge by the screen, never by a client's or another agent's report.
+- No freeze, no gate receipt, no rehearsal. The coordinator releases when a release's tasks are done.
 - Never touch services, users, DNS or proxies on the host that aren't Soul's. [docs/operations.md](docs/operations.md)
 
 ## Visitor analytics

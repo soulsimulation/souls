@@ -352,6 +352,14 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        o.push_str(",\"sync\":");
+        SYNCS.json(&mut o);
+        STREAM.json("stream", &mut o);
+        BACKUP.json("stream_backup", &mut o);
+        SHIPPING.json("shipping", &mut o);
+        ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
+        HISTORY_EXPORT.json(&mut o);
+        CREATOR.json("creator", &mut o);
         o.push_str("}\n");
         o
     }
@@ -404,6 +412,276 @@ impl Stalls {
             self.longest_ms.load(Ordering::Relaxed)
         );
     }
+}
+
+/// The sync thread's copy (`crate::syncs`, #1960): its seals, the records requests refused `sync-unknown-hash` (a
+/// record replaced longer ago than its window), and how far back each window of replaced records reached at the last
+/// seal, in seals and ms (`replica::sync::Records::windows`). One per process, written by the sync thread.
+pub struct Syncs {
+    seals: AtomicU64,
+    unknown_hash: AtomicU64,
+    small_seals: AtomicU64,
+    small_ms: AtomicU64,
+    big_seals: AtomicU64,
+    big_ms: AtomicU64,
+}
+
+/// This process's sync copy.
+pub static SYNCS: Syncs = Syncs {
+    seals: AtomicU64::new(0),
+    unknown_hash: AtomicU64::new(0),
+    small_seals: AtomicU64::new(0),
+    small_ms: AtomicU64::new(0),
+    big_seals: AtomicU64::new(0),
+    big_ms: AtomicU64::new(0),
+};
+
+impl Syncs {
+    /// A seal, and how far back the windows reach after it: seals and ms.
+    pub fn sealed(&self, small: u64, small_ms: u128, big: u64, big_ms: u128) {
+        let ms = |v: u128| u64::try_from(v).unwrap_or(u64::MAX);
+        self.seals.fetch_add(1, Ordering::Relaxed);
+        self.small_seals.store(small, Ordering::Relaxed);
+        self.small_ms.store(ms(small_ms), Ordering::Relaxed);
+        self.big_seals.store(big, Ordering::Relaxed);
+        self.big_ms.store(ms(big_ms), Ordering::Relaxed);
+    }
+
+    /// A records request refused `sync-unknown-hash`.
+    pub fn unknown_hash(&self) {
+        self.unknown_hash.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `{"seals":n,"unknown_hash":n,"small_window":{"seals":n,"ms":n},"big_window":{"seals":n,"ms":n}}`.
+    pub fn json(&self, o: &mut String) {
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            "{{\"seals\":{},\"unknown_hash\":{},\"small_window\":{{\"seals\":{},\"ms\":{}}},\"big_window\":{{\"seals\":{},\"ms\":{}}}}}",
+            l(&self.seals),
+            l(&self.unknown_hash),
+            l(&self.small_seals),
+            l(&self.small_ms),
+            l(&self.big_seals),
+            l(&self.big_ms)
+        );
+    }
+}
+
+/// The public stream's state (R12), set by `worldd serve`'s stream thread: `recovering` until its first flush,
+/// `serving` after it, and `degraded` while its recovery is refused, with the fault, the tries refused so far and the
+/// wait before the next; `stopped` with its fault if it ends after serving. A degraded world stays up with no viewers;
+/// a crash loop would hide the fault. Unset (no
+/// field in `health.json`) where no public stream runs.
+pub struct Stream(Mutex<String>);
+
+/// This process's public stream.
+pub static STREAM: Stream = Stream(Mutex::new(String::new()));
+
+/// R15: the stream's recovery chain, backed up to the store behind it (`stream_backup` in `health.json`). Viewers read
+/// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
+pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
+
+/// R17: the start's reads of the store that the world no longer waits on (`shipping`, `archive` and `creator` in
+/// `health.json`): `degraded` with the fault, the tries so far and the wait before the next while the store does not
+/// answer, `current` once it did, `stopped` with the fault if that helper ended on a refusal of another kind. The world
+/// listens and serves meanwhile; its log on the disk is the truth, and shipping catches up from it.
+pub static SHIPPING: Stream = Stream(Mutex::new(String::new()));
+/// R17: the history archive's open (its header, bundle index and public history), as [`SHIPPING`].
+pub static ARCHIVE: Stream = Stream(Mutex::new(String::new()));
+/// R17: the creator's record in the directory, as [`SHIPPING`]. While it is degraded, edits fail closed.
+pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
+
+/// The public history mirror's faults (`history_export` in `health.json`): keys the archiver stored but could not copy
+/// into the world's public history directory, the count and the last key with its fault. The store holds the truth;
+/// a key the mirror refuses is skipped and the world goes on. No field until the first fault. The keys refused so far
+/// (at most [`EXPORT_KEYS_HELD`]) are held so each is logged once, not at every write of it.
+pub struct ExportFaults(Mutex<(u64, String, std::collections::BTreeSet<String>)>);
+
+/// The most refused keys [`ExportFaults`] remembers; past it, a newly refused key is logged at each refusal.
+pub const EXPORT_KEYS_HELD: usize = 4096;
+
+/// This process's public history mirror.
+pub static HISTORY_EXPORT: ExportFaults = ExportFaults(Mutex::new((
+    0,
+    String::new(),
+    std::collections::BTreeSet::new(),
+)));
+
+impl ExportFaults {
+    /// `key` was not mirrored, refused with `fault`; whether this is its first refusal (to log).
+    pub fn fault(&self, key: &str, fault: &str) -> bool {
+        let mut f = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        f.0 += 1;
+        f.1 = format!("{key}: {fault}");
+        if f.2.contains(key) {
+            return false;
+        }
+        if f.2.len() < EXPORT_KEYS_HELD {
+            f.2.insert(key.to_owned());
+        }
+        true
+    }
+
+    /// The faults so far.
+    pub fn count(&self) -> u64 {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).0
+    }
+
+    /// `,"history_export":{"faults":n,"last":"<key>: <fault>"}`, or nothing before the first fault.
+    fn json(&self, o: &mut String) {
+        let f = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if f.0 > 0 {
+            let _ = write!(
+                o,
+                ",\"history_export\":{{\"faults\":{},\"last\":\"{}\"}}",
+                f.0,
+                quoted(&f.1)
+            );
+        }
+    }
+}
+
+/// The history archiver's backlog (`archive.queued`, `archive.queued_bytes` and `archive.in_log` in `health.json`):
+/// the parts waiting in its channel and their bytes (at most the window), and the records past them left in the log on
+/// the disk for it to read once it has caught up (`worldd serve`'s handover sets them, under its own lock).
+pub struct Backlog(Mutex<(u64, u64, u64)>);
+
+/// This process's archiver's backlog.
+pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
+
+impl Backlog {
+    /// The backlog as it stands now.
+    pub fn set(&self, queued: u64, queued_bytes: u64, in_log: u64) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = (queued, queued_bytes, in_log);
+    }
+
+    /// `"queued":n,"queued_bytes":n,"in_log":n`.
+    fn fields(&self) -> String {
+        let (q, b, l) = *self.0.lock().unwrap_or_else(|e| e.into_inner());
+        format!("\"queued\":{q},\"queued_bytes\":{b},\"in_log\":{l}")
+    }
+}
+
+impl Stream {
+    pub fn recovering(&self) {
+        self.set("{\"state\":\"recovering\"}".to_owned());
+    }
+
+    pub fn serving(&self) {
+        self.set("{\"state\":\"serving\"}".to_owned());
+    }
+
+    /// R17: the store answered this start read.
+    pub fn current(&self) {
+        self.set("{\"state\":\"current\"}".to_owned());
+    }
+
+    /// Its recovery refused `fault` for the `tries`th time; the next try in `next_try_ms`.
+    pub fn degraded(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        self.set(format!(
+            "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
+            quoted(fault)
+        ));
+    }
+
+    /// A running helper's write (the archiver's) the store did not answer, `tries` times so far, the last with `fault`;
+    /// it is tried again in `next_try_ms`, and what comes meanwhile waits in order.
+    pub fn behind(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        self.set(format!(
+            "{{\"state\":\"behind\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
+            quoted(fault)
+        ));
+    }
+
+    /// It stopped on `fault` after serving; the world goes on without it.
+    pub fn stopped(&self, fault: &str) {
+        self.set(format!(
+            "{{\"state\":\"stopped\",\"fault\":\"{}\"}}",
+            quoted(fault)
+        ));
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"degraded\"")
+    }
+
+    /// Whether the public stream still recovers its history ([`Stream::recovering`]).
+    pub fn is_recovering(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"recovering\"")
+    }
+
+    /// Whether a running helper waits for the store ([`Stream::behind`]).
+    pub fn is_behind(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"behind\"")
+    }
+
+    fn set(&self, json: String) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = json;
+    }
+
+    /// How the stream's backup stands ([`BACKUP`]).
+    pub fn backup(&self, state: &crate::view_out::BackupState) {
+        self.set(match state {
+            crate::view_out::BackupState::Current => "{\"state\":\"current\"}".to_owned(),
+            crate::view_out::BackupState::Degraded {
+                fault,
+                tries,
+                next_try_ms,
+                behind,
+                behind_bytes,
+            } => format!(
+                "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms},\"behind\":{behind},\"behind_bytes\":{behind_bytes}}}",
+                quoted(fault)
+            ),
+            crate::view_out::BackupState::Fenced { fault } => format!(
+                "{{\"state\":\"fenced\",\"fault\":\"{}\"}}",
+                quoted(fault)
+            ),
+        });
+    }
+
+    /// `,"<name>":{...}`, or nothing while unset.
+    fn json(&self, name: &str, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !s.is_empty() {
+            o.push_str(&format!(",\"{name}\":"));
+            o.push_str(&s);
+        }
+    }
+
+    /// As [`Stream::json`], with `fields` (`"k":v,...`) last inside the object.
+    fn json_with(&self, name: &str, fields: &str, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(inside) = s.strip_suffix('}') {
+            o.push_str(&format!(",\"{name}\":{inside},{fields}}}"));
+        }
+    }
+}
+
+/// `text` as the inside of a JSON string.
+fn quoted(text: &str) -> String {
+    let mut q = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '"' => q.push_str("\\\""),
+            '\\' => q.push_str("\\\\"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(q, "\\u{:04x}", c as u32);
+            }
+            c => q.push(c),
+        }
+    }
+    q
 }
 
 /// Writes `health.json` at `path` every `every`, by a temporary file and a rename, until the process ends. It
@@ -459,6 +737,58 @@ mod tests {
                 b - 1
             );
         }
+    }
+
+    /// The archiver behind a store that does not answer says so in `health.json`, with the parts waiting for it.
+    #[test]
+    fn an_archive_behind_says_its_fault_and_the_parts_that_wait() {
+        let (archive, queue) = (
+            Stream(Mutex::new(String::new())),
+            Backlog(Mutex::new((0, 0, 0))),
+        );
+        let json = || {
+            let mut o = String::new();
+            archive.json_with("archive", &queue.fields(), &mut o);
+            o
+        };
+        assert_eq!(json(), "", "unset: no field");
+        archive.behind("store-unreachable: k: timeout: receive response", 3, 4000);
+        queue.set(2, 25, 7);
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"behind\",\"fault\":\"store-unreachable: k: timeout: receive response\",\"tries\":3,\"next_try_ms\":4000,\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
+        );
+        archive.current();
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
+        );
+    }
+
+    /// A key the public history mirror could not hold is counted in `health.json`, by its key; none, no field.
+    #[test]
+    fn a_history_export_fault_is_counted_by_its_key() {
+        let faults = ExportFaults(Mutex::new((0, String::new(), Default::default())));
+        let json = || {
+            let mut o = String::new();
+            faults.json(&mut o);
+            o
+        };
+        assert_eq!(json(), "");
+        assert!(faults.fault(
+            "history/everyone/events/00020781/05",
+            "history-export: directory symlink or type mismatch"
+        ));
+        // The same key again is counted, not logged again.
+        assert!(!faults.fault(
+            "history/everyone/events/00020781/05",
+            "history-export: directory symlink or type mismatch",
+        ));
+        assert!(faults.fault("history/everyone/events/00020781/06", "another key"));
+        assert_eq!(
+            json(),
+            ",\"history_export\":{\"faults\":3,\"last\":\"history/everyone/events/00020781/06: another key\"}"
+        );
     }
 
     #[test]

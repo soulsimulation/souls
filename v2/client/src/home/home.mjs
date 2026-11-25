@@ -10,7 +10,7 @@
 // A token is read here and handed to the daemon in memory. It never goes into an argument, an environment variable,
 // a log line, an error or any file but credentials.json.
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
 export const HOME_NAME = '.souls';
@@ -30,14 +30,43 @@ export class Refused extends Error {
 }
 
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
-const isHome = (root) => existsSync(join(root, 'config.json')) || existsSync(join(root, 'souls'));
 
-/** The home: `SOULS_HOME`, else the nearest `.souls` from `cwd` up to `homedir` (home.mjs `findHome`). */
-export function findHome({ cwd, env = {}, homedir }) {
+/** What a new home's `.gitignore` holds (0.133 Q2): everything, so a home made inside a repository is never committed. */
+export const HOME_GITIGNORE = '# A Souls home: its credentials and its Souls\' own files. Never committed.\n*\n';
+
+/** Makes home `root` when there is none, mode 0700, with a `.gitignore` that keeps all of it out of git (0.133 Q2). */
+export function makeHome(root) {
+  if (existsSync(root)) return;
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  writeFileSync(join(root, '.gitignore'), HOME_GITIGNORE);
+}
+
+/** The commands that add to a home (a Soul, an account, a world, a Soul brought in): they never land in a home found in
+ *  a parent folder (0.133 Q2). Reading a parent's home for a Soul it already has still works. */
+export const ADDS = new Set(['pair', 'login', 'adopt', 'import']);
+
+/** `--home <path>` taken out of a command's words: the home its person named, and the words without it. */
+export function namedHome(argv) {
+  const k = argv.indexOf('--home');
+  if (k < 0) return { named: null, argv };
+  if (!argv[k + 1] || argv[k + 1].startsWith('--')) throw new Refused('home-usage', '--home <path to a .souls folder>');
+  return { named: argv[k + 1], argv: [...argv.slice(0, k), ...argv.slice(k + 2)] };
+}
+
+/**
+ * The home: one its person names (`--home <path>`, or `SOULS_HOME`), else the nearest `.souls` folder that exists from
+ * `cwd` up to `homedir` (home.mjs `findHome`), a home or one still pairing: the lookup stops there, so a client whose
+ * own `.souls` is not yet approved never reaches a parent folder's. A command that adds to a home (`adds`, [`ADDS`])
+ * never takes a parent folder's: it uses `cwd`'s own `.souls`, a new one when there is none (0.133 Q2: a client in a
+ * folder below someone's Souls home must not write into it).
+ */
+export function findHome({ cwd, env = {}, homedir, adds = false, named = null }) {
+  if (named) return resolve(cwd, named);
   if (env.SOULS_HOME) return resolve(cwd, env.SOULS_HOME);
   const start = real(cwd), stop = homedir ? real(homedir) : null;
+  if (adds) return join(start, HOME_NAME);
   for (let dir = start; ; dir = dirname(dir)) {
-    if (isHome(join(dir, HOME_NAME))) return join(dir, HOME_NAME);
+    if (existsSync(join(dir, HOME_NAME))) return join(dir, HOME_NAME);
     if (dir === stop || dirname(dir) === dir) return join(start, HOME_NAME);
   }
 }

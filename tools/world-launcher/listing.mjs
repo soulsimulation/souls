@@ -8,10 +8,14 @@ export const UNLISTED_SLUGS = Object.freeze(['bench-hamlet', 'bench-eden']);
 /** Shown first, in this order: the flagship worlds (Eden 2026, Mars College 2026). */
 export const FEATURED_SLUGS = Object.freeze(['eden-2026', 'my-mars-college-2026-3']);
 
-/** A registry row's explicit `unlisted` (owner or operator) wins; otherwise the bench slugs and any "… (scratch)" name. */
+/** A local or test world's address (a dev stack's `dev`, a test's `test-…`): never on the public list (first day, 25 Nov). */
+export const TEST_SLUG = /^(?:dev|test)(?:-[a-z0-9-]*)?$/;
+
+/** A registry row's explicit `unlisted` (owner or operator) wins; otherwise the bench slugs, a dev or test world's
+ *  address and any "… (scratch)" name. */
 export function isUnlisted(w) {
   if (typeof w?.unlisted === 'boolean') return w.unlisted;
-  return UNLISTED_SLUGS.includes(w?.slug) || /\(scratch\)\s*$/i.test(String(w?.name ?? ''));
+  return UNLISTED_SLUGS.includes(w?.slug) || TEST_SLUG.test(String(w?.slug ?? '')) || /\(scratch\)\s*$/i.test(String(w?.name ?? ''));
 }
 
 /** Featured first; then the most Souls; then the newest. `souls(w)` reads the freshest count the launcher has. */

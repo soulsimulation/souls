@@ -6,6 +6,7 @@
 // hand adapters and contacts apply unchanged. Support stays the humanoid navigation disc: the whole lower body is
 // authored inside it (owner admission refuses body.footprint otherwise). The GLB is generated from the repository's
 // published animated-casual.glb and is never checked in.
+import { isMain } from '../../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -144,4 +145,4 @@ export function authorCentaur({source=join(root,'mars/viewer/public/modular/envi
  if(out){out=resolve(out);mkdirSync(out,{recursive:true});writeFileSync(join(out,'body.glb'),bytes);writeFileSync(join(out,'manifest.json'),JSON.stringify(manifest,null,1)+'\n');}
  return {bytes,manifest,stats:{body:'Juniper',bytes:bytes.length,triangles:indices.length/3,drawCalls:1,images:0,joints:joints.length,clips:gltf.animations.map(c=>c.name),lowerBodyReach:+reach.toFixed(3),hindOffset}};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)console.log(JSON.stringify(authorCentaur({source:process.argv[2],out:process.argv[3]??join(root,'.local/centaur-authored')}).stats));
+if(isMain(import.meta.url))console.log(JSON.stringify(authorCentaur({source:process.argv[2],out:process.argv[3]??join(root,'.local/centaur-authored')}).stats));

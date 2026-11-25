@@ -4,6 +4,7 @@
 // rule's name, or the check itself is broken. Then the tree. Rules and what they do not prove: README.md.
 //
 //   node v2/tools/arch/check.mjs          (from anywhere; exit 1 on a broken rule)
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -57,11 +58,14 @@ export const ALLOWED = {
   // chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b,
   // #3156). archive, supervisor: `serve` archives its history (V3's archiver) into O9's folder store (O3b, #3458).
   // backup: O20's restore reads a served world's shipped stores back in its tests (O20b, #3523; dev only).
-  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor', 'backup'],
+  // libc: `serve`'s SIGTERM and SIGINT handler, which writes one line naming the signal and re-raises it (D6,
+  // src/stopped.rs, in the binary; the library keeps `forbid(unsafe_code)`).
+  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor', 'backup', 'libc'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   // worldd and sim: the world's view tier in the view subscription tests (#3292), and a real world behind the gateway
-  // for a creator's edits end to end (G1b, #3362; dev only).
-  gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix', 'worldd', 'sim', 'miniz_oxide'],
+  // for a creator's edits end to end (G1b, #3362; dev only). #3697: a creator's upload passes G6's check and hold
+  // point (assets), as a Soul's picture does in directoryd (W11).
+  gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix', 'worldd', 'sim', 'miniz_oxide', 'assets'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
@@ -191,4 +195,4 @@ async function main() {
   return problems.length ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();
+if (isMain(import.meta.url)) process.exitCode = await main();

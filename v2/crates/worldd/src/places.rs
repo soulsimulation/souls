@@ -16,6 +16,17 @@ use sim::walk::town::Town;
 /// no such place whose slot has a boarding reach (a boat afloat) is boarded from clear ground ([`board_from`]). Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
+/// `thing`'s own boxes in `floor`'s frame (E11d): what a body climbing out of one of its seats may pass over.
+pub fn footprint(tree: &replica::tree::Tree, thing: Id, floor: Id) -> sim::slots::Footprint {
+    tree.handle(thing)
+        .zip(tree.handle(floor))
+        .and_then(|(h, f)| sim::ground::scene::solids_under(tree, h, f).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.ring)
+        .collect()
+}
+
 pub fn register(
     town: &mut Town,
     kinds: &[(String, Json)],
@@ -41,6 +52,7 @@ pub fn register(
             point,
             facing,
             floor,
+            more: s.more.clone(),
         };
         // The stand point on the floor, at the floor's height under the seat.
         let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
@@ -120,6 +132,92 @@ pub fn register(
     let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
     things.dedup();
     (out, things.len(), all, left, moved)
+}
+
+/// The runs of the registered seats `places` that move with their cabins (N14, `sim::courses::rides::seat_runs`): each
+/// ride's seats, from its entry in `kinds` (the one the thing names), carried onto the floor its seats are on, over that
+/// floor's height (its surface for the standard body), on the ride's own clock from world time 0. Each is the thing's id and its seat's run; a thing whose
+/// entry has no ride of two stops has none.
+pub fn runs(
+    town: &Town,
+    kinds: &[(String, Json)],
+    places: &[PlaceAt],
+) -> Vec<(Id, sim::courses::rides::SeatRun)> {
+    use replica::pose::Frame;
+    let mut by_thing: std::collections::BTreeMap<Id, std::collections::BTreeMap<u64, PlaceAt>> =
+        Default::default();
+    for p in places {
+        by_thing
+            .entry(p.thing)
+            .or_default()
+            .insert(p.place.slot, p.clone());
+    }
+    let mut out = Vec::new();
+    for (thing, registered) in by_thing {
+        let Some(node) = town.tree.handle(thing).and_then(|h| town.tree.node(h)) else {
+            continue;
+        };
+        let name = import_eden::entry_name(node.kind().as_str(), node.fields());
+        let Some((_, entry)) = kinds.iter().find(|(k, _)| k == name) else {
+            continue;
+        };
+        if entry.get("ride").is_none() {
+            continue;
+        }
+        let Some(floor) = registered.values().next().map(|p| p.floor) else {
+            continue;
+        };
+        let surface = town.surfaces.get(&floor);
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let ground = |x: i64, z: i64| {
+            let b = surface?
+                .place(floor, frame, Vec3::new(x, 0, z), Quat::IDENTITY)
+                .ok()?;
+            Some(b.pose.position.y)
+        };
+        let Some(x) = town
+            .tree
+            .handle(thing)
+            .zip(town.tree.handle(floor))
+            .and_then(|(h, f)| sim::ground::scene::xform_to(&town.tree, h, f).ok())
+        else {
+            continue;
+        };
+        let to_floor = |p: Vec3| x.point(p).ok();
+        for r in sim::courses::rides::seat_runs(entry, &registered, &to_floor, &ground, 0) {
+            out.push((thing, r));
+        }
+    }
+    out
+}
+
+/// What the trips of the rides that fly a loop from their stop set back when they end (a balloon's `under_way`,
+/// `sim::courses::rides::trip_ends`): each thing of `places` on a course whose entry in `kinds` has a ride that
+/// [`sim::courses::rides::Ride::loops_aloft`], with its ends. Its trip ends when it next stands at its home, so a balloon
+/// set off once is boarded again.
+pub fn ride_trips(
+    town: &Town,
+    kinds: &[(String, Json)],
+    places: &[PlaceAt],
+) -> Vec<(Id, Vec<(u64, replica::encode::Value)>)> {
+    let things: std::collections::BTreeSet<Id> = places.iter().map(|p| p.thing).collect();
+    things
+        .into_iter()
+        .filter_map(|thing| {
+            let node = town.tree.handle(thing).and_then(|h| town.tree.node(h))?;
+            node.fields().get(&replica::schedule::F_COURSE)?;
+            let name = import_eden::entry_name(node.kind().as_str(), node.fields());
+            let (_, entry) = kinds.iter().find(|(k, _)| k == name)?;
+            sim::courses::rides::Ride::of(entry)?
+                .loops_aloft()
+                .then_some(())?;
+            let ends = sim::courses::rides::trip_ends(entry);
+            (!ends.is_empty()).then_some((thing, ends))
+        })
+        .collect()
 }
 
 /// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that

@@ -75,6 +75,8 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+/// Two centres closer than this, µm, are a close pair (#4215: the overlap count's 0.3 m).
+const CLOSE: i64 = 300_000;
 /// µs a tick: 20 a second.
 const TICK: Micros = 50_000;
 /// µm a second: today's walking pace.
@@ -164,6 +166,7 @@ fn humanoid() -> Family {
 
 /// Starts `body`'s walk (new to the runner, or already in it) to `goal` on `node` for `order`: its legs planned by
 /// the town, its walk the skill, the ladder keeping it.
+#[allow(clippy::too_many_arguments)]
 fn order(
     runner: &mut Runner,
     ladder: &mut Ladder,
@@ -172,7 +175,20 @@ fn order(
     order: Id,
     node: Id,
     goal: Vec3,
+    sent: Option<&mut BTreeMap<Id, (Id, sim::spots::Target)>>,
 ) -> Result<(), Refusal> {
+    // `--sent` (0.133 A2-4): sent to the point (N9), as a served world sends a Soul's walk: the runner asks its
+    // standing spot and gives it the route there; the ladder keeps it once its spot is granted.
+    if let Some(pending) = sent {
+        let skill = Box::new(Route::sent(SPEED, TICK));
+        if runner.controller.body(body.id).is_none() {
+            runner.add_body(humanoid(), body)?;
+        }
+        let target = sim::spots::Target::new(node, goal);
+        runner.send(body.id, skill, target, order)?;
+        pending.insert(body.id, (order, target));
+        return Ok(());
+    }
     let legs = town.plan(&body, node, goal)?;
     let skill = Box::new(Route::new(
         legs.iter()
@@ -336,6 +352,17 @@ fn pct(v: &mut [i64], q: usize) -> i64 {
 fn main() {
     let mut args: Vec<String> = std::env::args().collect();
     let fast = args.iter().any(|a| a == "--fast");
+    // `--sent` (0.133 A2-4): each walk is sent to its point (N9, `Route::sent`), the shape a served world uses.
+    let sent = args.iter().any(|a| a == "--sent");
+    // Sent walks not yet granted their spot: the order and the target.
+    let mut pending: BTreeMap<Id, (Id, sim::spots::Target)> = BTreeMap::new();
+    // 0.133 A2-5: the walks granted an overflow point round a crowded place, and how far each ended from the place.
+    let mut overflowed: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
+    let mut overflow_um: Vec<i64> = Vec::new();
+    // Where each walker's place is, on the open ground's frame.
+    let mut goal_world: BTreeMap<Id, [i64; 2]> = BTreeMap::new();
+    // Each walker's goal as its walk has it: its node and point there (the place, or the spot granted round it).
+    let mut goal_at: BTreeMap<Id, (Id, Vec3)> = BTreeMap::new();
     // `--threads N` (N17b, #3255): threads stepping the walkers' skills; any count gives the same walks.
     let threads: usize = match args.iter().position(|a| a == "--threads") {
         Some(k) => {
@@ -357,10 +384,10 @@ fn main() {
     let args: Vec<&String> = args
         .iter()
         .enumerate()
-        .filter(|&(i, a)| a != "--fast" && jx.is_none_or(|j| i != j && i != j + 1))
+        .filter(|&(i, a)| a != "--fast" && a != "--sent" && jx.is_none_or(|j| i != j && i != j + 1))
         .map(|(_, a)| a)
         .collect();
-    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast] [--threads N]";
+    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast] [--sent] [--threads N]";
     let (facts, labels, arm) = (
         args.get(1).expect(usage),
         args.get(2).expect(usage),
@@ -575,8 +602,14 @@ fn main() {
                     order_id(orders),
                     g.node,
                     g.at,
+                    sent.then_some(&mut pending),
                 ) {
-                    Ok(()) => break 'start,
+                    Ok(()) => {
+                        goal_world.insert(who, g.world);
+                        goal_at.insert(who, (g.node, g.at));
+                        overflowed.remove(&who);
+                        break 'start;
+                    }
                     Err(e) => {
                         *refused_at
                             .entry(format!("{} (a start): {}", piece_of(&w, &body), e.name))
@@ -728,6 +761,12 @@ fn main() {
     let mut corner_parts: Vec<[i64; 4]> = Vec::with_capacity(ticks as usize);
     let mut route_us: Vec<i64> = Vec::new();
     let (mut finished, mut ended) = (0u64, 0u64);
+    // 0.133 A2-4: trips that ended short of their goal, as near as the crowd allows: how far short, µm.
+    let mut short_um: Vec<i64> = Vec::new();
+    // Of those, the ones whose goal a body at rest stood on (within 0.3 m).
+    let mut short_taken = 0u64;
+    // Short ends on another node than their goal's (not measured).
+    let mut short_off_node = 0u64;
     let mut worst: (Micros, usize) = (0, 0);
     let mut next_moment = if arm == "event" {
         seed.within(45_000_000, 120_000_000)
@@ -750,6 +789,10 @@ fn main() {
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
     // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
     let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
+    // #4215: pairs of bodies on one node, neither carried, at least one walking, whose centres are closer than
+    // CLOSE after a tick (not timed): distinct pairs, pair-ticks and the most in one tick.
+    let mut close_pairs: std::collections::BTreeSet<(Id, Id)> = std::collections::BTreeSet::new();
+    let (mut close_ticks, mut close_most) = (0u64, 0usize);
     while ticker.next_tick() < ticks {
         let mut body = |tick: i64, start: Micros| {
             // The clock catches up after an overrun: never past the run's last tick.
@@ -854,8 +897,12 @@ fn main() {
                         order_id(orders),
                         g.node,
                         g.at,
+                        sent.then_some(&mut pending),
                     ) {
                         Ok(()) => {
+                            goal_world.insert(who, g.world);
+                            goal_at.insert(who, (g.node, g.at));
+                            overflowed.remove(&who);
                             placed = true;
                             break;
                         }
@@ -923,6 +970,33 @@ fn main() {
             ]);
 
             // Not timed: faults, rungs, ends, progress, the record and the trace.
+            // `--sent`: a walk granted its spot this tick is kept by the ladder from now, its legs to the spot.
+            if !pending.is_empty() {
+                let granted: Vec<(Id, Id, sim::spots::Granted)> = pending
+                    .iter()
+                    .filter(|(who, _)| runner.granted.contains_key(*who))
+                    .filter_map(|(who, (o, t))| match w.spots.granted(*who, t) {
+                        Some(Ok(g)) => Some((*who, *o, g)),
+                        _ => None,
+                    })
+                    .collect();
+                for (who, order, g) in granted {
+                    pending.remove(&who);
+                    goal_at.insert(who, (g.node, g.at));
+                    if g.overflow {
+                        overflowed.insert(who);
+                    }
+                    // Its legs as the runner planned them (the ladder keeps none from an earlier order).
+                    let legs = runner
+                        .controller
+                        .body(who)
+                        .copied()
+                        .and_then(|b| w.plan(&b, g.node, g.at).ok())
+                        .unwrap_or_default();
+                    ladder.add(who, order, SPEED, g.node, g.at, legs);
+                }
+                pending.retain(|who, _| runner.running(*who));
+            }
             let refused = std::mem::take(&mut runner.refused);
             for (who, e) in &refused {
                 faults += 1;
@@ -971,10 +1045,48 @@ fn main() {
                 }
                 if !runner.running(who) {
                     p.live = false;
+                    // However it ended, its overflow point goes with its order.
+                    let was_over = overflowed.remove(&who);
                     match runner.ended.get(&who) {
                         Some((_, Progress::Done)) => {
                             finished += 1;
                             route_us.push(at - p.since);
+                            // Ended on an overflow point round a crowded place, held still (A2-5): how far from the
+                            // place, on the open ground's frame.
+                            let over = was_over && runner.granted.contains_key(&who);
+                            if over
+                                && let (Some(b), Some(gw)) =
+                                    (runner.controller.body(who), goal_world.get(&who))
+                                && let q = b.pose.position
+                                && let Some(s) = w.map.spot_near(node_of(b), q, 1_000)
+                            {
+                                let qw = w.map.world(s.piece, [q.x / 1000, q.y / 1000, q.z / 1000]);
+                                overflow_um.push(dist([qw[0] * 1000, qw[2] * 1000], *gw));
+                            } else if runner
+                                .fields
+                                .get(&who)
+                                .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+                                && let Some(b) = runner.controller.body(who)
+                                && let Some(&(gn, to)) = goal_at.get(&who)
+                            {
+                                // Its goal as its walk had it, on the same node (else counted, not measured).
+                                let q = b.pose.position;
+                                if node_of(b) != gn {
+                                    short_off_node += 1;
+                                } else {
+                                    let (dx, dz) = (i128::from(q.x - to.x), i128::from(q.z - to.z));
+                                    short_um.push((dx * dx + dz * dz).isqrt() as i64);
+                                    // Taken: a body at rest stood within 0.3 m of its goal; else the goal was free.
+                                    let taken = runner.near(who, 3_500_000).iter().any(|n| {
+                                        n.velocity.x == 0
+                                            && n.velocity.z == 0
+                                            && (i128::from(n.position.x - to.x).pow(2)
+                                                + i128::from(n.position.z - to.z).pow(2))
+                                                < 300_000i128.pow(2)
+                                    });
+                                    short_taken += u64::from(taken);
+                                }
+                            }
                         }
                         Some((_, Progress::Failed(name))) => {
                             ended += 1;
@@ -1049,6 +1161,39 @@ fn main() {
                         );
                     }
                 }
+            }
+            {
+                let mut on: Vec<(Id, i64, i64, Id, bool)> = runner
+                    .controller
+                    .bodies()
+                    .filter(|b| !runner.controller.carried(b.id))
+                    .map(|b| {
+                        let walking = runner.running(b.id);
+                        (
+                            node_of(b),
+                            b.pose.position.x,
+                            b.pose.position.z,
+                            b.id,
+                            walking,
+                        )
+                    })
+                    .collect();
+                on.sort();
+                let mut this = 0usize;
+                for i in 0..on.len() {
+                    for j in i + 1..on.len() {
+                        let (a, b) = (on[i], on[j]);
+                        if b.0 != a.0 || b.1 - a.1 >= CLOSE {
+                            break;
+                        }
+                        if (a.4 || b.4) && dist([a.1, a.2], [b.1, b.2]) < CLOSE {
+                            this += 1;
+                            close_pairs.insert((a.3.min(b.3), a.3.max(b.3)));
+                        }
+                    }
+                }
+                close_ticks += this as u64;
+                close_most = close_most.max(this);
             }
             if let Some((f, c)) = trace.as_mut() {
                 for b in runner.controller.bodies() {
@@ -1214,6 +1359,26 @@ fn main() {
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
     }
+    short_um.sort_unstable();
+    overflow_um.sort_unstable();
+    println!(
+        "walkers: walks ended on an overflow point round a crowded place {}; from the place median {} mm, max {} mm",
+        overflow_um.len(),
+        overflow_um.get(overflow_um.len() / 2).copied().unwrap_or(0) / 1000,
+        overflow_um.last().copied().unwrap_or(0) / 1000
+    );
+    println!(
+        "walkers: walks {}; trips ended short (as near as the crowd allows) {}: goal taken {short_taken}, goal free {}, on another node {short_off_node}; short of the goal median {} mm, max {} mm",
+        if sent {
+            "sent to a point (N9)"
+        } else {
+            "along planned legs"
+        },
+        short_um.len(),
+        short_um.len() as u64 - short_taken,
+        short_um.get(short_um.len() / 2).copied().unwrap_or(0) / 1000,
+        short_um.last().copied().unwrap_or(0) / 1000
+    );
     if joins > 0 {
         let born = ids.len() - n;
         let (bm, bmax) = (
@@ -1242,6 +1407,11 @@ fn main() {
             longest_wait / 1000,
         );
     }
+    println!(
+        "walkers: close pairs (centres under {} mm, one walking, same node): {} distinct, {close_ticks} pair-ticks, at most {close_most} in a tick",
+        CLOSE / 1000,
+        close_pairs.len()
+    );
     let bar = |ok: bool| if ok { "pass" } else { "miss" };
     println!(
         "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; corner median < 1 ms {}; no walker without progress for 30 s {}; walker faults 0 {}",

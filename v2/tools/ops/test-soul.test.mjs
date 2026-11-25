@@ -37,7 +37,11 @@ test('a public destination is rejected before a request, the batch modes too, an
   const source = await readFile(new URL('./test-soul', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /credentials|readFile|createReadStream|readdir/);
   assert.deepEqual([...source.matchAll(/^import .* from '([^']+)'/gm)].map((m) => m[1]),
-    ['node:crypto', 'node:fs/promises', 'node:path', 'node:url']);
+    ['node:crypto', 'node:fs/promises', 'node:path', 'node:url', '../../../tools/lib/is-main.mjs']);
+  // The entry check resolves paths only (realpathSync on its own path and argv[1]); it reads no file's contents.
+  const entry = await readFile(new URL('../../../tools/lib/is-main.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(entry, /credentials|readFile|createReadStream|openSync/);
+  assert.deepEqual([...entry.matchAll(/^import (.*) from '([^']+)'/gm)].map((m) => `${m[1]} ${m[2]}`), ['{ realpathSync } node:fs', '{ fileURLToPath } node:url']);
 });
 
 /** A directory that answers the batch as directoryd does: a code per request, the token on the second poll. */
@@ -88,8 +92,21 @@ test('pair N asks, approves and polls N new Souls, writing their tokens outside 
   await rm(dir, { recursive: true });
 });
 
-test('retire-all retires every active test Soul of the named world, and no other', async () => {
-  const { sent, request } = directory();
+test('retire-all asks the directory for one pass over the named world', async () => {
+  const sent = [];
+  const request = async (url, options) => {
+    sent.push([url.pathname, JSON.parse(options.body)]);
+    return { ok: true, json: async () => ({ ok: true, world: 'eden', retired: 500, test: true }) };
+  };
+  assert.deepEqual(await run(['retire-all', 'eden', '--directory', direct], request), { ok: true, world: 'eden', retired: 500, test: true });
+  assert.deepEqual(sent, [['/v1/pair/operator/retire-all', { world: 'eden' }]]);
+});
+
+test('retire-all on a directory without the one-pass route retires every test Soul of the world, and no other', async () => {
+  const { sent, request: answers } = directory();
+  const request = (url, options) => url.pathname === '/v1/pair/operator/retire-all'
+    ? Promise.resolve({ ok: false, status: 404, json: async () => ({ refused: 'not-found' }) })
+    : answers(url, options);
   assert.deepEqual(await run(['retire-all', 'eden', '--directory', direct], request), { ok: true, world: 'eden', retired: 2 });
   assert.deepEqual(sent.map(([p, b]) => [p, b.soul]), [
     ['/v1/pair/operator/list', undefined], ['/v1/pair/operator/retire', 'soul-a'], ['/v1/pair/operator/retire', 'soul-c'],

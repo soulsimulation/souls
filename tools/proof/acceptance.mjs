@@ -37,10 +37,10 @@
 //     limits:        [string],
 //     playtest?:     { scenario, arms: [{ name, repeats, passed, url }] },          T3+
 //     review?:       { by, verdict, url } }                                         T3+
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { POLICY_PATH, loadPolicy as loadTierPolicy, tierFor } from './tier.mjs';
 import { APPROVED_LABEL, labelAddedBy, maintainerSignOff, needsSignOff } from './gate.mjs';
 import { assertPublishable, publicationFindings } from './publication.mjs';
@@ -609,4 +609,4 @@ async function main(argv) {
   return 2;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

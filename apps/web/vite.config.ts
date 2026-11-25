@@ -242,6 +242,42 @@ function vendorGroups() {
   ];
 }
 
+/** W2 (0.135): fills `src/v2-engine/source/kind-bounds.ts` with the size of each content kind that is a thing
+ *  (`content/kinds`; not an activity), by its name: the old page draws a placed thing no library def draws as a box that
+ *  size (v2-engine/source/stream-scene.ts). Outside the build the table is empty. The kinds with their own shape
+ *  (`looks.shape`) go in one data file beside the bundle (`KIND_LOOKS_URL`, not code: fetched once, the first time the
+ *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none.
+ *  `KIND_STATE_URL`: a data file of each kind's state fields by name and number, which the page names a thing's fields by
+ *  (world-state.ts), fetched with the looks. */
+function kindBounds(): Plugin {
+  const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
+  let build = false;
+  return {
+    name: 'souls-kind-bounds',
+    configResolved(c) { build = c.command === 'build'; },
+    transform(_code, id) {
+      if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
+      const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {}, state: Record<string, Record<string, unknown[]>> = {};
+      for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
+        if (!f.endsWith('.json')) continue;
+        const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; state?: unknown; geometry?: { bounds_mm?: unknown }; looks?: { shape?: { shapes?: unknown }; table?: unknown } };
+        this.addWatchFile(file);
+        if (typeof e.kind !== 'string' || e.owner !== 'thing' || e.roles || !Array.isArray(e.geometry?.bounds_mm)) continue;
+        out[e.kind] = e.geometry.bounds_mm as number[];
+        for (const [k, f] of Object.entries((e.state ?? {}) as Record<string, { n?: unknown; type?: unknown; default?: unknown; values?: unknown }>)) {
+          if (typeof f?.n !== 'number' || (f.type !== 'bool' && f.type !== 'int' && f.type !== 'enum')) continue;
+          const d = typeof f.default === 'boolean' ? Number(f.default) : typeof f.default === 'number' || typeof f.default === 'string' ? f.default : null;
+          (state[e.kind] ??= {})[k] = [f.n, f.type, d, ...(Array.isArray(f.values) ? [f.values] : [])];
+        }
+        if (Array.isArray(e.looks?.shape?.shapes)) looks[e.kind] = { format: 'souls-entry/1', kind: e.kind, state: e.state ?? {}, geometry: { bounds_mm: e.geometry.bounds_mm }, looks: { shape: e.looks.shape, ...(e.looks.table ? { table: e.looks.table } : {}) } };
+      }
+      const url = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-looks.json', source: JSON.stringify(looks) })}` : 'null';
+      const stateUrl = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-state.json', source: JSON.stringify(state) })}` : 'null';
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};`, map: null };
+    },
+  };
+}
+
 // PERF-EDEN: with SIM_DEV_API set, a world page carries the live world's inline config (apps/server/src/inline-config.ts
 // writes `window.__simConfig` into <head>; without it the page takes `eden` for an old-engine world and never mounts the
 // entity layer). The page is read from Vite (dev) or dist (preview) and the remote /v1/config is inlined the same way.
@@ -282,18 +318,26 @@ function devProxy() {
 }
 
 export default defineConfig({
-  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig()],
+  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig(), kindBounds()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',
+    __SIM_V2_REPLICA_SERVED__: !process.env.V2_REPLICA_PKG,   // #4177: the replica is the front door's (replica-served.ts)
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
+  // #4153: the v2 stream reader's worker (src/v2-engine/source, copied from v2/web/src/source by X1) imports `replica` (the new engine's WASM)
+  // and `cborg` (ours). #4177: the default build loads the replica the front door serves for a world routed to v2
+  // (replica-served.ts), so no Rust build is needed and its bytes match the deployed v2; V2_REPLICA_PKG bundles a package.
+  resolve: { alias: [
+    { find: /^replica$/, replacement: process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG, 'replica.js') : fileURLToPath(new URL('./src/v2-engine/replica-served.ts', import.meta.url)) },
+    { find: /^cborg$/, replacement: fileURLToPath(new URL('./node_modules/cborg/cborg.js', import.meta.url)) },
+  ] },
   server: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },
   preview: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },   // PERF-EDEN: `vite preview` serves a production build through the same proxy (SIM_DEV_API: a live world)
   // W1: standalone world-free studio, served by /god/workbench.
   // chunkSizeWarningLimit (kB, lane BUDGET 2026-10-22): just above the largest legitimate chunk, core-kit (1,491 kB raw /
   // 221 kB gzip on 3.62: the shared three.js + catalogue kit every world loads), so any chunk past it warns at build time.
   // The hard limit is the release gate's V3-bundle step (tools/test-harness/bundle-budget): +10% per chunk or total fails.
-  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', early: 'src/early-entry.ts' },
+  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', pairing: 'pair.html', early: 'src/early-entry.ts' },
     output: { codeSplitting: { groups: vendorGroups() } } } },
 });

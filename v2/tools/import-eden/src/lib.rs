@@ -11,8 +11,11 @@
 //!   a child of that floor, or of its room there (C27, `on_floor`).
 //! - a doorway (a door, gate or arch opening) is a link between the room it opens from and the room it leads to, or
 //!   the open ground; one with no rooms (a wall's gate) joins its thing to the open ground. The door thing standing in
-//!   it keeps the link's id and its open state. A stair, ramp or ladder is a link between two floor nodes. Links carry
-//!   no fields, so each doorway's and stair's geometry is a field of the node at its owning end.
+//!   it keeps the link's id and its open state. A stair, ramp or ladder is a link between two floor nodes; one between
+//!   two pieces of one storey is that floor's surfaces (`flight_surfaces`). Links carry no fields, so each doorway's and
+//!   stair's geometry is a field of the node at its owning end. A window in no room's wall is the nearest room's. A
+//!   storey today's mesh floors found has its narrow seams closed and, lowest and more than a step up, an entrance
+//!   tread along its open edges (`mesh_fill`).
 //! - each named place that is not a room is a node under the open ground with its name, kind and outline. Nobody is
 //!   its child: a place is found by its outline.
 //! - the terrain (N1b, #3197) is two fields of the open ground: its tile side and every tile's heights and classes,
@@ -61,6 +64,7 @@ pub const F_PLACE_KIND: u64 = 15; // a place's kind (water, shore, pier, zone �
 pub const F_LINE: u64 = 16; // [[x, z] …] mm: a path thing's, a line place's, a river's
 pub const F_LINE_WIDTH: u64 = 17; // mm
 pub const F_WATER_LEVEL: u64 = 18; // mm
+pub const F_PARAMS: u64 = 19; // W3 (0.135): its def's params, today's JSON text as bytes, when it has any
 pub const F_PLACE_OF: u64 = 20; // what a place is derived from: area, water, shore, line, outline, landform, landmark
 pub const F_STAIRS: u64 = 21; // a floor: [[link, kind, to, width, y0, y1, [[x, z] …]] …] for each stair from it
 pub const F_DOORWAYS: u64 = 22; // a doorway's owning end: [[link, kind, x, z, yaw mdeg, width, height] …]
@@ -72,6 +76,15 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 pub const F_TILES: u64 = 25;
 pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
 pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
+/// The defs the world defines itself (a template's `define`, not the core library's), on the open ground, once each:
+/// `[[ref, def] …]`, each def today's stored def as JSON text (bytes), so a page drawing from the stream alone draws
+/// them as today's page does (a hall's roof). On the ground, never on a thing of the def, so removing any thing keeps
+/// it. Above the entries' block (`replica::fields`).
+pub const F_DEF_BODIES: u64 = 102;
+/// The open ground's palette (today's `state.ground.palette`: desert, playa, grass …) as `souls:<palette>`: what a page
+/// colours the ground and its cover by (a Mars camp's desert floor, not grass). Display only, like the sky's palette
+/// (`replica::sky::F_PALETTE`): no rule reads it. On the open ground, when the facts' ground names one.
+pub const F_GROUND_PALETTE: u64 = 103;
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -96,9 +109,19 @@ pub struct Import {
     pub by_ref: BTreeMap<String, i64>,
     /// Things the import could not place as the facts say, each with its reason.
     pub notes: Vec<String>,
+    /// Flights between two pieces of one storey, walked as that floor (0.133, Chiba's upper deck): how many, and the
+    /// floor surfaces they became ([`count`] counts each as the flight it is).
+    pub floor_flights: (i64, i64),
+    /// Surfaces a modelled storey was given (0.133, Chiba's ground storey: [`mesh_fill`]): how many close a seam
+    /// between two of its surfaces, and how many are an entrance tread. [`count`] counts neither, as the bake has none.
+    pub mesh_fills: (i64, i64),
     /// Things today's facts put in a slot another thing already holds: each stays a plain child of the same parent
     /// at its own place, out of the slot (one occupant per slot), with what holds the slot.
     pub left_out: Vec<String>,
+    /// Souls' bodies today's facts list as things (old Eden's residents, `core/humanoid@1`): each is left out of the
+    /// tree, by its origin id and name. A Soul is not a thing: it comes back through the directory, unpaired, and
+    /// stands when its own agent joins (`v2/tools/ops/cutover/eden-residents.mjs`).
+    pub residents: Vec<(String, String)>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
     /// Every kind line the rules were read from, in order: the world's kinds text a creator's client keeps (G7b).
@@ -272,6 +295,113 @@ fn into(frame: [i64; 4], p: [i64; 4]) -> R<[i64; 4]> {
     ])
 }
 
+/// Point `p` (`[x, y, z]` mm, in the frame of the thing posed at `frame`) in the frame `frame` is in: [`into`]'s inverse.
+fn onto(frame: [i64; 4], p: [i64; 3]) -> R<[i64; 4]> {
+    let e = |e| format!("{e:?}");
+    let q = Quat::from_yaw_mdeg(frame[3].rem_euclid(360_000))
+        .map_err(e)?
+        .rotate(Vec3::new(p[0] * 1000, p[1] * 1000, p[2] * 1000))
+        .map_err(e)?;
+    let mm = |v: i64| (v + v.signum() * 500) / 1000;
+    Ok([
+        frame[0] + mm(q.x),
+        frame[1] + mm(q.y),
+        frame[2] + mm(q.z),
+        frame[3],
+    ])
+}
+
+/// Each entry's state fields a captured look seeds (#4784): `(name, n, type, max)` for its bool and int fields
+/// numbered in the entries' block (28 up: below it the import's own fields share numbers), keyed by the kind.
+type StateDefs = BTreeMap<String, Vec<(String, u64, String, Option<i64>)>>;
+fn entry_states(entries: &[(String, String)]) -> StateDefs {
+    use replica::rules::json::Value as J;
+    let mut out = StateDefs::new();
+    for (_, text) in entries {
+        let Ok(e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        let (Some(kind), Some(J::Obj(fs))) = (e.get("kind").and_then(J::str), e.get("state"))
+        else {
+            continue;
+        };
+        let int = |v: Option<&J>| match v {
+            Some(J::Int(n)) => i64::try_from(*n).ok(),
+            _ => None,
+        };
+        let defs = fs
+            .iter()
+            .filter_map(|(name, f)| {
+                let n = u64::try_from(int(f.get("n"))?).ok().filter(|n| *n >= 28)?;
+                let ty = f
+                    .get("type")
+                    .and_then(J::str)
+                    .filter(|t| matches!(*t, "bool" | "int"))?;
+                Some((name.clone(), n, ty.to_owned(), int(f.get("max"))))
+            })
+            .collect::<Vec<_>>();
+        if !defs.is_empty() {
+            out.insert(kind.to_owned(), defs);
+        }
+    }
+    out
+}
+
+/// A captured state value (today's entity state over its def's defaults: the facts' `state`) as the entry's field of
+/// that meaning: the same name; a burning or running bool by either name (`on`, `lit`); a lamp's `level` from `on`
+/// (on is the entry's top level, off 0). None when the capture says nothing of it.
+fn captured(state: &Json, name: &str, ty: &str, max: Option<i64>) -> Option<Value> {
+    const POWER: [&str; 4] = ["on", "lit", "playing", "running"];
+    let same = state.get(name);
+    let power = || POWER.iter().find_map(|k| state.get(k).and_then(Json::bool));
+    match ty {
+        "bool" => same
+            .and_then(Json::bool)
+            .or_else(|| if POWER.contains(&name) { power() } else { None })
+            .map(|b| Value::Uint(u64::from(b))),
+        "int" => match same.and_then(Json::int) {
+            Some(v) => Some(i(v)),
+            None if name == "level" => power().map(|on| i(if on { max.unwrap_or(1) } else { 0 })),
+            None => None,
+        },
+        _ => None,
+    }
+}
+
+/// Each entry's points (`points.*.at_mm`, its thing's frame), keyed by the kind the entry is for.
+fn entry_points(entries: &[(String, String)]) -> BTreeMap<String, Vec<[i64; 3]>> {
+    use replica::rules::json::Value as J;
+    let mut out = BTreeMap::new();
+    for (_, text) in entries {
+        let Ok(e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        let Some(kind) = e.get("kind").and_then(J::str) else {
+            continue;
+        };
+        let mut at = Vec::new();
+        if let Some(J::Obj(ps)) = e.get("points") {
+            for (_, p) in ps {
+                let v: Vec<i64> = p
+                    .get("at_mm")
+                    .and_then(J::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|n| match n {
+                        J::Int(n) => i64::try_from(*n).ok(),
+                        _ => None,
+                    })
+                    .collect();
+                if let [x, y, z] = v[..] {
+                    at.push([x, y, z]);
+                }
+            }
+        }
+        out.insert(plain(kind).to_owned(), at);
+    }
+    out
+}
+
 /// Whether `[x, z]` lies inside the polygon `poly` (`[[x, z] …]` mm), by crossings.
 fn inside(q: [i64; 2], poly: &Json) -> bool {
     let pts: Vec<[i64; 2]> = poly
@@ -326,6 +456,349 @@ fn on_floor(host: &Json, local: [i64; 4]) -> R<Option<(String, [i64; 4])>> {
     Ok(None)
 }
 
+/// The most a flight within one storey may rise and still be walked as that floor, mm: a step
+/// (`sim::ground::STEP`), what N3 lets a body step over between two of a floor's surfaces.
+const FLIGHT_RISE_MOST: i64 = 220;
+
+/// A flight within one storey as that floor's surfaces, `[y, ring]` rows (mm, the thing's frame): its path at its
+/// width, grown on each side by a standing body's clearance ([`STAND_CLEAR`]), which N3 shrinks a floor by, so a
+/// body's centre keeps the flight's own width. With level ends, one surface for each leg at that height. With ends
+/// apart by no more than a step, its one leg is split halfway: the lower end's half at its height and the upper's at
+/// its, meeting on one edge, where N3 finds a step between two of a floor's surfaces (`sim::ground::scene`'s inner
+/// steps). `None` for a rise of more than a step, or for ends apart on a path of more than one leg.
+fn flight_surfaces(st: &Json) -> R<Option<Vec<Value>>> {
+    let (y0, y1) = (int(st, "y0")?, int(st, "y1")?);
+    let path: Vec<[i64; 2]> = need(st, "path")?
+        .arr()
+        .iter()
+        .map(|p| match p.arr() {
+            [x, z, ..] => Ok([x.int().ok_or("a point")?, z.int().ok_or("a point")?]),
+            _ => Err("a point is [x, z]".to_owned()),
+        })
+        .collect::<R<_>>()?;
+    if path.len() < 2 || (y1 - y0).abs() > FLIGHT_RISE_MOST || (y0 != y1 && path.len() != 2) {
+        return Ok(None);
+    }
+    let half = int(st, "width")? / 2 + STAND_CLEAR;
+    // The unit off the leg `a`–`b`, times `half`.
+    let off = |a: [i64; 2], b: [i64; 2]| -> R<[i64; 2]> {
+        let (dx, dz) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let l = (dx * dx + dz * dz).isqrt();
+        if l == 0 {
+            return Err("a flight's leg of no length".into());
+        }
+        let h = i128::from(half);
+        Ok([(-dz * h / l) as i64, (dx * h / l) as i64])
+    };
+    // A ring wound as the facts' surfaces are (a positive area in x and z).
+    let rect = |a: [i64; 2], b: [i64; 2], n: [i64; 2], y: i64| {
+        let p = |q: [i64; 2], s: i64| [q[0] + s * n[0], q[1] + s * n[1]];
+        let mut ring = [p(a, 1), p(b, 1), p(b, -1), p(a, -1)];
+        let area: i128 = (0..4)
+            .map(|k| {
+                let (u, v) = (ring[k], ring[(k + 1) % 4]);
+                i128::from(u[0]) * i128::from(v[1]) - i128::from(v[0]) * i128::from(u[1])
+            })
+            .sum();
+        if area < 0 {
+            ring.reverse();
+        }
+        Value::Array(vec![
+            i(y),
+            Value::Array(
+                ring.iter()
+                    .map(|q| Value::Array(vec![i(q[0]), i(q[1])]))
+                    .collect(),
+            ),
+        ])
+    };
+    if y0 == y1 {
+        return path
+            .windows(2)
+            .map(|w| Ok(rect(w[0], w[1], off(w[0], w[1])?, y0)))
+            .collect::<R<_>>()
+            .map(Some);
+    }
+    let (a, b) = (path[0], path[1]);
+    let (n, m) = (off(a, b)?, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    Ok(Some(vec![rect(a, m, n, y0), rect(m, b, n, y1)]))
+}
+
+/// The widest seam between two of a modelled storey's surfaces at one height that is floor, mm: narrower than a
+/// standing body's clearance ([`STAND_CLEAR`]). Today's mesh floors are found on a 150 mm grid, which leaves a seam of
+/// two cells under a partition all along it, its doorways too (Chiba's ground storey: 300 mm).
+const SEAM_MOST: i64 = STAND_CLEAR;
+/// How deep an entrance tread is, mm: room for a body's centre between the clearance N3 keeps at its two steps.
+const TREAD_DEPTH: i64 = 2 * STAND_CLEAR + 300;
+
+/// A modelled storey's seams and entrance (0.133, Chiba): the surfaces to add to floor `level` of thing `t`, `[y, ring]`
+/// rows (mm, the thing's frame), with how many close a seam and how many are a tread. Only a storey whose every surface
+/// today's mesh floors found (a `mesh-floor:` tag) is touched; it is walked as today's page walked it:
+///
+/// - **Seams.** Where two of its surfaces at one height face each other across a seam no wider than [`SEAM_MOST`],
+///   the seam is floor. A partition's solids still stand on it, so only its doorways join the two.
+/// - **Entrance.** Today's page stepped up onto a mesh floor from the terrain by as much as 450 mm (`tools/mesh-floors`:
+///   "terrain-step"); N3 steps by [`FLIGHT_RISE_MOST`]. So the lowest storey of a thing on the open ground, standing
+///   above a step but no more than two, gets a tread at half its height along each stretch of its edges with nothing
+///   of the thing in front of it for [`TREAD_DEPTH`]: no surface of the storey, no floor or flight of the thing lower
+///   than a head over the tread, and no solid that meets a body standing on it (a wall, a rail, a flight's understair).
+///   That is an entrance flight of two risers: N3 steps from the tread down to the ground where the terrain there is
+///   within a step, and up onto the storey.
+fn mesh_fill(t: &Json, level: i64, lowest: bool) -> R<(Vec<Value>, i64, i64)> {
+    let ring_of = |j: &Json| -> R<Vec<[i64; 2]>> {
+        j.arr()
+            .iter()
+            .map(|p| match p.arr() {
+                [x, z, ..] => Ok([x.int().ok_or("a point")?, z.int().ok_or("a point")?]),
+                _ => Err("a point is [x, z]".to_owned()),
+            })
+            .collect()
+    };
+    let floors = need(t, "floors").map(Json::arr).unwrap_or(&[]);
+    let mut own: Vec<(i64, Vec<[i64; 2]>)> = Vec::new();
+    for fl in floors {
+        if int(fl, "level")? != level {
+            continue;
+        }
+        if !fl
+            .get("tag")
+            .and_then(Json::str)
+            .is_some_and(|g| g.starts_with("mesh-floor:"))
+        {
+            return Ok((Vec::new(), 0, 0));
+        }
+        let mut ring = ring_of(need(fl, "polygon")?)?;
+        if area2(&ring) < 0 {
+            ring.reverse();
+        }
+        own.push((int(fl, "y")?, ring));
+    }
+    let entrance = lowest
+        && t.get("parent").and_then(Json::str).is_none()
+        && own
+            .iter()
+            .all(|(y, _)| *y > FLIGHT_RISE_MOST && *y <= 2 * FLIGHT_RISE_MOST);
+    // What else of the thing may stand in front of an edge, each as points (the edge faces their box in its own
+    // axes): its other floors and its flights lower than a head over the tread, and the solids that meet a body on it.
+    let mut others: Vec<Vec<[i64; 2]>> = Vec::new();
+    if entrance {
+        let ty = own.iter().map(|(y, _)| y / 2).min().unwrap_or(0);
+        for fl in floors {
+            if int(fl, "level")? != level && int(fl, "y")? - ty < BODY_SPAN.1 {
+                others.push(ring_of(need(fl, "polygon")?)?);
+            }
+        }
+        for st in need(t, "stairs").map(Json::arr).unwrap_or(&[]) {
+            if int(st, "y0")?.min(int(st, "y1")?) - ty >= BODY_SPAN.1 {
+                continue;
+            }
+            let half = i128::from(int(st, "width")? / 2);
+            let path = ring_of(need(st, "path")?)?;
+            for w in path.windows(2) {
+                let (dx, dz) = (i128::from(w[1][0] - w[0][0]), i128::from(w[1][1] - w[0][1]));
+                let l = (dx * dx + dz * dz).isqrt().max(1);
+                let (nx, nz) = ((-dz * half / l) as i64, (dx * half / l) as i64);
+                others.push(
+                    [w[0], w[1]]
+                        .iter()
+                        .flat_map(|p| [[p[0] + nx, p[1] + nz], [p[0] - nx, p[1] - nz]])
+                        .collect(),
+                );
+            }
+        }
+        for sd in need(t, "solids").map(Json::arr).unwrap_or(&[]) {
+            let n: Vec<i64> = sd.arr().iter().filter_map(Json::int).collect();
+            let [cx, cz, hx, hz, yaw, y0, y1, ..] = n[..] else {
+                return Err("a solid is [cx, cz, hx, hz, yaw, y0, y1, …]".into());
+            };
+            if y1 <= ty + BODY_SPAN.0 || y0 >= ty + BODY_SPAN.1 {
+                continue;
+            }
+            let q = Quat::from_yaw_mdeg(yaw.rem_euclid(360_000)).map_err(|e| format!("{e:?}"))?;
+            let mut corners = Vec::new();
+            for (u, v) in [(-hx, -hz), (hx, -hz), (hx, hz), (-hx, hz)] {
+                let r = q
+                    .rotate(Vec3::new(u * 1000, 0, v * 1000))
+                    .map_err(|e| format!("{e:?}"))?;
+                corners.push([cx + r.x / 1000, cz + r.z / 1000]);
+            }
+            others.push(corners);
+        }
+    }
+    let (mut rows, mut seams, mut treads) = (Vec::new(), 0, 0);
+    for (p, (y, ring)) in own.iter().enumerate() {
+        for k in 0..ring.len() {
+            let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+            let e = [i128::from(b[0] - a[0]), i128::from(b[1] - a[1])];
+            let len = (e[0] * e[0] + e[1] * e[1]).isqrt();
+            if len == 0 {
+                continue;
+            }
+            // Along the edge from a, and out of the surface (its outward side, the ring counter-clockwise), mm.
+            let along = |q: [i64; 2]| {
+                (e[0] * i128::from(q[0] - a[0]) + e[1] * i128::from(q[1] - a[1])) / len
+            };
+            let out = |q: [i64; 2]| {
+                (e[1] * i128::from(q[0] - a[0]) - e[0] * i128::from(q[1] - a[1])) / len
+            };
+            let at = |u: i128, d: i128| {
+                [
+                    a[0] + ((e[0] * u + e[1] * d) / len) as i64,
+                    a[1] + ((e[1] * u - e[0] * d) / len) as i64,
+                ]
+            };
+            // A seam: another surface at its height facing the edge across no more than [`SEAM_MOST`], closed once,
+            // from the first of the two.
+            for (yq, other) in own.iter().skip(p + 1) {
+                if yq != y {
+                    continue;
+                }
+                for m in 0..other.len() {
+                    let (c, d) = (other[m], other[(m + 1) % other.len()]);
+                    let f = [i128::from(d[0] - c[0]), i128::from(d[1] - c[1])];
+                    if e[0] * f[1] - e[1] * f[0] != 0 || e[0] * f[0] + e[1] * f[1] >= 0 {
+                        continue;
+                    }
+                    let gap = out(c);
+                    let (lo, hi) = (
+                        along(c).min(along(d)).max(0),
+                        along(c).max(along(d)).min(len),
+                    );
+                    if gap > 0 && gap <= i128::from(SEAM_MOST) && hi > lo {
+                        rows.push(ring_row(
+                            *y,
+                            vec![at(lo, 0), at(hi, 0), at(hi, gap), at(lo, gap)],
+                        ));
+                        seams += 1;
+                    }
+                }
+            }
+            if !entrance {
+                continue;
+            }
+            // The stretches of the edge that something stands in front of within a tread's depth; a tread along each
+            // stretch left.
+            let depth = i128::from(TREAD_DEPTH);
+            let mut faced: Vec<(i128, i128)> = own
+                .iter()
+                .enumerate()
+                .filter(|(q, _)| *q != p)
+                .map(|(_, (_, r))| r)
+                .chain(others.iter())
+                .filter_map(|pts| {
+                    let (u, o): (Vec<i128>, Vec<i128>) =
+                        pts.iter().map(|&q| (along(q), out(q))).unzip();
+                    let (u0, u1) = (*u.iter().min()?, *u.iter().max()?);
+                    let (o0, o1) = (*o.iter().min()?, *o.iter().max()?);
+                    (o1 > 0 && o0 < depth && u1 > 0 && u0 < len).then_some((u0.max(0), u1.min(len)))
+                })
+                .collect();
+            faced.sort_unstable();
+            let mut from = 0;
+            for (lo, hi) in faced.into_iter().chain([(len, len)]) {
+                if lo > from {
+                    rows.push(ring_row(
+                        y / 2,
+                        vec![at(from, 0), at(lo, 0), at(lo, depth), at(from, depth)],
+                    ));
+                    treads += 1;
+                }
+                from = from.max(hi);
+            }
+        }
+    }
+    Ok((rows, seams, treads))
+}
+
+/// Twice a ring's area in x and z, mm² (positive counter-clockwise, as the facts' surfaces are wound).
+fn area2(ring: &[[i64; 2]]) -> i128 {
+    (0..ring.len())
+        .map(|k| {
+            let (u, v) = (ring[k], ring[(k + 1) % ring.len()]);
+            i128::from(u[0]) * i128::from(v[1]) - i128::from(v[0]) * i128::from(u[1])
+        })
+        .sum()
+}
+
+/// A floor surface's row, `[y, [[x, z] …]]` mm, its ring wound as the facts' are.
+fn ring_row(y: i64, mut ring: Vec<[i64; 2]>) -> Value {
+    if area2(&ring) < 0 {
+        ring.reverse();
+    }
+    Value::Array(vec![
+        i(y),
+        Value::Array(
+            ring.iter()
+                .map(|q| Value::Array(vec![i(q[0]), i(q[1])]))
+                .collect(),
+        ),
+    ])
+}
+
+/// The room of thing `t` nearest the opening `o`: on its level, or the nearest level to it, then by its point's
+/// distance to the room's outline (0 inside), the first of equals; and the opening's pose in that room's frame (mm,
+/// mdeg), as the exporter writes a window's `inRoom`. `None` for a thing with no rooms.
+fn nearest_room<'a>(t: &'a Json, o: &Json) -> R<Option<(&'a str, [i64; 4])>> {
+    let at = need(o, "at")?.arr();
+    let w = |k: usize| at.get(k).and_then(Json::int).ok_or("an opening's at");
+    let (wx, wz, yaw, level) = (w(0)?, w(1)?, int(o, "yaw")?, int(o, "level")?);
+    let mut best: Option<((i64, i128), &str, [i64; 4])> = None;
+    for r in need(t, "rooms").map(Json::arr).unwrap_or(&[]) {
+        let rp = pose4(need(r, "pose")?)?;
+        let turn = Quat::from_yaw_mdeg(-rp[3]).map_err(|e| format!("{e:?}"))?;
+        let l = turn
+            .rotate(Vec3::new((wx - rp[0]) * 1000, 0, (wz - rp[2]) * 1000))
+            .map_err(|e| format!("{e:?}"))?;
+        let p = [l.x / 1000, l.z / 1000];
+        let ring: Vec<[i64; 2]> = need(r, "polygon")?
+            .arr()
+            .iter()
+            .map(|q| match q.arr() {
+                [x, z, ..] => Ok([x.int().ok_or("a point")?, z.int().ok_or("a point")?]),
+                _ => Err("a point is [x, z]".to_owned()),
+            })
+            .collect::<R<_>>()?;
+        let d = ((int(r, "floor")? - level).abs(), outline_dist2(&ring, p));
+        if best.as_ref().is_none_or(|(b, ..)| d < *b) {
+            let pose = [p[0], 0, p[1], (yaw - rp[3]).rem_euclid(360_000)];
+            best = Some((d, s(r, "id")?, pose));
+        }
+    }
+    Ok(best.map(|(_, id, pose)| (id, pose)))
+}
+
+/// The squared distance from `p` to the outline `ring` (mm²), 0 for a point inside it.
+fn outline_dist2(ring: &[[i64; 2]], p: [i64; 2]) -> i128 {
+    let n = ring.len();
+    let mut inside = false;
+    let mut best = i128::MAX;
+    for k in 0..n {
+        let (a, b) = (ring[k], ring[(k + 1) % n]);
+        if (a[1] > p[1]) != (b[1] > p[1]) {
+            let x = i128::from(a[0])
+                + i128::from(b[0] - a[0]) * i128::from(p[1] - a[1]) / i128::from(b[1] - a[1]);
+            if i128::from(p[0]) < x {
+                inside = !inside;
+            }
+        }
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let (px, pz) = (i128::from(p[0] - a[0]), i128::from(p[1] - a[1]));
+        let len2 = ex * ex + ez * ez;
+        let t = if len2 == 0 {
+            0
+        } else {
+            (px * ex + pz * ez).clamp(0, len2)
+        };
+        let (dx, dz) = if len2 == 0 {
+            (px, pz)
+        } else {
+            (px - ex * t / len2, pz - ez * t / len2)
+        };
+        best = best.min(dx * dx + dz * dz);
+    }
+    if inside { 0 } else { best }
+}
+
 fn pose4(j: &Json) -> R<[i64; 4]> {
     let a = j.arr();
     if a.len() != 4 {
@@ -343,11 +816,132 @@ fn name_kind(line: &str) -> R<(String, replica::world_model::Kind)> {
 
 /// Builds the tree from the facts file's text.
 pub fn load(text: &str) -> R<Import> {
+    load_with(text, &[])
+}
+
+/// The slots of each kind whose entry joins parts (0.135, ahead of A2): an entry that declares a link type, or a slot
+/// that names the kinds it admits. Keyed by the kind's plain name, each slot by the number its entry gives it (K3's
+/// reader, `replica::kinds::entry`), with what it admits. Entries that do not read are left to the facts. An entry whose
+/// `children` name kinds (a frame admitting the crew that holds it, 0.135 A2) joins too, and those kinds are its
+/// children beside a thing.
+type Joining = BTreeMap<String, (BTreeMap<u64, Vec<String>>, Vec<String>)>;
+fn joining_slots(entries: &[(String, String)]) -> Joining {
+    use replica::rules::json::Value as J;
+    let mut out = BTreeMap::new();
+    for (_, text) in entries {
+        let Ok(mut e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        // The kind's admission only: its forms and timed fields are not read here (as `worldd` loads its forms).
+        if let J::Obj(o) = &mut e {
+            o.retain(|(k, _)| k != "forms" && k != "roles");
+            if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
+            }
+        }
+        let Ok(kind) = replica::kinds::entry::entry_to_kind(&e.to_json()) else {
+            continue;
+        };
+        let mut kinds = replica::kinds::Kinds::default();
+        kinds.load(&[("entry", kind.as_str())]);
+        for name in kinds.admits().into_keys() {
+            let Some(def) = kinds.get(&name) else {
+                continue;
+            };
+            let names_kinds = def
+                .slots
+                .values()
+                .any(|sl| sl.admits.iter().any(|a| a.contains(':')));
+            let children: Vec<String> = def
+                .admits
+                .children
+                .iter()
+                .filter(|c| c.contains(':'))
+                .cloned()
+                .collect();
+            if def.links.is_empty() && !names_kinds && children.is_empty() {
+                continue;
+            }
+            let slots = def
+                .slots
+                .iter()
+                .map(|(n, sl)| (*n, sl.admits.iter().cloned().collect()))
+                .collect();
+            out.insert(plain(def.name.as_str()).to_owned(), (slots, children));
+        }
+    }
+    out
+}
+
+/// Whether a def names a Soul's body (today's `core/humanoid@<n>`, also spelt `core-humanoid@<n>`), not a thing.
+pub fn is_body_def(def: &str) -> bool {
+    ["core/humanoid@", "core-humanoid@"].iter().any(|p| {
+        def.strip_prefix(p)
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// The facts' things less Souls' bodies (old Eden's 22 residents were exported as `core/humanoid@1` things): the
+/// things kept, each body left out as (origin id, name, def, ref), and what the bake counted for them. A thing that
+/// stood on a body (in its hands) would lose its parent, and is refused by name rather than placed somewhere new.
+type Residents = (
+    Vec<Json>,
+    Vec<(String, String, String, String)>,
+    Vec<(String, i64)>,
+);
+fn without_bodies(all: &[Json]) -> R<Residents> {
+    let body = |t: &Json| {
+        [t.get("def"), t.get("ref")]
+            .into_iter()
+            .flatten()
+            .filter_map(Json::str)
+            .any(is_body_def)
+    };
+    let mut gone: BTreeMap<String, i64> = BTreeMap::new();
+    let mut residents = Vec::new();
+    for t in all.iter().filter(|t| body(t)) {
+        let id = s(t, "id")?.to_owned();
+        let name = t
+            .get("name")
+            .and_then(Json::str)
+            .unwrap_or_default()
+            .to_owned();
+        let text = |k| t.get(k).and_then(Json::str).unwrap_or_default().to_owned();
+        residents.push((id, name, text("def"), text("ref")));
+        *gone.entry("things".into()).or_default() += 1;
+        *gone.entry("slots".into()).or_default() +=
+            t.get("slots").map_or(0, |v| v.arr().len() as i64);
+        *gone.entry("solids".into()).or_default() +=
+            t.get("solids").map_or(0, |v| v.arr().len() as i64);
+    }
+    let ids: BTreeSet<&str> = residents.iter().map(|r| r.0.as_str()).collect();
+    if let Some(t) = all.iter().find(|t| {
+        t.get("parent")
+            .and_then(Json::str)
+            .is_some_and(|p| ids.contains(p))
+    }) {
+        return Err(format!(
+            "{}: stands on a Soul's body, which is not a thing",
+            s(t, "id")?
+        ));
+    }
+    let kept = all.iter().filter(|t| !body(t)).cloned().collect();
+    Ok((kept, residents, gone.into_iter().collect()))
+}
+
+/// [`load`], with the world's entries (`(name, its souls-entry/1 text)`): a kind whose entry joins parts (it declares a
+/// link type, or slots naming the kinds they admit: a rack bay, a beam, a frame stand) takes its slots from its entry,
+/// numbered and admitting as the entry says, beside any slot only its things have. Every other kind is the facts'.
+/// Those kinds' names (their hashes) follow their entries, so a world seeded with such entries before is seeded again.
+pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
+    let joining = joining_slots(entries);
+    let states = entry_states(entries);
     let f = json::parse(text)?;
     if s(&f, "format")? != "souls/import-eden/1" {
         return Err("not a souls/import-eden/1 file".into());
     }
-    let things = need(&f, "things")?.arr();
+    let (kept, residents, gone) = without_bodies(need(&f, "things")?.arr())?;
+    let things = &kept[..];
 
     // --- Kinds: T3's names, with what each admits (section 11) and in its slots (section 6). -------------------------
     let mut slots_of: BTreeMap<&str, BTreeSet<i64>> = BTreeMap::new();
@@ -396,20 +990,40 @@ pub fn load(text: &str) -> R<Import> {
     }
     for k in need(&f, "kinds")?.arr() {
         let r = s(k, "ref")?;
-        let slots: String = slots_of
+        // The facts' slots (each admits a thing), and a joining kind's own slots from its entry over them.
+        let mut by_n: BTreeMap<i64, Vec<String>> = slots_of
             .get(r)
-            .map(|ns| {
-                ns.iter()
-                    .map(|n| format!("{n}: [\"thing\"]"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
+            .map(|ns| ns.iter().map(|n| (*n, vec!["thing".to_owned()])).collect())
             .unwrap_or_default();
-        let children = if has_floors.contains(r) {
-            format!("[\"thing\", \"{FLOOR}\"]")
-        } else {
-            "[\"thing\"]".to_owned()
-        };
+        let own = joining.get(kind_name(s(k, "name")?).as_str());
+        if let Some((own, _)) = own {
+            for (n, admits) in own {
+                if let Ok(n) = i64::try_from(*n) {
+                    by_n.insert(n, admits.clone());
+                }
+            }
+        }
+        let slots: String = by_n
+            .iter()
+            .map(|(n, admits)| {
+                let a: Vec<String> = admits.iter().map(|x| format!("\"{x}\"")).collect();
+                format!("{n}: [{}]", a.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut children = vec!["thing".to_owned()];
+        if has_floors.contains(r) {
+            children.push(FLOOR.to_owned());
+        }
+        children.extend(own.map(|(_, c)| c.clone()).unwrap_or_default());
+        let children = format!(
+            "[{}]",
+            children
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         // Section 19 holds today's def hash, so the kind's hash covers today's meaning until K3 loads real entries.
         // Named as the entries name it ([`kind_name`]), so a thing's kind finds its entry.
         let line = format!(
@@ -486,6 +1100,11 @@ pub fn load(text: &str) -> R<Import> {
     let mut links: Vec<(Id, &str, [Id; 2])> = Vec::new();
     let mut doorway_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
     let mut stair_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+    // Each floor's flights within itself, as surfaces ([`flight_surfaces`]), and how many flights and surfaces.
+    let mut flight_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+    let mut floor_flights = (0, 0);
+    // Each modelled storey's seams closed and entrance treads ([`mesh_fill`]).
+    let mut mesh_fills = (0, 0);
     // A slot's point in its thing's frame: today's pose of a thing in a slot is from its parent's origin, and K2's is
     // from the slot's point (T4's carry adds the point), so the point is taken off once here.
     let mut slot_at: HashMap<(&str, i64), [i64; 3]> = HashMap::new();
@@ -566,6 +1185,18 @@ pub fn load(text: &str) -> R<Import> {
         }
         if let Some(e) = t.get("entry").and_then(Json::str) {
             fields.insert(F_ENTRY, Value::Text(name(e)?));
+        }
+        if let Some(p) = t.get("params").and_then(Json::str) {
+            fields.insert(F_PARAMS, Value::Bytes(p.as_bytes().to_vec()));
+        }
+        // #4784: the world starts as today's page drew it (a lamp captured on is on, a fire burning is lit): each state
+        // field its entry has, from the captured state, where it says something of it
+        if let (Some(st), Some(defs)) = (t.get("state"), states.get(entry_name(&kind, &fields))) {
+            for (name, n, ty, max) in defs {
+                if let Some(v) = captured(st, name, ty, *max) {
+                    fields.entry(*n).or_insert(v);
+                }
+            }
         }
         if let Some(d) = t.get("door") {
             fields.insert(
@@ -670,7 +1301,12 @@ pub fn load(text: &str) -> R<Import> {
             levels.entry(int(st, "from")?).or_default();
             levels.entry(int(st, "to")?).or_default();
         }
-        for (lv, surfaces) in levels {
+        let lowest = levels.keys().next().copied();
+        for (lv, mut surfaces) in levels {
+            let (rows, seams, treads) = mesh_fill(t, lv, Some(lv) == lowest)?;
+            surfaces.extend(rows);
+            mesh_fills.0 += seams;
+            mesh_fills.1 += treads;
             let mut ff = BTreeMap::new();
             ff.insert(F_LEVEL, i(lv));
             if !surfaces.is_empty() {
@@ -707,24 +1343,24 @@ pub fn load(text: &str) -> R<Import> {
             let okind = s(o, "kind")?;
             let from = o.get("from").and_then(Json::str);
             if okind == "window" {
-                let (Some(from), Some(at)) = (from, o.get("inRoom")) else {
-                    b.notes.push(format!("{id}/{oid}: a window in no room"));
-                    continue;
+                let (room, at) = match (from, o.get("inRoom")) {
+                    (Some(from), Some(at)) => (b.node(&format!("{id}/{from}"))?, pose4(at)?),
+                    // In no room's wall (the Mars kitchen's serving hatch, in an outer wall below its raised rooms):
+                    // the window of the room of its thing nearest it, which it serves.
+                    _ => match nearest_room(t, o)? {
+                        Some((rid, at)) => (b.node(&format!("{id}/{rid}"))?, at),
+                        None => {
+                            b.notes.push(format!("{id}/{oid}: a window in no room"));
+                            continue;
+                        }
+                    },
                 };
-                let room = b.node(&format!("{id}/{from}"))?;
                 let mut wf = BTreeMap::new();
                 wf.insert(F_WIDTH, i(int(o, "width")?));
                 wf.insert(F_HEIGHT, i(int(o, "height")?));
                 wf.insert(F_SILL, i(o.get("sill").and_then(Json::int).unwrap_or(0)));
                 wf.insert(F_LEVEL, i(int(o, "level")?));
-                b.add(
-                    &format!("{id}/{oid}"),
-                    room,
-                    None,
-                    &full[WINDOW],
-                    pose4(at)?,
-                    wf,
-                )?;
+                b.add(&format!("{id}/{oid}"), room, None, &full[WINDOW], at, wf)?;
                 continue;
             }
             let link = doorway_ids[&(id.to_owned(), oid.to_owned())];
@@ -780,11 +1416,20 @@ pub fn load(text: &str) -> R<Import> {
             let (lo, hi) = (int(st, "from")?, int(st, "to")?);
             let a = b.node(&format!("{id}/floor-{lo}"))?;
             let z = b.node(&format!("{id}/floor-{hi}"))?;
-            // A step between two surfaces of one level (a deck's pieces a few mm apart) joins a floor to itself: the
-            // floor already holds both surfaces, so there is nothing to link.
+            // A flight between two pieces of one storey (Chiba's upper deck: pieces 150 mm apart, each reached by a
+            // short flight) can be no link, since a link joins two nodes: it is walked as that floor, its path become
+            // floor surfaces ([`flight_surfaces`]).
             if a == z {
-                b.notes
-                    .push(format!("{id}: a stair on floor {lo} to itself, not linked"));
+                match flight_surfaces(st)? {
+                    Some(rows) => {
+                        floor_flights.0 += 1;
+                        floor_flights.1 += rows.len() as i64;
+                        flight_fields.entry(a).or_default().extend(rows);
+                    }
+                    None => b.notes.push(format!(
+                        "{id}: a stair on floor {lo} to itself rising more than a step, not linked"
+                    )),
+                }
                 continue;
             }
             let link = b.id()?;
@@ -838,19 +1483,35 @@ pub fn load(text: &str) -> R<Import> {
         if let Some(rows) = stair_fields.remove(&sp.id) {
             sp.fields.insert(F_STAIRS, Value::Array(rows));
         }
+        if let Some(rows) = flight_fields.remove(&sp.id) {
+            match sp
+                .fields
+                .entry(F_SURFACES)
+                .or_insert(Value::Array(Vec::new()))
+            {
+                Value::Array(a) => a.extend(rows),
+                _ => return Err("a floor's surfaces are a list".into()),
+            }
+        }
     }
 
     // --- On another thing's floor (C27, #3509): a thing at the root standing on a building's own floor (a pavilion's,
     // a deck's), or in a building's slot that lies on one of its floors (a roof terrace), stands on that floor, in
     // the room there that holds it: the open ground is cut out under such a floor, and a roof is no ground. Moved
-    // after every node has its id, so no id changes. A decor thing stays where it is: scenery may reach far past the
-    // building its origin is in (a cableway from its valley station).
-    let decor: BTreeSet<&str> = need(&f, "kinds")?
+    // after every node has its id, so no id changes. A decor thing at the root goes too (the bubbles and succulents
+    // in verdelis-eden's dome garden), unless a point its kind's entry declares is off that floor: scenery may reach
+    // far past the building its origin is in (a cableway from its valley station). With no entries at all (`load`),
+    // its points are not known, so a decor thing stays where it is.
+    let decor: BTreeMap<&str, String> = need(&f, "kinds")?
         .arr()
         .iter()
         .filter(|k| k.get("layer").and_then(Json::str) == Some("decor"))
-        .filter_map(|k| k.get("ref").and_then(Json::str))
+        .filter_map(|k| {
+            let r = k.get("ref").and_then(Json::str)?;
+            Some((r, kind_name(k.get("name").and_then(Json::str)?)))
+        })
         .collect();
+    let reach = entry_points(entries);
     let hosts: Vec<&Json> = things
         .iter()
         .filter(|t| t.get("parent").and_then(Json::str).is_none() && t.get("floors").is_some())
@@ -860,7 +1521,14 @@ pub fn load(text: &str) -> R<Import> {
         at.insert(sp.id, k);
     }
     for t in things {
-        if t.get("floors").is_some() || t.get("rooms").is_some() || decor.contains(s(t, "ref")?) {
+        if t.get("floors").is_some() || t.get("rooms").is_some() {
+            continue;
+        }
+        // Scenery in a building's own slot (a big top's canopy on its roof) keeps its slot.
+        let scenery = decor.get(s(t, "ref")?);
+        if scenery.is_some()
+            && (entries.is_empty() || t.get("parent").and_then(Json::str).is_some())
+        {
             continue;
         }
         let found = match (t.get("parent").and_then(Json::str), t.get("slot")) {
@@ -870,7 +1538,7 @@ pub fn load(text: &str) -> R<Import> {
                 for h in &hosts {
                     let local = into(pose4(need(h, "pose")?)?, w)?;
                     if let Some(f) = on_floor(h, local)? {
-                        found = Some((s(h, "id")?, f));
+                        found = Some((*h, local, f));
                         break;
                     }
                 }
@@ -881,11 +1549,33 @@ pub fn load(text: &str) -> R<Import> {
                     .iter()
                     .find(|h| h.get("id").and_then(Json::str) == Some(p))
                 {
-                    Some(h) => on_floor(h, pose4(need(t, "pose")?)?)?.map(|f| (p, f)),
+                    Some(h) => {
+                        let local = pose4(need(t, "pose")?)?;
+                        on_floor(h, local)?.map(|f| (*h, local, f))
+                    }
                     None => None,
                 }
             }
             _ => None,
+        };
+        // Scenery whose entry puts a point off this floor (above it, or past its outline) stays on the open ground.
+        let found = match (found, scenery) {
+            (Some((h, local, f)), Some(kind)) => {
+                let entry = t
+                    .get("entry")
+                    .and_then(Json::str)
+                    .map_or(plain(kind), plain);
+                let mut on = true;
+                for p in reach.get(entry).map(Vec::as_slice).unwrap_or(&[]) {
+                    on &= on_floor(h, onto(local, *p)?)?.is_some();
+                }
+                on.then_some((h, local, f))
+            }
+            (found, _) => found,
+        };
+        let found = match found {
+            Some((h, _, f)) => Some((s(h, "id")?, f)),
+            None => None,
         };
         if let Some((host, (key, pose))) = found {
             let (Some(&node), Some(&parent)) = (
@@ -1029,6 +1719,23 @@ pub fn load(text: &str) -> R<Import> {
             by_ref.insert(k.clone(), v.int().unwrap_or(0));
         }
     }
+    // The bake counted the bodies left out: they are not in the tree, so not in what it is compared with.
+    for (key, n) in gone {
+        if let Some(v) = bake.get_mut(&key) {
+            *v -= n;
+        }
+    }
+    for (_, _, def, r) in &residents {
+        let key = if by_ref.contains_key(def) { def } else { r };
+        if let Some(v) = by_ref.get_mut(key) {
+            *v -= 1;
+        }
+    }
+    by_ref.retain(|_, v| *v != 0);
+    let residents = residents
+        .into_iter()
+        .map(|(id, name, _, _)| (id, name))
+        .collect();
     Ok(Import {
         tree,
         rules,
@@ -1038,7 +1745,10 @@ pub fn load(text: &str) -> R<Import> {
         bake,
         by_ref,
         notes: b.notes,
+        floor_flights,
+        mesh_fills,
         left_out: b.left_out,
+        residents,
         forms,
         kind_lines,
         log: (
@@ -1096,13 +1806,29 @@ fn presentation(f: &Json) -> R<Presentation> {
     Ok(p)
 }
 
-/// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, when the facts
-/// have a ground.
+/// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, the world's
+/// own defs (`F_DEF_BODIES`) and its palette (`F_GROUND_PALETTE`), when the facts have a ground.
 fn terrain(f: &Json) -> R<BTreeMap<u64, Value>> {
     let mut out = BTreeMap::new();
     let Some(g) = f.get("ground") else {
         return Ok(out);
     };
+    if let Some(ds) = g.get("defs") {
+        let rows = ds.arr().iter().map(|d| {
+            Ok(Value::Array(vec![
+                Value::Bytes(s(d, "ref")?.as_bytes().to_vec()),
+                Value::Bytes(s(d, "body")?.as_bytes().to_vec()),
+            ]))
+        });
+        let rows = rows.collect::<R<Vec<_>>>()?;
+        if !rows.is_empty() {
+            out.insert(F_DEF_BODIES, Value::Array(rows));
+        }
+    }
+    if let Some(p) = g.get("palette").and_then(Json::str) {
+        let n = Name::new(&format!("souls:{p}")).ok_or_else(|| format!("ground palette {p:?}"))?;
+        out.insert(F_GROUND_PALETTE, Value::Text(n));
+    }
     let mut tiles = Vec::new();
     for t in need(g, "tiles")?.arr() {
         let heights = base64(s(t, "heights")?)?;
@@ -1208,7 +1934,8 @@ pub struct Row {
 }
 
 /// Counts the tree by walking it from the root (children lists, never a scan of the node array) and its links, and
-/// sets them beside the bake's.
+/// sets them beside the bake's. A flight within one storey ([`Import::floor_flights`]) counts as a stair, not as the
+/// floor surfaces it became.
 pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, i64>) {
     let t = &im.tree;
     let mut c: BTreeMap<&str, i64> = BTreeMap::new();
@@ -1265,6 +1992,9 @@ pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, 
         *ty.entry(name.as_str().to_owned()).or_default() += 1;
     }
     let get = |m: &BTreeMap<String, i64>, k: &str| m.get(k).copied().unwrap_or(0);
+    // A flight within one storey is walked as its floor's surfaces, and counted as the flight it is.
+    let (flights, flight_surfaces) = im.floor_flights;
+    *c.entry("floor surfaces").or_default() -= flight_surfaces + im.mesh_fills.0 + im.mesh_fills.1;
     let rows = [
         ("things", c.get("things"), "things"),
         ("doors", c.get("doors"), "doors"),
@@ -1277,7 +2007,7 @@ pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, 
         ("doorways (links)", Some(&get(&ty, DOORWAY)), "doorways"),
         (
             "stairs (links)",
-            Some(&get(&ty, "eden:stairs")),
+            Some(&(get(&ty, "eden:stairs") + flights)),
             "stairs:stairs",
         ),
     ]
@@ -1490,6 +2220,46 @@ pub struct BodySlot {
     /// The slot's boarding reach, µm (its `board_mm`; 0 when it has none): when no body can stand at or near its stand
     /// point (a boat's side afloat), how far from the slot the clear ground it is got onto from may be.
     pub board: i64,
+    /// The slot's other places when its `most` is above one (E16: a tent's two sleepers), as offsets from `at` in the
+    /// thing's axes, µm ([`more_places`]). Empty for a slot of one body.
+    pub more: Vec<Vec3>,
+}
+
+/// How many rings of places around a slot's point [`more_places`] looks in.
+const MORE_RINGS: i64 = 3;
+
+/// A standard body's standing reach, µm (`sim::slots::STANDARD_REACH`): a thing no taller is body-sized, so its
+/// footprint is its slots' space.
+const BODY_REACH: i64 = 2_060_000;
+
+/// The other places of a slot at `at` that holds `most` bodies (E16), offsets from `at` in the thing's axes, µm: the
+/// points of a triangular grid around it a standard body's clearance diameter apart (so no two bodies are at one
+/// point, nor closer than their clearance), ring by ring outward (in a ring by x, then z), each with its body's clearance circle
+/// inside the thing's footprint (`bounds`, its `geometry.bounds_mm` across x and z, centred on its origin), so none is
+/// in a neighbour's geometry. At most `most - 1` of them; fewer when fewer fit, and none when the entry declares no
+/// bounds: such a slot holds one body, as before.
+pub fn more_places(at: Vec3, most: u64, bounds: Option<[i64; 2]>) -> Vec<Vec3> {
+    let Some([w, d]) = bounds else {
+        return Vec::new();
+    };
+    let r = replica::kinds::sizes::Size::Standard.radius_mm() * 1000;
+    let (pitch, row) = (2 * r, 2 * r * 866_025 / 1_000_000);
+    let fits = |x: i64, z: i64| (at.x + x).abs() + r <= w / 2 && (at.z + z).abs() + r <= d / 2;
+    // Nearest first by ring (the grid's own distance, exact where rounded lengths are not), then by x and z.
+    let mut grid: Vec<(i64, i64, i64)> = (-MORE_RINGS..=MORE_RINGS)
+        .flat_map(|b| (-MORE_RINGS..=MORE_RINGS).map(move |a| (a, b)))
+        .map(|(a, b)| {
+            let ring = a.abs().max(b.abs()).max((a + b).abs());
+            (ring, a * pitch + b * pitch / 2, b * row)
+        })
+        .filter(|&(ring, x, z)| ring > 0 && ring <= MORE_RINGS && fits(x, z))
+        .collect();
+    grid.sort_unstable();
+    let take = usize::try_from(most.saturating_sub(1)).unwrap_or(usize::MAX);
+    grid.into_iter()
+        .take(take)
+        .map(|(_, x, z)| Vec3::new(x, 0, z))
+        .collect()
 }
 
 /// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
@@ -1525,8 +2295,8 @@ pub fn body_slots_of(
     out
 }
 
-/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach).
-type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64)>>;
+/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach, other places).
+type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64, Vec<Vec3>)>>;
 
 fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKind<'_> {
     use replica::rules::json::Value as J;
@@ -1543,6 +2313,19 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
     let mut by_kind = BTreeMap::new();
     for (kind, e) in entries {
         let slots = e.get("slots").and_then(J::obj).unwrap_or(&[]);
+        // A box's footprint across x and z, µm, from its `[w, h, d]` mm; with its height for the thing's bounds.
+        let box3 = |v: Option<&J>| match v.and_then(J::arr) {
+            Some([J::Int(w), J::Int(h), J::Int(d)]) => Some((
+                [
+                    i64::try_from(*w).ok()? * 1000,
+                    i64::try_from(*d).ok()? * 1000,
+                ],
+                i64::try_from(*h).ok()? * 1000,
+            )),
+            _ => None,
+        };
+        let xz = |v: Option<&J>| box3(v).map(|(b, _)| b);
+        let bounds = box3(e.get("geometry").and_then(|g| g.get("bounds_mm")));
         let found: Vec<_> = (1u64..)
             .zip(slots)
             .filter(|(_, (_, d))| d.get("admits").and_then(J::str) == Some("body"))
@@ -1554,7 +2337,22 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
                     Some(J::Int(mm)) => i64::try_from(*mm).ok()?.saturating_mul(1000),
                     _ => 0,
                 };
-                Some((n, lie, um(d.get("at_mm"))?, stand, board))
+                let at = um(d.get("at_mm"))?;
+                // The space the places must fit in: the slot's own (`fits_mm`, centred on its point) when it declares
+                // one, else the thing's footprint, but only for a thing no taller than a body's standing reach (a tent,
+                // a piste): a taller thing (a big wheel, a cable car) has room that is not the slot's, so a slot on it
+                // with no space of its own holds one body.
+                let most = match d.get("most") {
+                    Some(J::Int(m)) if *m > 1 => u64::try_from(*m).unwrap_or(u64::MAX),
+                    _ => 1,
+                };
+                let more = match (most > 1, xz(d.get("fits_mm")), bounds) {
+                    (false, ..) => Vec::new(),
+                    (true, Some(fits), _) => more_places(Vec3::ZERO, most, Some(fits)),
+                    (true, None, Some((b, h))) if h <= BODY_REACH => more_places(at, most, Some(b)),
+                    _ => Vec::new(),
+                };
+                Some((n, lie, at, stand, board, more))
             })
             .collect();
         if !found.is_empty() {
@@ -1578,26 +2376,89 @@ fn slots_on(
     };
     // A thing that borrows another kind's entry (field 27: a Mars chair names `eden:chair`) has its own shape: each
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
-    // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered.
-    let borrowed = entry != plain(kind);
-    out.extend(found.iter().filter_map(|&(slot, lie, at, stand, board)| {
-        let (at, stand) = if borrowed {
-            let own = slot_point(fields, slot)?;
-            (
-                own,
-                Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
-            )
-        } else {
-            (at, stand)
-        };
-        Some(BodySlot {
-            thing: id,
-            slot,
-            lie,
-            at,
-            stand,
-            board,
-        })
-    }));
+    // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered. A ride on its
+    // course whose kind declares no slots at all (Eden's launch balloon, a `core/balloon` by another name, flying the
+    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are.
+    let has_slots = matches!(fields.get(&F_SLOTS), Some(Value::Array(rows)) if !rows.is_empty());
+    let bare_ride = !has_slots && fields.contains_key(&replica::schedule::F_COURSE);
+    let borrowed = entry != plain(kind) && !bare_ride;
+    out.extend(
+        found
+            .iter()
+            .filter_map(|(slot, lie, at, stand, board, more)| {
+                let (slot, lie, at, stand, board) = (*slot, *lie, *at, *stand, *board);
+                let (at, stand) = if borrowed {
+                    let own = slot_point(fields, slot)?;
+                    (
+                        own,
+                        Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
+                    )
+                } else {
+                    (at, stand)
+                };
+                Some(BodySlot {
+                    thing: id,
+                    slot,
+                    lie,
+                    at,
+                    stand,
+                    board,
+                    // A borrowed entry's places were fitted to the entry's shape, not this thing's: one body.
+                    more: if borrowed { Vec::new() } else { more.clone() },
+                })
+            }),
+    );
     found.len()
+}
+
+#[cfg(test)]
+mod captured_state {
+    use super::*;
+
+    /// #4784: a captured look seeds the entry's fields of that meaning (a fire burning is lit, a lamp on is at its top
+    /// level), and nothing below the entries' block.
+    #[test]
+    fn the_capture_seeds_the_entry_fields_of_its_meaning() {
+        let entry = |k: &str, t: &str| ("x".to_owned(), format!(r#"{{"kind":"{k}","state":{t}}}"#));
+        let entries = [
+            entry("eden:campfire", r#"{"lit":{"n":28,"type":"bool"}}"#),
+            entry(
+                "eden:floor_lamp",
+                r#"{"level":{"n":28,"type":"int","max":3}}"#,
+            ),
+            entry("eden:door", r#"{"open":{"n":6,"type":"bool"}}"#),
+        ];
+        let st = entry_states(&entries);
+        assert!(
+            !st.contains_key("eden:door"),
+            "below the entries' block: the import's own fields"
+        );
+        let seed = |kind: &str, capture: &str| {
+            let j = json::parse(capture).unwrap();
+            st[kind]
+                .iter()
+                .map(|(n, f, t, max)| (*f, captured(&j, n, t, *max)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            seed("eden:campfire", r#"{"on":true}"#),
+            vec![(28, Some(Value::Uint(1)))]
+        );
+        assert_eq!(
+            seed("eden:campfire", r#"{"lit":false}"#),
+            vec![(28, Some(Value::Uint(0)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"on":true}"#),
+            vec![(28, Some(Value::Uint(3)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"on":false}"#),
+            vec![(28, Some(Value::Uint(0)))]
+        );
+        assert_eq!(
+            seed("eden:floor_lamp", r#"{"broken":false}"#),
+            vec![(28, None)]
+        );
+    }
 }

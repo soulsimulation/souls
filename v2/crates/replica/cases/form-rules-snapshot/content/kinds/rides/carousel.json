@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:carousel",
   "owner": "thing",
-  "state": {"under_way":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"under_way":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "gate": {"role":"stand","at_mm":[0,0,4700],"yaw_mdeg":180000},
     "exit_gate": {"role":"stand","at_mm":[0,0,-4700],"yaw_mdeg":0}

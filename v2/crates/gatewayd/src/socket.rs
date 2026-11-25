@@ -81,17 +81,23 @@ const SEND_MOST: usize = FRAME_MOST + 64;
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
-/// entries (`entries.rs`) and a creator's bulk edits (#3695, `bulk.rs`).
+/// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
 pub fn router(gw: Arc<Gateway>) -> Router {
     Router::new()
         .route(PATH, get(upgrade))
         .route(crate::creator::PATH, post(crate::creator::exchange))
         .route(crate::creator::HELPER_PATH, post(crate::creator::helper))
         .route(crate::entries::PATH, get(crate::entries::serve))
+        .route(crate::entries::KINDS_PATH, get(crate::entries::serve_kinds))
         .route(
             crate::bulk::PATH,
             post(crate::bulk::submit).layer(crate::bulk::limit()),
         )
+        .route(
+            crate::uploads::PATH,
+            post(crate::uploads::upload).layer(crate::uploads::limit()),
+        )
+        .route(crate::uploads::SERVE, get(crate::uploads::serve))
         .with_state(gw)
 }
 
@@ -163,6 +169,7 @@ pub fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8>
         now,
         changed: Vec::new(),
         op: None,
+        detail: None,
     })
 }
 
@@ -184,6 +191,7 @@ fn refuse(
         now: now.clone(),
         changed: Vec::new(),
         op: None,
+        detail: None,
     };
     let Some(at) = Cursor::from_value(&now) else {
         return Some(own_answer(answer));
@@ -655,6 +663,10 @@ fn take_intent(
             intent.sequence,
             "intent-not-granted",
         );
+    }
+    // I2: a kind definition naming an uploaded model this world does not hold as allowed never reaches the world
+    if let Some(reason) = crate::uploads::edit_refusal(gw, &intent) {
+        return refuse(gw, grant, actor, intent.sequence, reason);
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());

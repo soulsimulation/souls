@@ -315,6 +315,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
         Wearing {
             catalogue: catalogue(),
             born: BTreeMap::from([(bo(), hash(TALL))]),
+            looks: BTreeMap::new(),
         },
         ada(),
         entry(),
@@ -653,6 +654,7 @@ fn b15_imported_choice_ordinary_c3() {
     let wearing = || Wearing {
         catalogue: catalogue.clone(),
         born: BTreeMap::from([(soul, chosen)]),
+        looks: BTreeMap::new(),
     };
     // This new import case uses open ground; the original narrow-corridor refusal case is unchanged.
     let at = Vec3::new(-35_000_000, 0, 30_000_000);
@@ -693,6 +695,7 @@ fn b15_imported_choice_ordinary_c3() {
         Wearing {
             catalogue: catalogue.clone(),
             born: BTreeMap::new(),
+            looks: BTreeMap::new(),
         },
         ada(),
         entry(),

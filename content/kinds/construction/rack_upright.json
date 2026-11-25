@@ -420,11 +420,26 @@
   }
  },
  "geometry": {
-  "bounds_mm": [1219, 2438, 76]
+  "bounds_mm": [1219, 2438, 76],
+  "solids_mm": [[-572, 0, 38, 38, 0, 0, 2438], [572, 0, 38, 38, 0, 0, 2438]]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"steel": "#3f6fa8"},
+   "tags": ["rack", "upright", "frame"],
+   "shapes": [
+    {"kind": "box", "at": [-572, 1219, 0], "size": [76, 2438, 76], "tint": "steel"},
+    {"kind": "box", "at": [572, 1219, 0], "size": [76, 2438, 76], "tint": "steel"},
+    {"kind": "box", "at": [0, 319, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 1238, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 2307, 0], "size": [1144, 38, 38], "tint": "steel"}
+   ]
+  }
  },
  "children": {
   "crew": {
-   "kind": "mars:rack_crew",
+   "kind": "mars:carry_activity",
    "most": 2
   }
  },
@@ -435,7 +450,7 @@
   "ever": true
  },
  "text": {
-  "card": "card"
+  "card": "A 2.4 m rack frame: two carry it flat; one holds it up in its bay for the beams."
  },
  "card": {
   "text": "card"

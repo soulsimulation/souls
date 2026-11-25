@@ -15,8 +15,33 @@ export function requestFollowSoul(soulId: string, target: Pick<EventTarget, 'dis
   return true;
 }
 
+/** How the camera is on `soulId` as the camera chip says it (ViewerFrame's `kind`), so the Soul card's Follow button and
+ *  the chip agree (first day, 25 Nov: right after arrival, while the camera flew to the new Soul, the chip said
+ *  "Following" and the card offered "Follow"): `following` while it follows or flies to it; `held` while the viewer has
+ *  pulled out of that follow (the chip and its hint offer "Follow again"); else null. */
+export function cameraOnSoul(state: { cameraMode?: string; flyingTo?: string | null; followHeld?: boolean; selection?: { soulId?: string | null } } | null | undefined, soulId: string | null): 'following' | 'held' | null {
+  if (!state || !soulId) return null;
+  if (state.flyingTo) return state.flyingTo === soulId ? 'following' : null;
+  if (state.cameraMode !== 'follow' || state.selection?.soulId !== soulId) return null;
+  return state.followHeld ? 'held' : 'following';
+}
+
 export function onFollowSoulRequest(cb: (soulId: string, approved: boolean) => void, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
   const listener = (e: Event) => { const d = (e as CustomEvent<{ soulId?: unknown; approved?: unknown }>).detail; if (isSoulId(d?.soulId)) cb(d.soulId, d.approved === true); };
   target.addEventListener(FOLLOW_SOUL_EVENT, listener);
   return () => target.removeEventListener(FOLLOW_SOUL_EVENT, listener);
+}
+
+/** Whether a Soul's body is in this window's picture now: the approval card asks it (V2PairDialog.tsx, the Soul is
+ *  arriving…) and the Shell, which holds the world's copy, answers. False when nothing answers. */
+export const SOUL_PRESENT_EVENT = 'sim:soul-present';
+export function soulPresent(soulId: string, target: Pick<EventTarget, 'dispatchEvent'> | null = typeof window === 'undefined' ? null : window): boolean {
+  let seen = false;
+  target?.dispatchEvent(new CustomEvent(SOUL_PRESENT_EVENT, { detail: { soulId, answer: (v: boolean) => { seen = v; } } }));
+  return seen;
+}
+export function onSoulPresentQuery(present: (soulId: string) => boolean, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
+  const listener = (e: Event) => { const d = (e as CustomEvent<{ soulId?: unknown; answer?: unknown }>).detail; if (isSoulId(d?.soulId) && typeof d.answer === 'function') d.answer(present(d.soulId)); };
+  target.addEventListener(SOUL_PRESENT_EVENT, listener);
+  return () => target.removeEventListener(SOUL_PRESENT_EVENT, listener);
 }

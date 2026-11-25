@@ -6,10 +6,19 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { closeApproval, closedApprovals, pickWindowApproval, useWindowApprovals } from './god-ui/window-approvals.ts';
 import type { AuthCtx } from './Shell.tsx';
+import { v2MailboxPlace } from './v2-engine/owner-mailbox.ts';
 
 const ApprovalDialog = lazy(() => import('./god-ui/ApprovalDialog.tsx').then((m) => ({ default: m.ApprovalDialog })));
+const V2PairApprovals = lazy(() => import('./god-ui/V2PairDialog.tsx').then((m) => ({ default: m.V2PairApprovals })));
 
 export function OldWorldApprovals({ linkId, auth, accountAuthRequired, onLinkDone }: { linkId: string | null; auth: AuthCtx; accountAuthRequired: boolean; onLinkDone: () => void }) {
+  // A world the new engine runs: its Soul requests are the directory's (`eden.mjs pair`), not this world's own list
+  const place = v2MailboxPlace();
+  if (place) return auth.authed ? <Suspense fallback={null}><V2PairApprovals place={place} /></Suspense> : null;
+  return <OldEngineApprovals linkId={linkId} auth={auth} accountAuthRequired={accountAuthRequired} onLinkDone={onLinkDone} />;
+}
+
+function OldEngineApprovals({ linkId, auth, accountAuthRequired, onLinkDone }: { linkId: string | null; auth: AuthCtx; accountAuthRequired: boolean; onLinkDone: () => void }) {
   const waiting = useWindowApprovals(auth.authed && accountAuthRequired);
   const [windowId, setWindowId] = useState<string | null>(null);
   useEffect(() => { if (!windowId) setWindowId(pickWindowApproval(waiting, closedApprovals())); }, [waiting, windowId]);

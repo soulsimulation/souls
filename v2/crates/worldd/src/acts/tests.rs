@@ -139,6 +139,8 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             at: goal,
             reach: 0,
             door: None,
+            ring: None,
+            aim: None,
         },
     };
     let line = FormQuestion {
@@ -163,11 +165,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([(id, body)]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([(id, body)])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: BTreeMap::from([(id, Build::STANDARD)]),
+        builds: Arc::new(BTreeMap::from([(id, Build::STANDARD)])),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -177,6 +179,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -221,6 +224,24 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         !planning.borrow().answers.contains_key(&line_key),
         "duplicate old line result cannot be reinstalled"
     );
+    // S13d: a walk the planner refuses reaches the form by the planner's own name, not as a walk with no legs.
+    assert_eq!(sight.plan_walk(id, 0, ground, goal, 0), WalkPlan::Pending);
+    let generation = planning.borrow().current[&walk_key].0.generation;
+    planning.borrow_mut().receive(BTreeMap::from([(
+        walk_key,
+        FormAnswer {
+            generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Err(Refusal {
+                name: sim::planner::GROUND_CHANGED,
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert_eq!(
+        sight.plan_walk(id, 0, ground, goal, 0),
+        WalkPlan::Refused(Name::new(sim::planner::GROUND_CHANGED).unwrap())
+    );
     planning.borrow_mut().keep(&BTreeMap::new());
     assert!(
         planning.borrow().current.is_empty(),
@@ -263,12 +284,14 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         at,
         reach: 0,
         door: None,
+        ring: None,
+        aim: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {
         generation: 1,
         map: Arc::clone(&map),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.ask(key, body, question(Vec3::new(1, 0, 0)), &map);
     planning.receive(BTreeMap::from([(key, old.clone())]));
@@ -283,7 +306,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     let current = FormAnswer {
         generation: 3,
         map: Arc::clone(&changed),
-        result: FormResult::Walk(Vec::new()),
+        result: FormResult::Walk(Ok(Vec::new())),
     };
     planning.receive(BTreeMap::from([(key, current.clone())]));
     assert!(planning.answer(&key, &map).is_none(), "old map refused");
@@ -311,6 +334,227 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     assert_eq!(
         merged.forms[&key].generation, 9,
         "an older batch cannot replace a newer result"
+    );
+}
+
+/// S8: a form's walk question ("where to stand near this thing", C7's 95 % of the planner at 750 agents) is queued
+/// by its form every tick until answered, and sent to the planner once while that request is out: counted over ten
+/// ticks with the batches not taken, once more after its batch was taken without the answer; a new generation (the
+/// body nudged while it waits) waits for the one out, then goes.
+#[test]
+fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = |x| FormQuery::Walk {
+        node: ground,
+        at: Vec3::new(x, 0, 0),
+        reach: 0,
+        door: None,
+        ring: None,
+        aim: None,
+    };
+    let mut planning = Planning::default();
+    let mut out = BTreeMap::new();
+    // One tick: the form asks (its question queued until answered), the queue goes in batch `next`.
+    let mut tick = |planning: &mut Planning, x: i64, taken: u64, next: u64| {
+        planning.ask(key, body, walk(x), &map);
+        crate::bodies::fresh_forms(
+            &mut out,
+            std::mem::take(&mut planning.queued),
+            &BTreeMap::new(),
+            taken,
+            next,
+        )
+        .len()
+    };
+    let sent: usize = (0..10).map(|k| tick(&mut planning, 0, 0, k)).sum();
+    assert_eq!(sent, 1, "sent once in ten ticks while out, not once a tick");
+    assert_eq!(
+        tick(&mut planning, 0, 1, 10),
+        1,
+        "its batch taken without the answer: sent again"
+    );
+    assert_eq!(tick(&mut planning, 0, 1, 11), 0);
+    // Nudged while batch 10 is out: a new generation every tick, none sent until batch 10 is taken; then the
+    // current one goes, once.
+    let sent: usize = (12..17).map(|k| tick(&mut planning, k as i64, 1, k)).sum();
+    assert_eq!(sent, 0, "a new generation waits for the question out");
+    assert_eq!(
+        tick(&mut planning, 17, 11, 17),
+        1,
+        "then the current generation goes"
+    );
+    assert_eq!(tick(&mut planning, 18, 11, 18), 0);
+}
+
+/// S8 review: in a tick the answers are taken first, then the questions the forms queued last tick are sent, and only
+/// then do the forms read the answers. A question whose answer has just come back is not sent again: one search
+/// per question when the planner keeps up, not two.
+#[test]
+fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = FormQuery::Walk {
+        node: ground,
+        at: Vec3::ZERO,
+        reach: 0,
+        door: None,
+        ring: None,
+        aim: None,
+    };
+    let mut planning = Planning::default();
+    let (mut out, mut answers, mut sent) = (BTreeMap::new(), BTreeMap::new(), 0);
+    // Tick 0: the form asks; its question goes in batch 0.
+    planning.ask(key, body, walk.clone(), &map);
+    let first = crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        0,
+        0,
+    );
+    sent += first.len();
+    // Tick 1: batch 0 is taken with the answer (`Bodies::take`), then last tick's queue is sent, then the form reads.
+    answers.insert(
+        key,
+        FormAnswer {
+            generation: first[0].generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Ok(Vec::new())),
+        },
+    );
+    planning.ask(key, body, walk.clone(), &map);
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        1,
+        1,
+    )
+    .len();
+    planning.receive(std::mem::take(&mut answers));
+    assert!(
+        planning.ask(key, body, walk, &map).is_some(),
+        "the form has its answer"
+    );
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        2,
+        2,
+    )
+    .len();
+    assert_eq!(sent, 1, "one search for the question");
+}
+
+/// S11: a form walker waiting for its line is pushed along by the crowd round it. Its question stands while it is on
+/// the same floor: asked once, not once a tick, and the line that comes back is its own, read from where it now is.
+/// Before, each new pose was a new question, and the answer never matched the question current when it came.
+#[test]
+fn s11_a_jostled_walkers_line_question_stands_and_its_answer_is_read() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let at = |x: i64| {
+        town.surfaces[&ground]
+            .place(
+                id,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, 40_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap()
+    };
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Line,
+    };
+    let map = Arc::new(town.versions.clone());
+    let to = Vec3::new(5_000_000, 0, 40_000_000);
+    let mut planning = Planning::default();
+    // Pushed 90 mm a tick for ten ticks while it waits: one question, one generation.
+    let mut asked = Vec::new();
+    for k in 0..10 {
+        planning.ask(key, at(k * 90_000), FormQuery::Line { to }, &map);
+        asked.extend(
+            std::mem::take(&mut planning.queued)
+                .into_values()
+                .map(|q| q.generation),
+        );
+    }
+    asked.dedup();
+    assert_eq!(asked.len(), 1, "one question while jostled: {asked:?}");
+    // Its answer comes back and is read, the walker 900 mm from where it was asked.
+    planning.receive(BTreeMap::from([(
+        key,
+        FormAnswer {
+            generation: asked[0],
+            map: Arc::clone(&map),
+            result: FormResult::Line(Err(Refusal {
+                name: "test.answer",
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert!(
+        planning.line(key, at(900_000), to, &map).is_some(),
+        "the answer is the walker's own"
     );
 }
 
@@ -355,11 +599,11 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -369,6 +613,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -431,11 +676,11 @@ fn a_point_upstairs_is_on_the_upper_floor() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -444,6 +689,7 @@ fn a_point_upstairs_is_on_the_upper_floor() {
         walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
@@ -514,7 +760,7 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         .granted
         .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
     let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
-    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap(), 0);
+    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap());
     let mut corners = BTreeSet::new();
     for t in 0..2_000i64 {
         let me = *b.runner.controller.body(id).unwrap();
@@ -620,11 +866,11 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = |thing: Id, point: &str| Sight {
-        bodies: BTreeMap::new(),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::new()),
+        carrying: Arc::new(BTreeSet::new()),
         tree,
         split: None,
-        builds: BTreeMap::new(),
+        builds: Arc::new(BTreeMap::new()),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -634,6 +880,7 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
         sit_walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -856,14 +1103,16 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: BTreeMap::from([below, on, outside]),
-        carrying: BTreeSet::new(),
+        bodies: Arc::new(BTreeMap::from([below, on, outside])),
+        carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
-        builds: [below.0, on.0, outside.0]
-            .into_iter()
-            .map(|b| (b, Build::STANDARD))
-            .collect(),
+        builds: Arc::new(
+            [below.0, on.0, outside.0]
+                .into_iter()
+                .map(|b| (b, Build::STANDARD))
+                .collect(),
+        ),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,
@@ -873,6 +1122,7 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
         sit_walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -901,4 +1151,384 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     );
     assert!(high > reach, "4 m straight overhead: {high}");
     assert_eq!(low, 0, "1 m up, straight overhead");
+}
+
+/// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the
+/// record is seen by everyone, so a hidden thing's id stays out of it (the record keeps the form's own node).
+#[test]
+fn an_aimed_move_names_a_visible_thing_and_never_a_hidden_one() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let (building, room) = (imported.nodes["building"], imported.nodes["building/r1a"]);
+    let tree = &imported.tree;
+    let b = tree.node(tree.handle(building).unwrap()).unwrap();
+    let closed = Json::Obj(vec![(
+        "closed".into(),
+        Json::Obj(vec![(
+            "audience".into(),
+            Json::Obj(vec![("rule".into(), Json::Str("owner".into()))]),
+        )]),
+    )]);
+    let open = Json::Obj(Vec::new());
+    let (me, you) = (
+        Id::new(Scope([0xca; 16]), 1).unwrap(),
+        Id::new(Scope([0xca; 16]), 2).unwrap(),
+    );
+    let toward = BTreeMap::from([(me, room), (you, building)]);
+    let planning = RefCell::new(Planning::default());
+    let aimed = |entry: &Json, body: Id, point: &str| {
+        let kinds = Json::Obj(vec![(plain(b.kind()).to_owned(), entry.clone())]);
+        Sight {
+            bodies: Arc::new(BTreeMap::new()),
+            carrying: Arc::new(BTreeSet::new()),
+            tree,
+            split: None,
+            builds: Arc::new(BTreeMap::new()),
+            kind: Name::new("souls:body").unwrap(),
+            kinds: &kinds,
+            toward: &toward,
+            asked: RefCell::new(BTreeMap::new()),
+            context: BTreeMap::new(),
+            walks: BTreeMap::new(),
+            approaches: Default::default(),
+            sit_walks: BTreeMap::new(),
+            goals: BTreeSet::new(),
+            walk_moves: BTreeMap::new(),
+            planning: &planning,
+            map: Arc::new(Versions::default()),
+        }
+        .aimed(body, &Name::new(point).unwrap())
+    };
+    assert_eq!(
+        aimed(&open, me, AT_ARG),
+        Some(room),
+        "a visible thing is named"
+    );
+    assert_eq!(
+        aimed(&closed, you, AT_ARG),
+        Some(building),
+        "the closed container itself is seen"
+    );
+    assert_eq!(
+        aimed(&closed, me, AT_ARG),
+        None,
+        "a thing in a closed container is not named"
+    );
+    assert_eq!(
+        aimed(&open, me, AT_SELF),
+        None,
+        "a move at the body itself names nothing else"
+    );
+}
+
+fn content_entry(path: &str) -> Json {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds")
+        .join(format!("{path}.json"));
+    replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// 0.135 E13: a body in a slot of a thing reaches from its seat to the thing's named point, wherever the thing is
+/// placed and however it is turned. Content's motorboat and narrowboat, placed far from the origin: the helm reaches
+/// the key and the other seats do not, the stern reaches the hatch and the berth and the galley do not, and the
+/// answers are the same at two places. Before, a seated body was measured from its seat's frame at zero, which gave
+/// the thing's distance from the origin for every seat and every point.
+#[test]
+fn e13_a_seated_body_reaches_from_its_seat_wherever_the_thing_is() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let tree = &imported.tree;
+    let node = |id: Id| tree.node(tree.handle(id).unwrap()).unwrap();
+    // Three things away from the origin, each read as a vehicle: the building (60 m west, turned 33°) and the ring
+    // (75 m east) as motorboats, a room upstairs in the building as a narrowboat.
+    let (west, east, room) = (
+        imported.nodes["building"],
+        imported.nodes["ring"],
+        imported.nodes["building/r1a"],
+    );
+    for id in [west, east, room] {
+        let at = world_at(tree, id).expect("placed");
+        assert!(
+            at.x.abs().max(at.z.abs()) > 50_000_000,
+            "far from the origin: {at:?}"
+        );
+    }
+    let (motorboat, narrowboat) = (
+        content_entry("vehicles/motorboat"),
+        content_entry("vehicles/narrowboat"),
+    );
+    let kinds = Json::Obj(vec![
+        (plain(node(west).kind()).to_owned(), motorboat.clone()),
+        (plain(node(east).kind()).to_owned(), motorboat.clone()),
+        (plain(node(room).kind()).to_owned(), narrowboat.clone()),
+    ]);
+    let slot_of = |entry: &Json, slot: &str| {
+        let slots = entry.get("slots").unwrap().obj().unwrap();
+        1 + slots.iter().position(|(k, _)| k == slot).unwrap() as u64
+    };
+    let mut bodies = BTreeMap::new();
+    let mut riders = Vec::new();
+    let mut ride = |thing: Id, entry: &Json, slot: &'static str, point: &'static str| {
+        let id = Id::new(Scope([0xcb; 16]), riders.len() as u64 + 1).unwrap();
+        let pose = replica::pose::Pose {
+            frame: Frame {
+                node: thing,
+                slot: Some(slot_of(entry, slot)),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: replica::pose::Support::Slot,
+        };
+        let body = Moved {
+            id,
+            pose,
+            linear: Vec3::ZERO,
+            piece: 0,
+            tri: 0,
+        };
+        bodies.insert(id, body);
+        riders.push((id, thing, slot, point));
+    };
+    for thing in [west, east] {
+        for slot in ["helm", "front", "back_left", "back_right"] {
+            ride(thing, &motorboat, slot, "key");
+        }
+    }
+    for slot in ["stern", "berth", "galley"] {
+        ride(room, &narrowboat, slot, "hatch");
+    }
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: Arc::new(bodies.clone()),
+        carrying: Arc::new(BTreeSet::new()),
+        tree,
+        split: None,
+        builds: Arc::new(bodies.keys().map(|b| (*b, Build::STANDARD)).collect()),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    // The press move's reach (content/moves/press.json), the move a motorboat's key and a narrowboat's hatch take.
+    let reach = 600_000;
+    let mut by_seat = BTreeMap::new();
+    for &(body, thing, slot, point) in &riders {
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(point).unwrap(),
+            )
+            .expect("measured");
+        println!("E13: seated in {slot}, {d} µm from {point}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "stern"),
+            "{slot} to {point}: {d} µm"
+        );
+        // The same seat of the same kind gives the same answer wherever the thing is.
+        if let Some(was) = by_seat.insert(slot, d) {
+            assert_eq!(was, d, "{slot}: the same from another place");
+        }
+    }
+    // 0.135 E20: a steer is at the thing's control point (the motorboat's wheel, the narrowboat's tiller), so the seat
+    // decides: the helm and the seat beside it reach the wheel, the back seats do not; only the stern reaches the
+    // tiller, not the berth or the galley 7 m off. The steer move's reach (content/moves/steer.json).
+    for &(body, thing, slot, point) in &riders {
+        let control = if point == "key" { "wheel" } else { "tiller" };
+        let d = sight
+            .distance(
+                body,
+                &Effector::Held,
+                None,
+                thing,
+                &Name::new(control).unwrap(),
+            )
+            .expect("measured");
+        println!("E20: seated in {slot}, {d} µm from the {control}");
+        assert_eq!(
+            d <= reach,
+            matches!(slot, "helm" | "front" | "stern"),
+            "{slot} to the {control}: {d} µm"
+        );
+    }
+}
+
+/// 0.135 E21: reach to and from a seated, lying or riding Soul is measured from where its body is, its seat's place
+/// in the world, not its slot frame's zero. The building (60 m west, turned 33°) read as a long bench: a Soul on its
+/// end seat, 1.5 m beyond the east wall and 9.5 m from the bench's origin, is in reach of a Soul standing 0.4 m from
+/// that seat, both ways, and out of reach of one standing 2 m from it; a walk to it is planned to its seat. The ring
+/// (75 m east) read as content's motorboat: its riders are a seat apart, the helm 0.7 m from the front seat and 1.3 m
+/// from the back left, both beyond a press's 0.6 m. Before, every seated body was at its frame's zero: the riders 0
+/// apart, the bench's Soul at the building's origin.
+#[test]
+fn e21_reach_to_a_seated_body_is_from_its_seat() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let ground = imported.nodes["ground"];
+    let (bench, boat) = (imported.nodes["building"], imported.nodes["ring"]);
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let mut town =
+        Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).expect("the town");
+    let node = |id: Id| town.tree.node(town.tree.handle(id).unwrap()).unwrap();
+    let end_x = testworld::BUILDING_LENGTH / 2 + 1_500;
+    let bench_entry = replica::rules::json::parse(&format!(
+        r#"{{"slots":{{"middle":{{"admits":"body","at_mm":[0,450,0]}},"end":{{"admits":"body","at_mm":[{end_x},450,0]}}}}}}"#
+    ))
+    .unwrap();
+    let motorboat = content_entry("vehicles/motorboat");
+    let kinds = Json::Obj(vec![
+        (plain(node(bench).kind()).to_owned(), bench_entry),
+        (plain(node(boat).kind()).to_owned(), motorboat.clone()),
+    ]);
+    let slot_of = |entry: &Json, slot: &str| {
+        let slots = entry.get("slots").unwrap().obj().unwrap();
+        1 + slots.iter().position(|(k, _)| k == slot).unwrap() as u64
+    };
+    let id = |n: u64| Id::new(Scope([0xcd; 16]), n).unwrap();
+    let seated = |n: u64, thing: Id, slot: u64| Moved {
+        id: id(n),
+        pose: replica::pose::Pose {
+            frame: Frame {
+                node: thing,
+                slot: Some(slot),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: replica::pose::Support::Slot,
+        },
+        linear: Vec3::ZERO,
+        piece: 0,
+        tri: 0,
+    };
+    // On the open ground beside the bench's end seat: a point of the bench's frame carried out.
+    let place = node(bench).place().unwrap();
+    let out = |x: i64, z: i64| {
+        place
+            .position
+            .plus(
+                place
+                    .orientation
+                    .rotate(Vec3::new(x * 1000, 0, z * 1000))
+                    .unwrap(),
+            )
+            .unwrap()
+    };
+    let standing = |n: u64, at: Vec3| {
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        town.surfaces[&ground]
+            .place(id(n), frame, at, Quat::IDENTITY)
+            .unwrap()
+    };
+    let (near, far) = (standing(2, out(end_x, 400)), standing(3, out(end_x, 2_000)));
+    let bodies = BTreeMap::from([
+        (id(1), seated(1, bench, 2)),
+        (id(2), near),
+        (id(3), far),
+        (id(4), seated(4, boat, slot_of(&motorboat, "helm"))),
+        (id(5), seated(5, boat, slot_of(&motorboat, "front"))),
+        (id(6), seated(6, boat, slot_of(&motorboat, "back_left"))),
+    ]);
+    let split = town.split(1);
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: Arc::new(bodies.clone()),
+        carrying: Arc::new(BTreeSet::new()),
+        tree: split.shared.tree,
+        split: Some(RefCell::new(split)),
+        builds: Arc::new(bodies.keys().map(|b| (*b, Build::STANDARD)).collect()),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let d = |from: u64, to: u64| {
+        sight
+            .distance(
+                id(from),
+                &Effector::Held,
+                None,
+                id(to),
+                &Name::new("p").unwrap(),
+            )
+            .expect("measured")
+    };
+    let reach = 600_000;
+    let about = |got: i64, want: i64| (got - want).abs() <= 10_000;
+    let (to_near, from_near, to_far) = (d(2, 1), d(1, 2), d(3, 1));
+    println!(
+        "E21: the bench's end {to_near} µm from the near Soul, {from_near} back, {to_far} from the far one"
+    );
+    assert!(
+        to_near <= reach && about(to_near, 400_000),
+        "near to the seated Soul: {to_near}"
+    );
+    assert!(
+        about(from_near, 400_000),
+        "the seated Soul to the near one: {from_near}"
+    );
+    assert!(
+        to_far > reach && about(to_far, 2_000_000),
+        "far to the seated Soul: {to_far}"
+    );
+    let (front, back) = (d(4, 5), d(4, 6));
+    println!("E21: the helm {front} µm from the front place, {back} from the back left");
+    assert!(
+        front > reach && about(front, 700_000),
+        "helm to front: {front}"
+    );
+    assert!(
+        back > reach && about(back, 1_300_961),
+        "helm to back left: {back}"
+    );
+    // A walk to the bench's Soul is planned to its seat, in the bench's frame.
+    let seen = sight.read(id(1)).expect("read");
+    assert_eq!(seen.parent, Some(bench));
+    assert_eq!(seen.position, Vec3::new(end_x * 1000, 450_000, 0));
+}
+
+/// A harvest's basket keeps its count (`picked`, field 28) for F4's sets: its entry's roles are left out with its
+/// forms, as the structure's reader leaves them, so the kind loads. Kept, the loader refused the whole entry, and
+/// `eden:pick` and `eden:pick_too` were refused `field-unknown` after their press.
+#[test]
+fn a_harvests_basket_loads_its_count_with_its_roles_left_out() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds/together/harvest_together.json");
+    let entry = replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert!(entry.get("roles").is_some(), "the entry has roles");
+    let kinds = loaded(&Json::object([("eden:harvest_together", entry)]));
+    let names = kinds.admits().into_keys().collect::<Vec<_>>();
+    assert_eq!(
+        names.len(),
+        1,
+        "the basket's kind loaded: {:?}",
+        kinds.refused()
+    );
+    let def = kinds.get(&names[0]).expect("its kind");
+    let picked = def.state.get(&28).expect("field 28");
+    println!("loaded {} with field 28 {}", names[0], picked.name.as_str());
+    assert!(picked.name.as_str().ends_with("picked"));
 }

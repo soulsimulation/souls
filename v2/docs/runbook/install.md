@@ -1,7 +1,7 @@
 # Installing Engine v2 beside today's system
 
 Engine v2 O17 (#2810). One script, `v2/tools/ops/install.sh`, puts the new programs on one Linux machine beside
-today's system. It serves nothing public and starts nothing: the preview is a path on the public name that the proxy
+today's system. It serves nothing public and starts nothing but the alarm daemon (below): the preview is a path on the public name that the proxy
 sends to these programs once the owner places its site file. Routing between the systems is O19 (`v2/tools/ops/proxy/README.md`); releases are O18.
 
 ## What it makes
@@ -9,31 +9,62 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd` and its uploads checker `assets-check` (which a release's move also puts beside it), `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
 | The world route file, which today's launcher's cut-over fence also reads (the parent `/var/lib/souls` is 751) | `/var/lib/souls/routes/worlds.json` | souls, 755 |
 | The settings folder, which today's launcher enters (not lists) to read its cut-over binding, `cutover-binding.json` | `/etc/souls/` | root:souls, 751 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
+| The view key (64 hex digits), written once, never overwritten: the directory (`--view-key` in `directory.args`) signs a signed-in page's view tokens with it and every world's gateway (`--view-key` in its `gateway-<world>.env`, from `place-world.sh`) checks them. An install made before 24 Nov 2026 has none: add the flag to both by hand, as soul.game was | `/etc/souls/view.key` | root:souls, 640 |
+| The mailbox key (64 hex digits), written once, never overwritten: every world's gateway (`--mailbox 127.0.0.1:7310 --mailbox-key` in its `gateway-<world>.env`, from `place-world.sh`) reads its owners' messages from the directory (`--mailbox-key` in `directory.args`) with it, so a message typed on a Soul's card reaches its client. An install made before 25 Nov 2026 had none, and every send was refused `no-mailbox`: the next release's move makes it (0600, souls) and adds the flags (below) | `/etc/souls/mailbox.key` | root:souls, 640 (made by a release: souls, 600) |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
-| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service` | root, 644 |
+| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
-`souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
-Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 8 GB; the
+`souls` in `souls.slice`, whose `MemoryMax` is 18 GB (14 GB until 24 Nov, raised for headroom): eleven worlds at their measured peaks (Eden 1.7 GB, the others
+0.85 GB) with a third to spare, inside what the production host has left beside today's system (its units' comment has
+the numbers), and `MemoryLow` 2 GB for Eden's.
+Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 4 GB; the
 install writes its `worldd@<world>.service.d/limits.conf`, [world-restarting](world-restarting.md#how-a-world-runs)),
-a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
+a gateway 512 MB, the directory 256 MB, the origin 2 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
 [viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight`
 and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
 gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
-`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
-and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
+`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory,
+the origin and the agents' relay listen on loopback only (ports 7310, 7320 and 7330). The relay
+(`v2/tools/origin/agents.mjs`, #4152) carries every world's agent paths (`/w/<slug>/v2/ws`, `v2/creator-token`,
+`v2/entries`) to the world's gateway in a process apart from the viewers' origin, so a viewer join wave that saturates
+or restarts the origin drops no agent; its gauge is `/run/souls-agents/stats.json` (open agent sockets); each world's gateway gets its port from its own
 `/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
-entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
-a gateway whose entries folder is missing or empty refuses to start.
+entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760),
+and the world's kinds text beside them (`<world>/world.kinds`) at `/v2/kinds`, which a creator's client keeps to check
+its edits against; a gateway whose entries folder is missing or empty refuses to start. It ends with the world's
+uploads folder (`--uploads <world>/uploads`, #1960), where the creator's checked models and pictures are kept and
+served by hash; the gateway refuses to start without `assets-check` beside it.
+
+A world placed before 25 Nov 2026 has no `--uploads`, so its creator's uploads are refused `upload.off`. Once a
+release with `assets-check` has moved (it is then at `/usr/local/lib/souls/assets-check`), add it on the host as the
+view key was added, one world at a time, then restart that world's gateway:
+
+```sh
+for f in /etc/souls/gateway-*.env; do
+  w=${f#/etc/souls/gateway-}; w=${w%.env}
+  grep -q -- ' --uploads ' "$f" && continue
+  sudo sed -i "s|^GATEWAYD_ARGS=.*|& --uploads /var/lib/souls/worlds/worlds/$w/uploads|" "$f"
+  sudo systemctl restart "souls-gateway@$w"
+done
+```
+
+A world placed before 25 Nov 2026 has no `--mailbox`, so the owner's message box on a Soul's card answered
+`Message could not be sent (no-mailbox)`. Nothing is done by hand: every release's move applies it (`release.sh mailbox
+apply`, [release.md](../release.md)): the key made once (0600, the services' user), `--mailbox-key` added to
+`directory.args` and `--mailbox <the directory's --listen> --mailbox-key` to each `gateway-<world>.env` when missing,
+before the gateways and the directory restart on the release; after them it sends one owner's message through each
+world's gateway and stops with `release.mailbox-unreachable` unless each is accepted. `release.sh mailbox plan` (the
+release workflow's plan step) shows what it would change and changes nothing.
 
 **Does it fit beside today's system?** Production: 8 cores, 30.6 GB of memory, about 173 GB of disk free. Today's
 worlds use 6.3 GB, and their unit may use at most 26 GB (O14, `v2/docs/machines.md`). With the new system's 3 GB
@@ -41,7 +72,13 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
 
 ## How it stays apart
 
-- It starts, enables and restarts nothing; the one systemd call is `daemon-reload` when a unit file changed.
+- It starts, enables and restarts nothing but the alarm daemon, `souls-alarms.service` (O2, #2731; runbook
+  [sleep-and-wake.md](sleep-and-wake.md)): it enables and starts it, and restarts it when its unit or drop-in
+  changed. With no world asleep it only waits. Its drop-in (`souls-alarms.service.d/10-install.conf`) keeps it root,
+  since it starts worlds, in the group souls with a group-writable socket, so worlds and gateways (the user souls)
+  reach it, and gives it `/etc/souls/secrets.env`, where the store is set (0.133 ST2). Uninstall stops and disables
+  it. Otherwise the one systemd call is `daemon-reload` when a unit file
+  changed.
 - It never reads or writes today's units, users, data, proxy, DNS or firewall. `install.sh check` (run by CI in
   `v2/tools/ci.sh` and by the workflow) plans into an empty folder and compares every path it would write, and every
   unit, user and port it names, with what today's installer and units name (read from
@@ -82,21 +119,10 @@ bash <bundle>/install.sh uninstall
 
 ## Installed migration commands
 
-The workflow builds both migration executables from the same checked-out head and locked release build as the
-serving programs. They are ordinary files in the recorded `/usr/local/lib/souls` tree, root-owned at mode 755;
-installing them does not run an import or start a service. The production machine needs no Rust toolchain.
-
-X11 reads a backup set and writes only a **fresh import output**, separate from the running installation's stores.
-Choose an output path that does not exist; do not point it at a serving account store or directory:
-
-```sh
-set -e
-test ! -e <fresh-import-dir>
-/usr/local/lib/souls/import-accounts <backup-set> --out <fresh-import-dir> --json
-```
-
-Add `--world <file.db>` for an original world's backup kept outside the set, as described in
-`v2/tools/import-accounts/README.md`. Both registries and all world backups open read-only and immutable.
+The workflow builds the world importer from the same checked-out head and locked release build as the serving
+programs. It is an ordinary file in the recorded `/usr/local/lib/souls` tree, root-owned at mode 755; installing it does
+not run an import or start a service. The production machine needs no Rust toolchain. (The accounts importer, X11's
+`import-accounts`, was removed in 0.134 D3: there are no migrations.)
 
 X6 has two steps: export one backup with Node, then validate the facts with the installed Rust executable. From
 a checkout of the same source head with its Node dependencies installed (Node 22.18 or later), create a fresh
@@ -132,8 +158,20 @@ A world brought over from today's system (Eden: `import-world`, `worldd seed`, `
 so nothing else puts it in the directory's list. `register-world` writes its name record and its list row in the store
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
-with the map naming it: a map entry the directory cannot find in its own list stops every pairing
-(`world-authority-unavailable`).
+with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
+are refused (`world-authority-missing`) until it is registered.
+
+A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
+world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so
+in the journal (`degraded: world-owner-unavailable <world>`). Only a store out of reach or too slow is covered that
+way: a world the store answers is missing, or whose record differs from the map, is refused by name
+(`world-authority-missing`, `world-authority-mismatch`, `world-authority-invalid`). A tokens file is never written with
+an owner older than the one it names, so a handoff is never undone by a slow read. A revoke or retire rewrites the
+world's tokens file at once with the owner it already names, reading no owner. A write that fails is tried twice more
+within about 150 ms; if it still fails, the world is retried in the background as below, a revoke is refused
+(`tokens-file`, so it never answers before the gateway stops taking the token) and a retire stands. The directory writes only the files of the world a change is for. A world whose files it could not write,
+or wrote from the owner last read, is retried in the background with back-off until the store answers. A start whose store does not answer logs
+`degraded: world-authority-unavailable` and serves, keeping the files already written.
 
 ```sh
 DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory /usr/local/lib/souls/register-world eden \
@@ -167,7 +205,9 @@ owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
    }
    ```
 
-4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-directory`.
+4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-agents souls-directory`.
+   `souls-agents` must be running before any Caddy reload whose `soul-game.caddy` routes agents to 7330 (#4152),
+   or agents get 502 until it starts; the cut-over's `check` refuses while it is not active.
 
 ## A world's models
 

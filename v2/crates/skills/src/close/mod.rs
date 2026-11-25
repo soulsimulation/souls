@@ -9,11 +9,20 @@
 //! - **Go near** (target, distance): walks straight toward the target until it is that far from it, then stands, and
 //!   closes again when the target moves off.
 //! - **Follow** (leader, band): walks the leader's trail, the points the leader stood on as read each tick (a node
-//!   other than the body is read as of the previous tick, T1), keeping the distance along the trail inside the band.
-//!   The leader walked it, so it is legal ground, and the follower does not aim at the leader through a wall. When the
+//!   other than the body is read as of the previous tick, T1), keeping the distance along the trail inside the band,
+//!   at the leader's gait (its pace, up to [`FASTEST`]). The leader walked it, so it is legal ground, and the follower does not aim at the leader through a wall. When the
 //!   follower stops making way on the trail (it lacks an ability the trail needs), it asks for one route toward the
 //!   leader (N5, through the host's `Toward`), walks to the point it is given, says so in an event
 //!   ([`FELL_BACK`]), and goes back to the trail. Once per follow.
+//!
+//!   A follow may instead keep a place **beside** the leader (0.135 R1, walking hand in hand,
+//!   `v2/docs/moving-group.md` rule 3): a point the given width to the side of the leader's heading, the heading
+//!   being the way the leader last walked, the side being the one the follower stood on when the leader first moved.
+//!   The place is a target the follower walks to, never a constraint; a follower farther than [`LET_GO`] from it, or
+//!   whose leader it cannot see (another frame: through a door, onto a deck), for [`LET_GO_TICKS`] ends, by name
+//!   ([`LOST_PLACE`]): it could not keep its place, so it lets go. When the leader turns back (its heading more than
+//!   90° from the last), the side is taken again from where the follower stands, and a way to the place that would
+//!   pass within [`KEEP_APART`] of the leader goes round it: the follower never walks through the leader.
 //!
 //! Circle, go near and follow end only when replaced (another skill claims the legs; they are `cancelled_by`
 //! locomotion), cancelled (the body releases them) or expired (`until`, world time). None of them ever picks a new
@@ -37,6 +46,8 @@ use std::collections::BTreeMap;
 pub const SPEED: i64 = 1_400_000;
 /// The most a follower or a body going near walks at while it closes, µm a second.
 pub const FAST: i64 = 2_400_000;
+/// The fastest gait on dry ground (`sim::gaits`' run), µm a second: a follower keeps up with a leader who runs.
+pub const FASTEST: i64 = 4_000_000;
 /// The tick a step assumes before it has seen two (µs); after that it measures them by world time.
 pub const TICK: Micros = 50_000;
 /// How near the stated distance counts as done, µm.
@@ -51,6 +62,14 @@ pub const REACHED: i64 = 300_000;
 pub const TRAIL_MOST: usize = 2_000;
 /// Ticks a follower may make less than a quarter of the way it asked for before it falls back to a route.
 pub const STALL: u32 = 10;
+/// A follower beside its leader (0.135 R1, hand in hand) farther than this from its place, µm, is not keeping it.
+pub const LET_GO: i64 = 1_500_000;
+/// Ticks a follower beside its leader may be farther than [`LET_GO`] from its place before it lets go (2 s).
+pub const LET_GO_TICKS: u32 = 40;
+/// A follower beside its leader never walks nearer the leader's middle than this, µm: two body radii's room.
+pub const KEEP_APART: i64 = 350_000;
+/// A follower beside its leader that could not keep its place ends with this name.
+pub const LOST_PLACE: &str = "souls:follow-lost-place";
 
 /// A step that met the edge of the ground ends with this name.
 pub const WALLED: &str = "souls:step-walled";
@@ -78,6 +97,23 @@ fn isqrt(n: i128) -> i128 {
 pub(crate) fn apart(a: Vec3, b: Vec3) -> i64 {
     let (dx, dz) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
     i64::try_from(isqrt(dx * dx + dz * dz)).unwrap_or(i64::MAX)
+}
+
+/// How near the straight way from `a` to `b` passes `c`, on the ground, µm.
+fn passes(a: Vec3, b: Vec3, c: Vec3) -> i64 {
+    let (dx, dz) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
+    let (cx, cz) = (i128::from(c.x - a.x), i128::from(c.z - a.z));
+    let len = dx * dx + dz * dz;
+    if len == 0 {
+        return apart(a, c);
+    }
+    let t = ((cx * dx + cz * dz) * 1_000_000 / len).clamp(0, 1_000_000);
+    let near = Vec3::new(
+        a.x + i64::try_from(dx * t / 1_000_000).unwrap_or(0),
+        a.y,
+        a.z + i64::try_from(dz * t / 1_000_000).unwrap_or(0),
+    );
+    apart(near, c)
 }
 
 /// A velocity along (`dx`, `dz`) at `speed` µm a second; still when the direction is none.
@@ -326,6 +362,13 @@ pub struct Follow {
     route: Option<Vec3>,
     /// Route searches asked for: zero, or one after a fall-back.
     pub routes: u32,
+    /// The width of a place beside the leader, µm (0.135 R1), instead of its trail.
+    pub beside: Option<i64>,
+    /// Beside: the leader where its heading was last taken, the heading (x, z), and the side (1 right, -1 left).
+    heading: Option<(Vec3, Option<(i64, i64)>)>,
+    side: i64,
+    /// Beside: ticks in a row farther than [`LET_GO`] from its place.
+    far: u32,
 }
 
 impl Follow {
@@ -340,7 +383,96 @@ impl Follow {
             stalled: 0,
             route: None,
             routes: 0,
+            beside: None,
+            heading: None,
+            side: 0,
+            far: 0,
         }
+    }
+
+    /// Follows `leader` keeping a place `width` µm beside it (0.135 R1), until `until`.
+    pub fn beside(leader: Id, width: i64, until: Option<Micros>) -> Follow {
+        Follow {
+            beside: Some(width),
+            ..Follow::new(leader, (0, 0), until)
+        }
+    }
+
+    /// The place beside the leader at `them` for the body at `me`, or none until the leader has walked: its heading
+    /// is taken from each [`TRAIL_GAP`] it walks, and the side is fixed the first time.
+    fn place(&mut self, me: Vec3, them: Vec3, width: i64) -> Option<Vec3> {
+        let (from, _) = *self.heading.get_or_insert((them, None));
+        if apart(from, them) >= TRAIL_GAP {
+            let h = (them.x - from.x, them.z - from.z);
+            // A heading turned back (more than 90°) takes the side again from where the follower stands, so the
+            // follower keeps its own side of the leader and never crosses through it.
+            let back = self.heading.and_then(|h| h.1).is_some_and(|(px, pz)| {
+                i128::from(px) * i128::from(h.0) + i128::from(pz) * i128::from(h.1) < 0
+            });
+            if self.side == 0 || back {
+                // The side the follower stands on: the sign of the heading crossed with leader to follower.
+                let cross = i128::from(h.0) * i128::from(me.z - them.z)
+                    - i128::from(h.1) * i128::from(me.x - them.x);
+                self.side = if cross > 0 { -1 } else { 1 };
+            }
+            self.heading = Some((them, Some(h)));
+        }
+        let (hx, hz) = self.heading.and_then(|h| h.1)?;
+        // (hz, -hx) is square to the heading; the side found above turns it to the follower's side.
+        let side = along(hz * self.side, -hx * self.side, width);
+        Some(Vec3::new(them.x + side.x, me.y, them.z + side.z))
+    }
+
+    /// One step beside the leader (0.135 R1): toward the place at the leader's pace plus the gap closed in a second
+    /// and a half, at most the leader's gait.
+    fn step_beside(
+        &mut self,
+        host: &mut dyn Host,
+        me: Vec3,
+        them: Vec3,
+        pace: i64,
+        width: i64,
+    ) -> Progress {
+        let Some(place) = self.place(me, them, width) else {
+            go(host, Vec3::ZERO);
+            return Progress::Going;
+        };
+        let gap = apart(me, place);
+        if self.lost(host, gap > LET_GO) {
+            return Progress::Failed(name(LOST_PLACE));
+        }
+        let speed = if gap <= THERE && pace == 0 {
+            0
+        } else {
+            (pace + gap * 2 / 3).clamp(0, pace.clamp(FAST, FASTEST))
+        };
+        // Never through the leader's body: a way to the place that passes nearer its middle than [`KEEP_APART`]
+        // goes round it instead, by a point on the circle of the place's width halfway to the place.
+        let aim = if passes(me, place, them) < KEEP_APART {
+            let to = |p: Vec3| along(p.x - them.x, p.z - them.z, width);
+            let (u, w) = (to(me), to(place));
+            let mid = if u.x + w.x == 0 && u.z + w.z == 0 {
+                along(u.z, -u.x, width)
+            } else {
+                along(u.x + w.x, u.z + w.z, width)
+            };
+            Vec3::new(them.x + mid.x, me.y, them.z + mid.z)
+        } else {
+            place
+        };
+        go(host, along(aim.x - me.x, aim.z - me.z, speed));
+        Progress::Going
+    }
+
+    /// Beside (0.135 R1): counts a tick in which the follower is not keeping its place (`off`: too far from it, or
+    /// its leader unseen); true, standing still, once it has been off for [`LET_GO_TICKS`] in a row.
+    fn lost(&mut self, host: &mut dyn Host, off: bool) -> bool {
+        self.far = if off { self.far + 1 } else { 0 };
+        if self.far >= LET_GO_TICKS {
+            go(host, Vec3::ZERO);
+            return true;
+        }
+        false
     }
 
     /// The distance along the trail from `me` to the leader at `them`, µm.
@@ -393,6 +525,10 @@ impl Skill for Follow {
         let now = host.now();
         let Some(them) = locate(host, Target::Node(self.leader), parent) else {
             go(host, Vec3::ZERO);
+            // Beside (0.135 R1): a leader gone from sight (through a door, onto a deck) is a place not kept.
+            if self.beside.is_some() && self.lost(host, true) {
+                return Progress::Failed(name(LOST_PLACE));
+            }
             return Progress::Going;
         };
         // The leader's pace, from where it was read last.
@@ -404,6 +540,9 @@ impl Skill for Follow {
             _ => 0,
         };
         self.seen = Some((them, now));
+        if let Some(width) = self.beside {
+            return self.step_beside(host, me, them, pace, width);
+        }
         if self
             .trail
             .last()
@@ -439,11 +578,12 @@ impl Skill for Follow {
         let behind = self.behind(me, them);
         let (near, far) = self.band;
         let mid = (near + far) / 2;
-        // The leader's pace, plus the gap to the band's middle closed in a second and a half.
+        // The leader's pace, plus the gap to the band's middle closed in a second and a half; at most the leader's
+        // gait (its pace, to the fastest gait), and never under FAST while it closes (0.135 G2: the leader's gait).
         let speed = if behind <= near {
             0
         } else {
-            (pace + (behind - mid) * 2 / 3).clamp(0, FAST)
+            (pace + (behind - mid) * 2 / 3).clamp(0, pace.clamp(FAST, FASTEST))
         };
         let aim = self
             .route

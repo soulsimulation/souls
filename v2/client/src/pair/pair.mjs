@@ -6,21 +6,27 @@
 // `views/world.json` (`--advert`, else `<directory>/w/<world>/views/world.json`, where the origin serves a placed
 // world), whose `history` is relative to the world's folder. No advert, no `history`; the pairing still succeeds.
 // Then it fetches the world's kind entries into `<home>/kinds/` from the gateway (#3760, `refreshEntries`), which
-// the daemon does again at each sign-in, so a restarted or changed world's kinds reach the client's own checks.
+// the daemon does again at each sign-in, so a restarted or changed world's kinds reach the client's own checks. A
+// world's creator also gets the world's kinds text, `<home>/kinds/<world>.kinds` (`refreshKindsText`, #1960), which
+// its edits are checked against: without it every library kind is `edit.kind-unknown`.
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
 //        --label <agent label> [--soul <grant> | --creator <creator grant>] [--force] [--advert <url of world.json>]
+//        [--name <the Soul's name>] [--start]
+//   --name is what the new Soul is called: kept in config.json and on its owner's page, and carried by the daemon's own
+//   first `life:join`, so it is born named. --start starts the Soul's daemon once approved, so it joins the world then.
 //   With --creator (G7, #2796) it asks for the world's creator scope: `creator-<scope hex>-<n>`, kept as `c_<...>`.
 //   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { writeGuide } from '../home/guide.mjs';
-import { CREDENTIALS, Refused, findHome } from '../home/home.mjs';
+import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
 
 const SLOW_DOWN = 5;
 
@@ -70,13 +76,19 @@ export function entriesOf(gateway) {
  * The world's kind entries (#3760): fetched from the gateway's `GET /v2/entries` with the Soul's token, sent with the
  * tag of the last copy kept (`<home>/kinds/.entries-<world>.json`), so an unchanged world sends nothing. Each entry is
  * written as `<home>/kinds/<kind, : as .>.json`, where the checks read them (`check/state.mjs` `kindsIn`), and an
- * entry this world sent before and no longer does is removed. Resolves to `{entries, changed}`; rejects on a refusal.
+ * entry this world sent before and no longer does is removed. The world's activities as it serves them (one
+ * `souls-activities/1` record after the entries: each one's served name, card, distance and place) go to
+ * `<home>/kinds/.activities-<world>.json` (`activitiesServed`), removed when the world sends none. Resolves to
+ * `{entries, changed}`; rejects on a refusal.
  */
 export async function refreshEntries({ home, world, gateway, token, within = 10000 }) {
   const dir = join(home, 'kinds'), mark = join(dir, `.entries-${encodeURIComponent(world)}.json`);
   let held = {};
   try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
   if (!(held.files ?? []).every((f) => existsSync(join(dir, f)))) held = { files: held.files }; // a file gone: fetch all
+  // The served activities are in the same answer: a mark from before they were kept (no `activities`), or one whose
+  // activities file is gone, is fetched again whole, not revalidated by its tag.
+  if (held.activities === undefined || (held.activities && !existsSync(activitiesFile(home, world)))) held = { files: held.files };
   const r = await fetch(entriesOf(gateway), {
     headers: { authorization: `Bearer ${token}`, ...(held.etag ? { 'if-none-match': held.etag } : {}) },
     signal: AbortSignal.timeout(within),
@@ -89,20 +101,67 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const list = await r.json();
   if (!Array.isArray(list)) throw new Refused('entries-answer', 'the entries are not a list');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const files = [];
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Off the daemon's thread of control (fs/promises), and only the entries whose bytes changed: a world's 449 entries
+  // written and renamed one by one, synchronously, held a new daemon's clock, sync and answers for 6 to 18 s on its
+  // first sign-in, right after its pairing had written the same files (first run, 0.135).
+  const files = [], served = activitiesFile(home, world);
+  let written = 0;
+  const activities = list.find((e) => e?.format === 'souls-activities/1' && Array.isArray(e.activities));
+  if (activities) { await writeFile(`${served}.tmp`, JSON.stringify(activities)); await rename(`${served}.tmp`, served); } else await rm(served, { force: true });
   for (const e of list) {
     if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
-    const f = `${e.kind.replaceAll(':', '.')}.json`;
-    writeFileSync(join(dir, `${f}.tmp`), JSON.stringify(e));
-    renameSync(join(dir, `${f}.tmp`), join(dir, f));
+    const f = `${e.kind.replaceAll(':', '.')}.json`, text = JSON.stringify(e);
     files.push(f);
+    if (await readFile(join(dir, f), 'utf8').then((t) => t === text, () => false)) continue;
+    await writeFile(join(dir, `${f}.tmp`), text);
+    await rename(join(dir, `${f}.tmp`), join(dir, f));
+    written++;
   }
   const now = new Set(files);
-  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
-  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) await rm(join(dir, f), { force: true });
+  await writeFile(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
+  await rename(`${mark}.tmp`, mark);
+  return { entries: files.length, changed: true, written };
+}
+
+const activitiesFile = (home, world) => join(home, 'kinds', `.activities-${encodeURIComponent(world)}.json`);
+
+/** The world's activities as it serves them (`refreshEntries`), `{format, activities}`; null when none are kept. */
+export function activitiesServed(home, world) {
+  try { return JSON.parse(readFileSync(activitiesFile(home, world), 'utf8')); } catch { return null; }
+}
+
+/**
+ * The world's kinds text for its creator (#1960): the gateway's `GET /v2/kinds` (the world's `world.kinds`, written at
+ * each start) into `<home>/kinds/<world>.kinds`, where the creator's checks read it (`daemon.mjs` `kindsText`), sent
+ * with the tag of the copy kept (`<home>/kinds/.kinds-<world>.json`), so an unchanged world sends nothing. Resolves to
+ * `{changed}`; rejects on a refusal.
+ */
+export async function refreshKindsText({ home, world, gateway, token, within = 10000 }) {
+  if (!/^[\w-][\w.-]*$/.test(world)) throw new Refused('kinds-world', 'the world\'s key cannot name a file');
+  const dir = join(home, 'kinds'), file = join(dir, `${world}.kinds`), mark = join(dir, `.kinds-${world}.json`);
+  let held = {};
+  try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
+  const u = new URL(entriesOf(gateway));
+  u.pathname = u.pathname.replace(/\/v2\/entries$/, '/v2/kinds');
+  const r = await fetch(u, {
+    headers: { authorization: `Bearer ${token}`, ...(held.etag && existsSync(file) ? { 'if-none-match': held.etag } : {}) },
+    signal: AbortSignal.timeout(within),
+  });
+  if (r.status === 304) return { changed: false };
+  if (!r.ok) {
+    let code = `kinds-${r.status}`;
+    try { code = (await r.json()).refused ?? code; } catch { /* not JSON */ }
+    throw new Refused(code, `the gateway answered ${r.status} for the world's kinds`);
+  }
+  const text = await r.text();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(`${file}.tmp`, text);
+  renameSync(`${file}.tmp`, file);
+  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag') }) + '\n');
   renameSync(`${mark}.tmp`, mark);
-  return { entries: files.length, changed: true };
+  return { changed: true };
 }
 
 /**
@@ -116,7 +175,7 @@ export const localId = (grant) => grant.startsWith('creator-') ? `c_${grant.slic
  * given the code; `unit` is the milliseconds in a second of polling interval (tests shorten it). Resolves to
  * `{soul, grant}`; rejects with a `Refused` naming why (and the device, for `soul-connected`).
  */
-export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert }) {
+export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert, name }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   // The token comes back in the poll's answer: over https, or plain http to this machine only.
   const at = new URL(directory);
@@ -144,42 +203,64 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (got.pending) continue;
     if (got.refused) throw Object.assign(new Refused(got.refused, got.device ? `connected to ${got.device}` : 'refused'), { device: got.device ?? null });
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
-    mkdirSync(home, { recursive: true, mode: 0o700 });
+    makeHome(home); // a new home gets its .gitignore (0.133 Q2)
     const id = localId(got.grant);
     const history = await advertisedHistory(advert ?? advertOf(directory, world));
     const configFile = join(home, 'config.json');
     const config = readJson(configFile);
     config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}) } };
+    // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
+    if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
+    // #3760: the world's kinds, so the client's own checks know them; the Soul is paired whether or not they came.
+    // Fetched before the token is written: a daemon can start only once the token is there (an agent's `look` the
+    // moment its owner approves), and one started while these were still being written fetched them all again over
+    // the same files at its sign-in (first run, 0.135).
+    let entries;
+    try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
+    // #1960: a creator's edits are checked against the world's kinds text.
+    let kinds;
+    if (got.grant.startsWith('creator-')) {
+      try { await refreshKindsText({ home, world, gateway, token: got.token }); kinds = 'kept'; } catch (e) { kinds = { failed: e.code ?? 'kinds-unreachable' }; }
+    }
     const credFile = join(home, CREDENTIALS);
     const creds = existsSync(credFile) ? readJson(credFile) : {};
     creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
     writePrivate(credFile, creds);
     // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
-    // #3760: the world's kinds, so the client's own checks know them; the Soul is paired whether or not they came.
-    let entries;
-    try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
+    // Its owner's page shows the same name; the Soul is paired whether or not the directory took it.
+    let named;
+    if (name) {
+      try { const r = await post('/v1/pair/profile', { token: got.token, name }); named = r?.profile?.name ? 'kept' : { failed: r?.refused ?? 'profile' }; } catch { named = { failed: 'profile-unreachable' }; }
+    }
     let guide;
     try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
     // #3702: the world's welcome, shown to the Soul as it arrives.
-    return { soul: id, grant: got.grant, history, entries, guide, ...(typeof got.welcome === 'string' ? { welcome: got.welcome } : {}) };
+    return { soul: id, grant: got.grant, history, entries, ...(kinds ? { kinds } : {}), ...(name ? { name, named } : {}), guide, ...(typeof got.welcome === 'string' ? { welcome: got.welcome } : {}) };
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const say = (v) => console.log(JSON.stringify(v));
   try {
     for (const n of ['--directory', '--world', '--gateway']) if (!opt(n)) throw new Refused('usage', `${n} is needed`);
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    // 0.133 Q2: a pairing never lands in a parent folder's home, unless `--home` names it
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: true, named: opt('--home') ?? null });
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
-      soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'),
-      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: 'Open the link signed in, check the code matches, and approve.' }),
+      soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'), name: opt('--name')?.trim() || undefined,
+      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: `Open the link while signed in to ${new URL(link, opt('--directory')).host}, check the code matches, and approve. The card also appears on the world page if it is open.` }),
     });
     say({ ok: true, ...out });
+    // Approved: the Soul's daemon starts now, syncs and joins the world by itself, with no command from its agent.
+    if (args.includes('--start')) {
+      const { call, DEFAULT_PKG } = await import('../daemon/client.mjs');
+      const s = await call(home, out.soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }).catch((e) => ({ ok: false, code: e.code ?? 'daemon-not-started' }));
+      say({ ok: s.ok !== false, step: 'started', soul: out.soul, ...(s.ok === false ? { code: s.code } : {}) });
+    }
   } catch (e) {
     say({ ok: false, code: e.code ?? 'failed', ...(e.device ? { device: e.device } : {}), detail: String(e.message ?? e).slice(0, 200) });
     process.exitCode = 1;

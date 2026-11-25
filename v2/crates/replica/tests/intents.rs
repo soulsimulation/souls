@@ -265,6 +265,8 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
             Op::Set { .. } => "set",
             Op::Remove { .. } => "remove",
             Op::Doorway { .. } => "doorway",
+            Op::Link { .. } => "link",
+            Op::Rows { .. } => "rows",
         })
         .collect();
     println!(
@@ -302,6 +304,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
         now: i.basis.clone(),
         changed: Vec::new(),
         op: None,
+        detail: None,
     };
     assert_eq!(keys(&receipt), [1, 2, 3, 4, 5]);
     assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);
@@ -340,6 +343,82 @@ fn g1f_doorway_wire_roundtrip_keeps_owned_geometry_under_strict_i2() {
     };
     op.insert(11, Value::Uint(0));
     assert!(replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).is_err());
+}
+
+#[test]
+fn link_wire_roundtrip_keeps_its_row_owner_and_door_under_strict_i2() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref};
+    use replica::ids::{Id, Scope};
+    use replica::world_model::End;
+    let node = |n| Ref::Node(Id::new(Scope([0xdd; 16]), n).unwrap());
+    // A stair's row: its kind, then numbers, then its line's points (3 deep inside the operation).
+    let row = vec![
+        Value::Text(replica::encode::Name::new("eden:stairs").unwrap()),
+        Value::Uint(1),
+        Value::Array(vec![Value::Array(vec![Value::Uint(5), Value::Nint(4)])]),
+    ];
+    for (owner, door) in [(End::First, Some(Ref::New(3))), (End::Second, None)] {
+        let ops = vec![Op::Link {
+            name: 7,
+            ty: replica::encode::Name::new("eden:stairs").unwrap(),
+            ends: [node(1), node(2)],
+            owner,
+            field: 21,
+            row: row.clone(),
+            door,
+        }];
+        let (_, mut i) = intent("edit");
+        i.parameters = parameters(&ops);
+        let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+        assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    }
+}
+
+/// #3728: a rows operation (a land edit's changed tiles) keeps its node, field and rows on the wire, and merges each
+/// row over the one with its first two values, adding the rest after.
+#[test]
+fn rows_wire_roundtrip_and_merge_by_first_two_values() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref, merged_rows};
+    use replica::ids::{Id, Scope};
+    let tile = |x: u64, z: u64, h: u8| {
+        Value::Array(vec![
+            Value::Uint(x),
+            Value::Uint(z),
+            Value::Bytes(vec![h; 4]),
+            Value::Bytes(vec![0]),
+        ])
+    };
+    let ops = vec![Op::Rows {
+        node: Ref::Node(Id::new(Scope([0xdd; 16]), 1).unwrap()),
+        field: 25,
+        rows: vec![tile(1, 0, 9), tile(2, 0, 9)],
+    }];
+    let (_, mut i) = intent("edit");
+    i.parameters = parameters(&ops);
+    let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+    assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    let now = Value::Array(vec![tile(0, 0, 1), tile(1, 0, 1)]);
+    assert_eq!(
+        merged_rows(Some(&now), &[tile(1, 0, 9), tile(2, 0, 9)]),
+        Some(Value::Array(vec![
+            tile(0, 0, 1),
+            tile(1, 0, 9),
+            tile(2, 0, 9)
+        ]))
+    );
+    assert_eq!(
+        merged_rows(Some(&Value::Uint(3)), &[tile(1, 0, 9)]),
+        None,
+        "not a field of rows"
+    );
+    assert_eq!(
+        merged_rows(Some(&now), &[Value::Array(vec![Value::Uint(1)])]),
+        None,
+        "a row of one value"
+    );
+    assert_eq!(merged_rows(None, &[tile(1, 0, 9)]), None, "no field");
 }
 
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of
@@ -446,4 +525,43 @@ fn a_creators_bulk_edit_is_read_over_the_frame_limit_and_nothing_else_is() {
             .err(),
         Some("intent.too-large")
     );
+}
+
+#[test]
+fn a_refusals_detail_is_printable_one_line_and_at_most_240_bytes_cut_at_a_character() {
+    use replica::intents::{Answer, DETAIL_MOST, answer_detail};
+    assert_eq!(answer_detail(""), None);
+    assert_eq!(answer_detail(" \n\t "), None, "nothing printable left");
+    assert_eq!(
+        answer_detail("too far:\nwalk\tup\u{7}first").as_deref(),
+        Some("too far: walk up first"),
+        "control characters are spaces"
+    );
+    // 239 ASCII bytes and a two-byte µ: the µ would end at byte 241, so it is left out whole.
+    let cut = answer_detail(&format!("{}µm", "a".repeat(DETAIL_MOST - 1))).unwrap();
+    assert_eq!(cut.len(), DETAIL_MOST - 1);
+    assert!(cut.chars().all(|c| c == 'a'));
+    // 238 bytes and a µ fit exactly.
+    let fits = answer_detail(&format!("{}µ", "a".repeat(DETAIL_MOST - 2))).unwrap();
+    assert_eq!(fits.len(), DETAIL_MOST);
+    // A refusal with one carries it as field 8, bytes; without one, no field 8.
+    let fields = |detail| match (Answer::Refused {
+        actor: replica::effects::Actor::World,
+        sequence: 1,
+        reason: replica::encode::Name::new("together.too-far").unwrap(),
+        now: Value::Uint(0),
+        changed: Vec::new(),
+        op: None,
+        detail,
+    })
+    .to_value()
+    {
+        Value::Map(m) => m,
+        _ => panic!("a map"),
+    };
+    assert_eq!(
+        fields(answer_detail("2 m apart")).get(&8),
+        Some(&Value::Bytes(b"2 m apart".to_vec()))
+    );
+    assert!(!fields(None).contains_key(&8));
 }

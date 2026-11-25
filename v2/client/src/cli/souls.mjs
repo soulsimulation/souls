@@ -4,13 +4,22 @@
 // command starts the daemon. Every answer but status's and quit's ends with `at` and `changed`.
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
-//   souls.mjs look                            the brief: my room, cards outward, what changed, the age
+//   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   souls.mjs look set <preset | params file> puts a humanoid look on your default body (`life:look`, G3): a preset
+//                                             (casual, punk, woman) or a core/humanoid@2 params JSON file; prints
+//                                             the receipt
+//   souls.mjs listen [--follow]               the owner's messages: those open now, else the next to arrive; with
+//                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
-//   souls.mjs pair <world url>                asks the world's directory for a Soul: prints a link and a code for the
-//                                             owner, and returns; the pairing finishes in the background (W2)
+//   souls.mjs pair <world url> --name "<Name>"   asks the world's directory for a Soul: prints a link and a code for
+//                                             the owner, and returns; the pairing finishes in the background (W2),
+//                                             and once approved the Soul joins the world by itself, named
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10)
+//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
+//                                             gait=walk|jog|run sets its pace (0.135 G1)
+//   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
+//                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
 //                                             and the act that sends it; asks the world nothing (#3686)
 //   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
@@ -27,6 +36,17 @@
 //   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
+//   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
+//   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
+//   souls.mjs together kinds                  the activities the world serves: each one's word, card, how many it asks,
+//                                             how near they stand and where it is played (anywhere, or at a thing)
+//   souls.mjs together offer <word> <body id|name> [...]   offers it (`hug`, `dance` to up to seven, `follow`, ...); one
+//                                             played at a thing is offered at the nearest of that kind (0.134 T1, 0.135)
+//   souls.mjs together accept|decline|leave <offer id | word>   answers the newest offer of it, or leaves it
+//   souls.mjs together withdraw <offer id | activity>   takes back your own offer before it is answered (#4700); an
+//                                             accept after it is refused offer-withdrawn
+//   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
+//   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
@@ -105,20 +125,21 @@
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
-import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
+import { ADDS, findHome, namedHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
 import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
-import { accountPair, hasAccount } from '../account/account.mjs';
+import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
@@ -128,19 +149,25 @@ export const OPS = [
   'batch',
   'calendar',
   'can',
+  'carry',
   'catalog',
   'context',
   'conversations',
   'converse',
   'events',
+  'give',
+  'together',
   'find',
   'history',
   'inspect',
+  'here',
   'lie',
+  'listen',
   'look',
   'now',
   'object',
   'pair',
+  'part',
   'pending',
   'pray',
   'prayers',
@@ -154,12 +181,14 @@ export const OPS = [
   'status',
   'stop',
   'wait',
+  'wake',
   'wear',
   'whatson',
   'whisper',
 ];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
-const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
+// 0.134 T1: a touch is offered as a give is, to one body on the open ground; the daemon's give handler sends it.
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look', together: 'give', part: 'carry' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = [
@@ -172,25 +201,67 @@ export const LOCAL = [
 ];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
+/** The harnesses an agent may run in, by an environment variable each sets for the commands it runs. */
+const HARNESSES = [['CLAUDECODE', 'Claude Code'], ['CODEX_SANDBOX', 'Codex'], ['CODEX_THREAD_ID', 'Codex'], ['CURSOR_AGENT', 'Cursor'],
+  ['CURSOR_TRACE_ID', 'Cursor'], ['GEMINI_CLI', 'Gemini CLI']];
+/** The label the owner's approval card shows for this agent (first day, 25 Nov: it said "souls.mjs" and the computer's
+ *  name): the harness it runs in, "on this computer"; never the host's name. */
+export function agentLabel(env = process.env) {
+  const named = HARNESSES.find(([k]) => env[k])?.[1];
+  return `${named ?? 'An agent'} on this computer`;
+}
+
 /**
  * Starts W2's pairing detached, its lines in `<home>/pairing.log`, and gives its first: the link and code, or the
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
  */
-async function pairing(home, url, { within = 15_000 } = {}) {
+async function pairing(home, url, { within = 15_000, name } = {}) {
   const { directory, world, gateway } = await pairAddress(url);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
-  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls.mjs'], {
-    detached: true, stdio: ['ignore', out, out], env: { PATH: process.env.PATH ?? '', SOULS_HOME: home },
+  // --start: once approved, the pairing starts the Soul's daemon, which joins the world by itself (named by --name).
+  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', agentLabel(), '--start', ...(name ? ['--name', name] : [])], {
+    detached: true, stdio: ['ignore', out, out],
+    env: { PATH: process.env.PATH ?? '', SOULS_HOME: home, ...(process.env.SOULS_REPLICA_PKG ? { SOULS_REPLICA_PKG: process.env.SOULS_REPLICA_PKG } : {}) },
   }).unref();
   for (const until = Date.now() + within; Date.now() < until;) {
     const first = readFileSync(log, 'utf8').split('\n').find((l) => l.startsWith('{'));
-    if (first) return { ...JSON.parse(first), then: 'look, once your owner has approved' };
+    if (first) {
+      const asked = JSON.parse(first);
+      return { ...asked, then: 'look, once your owner has approved: the Soul then joins the world by itself',
+        ...(asked.ok !== false && !name ? { name: 'none given: ask your owner what to call this Soul (or choose one), then run: profile name "<Name>". It is not born without one.' } : {}) };
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
+}
+
+/**
+ * Where a pairing started here stands while this home holds no Soul yet, from `<home>/pairing.log`: waiting for the
+ * owner's approval (its link and code), refused (why), or approved and arriving; null when no pairing was started.
+ */
+export function pairingState(home) {
+  let lines;
+  try { lines = readFileSync(join(home, 'pairing.log'), 'utf8').split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)); } catch { return null; }
+  const ask = lines.find((l) => l.step === 'approve'), last = lines.at(-1);
+  if (!last) return null;
+  if (last.ok === false) return { ok: true, in_world: false, pairing: 'refused', code: last.code, say: `Not in the world: the pairing ended (${last.code}). Run pair again for a new link and code.` };
+  if (last.soul) return { ok: true, in_world: false, pairing: 'approved', soul: last.soul, say: 'Approved: your Soul is arriving. Look again in a few seconds.' };
+  return { ok: true, in_world: false, pairing: 'waiting', link: ask?.link, code: ask?.code,
+    say: `Not in the world yet: waiting for your owner to approve. They open ${ask?.link ?? 'the link pair printed'} signed in and check the code ${ask?.code ?? ''}; the card is also on the world page. Then your Soul joins by itself.` };
+}
+
+/**
+ * The approval as plain lines for the person (`pair` writes them to stderr beside its JSON answer): the link alone on
+ * its line, so a terminal or a chat shows it as a link, the site to be signed in to, the code, and where else the card is.
+ */
+export function approvalText({ link, code }) {
+  let site = 'the world\'s site';
+  try { site = new URL(link).host; } catch { /* a link that is not a url is still printed as it came */ }
+  return `Approve this Soul: open this link while signed in to ${site}, and check it shows the code ${code}:\n${link}\n` +
+    'The card also appears on the world page if it is open.\n';
 }
 
 /** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
@@ -225,6 +296,11 @@ export function requestOf(argv) {
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
+  // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd). A carry's or a part's step
+  // always waits: the next step needs its end (0.135 C, A).
+  const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list')
+    || (['together', 'give'].includes(args[0]) && args[1] !== 'kinds');
+  if (args.includes('--wait')) args.splice(args.indexOf('--wait'), 1);
   const [op = 'status', ...rest] = args;
   if (op === 'schedule') {
     const [sub = 'list', ...more] = rest;
@@ -290,7 +366,11 @@ export function requestOf(argv) {
     if (opts.close !== undefined && !['done', 'failed'].includes(opts.close)) return { refused: 'ack-close', detail: 'ack <message id> "<reply>" --close done|failed' };
     Object.assign(req, { id: rest[0], reply: rest.slice(1).join(' '), ...(opts.close !== undefined ? { close: opts.close } : {}) });
   }
-  if (op === 'pair') { req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true; }
+  if (op === 'pair') {
+    const n = rest.indexOf('--name');
+    if (n >= 0) { req.name = rest[n + 1]; rest.splice(n, 2); }
+    req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true;
+  }
   if (op === 'pray') req.words = rest.join(' ');
   if (op === 'say' || op === 'shout') {
     // C26: a shout is a say at a raised voice; --to names whom it is for, --gesture what the body does toward them.
@@ -302,6 +382,18 @@ export function requestOf(argv) {
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wear') req.body = rest[0];
+  // R5: the owner's wake rules, by name (act-ended, soul-arrives, idle) or as a rule's JSON; listen and wait hand them.
+  if (op === 'wake') {
+    const w = wakeOf(rest);
+    if (w.refused) return w;
+    return { req: w, soul: opts.soul };
+  }
+  // G3: `look set <preset | params file>` is the Soul's own `life:look`, waited for like `act --wait`.
+  if (op === 'look' && rest[0] === 'set') {
+    const look = lookParams(rest[1]);
+    if (look.refused) return look;
+    return { req: { op: 'look-set', params: look.params }, soul: opts.soul, wait: true };
+  }
   if (op === 'converse') {
     const words = rest.filter((w) => w !== '--private');
     const [does = 'list', who, ...said] = words;
@@ -310,13 +402,191 @@ export function requestOf(argv) {
     else if (who !== undefined) req.conversation = who;
     if (said.length) req.words = said.join(' ');
   }
+  if (op === 'give') {
+    // 0.133 R4: give <thing id> --to <body id>, or give accept|decline <offer id>.
+    if (rest[0] === 'accept' || rest[0] === 'decline') Object.assign(req, { do: rest[0], offer: rest[1] });
+    else Object.assign(req, { do: 'offer', thing: rest[0], to: opts.to });
+  }
+  if (op === 'together') {
+    // 0.134 T1: together offer <touch> <body id>, or together accept|decline <offer id>.
+    if (rest[0] === 'offer') Object.assign(req, { do: 'offer', touch: rest[1], to: rest.length > 3 ? rest.slice(2) : rest[2] });
+    else if (rest[0] === 'kinds') req.do = 'kinds';
+    else Object.assign(req, { do: rest[0], offer: rest[1] });
+  }
+  if (op === 'carry' || op === 'part') {
+    // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
+    const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
+    const on = flag('--on'), from = flag('--from');
+    const [does, a, b, c] = words;
+    Object.assign(req, { op: 'carry', do: does });
+    if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
+    else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
+    else if (does !== 'list') req.crew = a;
+    for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
+  }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
+  if (op === 'listen' && rest.includes('--follow')) req.follow = true;
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
   // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
   if (opts.key !== undefined) req.key = opts.key;
-  return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+  return { req, soul: opts.soul, ...(waits ? { wait: true } : {}), ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+}
+
+/** R5: `wake` named rules: what each matches. `soul-arrives` is another Soul's move ending near this one (the world's
+ *  `souls:move-ended`, which reaches this Soul only from bodies in its view), from anyone or the Soul named. */
+export const WAKES = {
+  'act-ended': () => ({ when: { event: 'client:act-ended' }, why: 'an act of yours ended' }),
+  'soul-arrives': (who) => ({ when: { event: 'souls:move-ended', ...(who ? { from: [who] } : {}) }, why: who ? `${who} arrived near you` : 'a Soul arrived near you' }),
+  // The daemon's `client:idle` carries the quiet in seconds (field 1).
+  idle: (minutes) => ({ when: { event: 'client:idle', fields: { 1: Number(minutes) * 60 } }, why: `no command for ${minutes} minutes` }),
+};
+const WAKE_USAGE = "wake | wake add act-ended | wake add soul-arrives [<soul id>] | wake add idle <minutes> | wake add '<rule json>' | wake remove <id> | wake budget <quiet|normal|lively|unlimited|n> [--day <n>]";
+
+/** R5: the daemon request for `wake` words, or a refusal by name. */
+export function wakeOf([what, arg, ...more]) {
+  const usage = { refused: 'wake-usage', detail: WAKE_USAGE };
+  if (what === undefined || what === 'list') return arg === undefined ? { op: 'wake', do: 'list' } : usage;
+  if (what === 'remove') return arg && !more.length ? { op: 'wake', do: 'remove', id: arg } : usage;
+  if (what === 'add') {
+    if (arg === 'act-ended' && !more.length) return { op: 'wake', do: 'add', rule: WAKES['act-ended']() };
+    if (arg === 'soul-arrives' && more.length <= 1) {
+      if (more[0] !== undefined && !/^s_[A-Za-z0-9_-]+$/.test(more[0])) return { refused: 'wake-soul', detail: 'soul-arrives [<soul id, s_...>]' };
+      return { op: 'wake', do: 'add', rule: WAKES['soul-arrives'](more[0]) };
+    }
+    if (arg === 'idle' && more.length === 1) {
+      if (!/^\d{1,4}$/.test(more[0]) || Number(more[0]) < 1) return { refused: 'wake-idle-minutes', detail: 'idle <whole minutes, at least 1>' };
+      return { op: 'wake', do: 'add', rule: WAKES.idle(more[0]) };
+    }
+    if (arg?.trim().startsWith('{') && !more.length) {
+      try { return { op: 'wake', do: 'add', rule: JSON.parse(arg) }; } catch { return { refused: 'wake-rule-json', detail: 'a rule is one JSON object' }; }
+    }
+    return usage;
+  }
+  if (what === 'budget') {
+    const req = { op: 'wake', do: 'budget' }, words = [arg, ...more].filter((w) => w !== undefined);
+    for (let k = 0; k < words.length; k++) {
+      if (words[k] === '--day') { req.day = /^\d+$/.test(words[k + 1] ?? '') ? Number(words[++k]) : NaN; continue; }
+      if ('hour' in req) return usage;
+      req.hour = /^\d+$/.test(words[k]) ? Number(words[k]) : words[k];
+    }
+    return 'hour' in req || 'day' in req ? req : usage;
+  }
+  return usage;
+}
+
+/** G3: the humanoid look presets a page composes (`apps/web/src/humanoid/look.ts` PRESETS), by name. */
+export const LOOK_PRESETS = ['casual', 'punk', 'woman'];
+/** G3: the most bytes a look's params take (`skills::wear::LOOK_MOST`). */
+const LOOK_MOST = 2048;
+
+/**
+ * G3: a look's params for `look set`: a preset's name gives `{"preset":"<name>"}`; anything else is a file holding one
+ * JSON object of core/humanoid@2 params, at most 2 KiB. A refusal by name otherwise, before anything is sent.
+ */
+export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
+  const usage = { refused: 'look-set-usage', detail: `look set <${LOOK_PRESETS.join('|')} | a params .json file>` };
+  if (!arg) return usage;
+  if (LOOK_PRESETS.includes(arg)) return { params: JSON.stringify({ preset: arg }) };
+  let text;
+  try { text = read(arg); } catch { return usage; }
+  let o;
+  try { o = JSON.parse(text); } catch { return { refused: 'look-params', detail: 'the file holds one JSON object of look params' }; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return { refused: 'look-params', detail: 'the file holds one JSON object of look params' };
+  const params = JSON.stringify(o);
+  if (Buffer.byteLength(params) > LOOK_MOST) return { refused: 'look-params', detail: `at most ${LOOK_MOST} bytes of params` };
+  return { params };
+}
+
+/** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
+export const ACT_WAIT_MS = 60_000;
+/** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
+export const ACT_WAIT_MARGIN_MS = 15_000;
+
+/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer. */
+export function actWaitMs(req) {
+  const declared = (req?.acts ?? []).map((a) => /^for=(\d+)$/.exec(String(a))?.[1]).find((n) => n !== undefined);
+  return declared === undefined ? ACT_WAIT_MS : Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS);
+}
+/** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
+const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
+
+/**
+ * D1: the act's answer, once its receipt has its final phase: `done` (a receipt), `refused` with the reason, or a
+ * joint move's `resolved` with its outcome. Still going after `ms`, the answer says so and how to check. An act not
+ * sent (refused here) is returned as it is. `ask` is the daemon's; the receipt op reads the answers it already holds.
+ */
+export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
+  if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
+  const until = now() + ms;
+  for (;;) {
+    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
+    const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
+    const over = now() >= until;
+    if (ENDED(last) || over) {
+      // The last read closes the answer as any command does: the copy's version and what changed since the act.
+      const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
+      const end = r?.ok ? r.receipt.answers.at(-1) : last;
+      if (ENDED(end)) {
+        const phase = end.answer === 'receipt' ? 'done' : end.answer;
+        return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
+          ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
+          // The world's own words for why (`together.too-far`: how far apart, how far its move reaches).
+          ...(phase === 'refused' && end.detail ? { detail: end.detail } : {}),
+          // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
+          ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
+          // 0.133: a walk's end, how far from its target it stood, metres
+          ...(r?.receipt?.away_m != null ? { away_m: r.receipt.away_m } : {}),
+          // First-day round 4: aboard a balloon, when it takes off (done) or when this Soul can get off (refused).
+          ...(r?.receipt?.aboard ? { aboard: r.receipt.aboard } : {}),
+          // R1b: refused, one offer of the same thing that would work instead.
+          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
+          // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).
+          ...(phase === 'refused' && r?.receipt?.why ? { why: r.receipt.why } : {}) };
+      }
+      return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
+        detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };
+    }
+    await sleep(every);
+  }
+}
+
+/** What an agent does with an owner's message (the skill's "serve each open message in one call"). */
+const SERVE = (id) => `act <act> --for ${id}, or ack ${id} "<reply>" --close done|failed`;
+
+/**
+ * D2: the owner's messages, one line each: those open now, else the next to arrive; with `follow`, each as it
+ * arrives until stopped. A message is printed once. A daemon that ended (quit, a crash) is started again by the next
+ * ask, and its open messages are read again from the start, so none is missed.
+ */
+export async function listen(ask, print, { follow = false, seconds = 60, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  const printed = new Set();
+  let since, daemon;
+  for (;;) {
+    let got;
+    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + 5000); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
+    if (got?.ok !== true) {
+      if (!follow) return print(got);
+      [since, daemon] = [undefined, undefined];
+      await pause(1000);
+      continue;
+    }
+    // Another daemon than the last (it was restarted): its cursor means nothing here, so read its open messages.
+    const same = daemon === undefined || got.daemon === daemon;
+    [since, daemon] = [same ? got.cursor : undefined, got.daemon];
+    for (const m of got.mail) {
+      if (printed.has(m.id)) continue;
+      printed.add(m.id);
+      print({ ok: true, kind: 'mail', id: m.id, text: m.text, at: m.at, serve: SERVE(m.id) });
+    }
+    // R5: a wake the owner's rules fired, one line each (its rule, why, how many times since the last).
+    for (const w of got.wakes ?? []) print({ ok: true, kind: 'wake', rule: w.rule, why: w.why, count: w.count, ...(w.untrusted ? { untrusted: true } : {}) });
+    if (!follow && (printed.size || got.wakes?.length || got.timedOut)) return printed.size || got.wakes?.length ? undefined : print({ ok: true, mail: [], timedOut: true });
+  }
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
@@ -371,7 +641,8 @@ export async function runViews(args, shootOne) {
 
 function help(home, named, topic) {
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account'), { code: 'help-topics' });
+  if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
+  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account | carry'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -409,7 +680,33 @@ async function schedule(home, named, { sub, args, until, missed }) {
   return { ok: true, soul, file: 'memory/schedule.md', ...listed(readSchedule(file), marks, Date.now()) };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
+export const CARRY_HELP = [
+  'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
+  'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
+  'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
+  'carry lift <crew id> <load id>   lift a loose load together',
+  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry set-down <crew id>   put the lifted load down where it is',
+  'part take <crew id> <part id>   take a loose part, or one standing in a stand',
+  'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
+  'part unseat <crew id> <part id>   take it out of its bay',
+  'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
+];
+const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+
+/** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
+export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const listed = await ask({ op: 'carry', do: 'list' }, 5000);
+    const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
+    if (made) return { crew: made.id };
+    await sleep(200);
+  }
+  return { crew: null, note: 'the crew is not in the copy yet: `carry list` names it' };
+}
+
+if (isMain(import.meta.url)) {
   let newsHome = null;
   // #3708: a command's answer mentions news not mentioned before, once; `news` and `dashboard` say it themselves.
   const out = (v) => {
@@ -418,11 +715,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
     process.stdout.write(JSON.stringify(v) + '\n');
   };
+  // 0.133 Q2: `--home <path>` names the home; a command that adds to a home never takes a parent folder's
+  let homeNamed = null;
+  try { const h = namedHome(process.argv.slice(2)); homeNamed = h.named; process.argv = [...process.argv.slice(0, 2), ...h.argv]; } catch (e) { out({ ok: false, code: e.code, detail: e.message }); process.exit(1); }
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   // #3706: today's `help safety`, as text: the page a world serves at /safety.md, from the same file.
   if (process.argv[2] === 'help' && process.argv[3] === 'safety') { process.stdout.write(safetyText()); process.exit(0); }
   try {
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: ADDS.has(process.argv[2]), named: homeNamed });
     newsHome = home;
     if (process.argv[2] !== 'news') fetchNewsLater(home);
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
@@ -444,13 +744,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
-    else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
+    else if (req.op === 'pair') {
+      const paired = req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url, { name: req.name });
+      // Paired at once by the account: its name now, so its first join carries it.
+      if (paired?.paired && paired.soul && req.name) paired.profile = await soulProfile(home, paired.soul, ['name', req.name]).then((p) => p.profile, (e) => ({ failed: e.code ?? 'profile' }));
+      if (paired?.step === 'approve' && paired.link) process.stderr.write(approvalText(paired));
+      out(paired); process.exit(0);
+    }
     else {
+      // Before the owner approves there is no Soul here: look and status say where the pairing stands, plainly.
+      const waiting = ['look', 'status'].includes(req.op) && soulsWithTokens(home).length === 0 ? pairingState(home) : null;
+      if (waiting) { out(waiting); process.exit(0); }
       const { soul, resident } = await chooseCommandSoul(home, named);
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
+      // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
-      const answer = await ask(req, ms);
+      if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
+      const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
+      // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
+      if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.

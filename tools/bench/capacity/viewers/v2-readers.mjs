@@ -1,5 +1,5 @@
 // #4018 (X9): one driver process of the v2 viewers bench (v2.mjs forks several). Each viewer does what the page's
-// stream worker does (v2/web/src/source/worker.ts), without playing: the pointer (read with replica's own
+// stream worker does (apps/web/src/v2-engine/source/worker.ts), without playing: the pointer (read with replica's own
 // `readPointer`), the bundle's header, the generation's baseline and its words (the first picture), then every part
 // from the generation's first, AHEAD at a time (with its words while far behind, as the page's catch-up does), then
 // the pointer every 250 ms and each new part. A handoff to the next generation is drained and crossed with no new
@@ -7,16 +7,17 @@
 // of two sockets per viewer. Slow readers ask for the baseline and never read.
 // Messages from v2.mjs: {init: {base, stream, pkg}}, {add: n, overMs}, {slow: n}, {unslow: true}, {take: true}
 // (answers with the counters since the last take, and resets them), {stop: true}.
-import { Agent, request } from 'node:http';
+import { Agent as HttpAgent, request as httpRequest } from 'node:http';
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { fileType, record } from './v2-stats.mjs';
+import { BEHIND_US, CUT_US, PERIOD_US } from '../../../../apps/web/src/v2-engine/source/clock.ts'; // the page's clock
 
 const AHEAD = 16, POLL_MS = 250, TIMEOUT_MS = 10_000;
-const PERIOD_US = 500_000, BEHIND_US = 4 * PERIOD_US, CUT_US = 20_000_000; // v2/web/src/clock/clock.ts
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 let cfg, readPointer;
 const viewers = new Set(), slow = new Set();
@@ -31,7 +32,7 @@ const fail = (code) => { w.errors[code] = (w.errors[code] ?? 0) + 1; };
 function get(url, agent) {
   const type = fileType(url.pathname);
   return new Promise((ok, no) => {
-    const req = request(url, { agent, timeout: TIMEOUT_MS }, (res) => {
+    const req = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { agent, timeout: TIMEOUT_MS }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
@@ -51,6 +52,8 @@ function get(url, agent) {
 }
 
 const streamUrl = () => new URL(cfg.stream, cfg.base);
+// 0.133 P3: the limits run's viewers read a served world's stream through the front door, over https.
+const newAgent = (o) => (new URL(cfg.base).protocol === 'https:' ? new HttpsAgent(o) : new HttpAgent(o));
 const at = (p, file) => new URL(p.generation ? `g/${p.generation}/${file}` : file, streamUrl());
 const pointer = async (agent) => JSON.parse(readPointer(await get(new URL('pointer', streamUrl()), agent)));
 
@@ -80,7 +83,7 @@ async function parts(agent, p, from, to, far) {
 }
 
 async function viewer(v) {
-  const agent = new Agent({ keepAlive: true, maxSockets: 2 });
+  const agent = newAgent({ keepAlive: true, maxSockets: 2 });
   const t0 = performance.now();
   w.joined++;
   try {
@@ -159,7 +162,7 @@ process.on('message', async (m) => {
     }
   } else if (m.slow) {
     try {
-      const p = await pointer(new Agent({ keepAlive: false }));
+      const p = await pointer(newAgent({ keepAlive: false }));
       for (let k = 0; k < m.slow; k++) slowReader(p);
     } catch { fail('slow-reader'); }
   } else if (m.unslow) {

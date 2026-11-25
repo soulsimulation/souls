@@ -15,9 +15,8 @@
 //   does (#910): a check run whose Actions run was cancelled or replaced by a newer run of the same workflow at that
 //   head says nothing about the head. A cancelled conclusion is pending, never a failure.
 // - Train order is the order `merge-train.mjs next` tries: ascending PR number among merge:ready.
+import { isMain } from '../lib/is-main.mjs';
 import { execFile } from 'node:child_process';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { DEFAULT_CHECKS, READY, REBASE, blocker, maintainerApproved, APPROVED_LABEL } from '../../.github/scripts/merge-train.mjs';
 import { loadPolicy, tierFor } from '../proof/tier.mjs';
@@ -263,4 +262,4 @@ async function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

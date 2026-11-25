@@ -1,0 +1,241 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wave_together",
+  "owner": "thing",
+  "links": {
+    "one": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "other": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      3000
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "one": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000,
+        "slots": [
+          "lead"
+        ]
+      },
+      "move": "wave",
+      "on_beat": true
+    },
+    "other": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000,
+        "slots": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d5",
+          "d6",
+          "d7"
+        ]
+      },
+      "move": "wave",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Wave together: offer a greeting, accept, and leave at any time.",
+    "shared_wave": "shared wave",
+    "wave_together": "wave together",
+    "greeting": "greeting",
+    "rules": "Two to eight standing people wave on the world\u2019s beat. Offer the greeting to others; it starts when one accepts. Later acceptors join the same greeting. Each may leave at any time. No object, aimed pose or picture capture is required. Late joiners may repeat on a different cycle; this does not phase-lock everyone\u2019s pose."
+  },
+  "card": {
+    "text": "card",
+    "category": "greeting",
+    "synonyms": [
+      "shared_wave",
+      "wave_together",
+      "greeting"
+    ]
+  },
+  "points": {
+    "by_lead": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1000
+      ],
+      "yaw_mdeg": 180000
+    },
+    "by_d1": {
+      "role": "stand",
+      "at_mm": [
+        707,
+        0,
+        707
+      ],
+      "yaw_mdeg": 225000
+    },
+    "by_d2": {
+      "role": "stand",
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_d3": {
+      "role": "stand",
+      "at_mm": [
+        707,
+        0,
+        -707
+      ],
+      "yaw_mdeg": 315000
+    },
+    "by_d4": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -1000
+      ],
+      "yaw_mdeg": 0
+    },
+    "by_d5": {
+      "role": "stand",
+      "at_mm": [
+        -707,
+        0,
+        -707
+      ],
+      "yaw_mdeg": 45000
+    },
+    "by_d6": {
+      "role": "stand",
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 90000
+    },
+    "by_d7": {
+      "role": "stand",
+      "at_mm": [
+        -707,
+        0,
+        707
+      ],
+      "yaw_mdeg": 135000
+    }
+  },
+  "slots": {
+    "lead": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        1000
+      ],
+      "stand": "by_lead"
+    },
+    "d1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        707,
+        0,
+        707
+      ],
+      "stand": "by_d1"
+    },
+    "d2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "stand": "by_d2"
+    },
+    "d3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        707,
+        0,
+        -707
+      ],
+      "stand": "by_d3"
+    },
+    "d4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        -1000
+      ],
+      "stand": "by_d4"
+    },
+    "d5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -707,
+        0,
+        -707
+      ],
+      "stand": "by_d5"
+    },
+    "d6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "stand": "by_d6"
+    },
+    "d7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -707,
+        0,
+        707
+      ],
+      "stand": "by_d7"
+    }
+  }
+}

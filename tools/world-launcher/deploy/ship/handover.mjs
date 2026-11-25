@@ -15,8 +15,8 @@
 //     prints the matching status's state and description; exit 0 when it is the one wanted, 1 on failure or timeout (fail closed)
 //     --timeout-min 0 reads once: the newest status must already be the wanted one (ship.sh's pre-activation check)
 // Descriptions are public: details are reduced to [A-Za-z0-9 ()=.,:_-], so no path, address or stack trace is posted.
+import { isMain } from '../../../lib/is-main.mjs';
 import { execFile } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 export const CONTEXT = { ship: 'release/ship', eyes: 'release/eyes' };
 const MAX_DESC = 140;   // GitHub's limit for a status description
@@ -93,7 +93,7 @@ export async function waitFor({ repo, sha, context, run, want, timeoutMs, maxAge
 export const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s ?? ''));
 export const defaultRepo = () => process.env.GITHUB_REPOSITORY || 'soulsimulation/souls';
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [cmd, sha, context, ...rest] = process.argv.slice(2);
   const flag = (k, d) => { const i = rest.indexOf(`--${k}`); return i >= 0 ? rest[i + 1] : d; };
   const repo = flag('repo', defaultRepo());

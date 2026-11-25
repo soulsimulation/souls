@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request, start } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
@@ -112,10 +113,9 @@ before(async () => {
 
 after(async () => {
   await request(rt.socket, { op: 'stop' }).catch(() => {});
-  for (const p of procs) p.kill();
   relay?.server.close();
   relay?.cut();
-  rmSync(dir, { recursive: true, force: true });
+  await stopThenRemove(procs, dir);
 });
 
 test('A1: the first command starts it, and it outlives the command that started it', async () => {
@@ -268,7 +268,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   keep('look', t0, back);
   assert.equal(back.stale, undefined);
   assert.ok(back.age < 2000, `age ${back.age}`);
-  assert.ok(back.asleep?.sinceMs > 30_000, JSON.stringify(back.asleep));
+  assert.ok(back.asleep?.sinceMs > 30_000, `asleep ${JSON.stringify(back)} ${JSON.stringify(seen.slice(-4))}`);
   // A3: stats over what this daemon did: every achieved intent's commands, bytes and first send.
   const st = await ask({ op: 'stats' });
   assert.ok(st.achieved >= 21, `achieved ${st.achieved}`);
@@ -366,6 +366,30 @@ test('#3346: answers that share a version are counted as seen, so a resume gives
   await sleep(300);
   const again = (await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && acts.includes(e.sequence));
   assert.deepEqual(again, [], 'no answer given twice');
+});
+
+test('#4700: a copy confirmed within 1 s answers at once, the world not asked; a still copy is confirmed with no command', async () => {
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing; });
+  assert.equal((await request(rt.socket, { op: 'look' })).stale, undefined);
+  // The gateway's answers dropped: a look just after a confirmed one does not wait on the world (before, it waited its
+  // refresh's 2 s and said stale). A follow under way in a busy world is the case this stands for.
+  relay.deaf = true;
+  try {
+    const t = performance.now(), a = await request(rt.socket, { op: 'look' });
+    outputs.push(JSON.stringify(a));
+    assert.ok(performance.now() - t < 1000, `answered in ${Math.round(performance.now() - t)} ms`);
+    assert.equal(a.stale, undefined, JSON.stringify(a).slice(0, 300));
+    assert.ok(a.age < 1000, `age ${a.age}`);
+  } finally {
+    relay.deaf = false;
+  }
+  // No command for 9 s in a still world: an act's answer, which does not ask, comes from a copy the daemon confirmed
+  // by itself seconds ago, not one `unconfirmed` since the last command (FRESH_MS, 8 s).
+  await sleep(9000);
+  const act = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+  outputs.push(JSON.stringify(act));
+  assert.equal(act.stale, undefined, JSON.stringify(act).slice(0, 300));
+  assert.ok(act.age < 6000, `age ${act.age}`);
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {

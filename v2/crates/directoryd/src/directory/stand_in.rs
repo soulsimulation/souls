@@ -1,7 +1,8 @@
 //! A local S3 stand-in for tests (O3c, #3529): an HTTP server on `127.0.0.1` that answers the four calls
 //! [`super::s3::S3`] makes, GET and PUT of one object (with `If-None-Match: *` and `If-Match`) and ListObjectsV2 by
 //! prefix, page by page. It refuses a request that is not signed with its key id or whose body hash does not match
-//! (403). [`StandIn::fail_writes`] fails the answers to writes it has applied, as a bucket out of breath does. It
+//! (403). [`StandIn::fail_writes`] fails the answers to writes it has applied, as a bucket out of breath does, and
+//! [`StandIn::refuse_reads`] refuses reads, as a store that will not answer them does. It
 //! never stands for the production bucket: it holds its objects in memory and is gone when dropped.
 
 use std::collections::BTreeMap;
@@ -16,10 +17,15 @@ use ring::digest;
 /// The stand-in's key id; its secret is never checked, as only the real store holds one.
 pub const KEY_ID: &str = "stand-in-key";
 
+/// The `Retry-After` a refused 429 carries, s (R18): past the first of a patient read's own waits (2 s), so a test
+/// sees it honoured.
+pub const RETRY_AFTER_S: u64 = 3;
+
 type Objects = Arc<Mutex<BTreeMap<String, (String, Vec<u8>)>>>;
 
-/// How many reads are still to be held, for how long each, and what their target holds ([`StandIn::stall_reads`]).
-type Stalls = Arc<Mutex<(usize, Duration, String)>>;
+/// How many reads are still to be held, for how long each, what their target holds, and whether writes are held too
+/// ([`StandIn::stall_reads`], [`StandIn::stall_calls`]).
+type Stalls = Arc<Mutex<(usize, Duration, String, bool)>>;
 
 /// How the stand-in fails the answer to a write it has done ([`StandIn::fail_writes`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,12 +39,17 @@ pub enum Fail {
 /// How many write answers are still to be failed, and how ([`StandIn::fail_writes`]).
 type Fails = Arc<Mutex<(usize, Option<Fail>)>>;
 
+/// How many reads (or writes) are still to be refused, with what status, what their target holds, and the method
+/// refused ([`StandIn::refuse_reads`], [`StandIn::refuse_writes`]).
+type Refused = Arc<Mutex<(usize, u16, String, &'static str)>>;
+
 /// A running stand-in. Its address is [`StandIn::url`]; its threads end with the test process.
 pub struct StandIn {
     port: u16,
     objects: Objects,
     stalls: Stalls,
     fails: Fails,
+    refused: Refused,
 }
 
 impl StandIn {
@@ -49,11 +60,24 @@ impl StandIn {
         let objects: Objects = Arc::default();
         let stalls: Stalls = Arc::default();
         let fails: Fails = Arc::default();
-        let (shared, held, failing) = (objects.clone(), stalls.clone(), fails.clone());
+        let refused: Refused = Arc::default();
+        let (shared, held, failing, refusing) = (
+            objects.clone(),
+            stalls.clone(),
+            fails.clone(),
+            refused.clone(),
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (objects, stalls, fails) = (shared.clone(), held.clone(), failing.clone());
-                std::thread::spawn(move || serve(stream, &objects, &stalls, &fails, page.max(1)));
+                let (objects, stalls, fails, refused) = (
+                    shared.clone(),
+                    held.clone(),
+                    failing.clone(),
+                    refusing.clone(),
+                );
+                std::thread::spawn(move || {
+                    serve(stream, &objects, &stalls, &fails, &refused, page.max(1))
+                });
             }
         });
         Ok(StandIn {
@@ -61,7 +85,25 @@ impl StandIn {
             objects,
             stalls,
             fails,
+            refused,
         })
+    }
+
+    /// Answers the next `n` reads (GETs: an object or a listing page) whose target contains `matching` with `status`
+    /// and no body, as a store refusing them does (R12); `n` 0 ends it. A 429 carries `Retry-After: `[`RETRY_AFTER_S`],
+    /// as a rate-limited store's does (R18).
+    pub fn refuse_reads(&self, n: usize, status: u16, matching: &str) {
+        if let Ok(mut r) = self.refused.lock() {
+            *r = (n, status, matching.to_owned(), "GET");
+        }
+    }
+
+    /// Answers the next `n` PUTs whose target contains `matching` with `status`, not applying them, as a store
+    /// refusing writes does (R15); `n` 0 ends it. It replaces any refusal of reads.
+    pub fn refuse_writes(&self, n: usize, status: u16, matching: &str) {
+        if let Ok(mut r) = self.refused.lock() {
+            *r = (n, status, matching.to_owned(), "PUT");
+        }
     }
 
     /// Holds the next `n` reads (GETs: an object or a listing page) whose target contains `matching` for `wait` each
@@ -69,7 +111,14 @@ impl StandIn {
     /// reach (#1960).
     pub fn stall_reads(&self, n: usize, wait: Duration, matching: &str) {
         if let Ok(mut s) = self.stalls.lock() {
-            *s = (n, wait, matching.to_owned());
+            *s = (n, wait, matching.to_owned(), false);
+        }
+    }
+
+    /// [`StandIn::stall_reads`] for every call, writes and deletes too: a bucket that has stopped answering at all.
+    pub fn stall_calls(&self, n: usize, wait: Duration, matching: &str) {
+        if let Ok(mut s) = self.stalls.lock() {
+            *s = (n, wait, matching.to_owned(), true);
         }
     }
 
@@ -96,7 +145,14 @@ impl StandIn {
 }
 
 /// Answers one connection's requests until it closes.
-fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, page: usize) {
+fn serve(
+    stream: TcpStream,
+    objects: &Objects,
+    stalls: &Stalls,
+    fails: &Fails,
+    refused: &Refused,
+    page: usize,
+) {
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
@@ -130,9 +186,10 @@ fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, p
         }
         let mut parts = line.split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-        if method == "GET" {
+        {
             let hold = stalls.lock().ok().and_then(|mut s| {
-                (s.0 > 0 && target.contains(s.2.as_str())).then(|| {
+                let held = s.3 || method == "GET" || method == "HEAD";
+                (held && s.0 > 0 && target.contains(s.2.as_str())).then(|| {
                     s.0 -= 1;
                     s.1
                 })
@@ -141,7 +198,16 @@ fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, p
                 std::thread::sleep(wait);
             }
         }
-        let (mut code, mut etag, mut answer) = answer(method, target, &head, &body, objects, page);
+        let refuse = refused.lock().ok().and_then(|mut r| {
+            (method == r.3 && r.0 > 0 && target.contains(r.2.as_str())).then(|| {
+                r.0 -= 1;
+                r.1
+            })
+        });
+        let (mut code, mut etag, mut answer) = match refuse {
+            Some(c) => (c, None, Vec::new()),
+            None => answer(method, target, &head, &body, objects, page),
+        };
         let fail = fails.lock().ok().and_then(|mut f| {
             (method == "PUT" && f.0 > 0).then(|| {
                 f.0 -= 1;
@@ -154,11 +220,16 @@ fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, p
             None => {}
         }
         let mut res = format!("HTTP/1.1 {code} X\r\ncontent-length: {}\r\n", answer.len());
+        if refuse == Some(429) {
+            res.push_str(&format!("retry-after: {RETRY_AFTER_S}\r\n"));
+        }
         if let Some(e) = etag {
             res.push_str(&format!("etag: \"{e}\"\r\n"));
         }
         res.push_str("\r\n");
-        if out.write_all(res.as_bytes()).is_err() || out.write_all(&answer).is_err() {
+        // A HEAD answers a GET's length and ETag, with no body.
+        let sent: &[u8] = if method == "HEAD" { &[] } else { &answer };
+        if out.write_all(res.as_bytes()).is_err() || out.write_all(sent).is_err() {
             return;
         }
     }
@@ -218,10 +289,23 @@ fn answer(
             xml.push_str("</ListBucketResult>");
             (200, None, xml.into_bytes())
         }
-        "GET" => match objects.get(&path) {
+        "GET" | "HEAD" => match objects.get(&path) {
             Some((e, b)) => (200, Some(e.clone()), b.clone()),
             None => (404, None, Vec::new()),
         },
+        // CopyObject: the object at `x-amz-copy-source` copied to the key, its ETag with it.
+        "PUT" if head.contains_key("x-amz-copy-source") => {
+            let from = decode(head["x-amz-copy-source"].trim_start_matches('/'));
+            let Some(o) = objects.get(&from).cloned() else {
+                return (404, None, b"<Error><Code>NoSuchKey</Code></Error>".to_vec());
+            };
+            let xml = format!(
+                "<CopyObjectResult><ETag>&quot;{}&quot;</ETag></CopyObjectResult>",
+                o.0
+            );
+            objects.insert(path, o);
+            (200, None, xml.into_bytes())
+        }
         "PUT" => {
             let now = objects.get(&path).map(|o| o.0.clone());
             let ok = match (head.get("if-none-match"), head.get("if-match")) {
@@ -240,6 +324,11 @@ fn answer(
             }
             objects.insert(path, (hash.clone(), body.to_vec()));
             (200, Some(hash), Vec::new())
+        }
+        // DeleteObject (#3833), as S3 answers it: 204 whether or not the key was there.
+        "DELETE" => {
+            objects.remove(&path);
+            (204, None, Vec::new())
         }
         _ => (405, None, Vec::new()),
     }

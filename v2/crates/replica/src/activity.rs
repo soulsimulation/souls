@@ -12,7 +12,7 @@
 //!   with one owner, `v2/docs/zones.md` rule 4), so the node and its links are in the log and survive a restart.
 //!
 //! A kind is decoded from `{1: name, 2: revision, 3: [{1: role, 2: place, 3: [want, ...]}, ...], 4: proposal lasts
-//! µs, 5: leave within µs}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
+//! µs, 5: leave within µs, 6?: members at most (two when absent), 7?: 1 when its moves go on the world's beat, 8?: the role that follows}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
 //! or resource name}`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +21,7 @@ use crate::bodies::{Class, SkillShape, Want};
 use crate::effects::{Refusal, read_id};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
+use crate::pose::Vec3;
 use crate::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -53,6 +54,31 @@ pub struct Role {
     pub name: Name,
     pub place: Name,
     pub claims: Vec<Want>,
+    /// The move this role makes at the other member when the activity starts (0.134 T1: a handshake's), if any.
+    pub mv: Option<Name>,
+    /// Where its members stand, in the activity's own frame, in order (0.135 G3): each a point (µm) and a facing
+    /// (millidegrees of yaw); its k-th member takes the k-th. None: its members stay where they are.
+    pub stands: Vec<(Vec3, i64)>,
+    /// How near the activity's middle a member stands to be walked to its stand, µm (0.135 G3, the entry's
+    /// `within_mm`): one farther keeps where it is. None: any distance.
+    pub within: Option<i64>,
+    /// The link a member of this role holds on the activity's thing while it is a member (B10, #4239): the entry's
+    /// link of the role's name, which its forms' `who: {link}` and `linked` needs read. None: no link is written.
+    pub link: Option<RoleLink>,
+}
+
+/// A role's link on the activity's thing (B10, #4239). The activity's thing is the node its offer or proposal was
+/// made under when that node is of kind `on` (an entry's own thing, whose roles made the activity's kind); on any
+/// other place (the open ground) no link is written. The link is of tree type `ty`, from the member's body (or its
+/// Soul when `soul`) to the thing, owned by the thing, as a form's `link` effect writes it (`sim::forms::links`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoleLink {
+    pub ty: Name,
+    pub soul: bool,
+    /// The plain kind of the thing the link is written on.
+    pub on: String,
+    /// How many may hold it on one thing at once (the entry link's `most`): one more is refused `role-taken`.
+    pub most: Option<u64>,
 }
 
 /// An activity's kind, as data.
@@ -66,6 +92,14 @@ pub struct ActivityKind {
     pub proposal_lasts: Micros,
     /// µs a leave may take at most: a body in a move is let go at the move's next phase end, or at this.
     pub leave_within: Micros,
+    /// How many members it takes at most (0.134 T3): two for a pair; a dance's offer, to several, takes up to eight.
+    pub most: usize,
+    /// Its roles' moves go on the world's beat (0.134 T3, `v2/docs/time.md` rule 7): each member's move begins on one
+    /// beat, aimed at its own body, and begins again on the next beat after it ends, until the member leaves.
+    pub beat: bool,
+    /// The role whose member follows the other's (0.135 G2), if any: while the activity runs, the follower's own
+    /// `souls:follow` order on the leader (`v2/docs/intents.md` rule 5) walks it along the leader's trail.
+    pub follows: Option<Name>,
 }
 
 fn uint(v: Option<&Value>, what: &str) -> R<u64> {
@@ -107,7 +141,7 @@ impl ActivityKind {
         let Value::Map(m) = v else {
             return refuse("not-an-activity", "an activity kind is a map");
         };
-        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 5) {
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 8) {
             return refuse("not-an-activity", format!("field {k}"));
         }
         let name = text(m.get(&1), "the name")?;
@@ -120,11 +154,11 @@ impl ActivityKind {
             let Value::Map(r) = r else {
                 return refuse(
                     "not-an-activity",
-                    "a role is {1: name, 2: place, 3: [want, ...]}",
+                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move, 5?: [[x, y, z, yaw], ...], 6?: within}",
                 );
             };
-            if r.keys().any(|k| *k == 0 || *k > 3) {
-                return refuse("not-an-activity", "a role has fields 1 to 3");
+            if r.keys().any(|k| *k == 0 || *k > 6) {
+                return refuse("not-an-activity", "a role has fields 1 to 6");
             }
             let rname = text(r.get(&1), "a role's name")?;
             let place = text(r.get(&2), "a role's place")?;
@@ -138,10 +172,46 @@ impl ActivityKind {
             if roles.iter().any(|x| x.name == rname) {
                 return refuse("role-duplicate", rname.as_str());
             }
+            let mv = match r.get(&4) {
+                None => None,
+                v => Some(text(v, "a role's move")?),
+            };
+            let int = |v: &Value| match v {
+                Value::Uint(n) => i64::try_from(*n).ok(),
+                Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+                _ => None,
+            };
+            let stands = match r.get(&5) {
+                None => Vec::new(),
+                Some(Value::Array(ss)) => ss
+                    .iter()
+                    .map(|s| match s {
+                        Value::Array(p) => {
+                            match p.iter().map(int).collect::<Option<Vec<_>>>().as_deref() {
+                                Some([x, y, z, yaw]) => Ok((Vec3::new(*x, *y, *z), *yaw)),
+                                _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                            }
+                        }
+                        _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                    })
+                    .collect::<R<Vec<_>>>()?,
+                Some(_) => return refuse("not-an-activity", "a role's stands are a list"),
+            };
+            let within = match r.get(&6) {
+                None => None,
+                Some(v) => Some(int(v).filter(|n| *n >= 0).map_or_else(
+                    || refuse("not-an-activity", "a role's within is µm, zero or more"),
+                    Ok,
+                )?),
+            };
             roles.push(Role {
                 name: rname,
                 place,
                 claims,
+                mv,
+                stands,
+                within,
+                link: None,
             });
         }
         if roles.len() < 2 {
@@ -161,12 +231,45 @@ impl ActivityKind {
                 format!("{}: {leave_within} µs; 1 to {LEAVE_MOST}", name.as_str()),
             );
         }
+        let most = match m.get(&6) {
+            None => roles.len(),
+            v => usize::try_from(uint(v, "the members at most")?).unwrap_or(usize::MAX),
+        };
+        if most < roles.len() {
+            return refuse(
+                "not-an-activity",
+                format!(
+                    "{}: {most} members for {} roles",
+                    name.as_str(),
+                    roles.len()
+                ),
+            );
+        }
+        let beat = match m.get(&7) {
+            None => false,
+            v => uint(v, "on the beat")? == 1,
+        };
+        let follows = match m.get(&8) {
+            None => None,
+            v => Some(text(v, "the role that follows")?),
+        };
+        if let Some(f) = &follows
+            && !roles.iter().any(|r| r.name == *f)
+        {
+            return refuse(
+                "not-an-activity",
+                format!("{} follows as no role of its", f.as_str()),
+            );
+        }
         Ok(ActivityKind {
             name,
             revision,
             roles,
             proposal_lasts,
             leave_within,
+            most,
+            beat,
+            follows,
         })
     }
 
@@ -311,18 +414,45 @@ pub const OFFER_DECLINED: &str = "souls:offer-declined";
 pub const OFFER_LAPSED: &str = "souls:offer-lapsed";
 
 /// The bodies an offer's event is addressed to, for the queue of events addressed to a Soul (R4): an offer goes to
-/// each body asked, and a refusal or a lapse to the asker. `None` for any other event.
+/// each body asked, a refusal to the asker, and a lapse to the asker and to the bodies it names (those that did not
+/// answer, or the one whose accepted pair never started), so no one is left waiting on an offer that is gone.
+/// `None` for any other event.
 pub fn addressed(name: &str, fields: &BTreeMap<u64, Value>) -> Option<BTreeSet<Id>> {
-    match (name, fields.get(&3), fields.get(&2)) {
-        (OFFER, Some(Value::Array(a)), _) => {
-            Some(a.iter().filter_map(|x| read_id(x).ok()).collect())
+    let listed = |v: Option<&Value>| -> BTreeSet<Id> {
+        match v {
+            Some(Value::Array(a)) => a.iter().filter_map(|x| read_id(x).ok()).collect(),
+            _ => BTreeSet::new(),
         }
-        (OFFER_DECLINED | OFFER_LAPSED, _, Some(asker)) => {
-            Some(read_id(asker).into_iter().collect())
+    };
+    match (name, fields.get(&3), fields.get(&2)) {
+        (OFFER, Some(Value::Array(_)), _) => Some(listed(fields.get(&3))),
+        (OFFER_DECLINED, _, Some(asker)) => Some(read_id(asker).into_iter().collect()),
+        (OFFER_LAPSED, asked, Some(asker)) => {
+            let mut to = listed(asked);
+            to.extend(read_id(asker));
+            Some(to)
         }
         (OFFER | OFFER_DECLINED | OFFER_LAPSED, _, _) => Some(BTreeSet::new()),
         _ => None,
     }
+}
+
+/// The events of an activity its members are told wherever they stand (0.135): a join (an offer's answer of yes), its
+/// start, a leave, its end (`souls:activity-ended`, at a member's body), its expiry and a carry's set-down, each with
+/// the activity in field 1 or as the node it is written at. The view tier addresses each to the bodies that were
+/// members as it was written and those it made members (`worldd`'s hub keeps the membership links).
+pub const TO_MEMBERS: [&str; 6] = [
+    "souls:activity-joined",
+    "souls:activity-started",
+    "souls:activity-left",
+    "souls:activity-ended",
+    "souls:activity-expired",
+    "souls:carry-set-down",
+];
+
+/// Whether an event named `name` is one an activity's members are told ([`TO_MEMBERS`]).
+pub fn to_members(name: &str) -> bool {
+    TO_MEMBERS.contains(&name)
 }
 
 #[cfg(test)]
@@ -376,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offer_goes_to_those_asked_and_its_outcome_to_the_asker() {
+    fn an_offer_goes_to_those_asked_its_decline_to_the_asker_and_its_lapse_to_both() {
         let mut mint = Minter::new(Scope([0xe8; 16]));
         let mut id = || mint.mint().expect("an id");
         let (asker, a, b) = (id(), id(), id());
@@ -389,7 +519,15 @@ mod tests {
         let lapsed = BTreeMap::from([(2, asker.to_value()), (3, Value::Array(vec![a.to_value()]))]);
         assert_eq!(
             addressed(OFFER_LAPSED, &lapsed),
-            Some(BTreeSet::from([asker]))
+            Some(BTreeSet::from([asker, a])),
+            "a lapse reaches the asker and the body that did not answer"
+        );
+        let declined =
+            BTreeMap::from([(2, asker.to_value()), (3, Value::Array(vec![b.to_value()]))]);
+        assert_eq!(
+            addressed(OFFER_DECLINED, &declined),
+            Some(BTreeSet::from([asker])),
+            "a decline reaches the asker alone"
         );
         assert_eq!(addressed("souls:said", &lapsed), None);
     }

@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import type {Api} from './useSouls.ts';
 import {PUBLIC_SOUL_PATH,readPublicRecord,type PublicRecord} from './public-soul-record.ts';
+import {v2World} from './v2-engine/owner-mailbox.ts';
 type Event=PublicRecord['events'][number];
 /** Public per-Soul live record (G4): fade colour, last accepted action, recent receipts, public events. No auth.
  * Reads GET /v1/edge/public/souls/:id (proposed in INBOX-core G430). Every text is untrusted: rendered as text only. */
@@ -18,6 +19,7 @@ function describe(e:Event){
 export function PublicSoulRecord({api,soulId}:{api:Api;soulId:string}){
  const [rec,setRec]=useState<PublicRecord|null|'unavailable'|'loading'>('loading');
  useEffect(()=>{let live=true,timer:ReturnType<typeof setTimeout>|undefined;
+  if(v2World()){setRec('unavailable');return;}   // a world the new engine runs publishes no old live record
   const read=async()=>{try{const r=await api(PUBLIC_SOUL_PATH(soulId));if(!live)return;
    if(r.status===404||r.status===405){setRec('unavailable');return;}
    const p=r.status===200?readPublicRecord(r.data):null;setRec(prev=>p??(prev&&prev!=='loading'?prev:'unavailable'));}catch{}

@@ -18,11 +18,13 @@
 //   keeps the transcript. `--external-driver` writes private `ready.json` paths for a native worker, then waits up
 //   to twenty minutes for its `transcript.jsonl` and `complete` marker before the same grading and cleanup.
 
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stopAll } from '../teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../..');
@@ -62,9 +64,9 @@ async function world(dir, facts, creator) {
     const directory = await started(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1', '--store', join(dir, 'directory'),
       '--test-sign-in', '--test-own', `creator=creator-${creator}`, '--pairing', join(dir, 'pairing.sqlite'), '--gateway-tokens', tokens], /listening on (\S+)\n/, procs, join(dir, 'directoryd.log'));
     const gw = await started(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/, procs, join(dir, 'gatewayd.log'));
-    return { directory: `http://${directory}`, gateway: `ws://${gw}/v2/ws`, kinds: join(w, 'world.kinds'), stop: () => procs.forEach((p) => p.kill()) };
+    return { directory: `http://${directory}`, gateway: `ws://${gw}/v2/ws`, kinds: join(w, 'world.kinds'), stop: () => stopAll(procs) };
   } catch (e) {
-    procs.forEach((p) => p.kill());
+    await stopAll(procs);
     throw e;
   }
 }
@@ -168,7 +170,7 @@ function built(home, before) {
   }));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const pairOnly = args.includes('--pair-only');
   const externalDriver = args.includes('--external-driver');
   if (!pairOnly && !externalDriver && !process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }
@@ -225,7 +227,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const daemonLog = join(f.home, 'souls', id, 'runtime', 'daemon.log');
       try { copyFileSync(daemonLog, join(dir, 'daemon.log')); } catch {}
       await new Promise((ok) => execFile(process.execPath, [GOD, 'stop'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, ok));
-      w.stop();
+      await w.stop();
       rmSync(f.at, { recursive: true, force: true });
     }
   }

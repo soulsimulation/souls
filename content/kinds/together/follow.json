@@ -1,0 +1,68 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:follow",
+ "owner": "thing",
+ "links": {
+  "one": {
+   "n": 1,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "other": {
+   "n": 2,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   2000,
+   100,
+   2000
+  ]
+ },
+ "forms": {},
+ "roles": {
+  "one": {
+   "need": "required",
+   "places": {
+    "in": "here",
+    "within_mm": 3000
+   },
+   "follows": true
+  },
+  "other": {
+   "need": "required",
+   "places": {
+    "in": "here",
+    "within_mm": 3000
+   }
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "Follow another Soul who accepts; it ends after an hour, or when you act.",
+  "together": "together",
+  "walk_with": "walk with",
+  "accompany": "accompany"
+ },
+ "card": {
+  "text": "card",
+  "category": "together",
+  "synonyms": [
+   "walk_with",
+   "accompany"
+  ]
+ }
+}

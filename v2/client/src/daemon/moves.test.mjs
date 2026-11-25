@@ -21,6 +21,9 @@ test('C14 A3: can on a walk, sit, lie or rise answers from the move check, not u
   assert.deepEqual(can({ verb: 'eden:walk' }, false), { verdict: 'no', reason: 'move.no-target' });
   assert.deepEqual(can({ verb: 'eden:walk', this: square, point: [1, 2] }, false), { verdict: 'no', reason: 'move.bad-point' });
   assert.deepEqual(can({ verb: 'eden:walk', this: square }, true), { verdict: 'no', reason: 'resource-held' });
+  // 0.135 G1: a walk's gait, as `act`'s `gait=` argument.
+  assert.deepEqual(can({ verb: 'eden:walk', this: square, args: { gait: 'run' } }, false), { verdict: 'yes' });
+  assert.deepEqual(can({ verb: 'eden:walk', this: square, args: { gait: 'sprint' } }, false), { verdict: 'no', reason: 'move.unknown-gait' });
   assert.deepEqual(can({ verb: 'eden:sit', this: chair }, true), { verdict: 'no', reason: 'place-already-held' });
   assert.deepEqual(can({ verb: 'eden:lie', this: chair }, false), { verdict: 'unknown', why: 'not-in-copy' });
   assert.deepEqual(can({ verb: 'eden:rise' }, false), { verdict: 'no', reason: 'not-seated' });

@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:balloon (core/balloon@1, 4 placed): four riders stand in the basket, entered on foot through its door; the flight starts with ride and ends on its track.",
+ "about": "eden:balloon (core/balloon@1, 4 placed): four riders stand in the basket, entered on foot through its door; the flight starts with ride and ends on its track. Riders board while it stands at home, set off or not: the world takes them only then.",
  "cases": [
   {
    "name": "balloon_ride_standing_still_free_seat",
@@ -59,7 +59,7 @@
    }
   },
   {
-   "name": "balloon_ride_while_under_way_is_refused",
+   "name": "balloon_ride_after_another_set_off_boards_too",
    "act": {
     "this": "t1",
     "form": "ride",
@@ -111,17 +111,7 @@
     ]
    },
    "expect": {
-    "verdict": "no",
-    "reason": "field_differs",
-    "need": 0,
-    "detail": {
-     "field": "under_way",
-     "found": true,
-     "wanted": {
-      "is": false
-     }
-    },
-    "fix": null
+    "verdict": "yes"
    }
   },
   {
@@ -191,7 +181,7 @@
    "expect": {
     "verdict": "no",
     "reason": "slot_taken",
-    "need": 1,
+    "need": 0,
     "detail": {
      "node": "t1",
      "slot": "rider_1"
@@ -261,7 +251,7 @@
    }
   },
   {
-   "name": "balloon_board_while_under_way_is_refused",
+   "name": "balloon_board_after_another_set_off_boards_too",
    "act": {
     "this": "t1",
     "form": "board",
@@ -313,17 +303,7 @@
     ]
    },
    "expect": {
-    "verdict": "no",
-    "reason": "field_differs",
-    "need": 0,
-    "detail": {
-     "field": "under_way",
-     "found": true,
-     "wanted": {
-      "is": false
-     }
-    },
-    "fix": null
+    "verdict": "yes"
    }
   },
   {
@@ -393,7 +373,7 @@
    "expect": {
     "verdict": "no",
     "reason": "slot_taken",
-    "need": 1,
+    "need": 0,
     "detail": {
      "node": "t1",
      "slot": "rider_1"

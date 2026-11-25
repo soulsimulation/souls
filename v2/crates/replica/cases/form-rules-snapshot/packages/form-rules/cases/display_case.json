@@ -1,0 +1,77 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:display_case (from core-display-case@1, counter variant; #3719): a held thing is put on a named place of its six on the shelf to show it, and a free hand takes it off.",
+  "cases": [
+    {
+      "name": "display_case_put_on_held_thing",
+      "act": {
+        "this": "t1",
+        "form": "put_on",
+        "args": {
+          "thing": "x1",
+          "place": "shelf_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:display_case"
+          },
+          "x1": {
+            "kind": "eden:tomato"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "display_case_take_off_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "take_off",
+        "args": {
+          "thing": "x1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:display_case"
+          },
+          "x1": {
+            "kind": "eden:tomato"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

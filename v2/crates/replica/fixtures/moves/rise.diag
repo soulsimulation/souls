@@ -1,11 +1,12 @@
 # Rising from a slot (Engine v2 B3, #2682; v2/crates/replica/src/moves.rs). The sit in reverse: at contact `sim::slots`
-# hands the body from the slot back to its seat's stand point, on its feet. A new claim on locomotion before then
+# hands the body from the slot onto the floor where it sat, on its feet, and steps it to its seat's stand point by the
+# move's end (`sim::slots::step_track`). A new claim on locomotion before then
 # cancels it, and the body stays in the slot. Times in µs, reach in µm.
 {
   1: "souls:rise", 2: 1,
   3: [{1: 1, 2: 1}],                        # claims every locomotion resource
   5: [1],                                   # a new claim on locomotion cancels it
-  6: [{1: "souls:start-up", 2: 500000},     # rising; on its feet at the stand point at its end
+  6: [{1: "souls:start-up", 2: 500000},     # rising; on its feet at its end, stepping off
       {1: "souls:recovery", 2: 300000}],
   7: {1: 1},                                # the body itself
   8: 600000,

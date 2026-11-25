@@ -98,6 +98,7 @@ fn world(placed: &Placed, at: i64) -> Result<Bodies, Refusal> {
         point: seat(),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     let refused = b.seat_placed(placed, at);
     assert!(refused.is_empty(), "seated again: {refused:?}");
@@ -187,5 +188,75 @@ fn a_checkpoint_taken_while_a_soul_rises_keeps_it_in_its_seat() {
         (stood.position.x - seat().x).abs() < 1_000_000,
         "standing beside the chair, not at the start: {:?}",
         stood.position
+    );
+}
+
+/// A rise steps the body off its seat over the rise's recovery (sim::slots::step_track): a walk asked while it is still
+/// carried, a tick after contact, is not planned from inside the seat and refused; it waits for the landing and walks.
+#[test]
+fn a_walk_asked_during_the_step_off_a_seat_walks() {
+    let seated = Placed::from([(
+        body(),
+        (
+            Pose {
+                frame: Frame {
+                    node: chair(),
+                    slot: None,
+                },
+                position: Vec3::ZERO,
+                orientation: Quat::IDENTITY,
+                support: Support::Slot,
+            },
+            Some(Stance::Sit),
+        ),
+    )]);
+    let mut b = world(&seated, 0).expect("the world");
+    let mut now = 4 * TICK;
+    b.step(now);
+    rise(&mut b, 1, &mut now).expect("the rise starts");
+    while in_chair(&b) {
+        now += TICK;
+        b.step(now);
+    }
+    assert!(b.runner.controller.carried(body()), "stepping off the seat");
+    let ground = b
+        .runner
+        .controller
+        .body(body())
+        .expect("the body")
+        .pose
+        .frame
+        .node;
+    let walk = Asked {
+        body: body(),
+        actor: Actor::Soul(body()),
+        ask: Ask::Walk {
+            node: ground,
+            point: Some(start()),
+            gait: None,
+        },
+        fallbacks: Vec::new(),
+    };
+    let started = b.start(vec![(id(200), walk)]);
+    assert!(started.iter().all(|(_, r)| r.is_ok()), "{started:?}");
+    let mut done = None;
+    for _ in 0..600 {
+        now += TICK;
+        if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id(200)) {
+            done = Some(r);
+            break;
+        }
+    }
+    let to = b
+        .runner
+        .controller
+        .body(body())
+        .expect("the body")
+        .pose
+        .position;
+    assert_eq!(done, Some(Ok(())), "the walk is done: at {to:?}");
+    assert!(
+        (to.x - start().x).abs() < 1_000_000 && (to.z - start().z).abs() < 1_000_000,
+        "walked to its point: {to:?}"
     );
 }

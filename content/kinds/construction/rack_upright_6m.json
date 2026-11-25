@@ -1,0 +1,108 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:rack_upright_6m",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "stand_front": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    500
+   ]
+  },
+  "grip_foot": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    300,
+    0
+   ]
+  },
+  "grip_low": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    2132,
+    0
+   ]
+  },
+  "grip_high": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    3964,
+    0
+   ]
+  },
+  "grip_top": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    5796,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1219,
+   6096,
+   76
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"steel": "#3f6fa8"},
+   "tags": ["rack", "upright", "frame"],
+   "shapes": [
+    {"kind": "box", "at": [-572, 3048, 0], "size": [76, 6096, 76], "tint": "steel"},
+    {"kind": "box", "at": [572, 3048, 0], "size": [76, 6096, 76], "tint": "steel"},
+    {"kind": "box", "at": [0, 319, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 1829, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 3339, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 4849, 0], "size": [1144, 38, 38], "tint": "steel"},
+    {"kind": "box", "at": [0, 5965, 0], "size": [1144, 38, 38], "tint": "steel"}
+   ]
+  }
+ },
+ "children": {
+  "crew": {
+   "kind": "mars:carry_activity",
+   "most": 2
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 6.1 m rack frame: four carry it laid flat, one holds it standing."
+ },
+ "card": {
+  "text": "card"
+ }
+}

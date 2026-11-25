@@ -3,7 +3,7 @@
   "kind": "eden:earth_column",
   "owner": "thing",
   "state": {
-    "soil": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
+    "soil": { "n": 28, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 900] },

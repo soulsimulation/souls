@@ -94,9 +94,10 @@ export class Daylight {
     this.fill.position.copy(this.fill.target.position).add(new THREE.Vector3(-12, 18, 12));
     // Shadow acne on tilted panels and roofs: normal offset of about one shadow-map texel (never under 5 cm).
     this.sun.shadow.normalBias = Math.max(0.05, (2 * half) / this.sun.shadow.mapSize.x);
-    const key = this.key;
+    // re-light at the same clock; the key also carries the site's north (`<datetime>|<north>`), which is no datetime: read
+    // as one it lit the hemisphere NaN, and a scene change with no clock yet (a past's first minute) showed it white
     this.key = '';
-    this.update(key === 'none' || !key ? null : key);
+    this.update(this.datetime);
   }
 
   private followKey = '';
@@ -130,7 +131,7 @@ export class Daylight {
     if (!datetime) { // no clock yet: a soft midday so the camp reads
       this.daylightFactor=null;
       this.sun.position.copy(this.sun.target.position).add(new THREE.Vector3(20, 35, 15));
-      this.sun.intensity = 2; this.hemi.intensity = 1.6; this.sun.color.copy(SUN_WHITE);
+      this.sun.intensity = 2; this.hemi.intensity = 1.6; this.hemi.color.set(0xffffff); this.sun.color.copy(SUN_WHITE);
       this.fill.intensity = 0.2;
       (this.scene.background as THREE.Color).copy(DAY_SKY);
       this.elevation = null;

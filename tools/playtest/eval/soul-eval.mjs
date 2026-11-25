@@ -3,6 +3,7 @@
 //
 //   node tools/playtest/eval/soul-eval.mjs run --battery tools/playtest/eval/battery/m4-v1.json --seat tools/playtest/eval/seats/scripted-m4-v1.json \
 //        [--world local:eden-2026] [--server-root <checkout>] [--repeats 2] [--items a,b] [--out <dir>] [--port 18760] [--max-usd 0]
+//        [--engine v2]   (0.135 P2: on the new engine, a scripted seat only: tools/playtest/arena/new-engine/battery.mjs)
 //   node tools/playtest/eval/soul-eval.mjs run --battery hostile-v1 --seat scripted [--repeats 1]   (a case battery, #1950)
 //   node tools/playtest/eval/soul-eval.mjs report <out> [--against <other out>]
 //   node tools/playtest/eval/soul-eval.mjs load --souls 12,24 ...         (tools/playtest/eval/load.mjs)
@@ -10,6 +11,7 @@
 // A live seat (claude-headless) needs --max-usd: the run stops before an episode once its spend reaches the cap. Each
 // local episode runs on its own fresh fake-mind world, which keeps its own model budget (default $0.50 a day).
 // Docs: docs/testing/soul-eval.md.
+import { isMain } from '../../lib/is-main.mjs';
 import { resolve, join, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -52,6 +54,17 @@ export function resolveInputs(o) {
 export async function runEval(o) {
   const { battery, seatCfg } = resolveInputs(o);
   if (!battery || !seatCfg) throw new Error('--battery and --seat must be readable JSON');
+  // 0.135 P2: `--engine v2` runs the battery on the new engine (arena/new-engine/battery.mjs): each item on its own
+  // run.sh world of the battery's template, the scripted seat through the new client; the same result and REPORT.md
+  if (o.engine === 'v2') {
+    if (!GENESIS[battery.world]) throw new Error(`unknown local world ${battery.world}`);
+    const { runBatteryV2 } = await import('../arena/new-engine/battery.mjs');
+    const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `${battery.battery}-v2-${new Date().toISOString().replace(/[:.]/g, '-')}`));
+    const r = await runBatteryV2({ battery, seatCfg, genesis: GENESIS[battery.world], out, items: o.items ? new Set(String(o.items).split(',')) : null, repeats: Number(o.repeats ?? 1), log });
+    process.stdout.write(r.report);
+    log(`wrote ${relative(process.cwd(), out)}/result.json and REPORT.md`);
+    return { out, result: r.result };
+  }
   if (battery.kind === 'cases') return runCases(o, battery, seatCfg);
   const errs = validateBattery(battery);
   const catalogRef = o.catalog ? (readJson(resolve(o.catalog))?.catalog ?? readJson(resolve(o.catalog))) : null;   // for a client that keeps no world copy
@@ -199,4 +212,4 @@ async function main() {
   if (cmd === 'load') { const { runLoad } = await import('./load.mjs'); await runLoad(o); process.exit(0); }
   process.stderr.write('usage: soul-eval.mjs run|report|load (see the header)\n'); process.exitCode = 2;
 }
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('soul-eval.mjs')) main().catch((e) => { log(e.stack ?? e.message); process.exitCode = 1; });
+if (isMain(import.meta.url) || process.argv[1]?.endsWith('soul-eval.mjs')) main().catch((e) => { log(e.stack ?? e.message); process.exitCode = 1; });

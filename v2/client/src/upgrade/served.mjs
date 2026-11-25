@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { request } from '../daemon/client.mjs';
-import { Refused, runtimeOf, soulsWithTokens } from '../home/home.mjs';
+import { Refused, makeHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 
 export const LIB = ['replica.js', 'replica_bg.wasm'];
 const SKILL_COPIES = ['SKILL.md', '.claude/skills/souls/SKILL.md', '.agents/skills/souls/SKILL.md'];
@@ -98,7 +98,7 @@ export function readConfig(home) {
 function updateConfig(home, f) {
   const cfg = readConfig(home);
   f(cfg);
-  mkdirSync(home, { recursive: true, mode: 0o700 });
+  makeHome(home);
   writeFileSync(`${configFile(home)}.tmp`, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
   renameSync(`${configFile(home)}.tmp`, configFile(home));
   return cfg;
@@ -127,6 +127,7 @@ function putLib(home, got) {
 /** Writes what `fetchChecked` gave: the library, then the client and skill replaced kept back, then the new ones. */
 function install(home, site, c, got) {
   const bin = join(home, 'bin'), inUse = join(bin, 'eden.mjs');
+  makeHome(home); // a new home gets its .gitignore (0.133 Q2)
   mkdirSync(bin, { recursive: true, mode: 0o700 });
   const lib = putLib(home, got), was = readConfig(home);
   for (const n of ['eden.mjs', 'skill.md']) writeFileSync(join(bin, `.${n}.next`), got[n]);

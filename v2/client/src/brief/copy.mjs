@@ -46,6 +46,8 @@ export function decode(bytes) {
 const hex = (b) => Buffer.from(b).toString('hex');
 const NAMES = new WeakMap();
 const namesOf = (copy) => { if (!NAMES.has(copy)) NAMES.set(copy, new Map()); return NAMES.get(copy); };
+/** The public names the copy was told, `sha256 hex` -> words (#3728: a world's export carries them). */
+export const publicNames = (copy) => new Map(namesOf(copy));
 const publicRef = (record) => {
   const audience = record.get(5), fields = record.get(6);
   const ref = fields instanceof Map && fields.get(4);
@@ -122,6 +124,21 @@ export function publicNameRecords(copy, missingOnly = true) {
   }
   return found;
 }
+/**
+ * A node record's fields (key 6) with its big fields read in from their own records: a field of 64 KiB or more (the
+ * open ground's terrain tiles) is a record of its own, named by key 0 `[[field, hash], ...]` (replica
+ * `tree::BIG_FIELD`, #4713). One whose record the copy does not hold is left out.
+ */
+export function allFields(copy, m) {
+  const f = new Map(m.get(6) instanceof Map ? m.get(6) : []);
+  for (const [n, h] of m.get(0) ?? []) {
+    const bytes = copy.record(hex(h));
+    const own = bytes ? decode(bytes).get(6) : null;
+    if (own instanceof Map && own.has(n)) f.set(n, own.get(n));
+  }
+  return f;
+}
+
 /** An id `[scope, counter]` as text: `<scope hex>-<counter>`. */
 export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A kind `namespace:name@hash` as its plain name. */
@@ -129,6 +146,8 @@ export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 export const F_COURSE = 80;
 /** A place's title (#3699): field 4, a public name's hash (named at import) or a creator's words (`{21: id}`). */
 export const F_TITLE = 4;
+/** A Soul's body's public name (worldd `words::NAME`, field 30): its owner's words for it, set by a describe (`{21: id}`). */
+export const F_BODY_NAME = 30;
 /** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
 export const F_ALIASES = 101;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
@@ -169,14 +188,40 @@ function walkOf(copy) {
   };
 }
 
+/** The full names of the creator's own kinds (#3697) the copy holds: field 1 of each `souls:kind` node at a root. */
+export function definedNames(copy) {
+  const out = new Set();
+  for (const h of Object.values(JSON.parse(copy.roots()))) {
+    const root = copy.record(h);
+    if (!root) continue;
+    for (const c of decode(root).get(10) ?? []) {
+      const bytes = copy.record(hex(c));
+      if (!bytes) continue;
+      const m = decode(bytes), f = m.get(6) instanceof Map ? m.get(6) : new Map(), full = f.get(1) ?? f.get(1n);
+      if (plainKind(m.get(2)) === 'souls:kind' && typeof full === 'string') out.add(full);
+    }
+  }
+  return out;
+}
+
+/** An activity node's (`replica::activity`, a `<kind>_activity`, a conversation, a give) members and whether it has
+ *  started, as its fields hold them (2: 1 proposed, 2 started; 4: [[role, body, soul, link, intent], ...]):
+ *  `{members: [{role, body, soul}], started}`, or nothing for any other node. */
+function membersAt(kind, fields) {
+  if (!/_activity$|^souls:(conversation|give)$/.test(kind)) return {};
+  const ms = fields.get(4) ?? fields.get(4n), state = Number(fields.get(2) ?? fields.get(2n));
+  if (!Array.isArray(ms) || !ms.every((m) => Array.isArray(m) && m.length === 5 && typeof m[0] === 'string')) return {};
+  return { members: ms.map(([role, body, soul]) => ({ role, body: idText(body), soul: idText(soul) })), started: state === 2 };
+}
+
 /**
  * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, entry, parent, path, children, text, soul,
- * own }`, `soul` on a body that names its Soul, `entry` on a thing that borrows another kind's entry ([`entryKind`]).
+ * members, started, own }`, `soul` on a body that names its Soul, `members` and `started` on an activity ([`membersAt`]), `entry` on a thing that borrows another kind's entry ([`entryKind`]).
  * A node is named by its kind's plain name and its counter ("cup 7") unless a text field gives it one; text in its
  * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
  */
 export function rowsOf(copy) {
-  const rows = new Map();
+  const rows = new Map(), own = definedNames(copy);
   const walk = walkOf(copy);
   const todo = Object.values(JSON.parse(copy.roots())).map((h) => [h, []]);
   while (todo.length) {
@@ -186,8 +231,10 @@ export function rowsOf(copy) {
     const { m } = d, id = idText(m.get(1)), kind = plainKind(m.get(2));
     const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
     const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
-    const entry = entryKind(m);
-    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    // A thing of a creator's kind (#3697) goes by that kind's full name, so its own revision's record is read.
+    const full = String(m.get(2)), entry = own.has(full) ? full : entryKind(m);
+    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? wordsAt(copy, fields, F_BODY_NAME) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
@@ -198,7 +245,10 @@ export function rowsOf(copy) {
     const hours = hoursText(fields.get(F_HOURS) ?? fields.get(BigInt(F_HOURS)));
     const pose = m.get(7) instanceof Map ? m.get(7) : m.get(8) instanceof Map && m.get(8).get(5) instanceof Map ? m.get(8).get(5) : null;
     const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
-    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
+    const members = membersAt(kind, fields);
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), ...members, own: d.own });
+    // First-day round 4: its course as the record holds it, for `check/aboard.mjs` (not enumerable: never printed)
+    if (moving) Object.defineProperty(rows.get(id), 'course', { value: fields.get(F_COURSE) ?? fields.get(BigInt(F_COURSE)) });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   walk.done();

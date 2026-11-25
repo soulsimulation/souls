@@ -597,8 +597,9 @@ fn v13b_a1_a_session_exchanges_for_a_view_token_of_what_the_account_owns() {
     assert!(head.contains("cache-control: no-store"));
     assert!(head.contains("access-control-allow-origin: http://127.0.0.1:8080"));
     assert_eq!(
-        (none, nothing["refused"].as_str()),
-        (404, Some("nothing-owned"))
+        (none, &nothing),
+        (200, &json!({"owned": []})),
+        "signed in, owning nothing: no token and no error"
     );
     assert_eq!(pre, 204);
     assert!(pre_head.contains("access-control-allow-headers: authorization, content-type"));
@@ -698,7 +699,7 @@ fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
     // Before: Ada owns nothing, so her session gets no view.
     let ada = json!({"name": "Ada"}).to_string();
     let (s0, _, b0) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
-    assert_eq!((s0, b0["refused"].as_str()), (404, Some("nothing-owned")));
+    assert_eq!((s0, &b0), (200, &json!({"owned": []})));
     // A daemon asks for a new Soul; Ada approves once on the card.
     let ask =
         json!({"secret_hash": "ab".repeat(32), "device": "laptop", "label": "agent", "new": true});
@@ -848,5 +849,76 @@ fn c14_a1_a_soul_sets_its_status_line_through_the_gateway_and_anyone_reads_it() 
     println!(
         "c14 a1: set {s1}; too long {}; cleared; no key {s5}; 65 asked {s6}",
         r3["reply"]["refused"]
+    );
+}
+
+/// First day (25 Nov): the world page of a signed-in person lists this world's pending Soul requests asked from the
+/// same address, so the approval card comes up on the page already open; an approved request leaves the list.
+#[test]
+fn first_day_the_world_page_lists_pending_requests_from_its_address() {
+    use directoryd::accounts::serve::{App, run};
+    use directoryd::pairing::Pairing;
+    let dir = scratch("first-day-waiting");
+    let pairing = Pairing::open(&dir.join("pairing.sqlite"), None, "http://127.0.0.1:1").unwrap();
+    let app = Arc::new(App {
+        store: Store::open(&dir.join("accounts.sqlite")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: Some(pairing),
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let served = app.clone();
+    std::thread::spawn(move || run(listener, served));
+    let ask = |hash: &str, world: &str| {
+        json!({"secret_hash": hash.repeat(32), "device": "laptop", "label": "agent", "new": true, "world": world})
+            .to_string()
+    };
+    let (s1, _, asked) = request(&addr, "POST", "/v1/pair/request", None, &ask("ab", "eden"));
+    let (s1b, _, _) = request(
+        &addr,
+        "POST",
+        "/v1/pair/request",
+        None,
+        &ask("cd", "elsewhere"),
+    );
+    assert_eq!((s1, s1b), (200, 200));
+    let waiting = json!({"test_person": "Ada", "world": "eden"}).to_string();
+    let (s2, _, list) = request(&addr, "POST", "/v1/pair/waiting", None, &waiting);
+    assert_eq!(s2, 200, "{list}");
+    let codes: Vec<&str> = list["waiting"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        codes,
+        vec![asked["code"].as_str().unwrap()],
+        "only this world's request: {list}"
+    );
+    assert_eq!(list["waiting"][0]["label"], "agent");
+    // Signed out, nothing is listed.
+    let (s3, _, _) = request(
+        &addr,
+        "POST",
+        "/v1/pair/waiting",
+        None,
+        &json!({"world": "eden"}).to_string(),
+    );
+    assert_eq!(s3, 401);
+    let approve = json!({"test_person": "Ada", "code": asked["code"], "confirm": true}).to_string();
+    let (s4, _, _) = request(&addr, "POST", "/v1/pair/approve", None, &approve);
+    assert_eq!(s4, 200);
+    let (_, _, after) = request(&addr, "POST", "/v1/pair/waiting", None, &waiting);
+    assert_eq!(
+        after["waiting"],
+        json!([]),
+        "an approved request leaves the list"
     );
 }

@@ -1,0 +1,115 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:hold_hands",
+ "owner": "thing",
+ "links": {
+  "one": {
+   "n": 1,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "other": {
+   "n": 2,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "by_one": {
+   "role": "stand",
+   "at_mm": [
+    -225,
+    0,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "by_other": {
+   "role": "stand",
+   "at_mm": [
+    225,
+    0,
+    0
+   ],
+   "yaw_mdeg": 0
+  }
+ },
+ "slots": {
+  "one": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    -225,
+    0,
+    0
+   ],
+   "stand": "by_one"
+  },
+  "other": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    225,
+    0,
+    0
+   ],
+   "stand": "by_other"
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   900,
+   100,
+   400
+  ]
+ },
+ "forms": {},
+ "roles": {
+  "one": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "slots": [
+     "one"
+    ]
+   },
+   "move": "hold_hand"
+  },
+  "other": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "slots": [
+     "other"
+    ]
+   },
+   "move": "hold_hand"
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "Hold hands; the first to walk leads. A leave, a sit or the other's walk lets go.",
+  "together": "together",
+  "hold_hands": "hold hands",
+  "hand_in_hand": "hand in hand"
+ },
+ "card": {
+  "text": "card",
+  "category": "together",
+  "synonyms": [
+   "hold_hands",
+   "hand_in_hand"
+  ]
+ }
+}

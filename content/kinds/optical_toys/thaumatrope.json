@@ -1,0 +1,489 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:thaumatrope",
+  "owner": "thing",
+  "state": {
+    "twists": {
+      "n": 28,
+      "type": "int",
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      },
+      "unit": "count",
+      "min": 0,
+      "max": 3
+    },
+    "released": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "wind_strings": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_most": 2,
+          "says": "fully_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "by": 1,
+          "event": "disc_strings_wound"
+        }
+      ]
+    },
+    "unwind_strings": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_least": 1,
+          "says": "not_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "by": -1,
+          "event": "disc_strings_unwound"
+        }
+      ]
+    },
+    "release_disc": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_least": 1,
+          "says": "not_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "to": 0,
+          "event": "disc_strings_released"
+        },
+        {
+          "change": "set",
+          "field": "released",
+          "to": true,
+          "event": "picture_disc_spun"
+        }
+      ]
+    },
+    "catch_disc": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
+          "is": true,
+          "says": "already_caught"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": false,
+          "event": "picture_disc_caught"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:thaumatrope",
+    "table": [
+      {
+        "part": "flip",
+        "field": "released",
+        "do": "rotate",
+        "axis": "x",
+        "at": {
+          "true": 720000,
+          "false": 0
+        },
+        "over_us": 6000000
+      },
+      {
+        "part": "lid",
+        "field": "released",
+        "do": "show",
+        "at": {
+          "true": 0,
+          "false": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1080,
+            0
+          ],
+          "size": [
+            25,
+            300,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1080,
+            0
+          ],
+          "size": [
+            25,
+            300,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "size": [
+            400,
+            8,
+            8
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "r": 110,
+          "h": 10,
+          "segments": 16,
+          "tint": "paper",
+          "roll": 90000,
+          "role": "flip"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            1080,
+            -12
+          ],
+          "size": [
+            40,
+            50,
+            5
+          ],
+          "tint": "blue",
+          "role": "flip",
+          "pivot": [
+            0,
+            1080,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            25,
+            1080,
+            12
+          ],
+          "size": [
+            40,
+            70,
+            5
+          ],
+          "tint": "red",
+          "role": "flip",
+          "pivot": [
+            0,
+            1080,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            970,
+            0
+          ],
+          "size": [
+            90,
+            20,
+            35
+          ],
+          "tint": "red",
+          "role": "lid"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A two-sided picture disc: wind its strings, release it, then catch it.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "let_settle": "Catch the released picture disc before winding or releasing it again.",
+    "fully_wound": "The strings have three twists; release the disc or unwind a twist.",
+    "not_wound": "Wind the strings before releasing or unwinding the disc.",
+    "howto_play": "Wind one to three twists into the strings, release the picture disc, then catch it before winding again. Released marks the uncaught latch, with one keyed turn rather than continuous animation or automatic settling.",
+    "toy": "optical toy",
+    "already_caught": "The picture disc is already caught; wind and release it first."
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": [
+      "toy"
+    ]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "wind_strings"
+        },
+        {
+          "form": "release_disc"
+        },
+        {
+          "form": "catch_disc"
+        }
+      ]
+    }
+  }
+}

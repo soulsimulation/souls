@@ -7,6 +7,9 @@ import { apiPath, worldKey } from '../world-path.ts';
 import { isFlagDef } from './checklist.ts';
 import { userAuthHeaders, watchSession, session } from '../auth-session.ts';
 import { statusPoll } from './status-poll.ts';
+import { v2PageWorldName, v2World } from '../v2-engine/owner-mailbox.ts';
+import { worldTitle } from '../world-title.ts';
+import type { V2Creator } from '../v2-engine/creator-socket.ts';
 export { isFlagDef };
 
 export type Pending = { code: string; agent: string; expiresIn: number };
@@ -57,7 +60,24 @@ export function forgetToken(refused?: string) {
 
 async function json<T>(r: Response): Promise<T> { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error((d as { message?: string }).message ?? `HTTP ${r.status}`); return d as T; }
 
+/** G1 (0.133): on a world the new engine runs, the panel's creator (its socket and mailbox), loaded only there; null on
+ *  an old-engine world. One a sign-in. */
+let creator: Promise<V2Creator> | null = null;
+export function v2Creator(): Promise<V2Creator> | null {
+  const stream = v2World();
+  if (!stream) return null;
+  creator ??= import('../v2-engine/creator-socket.ts').then((m) => new m.V2Creator(stream));
+  return creator;
+}
+/** The panel's status on a v2 world: the owner's view for the world's creator (the session exchange says so). */
+async function v2Status(c: Promise<V2Creator>): Promise<Status> {
+  const s = session(), who = s.authed ? await (await c).who() : null;
+  return { worldId: worldKey, name: worldTitle(v2PageWorldName(), worldKey), hasOwner: true, you: who?.creator ? 'owner' : s.authed ? 'visitor' : 'anonymous', pending: [], entities: 0, seq: 0, base: '', agents: 1 };
+}
+
 const status = statusPoll<Status | null>(async () => {
+  const c = v2Creator();
+  if (c) return v2Status(c).catch(() => null);
   try { const r = await fetch(apiPath('/v1/god/status'), { headers: await authHeaders(), cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
 });
 // Owner-only pending codes belong to the current account, including during
@@ -69,7 +89,7 @@ watchSession(() => {
       (next.scope == null && next.label !== tokenSession.label)) {
     // Invalidate only work started for the previous identity. Stored bearer
     // adoption stays unchanged; explicit sign-out/401 paths call forgetToken.
-    tokenGeneration++; pendingToken = null;
+    tokenGeneration++; pendingToken = null; creator = null;
   }
   tokenSession = next;
   status.reset(null);

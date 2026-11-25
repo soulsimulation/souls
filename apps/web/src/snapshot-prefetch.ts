@@ -50,7 +50,8 @@ export type BootSocket = { url: string; ws: WebSocket; queue: unknown[]; hello: 
  *  round trips to the server all leave at once instead of one after another (research B, 2026-10-19). */
 export function entryPrefetchScript(base: string, oldKeys: readonly string[] = OLD_WORLD_KEYS, hello?: string): string {
   return `(function(){try{var b=${JSON.stringify(base)},k=(${worldKeyFrom.toString()})(location.pathname,b);`
-    + `if((window.__simConfig&&typeof window.__simConfig.worldEngine==='boolean'?!window.__simConfig.worldEngine:${JSON.stringify(oldKeys)}.indexOf(k)>=0)||typeof fetch!=='function')return;`
+    // a v2 world whose old views are not published (v2Views false, cutover.mjs v2Fields) has no snapshot to fetch
+    + `if((window.__simConfig&&typeof window.__simConfig.worldEngine==='boolean'?!window.__simConfig.worldEngine:${JSON.stringify(oldKeys)}.indexOf(k)>=0)||window.__simConfig&&window.__simConfig.v2Views===false||typeof fetch!=='function')return;`
     + `var w=b+'/w/'+k,rq=function(u){var c=typeof AbortController==='function'?new AbortController():null,p=c?fetch(u,{signal:c.signal}):fetch(u);p.catch(function(){});return {response:p,abort:function(){if(c)c.abort();}};},g=function(n,u){var r=rq(u);r.url=u;window[n]=r;};`
     // W3: the wire form (snapshot-wire.ts); its defs/ground part fetches start as soon as the response headers name them
     + `var x=window.__simSnapshotKey,n=w+'/v1/world/snapshot?defs=ref&cols=1';g(${JSON.stringify(PREFETCH_GLOBAL)},typeof x==='string'&&x?n+'&v='+encodeURIComponent(x):n);g(${JSON.stringify(CONFIG_GLOBAL)},w+'/v1/config');`
@@ -63,7 +64,9 @@ export function entryPrefetchScript(base: string, oldKeys: readonly string[] = O
     + `var ph=false;try{ph=(${phasedEntryWanted.toString()})(location.search||'',typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches,screen.width,screen.height,navigator.deviceMemory)===true;}catch(e){}window[${JSON.stringify(PHASED_GLOBAL)}]=ph;`
     // lane PAIR-UI: an #approve link may be handed to an open tab (Shell.tsx), so it opens no world socket, not even
     // in a phased (phone) second phase; a full boot opens its own
-    + (hello ? `if(typeof WebSocket!=='function')return;var os=function(){if(/^#approve\\//.test(location.hash||''))return;var h=${JSON.stringify(hello)},u=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+w+'/ws',s=new WebSocket(u+'?hello='+encodeURIComponent(h)),o={url:u,ws:s,queue:[],hello:h,sent:true};`
+    // A page the new engine runs (its config names `v2Stream`) reads its stream and never adopts this socket: opened, it
+    // only cost the old world a join and closed itself unread 20 s later, a drop nothing resumed (release probe, 24 Nov)
+    + (hello ? `if(typeof WebSocket!=='function'||window.__simConfig&&typeof window.__simConfig.v2Stream==='string')return;var os=function(){if(/^#approve\\//.test(location.hash||''))return;var h=${JSON.stringify(hello)},u=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+w+'/ws',s=new WebSocket(u+'?hello='+encodeURIComponent(h)),o={url:u,ws:s,queue:[],hello:h,sent:true};`
       + `s.onmessage=function(e){o.queue.push(e.data);};`
       + `setTimeout(function(){if(!o.adopted)try{s.close();}catch(e){}},20000);window[${JSON.stringify(SOCKET_GLOBAL)}]=o;};`
       + `if(ph)window[${JSON.stringify(OPEN_SOCKET_GLOBAL)}]=function(){delete window[${JSON.stringify(OPEN_SOCKET_GLOBAL)}];os();};else os();` : '')

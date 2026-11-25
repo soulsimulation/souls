@@ -10,12 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.6",
+    "@clerk/react": "^6.19.6",
     "@souls/client": "workspace:*",
     "@souls/ground": "workspace:*",
     "@souls/world-compiler": "workspace:*",
     "@souls/engine-contract": "workspace:*",
     "@souls/protocol": "workspace:*",
+    "cborg": "6.2.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "three": "^0.187.0",

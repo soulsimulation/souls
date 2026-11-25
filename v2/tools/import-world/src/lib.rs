@@ -58,6 +58,34 @@ impl World {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum LeftOut {
+    WindowNoRoom,
+}
+
+/// What a loader note leaves out on purpose (W2b, 0.133), if anything. A flight within one storey is walked as that
+/// floor (0.133); one the loader notes rises more than a step, a piece cut off, which nothing explains.
+fn left_out(note: &str) -> Option<LeftOut> {
+    note.ends_with(": a window in no room")
+        .then_some(LeftOut::WindowNoRoom)
+}
+
+fn notes_like(notes: &[String], what: LeftOut) -> i64 {
+    notes.iter().filter(|n| left_out(n) == Some(what)).count() as i64
+}
+
+/// Why the loader leaves it out, or None for a note nobody has explained.
+fn note_reason(note: &str) -> Option<&'static str> {
+    Some(match left_out(note)? {
+        // import-eden: a window node belongs to a room, the one it looks out of or, in no room's wall (a serving
+        // hatch), the nearest; a thing with no rooms (a lantern's glazing) has none. The thing keeps its solids and
+        // its look.
+        LeftOut::WindowNoRoom => {
+            "explained: its thing has no rooms, so no room to look out of; the thing keeps its walls and look"
+        }
+    })
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -144,11 +172,22 @@ pub fn row(text: &str) -> World {
             w.counts.insert(key, r.tree);
         }
         if r.tree != r.bake {
+            // W2b: a window of a thing with no rooms is left out by design (`note_reason`), so a count short by exactly
+            // those is explained.
+            let skipped = match r.what.as_str() {
+                "windows (nodes)" => notes_like(&im.notes, LeftOut::WindowNoRoom),
+                _ => 0,
+            };
+            let explained = skipped > 0 && r.tree + skipped == r.bake;
             w.differences.push(Difference {
                 what: format!("count {}", r.what),
                 ids: vec![format!("tree {}, bake {}", r.tree, r.bake)],
-                reason: "unexplained: the tree's count is not the model's".into(),
-                explained: false,
+                reason: if explained {
+                    format!("explained: {skipped} left out by design (the loader notes below)")
+                } else {
+                    "unexplained: the tree's count is not the model's".into()
+                },
+                explained,
             });
         }
     }
@@ -183,11 +222,15 @@ pub fn row(text: &str) -> World {
         });
     }
     for n in &im.notes {
+        let why = note_reason(n);
         w.differences.push(Difference {
             what: "loader note".into(),
             ids: vec![],
-            reason: n.clone(),
-            explained: false,
+            reason: match why {
+                Some(why) => format!("{n}: {why}"),
+                None => n.clone(),
+            },
+            explained: why.is_some(),
         });
     }
 

@@ -1,9 +1,12 @@
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
-import {WorldContextViews} from './WorldContextViews.ts';
+import {WorldContextViews,contextLocation,type Target as ContextTarget} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
+import { playSpeed, v2History } from './v2-engine/history.ts';
+import { CABIN } from './v2-engine/bridge.ts';
+import { momentTick, seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
 import {SoulSwipe,swipeStep,soulRing,interestScores} from './touch/soul-swipe.ts';
@@ -23,7 +26,7 @@ import {conversationFrame} from './WorldConversationFrame.ts';
 import {WorldEyes,type EyesWhere} from './WorldEyes.ts';
 import {WorldHover,type HoverTarget} from './WorldHover.ts';
 import {EDEN_VIEWER_PLACES} from './WorldEdenPlaceData.ts';
-import {WorldSoulAvatars} from './SoulAvatars.ts';
+import {WorldSoulAvatars, soulAvatars} from './SoulAvatars.ts';
 import {edenExpansionCapture} from './WorldEdenActivation.ts';
 import {worldPlaceView,CURATED_WORLD_LOCATIONS,type WorldPlaceId} from './WorldPlaces.ts';
 import type {createWorldEdenExpansion} from './WorldEdenExpansion.ts';
@@ -89,6 +92,7 @@ import { WorldSceneHistory } from './WorldSceneHistory.ts';
 import { apiPath, worldKey } from './world-path.ts';
 import { BASE } from './base-path.ts';
 import { newWorld } from './world-kind.ts';
+import { oldViews, streamBound } from './v2-engine/source/scene-offer.ts';
 import { sceneOwner, type SceneOwnerMemory } from './scene-owner.ts';
 import { marsFork } from './mars-fork.ts';
 import type { ForkLand } from './WorldMarsForkLand.ts';
@@ -128,7 +132,9 @@ import {cameraGround,cameraGroundSampler,clearShotEye} from './WorldCameraGround
 import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
-import { WorldBroadcast, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { buildTakesClicks } from './v2-engine/creator-build.ts';
+import { WorldBroadcast, openGroundScene, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
+import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
 type OldSceneKit=typeof import('./old-scene-kit.ts');
 let oldKit:OldSceneKit|null=null,oldKitLoad:Promise<OldSceneKit>|null=null;
@@ -155,18 +161,22 @@ function serverNow(sim: Souls): number | null {
   if (!t || typeof t.serverTick !== 'number') return null;
   return t.serverTick + Math.min(2, Math.max(0, (performance.now() - t.receivedAt) / 1000)) * tpsOf(sim);
 }
-/** Live playback sits this many ticks behind the server, so the next chunk has arrived before it is needed. */
+/** Live playback sits this many ticks behind the server, so the next chunk has arrived before it is needed; a source
+ *  with shorter chunks says how far (`playDelay`, the v2 bridge's, B3-4). */
 const LIVE_DELAY = 30;
+const liveDelayOf = (sim: Souls) => takesOf(sim)?.playDelay ?? LIVE_DELAY;
 const HOUR_SECONDS = 3600;
 
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
 type Shown = { tick: number; datetime: string | null; take: Take | null; entities: Record<string, SampledEntity> };
-type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
+type Label = { obj: CSS2DObject; head: THREE.Vector3; /** The speech bubble, anchored above the head, apart from the name tag. */ bubble: CSS2DObject; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
   /** #2195: the card's eased opacity, whether it is emphasised, and its last sightline check (performance.now ms). */
   shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
 
 async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal): Promise<Chunk[]> {
+  const v2 = v2History(); // R2: a world the new engine runs answers its past from its history export
+  if (v2) return validChunks(await v2.chunks(from, to, Math.min(MAX_PAST_CHUNKS, limit), signal) as Chunk[]);
   let out: Chunk[] = [], cursor = from;
   for (let page = 0; page < 4 && out.length < limit; page++) {
     const res = await fetch(apiPath(historyTakePath(cursor,to,limit-out.length)), { signal });
@@ -320,7 +330,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ~8 s of a 1.6 Mbps link) wait until the arrival is over. Before, they shared the link with the world's own build (its
     // building worker's code waited behind them) and held the card ~12 s; until they land, a simple figure stands in.
     // Desktop, old worlds and pictures load them at once and wait for them as before. `?people=wait|later` overrides.
-    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode);
+    // a moment link (#t=) draws nothing before its moment: no early arrival, the card holds until the recording is drawn
+    const earlyWanted=earlyArrivalWanted(quality.tier,newWorld,location.search,shotMode||momentTick(location.hash)!==null);
     // Old worlds on phones (F12): undecided until the first snapshot, held meanwhile; the people wait for the arrival
     // only when none of them stands in the arrival camera's view (otherwise the card waits for them as before).
     const peopleAsk=new URLSearchParams(location.search).get('people'),peopleRule=((q:string|null)=>q==='wait'?false:q==='later'?true:quality.tier==='phone'&&!shotMode)(peopleAsk);
@@ -377,6 +388,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const followView=new WorldFollow();
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
+    // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
+    let shotTrack:import('./WorldShotTrack.ts').ShotTrack|null=null,shotPoseNow:typeof import('./WorldShotTrack.ts').poseNow|null=null;
+    if(new URLSearchParams(location.search).has('track'))void import('./WorldShotTrack.ts').then(async m=>{const url=m.shotTrackUrl(location.search);if(!url||abort.signal.aborted)return;shotTrack=await m.loadShotTrack(url,abort.signal,{seek:tick=>playbackCommands.current?.seek(tick)??Promise.resolve(),setPlaying:playing=>playbackCommands.current?.setPlaying(playing)??false,tick:()=>past.current?.tick??null});shotPoseNow=m.poseNow;}).catch(()=>{});
     if(new URLSearchParams(location.search).has('camtrace'))void import('./camera-trace.ts').then(m=>{if(abort.signal.aborted)return;const t=m.startCameraTrace(renderer.domElement);camTrace=t.trace;abort.signal.addEventListener('abort',()=>t.stop());});
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
@@ -410,8 +424,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const seatSurvey=new URLSearchParams(location.search).get('survey')==='seats'?{done:false,since:null as number|null}:null;
     const waterDetail=new WorldWaterDetail(()=>!!reducedMotionQuery?.matches,()=>quality.tier==='phone'),waterDetailOff=new URLSearchParams(location.search).get('water')==='0';  // ?water=0: before/after comparisons
     waterDetail.boats=AFLOAT;(window as unknown as {__soulsWater?:unknown}).__soulsWater=waterDetail.stats;    const idleLife=new WorldIdleLife();const bodyPoses=new WorldBodyPoses();const idleSouls:IdleSoul[]=[];const idleSphere=new THREE.Sphere();let attentionTargets=new Map<string,readonly string[]>();
-    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld);
-    const edgeItems=new WorldEdgeItems(apiPath('/v1/edge/items'));scene.add(edgeItems.group);edgeItems.start(abort.signal);  // things lying around (together/1)
+    const contextViews=new WorldContextViews(apiPath,abort.signal,()=>{const state=latestViewerState.current;if(state&&!abort.signal.aborted)context.current.onViewerState?.({...state});},newWorld,place=>initialGate?.snapshot().stage==='ready'?placePreviews.captureLocation(place,sceneKey??''):Promise.resolve(null));  // a moved world's place with no kept picture is drawn here (tools/world-launcher/place-shots.mjs)
+    const edgeItems=new WorldEdgeItems(apiPath('/v1/edge/items'));scene.add(edgeItems.group);if(oldViews())edgeItems.start(abort.signal);  // things lying around (together/1); none on a v2 world without old views
     const early=newWorld?takeEarlyLayer():null;if(early)abort.signal.addEventListener('abort',()=>early.abort.abort());const entityLayer=early?.layer??new WorldEntityLayer(apiPath);entityLayerRef.current=entityLayer;{const q=new URLSearchParams(location.search);entityLayer.scatterPooling=q.get('scatterPools')!=='0';entityLayer.motionInstancing=q.get('motionPools')!=='0';entityLayer.scatterPools.cellSize=Number(q.get('scatterCell'))||(quality.tier==='phone'?192:Infinity);}  // P7b: a phone's layer may have started before this page's code was in (early-layer.ts)
     scene.add(entityLayer.group);entityLayer.cover.bindScene(scene);let entityWorldFramed=false,rideNames:string[]|null=null,rideNamesAt=0,rideCarriers:CarrierPose[]=[],rideCars:string[]=[],rideCarWheels=new Map<string,[number,number]>(),rideWheels=new Map<string,string>(),carrierIds:string[]=[],carrierRecords:object|null=null;
     // E2 #3: shy animals in a god world run from where the Souls' figures are now; ANI: every animal (god worlds and old Eden) gives way to them
@@ -601,6 +615,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const placePreviews=new WorldPlacePreviews(renderer,()=>[geometry.group,...(expansion?[expansion.group]:[]),...(entityLayer.active?[entityLayer.group]:[])],()=>scene,()=>{  // Gene #13: every place shot in the same late-morning, clear, dry light, whatever the live clock and weather
       const at=shotClockAt(light.clock??'2026-06-21T12:00:00',PLACE_SHOT_MINUTES)!,undoLight=light.photo(at),undoAtmosphere=atmosphere.photo(at,light.daylight),night=nightLightStrength();setNightLightStrength(1);houseWindows?.setNight(0);
       return ()=>{undoLight();undoAtmosphere();setNightLightStrength(0,night);houseWindows?.setNight(night);};});  // E2 #7: a god world's landmarks are drawn by its entity layer
+    placePreviews.owner=id=>id.startsWith('context:')&&entityLayer.active?entityLayer.contextObjects(id.slice(8)):[];
+    // ?placeShots=1: tools/world-launcher/place-shots.mjs has this page draw each place of a moved world once, to keep
+    if(new URLSearchParams(location.search).get('placeShots')==='1'){placePreviews.forShots();(window as unknown as {__placeShots?:unknown}).__placeShots={ready:()=>initialGate?.snapshot().stage==='ready',draw:(t:ContextTarget)=>placePreviews.captureLocation(contextLocation(t,'shots'),'shots')};}
     const loader = new GLTFLoader(manager).setDRACOLoader(draco).setMeshoptDecoder(MeshoptDecoder);
     const releaseAssetLoader = setAssetLoader(loader);
     const releaseTexturePreparation = newWorld ? setTextureRenderer(renderer,scene,camera) : () => {};
@@ -610,7 +627,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const bodyModels=new WorldBodyModels(loader,problem);bodyModels.held=peopleLater;
     let capturedPlatforms:readonly PlatformFloor[]|null=null;
     let currentPlatforms:{worldId:string;platforms:PlatformFloor[]}|null=null;
-    void fetch(apiPath('/v1/edge/platforms'),{signal:abort.signal}).then(r=>r.ok?r.json():null).then(meta=>{
+    if(oldViews())void fetch(apiPath('/v1/edge/platforms'),{signal:abort.signal}).then(r=>r.ok?r.json():null).then(meta=>{
       if(!abort.signal.aborted&&meta?.contract==='eden-edge/1'&&meta.active===true&&meta.provenance?.contract==='render-platforms/1'&&typeof meta.worldId==='string')currentPlatforms={worldId:meta.worldId,platforms:parsePlatformFloors(meta.platforms)};
     }).catch(()=>{});
     const kin = new KinScenery(scene, { baseUrl: '/world-assets/littlemartians/characters/', loader, prepareModel: fitTextures });
@@ -683,13 +700,18 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       for(const [index,building] of info.buildings.entries())gate.require('Building '+(index+1)+': '+building.file,async()=>{const assetRoot=await buildingRoot();if(assetRoot)owner.setAssetRoot(assetRoot);const failed=await owner.addBuildings([building],loader,assetBytes);if(failed.length)throw Error('Required building could not be loaded.');});}
     };
     let currentScene:Promise<ReturnType<typeof parseSceneInfo>>|null=null;
-    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(!response.ok)throw Error('Layout unavailable');return parseSceneInfo(await response.json());})();
+    const currentLayout=()=>currentScene??=(async()=>{if(!oldViews())return parseSceneInfo({scene:null,ground:'grass'});const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(response.status===404&&streamBound())return parseSceneInfo({scene:null,ground:'grass'});if(!response.ok)throw Error('Layout unavailable');  // W2: a world made on the new engine has no old layout: its ground and things come from its stream (stream-scene.ts)
+    return parseSceneInfo(await response.json());})();
     const failLayout=(reason:string)=>{initialGate?.cancel();sceneSettled=false;sceneRetryAt=Infinity;renderer.domElement.dataset.sceneBinding='unavailable';sceneryStatus(reason);setInitialProgress({generation:initialGeneration,stage:'failed',required:1,completed:0,failed:['World layout'],bytesLoaded:0,bytesTotal:null});retryInitial.current=()=>{sceneRequest++;sceneKey=null;currentScene=null;sceneRetryAt=0;setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});};};
     const ensureScene=(chunk:Chunk,history:boolean,now:number)=>{
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
       const ref=reference as {contract?:unknown;hash?:unknown;rulesVersion?:unknown}|undefined;
       const mismatch=reference!==undefined&&ref?.rulesVersion!==chunk.take.rulesVersion;
-      const key=reference===undefined?(history?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
+      // a moved world's past (its history export) and a world drawn from its stream (W2) have no old scenery to name: their
+      // past is drawn in the same scenery as their live view (the current layout, or the stream's ground), so a seek never
+      // tears the world down; only an old-engine recording with no reference shows people on plain ground
+      const bare=history&&!v2History()&&!streamBound();
+      const key=reference===undefined?(bare?'history-unbound':'current-unbound'):JSON.stringify([ref?.contract,ref?.hash,ref?.rulesVersion,mismatch]);
       if(key===sceneKey&&(sceneSettled||now<sceneRetryAt))return sceneSettled;
       const request=++sceneRequest;sceneKey=key;sceneRetryAt=Infinity;sceneSettled=false;initialGate?.cancel();setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
       staticBatches.reset();batchGeometry=null;batchRevision=-1;entityBatches.reset();entityBatchRevision=-1;
@@ -698,7 +720,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       clearSocialPaths();
       clearConnectedDressing();
       sceneHistory.cancel();planting?.dispose();planting=null;plantingFailed=false;clearNewcomerMarkers();restMarkers?.dispose();restMarkers=null;publication=null;expansionSceneInfo=null;people?.dispose();people=null;applied=null;floaters.sync(new Map());kin.place([]);standIns.clear();
-      for(const label of labels.values()){labelScene.remove(label.obj);label.obj.element.remove();}labels.clear();
+      for(const label of labels.values()){labelScene.remove(label.obj,label.bubble);label.obj.element.remove();label.bubble.element.remove();}labels.clear();
       clearExpansion();geometry.dispose();geometry=new WorldGeometry(null);scene.add(geometry.group);base=null;nativeBoat=undefined;light.setCommonsReadability(false);
       capturedPlatforms=null;
       platformDraw.set([],0,false);
@@ -706,8 +728,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       renderer.domElement.dataset.sceneHash='';renderer.domElement.dataset.sceneBinding='loading';sceneryStatus('Loading the scenery for this recording.');
       const active=()=>!abort.signal.aborted&&request===sceneRequest;
       if(reference===undefined){
-        const pending=history?Promise.resolve(parseSceneInfo(null)):currentLayout();
-        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(history?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=history?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
+        const pending=bare?Promise.resolve(parseSceneInfo(null)):currentLayout();
+        void pending.then(info=>{if(!active())return;installScene(info);sceneryStatus(bare?'This recording does not identify its scenery; showing people on plain ground.':null);renderer.domElement.dataset.sceneBinding=bare?'unbound-history':'current-unbound';}).catch(()=>{if(active())failLayout('The world layout could not be loaded. Retry to try again.');});
       }else if(mismatch){failLayout('The scenery reference does not match this recording.');}
       else void sceneHistory.resolve(reference).then(result=>{
         if(!active())return;
@@ -749,14 +771,18 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       obj.center.set(0.5, 0);  // C2: the plate hangs below its anchor under the body
       labelScene.add(obj);
       el.style.opacity = '0';
-      l = { obj, head: new THREE.Vector3(), name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
+      // A said line pops up above the head, never in the name tag (which hangs under the body, C2).
+      const bubbleEl = document.createElement('div'); bubbleEl.className = 'world-speech-bubble'; bubbleEl.dataset.soulId = soul.id;
+      const bubble = new CSS2DObject(bubbleEl); bubble.center.set(0.5, 1); labelScene.add(bubble);
+      l = { obj, head: new THREE.Vector3(), bubble, name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
       labels.set(soul.id, l);
       return l;
     };
 
     const initialMotionHistory=new WorldMotionHistory(fetchChunks,abort.signal);
     const motionOwner=()=>JSON.stringify([context.current.sim.conn.welcome?.worldId,context.current.sim.conn.welcome?.epoch]);
-    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [], liveTick: number | null = null;
+    let liveArr: unknown = null, liveKey = '', live: Chunk[] = [];
+    const liveClock = new LiveClock();
     const spot = new THREE.Vector3();
     const gaitContinuity=new RecordedGaitContinuity();
     let applied: Chunk | null = null, records: Record<string, Entity> = {}, frame = 0, last = performance.now(), labelAt = 0, brokenTake: string | null = null, frameGap = false;
@@ -766,7 +792,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (arr !== liveArr || key !== liveKey) { liveArr = arr; liveKey = key; live = validChunks(arr).filter((c) => c.fromTick <= (t?.serverTick ?? Infinity)); } // a restarted server starts its ticks again
       return live;
     };
-    const goLive = () => { past.current = null; liveTick = null; setMode('live'); setNote(null); };
+    const goLive = () => { past.current = null; liveClock.reset(); setMode('live'); setNote(null); };
+    // read-only, for checks and proof: the live tick drawn, its target and the newest chunk's end (live-clock.ts)
+    const liveProbe: { tick: number | null; target: number | null; newest: number | null } = { tick: null, target: null, newest: null };
+    (window as unknown as { __soulsLive?: typeof liveProbe }).__soulsLive = liveProbe;
 
     const pacer = new FramePacer();
     // #2260: where the public replica draws each Soul, place and thing now, so a client rendering on its own machine places a
@@ -794,7 +823,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // lane W1: while a new world's first build runs in slices nothing is drawn: look at the takes 4 times a second, no more
       if(entityLayer.building){const t=performance.now();if(t-buildingFrameAt<250)return;buildingFrameAt=t;}
       if(eyes&&!eyes.wake(performance.now()))return;  // VF1b: a slow frame leaves room for socket messages
-      const now = performance.now(), step = Math.min(0.1, (now - last) / 1000);
+      const now = performance.now(), real = (now - last) / 1000, step = Math.min(0.1, real);
       last = now;
       const rigBudget={remaining:1};  // one shared cap for this animate, including any repeated people updates
       const s = context.current.sim, dt = dtOf(s), liveList = liveChunks();
@@ -802,15 +831,17 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const p = past.current;
       if (p) {
         const end = p.chunks.at(-1)!;
-        if (p.playing) p.tick = Math.min(end.toTick, p.tick + step / dt); // replays run at the world's normal speed
+        // replays run at the world's normal speed, or as many times it as the viewer chose (K3, a moved world); a gap in
+        // what was recorded (a world stopped for a while) is crossed to the next chunk
+        if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
         // A paused recent seek remains history. Playing history catches the actual
         // delayed live moment, not merely the oldest buffered chunk boundary.
         const liveHead = serverNow(s);
         if (p.playing && liveList.length && liveHead !== null &&
-          p.tick >= Math.max(liveList[0].fromTick, liveHead - LIVE_DELAY)) { goLive(); return; }
+          p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
-          void fetchChunks(end.toTick, end.toTick + 60 / dt, 60, abort.signal).then((got) => {
+          void fetchChunks(end.toTick, end.toTick + 60 * playSpeed() / dt, 60 * playSpeed(), abort.signal).then((got) => {
             if (past.current !== p) return;
             const before = p.chunks.at(-1)!.toTick;
             p.chunks = mergeWindow(p.chunks, got, p.tick);
@@ -826,14 +857,14 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         chunks = p.chunks; tick = p.tick;
       } else {
         chunks = liveList;
-        const target = (serverNow(s) ?? chunks.at(-1)?.toTick ?? 0) - LIVE_DELAY;
-        if (liveTick === null || Math.abs(target - liveTick) > 80) liveTick = target;
-        else liveTick += step * tpsOf(s) + (target - liveTick) * Math.min(1, step * 1.5); // run at the clock rate, drift gently toward the server
-        if (chunks.length) liveTick = Math.max(chunks[0].fromTick, Math.min(chunks.at(-1)!.toTick, liveTick));
-        tick = liveTick;
+        const target = (serverNow(s) ?? chunks.at(-1)?.toTick ?? 0) - liveDelayOf(s);
+        // live-clock.ts: by real time, not by frames (a slow frame never leaves it behind); a late chunk or a stalled
+        // frame is caught up at most MAX_RATE fast, never skipped; only far off (a hidden tab) is it one cut
+        tick = liveClock.step(real, target, tpsOf(s), chunks.length ? chunks[0].fromTick : null, chunks.at(-1)?.toTick ?? null);
+        liveProbe.tick = tick; liveProbe.target = target; liveProbe.newest = chunks.at(-1)?.toTick ?? null;
       }
 
-      if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,LIVE_DELAY,motionOwner(),motionOwner);
+      if(initialMotionHistory&&!past.current&&initialMotionHistory.loading)void initialMotionHistory.start(liveList,serverNow(s)??liveList.at(-1)?.toTick??0,liveDelayOf(s),motionOwner(),motionOwner);
       const candidate = initialMotionHistory?.loading&&!past.current ? null : chunkAt(chunks, tick);
       // the people renderer: at once on desktops and old worlds (no frame until it is here), after the arrival on a phone's
       // new world (WorldLightPeople until then); a failed fetch is retried every 5 s
@@ -972,12 +1003,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (entityLayer.active && !expansion) entityLayer.transportPoses(at.entities, souls.map(soul => soul.entityId));
       // E-life B7: a god's balloon flies with its native ride (the recorded carrier entity of the same name)
       rideCarriers=expansion?[{p:balloonRide.basket.p,yaw:balloonRide.basket.yaw}]:[];  // V1: Broadcast frames a rider with its carrier
-      if(entityLayer.active&&!expansion){if(refresh||!rideNames||(!rideNames.length&&performance.now()-rideNamesAt>2000)){rideNames=entityLayer.rideNames();rideNamesAt=performance.now();}/* BALLOON-BODY: an empty list (asked before the world's things arrived) is asked again */for(const n of rideNames){const e=at.entities[n] as {p?:readonly[number,number,number];yaw?:number}|undefined;entityLayer.poseOverride(n,e?.p??null,e?.yaw);if(e?.p)rideCarriers.push({p:e.p,yaw:e.yaw??0});}}
+      if(entityLayer.active&&!expansion){if(refresh||!rideNames||(!rideNames.length&&performance.now()-rideNamesAt>2000)){rideNames=entityLayer.rideNames();rideNamesAt=performance.now();}/* BALLOON-BODY: an empty list (asked before the world's things arrived) is asked again */for(const n of rideNames){const e=(at.entities[n]??at.entities[entityLayer.idNamed(n)??''])/* K4: a new-engine world's balloon is recorded under its thing's id */ as {p?:readonly[number,number,number];yaw?:number}|undefined;entityLayer.poseOverride(n,e?.p??null,e?.yaw);if(e?.p)rideCarriers.push({p:e.p,yaw:e.yaw??0});}}
       // D1: every native carrier is a ride (a god's ferris wheel or carousel, Eden's punt), not only balloons: framed with its
       // rider, and a god attraction's carrier gets a car drawn at its twin, unless the thing has its own cars (#2198, below)
       if(refresh){if(records!==carrierRecords){carrierRecords=records;carrierIds=recordedCarriers(records);}/* #1574: records is a fresh object per take, never edited in place */rideCars=entityLayer.active&&!expansion?entityLayer.rideCars():[];rideCarWheels=entityLayer.active&&!expansion?entityLayer.rideCarWheels():new Map();rideWheels=entityLayer.active&&!expansion?entityLayer.rideWheels():new Map();}
       {const framed=new Set<string>([...(expansion?['eden-balloon']:[]),...(entityLayer.active&&!expansion?rideNames??[]:[])]),more=carrierPoses([...new Set([...carrierIds,...rideCars])],at.entities as Record<string,{p?:readonly number[];yaw?:number}|undefined>,framed);
-       rideCarriers.push(...more);const cars=new Set(rideCars);rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
+       rideCarriers.push(...more);const cars=new Set(rideCars),ownCars=new Set(rideWheels.values());for(const id of carrierIds)if(records[id]?.def===CABIN&&!ownCars.has(id.split('#')[0]))cars.add(id);/* N14: a seat that moves with its cabin gets a car, unless its ride has its own (a big wheel's gondolas) */rideCarsDrawn.update(more.filter(c=>cars.has(c.id)).map(c=>({...c,wheel:rideCarWheels.get(c.id)})));  // #1976: a wheel's car is drawn fixed to its rim
        // #2198: a big wheel's ride goes round in one of its own gondolas: the wheel turns that gondola to it once it leaves home
        for(const [cid,thing] of rideWheels){const c=more.find(x=>x.id===cid),home=(records[cid] as {carrier?:{home?:readonly number[]}}|undefined)?.carrier?.home;entityLayer.wheelRide(thing,c?{p:c.p,aloft:!!home&&Math.hypot(c.p[0]-home[0],c.p[1]-home[1],c.p[2]-home[2])>0.05}:null);}}
       const cards = refresh ? cardsAt(s.plays, at.tick) : null;
@@ -997,9 +1028,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         alive.add(soul.id);
         const drawnBody=recordedBody(rec?.body,at.entities[soul.entityId]?.state??{});
         const lift = drawnBody?.family === 'floater' ? (() => { const b = floaterBody(drawnBody); return b.hoverHeight + b.radius + 0.15; })() : 2.05;
-        if(refresh&&!eyes&&!soul.profilePhoto)portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
+        if((refresh||!soulAvatars.images.has(soul.id))&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
+        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : 1.9), pos[2]); l.bubble.visible = true;   // its tail just over the head
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
         l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
         l.obj.visible = true;
@@ -1037,11 +1069,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         cardSpeakers=new Set(latest.keys());
         for(const [id,l] of labels){
           // DLG2: in dock mode the dialogue dock carries the words and who can hear; the tag only gets a small speaking dot.
-          paintSpeakingDot(l.obj.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head));
+          const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');
           const chip=l.obj.element.querySelector('[data-channel-chip]') as HTMLElement|null;if(!chip)continue;const sp=latest.get(id);
           if(!sp||context.current.publishSpeechAnchors){chip.style.display='none';continue;}const c=channelChip(sp,nameOf);chip.textContent=c.text;chip.style.color=c.colour;chip.style.display='';}}
       speechLayer.update(speeches,Date.now(),soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,e=id?at.entities[id]:null;if(!id||!e)return null;const body=recordedBody(records[id]?.body,e.state),b=body?.family==='floater'?floaterBody(body):null;return speechHead.set(e.p[0],e.p[1]+(b?b.hoverHeight+b.radius+.05:1.95),e.p[2]).clone();});
-      for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj); l.obj.element.remove(); labels.delete(id); } }
+      for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
       if (!focus && thingId) {
         const q = thingId.startsWith('kin:') ? kin.view.object(thingId)?.position.toArray() : at.entities[thingId]?.p;
         if (q) focus = spot.set(q[0], q[1], q[2]);
@@ -1120,7 +1152,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // showed hollow ground)
       // P7f: nor before it knows whether Souls live here (a world without them stays on its arrival view; the welcome decides)
       if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !(arrivalPending && !s.conn.replica.souls.size)) {
-        const shot = broadcast.sample(at.entities, records, base, at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
+        const shot = broadcast.sample(at.entities, records, base ?? (entityLayer.active ? openGroundScene(entityLayer.groundExtent()) : null), at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
         if (shot?.pose) {
           camera.position.fromArray(shot.pose.position);
           controls.target.fromArray(shot.pose.target);
@@ -1129,6 +1161,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           renderer.domElement.dataset.cameraShot = shot.shot ?? '';
         }
       }
+      if(shotTrack&&shotPoseNow){const pose=shotPoseNow(shotTrack,past.current?.tick??null,now);if(pose){camera.position.fromArray(pose.position);controls.target.fromArray(pose.target);logicalFov=pose.fov;camera.up.set(0,1,0);camera.lookAt(controls.target);renderer.domElement.dataset.cameraShot='track:'+shotTrack.move;}}  // #1963: a planned camera
       refreshCameraGround();
       if(cameraGround.apply(camera,scene)>0&&!(viewing==='manual'&&context.current.manualNavigation==='free'))camera.lookAt(controls.target);  // never underground (Gene)
       if(context.current.cameraMode==='manual'&&expansion?.group.visible)constrainOfficeGuardCamera(camera,controls.target,officeGuardFrom,expansion.officeGuards);
@@ -1239,7 +1272,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
           cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.held,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
-          unavailableReason: context.current.graphicsUnavailable ?? sceneReason ?? (coveredNote || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
+          unavailableReason: context.current.graphicsUnavailable ?? context.current.sim.streamNotice ?? sceneReason ?? (coveredNote || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
           speechAnchors,
         }));
       }
@@ -1280,6 +1313,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; return; }
       down = null;
       if (entityLayer.active && godFeature('flags') && (e.altKey || flagModeRef.current)) return;  // a flag drop (onFlagClick), not a selection: no place card over the god panel
+      if (buildTakesClicks()) return;  // 0.133 item 6: the creator panel's Build places or selects (god-ui/BuildBar.tsx), not a card
       const target=hover.pick(e.clientX,e.clientY);
       if(touch&&target?.kind==='soul'&&controlsApi.current?.flyToSoul(target.id,{chip:true}))return;  // #892: one tap follows (the card's flight)
       if(touch&&(!target||target.kind==='place')&&(context.current.cameraMode==='follow'||chipFlight())){setPlaceCard(null);soulFlight=null;rts.flyToGround(e);return;}  // #892: a tap on the ground frees the camera there
@@ -1329,7 +1363,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       navigation?.dispose();
       controls.dispose();
       controlsApi.current = null;
-      for (const l of labels.values()) { labelScene.remove(l.obj); l.obj.element.remove(); }
+      for (const l of labels.values()) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); }
       labels.clear();
       people?.dispose();
       if(entityWorldFramed)entityView.current={eye:camera.position.toArray(),target:controls.target.toArray(),pending:!!arrivalPending,broadcast:context.current.cameraMode==='broadcast'};  // entity worlds only: the camera survives the scene re-mount
@@ -1378,7 +1412,8 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     if (at === null) { setDraft(null); return; }
     // An explicit seek chooses a recorded moment even inside the live buffer.
     // The separate live command resumes the delayed live view.
-    const tick = Math.floor(Math.max(at - HOUR_SECONDS / dts, Math.min(at, wanted), 0));
+    // X3: a moved world's history keeps more than the last hour, so a moment link can name any time in it.
+    const tick = seekTick(wanted, at, HOUR_SECONDS / dts, !!v2History());
     // A newer buffered seek also supersedes an older network request.
     seeking.current?.abort(); seeking.current = null;
     const cur = past.current;

@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEFAULT_PKG, call, request } from './client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { decode } from '../brief/copy.mjs';
+import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (name) => process.env[name.toUpperCase()] ?? join(v2, 'target/debug', name);
@@ -248,6 +249,8 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       assert.equal((await status()).hearing, principal(n));
       client.stage = 'held-pre-birth-sync';
       proxy.hold = true;
+      // A copy confirmed within RECENT_MS answers a look at once; past it, the look asks the world, and is held.
+      await sleep(2100);
       const oldLook = request(rt.socket, { op: 'look' });
       await until(() => proxy.held);
       const scopesBefore = proxy.scopeAnswers;
@@ -312,7 +315,6 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
     throw error;
   } finally {
     for (const { rt, proxy } of clients) { await request(rt.socket, { op: 'stop' }).catch(() => {}); proxy.close(); }
-    await Promise.all(procs.map((p) => new Promise((ok) => { if (p.exitCode !== null) return ok(); p.once('exit', ok); p.kill(); })));
-    rmSync(dir, { recursive: true, force: true });
+    await stopThenRemove(procs, dir);
   }
 });

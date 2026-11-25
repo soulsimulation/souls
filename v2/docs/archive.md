@@ -62,6 +62,13 @@ objects into the existing world `history/` export, using atomic writes and refus
 pointer names `history/`, resolved by the existing configured world history URL. Private base, checkpoint, source,
 range, head and input objects remain private. This export does not add a proxy route or a storage lifecycle.
 
+A file system cannot hold a day's event index at `events/<day>` and its split hours at `events/<day>/<hour>`. Once a
+day has a split hour, its index sits in the day's directory as `events/<day>/day`; an index placed earlier as a file
+moves there. The viewers' origin serves it at the day's URL, so readers fetch the same keys. A copy the mirror cannot
+place is skipped: the store holds it, `health.json` counts it (`history_export`: `faults`, `last`), and each key is
+logged once. Bytes that fail their check (header, index, bundle, event or count) are still refused, so a corrupt
+archive stops the start.
+
 ## The objects
 
 All keys are under the world's prefix. Every value is T0's deterministic CBOR ([encoding.md](encoding.md)); a key or

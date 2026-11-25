@@ -17,6 +17,9 @@
 //! #3365), and `worldd schemas` prints `reads <hash>` and `writes <hash>` lines. The served log is `<state>/log`; the
 //! world's socket is the placed world's `<root>/../run/<world>.sock` (`place-world.sh`), else `<state>/gateway.sock`.
 //! A rehearsal runs with `WORLDD_REHEARSAL=1` in its environment and serves `<scratch>/gateway.sock` (O18b, #3498).
+//! Its environment is otherwise cleared to a few process basics ([`REHEARSAL_ENV`]), so whatever build it runs never
+//! sees the shared store or the backup bucket, claims nothing and ships nothing: the live world's claim, epoch and
+//! archive stay as they were.
 // Deploying is operations, not the engine: its windows and timelines are wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
@@ -64,8 +67,33 @@ pub fn served_socket(root: &Path, world: &World) -> PathBuf {
     }
 }
 
+/// The only settings of the deploy's environment a rehearsal's build is given (with `WORLDD_REHEARSAL=1`): the
+/// process basics `worldd serve` needs on any machine. Everything else is cleared, so the build never sees the shared
+/// store a served world claims and ships its history to (`$WORLDD_STORE`, the directory's `$DIRECTORY_STORE_URL` and
+/// their keys), the backup bucket, the live socket, the live pin (`$WORLDD_BUILD`) or the service manager
+/// (`$NOTIFY_SOCKET`). With the store, a build serving the scratch copy would take the live world's claim at a new
+/// epoch (`worldd::shipping::take_over`) and write the live archive. Cleared by the deploy, not left to the build, so a
+/// build that predates this rule (a rollback's) and a setting added later are kept out too.
+pub const REHEARSAL_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+];
+
 /// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
-const FOLDER: [&str; 4] = ["world.json", "facts.json", "moves.json", "entries"];
+const FOLDER: [&str; 6] = [
+    "world.json",
+    "facts.json",
+    "header",
+    "header.kinds",
+    "moves.json",
+    "entries",
+];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     if from.is_dir() {
@@ -525,12 +553,37 @@ fn connect(socket: &Path, within: Duration) -> Option<UnixStream> {
     }
 }
 
-/// How long a world has to serve when its limits name no bound: worldd@.service's `TimeoutStartSec`.
-pub const START_WITHIN: Duration = Duration::from_secs(30);
+/// [`connect`], ending early with `exited`'s fault (the world's process ended), asked at most each half second.
+fn connect_or_exit(
+    socket: &Path,
+    within: Duration,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<UnixStream, String> {
+    let until = Instant::now() + within;
+    loop {
+        if let Some(s) = connect(socket, Duration::from_millis(500).min(within)) {
+            return Ok(s);
+        }
+        if let Some(fault) = exited() {
+            return Err(fault);
+        }
+        if Instant::now() >= until {
+            return Err(format!(
+                "canary.not-serving: no socket within {} ms",
+                within.as_millis()
+            ));
+        }
+    }
+}
+
+/// How long a world has to serve when its limits name no bound (R17, 0.133): a start whose store is slow (one write in
+/// twenty stalls 30 to 60 s on production's) waits for it with back-off and must not be judged on 30 s. A real fault
+/// still fails at once: the process ending ([`Unit::exited`], `canary.exited`) or a refused probe.
+pub const START_WITHIN: Duration = Duration::from_secs(120);
 
 /// The start bound in a world's limits drop-in (`worldd@<world>.service.d/limits.conf`, written from
 /// `world-limits.json` by `v2/tools/ops/world-limits.mjs`): its `Environment=WORLD_START_WITHIN_S=<s>` line, else
-/// [`START_WITHIN`]. A world that loads longer than 30 s (Eden) is given its own bound; one that hangs still fails.
+/// [`START_WITHIN`]. A world that loads longer (Eden) is given its own bound; one that hangs still fails.
 pub fn start_within(limits: Option<&str>) -> Duration {
     limits
         .into_iter()
@@ -591,6 +644,24 @@ fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result
     }
 }
 
+/// The first probe of a world that has just started (or of a rehearsal's copy fed nothing): a world listens once its
+/// clock's first tick is done and then catches up, tick by tick, the time since its log's last record (world time never
+/// stops). A quiet world's catch-up is that whole quiet stretch: 1dad on 0.136.0's move, 144k ticks after two quiet
+/// hours, longer than a tick's 2 s (`canary.unanswered: operator act`); Eden's rehearsal copy over 400k. So the probe has
+/// the start bound, and one whose intent (5 s, real time) expired in the catch-up (`intent.expired`) is sent again, a new
+/// intent, until the world answers one or the bound ends. Any other refusal, or no answer, fails as before, and only a
+/// receipt passes.
+fn probe_after_start(s: &mut UnixStream, probe: &mut Probe, c: &Canary) -> Result<(), String> {
+    let until = Instant::now() + c.start_within;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        match probe_once(s, probe, left.max(c.answer_within)) {
+            Err(e) if e == "canary.refused: intent.expired" && !left.is_zero() => {}
+            r => return r,
+        }
+    }
+}
+
 /// Watches the world behind `socket` for the canary's window; `Ok` when it stayed healthy, else the first fault.
 /// With `until_healthy`, ends `Ok` at the first receipt instead (a rolled-back world serving again).
 pub fn watch(
@@ -599,11 +670,23 @@ pub fn watch(
     probe: &mut Probe,
     until_healthy: bool,
 ) -> Result<(), String> {
+    watch_unit(socket, c, probe, until_healthy, &mut || None)
+}
+
+/// [`watch`], failing at once with `exited`'s fault while it waits for the socket: a world whose process ended is a
+/// real fault, never a slow start (R17).
+pub fn watch_unit(
+    socket: &Path,
+    c: &Canary,
+    probe: &mut Probe,
+    until_healthy: bool,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<(), String> {
     // A new watch resolves its interrupted predecessor before it can birth anything else. Failure preserves the
     // exact owned identity for the rollback's watch; neither an unknown body nor a lost ACK discards the receipt.
-    cleanup_operator(socket, c, probe)?;
-    let result = watch_inner(socket, c, probe, until_healthy);
-    let cleanup = cleanup_operator(socket, c, probe);
+    cleanup_operator(socket, c, probe, exited)?;
+    let result = watch_inner(socket, c, probe, until_healthy, exited);
+    let cleanup = cleanup_operator(socket, c, probe, exited);
     match (result, cleanup) {
         (Ok(()), r) => r,
         (Err(e), Ok(())) => Err(e),
@@ -611,15 +694,21 @@ pub fn watch(
     }
 }
 
-fn cleanup_operator(socket: &Path, c: &Canary, probe: &mut Probe) -> Result<(), String> {
+fn cleanup_operator(
+    socket: &Path,
+    c: &Canary,
+    probe: &mut Probe,
+    exited: &mut dyn FnMut() -> Option<String>,
+) -> Result<(), String> {
     let Probe::Operator(p) = probe else {
         return Ok(());
     };
     if !p.pending {
         return Ok(());
     }
-    let mut s = connect(socket, c.start_within)
-        .ok_or("canary.probe-pending: retirement awaits the world serving again")?;
+    let mut s = connect_or_exit(socket, c.start_within, exited).map_err(|e| {
+        format!("canary.probe-pending: retirement awaits the world serving again ({e})")
+    })?;
     p.retire(&mut s, c.answer_within)
         .map_err(|e| format!("canary.probe-pending: {e}"))
 }
@@ -629,25 +718,28 @@ fn watch_inner(
     c: &Canary,
     probe: &mut Probe,
     until_healthy: bool,
+    exited: &mut dyn FnMut() -> Option<String>,
 ) -> Result<(), String> {
     let end = Instant::now() + c.window;
     let mut link: Option<UnixStream> = None;
+    // The first probe after each connect meets the start's catch-up ([`probe_after_start`]); later ones a tick's bound.
+    let mut started = false;
     loop {
         let s = match link.as_mut() {
             Some(s) => s,
-            None => match connect(socket, c.start_within) {
-                Some(s) => link.insert(s),
-                None => {
-                    return Err(format!(
-                        "canary.not-serving: no socket within {} ms",
-                        c.start_within.as_millis()
-                    ));
-                }
-            },
+            None => {
+                started = false;
+                link.insert(connect_or_exit(socket, c.start_within, exited)?)
+            }
         };
-        match probe_once(s, probe, c.answer_within) {
+        let probed = if started {
+            probe_once(s, probe, c.answer_within)
+        } else {
+            probe_after_start(s, probe, c)
+        };
+        match probed {
             Ok(()) if until_healthy => return Ok(()),
-            Ok(()) => {}
+            Ok(()) => started = true,
             // A world that died after it served is reached again, within the start limit, or is not serving.
             Err(e) if e.starts_with("canary.not-serving") && Instant::now() < end => {
                 link = None;
@@ -678,6 +770,9 @@ pub struct Rehearsal {
     pub served_len: usize,
     pub served_sha: String,
     pub served_kept: bool,
+    /// An earlier rehearsal of this build left its scratch probe receipt and its copy is no longer served: the receipt
+    /// was dropped with the copy (`rehearsal.probe-dropped`).
+    pub dropped_probe: bool,
 }
 
 struct Killed(Child);
@@ -733,9 +828,19 @@ pub fn rehearse(
     }
     let total: usize = fed.iter().map(Vec::len).sum();
     let receipt = scratch.join("operator.probe");
+    let mut dropped_probe = false;
     if matches!(probe, Probe::Operator(_)) && receipt.exists() {
+        // Its lock first: a rehearsal of this build still running owns it (`canary.probe-busy`).
         let mut previous = Probe::operator(&receipt)?;
-        cleanup_operator(&socket_path(scratch), c, &mut previous)?;
+        // A scratch probe's body lives only in the scratch copy, emptied below. A copy still served (an interrupted
+        // deploy's build, left running) retires it as any watch does; one no longer served never can, and waiting on
+        // its socket refused every later rehearsal of this build (`canary.probe-pending`). Its receipt goes with the
+        // copy, by name in the deploy's record.
+        if UnixStream::connect(socket_path(scratch)).is_ok() {
+            cleanup_operator(&socket_path(scratch), c, &mut previous, &mut || None)?;
+        } else {
+            dropped_probe = true;
+        }
     }
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
@@ -758,14 +863,21 @@ pub fn rehearse(
 
     let err = std::fs::File::create(scratch.join("worldd.err"))
         .map_err(|e| format!("rehearsal.scratch: {e}"))?;
-    let child = Command::new(build)
+    let mut serve = Command::new(build);
+    // Only the settings in [`REHEARSAL_ENV`]: never the live store, backup, socket, pin or service manager.
+    serve.env_clear();
+    for k in REHEARSAL_ENV {
+        if let Some(v) = std::env::var_os(k) {
+            serve.env(k, v);
+        }
+    }
+    let child = serve
         .arg("serve")
         .arg("--dir")
         .arg(scratch)
         .arg("--socket")
         .arg(socket_path(scratch))
         .env("WORLDD_REHEARSAL", "1")
-        .env_remove("WORLDD_SOCKET")
         .stdout(Stdio::null())
         // What the build says goes beside its scratch copy, out of the deploy's timeline.
         .stderr(err)
@@ -775,13 +887,26 @@ pub fn rehearse(
     let mut s = connect(&socket_path(scratch), c.start_within)
         .ok_or("rehearsal.no-start: the build did not serve the scratch copy")?;
     let (mut ended, mut receipts, mut refused) = (0, 0, std::collections::BTreeMap::new());
-    for tick in &fed {
+    for (n, tick) in fed.iter().enumerate() {
         for b in tick {
             if !send(&mut s, b) {
                 return Err("rehearsal.no-start: the socket closed".into());
             }
         }
-        let (goal, until) = (ended + tick.len(), Instant::now() + c.answer_within * 4);
+        // The copy answers nothing until its clock has caught up, back to back, from the tick its copied log ends at
+        // to now: on a quiet world the window's records can span hours, so the first answers have the world's start
+        // bound, not a tick's. Answers that come late count with a later tick's; the last tick waits for them all.
+        let wait = if n == 0 {
+            c.start_within
+        } else {
+            c.answer_within * 4
+        };
+        let goal = if n + 1 == fed.len() {
+            total
+        } else {
+            ended + tick.len()
+        };
+        let until = Instant::now() + wait;
         while ended < goal {
             let Some(frame) = read_frame(&mut s, until.saturating_duration_since(Instant::now()))
             else {
@@ -813,8 +938,14 @@ pub fn rehearse(
         None
     };
     let checking = own.as_mut().unwrap_or(probe);
-    let checked = probe_once(&mut s, checking, c.answer_within);
-    let cleaned = cleanup_operator(&socket_path(scratch), c, checking);
+    // With no recorded intent fed (a quiet window, as Eden's on 0.136), the probe is the copy's first ask and meets
+    // its catch-up ([`probe_after_start`]). After a fed intent's answer it has a tick's.
+    let checked = if fed.is_empty() {
+        probe_after_start(&mut s, checking, c)
+    } else {
+        probe_once(&mut s, checking, c.answer_within)
+    };
+    let cleaned = cleanup_operator(&socket_path(scratch), c, checking, &mut || None);
     match (checked, cleaned) {
         (Ok(()), r) => r,
         (Err(e), Ok(())) => Err(e),
@@ -834,6 +965,7 @@ pub fn rehearse(
         served_len,
         served_sha,
         served_kept,
+        dropped_probe,
     })
 }
 
@@ -881,22 +1013,69 @@ pub fn rollback_check(old: &Schemas, new: &Schemas, new_wrote: bool) -> Result<(
 /// How a world's process is restarted.
 pub trait Unit {
     fn restart(&mut self) -> Result<(), String>;
+
+    /// `canary.exited` with what it saw once the world's process has ended since [`Unit::restart`], so the canary
+    /// waiting for a slow start fails at once on an exit (R17); `None` while it runs, or where it cannot tell.
+    fn exited(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// `worldd@<world>.service` under systemd (O1). `--no-block`: a build that never says READY must not hold the deploy.
-pub struct Systemd(pub String);
+/// The second field is the lowest `NRestarts` seen since the restart ([`Unit::exited`]).
+pub struct Systemd(pub String, pub Option<u64>);
+
+impl Systemd {
+    pub fn new(world: String) -> Systemd {
+        Systemd(world, None)
+    }
+
+    fn unit(&self) -> String {
+        format!("worldd@{}.service", self.0)
+    }
+
+    /// systemd's count of the unit's automatic restarts (`Restart=always`): one more each time its process ends.
+    fn restarts(&self) -> Option<u64> {
+        let out = Command::new("systemctl")
+            .args(["show", "--property=NRestarts", "--value", &self.unit()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
 
 impl Unit for Systemd {
     fn restart(&mut self) -> Result<(), String> {
-        let unit = format!("worldd@{}.service", self.0);
+        let unit = self.unit();
         let st = Command::new("systemctl")
             .args(["restart", "--no-block", &unit])
             .status()
             .map_err(|e| format!("restart: {e}"))?;
+        self.1 = self.restarts();
         st.success()
             .then_some(())
             .ok_or_else(|| format!("restart: systemctl restart {unit}: {st}"))
     }
+
+    fn exited(&mut self) -> Option<String> {
+        let now = self.restarts()?;
+        let unit = self.unit();
+        exits_since(&mut self.1, now, &unit)
+    }
+}
+
+/// [`Systemd::exited`]'s rule on a reading `now` of `NRestarts`: the lowest count seen (`low`) is the start's, since a
+/// manual restart may reset the count after it was first read; a count above it means the process ended.
+fn exits_since(low: &mut Option<u64>, now: u64, unit: &str) -> Option<String> {
+    let least = *low.get_or_insert(now);
+    if now > least {
+        return Some(format!(
+            "canary.exited: {unit} ended while starting ({} automatic restarts since the deploy's)",
+            now - least
+        ));
+    }
+    *low = Some(least.min(now));
+    None
 }
 
 /// A deploy's timeline: milliseconds from its start, and what happened.
@@ -939,6 +1118,21 @@ impl Deploy<'_> {
         build_path(self.root, build)
     }
 
+    /// The rehearsal alone (`deploy --rehearse-only`): `new` on a scratch copy of the world, as [`Deploy::run`]
+    /// begins. It reads neither the store nor the pin, restarts nothing and writes only under `rehearsals/`.
+    pub fn rehearse(&self, new: &[u8], probe: &mut Probe) -> Result<Rehearsal, String> {
+        // Short, so its socket's path fits (104 bytes on macOS): one rehearsal of a build at a time on a machine.
+        let scratch = self.root.join("rehearsals").join(&to_hex(new)[..16]);
+        rehearse(
+            &self.path(new),
+            &state_path(self.root, &self.world),
+            &scratch,
+            self.window,
+            &self.canary,
+            probe,
+        )
+    }
+
     /// Rehearses `new`, pins it, restarts the world and watches it; rolls back to the build it replaced on a fault.
     pub fn run(
         &self,
@@ -954,22 +1148,19 @@ impl Deploy<'_> {
             Ok((b, _)) => b,
             Err(e) => return (Ended::NotDeployed { why: e }, tl, None),
         };
-        // Short, so its socket's path fits (104 bytes on macOS): one rehearsal of a build at a time on a machine.
-        let scratch = self.root.join("rehearsals").join(&to_hex(new)[..16]);
-        let r = match rehearse(
-            &self.path(new),
-            &state,
-            &scratch,
-            self.window,
-            &self.canary,
-            probe,
-        ) {
+        let r = match self.rehearse(new, probe) {
             Ok(r) => r,
             Err(why) => {
                 note(format!("rehearsal failed: {why}"));
                 return (Ended::NotDeployed { why }, tl, None);
             }
         };
+        if r.dropped_probe {
+            note(
+                "rehearsal.probe-dropped: a probe receipt of an earlier rehearsal no longer served"
+                    .into(),
+            );
+        }
         note(format!(
             "rehearsed on a scratch copy: {} records copied, {} recorded intents fed, {} named ends",
             r.copied, r.fed, r.ended
@@ -984,7 +1175,7 @@ impl Deploy<'_> {
         }
         note("restarted: the canary watch begins".into());
         let socket = served_socket(self.root, &self.world);
-        let fault = match watch(&socket, &self.canary, probe, false) {
+        let fault = match watch_unit(&socket, &self.canary, probe, false, &mut || unit.exited()) {
             Ok(()) => {
                 note(format!(
                     "healthy for {} ms: kept",
@@ -1055,13 +1246,14 @@ mod tests {
     }
 
     #[test]
-    fn a2_the_start_bound_is_the_worlds_own_else_the_units_30_s() {
+    fn a2_the_start_bound_is_the_worlds_own_else_120_s() {
         // What world-limits.mjs writes for Eden (world-limits.test.mjs checks the same text).
         let eden = "# Written by world-limits.mjs from world-limits.json (world eden); edit that file, not this one.\n\
                     [Service]\nMemoryMax=8G\nEnvironment=WORLD_START_WITHIN_S=600\n";
         assert_eq!(start_within(Some(eden)), Duration::from_secs(600));
         assert_eq!(start_within(None), START_WITHIN);
-        assert_eq!(START_WITHIN, Duration::from_secs(30));
+        // R17: a slow store's start, not the unit's 30 s.
+        assert_eq!(START_WITHIN, Duration::from_secs(120));
         assert_eq!(
             start_within(Some("[Service]\nMemoryMax=8G\n")),
             START_WITHIN
@@ -1071,6 +1263,349 @@ mod tests {
             let t = format!("[Service]\nEnvironment=WORLD_START_WITHIN_S={bad}\n");
             assert_eq!(start_within(Some(&t)), START_WITHIN, "{bad}");
         }
+    }
+
+    /// R17: `NRestarts` read after the deploy's restart is the start's count; one more is an exit. A count that drops
+    /// (systemd reset it at the manual restart, after it was first read) becomes the start's, and an exit after it still
+    /// shows. No reading at all is no answer.
+    #[test]
+    fn r17_an_exit_is_a_restart_count_above_the_lowest_seen() {
+        let u = "worldd@w.service";
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 5, u), None);
+        let e = exits_since(&mut low, 6, u).expect("an exit");
+        assert!(
+            e.starts_with("canary.exited: worldd@w.service ended"),
+            "{e}"
+        );
+        assert!(e.contains("(1 automatic restarts"), "{e}");
+        // Reset after the first reading: 0 is the start's, 0 again is no exit, 1 is one.
+        let mut low = Some(5);
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert_eq!(low, Some(0));
+        assert_eq!(exits_since(&mut low, 0, u), None);
+        assert!(exits_since(&mut low, 1, u).is_some());
+        // No reading at the restart: the first one is the start's.
+        let mut low = None;
+        assert_eq!(exits_since(&mut low, 3, u), None);
+        assert!(exits_since(&mut low, 4, u).is_some());
+    }
+
+    /// R17: the canary's wait for a slow start ends at once when the world's process ends, with that fault, and
+    /// otherwise reaches a world that serves late or fails at its bound.
+    #[test]
+    fn r17_the_start_wait_fails_at_once_on_an_exit_and_waits_out_a_slow_start() {
+        let dir = std::env::temp_dir().join(format!("r17-wait-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("w.sock");
+        let _ = std::fs::remove_file(&sock);
+        // An exit 1 s in: the fault within about half a second of it, far under the 120 s bound.
+        let t0 = Instant::now();
+        let mut exited = || {
+            (t0.elapsed() >= Duration::from_secs(1))
+                .then(|| "canary.exited: worldd@w ended".to_owned())
+        };
+        let e = connect_or_exit(&sock, START_WITHIN, &mut exited).unwrap_err();
+        assert!(e.starts_with("canary.exited"), "{e}");
+        assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+        // No exit, a socket 1.5 s in: reached.
+        let late = sock.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            std::os::unix::net::UnixListener::bind(&late).unwrap()
+        });
+        assert!(connect_or_exit(&sock, Duration::from_secs(5), &mut || None).is_ok());
+        drop(t.join().unwrap());
+        std::fs::remove_file(&sock).unwrap();
+        // No exit, no socket: not serving at the bound.
+        let e = connect_or_exit(&sock, Duration::from_millis(800), &mut || None).unwrap_err();
+        assert!(
+            e.starts_with("canary.not-serving: no socket within 800 ms"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The fake build of the catch-up test: this test binary, run as that test's child.
+    const CHILD: &str = "SOULS_REHEARSAL_CATCH_UP_CHILD";
+    const NAME: &str = "deploy::tests::a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused";
+
+    /// 0.134.0: a quiet world's copy caught its clock up for longer than a tick's wait before it answered the first
+    /// fed intent; every later answer then counted for the tick after it and the last was never waited for, so a
+    /// build that ended all 192 was refused `rehearsal.unanswered: 1 of 192`. The first answers have the start bound,
+    /// the last tick waits for every answer, and a build that answers nothing is still refused.
+    #[test]
+    fn a_copy_that_answers_only_after_catching_up_passes_and_a_silent_one_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(sock) = std::env::var_os(CHILD) {
+            // The fake build: serves the socket, answers nothing for `delay` (catching up), then ends each intent.
+            let delay = std::env::var("SOULS_REHEARSAL_DELAY_MS").unwrap();
+            // `<ms>x`: the first ask came while the copy caught up, so it expired before it was taken (0.136's Eden).
+            let (delay, mut expire) = match delay.strip_suffix('x') {
+                Some(d) => (d.to_owned(), true),
+                None => (delay, false),
+            };
+            let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
+            let (mut s, _) = listener.accept().unwrap();
+            let Ok(ms) = delay.parse::<u64>() else {
+                loop {
+                    std::thread::park();
+                }
+            };
+            std::thread::sleep(Duration::from_millis(ms));
+            while let Ok(frame) = read_or_closed(&mut s, Duration::from_secs(30)) {
+                let Value::Map(m) = decode(&frame).unwrap().value else {
+                    panic!("a map")
+                };
+                let answer = match m.get(&wire::ASK) {
+                    Some(n) if std::mem::take(&mut expire) => Value::Map(BTreeMap::from([
+                        (wire::ASK, n.clone()),
+                        (
+                            wire::REFUSED,
+                            Value::Text(Name::new("intent.expired").unwrap()),
+                        ),
+                    ])),
+                    Some(n) => Value::Map(BTreeMap::from([
+                        (1, Value::Uint(1)),
+                        (wire::ASK, n.clone()),
+                        (wire::IDS, Value::Array(vec![Value::Bytes(vec![1])])),
+                    ])),
+                    None => Value::Map(BTreeMap::from([(
+                        2,
+                        Value::Map(BTreeMap::from([
+                            (2, m[&2].clone()),
+                            (3, Value::Uint(2)),
+                            (4, Value::Text(Name::new("intent.expired").unwrap())),
+                        ])),
+                    )])),
+                };
+                assert!(send(&mut s, &encode(&answer).unwrap()));
+            }
+            std::process::exit(0);
+        }
+        let dir = std::env::temp_dir().join(format!("catch-up-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = dir.join("w");
+        std::fs::create_dir_all(&state).unwrap();
+        // The import's part, then three ticks that each answered one intent (its sequence is all the fake reads).
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&state)).unwrap(), 1).unwrap();
+        log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+            .unwrap();
+        for seq in 1..=3 {
+            let intent = Value::Map(BTreeMap::from([(2, Value::Uint(seq))]));
+            let row = Value::Map(BTreeMap::from([(5, intent)]));
+            let part = Value::Map(BTreeMap::from([(ANSWERED, Value::Array(vec![row]))]));
+            log.append(encode(&part).unwrap()).unwrap();
+        }
+        log.wait_durable(4).unwrap();
+        drop(log.close());
+        let exe = std::env::current_exe().unwrap();
+        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+        // A tick's wait is 4 × 200 ms; the copy answers 1.5 s in, well within its 5 s start bound.
+        let c = Canary {
+            window: Duration::from_secs(1),
+            start_within: Duration::from_secs(5),
+            answer_within: Duration::from_millis(200),
+            every: Duration::from_millis(100),
+        };
+        let rehearse_with = |state: &Path, delay: &str| {
+            // The rehearsal clears the build's environment, so the script names what the fake reads.
+            let build = dir.join(format!("build-{delay}"));
+            std::fs::write(
+                &build,
+                format!(
+                    "#!/bin/sh\nexport {CHILD}=\"$5\" SOULS_REHEARSAL_DELAY_MS={delay}\n\
+                     exec {quoted} --exact {NAME} --nocapture\n"
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let mut probe = Probe::Ask(0);
+            rehearse(&build, state, &dir.join("r"), 3, &c, &mut probe)
+        };
+        let r = rehearse_with(&state, "1500").expect("every fed intent ended, late or not");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 3, 3));
+        assert_eq!(r.refused.get("intent.expired"), Some(&3));
+        let e = rehearse_with(&state, "never").unwrap_err();
+        assert_eq!(
+            e, "rehearsal.unanswered: 3 of 3 recorded intents reached no named end",
+            "a copy that never answers is still refused"
+        );
+        // 0.136's Eden: a window of quiet records feeds no intent, so the probe was the copy's first ask and met its
+        // catch-up with a tick's wait (`rehearsal.canary.unanswered`). The probe then has the start bound.
+        let quiet = dir.join("q");
+        std::fs::create_dir_all(&quiet).unwrap();
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&quiet)).unwrap(), 1).unwrap();
+        for _ in 0..4 {
+            log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+                .unwrap();
+        }
+        log.wait_durable(4).unwrap();
+        drop(log.close());
+        let r = rehearse_with(&quiet, "1500").expect("the probe is answered after the catch-up");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 0, 0));
+        assert!(
+            rehearse_with(&quiet, "never").is_err(),
+            "a quiet copy that never answers is still refused"
+        );
+        // 0.136 on 02d99b61: the probe sent during the catch-up expired before the copy took it
+        // (`rehearsal.canary.refused: intent.expired`). It is sent again, and the copy caught up answers it.
+        let r =
+            rehearse_with(&quiet, "1500x").expect("a probe expired in the catch-up is sent again");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 0, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `deploy --rehearse-only`: the rehearsal alone passes or fails as a deploy's would, and moves no pin, restarts
+    /// nothing and writes nothing outside `rehearsals/`: the world's folder, its build and the store stay as they were.
+    #[test]
+    fn a_rehearsal_alone_moves_no_pin_and_writes_only_its_scratch() {
+        use directoryd::directory::store::Memory;
+        use std::os::unix::fs::PermissionsExt;
+        fn files(dir: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else if p.is_file() {
+                    // Not the scratch copy's socket.
+                    out.insert(p.clone(), std::fs::read(&p).unwrap());
+                }
+            }
+        }
+        // Short: the scratch socket, `<root>/rehearsals/<16 hex>/gateway.sock`, must fit 104 bytes on macOS.
+        let root = std::env::temp_dir().join(format!("ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let world = World {
+            lineage: [7; 16],
+            zone: Id::new(Scope([8; 16]), 1).unwrap(),
+        };
+        let state = state_path(&root, &world);
+        std::fs::create_dir_all(&state).unwrap();
+        // The import's part, then two ticks that each answered one intent.
+        let (mut log, _) = Log::open(FileStore::open(&log_path(&state)).unwrap(), 1).unwrap();
+        log.append(encode(&Value::Map(BTreeMap::new())).unwrap())
+            .unwrap();
+        for seq in 1..=2 {
+            let intent = Value::Map(BTreeMap::from([(2, Value::Uint(seq))]));
+            let row = Value::Map(BTreeMap::from([(5, intent)]));
+            let part = Value::Map(BTreeMap::from([(ANSWERED, Value::Array(vec![row]))]));
+            log.append(encode(&part).unwrap()).unwrap();
+        }
+        log.wait_durable(3).unwrap();
+        drop(log.close());
+        let (old, new) = (crate::build_hash(b"old"), crate::build_hash(b"new"));
+        let store = Memory::default();
+        set_pin(&store, &world, &old).unwrap();
+        // The new build staged by hash: the catch-up test's fake, answering at once.
+        let build = build_path(&root, &new);
+        std::fs::create_dir_all(build.parent().unwrap()).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', "'\\''"));
+        std::fs::write(
+            &build,
+            format!(
+                "#!/bin/sh\nexport {CHILD}=\"$5\" SOULS_REHEARSAL_DELAY_MS=0\n\
+                 exec {quoted} --exact {NAME} --nocapture\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut before = BTreeMap::new();
+        files(&root, &mut before);
+        let d = Deploy {
+            store: &store,
+            root: &root,
+            world,
+            canary: Canary {
+                window: Duration::from_secs(1),
+                start_within: Duration::from_secs(5),
+                answer_within: Duration::from_millis(200),
+                every: Duration::from_millis(100),
+            },
+            window: 2,
+        };
+        let r = d
+            .rehearse(&new, &mut Probe::Ask(0))
+            .expect("the rehearsal passes");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 2, 2));
+        assert!(r.served_kept, "{r:?}");
+        assert!(r.scratch.starts_with(root.join("rehearsals")), "{r:?}");
+        let mut after = BTreeMap::new();
+        files(&root, &mut after);
+        after.retain(|p, _| !p.starts_with(root.join("rehearsals")));
+        assert_eq!(after, before, "nothing outside rehearsals/ was written");
+        assert_eq!(
+            pin(&store, &root, &world).unwrap().0,
+            old,
+            "the pin never moved"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 0.136.0's move: 1dad restarted on the new build catching up two quiet hours, and the live watch's first operator
+    /// act had a tick's 2 s (`canary.unanswered: operator act`); the old build, restarted from the new one's records,
+    /// had nothing to catch up. A world that answers its first ask only after catching up, and that ask expired, is
+    /// watched healthy; one that never answers still fails.
+    #[test]
+    fn a_watch_waits_out_a_restarted_worlds_catch_up_and_fails_a_silent_one() {
+        let dir = std::env::temp_dir().join(format!("catch-up-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = Canary {
+            window: Duration::from_millis(600),
+            start_within: Duration::from_secs(5),
+            answer_within: Duration::from_millis(200),
+            every: Duration::from_millis(100),
+        };
+        // A world that catches up for `delay` ms, then answers asks; its first ask expired in the catch-up.
+        let world = |sock: PathBuf, delay: Option<u64>| {
+            let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+            std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let Some(ms) = delay else {
+                    std::thread::sleep(Duration::from_secs(8));
+                    return;
+                };
+                std::thread::sleep(Duration::from_millis(ms));
+                let mut expire = true;
+                while let Ok(frame) = read_or_closed(&mut s, Duration::from_secs(10)) {
+                    let Value::Map(m) = decode(&frame).unwrap().value else {
+                        panic!("a map")
+                    };
+                    let n = m[&wire::ASK].clone();
+                    let answer = if std::mem::take(&mut expire) {
+                        Value::Map(BTreeMap::from([
+                            (wire::ASK, n),
+                            (
+                                wire::REFUSED,
+                                Value::Text(Name::new("intent.expired").unwrap()),
+                            ),
+                        ]))
+                    } else {
+                        Value::Map(BTreeMap::from([
+                            (1, Value::Uint(1)),
+                            (wire::ASK, n),
+                            (wire::IDS, Value::Array(vec![Value::Bytes(vec![1])])),
+                        ]))
+                    };
+                    if !send(&mut s, &encode(&answer).unwrap()) {
+                        return;
+                    }
+                }
+            })
+        };
+        let sock = dir.join("late.sock");
+        let t = world(sock.clone(), Some(1500));
+        watch(&sock, &c, &mut Probe::Ask(0), false).expect("healthy once caught up");
+        drop(t);
+        let sock = dir.join("silent.sock");
+        let _t = world(sock.clone(), None);
+        assert!(
+            watch(&sock, &c, &mut Probe::Ask(0), false).is_err(),
+            "a world that never answers still fails"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

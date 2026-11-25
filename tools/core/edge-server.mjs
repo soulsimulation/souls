@@ -1,6 +1,7 @@
 // Edge server entry (EDGE-CONTRACT-v1). Owners' agents drive Souls; the world runs no Soul mind.
 // Usage: node tools/core/edge-server.mjs <descriptor.json> [check]
 // Descriptor: {input, dataDir, worldId, port, build, webDir?, marsWebDir?, placeData?, inputManifestSHA256?, localSoulLimit?, flags?{...}, nav?{ground?:[{id,boundsXZ}]}, activitySpots?, upperFloors?}
+import { isMain } from '../lib/is-main.mjs';
 import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 import {resolve,join} from 'node:path';
@@ -186,7 +187,7 @@ export async function openEdgeServerV1({input,dataDir,worldId,port=4959,webDir,m
   } catch(error){host?.stop();server?.close();auth?.close();db.close();releaseLock();throw error;}
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   const [descriptorPath,mode]=process.argv.slice(2);
   try {
     if(!descriptorPath)throw Error('usage: node tools/core/edge-server.mjs <descriptor.json> [check]');

@@ -6,10 +6,10 @@
 //
 // Prints one JSON line per file: its kind, its provisional reference `namespace:name@prov-1220<sha-256>`, and any
 // errors, each naming the path of the field at fault. Exits 1 if any entry is refused.
+import { isMain } from '../lib/is-main.mjs';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
 
 export const FORMAT = 'souls-entry/1';
 
@@ -211,7 +211,10 @@ export function validateEntry(entry) {
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
     else {
-      only(entry.geometry, ['bounds_mm', 'front'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      only(entry.geometry, ['bounds_mm', 'front', 'solids_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      // The thing's own walk boxes, [cx, cz, hx, hz, yaw_mdeg, y0, y1] in whole mm, as the engine reads them (solids_of).
+      const sol = entry.geometry.solids_mm;
+      if (sol !== undefined && !(Array.isArray(sol) && sol.length > 0 && sol.every(r => Array.isArray(r) && r.length === 7 && r.every(isInt) && r[2] >= 0 && r[3] >= 0 && r[5] >= 0 && r[6] > r[5]))) err('geometry.solids_mm', 'a list of walk boxes, each seven whole millimetres [cx, cz, hx, hz, yaw_mdeg, y0, y1]: half sizes and heights none below 0, the top above the bottom');
       if (entry.geometry.front !== undefined && !FRONTS.includes(entry.geometry.front)) err('geometry.front', `one of ${FRONTS.join(', ')}: "z" is the front the frame names, "none" a thing with no front (a round table)`);
     }
   }
@@ -679,7 +682,8 @@ function bounds(f, path, err) {
 }
 
 /** An activity's roles (SA-G1a): each role is one of the kind's link types to a body or a Soul, with how much it is needed
- *  and where its members may be: the activity's own body slots (`this`), or body slots near it (`here`, within_mm). */
+ *  and where its members may be: the activity's own body slots (`this`), or body slots near it (`here`, within_mm; with
+ *  `slots`, 0.135 G3, the activity's own slots its members are walked to when it starts). */
 function roles(entry, err) {
   const table = section(entry, 'roles', err), links = isObj(entry.links) ? entry.links : {}, slots = isObj(entry.slots) ? entry.slots : {};
   for (const [name, r] of Object.entries(table)) {
@@ -687,8 +691,14 @@ function roles(entry, err) {
     const p = `roles.${name}`;
     if (!(isObj(links[name]) && (links[name].from === 'body' || links[name].from === 'soul'))) err(p, 'a role is a link type of this kind whose from end is a body or a Soul');
     if (!isObj(r)) { err(p, 'a role is an object: {"need", "places"}'); continue; }
-    only(r, ['need', 'places'], p, err);
+    only(r, ['need', 'places', 'move', 'on_beat', 'follows'], p, err);
+    // 0.135 G2: the role whose member follows the other's.
+    if (r.follows !== undefined && r.follows !== true) err(`${p}.follows`, 'true, or left out');
+    // 0.134 T3: the move begins on the world's beat, and again on the next after it ends, until the member leaves.
+    if (r.on_beat !== undefined && r.on_beat !== true) err(`${p}.on_beat`, 'true, or left out');
     if (!ROLE_NEEDS.includes(r.need)) err(`${p}.need`, `one of ${ROLE_NEEDS.join(', ')}`);
+    // 0.134 T1: the move (content/moves) a member of this role aims at the other member when the activity starts.
+    if (r.move !== undefined && !(typeof r.move === 'string' && /^[a-z][a-z0-9_]*$/.test(r.move))) err(`${p}.move`, 'a move of content/moves, by name');
     const pl = r.places, pp = `${p}.places`;
     if (!isObj(pl)) { err(pp, 'an object: {"in", ...}'); continue; }
     if (!PLACES_IN.includes(pl.in)) { err(`${pp}.in`, `one of ${PLACES_IN.join(', ')}`); continue; }
@@ -697,8 +707,9 @@ function roles(entry, err) {
       if (!(Array.isArray(pl.slots) && pl.slots.length)) err(`${pp}.slots`, 'a list of this kind\'s own slots, never empty');
       else pl.slots.forEach((n, i) => { if (slots[n]?.admits !== 'body') err(`${pp}.slots.${i}`, 'names a slot of this kind that admits a body'); });
     } else {
-      only(pl, ['in', 'within_mm', 'posture'], pp, err);
+      only(pl, ['in', 'within_mm', 'posture', 'slots'], pp, err);
       if (!(isInt(pl.within_mm) && pl.within_mm > 0)) err(`${pp}.within_mm`, 'how near the activity, whole millimetres above zero');
+      if (pl.slots !== undefined && !(Array.isArray(pl.slots) && pl.slots.length && pl.slots.every((n) => slots[n]?.admits === 'body'))) err(`${pp}.slots`, 'a list of this kind\'s own slots that admit a body, or left out');
     }
     if (pl.posture !== undefined && !POSTURES.includes(pl.posture)) err(`${pp}.posture`, `one of ${POSTURES.join(', ')}`);
   }
@@ -922,8 +933,14 @@ function form(f, path, ctx, err) {
     if (s.step === 'walk_to') { only(s, ['step', 'point'], p, err); place(s.point, `${p}.point`); }
     else if (s.step === 'sit') { only(s, ['step', 'slot'], p, err); slot(s.slot, `${p}.slot`); }
     else if (s.step === 'move') {
-      only(s, ['step', 'move', 'at', 'toward'], p, err);
+      only(s, ['step', 'move', 'at', 'toward', 'for_s'], p, err);
       if (typeof s.move !== 'string' || !IDENT.test(s.move)) err(`${p}.move`, 'names a move (moves are data, SA-D4)');
+      // 0.135: the move repeats back to back for whole seconds (1 to 3600), written out or a `count` argument with a default
+      const secs = (n) => isInt(n) && n >= 1 && n <= 3600;
+      if (s.for_s !== undefined && !secs(s.for_s)) {
+        if (!(isObj(s.for_s) && typeof s.for_s.arg === 'string' && (s.for_s.default === undefined || secs(s.for_s.default)))) err(`${p}.for_s`, 'whole seconds from 1 to 3600, or {"arg": <a count it takes>, "default": <seconds>}');
+        else { only(s.for_s, ['arg', 'default'], `${p}.for_s`, err); arg(s.for_s, `${p}.for_s`, ['count']); }
+      }
       if (s.at !== undefined) place(s.at, `${p}.at`);
       if (s.toward !== undefined && !isArg(s.toward)) err(`${p}.toward`, 'an argument');
       else if (s.toward !== undefined) arg(s.toward, `${p}.toward`, ['thing', 'slot', 'part']);
@@ -1210,7 +1227,7 @@ export function loadDir(dir) {
   return files;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const files = process.argv.slice(2).flatMap(loadDir);
   const rows = files.map(file => {
     const {entry, errors} = parseEntry(readFileSync(file, 'utf8'));

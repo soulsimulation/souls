@@ -4,11 +4,15 @@
 #
 # On the runner:
 #   bash release.sh checks <sha>                       refuses `release.missing-check: <name>` for each check of
-#                                                      v2/docs/release.md's list the head has not passed (gh api)
+#                                                      v2/docs/release.md's list the head has not passed (gh api); the
+#                                                      merge queue's green `ci` run at <sha> counts for its CI checks
 #   bash release.sh bundle <out> <sha> <version> <cargo release dir> <page dist dir> <client dir> [<wasm pkg dir>]
-#                                                      the four artifacts, the tools and manifest.json (name, hash);
+#                                                      the artifacts, the tools and manifest.json (name, hash);
 #                                                      client.tar is the served client (v2/client/served/build.mjs,
-#                                                      R17 #2818), each served file a `served` line of the manifest
+#                                                      R17 #2818), each served file a `served` line of the manifest;
+#                                                      directoryd, origin.tar (install.sh origin) and units.tar (their
+#                                                      two unit files) are the directory and the viewers' origin;
+#                                                      reseed/ holds Eden's reseed, its undo and content/kinds
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -17,10 +21,28 @@
 #   stage <bundle>                 each artifact to $WORLDS_ROOT/builds/<hash>/<name> if its bytes hash to the
 #                                  manifest's; the release's record to $DATA/releases/<sha>/; then verify
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
-#   move <sha> [<canary world>]    the canary's pin by `deploy` (O7), then every other world's, then the gateway by
+#   move <sha> [<canary world>|@eden]   the canary's pin by `deploy` (O7), then every other world's, then the gateway by
 #                                  `gateway-upgrade` (O16), then the page, then the served client
-#                                  ($LIB/client, which a world's address serves); each step done once per release
+#                                  ($LIB/client, which a world's address serves), then the directory (souls-directory)
+#                                  and the viewers' origin (souls-origin), each restarted once on the release's program
+#                                  and unit and checked healthy, else put back on its previous ones; each step done
+#                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`
+#   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
+#                                  folder (every world when none is named) that has none, or whose own it admits
+#                                  every body of; a fork keeps its own (its boot pins it). worldd reads it at start
+#   bodies binding                 each world of the launcher's cutover binding (SOULS_CUTOVER_BINDING, else
+#                                  $ETC/cutover-binding.json, as the launcher finds it) that names no catalogue gets
+#                                  bodiesDir $LIB/web/assets/bodies: its page draws the bodies Souls wear, served at
+#                                  /w/<slug>/v2/bodies/ (the launcher reads the file again within a second)
+#   mailbox plan|apply|check       the owner's messages (R13): plan prints what apply would change (the mailbox key,
+#                                  made once, 0600; `--mailbox-key` in directory.args; `--mailbox <directory>
+#                                  --mailbox-key` in each gateway-<world>.env), apply changes it; check sends one
+#                                  owner's message for a grant no Soul holds through each world's gateway and wants it
+#                                  accepted. move applies before the gateways restart and checks after the directory
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
+#   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
+#                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
+#   reseed-undo <label> check|run  undoes that reseed, with the undo the release it moved to carried
 #   news <sha> <version> <link> <date>   one release entry in $DATA/news.jsonl, keyed by its link; refuses
 #                                  `release.not-live` unless this release moved every world
 # A refusal prints `refused: <name>: <why>` and exits 3; it changes nothing it has not already done.
@@ -30,11 +52,18 @@ DATA=${RELEASE_DATA:-/var/lib/souls}
 WORLDS_ROOT=${WORLDS_ROOT:-$DATA/worlds}
 LIB=${RELEASE_LIB:-/usr/local/lib/souls}
 ETC=${RELEASE_ETC:-/etc/souls}
+UNITS=${RELEASE_UNITS:-/etc/systemd/system}
 export WORLDS_ROOT
-# The four artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7).
-ARTIFACTS=(worldd gatewayd page.tar client.tar)
-# What moves them, carried with the release.
-TOOLS=(deploy gateway-upgrade)
+# The artifacts of a release, by their names under builds/<hash>/; worldd's hash is its build (O1, O7). directoryd,
+# origin.tar and units.tar (souls-directory.service, souls-origin.service) are the directory and the viewers' origin.
+ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
+# The two services the move restarts after the worlds and the gateway; the scratch machine runs neither (scratch.sh).
+SERVICES=${RELEASE_SERVICES-directory origin}
+# What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
+# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
+TOOLS=(deploy gateway-upgrade world-aside assets-check)
+# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
+RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
 die() {
   echo "release: $*" >&2
@@ -58,14 +87,23 @@ field() { sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p" "$1" | head -1; }
 artifact() { entries "$1" | awk -v n="$2" '$1 == n {print $2}'; }
 
 # A4: every check v2/docs/release.md lists (between its release-checks markers) passed at <sha>: a run of that name
-# concluded success there (the merge queue's run; main's own push run is often cancelled by the next merge).
+# concluded success there. 0.133 R13: for `ci-ok` and the v2 legs, so does the merge queue's `ci` run concluding
+# success at <sha> (a queued commit lands on main as itself): a pull request enters the queue only with ci-ok green at
+# its own head, which needs every v2 leg its paths select, and the queue's run checks that the combined code
+# compiles. Main's own push run is often cancelled by the next merge, and runs no leg its paths do not select.
 checks() {
-  local sha=$1 doc=${RELEASE_DOC:-$(dirname "$0")/../../../docs/release.md} names passed n missing=()
+  local sha=$1 doc=${RELEASE_DOC:-$(dirname "$0")/../../../docs/release.md} names passed n queued missing=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "checks <full 40-hex sha>"
   names=$(sed -n '/<!-- release-checks -->/,/<!-- \/release-checks -->/s/^- `\([^`]*\)`.*/\1/p' "$doc")
   [ -n "$names" ] || die "no checks listed in $doc"
   passed=$(gh api --paginate "repos/${GITHUB_REPOSITORY:?}/commits/$sha/check-runs?per_page=100" --jq \
     '.check_runs[] | select(.conclusion == "success") | .name' | sort -u)
+  queued=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/runs?head_sha=$sha&event=merge_group&per_page=100" --jq \
+    '[.workflow_runs[] | select(.name == "ci" and .conclusion == "success")] | length')
+  if [ "${queued:-0}" -gt 0 ]; then
+    echo "checks: the merge queue's ci run passed at ${sha:0:12}, so ci-ok and the v2 legs count as passed"
+    passed=$(printf '%s\n' "$passed" "$(grep -xE 'ci-ok|v2-.+' <<< "$names")" | sort -u)
+  fi
   while IFS= read -r n; do
     grep -qxF -- "$n" <<< "$passed" || missing+=("$n")
   done <<< "$names"
@@ -79,18 +117,27 @@ checks() {
 bundle() {
   local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 pkg=${7:-$6/../target/wasm-load/pkg} a t lines=() served=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "bundle: the sha is the full 40 hex"
-  [ -f "$page/index.html" ] || die "bundle: no page build at $page"
+  # X2: the page folder is the body files (bodies.ts) or a page build
+  [ -f "$page/index.html" ] || [ -f "$page/assets/bodies/bodies.json" ] || die "bundle: no page folder at $page"
   [ -d "$client/src" ] && [ -d "$client/skill" ] || die "bundle: no client (src, skill) at $client"
   rm -rf "$out"
   mkdir -p "$out/artifacts" "$out/bin"
   install -m 755 "$bins/worldd" "$out/artifacts/worldd"
   install -m 755 "$bins/gatewayd" "$out/artifacts/gatewayd"
+  install -m 755 "$bins/directoryd" "$out/artifacts/directoryd"
+  # The origin's files as the install puts them (install.sh origin), and the two services' unit files.
+  bash "$(dirname "$0")/../install.sh" origin "$out/origin"
+  COPYFILE_DISABLE=1 tar -C "$out/origin" -cf "$out/artifacts/origin.tar" .
+  mkdir -p "$out/units"
+  cp "$(dirname "$0")/../units/souls-directory.service" "$(dirname "$0")/../units/souls-origin.service" "$out/units/"
+  COPYFILE_DISABLE=1 tar -C "$out/units" -cf "$out/artifacts/units.tar" .
+  rm -rf "$out/origin" "$out/units"
   COPYFILE_DISABLE=1 tar -C "$page" -cf "$out/artifacts/page.tar" .
   # The served client (R17): its files by name, version, length and hash, as soul-client.json gives them. Its version
   # is x.y.z (build.mjs), so a minor release's (0.132) is stamped 0.132.0; a patch's (0.131.1) is its own.
   local stamp=$version
   if [[ $version =~ ^[0-9]+\.[0-9]+$ ]]; then stamp=$version.0; fi
-  node "$client/served/build.mjs" --out "$out/served" --version "$stamp" --pkg "$pkg" > /dev/null
+  node "$client/served/build.mjs" --out "$out/served" --version "$stamp" --pkg "$pkg" --commit "$sha" > /dev/null
   COPYFILE_DISABLE=1 tar -C "$out/served" -cf "$out/artifacts/client.tar" .
   for t in "$out"/served/*; do
     [ "${t##*/}" = soul-client.json ] && continue
@@ -99,6 +146,9 @@ bundle() {
   rm -rf "$out/served"
   for t in "${TOOLS[@]}"; do install -m 755 "$bins/$t" "$out/bin/$t"; done
   install -m 755 "$0" "$out/release.sh"
+  mkdir -p "$out/reseed"
+  for t in "${RESEED[@]}"; do install -m 755 "$(dirname "$0")/../cutover/$t" "$out/reseed/$t"; done
+  cp -R "$(dirname "$0")/../../../../content/kinds" "$out/reseed/kinds"
   for a in "${ARTIFACTS[@]}"; do
     lines+=("$(printf '{"name":"%s","hash":"%s","bytes":%s}' "$a" "$(hash "$out/artifacts/$a")" "$(wc -c < "$out/artifacts/$a" | tr -d ' ')")")
   done
@@ -154,14 +204,23 @@ stage() {
   install -m 644 "$from/manifest.json" "$rel/manifest.json"
   install -m 755 "$from/release.sh" "$rel/release.sh"
   for n in "${TOOLS[@]}"; do install -m 755 "$from/bin/$n" "$rel/bin/$n"; done
+  rm -rf "$rel/reseed"
+  cp -R "$from/reseed" "$rel/reseed"
   verify "$sha"
 }
 
 worlds() { find "$WORLDS_ROOT/worlds" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | sed 's|.*/||' | sort; }
 # The directory's store for deploy's pins: the one worldd@'s launcher reads (#1960 B6). The install's drop-in gives
-# worldd@ the secrets file, so its store settings (only those) come from there; a directory.env still wins after it.
+# worldd@ the secrets file after the unit's directory.env, so its store settings (only those) come from there and win,
+# as systemd reads them (0.133 ST2: the store is set in secrets.env only).
 directory_env() {
   local k v
+  if [ -f "$ETC/directory.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ETC/directory.env"
+    set +a
+  fi
   if [ -r "$ETC/secrets.env" ]; then
     while IFS='=' read -r k v; do
       k=${k#export }
@@ -173,12 +232,179 @@ directory_env() {
       esac
     done < "$ETC/secrets.env"
   fi
-  if [ -f "$ETC/directory.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    . "$ETC/directory.env"
-    set +a
+}
+
+# The body catalogue (souls/bodies/1) a release's page carries (bodies.ts) is the one every world admits: a Soul's
+# `wear` is refused by a world without it, and a page whose binding names none draws every body as a default person.
+# ADMITS <old> <new>: exits 0 when <new> is a catalogue that admits every body <old> does (or <old> is none).
+ADMITS='const fs = require("fs"), cat = (f) => { try { const c = JSON.parse(fs.readFileSync(f, "utf8")); return c && c.format === "souls/bodies/1" && Array.isArray(c.bodies) ? new Set(c.bodies.map((b) => b && b.hash)) : null; } catch { return null; } };
+const [o, n] = process.argv.slice(1).map(cat); process.exit(n && (!o || [...o].every((h) => n.has(h))) ? 0 : 1);'
+# BIND <binding> <dir>: bodiesDir <dir> on each world of the binding that names no catalogue (bodiesDir or v2Bodies).
+BIND='const fs = require("fs"), [file, dir] = process.argv.slice(1), b = JSON.parse(fs.readFileSync(file, "utf8"));
+const list = Array.isArray(b.worlds) ? b.worlds : [b], set = list.filter((w) => w && typeof w === "object" && !w.bodiesDir && !w.v2Bodies);
+for (const w of set) w.bodiesDir = dir;
+if (set.length) { const st = fs.statSync(file), tmp = `${file}.bodies.new`; fs.writeFileSync(tmp, JSON.stringify(b, null, 2) + "\n", { mode: st.mode & 0o777 });
+  if (process.getuid() === 0) fs.chownSync(tmp, st.uid, st.gid); fs.renameSync(tmp, file); }
+console.log(`bodies: the binding serves ${dir} for ${set.length ? set.map((w) => w.canonicalSlug).join(", ") : "no other world"}; ${list.length - set.length} already named a catalogue`);'
+
+bodies_worlds() {
+  local tarball=$1 tmp new f w
+  shift
+  # shellcheck disable=SC2046 # a world's name is one word
+  if [ $# -eq 0 ]; then set -- $(worlds); fi
+  tmp=$(mktemp -d)
+  tar -xf "$tarball" -C "$tmp" ./assets/bodies/bodies.json 2> /dev/null || tar -xf "$tarball" -C "$tmp" assets/bodies/bodies.json 2> /dev/null || true
+  new=$tmp/assets/bodies/bodies.json
+  if ! node -e "$ADMITS" "$new" "$new"; then
+    rm -rf "$tmp"
+    echo "bodies: this release's page carries no body catalogue; every world keeps its own"
+    return 0
   fi
+  for w in "$@"; do
+    f=$WORLDS_ROOT/worlds/$w
+    if grep -q '"fork" *: *true' "$f/world.json" 2> /dev/null; then
+      echo "bodies: $w keeps its own catalogue (a fork's boot pins it)"
+    elif [ -f "$f/bodies.json" ] && cmp -s "$new" "$f/bodies.json"; then
+      echo "bodies: $w has this release's catalogue"
+    elif [ -f "$f/bodies.json" ] && ! node -e "$ADMITS" "$f/bodies.json" "$new"; then
+      echo "bodies: $w keeps its own catalogue (this release's does not admit every body it does)"
+    else
+      install -m 644 "$new" "$f/.bodies.json.new"
+      if [ "$(id -u)" = 0 ]; then chown --reference="$f/world.json" "$f/.bodies.json.new"; fi
+      mv "$f/.bodies.json.new" "$f/bodies.json"
+      echo "bodies: $w gets this release's catalogue (read when its deploy restarts it)"
+    fi
+  done
+  rm -rf "$tmp"
+}
+
+bodies_binding() {
+  local file=${SOULS_CUTOVER_BINDING:-$ETC/cutover-binding.json} dir=$LIB/web/assets/bodies
+  if [ ! -f "$file" ]; then
+    echo "bodies: no cutover binding at $file"
+  elif [ ! -f "$dir/bodies.json" ]; then
+    echo "bodies: no catalogue at $dir; the binding is unchanged"
+  else
+    node -e "$BIND" "$file" "$dir" || echo "bodies: the binding at $file could not be read; it is unchanged"
+  fi
+}
+
+# The owner's messages (R13): every world's gateway reads them from the directory with the install's mailbox key
+# (gatewayd --mailbox <directory> --mailbox-key <key>; directoryd --mailbox-key <key>). Without them a message sent
+# from a Soul's card is refused `no-mailbox`. MAILBOX_CFG <etc> plan|apply [<uid> <gid>]: the key made once (0600, the
+# services' user), `--mailbox-key` added to directory.args and both flags to each gateway-<world>.env, when missing;
+# a flag already there is left as it is. One line per change (`would …` in a plan), then `changed:` and what changed:
+# `directory` and the worlds whose gateway file changed. Nothing when there is no directory.args (no directory here).
+MAILBOX_CFG='const fs = require("fs"), crypto = require("crypto"), path = require("path");
+const [etc, mode, uid, gid] = process.argv.slice(1), apply = mode === "apply", key = path.join(etc, "mailbox.key"), changed = [];
+const say = (what) => console.log(`mailbox: ${apply ? "" : "would "}${what}`);
+const args = path.join(etc, "directory.args");
+if (!fs.existsSync(args)) { console.log(`mailbox: no directory here (${args}); nothing to set`); console.log("changed:"); process.exit(0); }
+const words = (v) => v.replace(/^(["\x27])(.*)\1$/, "$2").split(/\s+/).filter(Boolean);
+const flag = (v, f) => { const w = words(v), i = w.indexOf(f); return i < 0 ? null : (w[i + 1] ?? ""); };
+const add = (v, more) => { const q = /^(["\x27]).*\1$/.test(v) ? v[0] : ""; const inner = q ? v.slice(1, -1) : v; return q + (inner.trimEnd() + " " + more).trim() + q; };
+// edit <file> <NAME> <fn(value) -> new value | null>: the line NAME=…, rewritten in place (same mode and owner)
+const edit = (file, name, fn) => {
+  const text = fs.readFileSync(file, "utf8"), re = new RegExp(`^(\\s*(?:export\\s+)?${name}=)(.*)$`, "m"), m = text.match(re);
+  if (!m) { console.log(`mailbox: ${file} has no ${name} line; left as it is`); return false; }
+  const next = fn(m[2]);
+  if (next === null) return false;
+  if (apply) {
+    const st = fs.statSync(file), tmp = `${file}.mailbox.new`;
+    fs.writeFileSync(tmp, text.replace(re, (_, k) => k + next), { mode: st.mode & 0o777 });
+    if (process.getuid() === 0) fs.chownSync(tmp, st.uid, st.gid);
+    fs.renameSync(tmp, file);
+  }
+  return true;
+};
+if (!fs.existsSync(key)) {
+  say(`make ${key} (a new key, 0600)`);
+  if (apply) {
+    fs.writeFileSync(key, crypto.randomBytes(32).toString("hex"), { mode: 0o600, flag: "wx" });
+    if (process.getuid() === 0 && uid) fs.chownSync(key, Number(uid), Number(gid));
+  }
+  changed.push("key");
+}
+const listen = flag(fs.readFileSync(args, "utf8").match(/^\s*(?:export\s+)?DIRECTORYD_ARGS=(.*)$/m)?.[1] ?? "", "--listen") || "127.0.0.1:7310";
+if (edit(args, "DIRECTORYD_ARGS", (v) => flag(v, "--mailbox-key") !== null ? null : add(v, `--mailbox-key ${key}`))) {
+  say(`add --mailbox-key ${key} to ${args}`); changed.push("directory");
+}
+for (const f of fs.readdirSync(etc).filter((f) => /^gateway-.+\.env$/.test(f)).sort()) {
+  const file = path.join(etc, f), world = f.slice(8, -4);
+  let more = "";
+  if (edit(file, "GATEWAYD_ARGS", (v) => {
+    more = [flag(v, "--mailbox") === null ? `--mailbox ${listen}` : "", flag(v, "--mailbox-key") === null ? `--mailbox-key ${key}` : ""].filter(Boolean).join(" ");
+    return more ? add(v, more) : null;
+  })) { say(`add ${more} to ${file}`); changed.push(world); }
+}
+if (!changed.length) console.log("mailbox: the key, the directory and every gateway already have it");
+console.log(`changed: ${changed.join(" ")}`);'
+# MAILBOX_PROBE <etc>: through each world's gateway (its gateway-<world>.env: --listen, --view-key), as an owner's page
+# sends: a view token for a grant no Soul holds (minted with the install's view key, two minutes), then `put` one
+# message for it. `accepted` is the directory's id for it: the gateway has its mailbox and the directory took its key.
+# Nothing reads the message (no client signs in for that grant, no page holds it) and it expires unread. Exits 1
+# unless every gateway accepted.
+MAILBOX_PROBE='const fs = require("fs"), crypto = require("crypto"), path = require("path");
+const etc = process.argv[1], GRANT = `soul-${"f".repeat(32)}-0`;
+const files = fs.readdirSync(etc).filter((f) => /^gateway-.+\.env$/.test(f)).sort();
+const flag = (v, f) => { const w = v.replace(/^(["\x27])(.*)\1$/, "$2").split(/\s+/), i = w.indexOf(f); return i < 0 ? null : w[i + 1]; };
+const cborText = (s) => { const b = Buffer.from(s); const h = b.length < 24 ? [0x60 + b.length] : b.length < 256 ? [0x78, b.length] : [0x79, b.length >> 8, b.length & 255]; return Buffer.concat([Buffer.from(h), b]); };
+const probe = (world, listen, viewKey) => new Promise((done) => {
+  const expires = Math.floor(Date.now() / 1000) + 120, body = `view.${expires}.${GRANT}`;
+  const token = `${body}.${crypto.createHmac("sha256", Buffer.from(fs.readFileSync(viewKey, "utf8").trim(), "hex")).update(body).digest("hex")}`;
+  const ws = new WebSocket(`ws://${listen}/v2/ws`); ws.binaryType = "arraybuffer";
+  let step = 0;
+  const end = (what) => { clearTimeout(t); try { ws.close(); } catch {} done(what); };
+  const t = setTimeout(() => end("no-answer"), 10_000);
+  ws.onopen = () => ws.send(Buffer.from([0xa2, 0x01, 0x02, 0x02, 0x40]));
+  ws.onerror = () => end("not-reachable");
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") {
+      if (!ev.data.startsWith("{\"sent\"")) return;
+      const s = JSON.parse(ev.data).sent ?? {};
+      return end(s.id ? `accepted ${s.id}` : `refused ${s.refused}`);
+    }
+    const text = Buffer.from(ev.data).toString("latin1");
+    if (step === 0) { step = 1; return ws.send(Buffer.concat([Buffer.from([0xa1, 0x01]), cborText(token)])); }
+    if (step === 1 && text.includes("view.started")) { step = 2; return ws.send(`put ${GRANT}\nrelease check: a message for no Soul; it expires unread`); }
+    if (step === 1 && text.includes("refused")) return end("refused view-token");
+  };
+});
+(async () => {
+  let bad = 0;
+  if (!files.length) console.log("mailbox: no gateway here to check");
+  for (const f of files) {
+    const world = f.slice(8, -4), v = fs.readFileSync(path.join(etc, f), "utf8").match(/^\s*(?:export\s+)?GATEWAYD_ARGS=(.*)$/m)?.[1] ?? "";
+    const listen = flag(v, "--listen"), viewKey = flag(v, "--view-key");
+    const got = !listen ? "refused no-listen" : !viewKey ? "refused no-view-key" : await probe(world, listen, viewKey);
+    if (!got.startsWith("accepted")) bad++;
+    console.log(`mailbox: ${world}: an owner send ${got.startsWith("accepted") ? `is ${got}` : `was not accepted (${got})`}`);
+  }
+  process.exit(bad ? 1 : 0);
+})();'
+
+# mailbox plan|apply|check: MAILBOX_CFG's plan or change (apply prints `changed:` last), or MAILBOX_PROBE's check.
+mailbox() {
+  local u='' g=''
+  case ${1:-} in
+    plan) node -e "$MAILBOX_CFG" "$ETC" plan ;;
+    apply)
+      if id "${RELEASE_ACCOUNT:-souls}" > /dev/null 2>&1; then
+        u=$(id -u "${RELEASE_ACCOUNT:-souls}") g=$(id -g "${RELEASE_ACCOUNT:-souls}")
+      fi
+      node -e "$MAILBOX_CFG" "$ETC" apply "$u" "$g"
+      ;;
+    check) node -e "$MAILBOX_PROBE" "$ETC" ;;
+    *) die "mailbox plan|apply|check" ;;
+  esac
+}
+
+bodies() {
+  case ${1:-} in
+    worlds) shift && [ $# -ge 1 ] || die "bodies worlds <page.tar> [<world>...]"; bodies_worlds "$@" ;;
+    binding) bodies_binding ;;
+    *) die "bodies worlds <page.tar> [<world>...] | bodies binding" ;;
+  esac
 }
 
 move() {
@@ -188,12 +414,19 @@ move() {
   page=$(artifact "$rel/manifest.json" page.tar) client=$(artifact "$rel/manifest.json" client.tar)
   all=$(worlds)
   [ -n "$all" ] || refuse "release.no-worlds: nothing under $WORLDS_ROOT/worlds"
+  # @eden: Eden's world (the cut-over's, $ETC/cutover.env), the canary of a release that reseeded it (0.133 R13)
+  if [ "$canary" = @eden ]; then
+    canary=$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ETC/cutover.env" 2> /dev/null)
+    [ -n "$canary" ] || refuse "release.no-such-world: no Eden world in $ETC/cutover.env"
+  fi
   canary=${canary:-$(head -1 <<< "$all")}
   grep -qxF -- "$canary" <<< "$all" || refuse "release.no-such-world: $canary"
   order=("$canary")
   while IFS= read -r w; do [ "$w" = "$canary" ] || order+=("$w"); done <<< "$all"
   directory_env
   echo "move: ${sha:0:12}: worldd ${worldd:0:16}…, canary $canary, then ${#order[@]} worlds in all"
+  # each world's catalogue before its deploy, which restarts it: worldd reads bodies.json at start
+  bodies_worlds "$WORLDS_ROOT/builds/$page/page.tar" "${order[@]}"
   for w in "${order[@]}"; do
     if [ -f "$rel/moved/$w" ]; then
       echo "move: $w already moved by this release"
@@ -206,10 +439,20 @@ move() {
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done
+  # The owner's messages (R13): the key and the flags, when missing, before the gateways and the directory restart on
+  # the release below and read them. A rerun of a release whose gateways or directory had moved restarts what changed.
+  local mb changed
+  mb=$(mailbox apply) || refuse "release.mailbox-config: $(tail -1 <<< "$mb")"
+  grep -v '^changed:' <<< "$mb" || true
+  changed=$(sed -n 's/^changed: *//p' <<< "$mb")
   if [ -f "$rel/moved/gateway" ]; then
     echo "move: the gateway already moved by this release"
+    for w in $changed; do
+      case $w in key | directory) ;; *) echo "move: souls-gateway@$w restarts for its mailbox"; systemctl restart "souls-gateway@$w" || true ;; esac
+    done
   else
     echo "move: gateway-upgrade to ${gw:0:16}…"
+    install -m 755 "$rel/bin/assets-check" "$LIB/.assets-check.new" && mv "$LIB/.assets-check.new" "$LIB/assets-check"
     "$rel/bin/gateway-upgrade" "$WORLDS_ROOT/builds/$gw/gatewayd" "${order[@]}" --lib "$LIB" || refuse "release.gateway-failed"
     touch "$rel/moved/gateway"
   fi
@@ -225,6 +468,7 @@ move() {
     touch "$rel/moved/page"
     echo "move: the page is ${page:0:16}… ($LIB/web)"
   fi
+  bodies_binding
   if [ -f "$rel/moved/client" ]; then
     echo "move: the served client already moved by this release"
   else
@@ -237,7 +481,126 @@ move() {
     touch "$rel/moved/client"
     echo "move: the served client is ${client:0:16}… ($LIB/client)"
   fi
-  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page and the served client"
+  # Last, once the worlds and the gateway are on the release: the directory, then the viewers' origin. Each restart is
+  # a blip of a second or two; the page tries again.
+  local s l
+  if [ -f "$rel/moved/directory" ] && grep -qw directory <<< "$changed"; then
+    echo "move: souls-directory.service restarts for its mailbox key"
+    systemctl restart souls-directory.service || true
+  fi
+  for s in $SERVICES; do
+    case $s in
+      directory)
+        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1)
+        service "$rel" directory souls-directory.service directoryd 401 \
+          -X POST "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}/v1/account/session"
+        ;;
+      origin)
+        service "$rel" origin souls-origin.service origin.tar 200 \
+          "${RELEASE_ORIGIN_URL:-http://localhost:7320}$(stream_path "${order[@]}")"
+        ;;
+    esac
+  done
+  # After the restarts: an owner's send through each world's gateway must be accepted, not refused `no-mailbox`.
+  if [ -f "$ETC/directory.args" ] && grep -qw directory <<< " $SERVICES "; then
+    local seen
+    seen=$(mailbox check) || { echo "$seen"; refuse "release.mailbox-unreachable: an owner's send was not accepted"; }
+    echo "$seen"
+  fi
+  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page, the served client$([ -z "$SERVICES" ] || echo ', the directory and the origin')"
+}
+
+# The first of these worlds' streams the origin serves (place-world.sh links /w/<world>/views), as its pointer's path;
+# with none, the origin's own feed.
+stream_path() {
+  local w s
+  for w in "$@"; do
+    s=$(sed -n 's/.*"stream": *"\([^"]*\)".*/\1/p' "$WORLDS_ROOT/worlds/$w/views/world.json" 2> /dev/null | head -1)
+    if [ -n "$s" ]; then
+      echo "/w/$w/${s%/}/pointer"
+      return
+    fi
+  done
+  echo /v1/feed
+}
+
+# The HTTP status a request gets (000 with no answer), asked every half second for RELEASE_HEALTH_S (30) seconds until
+# it is <want>; prints the last one when it never was.
+answers() {
+  local want=$1 end=$((SECONDS + ${RELEASE_HEALTH_S:-30})) got
+  shift
+  while :; do
+    got=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$@" 2> /dev/null || true)
+    [ "$got" = "$want" ] && return 0
+    if [ "$SECONDS" -ge "$end" ]; then
+      echo "${got:-000}"
+      return 1
+    fi
+    sleep 0.5
+  done
+}
+
+# service <release> <name> <unit> <artifact> <want> <request...>: the release's program ($LIB/directoryd, or the folder
+# $LIB/origin from origin.tar) and its unit file (from units.tar, then a daemon-reload) go in beside the old ones and
+# are renamed over them, the unit is restarted once, and the request must get <want>. If it does not, the previous
+# program and unit go back, the unit is restarted on them, and the release stops: `release.<name>-unhealthy`.
+service() {
+  local rel=$1 name=$2 unit=$3 a=$4 want=$5 h prog new prev changed=0 got again
+  shift 5
+  if [ -f "$rel/moved/$name" ]; then
+    echo "move: $unit already moved by this release"
+    return 0
+  fi
+  h=$(artifact "$rel/manifest.json" "$a")
+  if [ -z "$h" ]; then
+    echo "move: release ${rel##*/} carries no $a (staged by an older release.sh): $unit not moved"
+    return 0
+  fi
+  prog=$LIB/${a%.tar} new=$LIB/.${a%.tar}.new prev=$LIB/.${a%.tar}.prev
+  rm -rf "$new" "$prev" "$rel/units" "$rel/prev/$unit"
+  if [ "$a" = "${a%.tar}" ]; then
+    install -m 755 "$WORLDS_ROOT/builds/$h/$a" "$new"
+  else
+    mkdir -p "$new"
+    tar --no-same-owner -xf "$WORLDS_ROOT/builds/$h/$a" -C "$new"
+  fi
+  mkdir -p "$rel/units" "$rel/prev"
+  tar --no-same-owner -xf "$WORLDS_ROOT/builds/$(artifact "$rel/manifest.json" units.tar)/units.tar" -C "$rel/units"
+  if ! cmp -s "$rel/units/$unit" "$UNITS/$unit"; then
+    if [ -f "$UNITS/$unit" ]; then cp -p "$UNITS/$unit" "$rel/prev/$unit"; fi
+    install -m 644 "$rel/units/$unit" "$UNITS/.$unit.new"
+    mv "$UNITS/.$unit.new" "$UNITS/$unit"
+    systemctl daemon-reload
+    changed=1
+  fi
+  if [ -d "$new" ]; then
+    if [ -e "$prog" ]; then mv "$prog" "$prev"; fi
+  elif [ -e "$prog" ]; then
+    cp -p "$prog" "$prev"
+  fi
+  mv "$new" "$prog"
+  echo "move: $unit restarts on ${h:0:16}…$([ "$changed" = 0 ] || echo ' with its new unit file')"
+  systemctl restart "$unit" || true
+  if got=$(answers "$want" "$@"); then
+    rm -rf "$prev"
+    touch "$rel/moved/$name"
+    echo "move: $unit answers $want on ${h:0:16}…"
+    return 0
+  fi
+  echo "move: $unit answered $got, not $want: back to its previous program and unit"
+  [ -e "$prev" ] || refuse "release.$name-unhealthy: $unit answered $got, not $want, and has no previous program to go back to"
+  if [ -d "$prev" ]; then rm -rf "$prog"; fi
+  mv "$prev" "$prog"
+  if [ -f "$rel/prev/$unit" ]; then
+    install -m 644 "$rel/prev/$unit" "$UNITS/.$unit.new"
+    mv "$UNITS/.$unit.new" "$UNITS/$unit"
+    systemctl daemon-reload
+  fi
+  systemctl restart "$unit" || true
+  if again=$(answers "$want" "$@"); then
+    refuse "release.$name-unhealthy: $unit answered $got, not $want, on ${h:0:16}…; back on its previous program it answers $want"
+  fi
+  refuse "release.$name-unhealthy: $unit answered $got, not $want, on ${h:0:16}…; back on its previous program it answers $again"
 }
 
 rollback() {
@@ -260,6 +623,31 @@ rollback() {
     fi
   done
   return $status
+}
+
+# 0.133 R13: Eden's reseed as a release step, by the scripts, world-aside and kinds this release staged. The script
+# finds this release's world-aside and kinds itself (reseed-eden.sh); `check` reads and prints, changing nothing.
+reseed() {
+  local sha=$1 act=${2:-} label=${3:-} rel=$DATA/releases/$1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed <sha> check|run [<label>]"
+  [ -f "$rel/reseed/reseed-eden.sh" ] || refuse "release.no-reseed: release ${sha:0:12} carries no reseed (staged by an older release-v2)"
+  if [ -n "$label" ]; then
+    bash "$rel/reseed/reseed-eden.sh" "$sha" resume "$label" "$act"
+  else
+    bash "$rel/reseed/reseed-eden.sh" "$sha" "$act"
+  fi
+}
+
+# Undoes the reseed <label>, with the undo of the release the reseed moved Eden to (its receipt's `new` build).
+reseed_undo() {
+  local label=$1 act=${2:-} receipt new rel
+  [[ $label =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed-undo <label> check|run"
+  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1)
+  [ -f "$receipt" ] || refuse "release.no-reseed: no reseed receipt for $label"
+  new=$(sed -n 's/^new=//p' "$receipt")
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  [ -n "$rel" ] && [ -f "$(dirname "$rel")/reseed/reseed-eden-undo.sh" ] || refuse "release.no-reseed: no staged release carries the undo for $label"
+  RESEED_TOOL=${RESEED_TOOL:-$(dirname "$rel")/bin/world-aside} bash "$(dirname "$rel")/reseed/reseed-eden-undo.sh" "$label" "$act"
 }
 
 news() {
@@ -337,8 +725,9 @@ main() {
   local cmd=${1:-}
   shift || true
   case $cmd in
-    checks | bundle | stage | verify | move | rollback | news | publish | remote) "$cmd" "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|rollback|news (see the top of this file)" ;;
+    checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
+    reseed-undo) reseed_undo "$@" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 

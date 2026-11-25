@@ -33,8 +33,10 @@
 // A transport is a module whose default export makes `{name, timers, events, start(), place(kind, entry), set(id,
 // fields), remove(id), offers(id), fields(id), act(id, form, args)}` from `{world, ...flags}`; for the disturbances also
 // `begin(id, form, args)` → `{verdict: "started", rid, progress}`, `progress(rid)` → `{phase, step, moving}` (step null
-// when the world does not say), `wait(rid)`, `leave(rid)`, `body()` → `{posture, activity, holding}` and `restart()`. `act` answers `{verdict:
-// "yes"|"no", reason, code, receipt}`: `reason` is the rules' reason when the world names one. The built-in one,
+// when the world does not say), `wait(rid)`, `leave(rid)`, `body()` → `{posture, activity, holding, seat}` (`seat`: the
+// id of the thing whose seat the body holds, when the world says), `restart()` and, optionally, `rise()` (the body up
+// from its seat by the world's own rise, answered as `wait` answers). `act` answers `{verdict: "yes"|"no", reason, code,
+// receipt}`: `reason` is the rules' reason when the world names one. The built-in one,
 // `today`, drives today's local world through its adapters (tools/entry/load.mjs, SA-F3a's forms adapter): the god CLI
 // (tools/god-skill/cli.mjs) from the creator's folder (--god <dir>, default here) and the Soul CLI
 // (tools/world-launcher/soul/eden.mjs) for the Soul in SOULS_HOME (--soul <name> when there are several).
@@ -42,6 +44,7 @@
 // as (a world that decides on the case's own state reads it; today's ignores it). A transport with `stepped` true runs
 // a world that changes only when asked (tools/entry/v2.mjs, Engine v2's form runner): its reads are final, so the gate
 // never waits on them.
+import { isMain } from '../lib/is-main.mjs';
 import {spawnSync} from 'node:child_process';
 import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -101,22 +104,25 @@ export function asWorld(entry, field, v) {
 }
 /** The fields a Soul reads back: a text is set but a Soul's read of the thing leaves it out, so it is never compared. */
 export const seen = (entry, fields) => Object.fromEntries(Object.entries(fields).filter(([k]) => entry?.state?.[k]?.type !== 'text'));
-/** The fields a node starts with: the entry's defaults under the case's own. A list, schedule or timed field is not
- *  carried today (load.mjs), and a text with nothing written (null) is left unset. */
-export function startFields(entry, node) {
-  const out = {};
+/** The field types a world does not carry: list, schedule and timed on today's (load.mjs); a transport with `lists`
+ *  (tools/entry/v2.mjs) carries lists. */
+export const unbornTypes = t => t?.lists ? NEW_ENGINE_ONLY.filter(x => x !== 'list') : NEW_ENGINE_ONLY;
+/** The fields a node starts with: the entry's defaults under the case's own. A field the world `t` does not carry
+ *  (unbornTypes) is left out, and a text with nothing written (null) is left unset. */
+export function startFields(entry, node, t) {
+  const out = {}, unborn = unbornTypes(t);
   for (const [k, v] of Object.entries({...Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k, f.default])), ...(node?.fields ?? {})})) {
     const f = entry.state?.[k];
-    if (NEW_ENGINE_ONLY.includes(f?.type) || (f?.type === 'text' && v === null)) continue;
+    if (unborn.includes(f?.type) || (f?.type === 'text' && v === null)) continue;
     out[k] = asWorld(entry, k, v);
   }
   return out;
 }
-/** Why a case needs a field today's def does not carry (a list, schedule or timed field), or null: its start sets one, or
- *  a step or its end expects one. */
-export function newEngineGap(c, kinds) {
-  const kindOf = nid => kinds.get(c.state?.nodes?.[nid]?.kind);
-  const needs = (nid, field) => { const f = kindOf(nid)?.state?.[field]; return NEW_ENGINE_ONLY.includes(f?.type) ? `${field} (a ${f.type} field)` : null; };
+/** Why a case needs a field the world `t` does not carry (unbornTypes), or null: its start sets one, or a step or its
+ *  end expects one. */
+export function newEngineGap(c, kinds, t) {
+  const kindOf = nid => kinds.get(c.state?.nodes?.[nid]?.kind), unborn = unbornTypes(t);
+  const needs = (nid, field) => { const f = kindOf(nid)?.state?.[field]; return unborn.includes(f?.type) ? `${field} (a ${f.type} field)` : null; };
   const named = [
     ...Object.entries(c.state?.nodes ?? {}).flatMap(([nid, n]) => Object.keys(n.fields ?? {}).map(k => needs(nid, k))),
     ...(c.do ?? []).flatMap(s => (s.expect?.changes ?? []).filter(x => x.change === 'set').map(x => needs(x.node, x.field))),
@@ -133,15 +139,34 @@ export function rulesFix(c) {
   try { return decide({kinds: (allKinds ??= loadKinds()), act: c.act, state: c.state, asker: c.asker}).fix; } catch { return undefined; }
 }
 
-/** Why a case's start cannot be set up from outside, or null. */
-function setupGap(c, kinds) {
+/** Why a case's start cannot be set up from outside, or null. A world that takes the case's own hands, links and
+ *  slots as its scene (`t.scene`, the v2 transport: it decides on the case's state) needs no take or link first. */
+function setupGap(c, kinds, t) {
+  const scene = new Set(t?.scene ?? []);
   for (const [id, n] of Object.entries(c.state?.nodes ?? {})) {
     if (n.kind && !kinds.has(n.kind)) return `the start needs a ${n.kind} (${id}), which is not in this family`;
     const held = Object.entries(n.hands ?? {}).filter(([, v]) => v);
-    if (held.length) return `the start needs ${id} holding ${held.map(([h, v]) => `${v} in the ${h} hand`).join(', ')}: a take, which this run does not set up`;
-    if (Object.keys(n.links ?? {}).length || Object.keys(n.slots ?? {}).length || n.parent) return `the start needs links, slots or a parent on ${id}, which this run does not set up`;
+    if (held.length && !scene.has('hands')) return `the start needs ${id} holding ${held.map(([h, v]) => `${v} in the ${h} hand`).join(', ')}: a take, which this run does not set up`;
+    const links = Object.keys(n.links ?? {}).length && !scene.has('links'), slots = Object.keys(n.slots ?? {}).length && !scene.has('slots');
+    if (links || slots || n.parent) return `the start needs links, slots or a parent on ${id}, which this run does not set up`;
   }
   return null;
+}
+/** Whether a case's start leans on the scene a world takes from the case (`t.scene`) or a kind from outside the family
+ *  (`t.outside`): then a form that needs what that world cannot run (`t.treeGap`) is skipped, with its reason. */
+function sceneGap(c, entry, form, t) {
+  const leans = Object.values(c.state?.nodes ?? {}).some(n => Object.values(n.hands ?? {}).some(Boolean) || Object.keys(n.links ?? {}).length || Object.keys(n.slots ?? {}).length || t.outside?.has(n.kind));
+  return leans ? t.treeGap?.(entry, form) ?? null : null;
+}
+
+/** What a world that keeps a tree could not do, from an act's answer: `scene`, the case's start would not stand in
+ *  its tree (the case is skipped, by the refusal's name); `run`, its tree refused the run's own entries (the case
+ *  fails, by name). A pass then means the tree took what the run wrote. */
+export function refusedBy(got) {
+  return {
+    scene: got?.scene_refused?.length ? `the world's tree would not hold the case's start: ${got.scene_refused[0]}` : null,
+    run: got?.tree_refused?.length ? `the world's tree refused the run's entries: ${got.tree_refused[0]}` : null,
+  };
 }
 
 /** Fields read back until they hold `want` (or the time runs out): what the world shows from outside. */
@@ -178,33 +203,38 @@ function judge(expect, got, before, after) {
 async function ruleCase(t, row, kinds, placed) {
   const c = row.case, entry = kinds.get(row.kind), form = entry.forms?.[c.act.form];
   if (form && form.starts !== 'act') return {result: 'skip', why: `${c.act.form} is started by the world (${form.starts}), not by an act`};
-  const unborn = newEngineGap(c, kinds); if (unborn) return {result: 'skip', why: unborn};
+  const unborn = newEngineGap(c, kinds, t); if (unborn) return {result: 'skip', why: unborn};
   const id = await placed(row.kind);
-  const want = startFields(entry, c.state.nodes[c.act.this]);
+  const want = startFields(entry, c.state.nodes[c.act.this], t);
   await t.set(id, want);
   const before = await readUntil(t, id, seen(entry, want));
   if (!sameFields(before, seen(entry, want))) return {result: 'fail', why: `the scene could not be set: the fields read ${JSON.stringify(before)}, not ${JSON.stringify(seen(entry, want))}`};
   if (form && !(await t.offers(id)).includes(c.act.form)) return {result: 'skip', why: `${c.act.form} is not offered by this world`};
-  const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
+  const gap = setupGap(c, kinds, t) ?? (c.expect.verdict === 'yes' ? sceneGap(c, entry, c.act.form, t) : null); if (gap) return {result: 'skip', why: gap};
   // the case's other things (an argument: a pot, a pail), placed and set as the effect cases place them
   const ids = {[c.act.this]: id}, others = Object.entries(c.state.nodes).filter(([nid, n]) => n.kind && nid !== c.act.this);
-  for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
-  for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
+  for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n, t)); }
+  for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n, t)));
   const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])), {case: c, ids});
+  const refused = refusedBy(got);
+  if (refused.scene) return {result: 'skip', why: refused.scene};
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
   const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
+  if (refused.run) off.push(refused.run);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), got: brief(got), ...(via ? {via} : {})};
 }
 
 async function effectCase(t, row, kinds, placed) {
   const c = row.case;
-  const gap = setupGap(c, kinds) ?? newEngineGap(c, kinds); if (gap) return {result: 'skip', why: gap};
+  const gap = setupGap(c, kinds, t) ?? newEngineGap(c, kinds, t); if (gap) return {result: 'skip', why: gap};
   const ids = {};
-  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
-  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
+  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n, t)); }
+  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n, t)));
   const steps = [];
+  let moved = null;
   for (const [k, step] of c.do.entries()) {
     const kind = c.state.nodes[step.act.this]?.kind, form = kinds.get(kind)?.forms?.[step.act.form], id = ids[step.act.this];
+    if (!id) return {result: 'skip', why: `step ${k}: it acts on ${step.act.this}, which an earlier step made, and this run places only the case's own things`, steps};
     if (form && form.starts !== 'act') {
       if (!t.timers) return {result: 'skip', why: `step ${k}: ${step.act.form} is started by the world's timer, which this world does not run`, steps};
       const want = setsOf(step.expect, ids, c, kinds)[id] ?? {}, got = await readUntil(t, id, want, (timerAfter(c, step) ?? 0) / 1000 + 10000);
@@ -214,17 +244,31 @@ async function effectCase(t, row, kinds, placed) {
     }
     const offered = await t.offers(id);
     if (form && !offered.includes(step.act.form)) return {result: 'skip', why: `step ${k}: ${step.act.form} is not offered by this world`, steps};
+    const tree = step.expect?.verdict === 'yes' && sceneGap(c, kinds.get(kind), step.act.form, t);
+    if (tree) return {result: 'skip', why: `step ${k}: ${tree}`, steps};
+    // a world that decides on the case's start (t.scene) cannot see what an earlier step linked or moved
+    if (k > 0 && t.scene && !t.tree && moved) return {result: 'skip', why: `step ${k}: an earlier step ${moved}, and this world decides on the case's start`, steps};
     const unread = (step.expect?.changes ?? []).filter(x => x.change !== 'set').map(x => x.change);
-    if (unread.length && !t.reads?.includes?.(unread[0])) return {result: 'skip', why: `step ${k}: a ${unread[0]} change cannot be read from outside on this world`, steps};
+    const blind = unread.find(x => !t.reads?.includes?.(x));
+    if (blind) return {result: 'skip', why: `step ${k}: a ${blind} change cannot be read from outside on this world`, steps};
     const before = await t.fields(id);
     const args = Object.fromEntries(Object.entries(step.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v]));
-    const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: c.state}, ids});
+    const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: step.actor ? {...c.state, actor: step.actor} : c.state}, ids});
+    const refused = refusedBy(got);
+    if (refused.scene) return {result: 'skip', why: `step ${k}: ${refused.scene}`, steps};
     const sets = setsOf(step.expect, ids, c, kinds);
     const after = got.verdict === 'no' ? await settled(t, id) : await readUntil(t, id, sets[id] ?? {});
     const {off, via} = judge(step.expect ?? {}, got, before, after);
+    if (refused.run) off.push(refused.run);
     for (const [nid, want] of Object.entries(sets)) { const now = nid === id ? after : await readUntil(t, nid, want); if (!sameFields(now, want)) off.push(`after the step, ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(want)}`); }
+    if (unread.length && got.verdict === 'yes') {
+      const want = (step.expect.changes ?? []).filter(x => x.change !== 'set').map(changeLine).sort(), have = (got.changes ?? []).map(changeLine).sort();
+      if (!same(want, have)) off.push(`its changes were ${JSON.stringify(have)}, not ${JSON.stringify(want)}`);
+    }
     if (t.events && step.expect?.events && !same((got.events ?? []).map(e => e.event), step.expect.events.map(e => e.event))) off.push(`events ${JSON.stringify(got.events)} differ`);
     steps.push({step: k, form: step.act.form, got: brief(got), ...(via ? {via} : {})});
+    const changed = got.verdict === 'yes' && (form?.effects ?? []).find(e => ['link', 'unlink', 'reparent', 'create', 'remove'].includes(e.change));
+    if (changed) moved ??= `${changed.change === 'link' || changed.change === 'unlink' ? `${changed.change}ed` : changed.change === 'reparent' ? 'moved' : `${changed.change}d`} something`;
     if (off.length) return {result: 'fail', why: `step ${k}: ${off.join('; ')}`, steps};
   }
   for (const [nid, want] of Object.entries(c.after ?? {})) {
@@ -285,7 +329,7 @@ async function disturbCase(t, row, kinds, placed) {
   if (!t.begin || !t.progress || !t.wait || !t.leave || !t.body) return {result: 'skip', why: `the ${t.name} transport cannot follow an act under way`};
   if (row.how === 'restart' && !t.restart) return {result: 'skip', why: t.noRestart ?? 'this world cannot be restarted from here'};
   const scene = async () => {
-    const id = await placed(row.kind, {far: true}), want = startFields(entry, c.state.nodes[c.act.this]);
+    const id = await placed(row.kind, {far: true}), want = startFields(entry, c.state.nodes[c.act.this], t);
     await t.set(id, want);
     const got = await readUntil(t, id, seen(entry, want));
     if (!sameFields(got, seen(entry, want))) throw new Error(`the scene could not be set: the fields read ${JSON.stringify(got)}, not ${JSON.stringify(seen(entry, want))}`);
@@ -293,9 +337,15 @@ async function disturbCase(t, row, kinds, placed) {
   };
   const {id, fields: before} = await scene();
   if (!(await t.offers(id)).includes(row.form)) return {result: 'skip', why: `${row.form} is not offered by this world`};
-  const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
+  const gap = setupGap(c, kinds, t) ?? sceneGap(c, entry, row.form, t); if (gap) return {result: 'skip', why: gap};
+  // the case's other things (an argument), placed and set as the rule cases place them
+  const ids = {[c.act.this]: id};
+  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind && nid !== c.act.this) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n, t)); }
+  // a world that keeps the case's scene in its tree sets it now, so what the Soul holds before is the case's
+  const set = refusedBy(await t.arrange?.({case: c, ids}));
+  if (set.scene) return {result: 'skip', why: set.scene};
   const body0 = await t.body();
-  const b = await t.begin(id, row.form, c.act.args, {case: c, ids: {[c.act.this]: id}});
+  const b = await t.begin(id, row.form, c.act.args, {case: c, ids});
   if (b.verdict !== 'started') return {result: 'fail', why: `the act was not accepted (${b.code ?? b.reason ?? b.verdict}), though every need is met`};
   const r = await reach(t, b.rid, b.progress, row.stage, row.steps);
   if (r.gap) { await t.leave(b.rid).catch(() => {}); await t.wait(b.rid).catch(() => {}); return {result: 'skip', why: r.gap}; }
@@ -306,6 +356,7 @@ async function disturbCase(t, row, kinds, placed) {
   else await t.restart();
   const landed = ['accepted', 'started'].includes((await t.progress(b.rid)).phase);   // still under way once it was done
   const end = await t.wait(b.rid);
+  const stopRefused = refusedBy(end).run;
   const off = [], ended = {phase: end.receipt ?? end.verdict, ...(end.code ? {code: end.code} : {}), ...(end.text ? {reason: end.text} : {})};
   const sentAt = {step: (sent.step ?? 0) + 1, moving: sent.moving, ...(r.passed ? {late: true} : {})};
   if (end.verdict === 'yes' && !landed) return {result: 'skip', why: `the form completed before the disturbance landed: it did not test a stop`, ended, sent_at: sentAt};
@@ -314,24 +365,49 @@ async function disturbCase(t, row, kinds, placed) {
   else if (!end.code) off.push('the form ended with no named reason');
   const body1 = await t.body();
   if (body1.posture === 'busy') off.push(`the Soul is still busy (${body1.activity})`);
-  if (!same(body1.holding, body0.holding)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(body0.holding)} as before`);
+  // a thing removed from the Soul's hand is gone from it: it holds the rest as before
+  const held0 = row.how === 'remove' ? (body0.holding ?? []).filter(h => h !== id) : body0.holding;
+  if (!same(body1.holding, held0)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(held0)} as before`);
+  // A seat outlives the run (#4187, E7 #4481): a Soul that leaves while seated on the thing stays seated until it
+  // rises. It rises first, so the form is done again on the thing as it stands; a world that cannot make it rise from
+  // here refuses the redo `slot_taken`, its own seat held.
+  const seated = row.how === 'leave' && body1.seat === id;
+  let rose;
+  if (seated && t.rise) {
+    const up = await t.rise();
+    rose = up.verdict === 'yes' && (await t.body()).seat == null;
+    if (!rose) off.push(`the Soul, left seated, could not rise (${up.code ?? up.reason ?? up.verdict})`);
+  }
   let again;
   if (row.how === 'remove') {
-    const fresh = await scene();
-    again = await t.act(fresh.id, row.form, c.act.args, {case: c, ids: {[c.act.this]: fresh.id}});
+    const fresh = await scene(), ids2 = {...ids, [c.act.this]: fresh.id};
+    // a world that keeps a tree took the case's other things in it away with it: those are placed again
+    if (t.tree) for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind && nid !== c.act.this && !(await t.fields(ids[nid]))) { ids2[nid] = await placed(n.kind); await t.set(ids2[nid], startFields(kinds.get(n.kind), n, t)); }
+    again = await t.act(fresh.id, row.form, c.act.args, {case: c, ids: ids2});
     if (again.verdict !== 'yes') off.push(`afterwards the Soul could not do ${row.form} on a fresh thing (${again.code ?? again.reason ?? again.verdict})`);
   } else {
     const after = await settled(t, id);
     if (!sameFields(after, before)) off.push(`stopped, yet the thing's fields changed: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
     if (!(await t.offers(id)).includes(row.form)) off.push(`afterwards the thing no longer offers ${row.form}`);
     else {
-      again = await t.act(id, row.form, c.act.args, {case: c, ids: {[c.act.this]: id}});
-      if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
+      again = await t.act(id, row.form, c.act.args, {case: c, ids});
+      if (seated && !t.rise) { if (again.reason !== 'slot_taken' && again.code !== 'slot_taken') off.push(`afterwards ${row.form} on the thing the Soul is still seated on was not refused slot_taken (${again.code ?? again.reason ?? again.verdict})`); }
+      else if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
     }
   }
-  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
+  for (const r of [stopRefused, refusedBy(again).run]) if (r) off.push(r);
+  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(seated ? {left_seated: true, ...(t.rise ? {rose} : {})} : {}), ...(again ? {again: brief(again)} : {})};
 }
 
+/** A change other than a set as one line to compare, by the case's names: what it did, to what, and where to (a made
+ *  thing by its kind). A world whose `reads` names a change kind answers an act with its changes in these terms. */
+export function changeLine(x) {
+  const to = x.to ? `${x.to.node}${x.to.hand ? `/hand:${x.to.hand}` : x.to.slot ? `/slot:${x.to.slot}` : ''}` : '';
+  if (x.change === 'create') return `create ${x.kind} into ${to}`;
+  if (x.change === 'reparent') return `reparent ${x.node} into ${to}`;
+  if (x.change === 'link' || x.change === 'unlink') return `${x.change} ${x.node} ${x.link} ${x.end}`;
+  return `${x.change} ${x.node ?? ''}`.trim();
+}
 const timerAfter = (c, step) => c.do.flatMap(s => s.expect?.timers ?? []).find(x => x.form === step.act.form)?.after_us;
 /** The `set` changes a step expects, as fields per world id, in the world's terms (a bool's 0/1 as false/true). */
 export function setsOf(expect, ids, c, kinds) {
@@ -376,19 +452,33 @@ export async function run(target, {world, repeats = 2, transport, cases, ...flag
   const kinds = new Map(loaded.filter(k => k.entry.forms && Object.keys(k.entry.forms).length).map(k => [k.kind, k.entry]));
   const played = casesFor([...kinds].map(([kind, entry]) => ({kind, entry})), {cases: cases && resolve(cases)});
   const rows = [...played, ...disturbancesFor(kinds, played)];
+  const family = [...kinds.keys()];
   const make = transport ? (await import(pathToFileURL(resolve(transport)).href)).default : todayTransport;
   const t = await make({world, ...flags});
-  await t.start?.(loaded);
+  // A world that defines kinds as it starts also places the kinds a case names from outside the family (a flower to
+  // hand in, a linen to hang): placed and set, never played.
+  const others = t.defines ? kindsNamedOutside(played, kinds) : [];
+  for (const o of others) kinds.set(o.kind, o.entry);
+  t.outside = new Set(others.map(o => o.kind));
+  await t.start?.([...loaded, ...others]);
   const runs = [];
   for (let i = 0; i < repeats; i++) { const s = Date.now(); const r = await runOnce(t, kinds, rows); runs.push({repeat: i + 1, wall_ms: Date.now() - s, cases: r}); }
   await t.stop?.();
   const failed = [...new Set(runs.flatMap(r => r.cases.filter(c => c.result === 'fail').map(c => c.case)))];
   const skipped = Object.entries(Object.groupBy(runs[0]?.cases.filter(c => c.result === 'skip') ?? [], c => c.why)).map(([why, cs]) => ({why, cases: cs.map(c => c.case)}));
   return {
-    target, world, transport: t.name, repeats, kinds: [...kinds.keys()], ok: !failed.length, failed,
+    target, world, transport: t.name, repeats, kinds: family, ok: !failed.length, failed,
     passed_every_repeat: runs.every(r => r.cases.every(c => c.result !== 'fail')),
     table: table(runs[0]?.cases ?? []), skipped, runs, wall_ms: Date.now() - t0,
   };
+}
+
+/** The kinds the cases name that are not in the family, as content defines them: `{kind, entry}`. */
+function kindsNamedOutside(played, kinds) {
+  const named = new Set(played.flatMap(r => Object.values(r.case?.state?.nodes ?? {}).map(n => n.kind)).filter(k => k && !kinds.has(k)));
+  const all = named.size ? (allKinds ??= loadKinds()) : {};
+  // a body's family (the humanoid) is the Soul's own body, never a thing to place
+  return [...named].filter(k => all[k] && all[k].owner !== 'family').map(k => ({kind: k, entry: all[k]}));
 }
 
 // ---------------------------------------------------------------- today's world, through its adapters
@@ -529,4 +619,4 @@ export async function main(argv) {
   return v.error ? 2 : v.ok ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

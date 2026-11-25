@@ -21,8 +21,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 1 },
-              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 25000, "per_s": 500, "set_us": 60000000 } }
+              { "change": "set", "node": "k1", "field": "heating", "n": 29, "to": 1 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 30, "to": { "value": 25000, "per_s": 500, "set_us": 60000000 } }
             ],
             "events": [
               { "event": "eden:switched_on", "node": "k1", "changes": [0] },
@@ -45,8 +45,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 0 },
-              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 100000, "per_s": -50, "set_us": 210000000 } }
+              { "change": "set", "node": "k1", "field": "heating", "n": 29, "to": 0 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 30, "to": { "value": 100000, "per_s": -50, "set_us": 210000000 } }
             ],
             "events": [
               { "event": "eden:boiled", "node": "k1", "changes": [0] },

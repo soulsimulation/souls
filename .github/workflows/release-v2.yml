@@ -2,11 +2,28 @@
 # by canary (O7's deploy, then every other world, then O16's gateway-upgrade, then the page), then the news entry, tag
 # and changelog, each once. A dry run (the default) builds and stages, and moves and publishes nothing. Docs:
 # v2/docs/release.md; the steps: v2/tools/ops/release/release.sh. Rollback: rollback-v2.yml.
+# release.yml calls it twice (0.133 R13: one run takes a sha through both releases): part=stage builds and stages
+# beside today's ship, and part=move, after ship's verdict, runs the reseed and the move. Called, its own tag, Release
+# and changelog steps do not run (release.yml's publish makes them once), and it takes release.yml's turn on the
+# machine instead of waiting for it. reseed (fresh, or a label to resume) runs Eden's reseed on this build before the
+# move, with Eden as the canary: a dry run runs only its pre-check; rollback-v2.yml -f reseed=<label> undoes it.
 #   gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha>                  (the dry run, scratch)
 #   gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dry_run=false [-f target=production]
 name: release-v2
 run-name: release-v2 ${{ inputs.version }}${{ inputs.sha && format(' at {0}', inputs.sha) || '' }} on ${{ inputs.target }}${{ inputs.dry_run && ' (dry run)' || '' }}
 on:
+  workflow_call:
+    inputs:
+      version: { type: string, required: true }
+      sha: { type: string, required: true }
+      dry_run: { type: boolean, default: true }
+      target: { type: string, default: production }
+      canary: { type: string, required: false }
+      date: { type: string, required: false }
+      reseed: { type: string, required: false }
+      called: { type: boolean, default: true }
+      # stage: build and stage only; move: the reseed, the move and the news entry of a release part=stage staged
+      part: { type: string, required: true }
   workflow_dispatch:
     inputs:
       version:
@@ -30,11 +47,15 @@ on:
       date:
         description: Release date (YYYY-MM-DD, UTC) for the changelog and news entry; default today
         required: false
+      reseed:
+        description: 'empty = no reseed; fresh = Eden starts fresh on this build before the move (a dry run runs only the pre-check); a label (YYYYMMDDTHHMMSSZ) resumes that reseed'
+        required: false
 permissions:
   contents: read
-# release.yml's and install-v2.yml's group: one release step on the machine at a time
+# release.yml's and install-v2.yml's group: one release step on the machine at a time. Called by release.yml, it runs in
+# release.yml's turn (a group of its own, as a called workflow sharing its caller's group would wait on itself).
 concurrency:
-  group: release
+  group: ${{ inputs.called && format('release-v2-in-{0}-{1}', github.run_id, inputs.part) || 'release' }}
   cancel-in-progress: false
 env:
   SIM_ORIGIN: ${{ vars.SIM_ORIGIN || 'https://soul.game' }}
@@ -45,6 +66,7 @@ jobs:
     permissions:
       contents: read
       checks: read
+      actions: read   # the merge queue's ci run at the release head (release.sh checks)
     outputs:
       sha: ${{ steps.refs.outputs.sha }}
       date: ${{ steps.refs.outputs.date }}
@@ -58,8 +80,10 @@ jobs:
           VERSION: ${{ inputs.version }}
           PIN: ${{ inputs.sha }}
           DATE: ${{ inputs.date }}
+          RESEED: ${{ inputs.reseed }}
           RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
         run: |
+          [[ -z "$RESEED" || "$RESEED" = fresh || "$RESEED" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::reseed: empty, fresh or a reseed's label YYYYMMDDTHHMMSSZ"; exit 1; }
           [ "$REF" = refs/heads/main ] || { echo "::error::release-v2 runs from main only (got $REF)"; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.140 or 0.140.1"; exit 1; }
           if [ -n "$PIN" ]; then
@@ -120,31 +144,37 @@ jobs:
         with: { ref: "${{ needs.preflight.outputs.sha }}", persist-credentials: false }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
-      - name: Build the world process, the gateway, the page's WASM and the tools, once
+      - name: Build the world process, the gateway, the directory, the page's WASM and the tools, once
+        if: ${{ inputs.part != 'move' }}
         working-directory: v2
         run: |
           channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
           rustup toolchain install "$channel" --profile minimal --no-self-update --target wasm32-unknown-unknown
           # --bin names targets in every -p package: the programs and the tools are two builds (O18b, #3498).
-          cargo build --release --locked -p worldd -p gatewayd
-          cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade
+          cargo build --release --locked -p worldd -p gatewayd -p directoryd
+          cargo build --release --locked -p assets --bin assets-check
+          cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade --bin world-aside
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page and its pinned body assets
+      - name: The pinned body assets
+        if: ${{ inputs.part != 'move' }}
+        # X2: the page folder holds only the body files; the pairing card is the old page's (soul-game.caddy). The new
+        # page is not built: its packages are installed for the preparation's renderer closure (three, zod) alone.
         run: |
-          node tools/changelog/compile.mjs --version "$VERSION" --date "$DATE" --out "$RUNNER_TEMP/CHANGELOG.md"
           npm --prefix v2/web ci
           node v2/tools/import-body/prepare.mjs --out "$RUNNER_TEMP/body-assets"
-          V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
+          node v2/tools/ops/release/bodies.ts --from "$RUNNER_TEMP/body-assets" --out "$RUNNER_TEMP/page"
       - name: Bundle and its manifest
+        if: ${{ inputs.part != 'move' }}
         run: |
           # The land verbs' ground model (packages/ground) rides in the served client with its one dependency (#3695).
           npm install --no-save --no-package-lock --no-audit --no-fund --prefix packages/ground zod@4.6.7
-          bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release v2/web/dist v2/client | tee -a "$GITHUB_STEP_SUMMARY"
+          bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release "$RUNNER_TEMP/page" v2/client | tee -a "$GITHUB_STEP_SUMMARY"
           cp "$RUNNER_TEMP/bundle/manifest.json" "$RUNNER_TEMP/manifest.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ inputs.part != 'move' }}
         with:
           name: release-v2-${{ inputs.version }}-manifest
           path: ${{ runner.temp }}/manifest.json
@@ -161,14 +191,61 @@ jobs:
           printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
             "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
       - name: Stage by hash
+        if: ${{ inputs.part != 'move' }}
         env:
           RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
         run: bash v2/tools/ops/release/release.sh remote stage "$RUNNER_TEMP/bundle" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Move by canary, then the rest
-        if: ${{ !inputs.dry_run }}
+      # 0.133 R13: Eden fresh on this build, on the machine, from the scripts, world-aside and kinds this release staged:
+      # the pre-check (reads and prints, changes nothing), then, on a real release, the reseed. Its store calls are
+      # tried again with back-off on a dropped connection or a 5xx. Its label and undo line reach the summary even when
+      # it stops (the next step).
+      - name: Reseed Eden on this build (pre-check, then the reseed)
+        id: reseed
+        if: ${{ inputs.reseed != '' && inputs.part != 'stage' }}
         env:
           RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
-          CANARY: ${{ inputs.canary }}
+          RESEED: ${{ inputs.reseed }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -o pipefail
+          label=""; [ "$RESEED" = fresh ] || label=$RESEED
+          # shellcheck disable=SC2086 # the label, when resuming
+          bash v2/tools/ops/release/release.sh remote reseed "$SHA" check $label 2>&1 | tee "$RUNNER_TEMP/reseed.txt"
+          if [ "$DRY_RUN" != false ]; then echo "dry run: the reseed's pre-check only" | tee -a "$RUNNER_TEMP/reseed.txt"
+          else
+            # shellcheck disable=SC2086
+            bash v2/tools/ops/release/release.sh remote reseed "$SHA" run $label 2>&1 | tee -a "$RUNNER_TEMP/reseed.txt"
+          fi
+      - name: The reseed's label and undo
+        if: ${{ always() && inputs.reseed != '' && inputs.part != 'stage' }}
+        run: |
+          f="$RUNNER_TEMP/reseed.txt"; [ -f "$f" ] || { echo "the reseed did not start" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          label=$(sed -n 's/^reseed: label *\([0-9]\{8\}T[0-9]\{6\}Z\).*/\1/p' "$f" | tail -1)
+          {
+            echo "Reseed (${{ steps.reseed.outcome }})${label:+, label $label}"
+            if [ -n "$label" ] && grep -q '^reseed: 1\. stop' "$f"; then
+              echo
+              echo "Resume: \`gh workflow run release.yml --ref main -f version=$VERSION -f sha=$SHA -f dry_run=false -f reseed=$label\`"
+              echo "Undo: \`gh workflow run rollback-v2.yml --ref main -f target=production -f reseed=$label\`"
+            fi
+            echo '```'; cat "$f"; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # R13: what the move would change for the owner's messages (the mailbox key, the directory's and each gateway's
+      # flags), read only; a dry run stops here, a real one applies it in the move and checks an owner's send after.
+      - name: The owner's mailbox settings (plan)
+        if: ${{ inputs.part != 'stage' }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          bash v2/tools/ops/release/release.sh remote mailbox plan 2>&1 | tee "$RUNNER_TEMP/mailbox.txt"
+          { echo "Mailbox settings ($([ "$DRY_RUN" != false ] && echo 'dry run: not applied' || echo 'applied by the move'))"; echo '```'; cat "$RUNNER_TEMP/mailbox.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Move by canary, then the rest
+        if: ${{ !inputs.dry_run && inputs.part != 'stage' }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          # a reseed moves Eden first: it is the world the reseed changed (release.sh move resolves @eden)
+          CANARY: ${{ inputs.reseed != '' && '@eden' || inputs.canary }}
         run: |
           set +e
           bash v2/tools/ops/release/release.sh remote move "$SHA" $CANARY > "$RUNNER_TEMP/move.txt" 2>&1
@@ -177,15 +254,15 @@ jobs:
           { echo '```'; cat "$RUNNER_TEMP/move.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: News entry (only when every world runs it)
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.part != 'stage' }}
         env:
           RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
         run: bash v2/tools/ops/release/release.sh remote news "$SHA" "$VERSION" "$SIM_ORIGIN/changelog#v$VERSION" "$DATE" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.called }}
         with: { ref: main, fetch-depth: 0, path: main }
-      - name: Tag, GitHub Release and changelog (each once)
-        if: ${{ !inputs.dry_run }}
+      - name: Tag, GitHub Release and changelog (each once; release.yml's publish when called)
+        if: ${{ !inputs.dry_run && !inputs.called }}
         working-directory: main
         env:
           GH_TOKEN: ${{ github.token }}

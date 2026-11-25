@@ -129,3 +129,18 @@ for (const [name, key, kind] of [['strike', 'strike_us', 'a hammer'], ['pump', '
     }
   });
 }
+
+test('0.134 B2: a move may fix its contact point (handshake, hug, high-five); a bad point name is refused', () => {
+  for (const name of ['handshake', 'hug', 'high_five']) {
+    assert.deepEqual(validateMove(moves[name]), [], name);
+    assert.match(moves[name].contact, /^[a-z][a-z0-9_]*$/, name);
+  }
+  assert.deepEqual(validateMove({...structuredClone(moves.handshake), contact: 'Right Hand'}).map(e => e.path), ['contact']);
+});
+
+test('0.134: a last hold_us holds until released and replaces recovery_us; anywhere else it is refused', () => {
+  assert.deepEqual(validateMove(moves.hold_hand), []);
+  const m = structuredClone(moves.hold_hand);
+  m.phases = {start_up_us: 600000, hold_us: 400000, recovery_us: 300000};
+  assert.deepEqual(validateMove(m).map(e => e.path), ['phases.hold_us']);
+});

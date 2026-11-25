@@ -9,7 +9,7 @@ mod common;
 
 use common::{arrived, id, send, stand};
 use replica::pose::Vec3;
-use sim::host::{Planned, Runner};
+use sim::host::{Batches, Planned, Runner};
 use sim::planner::{Planner, Thread};
 use sim::spots::Target;
 use sim::walk::town::Town;
@@ -284,6 +284,8 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
                 at: target.point(),
                 reach: 0,
                 door: None,
+                ring: None,
+                aim: None,
             },
         }],
         ..Default::default()
@@ -442,7 +444,13 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
             && historical.forms.is_empty()
     );
 
+    // The body found again on the ground as installed, as a tick's reground finds it (`Host::reground`): the stair
+    // removal cuts the open ground's squares again (S13), so the pieces it stood on are numbered anew.
+    let here = town.relocate(&body).unwrap();
     let mut fresh = old.clone();
+    fresh.places[0].0 = here;
+    fresh.lines[0].0 = here;
+    fresh.forms[0].body = here;
     fresh.form_map = Some(Arc::clone(&current));
     fresh.forms[0].generation = 2;
     worker.send(fresh.clone());
@@ -451,7 +459,7 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
     assert!(Arc::ptr_eq(now.map.as_ref().unwrap(), &current));
     assert_eq!(now.forms[&key].generation, 2);
     assert!(
-        matches!(&now.forms[&key].result, sim::planner::FormResult::Walk(legs) if legs.is_empty())
+        matches!(&now.forms[&key].result, sim::planner::FormResult::Walk(Ok(legs)) if legs.is_empty())
     );
     assert_eq!(worker.pending(), 0);
 
@@ -483,4 +491,92 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
     println!(
         "K18d: committed stair removal => no-route; all four stale caches discarded; map controls add zero batches"
     );
+}
+
+/// A planner's batches as a tick reads them (S8): `taken` taken so far, this tick's going in batch `next`.
+fn stamped(mut p: Planned, taken: u64, next: u64) -> Planned {
+    p.batches = Some(Batches { taken, next });
+    p
+}
+
+/// S8: a walk whose place request is still out is not asked again each tick; once the batch it went in has been
+/// taken without its answer (a dropped or panicked batch), it is asked again. Without the batches' count, every
+/// tick asks, as before.
+#[test]
+fn s8_a_walk_is_asked_for_its_place_once_while_the_request_is_out() {
+    let mut t = town();
+    let mut r = runner(&t, 1);
+    let asked = |r: &mut Runner, t: &mut Town, p: &Planned| r.tick_planned(t, p).0.places.len();
+    assert_eq!(
+        asked(&mut r, &mut t, &stamped(Planned::default(), 0, 0)),
+        1,
+        "asked once"
+    );
+    for next in 1..5 {
+        assert_eq!(
+            asked(&mut r, &mut t, &stamped(Planned::default(), 0, next)),
+            0,
+            "still out: not asked again"
+        );
+    }
+    // Batch 0 taken with no answer for it: asked again, in batch 5, and not again while that one is out.
+    assert_eq!(
+        asked(&mut r, &mut t, &stamped(Planned::default(), 1, 5)),
+        1,
+        "asked again"
+    );
+    assert_eq!(asked(&mut r, &mut t, &stamped(Planned::default(), 5, 6)), 0);
+    // Answered: granted, nothing more to ask.
+    let mut planner = Planner::new(t.copy().unwrap());
+    let (wants, _) = r.tick_planned(&mut t, &stamped(Planned::default(), 6, 7));
+    assert_eq!(wants.places.len(), 1);
+    let answer = planner.answer(&wants);
+    assert_eq!(asked(&mut r, &mut t, &stamped(answer, 8, 8)), 0);
+    assert!(r.granted.contains_key(&id(1)), "the place was granted");
+    // Without the count: every tick asks.
+    let mut r = runner(&t, 1);
+    for _ in 0..3 {
+        assert_eq!(asked(&mut r, &mut t, &Planned::default()), 1);
+    }
+}
+
+/// S8: a walker's new line is asked once while the request is out, again once its batch was taken without it, and
+/// the walker arrives on the line when it comes.
+#[test]
+fn s8_a_walkers_line_is_asked_once_while_the_request_is_out() {
+    let mut t = town();
+    let mut r = runner(&t, 1);
+    let mut planner = Planner::new(t.copy().unwrap());
+    let (wants, _) = r.tick_planned(&mut t, &stamped(Planned::default(), 0, 0));
+    let mut answer = stamped(planner.answer(&wants), 1, 1);
+    // Ticks until the walker asks a line, with every batch answered.
+    let mut first = None;
+    for tick in 1..400u64 {
+        let (wants, _) = r.tick_planned(&mut t, &answer);
+        if !wants.lines.is_empty() {
+            first = Some(tick);
+            break;
+        }
+        answer = stamped(planner.answer(&wants), tick + 1, tick + 1);
+    }
+    let first = first.expect("the walker asked for a line (its straight way crosses the ring)");
+    // Its batch (`first`) not taken: no new request, however many ticks.
+    let (taken, mut next) = (first, first + 1);
+    for _ in 0..5 {
+        let (wants, _) = r.tick_planned(&mut t, &stamped(Planned::default(), taken, next));
+        assert!(wants.lines.is_empty(), "still out: not asked again");
+        next += 1;
+    }
+    // Taken without its answer: asked again; then answered, and the walk goes on to arrive.
+    let (wants, _) = r.tick_planned(&mut t, &stamped(Planned::default(), first + 1, next));
+    assert_eq!(wants.lines.len(), 1, "asked again");
+    let mut answer = stamped(planner.answer(&wants), next + 1, next + 1);
+    for k in next + 1..next + 4_000 {
+        if r.runs.is_empty() {
+            break;
+        }
+        let (wants, _) = r.tick_planned(&mut t, &answer);
+        answer = stamped(planner.answer(&wants), k + 1, k + 1);
+    }
+    assert!(arrived(&r, id(1)).is_some(), "the walker arrived");
 }

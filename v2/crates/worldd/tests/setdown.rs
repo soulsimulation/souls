@@ -37,6 +37,23 @@ use worldd::answers::{self, Config, JOIN, Join};
 use worldd::bodies::Bodies;
 use worldd::checkers::Rules;
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 const LINEAGE: Scope = Scope([0xd4; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
 
@@ -189,6 +206,7 @@ fn ours() -> BTreeMap<String, Kind> {
             .map(|s| (*s, BTreeSet::from(["thing".to_owned()])))
             .collect(),
         hands,
+        fields: Default::default(),
     };
     {
         BTreeMap::from([
@@ -372,6 +390,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         point: Vec3::new(s.x, 450_000, s.z - 300_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -421,10 +440,16 @@ impl Client {
 
     /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
     fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };

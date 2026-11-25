@@ -828,6 +828,136 @@ fn a3_a_made_thing_appears_where_its_form_names_and_a_place_not_free_is_refused(
     assert_eq!((how.as_str(), made.len()), ("slot-occupied", 0));
 }
 
+/// E6: a form's `create` that names its kind by the plain name, as content writes it, commits under the name the
+/// zone's header pins (`<kind>@<hash>`); the tree takes it (it refuses a plain name, `name-not-pinned`).
+#[test]
+fn e6_a_create_by_the_plain_name_commits_under_the_pinned_name() {
+    let mut b = Bench::new(1, 1, &[0]);
+    let full = b.full.clone();
+    let plain = replica::world_model::plain(&full).to_owned();
+    assert_ne!(plain, full, "the header pins the kind by hash");
+    let entry = parse(&ENTRY.replace("KIND", &plain)).expect("JSON");
+    let (body, thing) = (id(2), id(100));
+    assert!(matches!(
+        b.ask(&entry, body, thing, "make_held", None, intent(body, 1)),
+        Ok(Asked::Started(_))
+    ));
+    let mut made = Vec::new();
+    while !b.p.forms.is_empty() {
+        b.tick();
+        made.extend(
+            b.flush()
+                .0
+                .iter()
+                .flat_map(Effect::changes)
+                .filter_map(|c| match &c.change {
+                    Change::Create { node, kind, .. } => Some((*node, kind.clone())),
+                    _ => None,
+                }),
+        );
+    }
+    let e = b.p.forms.ended.pop().expect("ended");
+    let [(node, ref kind)] = made[..] else {
+        panic!("{made:?}")
+    };
+    println!(
+        "create of {plain}: {}; made as {}",
+        e.how.as_str(),
+        kind.as_str()
+    );
+    assert_eq!((e.how.as_str(), kind.as_str()), ("done", full.as_str()));
+    let n = b
+        .tree
+        .node(b.tree.handle(node).expect("committed to the tree"))
+        .expect("a node");
+    assert_eq!((n.kind().as_str(), n.parent()), (full.as_str(), Some(body)));
+}
+
+/// 0.135 E14: a form's `put` and `reparent` into a slot of another thing (a collage's `mount` onto a patch of a board,
+/// the slot argument `{node, slot}` bound as [`Arg::Slot`]) moves the held thing into that thing's slot through the
+/// same commit path as a put into the form's own slot. A Soul that leaves mid-step keeps the thing in its hand and
+/// the slot stays free; a slot already holding a thing is refused by name (`slot-occupied`).
+#[test]
+fn e14_a_put_into_a_slot_of_another_thing_lands_there_and_a_leave_keeps_it_in_hand() {
+    let mut b = Bench::new(1, 3, &[0]);
+    let mount = r#""mount": { "who": "anyone", "takes": { "patch": { "type": "slot" } },
+      "steps": [{ "step": "put", "slot": { "arg": "patch" } }, { "step": "wait", "us": 4000000 }],
+      "effects": [{ "change": "reparent", "what": "this", "into": { "arg": "patch" }, "event": "mounted" }] },
+    "take": {"#;
+    let entry = parse(
+        &ENTRY
+            .replace("KIND", &b.full.clone())
+            .replace(r#""take": {"#, mount),
+    )
+    .expect("JSON");
+    let (body, paper, other, board) = (id(2), id(100), id(101), id(102));
+    let patch = [("patch", Arg::Slot(board, 1))];
+    let at = |b: &Bench, t: Id| {
+        let n = b
+            .tree
+            .node(b.tree.handle(t).expect("in the tree"))
+            .expect("a node");
+        (n.parent(), n.slot())
+    };
+    let finish = |b: &mut Bench| {
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        b.p.forms
+            .ended
+            .pop()
+            .expect("ended")
+            .how
+            .as_str()
+            .to_owned()
+    };
+    let take = |b: &mut Bench, t: Id, n: u64| {
+        assert!(matches!(
+            b.ask(&entry, body, t, "take", None, intent(body, n)),
+            Ok(Asked::Started(_))
+        ));
+        assert_eq!(finish(b), "done", "taken");
+    };
+    take(&mut b, paper, 1);
+    // Leave mid-step (in the mount's wait): the paper stays in the hand, the patch free.
+    start(&mut b, &entry, body, paper, "mount", board, &patch, 2).expect("binds");
+    for _ in 0..4 {
+        b.tick();
+        b.flush();
+    }
+    let now = b.now;
+    {
+        let (mut w, forms) = b.world();
+        forms.leave(&mut w, body, None, now).expect("left");
+    }
+    let how = finish(&mut b);
+    println!(
+        "E14 mount, left mid-step: {how}; paper at {:?}",
+        at(&b, paper)
+    );
+    assert_eq!(how, "left");
+    assert_eq!(at(&b, paper).0, Some(body), "still in the hand");
+    // Done: the paper is in the board's patch, not a slot of the paper's own.
+    start(&mut b, &entry, body, paper, "mount", board, &patch, 3).expect("binds");
+    let how = finish(&mut b);
+    println!("E14 mount: {how}; paper at {:?}", at(&b, paper));
+    assert_eq!(
+        (how.as_str(), at(&b, paper)),
+        ("done", (Some(board), Some(1)))
+    );
+    // The patch taken: another piece is refused by name and stays in the hand.
+    take(&mut b, other, 4);
+    start(&mut b, &entry, body, other, "mount", board, &patch, 5).expect("binds");
+    let how = finish(&mut b);
+    println!(
+        "E14 mount onto the taken patch: {how}; the other piece at {:?}",
+        at(&b, other)
+    );
+    assert_eq!(how, "slot-occupied");
+    assert_eq!(at(&b, other).0, Some(body));
+}
+
 /// Starts `form` of `entry` by `body` at `node` with thing argument `other` and value arguments `vals` (C24).
 #[allow(clippy::too_many_arguments)]
 fn start(
@@ -1013,4 +1143,266 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
         b.log.len() - b.parts[0]
     );
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+}
+
+/// E5's kinds: linen (dirt 1, soap 2), a board (soap 1, dirt 2), a tub (soap 2, as linen numbers it) and a funnel
+/// (no soap), each with a form that transfers soap.
+const E5_KINDS: [&str; 4] = [
+    r#"{ "format": "souls-entry/1", "kind": "e5:linen", "owner": "thing",
+      "state": {
+        "dirt": { "n": 1, "type": "int", "unit": "count", "default": 5, "min": 0, "max": 9, "audience": { "rule": "everyone" } },
+        "soap": { "n": 2, "type": "int", "unit": "g", "default": 30, "min": 0, "max": 50, "audience": { "rule": "everyone" } }
+      },
+      "forms": { "wash": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+        "effects": [{ "change": "transfer", "field": "soap", "from": "this", "into": { "arg": "other" }, "amount": 10, "event": "washed" }] } } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:board", "owner": "thing",
+      "state": {
+        "soap": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } },
+        "dirt": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 9, "audience": { "rule": "everyone" } }
+      } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:tub", "owner": "thing",
+      "state": {
+        "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } },
+        "soap": { "n": 2, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } }
+      } }"#,
+    r#"{ "format": "souls-entry/1", "kind": "e5:funnel", "owner": "thing",
+      "state": {
+        "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 40, "audience": { "rule": "everyone" } }
+      },
+      "forms": { "pour_soap": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+        "effects": [{ "change": "transfer", "field": "soap", "from": { "arg": "from" }, "into": { "arg": "into" }, "amount": 10, "event": "poured" }] } } }"#,
+];
+
+/// A set a transfer writes: the node, its field's number, the value and the signed `by`.
+type E5Set = (Id, u64, Value, Option<i64>);
+
+/// The things of E5's kinds, `e5:linen` 100, `e5:board` 101, `e5:tub` 102 and `e5:funnel` 103, on a tree, and what
+/// form `form` of kind `at` (by its index in [`E5_KINDS`]) done at its thing with thing arguments `args` writes.
+fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>, &'static str> {
+    let numbered = |e: &str| {
+        let mut v = parse(e).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let texts: Vec<String> = E5_KINDS.iter().map(|e| numbered(e)).collect();
+    let mut kinds = Kinds::default();
+    let named: Vec<(&str, &str)> = ["linen", "board", "tub", "funnel"]
+        .into_iter()
+        .zip(texts.iter().map(String::as_str))
+        .collect();
+    kinds.load(&named);
+    assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
+    let limits = super::amounts::limits(&kinds);
+    let kinds_diag = "{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}\n\
+                      {1: \"e5:linen\", 2: \"thing\"}\n{1: \"e5:board\", 2: \"thing\"}\n\
+                      {1: \"e5:tub\", 2: \"thing\"}\n{1: \"e5:funnel\", 2: \"thing\"}";
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:board\", 3: 1}, {1: 102, 2: \"e5:tub\", 3: 1}, \
+                 {1: 103, 2: \"e5:funnel\", 3: 1}], 4: []}";
+    let (tree, _) =
+        Tree::load(&parse_world(&parse_kinds(kinds_diag).expect("kinds"), world).expect("a world"))
+            .expect("loads");
+    let args: BTreeMap<String, Id> = args
+        .iter()
+        .map(|(k, n)| ((*k).to_owned(), id(*n)))
+        .collect();
+    let effects =
+        bind_effects_with(&parse(E5_KINDS[at]).expect("JSON"), form, &args).expect("bound");
+    let reserved: Vec<Id> = Vec::new();
+    let made = super::amounts::Cx {
+        view: View {
+            tree: &tree,
+            out: &[],
+        },
+        limits: &limits,
+        header: None,
+        body: id(2),
+        soul: id(2),
+        hands: &[],
+        node: id(100 + at as u64),
+        reserved: &reserved,
+        now: 0,
+    }
+    .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
+    .map_err(|r| r.name)?;
+    Ok(made
+        .iter()
+        .flat_map(|(_, _, body)| match body {
+            Body::Changes(cs) => cs.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|c| match c.change {
+            Change::Set {
+                node,
+                field,
+                to,
+                by,
+            } => Some((node, field, to, by)),
+            _ => None,
+        })
+        .collect())
+}
+
+/// E5, E5b: a transfer between two kinds that number the field differently (linen's soap is field 2, the board's
+/// field 1) binds each end's field by its name on that end's own kind: the source's soap goes down and the target's
+/// soap up, and neither end's other field (dirt, numbered as the other kind's soap) is written. The part commits onto
+/// a tree whose kinds are the same K3 kinds: T6 rule 3.4's balance sums the two sets by the field's name.
+#[test]
+fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amount() {
+    let (linen_e, board_e) = (E5_KINDS[0], E5_KINDS[1]);
+    let numbered = |e: &str| {
+        let mut v = parse(e).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let (linen_k, board_k) = (numbered(linen_e), numbered(board_e));
+    let mut kinds = Kinds::default();
+    kinds.load(&[("linen", linen_k.as_str()), ("board", board_k.as_str())]);
+    assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
+    let limits = super::amounts::limits(&kinds);
+
+    // The tree's kinds are the same numbered kinds, so it knows each field's name (section 3).
+    let kinds_diag = format!(
+        "{{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}}\n{}\n{}",
+        linen_k.trim(),
+        board_k.trim()
+    );
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:board\", 3: 1}], 4: []}";
+    let (mut tree, rules) = Tree::load(
+        &parse_world(&parse_kinds(&kinds_diag).expect("kinds"), world).expect("a world"),
+    )
+    .expect("loads");
+    let (linen, board) = (id(100), id(101));
+
+    let args = BTreeMap::from([("other".to_owned(), board)]);
+    let effects = bind_effects_with(&parse(linen_e).expect("JSON"), "wash", &args).expect("bound");
+    let reserved: Vec<Id> = Vec::new();
+    let made = super::amounts::Cx {
+        view: View {
+            tree: &tree,
+            out: &[],
+        },
+        limits: &limits,
+        header: None,
+        body: id(2),
+        soul: id(2),
+        hands: &[],
+        node: linen,
+        reserved: &reserved,
+        now: 0,
+    }
+    .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
+    .expect("the transfer is not refused");
+    let mut entries: Vec<Effect> = made
+        .into_iter()
+        .map(|(node, _, body)| {
+            let mut e = world_set(node, 0);
+            e.body = body;
+            e
+        })
+        .collect();
+    let sets: Vec<(Id, u64, Value, Option<i64>)> = entries
+        .iter()
+        .flat_map(Effect::changes)
+        .filter_map(|c| match &c.change {
+            Change::Set {
+                node,
+                field,
+                to,
+                by,
+            } => Some((*node, *field, to.clone(), *by)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sets,
+        vec![
+            (linen, 2, Value::Uint(20), Some(-10)),
+            (board, 1, Value::Uint(10), Some(10))
+        ],
+        "each end's soap, by its own kind's number"
+    );
+
+    // The part commits onto the tree (its balance sums soap to zero), and the amounts are there.
+    let pinned: Vec<&str> = rules.kinds.keys().map(String::as_str).collect();
+    let header = header(id(1), &pinned);
+    for (e, s) in entries.iter_mut().zip(tree.to_state().next..) {
+        e.envelope.sequence = s;
+    }
+    let part = |entries: &[Effect]| {
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(entries.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .expect("bytes");
+        Part::read(&bytes).expect("a part")
+    };
+    // Half a transfer is still refused, and leaves the tree as it was: the balance is by name, not waived.
+    let half = tree.commit(&header, &part(&entries[..1]), &rules);
+    assert_eq!(
+        half.err().map(|r| r.name),
+        Some("by-not-balanced"),
+        "a lone set with a by"
+    );
+    tree.commit(&header, &part(&entries), &rules)
+        .expect("the part commits");
+    let field = |n: Id, f: u64| {
+        tree.node(tree.handle(n).expect("there"))
+            .expect("a node")
+            .fields()
+            .get(&f)
+            .cloned()
+    };
+    assert_eq!(field(linen, 2), Some(Value::Uint(20)));
+    assert_eq!(field(board, 1), Some(Value::Uint(10)));
+    assert_eq!(field(linen, 1), None, "the linen's dirt is untouched");
+    assert_eq!(field(board, 2), None, "the board's dirt is untouched");
+}
+
+/// E5: into a kind that numbers the field as the source does (the tub's soap is 2, as linen's), the transfer moves
+/// the amount, each end by its own field.
+#[test]
+fn e5_a_transfer_into_a_kind_that_numbers_the_field_alike_moves_the_amount() {
+    assert_eq!(
+        e5_transfer(0, "wash", &[("other", 102)]),
+        Ok(vec![
+            (id(100), 2, Value::Uint(20), Some(-10)),
+            (id(102), 2, Value::Uint(10), Some(10))
+        ])
+    );
+}
+
+/// E5: each end finds the field by name on its own kind; an end whose kind has no field of that name (the funnel has
+/// no soap) is refused `field-unknown`, from either side.
+#[test]
+fn e5_an_end_whose_kind_lacks_the_field_is_refused_field_unknown() {
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 103), ("into", 102)]),
+        Err("field-unknown")
+    );
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 102), ("into", 103)]),
+        Err("field-unknown")
+    );
+}
+
+/// E5: a transfer whose field the acting kind does not declare (the funnel pours soap it has none of) binds, and moves
+/// the amount between its two thing arguments by their own kinds' field.
+#[test]
+fn e5_a_transfer_of_a_field_the_acting_kind_does_not_declare_moves_between_its_arguments() {
+    assert_eq!(
+        e5_transfer(3, "pour_soap", &[("from", 100), ("into", 102)]),
+        Ok(vec![
+            (id(100), 2, Value::Uint(20), Some(-10)),
+            (id(102), 2, Value::Uint(10), Some(10))
+        ])
+    );
 }

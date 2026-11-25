@@ -21,7 +21,7 @@ use replica::intents::{Fallback, Intent, Target};
 use replica::move_check::move_check;
 use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
-use replica::select::{Spot, resolve};
+use replica::select::{self, Spot, resolve};
 use replica::tree::Tree;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
@@ -30,6 +30,23 @@ use sim::walk::town::Town;
 use worldd::answers::{self, Config, MOVE_ENDED, MOVE_STARTED};
 use worldd::bodies::Bodies;
 use worldd::checkers::toggles;
+
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
 
 const LINEAGE: Scope = Scope([0x4b; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
@@ -118,6 +135,7 @@ fn bodies_with(place: &str, point: Vec3) -> Result<Bodies, replica::effects::Ref
         point,
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -144,6 +162,7 @@ fn bodies_and_bed() -> Result<Bodies, replica::effects::Refusal> {
         point: bed_at(),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })?;
     Ok(b)
 }
@@ -185,10 +204,16 @@ impl Client {
 
     /// The next answer: a receipt's intent id and entries, or a refusal's reason.
     fn answer(&mut self) -> Result<(Id, Vec<u64>), String> {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         read_answer(&frame)
     }
 }
@@ -919,6 +944,9 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         .send(answers::Event::RunTo { tick: 100, done })
         .unwrap();
     ran.recv().unwrap();
+    // Accepted as its route is planned (C20, W11 #4087), with what is left of its 1 s; then its end.
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(answers::is_progress(&frame), "accepted first");
     let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
     assert_eq!(read_answer(&frame), Err("act.timed-out".into()));
     world.stop();
@@ -959,6 +987,226 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         "timed out: stopped at {stopped:?} um; {} later records, none moving the body",
         ticks.len() - k - 1
     );
+}
+
+/// W11 (#4087), A3: the same 4 m walk with its route planned in the next tick and with the planner's answers held back
+/// for `late` ticks. Lockstep, so the planner's batches are taken by the body schedule (K18b's replay control). Returns
+/// the act deadline's distance from the tick that wrote it (the planning tick), the planning tick's time and how the
+/// walk ended.
+fn walk_planned_late(late: i64) -> (i64, i64, String) {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 10_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        let mut b = bodies()?;
+        // Body ticks 1..=late take none of the planner's batches: the route arrives after them.
+        for t in 1..=late {
+            b.schedule.insert(t * 50_000, 0);
+        }
+        Ok(b)
+    }));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let (reply, rx) = channel();
+    let bytes = intent_bytes(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        60_000_000,
+    );
+    world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 0,
+            bytes,
+            reply,
+        })
+        .unwrap();
+    let (done, ran) = channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(
+        answers::is_progress(&frame),
+        "accepted as its route is planned"
+    );
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(!answers::is_progress(&frame), "one progress answer");
+    let answered = read_answer(&frame);
+    world.stop();
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let mut deadline = None;
+    for r in recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            for ev in e.events.unwrap_or_default() {
+                if ev.name.as_str() == answers::ACT_DEADLINE {
+                    let Some(Value::Uint(n)) = ev.fields.get(&5) else {
+                        panic!("deadline")
+                    };
+                    deadline = Some((*n as i64 - e.envelope.at, e.envelope.at));
+                }
+            }
+        }
+    }
+    let (span, planned) = deadline.expect("the walk's deadline entry");
+    let how = match answered {
+        Ok(_) => "done".to_owned(),
+        Err(r) => r,
+    };
+    (span, planned, how)
+}
+
+/// W11 (#4087), A3: a walk's deadline is its route's time from the tick its route is planned, not from the move's
+/// start. With its route 6 s late, the walk keeps the same span as one planned at once, and arrives; counted from its
+/// start (the old rule), its 4 m route's 8 s would have had 2 s left when it could first walk, and it ended
+/// `act.timed-out` on its way.
+#[test]
+fn a_walk_whose_route_comes_late_keeps_its_whole_route_time_and_arrives() {
+    let (prompt, prompt_at, prompt_how) = walk_planned_late(0);
+    let (late, late_at, late_how) = walk_planned_late(120);
+    println!(
+        "planned at {prompt_at} us: span {prompt} us, {prompt_how}; planned at {late_at} us: span {late} us, {late_how}"
+    );
+    assert!(late_at >= prompt_at + 6_000_000, "the route came 6 s later");
+    assert_eq!(
+        late, prompt,
+        "the same route's time, counted from its planning tick"
+    );
+    assert_eq!(prompt_how, "done");
+    assert_eq!(late_how, "done", "the late walk arrives, not timed out");
+}
+
+/// W11 (#4087): a Soul's answers reach it in version order. Its walk's route is planned a tick or two after the walk
+/// starts, and in each of those ticks the same Soul's sit on bare ground is refused at the moves' start, after the
+/// bodies stepped, so its refusal is framed after the walk's deadline entry raised the version. Every frame on the one
+/// stream the Soul's answers share carries a version no older than the frame before it; the walk has one progress
+/// answer and the sits none.
+#[test]
+fn a_souls_answers_keep_version_order_when_its_walk_is_accepted() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 10_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store,
+        cfg,
+    )
+    .expect("the world starts");
+    let ground = bodies().unwrap().town.ground;
+    let (reply, rx) = channel();
+    let walk = intent_bytes(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        60_000_000,
+    );
+    world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 0,
+            bytes: walk,
+            reply: reply.clone(),
+        })
+        .unwrap();
+    for (tick, sequence) in (1..=4).zip(2..) {
+        // A ranked sit (C14) with no free place among its candidates is refused before it would replace the walk.
+        let sit = intent_bytes(
+            body_id(),
+            sequence,
+            "eden:sit",
+            Some(Target::Node(ground)),
+            &[ground],
+            60_000_000,
+        );
+        world
+            .events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: sit,
+                reply: reply.clone(),
+            })
+            .unwrap();
+    }
+    drop(reply);
+    let (done, ran) = channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick: 200, done })
+        .unwrap();
+    ran.recv().unwrap();
+    world.stop();
+    let mut seen = Vec::new();
+    while let Ok(frame) = rx.recv_timeout(Duration::from_secs(5)) {
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Array(v)) = m.get(&1) else {
+            panic!("a version")
+        };
+        let Some(Value::Uint(version)) = v.get(3) else {
+            panic!("a version's sequence")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer")
+        };
+        let Some(Value::Uint(sequence)) = a.get(&2) else {
+            panic!("a sequence")
+        };
+        let how = match answers::is_progress(&frame) {
+            true => "accepted".to_owned(),
+            false => match read_answer(&frame) {
+                Ok(_) => "done".to_owned(),
+                Err(r) => r,
+            },
+        };
+        seen.push((*version, *sequence, how));
+    }
+    println!("one Soul's stream (version, sequence, answer): {seen:?}");
+    for w in seen.windows(2) {
+        assert!(
+            w[1].0 >= w[0].0,
+            "a version went back on the stream: {seen:?}"
+        );
+    }
+    let of = |s: u64| -> Vec<&str> {
+        seen.iter()
+            .filter(|f| f.1 == s)
+            .map(|f| f.2.as_str())
+            .collect()
+    };
+    assert_eq!(
+        of(1),
+        ["accepted", "done"],
+        "the walk: one progress answer, then done"
+    );
+    for s in 2..=5 {
+        let sit = of(s);
+        assert!(
+            sit.len() == 1 && sit[0] != "accepted" && sit[0] != "done",
+            "sit {s}: one refusal, no progress answer: {sit:?}"
+        );
+    }
 }
 
 /// A walk ended mid-move by a new move of the same body (`claim-taken`) stops in the tick the new move starts: its end
@@ -1047,6 +1295,7 @@ fn multi_slot_eligibility(ranked: bool) {
             point: Vec3::new(-38_000_000 + slot as i64 * 1_000_000, 450_000, 30_000_000),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })
         .unwrap();
     }
@@ -1060,6 +1309,7 @@ fn multi_slot_eligibility(ranked: bool) {
         point: Vec3::new(-34_000_000, 450_000, 30_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
+        more: Vec::new(),
     })
     .unwrap();
     b.begin(0);
@@ -1136,8 +1386,11 @@ fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
 }
 
 /// C29: the unchanged 20 m B7b leader distance must outlive the default 10 s and arrive, with exactly one C20
-/// progress frame and a route deadline entry named in its receipt.
+/// progress frame and a route deadline entry named in its receipt. W11 (#4087): the progress frame, the act's
+/// "accepted", comes within 2 s of the send (as its route is planned), not at the 10 s arrival deadline.
 #[test]
+// Times the first answer from the send by the wall clock, as the gateway sees it.
+#[allow(clippy::disallowed_methods)]
 fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     let (world, mut c, store, path) = served(10_000_000, "longwalk");
     let ground = bodies().unwrap().town.ground;
@@ -1177,6 +1430,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
         reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
+    let sent = std::time::Instant::now();
     c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
         .unwrap();
     c.0.write_all(&bytes).unwrap();
@@ -1184,19 +1438,33 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     c.0.read_exact(&mut len).unwrap();
     let mut frame = vec![0; u32::from_be_bytes(len) as usize];
     c.0.read_exact(&mut frame).unwrap();
+    let accepted = sent.elapsed();
     let Value::Map(m) = decode(&frame).unwrap().value else {
         panic!("frame")
     };
     let Some(Value::Map(a)) = m.get(&2) else {
         panic!("answer")
     };
-    assert_eq!(
-        a.get(&3),
-        Some(&Value::Uint(3)),
-        "one in-progress answer at 10 s"
+    assert_eq!(a.get(&3), Some(&Value::Uint(3)), "one in-progress answer");
+    // 2 s is the bar; a loaded CI runner gets 5 s, and the measured time is printed either way.
+    let most = Duration::from_secs(if std::env::var_os("CI").is_some() {
+        5
+    } else {
+        2
+    });
+    println!("20 m: accepted after {accepted:?} (bar {most:?})");
+    assert!(
+        accepted < most,
+        "accepted within {most:?} of its send, not at the arrival deadline: {accepted:?}"
     );
     assert!(matches!(a.get(&answers::LEFT), Some(Value::Uint(n)) if *n > 0));
-    let (id, receipt) = c.answer().expect("the next answer is the final receipt");
+    // Exactly one progress answer: the next frame is the act's own answer.
+    let mut len = [0; 4];
+    c.0.read_exact(&mut len).unwrap();
+    let mut frame = vec![0; u32::from_be_bytes(len) as usize];
+    c.0.read_exact(&mut frame).unwrap();
+    assert!(!answers::is_progress(&frame), "a second progress answer");
+    let (id, receipt) = read_answer(&frame).expect("the next answer is the final receipt");
     world.stop();
     let _ = std::fs::remove_file(&path);
     let bytes = store.0.lock().unwrap().bytes.clone();
@@ -1225,14 +1493,11 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     let end = log[&id].last().unwrap();
     assert_eq!(end.2.as_deref(), Some("done"));
     assert!(near(end.4, destination, 100_000), "arrived: {:?}", end.4);
-    println!(
-        "20 m: one progress answer then done; receipt {:?}; planned time {:?}",
-        receipt, due
-    );
+    println!("20 m: one progress answer, then done; receipt {receipt:?}; planned time {due:?}");
 }
 
 /// A synthetic mover edge across an otherwise planned route reproduces a walker making no progress. The test
-/// keeps the map unchanged deliberately: it exercises the same C21 watch as a stale route or a blocked walker.
+/// keeps the map unchanged deliberately: it exercises the never-stuck ladder as a stale route or a blocked walker would.
 fn stalled_bodies() -> Result<Bodies, replica::effects::Refusal> {
     let mut b = bodies()?;
     let ground = b.town.ground;
@@ -1269,18 +1534,21 @@ fn stalled_bodies() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
+/// A stalled gateway walk is the never-stuck ladder's (0.133 N1): routed again at 3 s, a shoulder turn at 9 s, and at
+/// 15 s its order ends by name, `goal-unreachable` (before, C21's watch ended it `walk.blocked` at 3 s); its body is
+/// released in its ending tick.
 #[test]
-fn a_stalled_gateway_walk_ends_walk_blocked_and_releases_its_body() {
+fn a_stalled_gateway_walk_ends_goal_unreachable_and_releases_its_body() {
     let (world, mut c, store, path) = served_with(10_000_000, "blockedwalk", stalled_bodies);
     c.send(1, "eden:walk", Some(thing()));
-    assert_eq!(c.answer(), Err("walk.blocked".into()));
+    assert_eq!(c.answer(), Err("goal-unreachable".into()));
     std::thread::sleep(Duration::from_millis(150));
     world.stop();
     let _ = std::fs::remove_file(&path);
     let bytes = store.0.lock().unwrap().bytes.clone();
     let log = logged(&bytes);
     let (&id, l) = log.iter().next().unwrap();
-    assert_eq!(l.last().unwrap().2.as_deref(), Some("walk.blocked"));
+    assert_eq!(l.last().unwrap().2.as_deref(), Some("goal-unreachable"));
     let ticks = ticks(&bytes);
     let (end, _, _) = tick_of(&ticks, id, MOVE_ENDED);
     assert!(
@@ -1338,6 +1606,7 @@ fn exact_slot_reach(first_is_near: bool, replace_pending: bool) {
             ),
             facing: Quat::IDENTITY,
             floor: ground,
+            more: Vec::new(),
         })
         .unwrap();
     }
@@ -1734,4 +2003,581 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     assert!(near([first.x, first.y, first.z], start(), 1));
     let stand = Vec3::new(far_seat().x, 0, far_seat().z + 300_000);
     assert!(near([last.x, last.y, last.z], stand, 500_000), "{last:?}");
+}
+
+/// 0.135 G1: a walk to `to` on the ground at `gait` (parameter 2, `gait:<name>`), as the socket carries it.
+fn gait_walk(sequence: u64, ground: Id, to: Vec3, gait: Option<&str>) -> Vec<u8> {
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let mut parameters = BTreeMap::from([(1, Value::Array(vec![int(to.x), int(to.y), int(to.z)]))]);
+    if let Some(g) = gait {
+        parameters.insert(2, Value::Text(name(&format!("gait:{g}"))));
+    }
+    let i = Intent {
+        actor: Actor::Soul(body_id()),
+        verb: name("eden:walk"),
+        target: Some(Target::Node(ground)),
+        parameters,
+        sequence,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
+        }
+        .to_value(),
+        expiry: 600_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    encode(&i.to_value()).unwrap()
+}
+
+/// 0.135 G1: the same 20 m walk on the open ground, at each gait a walk intent may name, on a served world in
+/// lockstep. From the tick its route is planned (its deadline entry) to the tick it arrives, each takes the time its
+/// gait's speed says over the distance it walked, to within one tick (walk 1.4, jog 2.5, run 4.0 m/s); with no gait it
+/// walks. An unknown gait is refused by name.
+#[test]
+fn g1_a_twenty_metre_walk_takes_its_gaits_time() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 60_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let ground = bodies().unwrap().town.ground;
+    let (west, east) = (
+        Vec3::new(start().x - 20_000_000, 0, start().z),
+        Vec3::new(start().x, 0, start().z),
+    );
+    // Each walk arrives at a tick, runs to its end, and is answered; the next is sent from there.
+    let mut tick = 0_i64;
+    let mut walked = Vec::new();
+    for (seq, (gait, to)) in [
+        (Some("walk"), west),
+        (Some("jog"), east),
+        (Some("run"), west),
+        (None, east),
+        (Some("sprint"), west),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (reply, rx) = channel();
+        world
+            .events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: gait_walk(seq as u64 + 1, ground, to, gait),
+                reply,
+            })
+            .unwrap();
+        tick += 400;
+        let (done, ran) = channel();
+        world
+            .events
+            .send(answers::Event::RunTo { tick, done })
+            .unwrap();
+        ran.recv().unwrap();
+        tick += 1;
+        let answer = loop {
+            let frame = rx
+                .recv_timeout(Duration::from_secs(20))
+                .unwrap_or_else(|e| panic!("{gait:?}: an answer: {e}"));
+            if !answers::is_progress(&frame) {
+                break read_answer(&frame);
+            }
+        };
+        walked.push((gait, answer));
+    }
+    world.stop();
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    // Each walk's planning tick (its deadline entry's time) and its end's time.
+    let mut times: BTreeMap<Id, (i64, i64)> = BTreeMap::new();
+    for r in recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            let Cause::Intent(id) = e.envelope.cause else {
+                continue;
+            };
+            for ev in e.events.unwrap_or_default() {
+                let t = times.entry(id).or_insert((0, 0));
+                match ev.name.as_str() {
+                    answers::ACT_DEADLINE => t.0 = e.envelope.at,
+                    MOVE_ENDED => t.1 = e.envelope.at,
+                    _ => {}
+                }
+            }
+        }
+    }
+    let log = logged(&bytes);
+    for (gait, answer) in &walked[..4] {
+        let (id, _) = answer.as_ref().unwrap_or_else(|e| panic!("{gait:?}: {e}"));
+        let l = &log[id];
+        let (from, to) = (l[0].4, l.last().unwrap().4);
+        assert_eq!(l.last().unwrap().2.as_deref(), Some("done"), "{gait:?}");
+        let d = (i128::from(to[0] - from[0]).pow(2) + i128::from(to[2] - from[2]).pow(2)).isqrt();
+        let (planned, ended) = times[id];
+        let took = i128::from(ended - planned);
+        let says = d * 1_000_000 / i128::from(worldd::bodies::speed(*gait));
+        println!(
+            "g1: {:<4} {:.3} m in {:.2} s; its speed says {:.3} s ({:+} µs)",
+            gait.unwrap_or("none"),
+            d as f64 / 1e6,
+            took as f64 / 1e6,
+            says as f64 / 1e6,
+            took - says
+        );
+        assert!(d > 19_000_000, "{gait:?}: walked {d} µm");
+        assert!(
+            (took - says).abs() <= 50_000,
+            "{gait:?}: took {took} µs, its speed says {says} µs"
+        );
+    }
+    assert_eq!(worldd::bodies::speed(Some("jog")), 2_500_000);
+    assert_eq!(worldd::bodies::speed(Some("run")), 4_000_000);
+    assert_eq!(
+        worldd::bodies::speed(None),
+        worldd::bodies::speed(Some("walk"))
+    );
+    let (gait, refused) = &walked[4];
+    assert_eq!(
+        refused,
+        &Err("move.unknown-gait".to_owned()),
+        "{gait:?} refused by name"
+    );
+}
+
+/// 0.133: a walk's target (for how far from it the walk ended) is kept only until the walk ends, however it ends: done
+/// (taken with its end), replaced by a new move, stopped, or refused as it starts.
+#[test]
+fn a_walks_target_is_kept_until_it_ends_however_it_ends() {
+    use worldd::bodies::{Ask, Asked};
+    fn walk(b: &mut Bodies, n: u64, to: Id) -> Vec<(Id, Result<(), replica::effects::Refusal>)> {
+        b.start(vec![(
+            soul(n),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+    }
+    /// Steps until `id` ends; its ending.
+    fn run(b: &mut Bodies, id: Id) -> Result<(), String> {
+        for _ in 0..2_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    }
+    let mut b = bodies().unwrap();
+    b.begin(0);
+
+    // done: kept to its end, then its end distance until the end is written (a walk to the ground's middle, a node
+    // in the tree, ends within a step of it)
+    let (_, ground) = town();
+    assert!(walk(&mut b, 1, ground).iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(b.walks_kept(), 1);
+    assert_eq!(run(&mut b, soul(1)), Ok(()));
+    let away = b.away(soul(1));
+    assert!(
+        away.is_some_and(|mm| mm < 500),
+        "a done walk says how far from its target it ended: {away:?}"
+    );
+    assert_eq!(b.walks_kept(), 0, "nothing kept once its end is written");
+
+    // replaced by a new move: the old walk's target goes with it
+    assert!(walk(&mut b, 2, body_id()).iter().all(|(_, r)| r.is_ok()) || b.walks_kept() == 0);
+    let _ = b.step(b.runner.now + b.runner.tick);
+    assert!(walk(&mut b, 3, thing()).iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(b.walks_kept(), 1, "only the new walk's");
+    let _ = run(&mut b, soul(3));
+    let _ = b.away(soul(2));
+    let _ = b.away(soul(3));
+    assert_eq!(b.walks_kept(), 0);
+
+    // stopped by its own Soul
+    let far = Id::new(Scope([7; 16]), 9_002).unwrap();
+    assert!(walk(&mut b, 4, far).iter().all(|(_, r)| r.is_ok()));
+    let _ = b.cancel(soul(4));
+    assert_eq!(b.walks_kept(), 0, "a stopped walk keeps nothing");
+
+    // refused as it starts: a target the world does not have
+    let none = Id::new(Scope([9; 16]), 1).unwrap();
+    let r = walk(&mut b, 5, none);
+    assert!(r.iter().all(|(_, r)| r.is_err()), "{r:?}");
+    assert_eq!(
+        b.walks_kept(),
+        0,
+        "a walk refused at its start keeps nothing"
+    );
+}
+
+/// 0.133 Q2: where a walk to a node with no point and no seat ends. A walk to a building ends inside its largest room
+/// (the stair hall, the first by id of the two largest); a walk to the ground stays on the ground at its middle (once
+/// it ended in that room, 62 m off); a walk to another Soul's body ends at speaking distance from it on the walker's
+/// side; a walk to the world's root is refused by name.
+#[test]
+fn q2_a_walk_ends_in_a_buildings_main_room_on_the_ground_or_beside_a_soul() {
+    use worldd::bodies::{Ask, Asked};
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    let n = |k: &str| im.nodes[k];
+    let walk = |b: &mut Bodies, i: u64, to: Id| {
+        b.start(vec![(
+            soul(i),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+        .remove(0)
+        .1
+    };
+    let run = |b: &mut Bodies, id: Id| -> Result<(), String> {
+        for _ in 0..4_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    };
+    // Where a walk to `node`'s middle goes, as E2's shared library resolves it.
+    let middle = |node: Id| {
+        let r = resolve(&im.tree, &Spot::Middle(node), None, &|_, _| false).expect("a middle");
+        (r.frame, r.local)
+    };
+    let flat = |p: Vec3, q: Vec3| {
+        (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt() as i64
+    };
+    // A second Soul, standing 6 m north of the walker on the open ground.
+    let other = Id::new(Scope([7; 16]), 9_020).unwrap();
+    let other_at = Vec3::new(-40_000_000, 0, 36_000_000);
+    let mut b = bodies().unwrap();
+    let (town, ground) = town();
+    let placed = town.surfaces[&ground]
+        .place(
+            other,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            other_at,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    b.add_body(humanoid(), placed).unwrap();
+    b.begin(0);
+
+    // To the world's root: refused by name as it starts.
+    let root = im.tree.node(im.tree.root()).unwrap().id();
+    let r = walk(&mut b, 1, root);
+    assert_eq!(r.map_err(|e| e.name), Err("move.whole-world"));
+
+    // To another Soul: beside it, about 1.2 m away on the walker's side (south of it).
+    walk(&mut b, 2, other).expect("the walk to the other Soul starts");
+    assert_eq!(run(&mut b, soul(2)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    let gap = flat(at, other_at);
+    println!("beside: {gap} um from the other Soul, at {at:?}");
+    assert_eq!(frame, ground);
+    assert!(
+        (900_000..=1_600_000).contains(&gap),
+        "speaking distance: {gap} um"
+    );
+    assert!(at.z < other_at.z, "on the walker's side: {at:?}");
+
+    // To the ground: on the ground, at its middle, never in a building's room.
+    let (g_frame, g_mid) = middle(ground);
+    walk(&mut b, 3, ground).expect("the walk to the ground starts");
+    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    println!(
+        "ground: on {} at {at:?}, middle {g_mid:?}",
+        replica::world_model::show(frame)
+    );
+    assert_eq!((frame, g_frame), (ground, ground), "still on the ground");
+    assert!(
+        flat(at, g_mid) < 1_000_000,
+        "at the ground's middle: {at:?}"
+    );
+
+    // To the building: inside its main room, the stair hall.
+    let (h_frame, h_mid) = middle(n("building/r0a"));
+    let mut b = bodies().unwrap();
+    b.begin(0);
+    walk(&mut b, 4, n("building")).expect("the walk to the building starts");
+    assert_eq!(run(&mut b, soul(4)), Ok(()));
+    let (frame, at) = b.pose(body_id()).unwrap();
+    println!(
+        "building: on {} at {at:?}, the stair hall's middle {h_mid:?}, after {} ms",
+        replica::world_model::show(frame),
+        b.runner.now / 1000
+    );
+    assert_eq!(frame, h_frame, "on the stair hall's floor");
+    // Inside the stair hall's outline (5.8 m by 11.8 m clear round its middle, in the floor's frame); N9 grants the
+    // nearest free standing spot to its middle, off the stair.
+    assert!(
+        (at.x - h_mid.x).abs() <= 2_900_000 && (at.z - h_mid.z).abs() <= 5_900_000,
+        "inside the stair hall: {at:?}"
+    );
+}
+
+/// 0.135: a walk to a thing or another Soul ends facing it, as a person turns to what they came to; a walk to the
+/// ground (a place it ends in) keeps the facing it had. The body's facing is the world's (its pose's orientation), not
+/// the drawing's: the page reads it from the stream.
+#[test]
+fn a_walk_to_a_thing_or_a_soul_ends_facing_it() {
+    use worldd::bodies::{Ask, Asked};
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    let walk = |b: &mut Bodies, i: u64, to: Id| {
+        b.start(vec![(
+            soul(i),
+            Asked {
+                body: body_id(),
+                actor: Actor::Soul(body_id()),
+                ask: Ask::Walk {
+                    node: to,
+                    point: None,
+                    gait: None,
+                },
+                fallbacks: vec![],
+            },
+        )])
+        .remove(0)
+        .1
+    };
+    let run = |b: &mut Bodies, id: Id| -> Result<(), String> {
+        for _ in 0..8_000 {
+            let now = b.runner.now + b.runner.tick;
+            if let Some((_, r)) = b.step(now).into_iter().find(|(i, _)| *i == id) {
+                // the turn is taken at the next step, as any input is
+                let _ = b.step(b.runner.now + b.runner.tick);
+                return r;
+            }
+        }
+        panic!("the walk never ended");
+    };
+    // How far (µm, on the level, at 1 m out) the body's facing (+x turned by its orientation) is from pointing at `to`.
+    let off = |b: &Bodies, to: Vec3| {
+        let m = b.runner.controller.body(body_id()).unwrap();
+        let f = m
+            .pose
+            .orientation
+            .rotate(Vec3::new(1_000_000, 0, 0))
+            .unwrap();
+        let (dx, dz) = (to.x - m.pose.position.x, to.z - m.pose.position.z);
+        let l = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() as i64;
+        let (ux, uz) = (dx * 1_000_000 / l, dz * 1_000_000 / l);
+        (i128::from(f.x - ux).pow(2) + i128::from(f.z - uz).pow(2)).isqrt() as i64
+    };
+    // A second Soul 6 m north-east of the walker, so the walk does not already end facing it by chance.
+    let other = Id::new(Scope([7; 16]), 9_020).unwrap();
+    let other_at = Vec3::new(-36_000_000, 0, 34_000_000);
+    let mut b = bodies().unwrap();
+    let (town, ground) = town();
+    let placed = town.surfaces[&ground]
+        .place(
+            other,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            other_at,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    b.add_body(humanoid(), placed).unwrap();
+    b.begin(0);
+
+    // To another Soul: it ends beside it, facing it (it started facing +x, and walking never turns the world's body).
+    walk(&mut b, 1, other).expect("the walk to the other Soul starts");
+    assert_eq!(run(&mut b, soul(1)), Ok(()));
+    let o = off(&b, other_at);
+    println!("to the other Soul: facing {o} um off it at 1 m");
+    assert!(o < 20_000, "faces the Soul it walked to: {o} um off at 1 m");
+
+    // To a thing (the yard's frame stand, its origin from the tree): it ends facing the thing's origin.
+    let stand = im.nodes["yard-stand"];
+    walk(&mut b, 2, stand).expect("the walk to the stand starts");
+    assert_eq!(run(&mut b, soul(2)), Ok(()));
+    let (frame, _) = b.pose(body_id()).unwrap();
+    let origin = select::origin_in(&im.tree, stand, frame).unwrap();
+    let o = off(&b, origin);
+    println!("to the stand: facing {o} um off its origin at 1 m");
+    assert!(
+        o < 20_000,
+        "faces the thing it walked to: {o} um off at 1 m"
+    );
+
+    // To the ground, a place it ends in: the facing it had is kept.
+    let before = b
+        .runner
+        .controller
+        .body(body_id())
+        .unwrap()
+        .pose
+        .orientation;
+    walk(&mut b, 3, ground).expect("the walk to the ground starts");
+    assert_eq!(run(&mut b, soul(3)), Ok(()));
+    assert_eq!(
+        b.runner
+            .controller
+            .body(body_id())
+            .unwrap()
+            .pose
+            .orientation,
+        before,
+        "a walk to a place keeps its facing"
+    );
+}
+
+/// I4's durable half (0.133 verification): a walk outlives the gateway connection it came on (the gateway restarted
+/// under it), and its answer comes on the gateway's next connection, once: handed on at once while one is up, held
+/// until one asks while none is (`worldd::handover`).
+#[test]
+#[allow(clippy::disallowed_methods)] // waits in real time for the walk back to end
+fn i4_a_walks_answer_outlives_its_gateway_connection_once() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("i4-handover-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let door = door.clone();
+            std::thread::spawn(move || answers::serve(door, stream));
+        }
+    });
+    // A gateway's connection: its handover ask first.
+    let gateway = || {
+        let mut s = UnixStream::connect(&path).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let ask = worldd::handover::ask();
+        s.write_all(&u32::try_from(ask.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&ask).unwrap();
+        Client(s)
+    };
+    // The sequence of the next answer that is not a run's progress; `None` when nothing comes.
+    let final_of = |c: &mut Client| -> Option<u64> {
+        loop {
+            let mut len = [0u8; 4];
+            c.0.read_exact(&mut len).ok()?;
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            c.0.read_exact(&mut frame).unwrap();
+            if answers::progress_of(&frame).is_some() {
+                continue;
+            }
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.get(&2) else {
+                panic!("an answer")
+            };
+            match a.get(&2) {
+                Some(Value::Uint(s)) => return Some(*s),
+                _ => panic!("an answer names its sequence"),
+            }
+        }
+    };
+    // The walk goes on the first connection, which ends at once; the next one is told how it ended.
+    let mut first = gateway();
+    first.send(1, "eden:walk", Some(thing()));
+    drop(first);
+    let mut second = gateway();
+    assert_eq!(
+        final_of(&mut second),
+        Some(1),
+        "handed on to the next gateway"
+    );
+    // A walk back, sent on the second connection, which ends at once too: the walk ends with no gateway connected.
+    let back = start();
+    let (_, ground) = town();
+    let mut i = Intent::read(&intent_bytes(
+        body_id(),
+        2,
+        "eden:walk",
+        Some(Target::Node(ground)),
+        &[],
+        answers::now() + 60_000_000,
+    ))
+    .unwrap();
+    let int = |n: i64| {
+        if n >= 0 {
+            Value::Uint(n as u64)
+        } else {
+            Value::Nint(n.unsigned_abs() - 1)
+        }
+    };
+    i.parameters.insert(
+        1,
+        Value::Array([back.x, back.y, back.z].into_iter().map(int).collect()),
+    );
+    let bytes = encode(&i.to_value()).unwrap();
+    second
+        .0
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    second.0.write_all(&bytes).unwrap();
+    drop(second);
+    let ended = || {
+        logged(&store.0.lock().unwrap().bytes)
+            .values()
+            .flatten()
+            .filter(|e| e.1 == MOVE_ENDED)
+            .count()
+    };
+    let by = std::time::Instant::now() + Duration::from_secs(30);
+    while ended() < 2 {
+        assert!(std::time::Instant::now() < by, "the walk back ends");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut third = gateway();
+    assert_eq!(final_of(&mut third), Some(2), "held for the next gateway");
+    third
+        .0
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    assert_eq!(final_of(&mut third), None, "each answer comes once");
+    drop(third);
+    world.stop();
 }

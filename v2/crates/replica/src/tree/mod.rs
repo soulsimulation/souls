@@ -27,7 +27,7 @@ mod check;
 mod seal;
 
 pub use check::Rules;
-pub use seal::Sealed;
+pub use seal::{BIG_FIELD, Sealed};
 
 use crate::effects::{
     Body, Change, Effect, Flight, Header, LinkState, NodeState, Part, Refusal, State, TimerRec,
@@ -315,6 +315,16 @@ pub struct Tree {
     /// The state hash's SHA-256 of a node's record up to its children (`seal`, #1960), by slot, for nodes whose
     /// record is large: kept while only what is below the node changes, let go when the node itself does.
     heads: HashMap<u32, Sha256>,
+    /// The records of a node's big fields (`seal`, #4713), by slot and field: each one's hash, and whether a seal has
+    /// given its bytes yet. Kept while the node itself is unchanged, let go when it changes, as `heads` are.
+    bigs: HashMap<u32, BTreeMap<u64, Big>>,
+}
+
+/// A big field's record as kept (`Tree`'s `bigs`): its hash, and whether a seal has given it.
+#[derive(Clone, Copy)]
+struct Big {
+    hash: Hash,
+    given: bool,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
@@ -359,6 +369,7 @@ impl Tree {
             kept: None,
             rehashed: 0,
             heads: HashMap::new(),
+            bigs: HashMap::new(),
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -488,6 +499,7 @@ impl Tree {
             kept: self.kept.clone(),
             rehashed: 0,
             heads: HashMap::new(),
+            bigs: HashMap::new(),
         }
     }
 
@@ -580,6 +592,18 @@ impl Tree {
         }
     }
 
+    /// The kind of node `id`, live or removed in the part being applied (a removed node leaves lookup at once, but its
+    /// slot keeps its record until the part ends).
+    pub(crate) fn kind_any(&self, id: Id) -> Option<Name> {
+        let slot = self.by_id.get(&id).copied().or_else(|| {
+            self.dead
+                .iter()
+                .copied()
+                .find(|s| self.nodes[*s as usize].id == id)
+        })?;
+        Some(self.names[self.nodes[slot as usize].kind as usize].clone())
+    }
+
     fn live(&self, id: Id) -> R<u32> {
         match self.by_id.get(&id) {
             Some(s) if self.nodes[*s as usize].life == Life::Live => Ok(*s),
@@ -610,6 +634,9 @@ impl Tree {
     fn touch(&mut self, slot: u32) {
         if !self.heads.is_empty() {
             self.heads.remove(&slot);
+        }
+        if !self.bigs.is_empty() {
+            self.bigs.remove(&slot);
         }
         self.touch_below(slot);
     }
@@ -838,6 +865,7 @@ impl Tree {
         let slot = match self.free.pop() {
             Some(s) => {
                 self.heads.remove(&s);
+                self.bigs.remove(&s);
                 let generation = self.nodes[s as usize].generation;
                 self.nodes[s as usize] = NodeRec { generation, ..rec };
                 s
@@ -868,6 +896,7 @@ impl Tree {
             self.moving_free.push(ix);
         }
         self.heads.remove(&slot);
+        self.bigs.remove(&slot);
         self.free.push(slot);
     }
 
@@ -1025,7 +1054,7 @@ impl Tree {
         if result.is_ok()
             && let Some(rules) = rules
         {
-            result = rules.balanced(effects);
+            result = rules.balanced(self, effects);
         }
         if result.is_ok() && self.gaps_met != self.gaps.len() {
             result = refuse(
@@ -1217,7 +1246,8 @@ impl Tree {
                 own.check(pose.frame.node)?;
                 own.audience(*audience, *node)?;
                 self.fresh(*node)?;
-                if !header.kinds.contains(kind) {
+                // A creator's kind is pinned by its `souls:kind` node at the root, not the header (#3697).
+                if !header.kinds.contains(kind) && !crate::kinds::defined::defines(self, kind) {
                     return refuse("kind-not-in-header", kind.as_str());
                 }
                 let parent = self
