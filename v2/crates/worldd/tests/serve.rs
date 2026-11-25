@@ -1135,9 +1135,9 @@ fn i1960_a_world_starts_through_slow_store_reads_and_listens_on_an_unreachable_s
     w.kill();
 
     // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
-    // go unanswered for 6 s, past the client's 5 s.
+    // go unanswered for 6 s, past the client's 5 s, both tries of each (`s3.rs` HEDGE).
     // Since R17 the archive opens on its own thread, after the world listens.
-    s.stall_reads(2, Duration::from_secs(6), "/header");
+    s.stall_reads(4, Duration::from_secs(6), "/header");
     let begun = Instant::now();
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
