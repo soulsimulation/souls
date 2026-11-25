@@ -251,6 +251,9 @@ test('25 Nov: a pointer read that never answers is given up, and the next poll r
   // The reader's read timeout, cut to 50 ms here so the test runs at its own pace.
   const timeout = AbortSignal.timeout;
   AbortSignal.timeout = () => timeout.call(AbortSignal, 50);
+  // AbortSignal.timeout's timer does not hold the event loop open: while the hung read waits on it alone, a ref'd timer
+  // keeps the test from being cancelled with its promise still pending (CI).
+  const awake = setInterval(() => {}, 1000);
   try {
     const POLL_MS = 250, POLLS = 80, NEWEST = 3;
     const world = new World(START, [{}, {}, {}, {}]);
@@ -265,5 +268,5 @@ test('25 Nov: a pointer read that never answers is given up, and the next poll r
     }, 'hung', { quietAt: (i) => (NEWEST + 1) * PERIOD_US + i * POLL_MS * 1000, fails: () => false, hangs: (path, i) => i === 40 && path.endsWith('/pointer') });
     assert.equal(errors.length, 1, `the hung read is given up as an error: ${errors}`);
     assert.ok((seen.get(POLLS) ?? 0) > (seen.get(40) ?? Infinity), `and the polls after it read the pointer again: ${seen.get(40)} then ${seen.get(POLLS)}`);
-  } finally { AbortSignal.timeout = timeout; }
+  } finally { AbortSignal.timeout = timeout; clearInterval(awake); }
 });
