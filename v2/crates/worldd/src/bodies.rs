@@ -1298,7 +1298,7 @@ impl Bodies {
         // nearest walkable point at its edge on the walker's way there. A walker already within it is there.
         eprintln!(
             "DBG goal {:?} fields {:?} half {:?} pose {:?}",
-            node.counter,
+            node,
             tree.handle(node)
                 .and_then(|h| tree.node(h))
                 .map(|n| n.fields().keys().copied().collect::<Vec<_>>()),
