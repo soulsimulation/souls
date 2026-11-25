@@ -132,7 +132,7 @@ bundle() {
   # is x.y.z (build.mjs), so a minor release's (0.132) is stamped 0.132.0; a patch's (0.131.1) is its own.
   local stamp=$version
   if [[ $version =~ ^[0-9]+\.[0-9]+$ ]]; then stamp=$version.0; fi
-  node "$client/served/build.mjs" --out "$out/served" --version "$stamp" --pkg "$pkg" > /dev/null
+  node "$client/served/build.mjs" --out "$out/served" --version "$stamp" --pkg "$pkg" --commit "$sha" > /dev/null
   COPYFILE_DISABLE=1 tar -C "$out/served" -cf "$out/artifacts/client.tar" .
   for t in "$out"/served/*; do
     [ "${t##*/}" = soul-client.json ] && continue

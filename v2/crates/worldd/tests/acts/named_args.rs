@@ -363,7 +363,7 @@ fn fixture() -> (NamedRun, Client) {
             text,
             path,
         },
-        Client(socket, w1(), 0, Vec::new()),
+        Client(socket, w1(), 0, Vec::new(), Vec::new()),
     )
 }
 fn pair(key: &str, value: Value) -> Value {

@@ -144,7 +144,8 @@ test('A1: the one line, in an empty folder, ends with a running client', async (
   rt = runtimeOf(home, soul);
 
   const status = await eden('status');
-  assert.equal(status.started, true, JSON.stringify(status));
+  // #4766: once approved, the pairing starts the daemon itself, so `status` may find it running already.
+  assert.ok(status.started === true || status.pid > 0, JSON.stringify(status));
   assert.match(commandOf(daemonPid(soul)), /bin\/client\/1\.0\.0-[0-9a-f]{16}\/v2\/client\/src\/daemon\/daemon\.mjs/, 'the daemon runs from the served client');
   assert.match(commandOf(daemonPid(soul)), /bin\/lib\/[0-9a-f]{16}/, 'with the library fetched by hash');
   await waitFor(async () => (await request(rt.socket, { op: 'status' })).connected);

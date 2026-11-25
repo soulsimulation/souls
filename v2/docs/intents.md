@@ -63,8 +63,10 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 8. **A checked act gets a receipt or a refusal.** A receipt is `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log
    sequence, ...], 6: {name: id}}`, naming the entries that carried it out (one act may be several, since each entry
    writes one node); 6 is an edit's (rule 15), left out when empty. A refusal is `{.., 3: 2, 4: reason, 5: version
-   now, 6: [node, ...], 7: operation}`, naming what changed since its basis (6 left out when empty) and, for an
-   edit, the operation that failed by its place in the batch (7 left out when none). Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
+   now, 6: [node, ...], 7: operation, 8: detail}`, naming what changed since its basis (6 left out when empty), for an
+   edit, the operation that failed by its place in the batch (7 left out when none), and the refusal's own words
+   (8: UTF-8 bytes, at most 240, left out when it has none; `together.too-far`'s say how far apart and how far the
+   move reaches). A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
    walk, moves and pauses, C20), and a walk's by its planned route's time from when it is planned (C29). Either is
    answered in progress in the tick its run starts or its route is planned, `{.., 3: 3, 4: intent id, 5: µs left}`
