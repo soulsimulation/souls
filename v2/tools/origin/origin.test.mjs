@@ -245,6 +245,20 @@ test('V9b: only public history/live refreshes its cache and strong ETag across e
   assert.equal((await fetch(`${url}.tmp`)).status, 404);
 });
 
+test('V4: a day\'s event index is served at the day\'s URL, as a file or beside its split hours as `day`', async () => {
+  const events = join(dir, 'w', 'split-instance', 'history', 'history', 'everyone', 'events');
+  mkdirSync(join(events, '00020781'), { recursive: true });
+  writeFileSync(join(events, '00020781', 'day'), 'day index');
+  writeFileSync(join(events, '00020781', '05'), 'hour five');
+  writeFileSync(join(events, '00020782'), 'whole day');
+  const at = `${new URL(base).origin}/w/split-instance/history/history/everyone/events/`;
+  const get = async (p) => { const r = await fetch(at + p); return [r.status, await r.text()]; };
+  assert.deepEqual(await get('00020781'), [200, 'day index']);
+  assert.deepEqual(await get('00020781/05'), [200, 'hour five']);
+  assert.deepEqual(await get('00020782'), [200, 'whole day']);
+  assert.equal((await get('00020783'))[0], 404);
+});
+
 test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {
   const at = base.slice(0, base.indexOf('/', 'http://'.length)), html = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   for (const path of ['/nope', '/l/old-lab', '/w/eden/nope', '/preview/w/eden/no/such/page', '/nope?x=1', '/w/eden/%3Cb%3E']) {

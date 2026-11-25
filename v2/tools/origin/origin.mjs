@@ -40,7 +40,7 @@ import { createServer } from 'node:http';
 import { availableParallelism } from 'node:os';
 import { promisify } from 'node:util';
 import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
-import { basename, normalize, resolve, sep } from 'node:path';
+import { basename, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
@@ -102,6 +102,9 @@ export function byteRange(range, size) {
   return start > end || start >= size ? 'unsatisfiable' : { start, end };
 }
 const SLICE = 256 * 1024; // a response body is written this much at a time (createOrigin's stallMs)
+
+/** A day's object of a world's public event index (`…/history/everyone/events/<day>`). */
+const EVENTS_DAY = /(?:^|\/)history\/everyone\/events\/-?\d+$/;
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -192,8 +195,11 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     } catch {
       return miss();
     }
-    const file = normalize(resolve(root, rel));
+    let file = normalize(resolve(root, rel));
     if (!file.startsWith(root + sep)) return miss();
+    // V4: a day's event index whose hours split off sits in the day's directory, beside them, as `day` (worldd's
+    // history mirror); its URL stays the day's.
+    if (EVENTS_DAY.test(rel) && (await stat(file).then((s) => s.isDirectory(), () => false))) file = join(file, 'day');
     const kind = kindOf(file);
     if (!kind) return miss();
     let body, etag;

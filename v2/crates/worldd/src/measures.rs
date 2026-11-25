@@ -494,18 +494,33 @@ pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
 
 /// The public history mirror's faults (`history_export` in `health.json`): keys the archiver stored but could not copy
 /// into the world's public history directory, the count and the last key with its fault. The store holds the truth;
-/// a key the mirror refuses is skipped and the world goes on. No field until the first fault.
-pub struct ExportFaults(Mutex<(u64, String)>);
+/// a key the mirror refuses is skipped and the world goes on. No field until the first fault. The keys refused so far
+/// (at most [`EXPORT_KEYS_HELD`]) are held so each is logged once, not at every write of it.
+pub struct ExportFaults(Mutex<(u64, String, std::collections::BTreeSet<String>)>);
+
+/// The most refused keys [`ExportFaults`] remembers; past it, a newly refused key is logged at each refusal.
+pub const EXPORT_KEYS_HELD: usize = 4096;
 
 /// This process's public history mirror.
-pub static HISTORY_EXPORT: ExportFaults = ExportFaults(Mutex::new((0, String::new())));
+pub static HISTORY_EXPORT: ExportFaults = ExportFaults(Mutex::new((
+    0,
+    String::new(),
+    std::collections::BTreeSet::new(),
+)));
 
 impl ExportFaults {
-    /// `key` was not mirrored, refused with `fault`.
-    pub fn fault(&self, key: &str, fault: &str) {
+    /// `key` was not mirrored, refused with `fault`; whether this is its first refusal (to log).
+    pub fn fault(&self, key: &str, fault: &str) -> bool {
         let mut f = self.0.lock().unwrap_or_else(|e| e.into_inner());
         f.0 += 1;
         f.1 = format!("{key}: {fault}");
+        if f.2.contains(key) {
+            return false;
+        }
+        if f.2.len() < EXPORT_KEYS_HELD {
+            f.2.insert(key.to_owned());
+        }
+        true
     }
 
     /// The faults so far.
@@ -753,20 +768,26 @@ mod tests {
     /// A key the public history mirror could not hold is counted in `health.json`, by its key; none, no field.
     #[test]
     fn a_history_export_fault_is_counted_by_its_key() {
-        let faults = ExportFaults(Mutex::new((0, String::new())));
+        let faults = ExportFaults(Mutex::new((0, String::new(), Default::default())));
         let json = || {
             let mut o = String::new();
             faults.json(&mut o);
             o
         };
         assert_eq!(json(), "");
-        faults.fault(
+        assert!(faults.fault(
+            "history/everyone/events/00020781/05",
+            "history-export: directory symlink or type mismatch"
+        ));
+        // The same key again is counted, not logged again.
+        assert!(!faults.fault(
             "history/everyone/events/00020781/05",
             "history-export: directory symlink or type mismatch",
-        );
+        ));
+        assert!(faults.fault("history/everyone/events/00020781/06", "another key"));
         assert_eq!(
             json(),
-            ",\"history_export\":{\"faults\":1,\"last\":\"history/everyone/events/00020781/05: history-export: directory symlink or type mismatch\"}"
+            ",\"history_export\":{\"faults\":3,\"last\":\"history/everyone/events/00020781/06: another key\"}"
         );
     }
 
