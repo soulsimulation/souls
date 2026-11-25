@@ -113,13 +113,16 @@ type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'part'; p: PartRec } | { t: 
 
 /** Runs the worker on `world` (newest part `newest`, parts up to `served` served, the rest 404): its first poll, then
  *  `polls` more, each followed by `each(messages of that poll, poll index)`. */
-async function run(world: World, newest: number, served: number, polls: number, each: (m: Msg[], i: number) => void, tag: string) {
+async function run(world: World, newest: number, served: number, polls: number, each: (m: Msg[], i: number) => void, tag: string,
+  still?: { quietAt: (i: number) => number; fails: (path: string, i: number) => boolean }) {
   (globalThis as { __world?: World }).__world = world;
   const baseline = encode(new Map([[3, new Map([[1, 0]])]]));
   const generation = createHash('sha256').update(baseline).digest('hex');
   const pointer = JSON.stringify({ newest, newestTo: (newest + 1) * PERIOD_US, period: PERIOD_US, anchorWorld: (newest + 1) * PERIOD_US, anchorWallMs: Date.now(), header: 'h', baseline: generation, generation });
+  // `still`: the pointer of a world writing no part, its quiet time moving on at each poll, and reads that fail.
+  let poll = 0;
   const files = (path: string): Uint8Array | string | null => {
-    if (path === '/a/b/c/d/pointer') return pointer;
+    if (path === '/a/b/c/d/pointer') return still ? JSON.stringify({ ...JSON.parse(pointer), quietUntil: still.quietAt(poll) }) : pointer;
     if (path === '/a/headers/h') return 'header';
     const g = `/a/b/c/d/g/${generation}/`;
     if (path === `${g}baseline`) return baseline;
@@ -130,6 +133,7 @@ async function run(world: World, newest: number, served: number, polls: number, 
   const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
   try {
     globalThis.fetch = (async (input: string | URL) => {
+      if (still?.fails(new URL(String(input)).pathname, poll)) throw new TypeError('Failed to fetch');
       const body = files(new URL(String(input)).pathname);
       return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
     }) as typeof fetch;
@@ -141,7 +145,7 @@ async function run(world: World, newest: number, served: number, polls: number, 
     while (!ticks.length && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
     assert.ok(ticks.length, 'the first poll ends');
     each(got.splice(0), 0);
-    for (let i = 1; i <= polls; i++) { await ticks[0](); each(got.splice(0), i); }
+    for (let i = 1; i <= polls; i++) { poll = i; await ticks[0](); each(got.splice(0), i); }
   } finally {
     globalThis.fetch = before.fetch;
     globalThis.setInterval = before.setInterval;
@@ -213,4 +217,28 @@ test('a reader whose parts stop coming in a catch-up says nothing more, and the 
   const shown = notices.filter(([, n]) => n === STREAM_NOTICE).map(([t]) => t);
   assert.equal(shown[0], lastLife + STREAM_SILENCE_MS, 'the notice shows 15 s after the last sign of life');
   assert.ok(notices.every(([t, n]) => (t < lastLife + STREAM_SILENCE_MS) === (n !== STREAM_NOTICE)), 'and not before');
+});
+
+test('25 Nov: in a still world one failed read of the pointer never shows the notice once its pointer moves on again', async () => {
+  // Eden on soul.game: no part for 10 minutes, and the page said the stream was not available until the next part.
+  const POLL_MS = 250, POLLS = 2 * 60 * 4, NEWEST = 3;
+  const world = new World(START, [{}, {}, {}, {}]);
+  const bridge = new V2Bridge({ rulesVersion: 'test/1' }), life = new StreamLife();
+  // As use-v2-souls.ts keeps them: the error first seen, by parts and by time.
+  let lastError: string | null = null, errorAtParts: number | null = null, errorAt: number | null = null;
+  const notices: number[] = [], errors: string[] = [];
+  await run(world, NEWEST, NEWEST, POLLS, (msgs, i) => {
+    const now = i * POLL_MS;
+    for (const m of msgs) {
+      if (m.t === 'error') errors.push((m as { message: string }).message);
+      bridge.receive(m as Parameters<V2Bridge['receive']>[0]);
+    }
+    const v = bridge.view;
+    if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = life.parts; errorAt = now; }
+    life.see(v, now);
+    if (streamNotice({ failed: false, error: v.error, errorAtParts, errorAt, parts: life.parts, startedAt: 0, lastPartAt: life.lastPartAt, now })) notices.push(now);
+  }, 'still', { quietAt: (i) => (NEWEST + 1) * PERIOD_US + i * POLL_MS * 1000, fails: (path, i) => i === 40 && path.endsWith('/pointer') });
+  assert.equal(errors.length, 1, 'the one failed read is an error');
+  // At most the failed poll's own 250 ms (the status line waits 4 s before it shows a passing reason); none after it.
+  assert.ok(notices.length <= 1 && notices.every((t) => t === 40 * POLL_MS), `no notice through two still minutes: ${notices}`);
 });
