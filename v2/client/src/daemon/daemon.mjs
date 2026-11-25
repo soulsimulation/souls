@@ -1979,7 +1979,8 @@ async function answer(req, conn = null) {
         // A dance or a workout with something in hand is refused `hand_not_empty`: name it and how to put it down.
         const held = refused && r.answers.at(-1)?.reason === 'hand_not_empty' ? holdingOf(rows).holding?.[0] : null;
         const why = aboard ?? (held ? `holding ${held.name} (${held.id}): put it down first (set-down ${held.id} here), then send it again` : null);
-        const more = { ...(h ? { held: h } : {}), ...(aboard && done ? { aboard } : {}), ...(why && refused ? { why } : {}) };
+        // Holding something, another offer of the body (a wave) is no answer: the `why` is what to do next.
+        const more = { ...(h ? { held: h } : {}), ...(aboard && done ? { aboard } : {}), ...(why && refused ? { why } : {}), ...(held ? { try: undefined } : {}) };
         return { ...(Object.keys(more).length ? { receipt: { ...got.receipt, ...more } } : {}), ...hand };
       } : null, { now: !done });
     }
