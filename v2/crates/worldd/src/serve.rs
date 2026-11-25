@@ -2109,7 +2109,7 @@ fn recorded_body(
     // A body that sat stands at its seat's stand point until its seat is held again, or for good when the seat is gone
     // or taken: at a point it may stand on.
     let moved = if pose.support == replica::pose::Support::Slot {
-        worldd::bodies::legal_near(surface, id, frame, point, facing, build)?
+        worldd::bodies::legal_near(town, surface, id, frame, point, facing, build)?
     } else {
         sim::slots::placed_off(surface, id, frame, point, facing, build)?
     };
@@ -3551,6 +3551,25 @@ fn serve(args: &[String]) -> R<()> {
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
+    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground
+    // that holds it is the main ground: a stand point or a restart is never put in ground no walk from there reaches.
+    let int = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let entry = match meta.get("entry").and_then(Json::arr) {
+        Some([x, z]) => int(x).zip(int(z)),
+        _ => None,
+    }
+    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    town.set_entry(entry);
+    match town.main_ground() {
+        Some((held, dry)) => println!(
+            "main ground: the entry's part holds {held} of {dry} dry pieces; the rest is sealed off from it"
+        ),
+        None => println!("main ground: no dry ground at the entry; no ground is sealed"),
+    }
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
     let trips = worldd::places::ride_trips(&town, &kinds, &places);
@@ -3719,18 +3738,6 @@ fn serve(args: &[String]) -> R<()> {
     std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
-
-    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
-    let int = |v: &Json| match v {
-        Json::Int(n) => i64::try_from(*n).ok(),
-        _ => None,
-    };
-    let entry = match meta.get("entry").and_then(Json::arr) {
-        Some([x, z]) => int(x).zip(int(z)),
-        _ => None,
-    }
-    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
-    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     cfg.join = Some(Join {
         entry: (ground, entry),
         family: humanoid()?,

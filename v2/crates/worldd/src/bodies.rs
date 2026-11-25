@@ -696,8 +696,15 @@ impl Bodies {
                             _ => resume = clean.map(|to| (surface, Some(to), r)),
                         }
                         if matches!(r, sim::slots::Resumed::Held) {
-                            let m =
-                                legal_near(s, body.id, p.frame, p.position, p.orientation, build)?;
+                            let m = legal_near(
+                                &self.town,
+                                s,
+                                body.id,
+                                p.frame,
+                                p.position,
+                                p.orientation,
+                                build,
+                            )?;
                             self.free_near(s, m, build)
                         } else {
                             sim::slots::placed_off(
@@ -749,9 +756,16 @@ impl Bodies {
                             .map(|b| b.pose)
                             .and_then(|p| {
                                 let s = self.town.surfaces_for(build.size)?.get(&floor)?;
-                                let m =
-                                    legal_near(s, id, p.frame, p.position, p.orientation, build)
-                                        .ok()?;
+                                let m = legal_near(
+                                    &self.town,
+                                    s,
+                                    id,
+                                    p.frame,
+                                    p.position,
+                                    p.orientation,
+                                    build,
+                                )
+                                .ok()?;
                                 Some(self.free_near(s, m, build))
                             });
                         self.runner.controller.remove(id);
@@ -882,13 +896,19 @@ impl Bodies {
         if taken.iter().all(apart) {
             return moved;
         }
-        sim::slots::clear_spot(
+        // Never into ground sealed off from the main ground: the nearest clear point that is not.
+        let open = |q: [i64; 2]| {
+            let at = Vec3::new(q[0], p.position.y, q[1]);
+            !sim::mover::Floors::sealed(&self.town, p.frame.node, at, build)
+        };
+        sim::slots::clear_spot_where(
             floor,
             [p.position.x, p.position.z],
             &taken,
             RESTART_APART,
             100_000,
             5_000_000,
+            &open,
         )
         .and_then(|q| {
             floor
@@ -929,7 +949,7 @@ impl Bodies {
                 name: "no-surface",
                 detail: "the ground for its build".into(),
             })?;
-        let moved = legal_near(s, id, frame, entry, logged.orientation, build)?;
+        let moved = legal_near(&self.town, s, id, frame, entry, logged.orientation, build)?;
         let moved = self.free_near(s, moved, build);
         let to = moved.pose.position;
         self.logged.insert(id, *logged);
@@ -1914,8 +1934,10 @@ impl Bodies {
 
 /// `id` placed on `floor` at `at`, else at the floor's nearest legal point to it by the walk-out's rule
 /// (`sim::ground::exits::nearest`): a point it may stand on, placed there at once (a restart, not a move), or
-/// `off-surface` when the floor holds none for its build.
+/// `off-surface` when the floor holds none for its build. Never ground sealed off from the main ground (`floors`'
+/// [`sim::mover::Floors::sealed`]: a pocket no walk from outside reaches), so a restart never shuts a body in.
 pub fn legal_near(
+    floors: &dyn sim::mover::Floors,
     floor: &sim::mover::Surface,
     id: Id,
     frame: Frame,
@@ -1923,13 +1945,17 @@ pub fn legal_near(
     facing: Quat,
     build: Build,
 ) -> R<Moved> {
-    if let Ok(b) = floor.place_built(id, frame, at, facing, build) {
+    let sealed = |p: Vec3| floors.sealed(frame.node, p, build);
+    if !sealed(at)
+        && let Ok(b) = floor.place_built(id, frame, at, facing, build)
+    {
         return Ok(b);
     }
-    let (_, to) = sim::ground::exits::nearest(floor.pieces(), at).ok_or_else(|| Refusal {
-        name: "off-surface",
-        detail: format!("({}, {}) µm: no legal point on its floor", at.x, at.z),
-    })?;
+    let (_, to) = sim::ground::exits::nearest_where(floor.pieces(), at, &|p| !sealed(p))
+        .ok_or_else(|| Refusal {
+            name: "off-surface",
+            detail: format!("({}, {}) µm: no legal point on its floor", at.x, at.z),
+        })?;
     floor.place_built(id, frame, to, facing, build)
 }
 
