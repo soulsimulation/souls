@@ -56,7 +56,11 @@ v2 adapter turns the engine's public stream into that frame's input.
    never moved.
 4. **Takes.** `apps/web/src/v2-engine/takes.ts` (`chunkOf`) turns those samples into one-second `mars-take/4`
    chunks, the format the old server streams. Each tick carries the body's position, its heading (from its motion),
-   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A chunk is built only once
+   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A held thing is the hand
+   prop: the old renderer (`humans.ts`) carries it in one hand at the engine's carry point, standing and walking, a
+   book closed; a move at a book in the body's own hand (its `read` form) is the `read` pose, the book open in both
+   hands, until the run ends. A load two Souls carry is not a prop: it rides its carry (`take-parts.ts`), gripped.
+   A chunk is built only once
    the world is past its end, so a body is never pushed past its newest sample.
    A thing on a course (a balloon, a punt) is in the chunks too (0.135 K4): a `vehicle` record with a `carrier`,
    under the page's id for that thing, where the replica's `courseAt` has it at each tick. The page's own layers draw

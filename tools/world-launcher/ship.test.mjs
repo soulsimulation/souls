@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkPoster, checkQuickCheck, checkStall, checkWalks } from './deploy/ship/checks.mjs';
+import { checkPairCard, checkPoster, checkQuickCheck, checkStall, checkWalks } from './deploy/ship/checks.mjs';
 import { NOTCH_FACTOR, zoomStep } from './deploy/ship/walk.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -215,6 +215,13 @@ test('checks.mjs stall: no frame gap over 1 s, every run reported', () => {
   assert.equal(checkStall([1, 2, 3, 4].map((k) => run(k)).join('\n'), 4).ok, true);
   const bad = checkStall([run(1), run(2, [1400])].join('\n'), 4);
   assert.deepEqual(bad.problems, ['stall run 2: 1 frame gap(s) over 1 s (max 1400 ms)', '2 stall runs reported, expected 4']);
+});
+
+test('checks.mjs pair-card: 200 with the approve button and the pairing module; a 403 names the traverse cause; another page fails', () => {
+  const card = '<button id="approve" disabled>Approve</button>\n<script type="module" crossorigin src="https://cdn.test/assets/pairing-Ab12.js"></script>';
+  assert.equal(checkPairCard('200', card).ok, true);
+  assert.match(checkPairCard('403', 'forbidden').problems[0], /403: most likely Caddy \(user caddy\) cannot traverse/);
+  assert.match(checkPairCard('200', '<!doctype html><title>Souls</title><script type="module" src="/assets/main-x.js"></script>').problems[0], /not with the pairing card \(no id="approve", no pairing module script\)/);
 });
 
 test('walk.mjs zoomStep keeps the orbit eye in open space', () => {

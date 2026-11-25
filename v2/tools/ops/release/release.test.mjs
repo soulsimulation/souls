@@ -7,7 +7,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -170,6 +170,9 @@ test('move: the directory and the origin go on the release once, after the world
   assert.match(moved.stdout, /souls-directory\.service answers 401/);
   assert.match(moved.stdout, /souls-origin\.service answers 200/);
   assert.match(moved.stdout, /the directory and the origin$/m);
+  // R13: the move gave the directory the mailbox key before it restarted it, and checked the gateways (none here)
+  assert.match(read(join(ok.env.RELEASE_ETC, 'directory.args')), / --mailbox-key \S+mailbox\.key\n$/);
+  assert.match(moved.stdout, /mailbox: add --mailbox-key [\s\S]*mailbox: no gateway here to check/);
   // a second dispatch of the same release restarts nothing again
   const before = ok.lines().length;
   assert.equal(run(['move', sha], ok.env).status, 0);
@@ -260,4 +263,36 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
   assert.match(run(['bodies', 'binding'], env).stdout, /for no other world; 2 already named a catalogue/);
   const pageHash = /"name":"page.tar","hash":"(1220[0-9a-f]{64})"/.exec(read(data, 'releases', sha, 'manifest.json'))[1];
   assert.match(run(['bodies', 'worlds', join(data, 'worlds/builds', pageHash, 'page.tar')], env).stdout, /bodies: none has this release's catalogue/);
+});
+
+test('mailbox: plan shows, apply makes the key once (0600) and adds only the missing flags, a second apply changes nothing', () => {
+  const etc = join(dir, 'mailbox-etc'), key = join(etc, 'mailbox.key'), env = { RELEASE_ETC: etc, RELEASE_ACCOUNT: 'nobody-here' };
+  const read = (f) => readFileSync(f, 'utf8');
+  mkdirSync(etc, { recursive: true });
+  assert.match(run(['mailbox', 'plan'], env).stdout, /no directory here .*nothing to set\nchanged: *\n?$/);
+  writeFileSync(join(etc, 'directory.args'), 'DIRECTORYD_ARGS="--listen 127.0.0.9:7310 --store /s"\n');
+  writeFileSync(join(etc, 'gateway-a.env'), 'GATEWAYD_ARGS=--listen 127.0.0.1:7500 --view-key /v\n', { mode: 0o640 });
+  writeFileSync(join(etc, 'gateway-b.env'), 'GATEWAYD_ARGS=--listen 127.0.0.1:7501 --mailbox 127.0.0.1:1 --view-key /v\n');
+  const plan = run(['mailbox', 'plan'], env);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.match(plan.stdout, /would make .*mailbox\.key \(a new key, 0600\)/);
+  assert.match(plan.stdout, /^changed: key directory a b$/m);
+  assert.equal(existsSync(key), false, 'a plan changes nothing');
+  assert.doesNotMatch(read(join(etc, 'directory.args')), /mailbox/);
+  const applied = run(['mailbox', 'apply'], env);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(read(key), /^[0-9a-f]{64}$/);
+  assert.equal(statSync(key).mode & 0o777, 0o600);
+  assert.equal(read(join(etc, 'directory.args')), `DIRECTORYD_ARGS="--listen 127.0.0.9:7310 --store /s --mailbox-key ${key}"\n`, 'inside its quotes');
+  assert.equal(read(join(etc, 'gateway-a.env')), `GATEWAYD_ARGS=--listen 127.0.0.1:7500 --view-key /v --mailbox 127.0.0.9:7310 --mailbox-key ${key}\n`, 'the directory\'s own address');
+  assert.equal(read(join(etc, 'gateway-b.env')), `GATEWAYD_ARGS=--listen 127.0.0.1:7501 --mailbox 127.0.0.1:1 --view-key /v --mailbox-key ${key}\n`, 'a flag already there is kept');
+  assert.equal(statSync(join(etc, 'gateway-a.env')).mode & 0o777, 0o640, 'the file keeps its mode');
+  const first = read(key), again = run(['mailbox', 'apply'], env);
+  assert.match(again.stdout, /already have it\nchanged: *\n?$/);
+  assert.equal(read(key), first, 'the key is never made again');
+  // the check, with no gateway to ask, says so and passes
+  rmSync(join(etc, 'gateway-a.env')); rmSync(join(etc, 'gateway-b.env'));
+  const checked = run(['mailbox', 'check'], env);
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.match(checked.stdout, /no gateway here to check/);
 });

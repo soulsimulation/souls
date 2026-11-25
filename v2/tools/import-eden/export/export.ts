@@ -106,7 +106,12 @@ const things: unknown[] = [];
 /** Every door, gate and arch opening, in the world frame, for pairing door things with their doorways. */
 const doorways: { thing: string; opening: string; x: number; z: number; y: number; width: number }[] = [];
 const doorThings: { id: string; x: number; y: number; z: number }[] = [];
+// A Soul's body (today's `core/humanoid@<n>`, a live world's residents) is not a thing: it is listed by its id, name and
+// pose for the record, and its Soul comes back through the directory (v2/tools/ops/cutover/eden-residents.mjs).
+const isBody = (e: Entity) => /^core[-/]humanoid@\d+$/.test(e.def);
+const residents: { id: string; name?: string; world: number[] }[] = [];
 for (const e of m.entities.values()) {
+  if (isBody(e)) { residents.push({ id: e.id, ...(e.name ? { name: e.name } : {}), world: out(world.get(e.id)!) }); continue; }
   const d = defOf(e), b = bakeOf(e), s = scale.get(e.id)!, wp = world.get(e.id)!;
   const ref = d.ref;
   keepOwn(d);
@@ -245,7 +250,7 @@ type Place = { id: string; of: string; kind: string; entity: string; name: strin
 const places: Place[] = [];
 const label = (e: Entity, d: { name: string }) => e.name ?? `${shortDef(d.name)} ${e.id}`;
 for (const e of m.entities.values()) {
-  if (e.in.parent !== 'world') continue;
+  if (e.in.parent !== 'world' || isBody(e)) continue;
   const d = defOf(e), b = bakeOf(e), name = label(e, d), short = shortDef(d.name), wp = world.get(e.id)!;
   if (b.water && WATER_KINDS.test(d.name)) {
     const w = b.water;
@@ -274,7 +279,7 @@ for (const e of m.entities.values()) {
 // landmarks: a named point thing at least 1.5 m wide standing on its own (not in another named place), no furniture
 const outer = places.slice();
 for (const e of m.entities.values()) {
-  if (e.in.parent !== 'world' || !e.name) continue;
+  if (e.in.parent !== 'world' || !e.name || isBody(e)) continue;
   const d = defOf(e); if (d.form !== 'point' || d.tags.includes('local-fixture') || NOT_LANDMARKS.test(shortDef(d.name))) continue;
   const c = d.components as Record<string, unknown>; if (c.carryable || c.seat || c.item || c.opening) continue;
   const b = bakeOf(e); if (b.rooms?.length) continue;   // a building is a place of rooms, not a landmark
@@ -288,6 +293,7 @@ for (const e of m.entities.values()) {
 const bake: Record<string, number> = {}, byRef: Record<string, number> = {};
 const add = (k: string, n = 1) => { bake[k] = (bake[k] ?? 0) + n; };
 for (const e of m.entities.values()) {
+  if (isBody(e)) continue;
   const d = m.resolvedDef(e.def)!, b = m.bake(d, e.params ?? {}, e.seed ?? 0, e.shape);
   // keyed by the def as the thing names it (its facts' `def`, the tree's def field): an old spelling (`core/humanoid@1` for
   // `core-humanoid@1`) is counted under the same name on both sides (W2b, 0.133)
@@ -323,7 +329,7 @@ const file = {
   ...(live ? live.head : { template: { path: TEMPLATE, sha256: sha(text), batches: g.batches.length } }),
   seed: live ? m.seed : SEED, entities: m.entities.size, bake, byRef, sky,
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
-  things, doors: doorPairs,
+  things, doors: doorPairs, ...(residents.length ? { residents } : {}),
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.
   // its palette (`state.ground.palette`), which the page colours the ground and its cover by (the import's F_GROUND_PALETTE)
   ground: { recipe: JSON.stringify(ground), recipeSha256: sha(JSON.stringify(ground)), tileM: 64, tiles,
@@ -334,4 +340,4 @@ const file = {
 mkdirSync(dirname(OUT), { recursive: true });
 const json = JSON.stringify(file);
 writeFileSync(OUT, json);
-console.log(JSON.stringify({ out: OUT, bytes: json.length, sha256: sha(json), replayMs, entities: m.entities.size, kinds: kinds.size, doors: doorPairs.length, doorsPaired: doorPairs.filter((p) => p.thing).length, places: places.length, tiles: tiles.length }));
+console.log(JSON.stringify({ out: OUT, bytes: json.length, sha256: sha(json), replayMs, entities: m.entities.size, residents: residents.length, kinds: kinds.size, doors: doorPairs.length, doorsPaired: doorPairs.filter((p) => p.thing).length, places: places.length, tiles: tiles.length }));
