@@ -26,12 +26,33 @@ const OPERATOR_PHASE: Duration = Duration::from_secs(30);
 /// How long one object's body may take to send or receive in a world's store ([`S3::for_world`]).
 const BODY_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The slowest link a world's write is waited on at, bytes a second ([`S3::for_world`]): a body is sent once the
+/// connection's buffer holds it, not once the store has it, so the wait for the answer runs while its tail is still on
+/// the wire. Each write waits [`TIMEOUT`] for its answer, and a second more for each this many bytes of its body; a
+/// store that does not answer a small write is still found within [`TIMEOUT`].
+const SLOWEST_LINK: u64 = 1 << 20;
+
+/// How long a write of `len` bytes waits for its answer's head once its body is sent ([`SLOWEST_LINK`]).
+fn answer_within(len: usize) -> Duration {
+    TIMEOUT + Duration::from_millis((len as u64).saturating_mul(1000) / SLOWEST_LINK)
+}
+
+/// The largest object a store's read takes, and how its write waits for an answer (one field, so [`S3`] stays small).
+#[derive(Clone, Copy)]
+enum Reads {
+    /// ureq's own cap (10 MiB), which every program but a world's store and an operator's tool keeps.
+    Capped,
+    /// A world's ([`S3::for_world`]): up to [`WORLD_READ_LIMIT`], and a write waits by its body ([`answer_within`]).
+    World,
+    /// An operator's tool's ([`S3::for_operator`], [`S3::for_probe`]): up to this many bytes.
+    Limit(u64),
+}
+
 /// One bucket of an S3-compatible store, and the prefix every key is put under.
 pub struct S3 {
     agent: ureq::Agent,
-    /// The largest object a read takes, in bytes: `None` is ureq's own cap (10 MiB), which every program but an
-    /// operator's copy keeps ([`S3::for_operator`]).
-    read_limit: Option<u64>,
+    /// The largest object a read takes, and how a write waits for its answer.
+    reads: Reads,
     /// `scheme://host[:port]`, with no path.
     endpoint: String,
     host: String,
@@ -89,7 +110,7 @@ impl S3 {
             .into();
         Ok(S3 {
             agent,
-            read_limit: None,
+            reads: Reads::Capped,
             endpoint: endpoint.to_owned(),
             host: host.to_owned(),
             bucket: bucket.to_owned(),
@@ -104,7 +125,7 @@ impl S3 {
     /// up to [`WORLD_READ_LIMIT`], where ureq's own cap is 10 MiB and a fresh Eden's stream-recovery object is already
     /// 11.8 MB (its checkpoint 10.1 MB, its import part 9.6 MB). A store out of reach is still found within [`TIMEOUT`]:
     /// the name's lookup, the connection, the request and the answer's head each have that long; only an object's body, sent or
-    /// received, has [`BODY_TIMEOUT`].
+    /// received, has [`BODY_TIMEOUT`], and a write's answer a second more for each [`SLOWEST_LINK`] bytes it sent.
     pub fn for_world(mut self) -> S3 {
         self.agent = ureq::Agent::config_builder()
             .timeout_global(None)
@@ -117,7 +138,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(WORLD_READ_LIMIT);
+        self.reads = Reads::World;
         self
     }
 
@@ -137,7 +158,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(read_limit);
+        self.reads = Reads::Limit(read_limit);
         self
     }
 
@@ -150,7 +171,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(read_limit);
+        self.reads = Reads::Limit(read_limit);
         self
     }
 
@@ -430,9 +451,10 @@ impl Store for S3 {
         status(&res, key)?;
         let etag = etag(&res, key)?;
         let body = res.body_mut();
-        let bytes = match self.read_limit {
-            Some(n) => body.with_config().limit(n).read_to_vec(),
-            None => body.read_to_vec(),
+        let bytes = match self.reads {
+            Reads::World => body.with_config().limit(WORLD_READ_LIMIT).read_to_vec(),
+            Reads::Limit(n) => body.with_config().limit(n).read_to_vec(),
+            Reads::Capped => body.read_to_vec(),
         }
         .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
         Ok(Some(Object { etag, bytes }))
@@ -450,6 +472,12 @@ impl Store for S3 {
             // object's ETag) and takes the bare one (#1960).
             When::Is(e) => req.header("if-match", e),
         };
+        if matches!(self.reads, Reads::World) {
+            req = req
+                .config()
+                .timeout_recv_response(Some(answer_within(bytes.len())))
+                .build();
+        }
         let answered = req
             .send(bytes)
             .or_else(|e| unreachable(key, e))

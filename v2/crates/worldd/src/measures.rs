@@ -357,7 +357,7 @@ impl Measures {
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
         SHIPPING.json("shipping", &mut o);
-        ARCHIVE.json("archive", &mut o);
+        ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         CREATOR.json("creator", &mut o);
         o.push_str("}\n");
         o
@@ -491,6 +491,27 @@ pub static ARCHIVE: Stream = Stream(Mutex::new(String::new()));
 /// R17: the creator's record in the directory, as [`SHIPPING`]. While it is degraded, edits fail closed.
 pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
 
+/// The history archiver's backlog (`archive.queued`, `archive.queued_bytes` and `archive.in_log` in `health.json`):
+/// the parts waiting in its channel and their bytes (at most the window), and the records past them left in the log on
+/// the disk for it to read once it has caught up (`worldd serve`'s handover sets them, under its own lock).
+pub struct Backlog(Mutex<(u64, u64, u64)>);
+
+/// This process's archiver's backlog.
+pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
+
+impl Backlog {
+    /// The backlog as it stands now.
+    pub fn set(&self, queued: u64, queued_bytes: u64, in_log: u64) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = (queued, queued_bytes, in_log);
+    }
+
+    /// `"queued":n,"queued_bytes":n,"in_log":n`.
+    fn fields(&self) -> String {
+        let (q, b, l) = *self.0.lock().unwrap_or_else(|e| e.into_inner());
+        format!("\"queued\":{q},\"queued_bytes\":{b},\"in_log\":{l}")
+    }
+}
+
 impl Stream {
     pub fn recovering(&self) {
         self.set("{\"state\":\"recovering\"}".to_owned());
@@ -513,6 +534,15 @@ impl Stream {
         ));
     }
 
+    /// A running helper's write (the archiver's) the store did not answer, `tries` times so far, the last with `fault`;
+    /// it is tried again in `next_try_ms`, and what comes meanwhile waits in order.
+    pub fn behind(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        self.set(format!(
+            "{{\"state\":\"behind\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
+            quoted(fault)
+        ));
+    }
+
     /// It stopped on `fault` after serving; the world goes on without it.
     pub fn stopped(&self, fault: &str) {
         self.set(format!(
@@ -526,6 +556,14 @@ impl Stream {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .starts_with("{\"state\":\"degraded\"")
+    }
+
+    /// Whether a running helper waits for the store ([`Stream::behind`]).
+    pub fn is_behind(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .starts_with("{\"state\":\"behind\"")
     }
 
     fn set(&self, json: String) {
@@ -559,6 +597,14 @@ impl Stream {
         if !s.is_empty() {
             o.push_str(&format!(",\"{name}\":"));
             o.push_str(&s);
+        }
+    }
+
+    /// As [`Stream::json`], with `fields` (`"k":v,...`) last inside the object.
+    fn json_with(&self, name: &str, fields: &str, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(inside) = s.strip_suffix('}') {
+            o.push_str(&format!(",\"{name}\":{inside},{fields}}}"));
         }
     }
 }
@@ -632,6 +678,32 @@ mod tests {
                 b - 1
             );
         }
+    }
+
+    /// The archiver behind a store that does not answer says so in `health.json`, with the parts waiting for it.
+    #[test]
+    fn an_archive_behind_says_its_fault_and_the_parts_that_wait() {
+        let (archive, queue) = (
+            Stream(Mutex::new(String::new())),
+            Backlog(Mutex::new((0, 0, 0))),
+        );
+        let json = || {
+            let mut o = String::new();
+            archive.json_with("archive", &queue.fields(), &mut o);
+            o
+        };
+        assert_eq!(json(), "", "unset: no field");
+        archive.behind("store-unreachable: k: timeout: receive response", 3, 4000);
+        queue.set(2, 25, 7);
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"behind\",\"fault\":\"store-unreachable: k: timeout: receive response\",\"tries\":3,\"next_try_ms\":4000,\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
+        );
+        archive.current();
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
+        );
     }
 
     #[test]
