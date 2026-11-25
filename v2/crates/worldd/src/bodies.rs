@@ -1296,6 +1296,14 @@ impl Bodies {
         // walker, stood back from it by [`select::GAP`], it steps back toward the walker a metre at a time to the first
         // point a body may stand on that the walker's walk may reach (`View::stand_reached`, no route search): the
         // nearest walkable point at its edge on the walker's way there. A walker already within it is there.
+        eprintln!(
+            "DBG goal {:?} kind {:?} half {:?}",
+            node,
+            tree.handle(node)
+                .and_then(|h| tree.node(h))
+                .map(|n| n.kind().as_str().to_owned()),
+            place_half_width(tree, node)
+        );
         if let Some(half) = place_half_width(tree, node)
             && let Some((frame, at)) = self.pose(body)
         {
@@ -1318,10 +1326,12 @@ impl Bodies {
             let mut s = first;
             while s < len {
                 if let Some(p) = view.stand_reached(frame, along(s), (frame, at)) {
+                    eprintln!("DBG found {p:?} at {s} of {len}");
                     return Ok(Target::new(frame, p));
                 }
                 s += 1_000_000;
             }
+            eprintln!("DBG none of {len} from {edge:?} to {at:?}");
             return Ok(Target::new(frame, along(first)));
         }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
