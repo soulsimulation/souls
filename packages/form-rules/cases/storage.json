@@ -2427,6 +2427,364 @@
           "form": "read"
         }
       }
+    },
+    {
+      "name": "bookcase_put_back_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase",
+            "fields": {
+              "books": 119
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookcase_put_back_not_holding_a_book",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase",
+            "fields": {
+              "books": 3
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:book"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:book"
+        }
+      }
+    },
+    {
+      "name": "bookshelf_put_back_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf",
+            "fields": {
+              "books": 39
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookshelf_put_back_not_holding_a_book",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf",
+            "fields": {
+              "books": 3
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:book"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:book"
+        }
+      }
+    },
+    {
+      "name": "book_stack_put_back_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book_stack",
+            "fields": {
+              "books": 5
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "book_stack_put_back_not_holding_a_book",
+      "act": {
+        "this": "x1",
+        "form": "put_back",
+        "args": {
+          "book": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book_stack",
+            "fields": {
+              "books": 3
+            }
+          },
+          "w1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:book"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:book"
+        }
+      }
+    },
+    {
+      "name": "book_stack_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book_stack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "book_stack_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book_stack",
+            "fields": {
+              "books": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "book_stack_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book_stack"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
     }
   ]
 }

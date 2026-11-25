@@ -97,7 +97,7 @@
     {"def": "core/pew@1", "placed": 8, "entry": "eden:pew", "forms": "own", "pr": 3039, "state": {"kneeler_down": "default"}},
     {"def": "core/postbox@1", "placed": 8, "entry": "eden:postbox", "forms": "own", "pr": 3062, "state": {"locked": {"from": "locked"}, "letters": "default"}},
     {"def": "core/string-lights@1", "placed": 8, "entry": "eden:string_lights", "forms": "own", "pr": 3034, "state": {"on": {"from": "on"}}},
-    {"def": "core/book-stack@1", "placed": 7, "entry": "eden:book_stack", "forms": "base", "pr": 3062},
+    {"def": "core/book-stack@1", "placed": 7, "entry": "eden:book_stack", "forms": "own", "pr": 3062, "state": {"books": "default"}},
     {"def": "core/picnic-table@1", "placed": 7, "entry": "eden:picnic_table", "forms": "own", "pr": 3038, "state": {"clean": "default"}},
     {"def": "core/barn@3", "placed": 6, "entry": "eden:barn", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
     {"def": "core/cabin@3", "placed": 6, "entry": "eden:cabin", "forms": "own", "pr": 3072, "note": "today's def furnishes its rooms (contents, 8 things); placing those as entries in its rooms waits for SA-E11's with list and those kinds' entries"},
