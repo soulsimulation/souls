@@ -41,7 +41,7 @@ screenshot and the exact text on the screen; do not work around it and carry on 
 | 4 | Paste that prompt, and only that prompt, as the naive agent's first message. Let it work. Answer its questions the way a new person would ("yes", "go ahead"). If it asks you to change a permission, do exactly what it says through its own words, once. | The agent gets to "approve your Soul" without you opening a terminal or running a command yourself. Record every refusal by a safety check, verbatim. |
 | 5 | Look at the Eden page you already have open. | The approval card appears **on that page**, showing the same code the agent printed, within 10 s of the agent asking. Having to open a separate link is a FAIL (note it, then use the link to continue). |
 | 6 | Approve. | Within 30 s: the Soul stands in the world, the page tells you it is arriving until it does, the camera goes to it, it has a name (or the page or agent asks for one), and it is under **your Souls** in the navbar. Its `#soul/<id>` link, opened in a new tab, puts the camera on it. |
-| 7 | Tell the naive agent, one at a time, in plain words: "walk to the fountain", "say hello to whoever is near", "sit on a bench". | Each time, within 15 s, you see it on the page: it walks there, its words appear above it, it sits. The agent's own report alone is not a pass. |
+| 7 | Tell the naive agent, one at a time, in plain words: "walk to the fountain", "go to the fire", "say hello to whoever is near", "sit in an armchair", "take a book and read it", "dance for a minute". Also send "go explore" from the Soul's own card on the page. | Each time, within 15 s, you see it on the page, looking right: it walks there and ends facing the thing; its words appear above it; it sits facing out of the seat, legs in front, nothing through the furniture; the book is in its hands; it dances without stopping for the whole minute; the card's message reaches the agent and the card shows the agent as connected. The agent's own report alone is not a pass. |
 | 8 | Reload the page and come back to the Soul. | It is still yours, still named, still where it was. |
 
 ## Report
@@ -56,3 +56,7 @@ page. Any FAIL means the release is not done: fix it first, as an emergency, the
   no card appeared on the page, the approved Soul was never born (nothing sent its first act), the navbar was empty,
   and the coordinator told Gene "your Soul is now in Eden" from another agent's signed-out reading. Never again:
   look yourself, signed in as the owner, before saying it works.
+- The same night, once a Soul existed: dancing stopped and started every few seconds, it walked to the fire and
+  faced away, it held a book at its hip through its leg, it sat in an armchair facing the backrest with its legs
+  through it, the card's message box said "no-mailbox", and the world's stream froze for minutes while offsite
+  storage stalled. Step 7 checks each of these by eye.
