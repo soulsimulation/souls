@@ -437,9 +437,14 @@ fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
 /// The world as built, on an open ground under the zone's place: the two walkers, the vessel 300 mm from the first,
 /// the rack 400 mm from it, the plank between the two.
 fn world() -> Replica {
+    world_of(zone_place(), built())
+}
+
+/// [`world`]'s changes.
+fn built() -> Vec<(Id, Change)> {
     let g = ground();
     let off = |p: Vec3, dx: i64| Vec3::new(p.x + dx, 0, p.z);
-    let changes = vec![
+    vec![
         create(g, OPEN_GROUND, zone_place(), Vec3::ZERO),
         create(w1(), WALKER, g, at1()),
         create(w2(), WALKER, g, at2()),
@@ -459,8 +464,7 @@ fn world() -> Replica {
         create(bar(), BAR, g, bar_at()),
         create(lift(), LIFT, g, lift_at()),
         create(wheel(), WHEEL, g, wheel_at()),
-    ];
-    world_of(zone_place(), changes)
+    ]
 }
 
 /// N2's test world's ground with `changes` written on it as built.
@@ -765,7 +769,11 @@ fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
 impl Run {
     /// The world's replica as of now: the world as built with every logged part applied.
     fn replay(&self) -> Replica {
-        let mut r = world();
+        self.replay_on(world())
+    }
+
+    /// [`Run::replay`] on `r`, the world as built.
+    fn replay_on(&self, mut r: Replica) -> Replica {
         let log = self.store.0.lock().unwrap().bytes.clone();
         for rec in recover(&log).unwrap().records {
             if sim::recorder::is_input(&rec) {
@@ -1395,6 +1403,11 @@ fn lockstep() -> Run {
 
 /// [`lockstep`], its bodies made by `make`.
 fn lockstep_with(make: fn() -> Result<Bodies, replica::effects::Refusal>) -> Run {
+    lockstep_on(world(), make)
+}
+
+/// [`lockstep_with`] on `built`, the world as built.
+fn lockstep_on(built: Replica, make: fn() -> Result<Bodies, replica::effects::Refusal>) -> Run {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.lockstep = true;
@@ -1410,7 +1423,7 @@ fn lockstep_with(make: fn() -> Result<Bodies, replica::effects::Refusal>) -> Run
         kinds: entries(),
         moves: Json::Obj(Vec::new()),
     };
-    let world = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let world = answers::start(built, rules, store.clone(), cfg).expect("the world starts");
     let path = std::env::temp_dir().join(format!("c2-lockstep-{}.sock", std::process::id()));
     Run { world, store, path }
 }
@@ -2754,4 +2767,78 @@ fn n14_a_wheel_is_boarded_at_a_gondola_that_waits_while_gondola_1_is_aloft_throu
         "not gondola 1, aloft: {slot:?}"
     );
     run.stop();
+}
+
+// --- A far approach planned off the clock -----------------------------------------------------------------------------
+
+/// Vessel `k` of two past the ring from the walkers, 2 m apart: no straight walk reaches them, so a place to stand at
+/// one is found by a route search.
+fn far_vessel(k: u64) -> Id {
+    id(14 + k)
+}
+fn past_the_ring(k: u64) -> Vec3 {
+    Vec3::new(90_000_000, 0, k as i64 * 2_000_000 - 1_000_000)
+}
+
+/// Two Souls far off take at once, each its own vessel past the ring: each take's approach walk looks for a place to
+/// stand by its vessel from where the Soul stands, a route search round the ring. It runs on the planner, never on
+/// the clock (where a debug build panics the clock, and a release build counts it), and the form waits for it as a
+/// walk does. Both takes land, each vessel in its Soul's hand.
+#[test]
+fn two_far_souls_take_at_once_and_their_approaches_are_planned_off_the_clock() {
+    let on_clock = sim::commit::checks_on_clock();
+    let mut changes = built();
+    for k in 0..2 {
+        changes.push(create(far_vessel(k), VESSEL, ground(), past_the_ring(k)));
+    }
+    let world = || world_of(zone_place(), changes.clone());
+    let run = lockstep_on(world(), bodies);
+    let takes: Vec<_> = [w1(), w2()]
+        .into_iter()
+        .zip(0..)
+        .map(|(w, k)| {
+            let (reply, rx) = std::sync::mpsc::channel();
+            let bytes = intent_bytes(w, 1, "test:take", Some(far_vessel(k)), BTreeMap::new());
+            run.world
+                .events
+                .send(answers::Event::ArrivalAt {
+                    tick: 1,
+                    bytes,
+                    reply,
+                })
+                .unwrap();
+            rx
+        })
+        .collect();
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: 4_000, done })
+        .unwrap();
+    ran.recv()
+        .expect("the clock ran (a route search on it panics it in a debug build)");
+    let r = run.replay_on(world());
+    for ((rx, w), k) in takes.iter().zip([w1(), w2()]).zip(0..) {
+        let ends: Vec<_> = rx
+            .try_iter()
+            .filter(|f| answers::progress_of(f).is_none())
+            .map(|f| answer_in(&f))
+            .collect();
+        println!(
+            "far take {k}: {ends:?}; body at {:?}, vessel parent {:?}",
+            at(&r, w),
+            parent(&r, far_vessel(k))
+        );
+        assert!(
+            matches!(ends[..], [(1, Ok(_))]),
+            "take {k} answered once, taken: {ends:?}"
+        );
+        assert_eq!(parent(&r, far_vessel(k)).0, Some(w), "in its Soul's hand");
+    }
+    assert_eq!(
+        sim::commit::checks_on_clock(),
+        on_clock,
+        "no route search on the clock"
+    );
+    run.world.stop();
 }

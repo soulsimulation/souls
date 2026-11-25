@@ -97,6 +97,7 @@ fn wants(bodies: &[Body], to: Vec3, ask: bool, map: &Arc<crate::ground::Versions
                             reach: 0,
                             door: None,
                             ring: None,
+                            aim: None,
                         },
                     },
                     FormQuestion {

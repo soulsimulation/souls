@@ -96,6 +96,10 @@ pub enum FormQuery {
         /// whether the walk ends on it: the walk ends within `reach` of its outline, not of `at`, or on it (#4072,
         /// [`crate::spots::within_footprint`]).
         ring: Option<([Vec3; 4], bool)>,
+        /// An approach's aim (#3688): `at` moved short toward the body, in `node`'s frame. The walk ends near it when a
+        /// body may stand there, else near `at`. Chosen here, not on the clock: finding a place to stand is a route
+        /// search.
+        aim: Option<Vec3>,
     },
     Line {
         to: Vec3,
@@ -422,6 +426,7 @@ impl Planner {
                 reach,
                 door,
                 ring,
+                aim,
             } => {
                 let view = match self.town.view_for(body.id) {
                     Ok(v) => v,
@@ -433,8 +438,8 @@ impl Planner {
                     .and_then(|(floor, at, _)| {
                         // A ring is given on the floor itself (`node` is the floor).
                         let ring = ring.as_ref().filter(|_| floor == node);
-                        let to = view
-                            .stand_near_shape(
+                        let near = |at| {
+                            view.stand_near_shape(
                                 floor,
                                 at,
                                 ring.map(|(r, on)| (&r[..], *on)),
@@ -442,6 +447,12 @@ impl Planner {
                                 Some(&body),
                                 door,
                             )
+                        };
+                        // An aim, like a ring, is given on the floor itself.
+                        let to = aim
+                            .filter(|_| floor == node)
+                            .and_then(near)
+                            .or_else(|| near(at))
                             .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
                         view.plan(&body, floor, to).ok()
                     })
@@ -771,6 +782,7 @@ mod tests {
                         reach: 0,
                         door: None,
                         ring: None,
+                        aim: None,
                     },
                 },
                 FormQuestion {
