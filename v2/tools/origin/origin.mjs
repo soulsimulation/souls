@@ -226,10 +226,6 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
     }
     const again = kind === 'immutable' && rewritten(file);
     const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : again ? REVALIDATE : IMMUTABLE, etag };
-    if (again && !req.headers.range && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
-      stats[kind]++;
-      return res.writeHead(304, { 'cache-control': REVALIDATE, etag }).end();
-    }
     let status = 200;
     if (kind === 'immutable') {
       headers['accept-ranges'] = 'bytes';
@@ -250,6 +246,12 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
         // the decoded file, so an encoded copy's tag must never match a resumed download's If-Range
         if (packed) { headers['content-encoding'] = encoding; headers.etag = `W/${etag}`; body = packed; }
       }
+    }
+    // A rewritten history object whose ETag the reader holds: a 304 with the validators the 200 would carry (weak when
+    // encoded, and its Vary). If-None-Match compares weakly (RFC 9110 13.1.2).
+    if (again && status === 200 && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
+      stats[kind]++;
+      return res.writeHead(304, { 'cache-control': REVALIDATE, etag: headers.etag, ...(headers.vary ? { vary: headers.vary } : {}) }).end();
     }
     stats[kind]++;
     stats.perPath.set(rel, (stats.perPath.get(rel) ?? 0) + 1);

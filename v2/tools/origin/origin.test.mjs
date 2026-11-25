@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
-import { IMMUTABLE, REVALIDATE, createOrigin } from './origin.mjs';
+import { COMPRESS_FROM, IMMUTABLE, REVALIDATE, createOrigin } from './origin.mjs';
 import { readWorldRoutes } from './world-routes.mjs';
 import { localAddresses, worldAddress } from '../../web/src/source/address.ts';
 import { updateWorldRoute } from '../ops/proxy/route-config.mjs';
@@ -462,5 +462,30 @@ test('concurrent encoded requests for one file share one compression, and a late
     assert.equal(stats.compressions, 2, 'gzip is its own copy');
   } finally {
     s.close();
+  }
+});
+
+test('V4: a large rewritten history object\'s 304 carries the ETag and Vary its 200 would, weak when encoded (br, gzip, identity)', async () => {
+  const history = join(dir, 'w', 'big-history', 'history', 'history', 'everyone', 'events');
+  mkdirSync(history, { recursive: true });
+  writeFileSync(join(history, '00020781'), packable);
+  assert.ok(packable.length >= COMPRESS_FROM);
+  const url = `${new URL(base).origin}/w/big-history/history/history/everyone/events/00020781`;
+  const strong = `"${createHash('sha256').update(packable).digest('hex')}"`;
+  for (const [accept, encoding, etag] of [['gzip, deflate, br', 'br', `W/${strong}`], ['gzip, br;q=0', 'gzip', `W/${strong}`], ['identity', undefined, strong]]) {
+    const ok = await raw(url, { 'accept-encoding': accept });
+    assert.equal(ok.res.statusCode, 200, accept);
+    assert.equal(ok.res.headers['content-encoding'], encoding, accept);
+    assert.equal(ok.res.headers.etag, etag, accept);
+    assert.equal(ok.res.headers.vary, 'accept-encoding', accept);
+    assert.equal(ok.res.headers['cache-control'], REVALIDATE, accept);
+    for (const held of [etag, strong, `W/${strong}`]) {
+      const again = await raw(url, { 'accept-encoding': accept, 'if-none-match': held });
+      assert.equal(again.res.statusCode, 304, `${accept} ${held}`);
+      assert.equal(again.res.headers.etag, ok.res.headers.etag, `${accept} ${held}`);
+      assert.equal(again.res.headers.vary, ok.res.headers.vary, `${accept} ${held}`);
+      assert.equal(again.res.headers['cache-control'], REVALIDATE, `${accept} ${held}`);
+      assert.equal(again.body.length, 0);
+    }
   }
 });
