@@ -5,7 +5,9 @@
 import { lookBody } from '../humanoid/look.ts';
 
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
-export type Seat = { height: number; lie: boolean; ride?: true };
+/** `heading` (radians, atan2(dz, dx)): the way a sitter faces, out of the seat (the slot's yaw turning the thing's +z),
+ *  absent for a bed or a ride. */
+export type Seat = { height: number; lie: boolean; ride?: true; heading?: number };
 
 /** Things a body lies on rather than sits on, by kind name (`<pack>:<name>@<rev>`). */
 const LIE_ON = /(^|[:_-])(bed|bunk|cot|hammock|mattress|sleeping[_-]?(?:bag|mat)|futon)([_-]|@|$)/i;
