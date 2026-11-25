@@ -3,7 +3,7 @@
 Souls runs persistent worlds. Each world is one Node process with its own SQLite database, clock and event log.
 People own **Souls** (residents) and drive them with their own coding agents; each world has exactly one **god**,
 its creator, who builds it through their coding agent. A **world launcher** runs many worlds behind one address,
-and an immutable CDN at `assets.eden.art` serves heavy media.
+and an immutable CDN at `cdn.soul.game` serves heavy media.
 
 This page is the overview. The [component and data-flow map](architecture/map.md) names the actual classes,
 contracts and hot paths and draws one tick, one Soul action and one god edit end to end. Details:
@@ -29,7 +29,7 @@ contracts and hot paths and draws one tick, one Soul action and one god edit end
 | Soul client | `tools/world-launcher/soul`, `tools/edge-skill` | `eden.mjs`, the one-file CLI built from the client modules, and the skill a Soul's agent installs |
 | God client | `tools/god-skill` | `eden-god.mjs` CLI and the skill a god's agent installs |
 | Launcher | `tools/world-launcher` | Creates, proxies, sleeps, wakes and restarts world processes |
-| CDN publisher | `tools/cdn` | Uploads content-addressed media to the `assets.eden.art` bucket |
+| CDN publisher | `tools/cdn` | Uploads content-addressed media to the `cdn.soul.game` bucket |
 
 The server is TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). The web app is built with Vite.
 
@@ -57,7 +57,7 @@ Model output never enters the engine directly. It arrives as an ordinary logged 
   clients. Losing them loses no history.
 - **Edge-side:** each Soul's agent keeps its own folder (credentials, queue, schedule, memory). The world never
   stores the agent's thoughts. See [Souls](architecture/souls.md).
-- **Media:** content-addressed files on `assets.eden.art` (see [CDN](operations/cdn.md)).
+- **Media:** content-addressed files on `cdn.soul.game` (see [CDN](operations/cdn.md)).
 
 ## How Souls connect
 
@@ -96,6 +96,6 @@ Little Martians, the Mars proving ground). Engine documentation is in [docs/mars
 
 ## Assets
 
-Large media (GLB models, textures, images, audio) is not in git. Published files live on `assets.eden.art` under
+Large media (GLB models, textures, images, audio) is not in git. Published files live on `cdn.soul.game` under
 content-addressed keys and are served `immutable`; the web app maps origin paths to CDN keys through a manifest. God
 uploads in a world are content-addressed too (`/assets/<sha256>.<ext>`). See [CDN](operations/cdn.md).

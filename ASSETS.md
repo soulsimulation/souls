@@ -2,7 +2,7 @@
 
 The code in this repository is MIT-licensed ([LICENSE](LICENSE)). **Art, 3D models, textures, audio, video and other
 media are not in this repository and are not covered by the MIT licence.** They are served from
-`https://assets.eden.art` under immutable, content-addressed keys. `pnpm assets:pull` downloads the ones a checkout
+`https://cdn.soul.game` under immutable, content-addressed keys. `pnpm assets:pull` downloads the ones a checkout
 needs, checking each file's SHA-256 against `tools/assets/manifest.json`. The CDN is a transport: it grants no licence.
 Rights stay with their holders, as listed below.
 

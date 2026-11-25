@@ -1,7 +1,7 @@
 # Operations
 
 How the public site runs: `https://soul.game` on the root-only production host, with immutable assets on
-`https://assets.eden.art`. Hosts, SSH users, keys and credentials live in deployment secrets and host settings, never
+`https://cdn.soul.game`. Hosts, SSH users, keys and credentials live in deployment secrets and host settings, never
 in the repository.
 
 | Page | For |
@@ -9,7 +9,8 @@ in the repository.
 | [release](release.md) | Shipping a commit: gate receipt, `ship.sh`, `release.sh`, handover, rollback |
 | [runbook](operations/runbook.md) | Day-to-day commands: health, logs, backups, worlds, the legacy stage |
 | [disaster recovery](operations/disaster-recovery.md) | A blank host to a serving site |
-| [CDN](operations/cdn.md) | `assets.eden.art`: publishing, verification, the uploads Worker |
+| [CDN](operations/cdn.md) | `cdn.soul.game`: publishing, verification, the uploads Worker |
+| [soul.game migration](operations/soul-game-migration.md) | Moving the CDN, links and the worlds' bucket off eden.art: order, checks, rollback |
 | [auth](operations/auth.md) | Clerk sign-in and the shared account registry |
 | [analytics](operations/analytics.md) | Cookieless visitor counts |
 
@@ -258,9 +259,9 @@ that replaces it. `op.mjs feed-stats` prints reads per UTC day by client version
 ## CDN
 
 Reviewed immutable assets (models, textures, the Mars campus, the humanoid kit) are content-addressed objects on
-`assets.eden.art`. The web build carries a manifest that maps origin URLs to CDN keys; the client checks length and
+`cdn.soul.game`. The web build carries a manifest that maps origin URLs to CDN keys; the client checks length and
 SHA-256 and falls back to the origin on any failure. God uploads go through a pull-through Cloudflare Worker on
-`assets.eden.art/w/*`. See [CDN](operations/cdn.md).
+`cdn.soul.game/w/*`. See [CDN](operations/cdn.md).
 
 ## Auth
 

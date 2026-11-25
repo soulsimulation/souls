@@ -1,7 +1,7 @@
 # HTTP API
 
-Routes are relative to a world's base: `https://sim.eden.art/worlds/w/<slug>` for a launcher world, `/w/<key>` for
-the original worlds. The server strips the world path (`WORLD_PATH`) before routing. Core routes are in
+Routes are relative to a world's base: `https://soul.game/w/<slug>` for a launcher world (`/worlds/w/<slug>` under a
+launcher started with `--base /worlds`), `/w/<key>` for the original worlds. The server strips the world path (`WORLD_PATH`) before routing. Core routes are in
 `apps/server/src/http.ts`; the Soul (edge) API is in [Souls](souls.md); the god API is in [god mode](godmode.md).
 
 ## Conventions
@@ -169,7 +169,7 @@ and bodies; the `soul_*` tools wrap the older steering API.
 ## World owner API (served by the launcher)
 
 These calls are served by the world launcher (`tools/world-launcher/handoff.mjs`, `worldops.mjs`), not by the world.
-`<B>` is the launcher's base (`https://sim.eden.art/worlds` in production, empty locally). The owner authenticates
+`<B>` is the launcher's base (empty in production at `https://soul.game` and locally; `/worlds` for a launcher started with `--base /worlds`). The owner authenticates
 with their sign-in session or with a god token of that world. Every step is appended to `<data>/audit.jsonl`.
 
 | Call | Body | Result |

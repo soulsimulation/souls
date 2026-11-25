@@ -7,7 +7,7 @@
 // worlds/core-assets/index.json plus every other worlds/core-assets/*.index.json (lods, littlemartians-two,
 // mars-fidelity; index.json wins a clash), and for a GLB with a rendition in renditions.json the rendition's bytes,
 // which the origin sends under the source sha. Measured on 2026-10-20 (team/lanes/t4-cdn2.md): Cloudflare caches
-// that route uncompressed, while assets.eden.art sends brotli, so these load faster from the CDN.
+// that route uncompressed, while cdn.soul.game sends brotli, so these load faster from the CDN.
 // CDN3 (2026-10-20): /modular joins (modularRecords below). With precompressed q11 objects (inventory.mjs precompress)
 // the CDN is at least as small on the wire as the origin's q11 brotli, so these classes load faster from it too.
 //

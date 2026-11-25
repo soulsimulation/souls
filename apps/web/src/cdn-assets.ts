@@ -57,10 +57,14 @@ export function readCdnManifest(value: unknown): CdnManifest {
   return { version: 1, assets, ...(Object.keys(worlds).length ? { worlds } : {}) };
 }
 
+/** The asset CDN: soul.game's bucket. The former origin stays accepted only so a rollback build
+ *  (SIM_ASSETS_CDN_ORIGIN=https://assets.eden.art) still loads; nothing defaults to it. */
+export const CDN_ORIGINS: readonly string[] = ['https://cdn.soul.game', 'https://assets.eden.art'];
+
 export function cdnOrigin(value: string): string {
   const url = new URL(value);
   if (url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
-      !(url.origin === 'https://assets.eden.art' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) throw Error('Invalid CDN origin');
+      !(CDN_ORIGINS.includes(url.origin) || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) throw Error('Invalid CDN origin');
   return url.origin;
 }
 
@@ -87,7 +91,7 @@ export function manifestAsset(manifest: CdnManifest, input: string, pageUrl: str
   } catch { return; }
 }
 
-// CDN4 (2026-10-20): god uploads (POST /v1/god/assets) through the pull-through Worker on assets.eden.art/w/*
+// CDN4 (2026-10-20): god uploads (POST /v1/god/assets) through the pull-through Worker on cdn.soul.game/w/*
 // (tools/cdn/worker/god-uploads.js). An upload is not in the release manifest, so its route is derived from the page:
 // a GLB a /worlds god world serves under its own `/worlds/w/<slug>/assets/<sha>.glb` whose byte count the world's snapshot
 // listed (`assetBytes`, noteUploadSizes) maps to `w/<slug>/assets/<sha>.glb`. The transport's checks are unchanged:
@@ -293,7 +297,7 @@ export function cdnRoute(url: string): Promise<CdnRoute | null> {
   }, () => null);
 }
 /** Tests: install a parsed manifest for cdnRoute without the build-time switch. */
-export function setCdnRouteForTest(manifest: CdnManifest | null, origin = 'https://assets.eden.art') { published = Promise.resolve(manifest ? { manifest, origin: cdnOrigin(origin) } : null); }
+export function setCdnRouteForTest(manifest: CdnManifest | null, origin = 'https://cdn.soul.game') { published = Promise.resolve(manifest ? { manifest, origin: cdnOrigin(origin) } : null); }
 
 export function installCdnAssets(manifestPath: string, onProgress?: CdnProgress): void {
   if (typeof __SIM_ASSETS_CDN_ENABLED__ === 'undefined' || !__SIM_ASSETS_CDN_ENABLED__) return;

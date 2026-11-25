@@ -6,7 +6,7 @@
 //   eden-art.mjs <world-url> clear <frame> [--slot n]
 //   eden-art.mjs <world-url> upload <./local-file>          → prints the URL to hang
 //
-// <world-url> is the world's base, e.g. https://sim.eden.art/w/eden. The token comes from $SIM_TOKEN or
+// <world-url> is the world's base, e.g. https://soul.game/w/eden. The token comes from $SIM_TOKEN or
 // --token-file <path> (a raw token, or your agent folder's .eden-god.json / .eden-agent.json; read at run time, never printed). Frames are picture frames, screens and gallery walls
 // (4 slots, 0–3); place them first with the god CLI (`place core/gallery-wall@1 …`). A local file is uploaded
 // (PNG/JPEG/WebP/GIF ≤ 4 MB, MP4/WebM ≤ 16 MB) and then hung. A web link is drawn only if its host sends a CORS header

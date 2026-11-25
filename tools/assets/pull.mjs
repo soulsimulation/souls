@@ -210,7 +210,7 @@ export async function run(options) {
 }
 
 /** Manifest entries for files about to leave git: publish each object at its url first (tools/cdn/publish.mjs). */
-export async function entry(paths, { root = ROOT, cdn = 'https://assets.eden.art', set = 'runtime' } = {}) {
+export async function entry(paths, { root = ROOT, cdn = 'https://cdn.soul.game', set = 'runtime' } = {}) {
   const out = [];
   for (const p of paths) {
     const abs = resolve(p), path = relative(root, abs), d = await hashFile(abs);

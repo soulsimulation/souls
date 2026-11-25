@@ -1,15 +1,15 @@
-// god-uploads.js — Cloudflare Worker (module syntax) on the route assets.eden.art/w/* (lane CDN4, 2026-10-20).
+// god-uploads.js — Cloudflare Worker (module syntax) on the route cdn.soul.game/w/* (lane CDN4, 2026-10-20).
 //
 // Pull-through CDN for god uploads (POST /v1/god/assets). It serves exactly one URL shape:
 //
-//   https://assets.eden.art/w/<slug>/assets/<sha256>.<ext>      ext = glb | png | jpg | json (what the server accepts)
+//   https://cdn.soul.game/w/<slug>/assets/<sha256>.<ext>      ext = glb | png | jpg | json (what the server accepts)
 //
 // and nothing else under /w/ (400). The R2 key mirrors the path, `w/<slug>/assets/<sha256>.<ext>`, a top-level prefix no
 // publisher uses (CDN1-3 keys all start with `assets/`), so it cannot overwrite or shadow any published object.
 //
 //   R2 hit  -> the stored object: immutable cache, Content-Type by extension, CORS for the requesting allowed site, ETag "<sha>",
 //              Content-Encoding br when the object was stored precompressed; also kept in the edge cache (Cache API).
-//   R2 miss -> GET https://souls.game/w/<slug>/assets/<sha>.<ext> (old slugs resolve through launcher aliases). The body is read as a
+//   R2 miss -> GET https://soul.game/w/<slug>/assets/<sha>.<ext> (old slugs resolve through launcher aliases). The body is read as a
 //              stream, counted against MAX_BYTES and hashed; only bytes whose SHA-256 equals the sha in the path are
 //              returned (200) and stored, so the bucket cannot be poisoned. Mismatch -> 502, origin 404 -> 404, any other
 //              origin status or a redirect -> 502, too large -> 502; none of these is stored or cached (no-store). The R2 write is
@@ -19,12 +19,13 @@
 // Content-Encoding br with ETag W/"<sha>"). That is left on: it is transport only, browsers and fetch decode it, and the
 // client's checks (byte count and SHA-256 of the decoded body, cdn-assets.ts) run on what the loaders get.
 //
-// The Worker holds no secrets: R2 is an object binding (env.ASSETS, bucket eden-assets). Deployment: README.md here.
+// The Worker holds no secrets: R2 is an object binding (env.ASSETS, bucket soul-game-assets). Deployment: README.md here.
 // Tests: god-uploads.test.mjs (fake R2, fake origin, fake edge cache). Post-deploy proof: verify-worker.mjs.
 
-export const APP_ORIGIN = 'https://sim.eden.art';
-export const APP_ORIGINS = [APP_ORIGIN, 'https://souls.game', 'https://soul.game'];
-export const ORIGIN = 'https://souls.game';
+export const APP_ORIGIN = 'https://soul.game';
+// souls.game and sim.eden.art redirect to soul.game; they stay allowed for a page still open on them.
+export const APP_ORIGINS = [APP_ORIGIN, 'https://souls.game', 'https://sim.eden.art'];
+export const ORIGIN = 'https://soul.game';
 /** God uploads are budgeted at 3 MB by default (creation limits); a world can raise its budget. 32 MiB bounds memory. */
 export const MAX_BYTES = 32 * 1024 * 1024;
 export const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -69,7 +70,7 @@ async function readCapped(body, max) {
 
 /**
  * The handler. `deps` exists for the local tests: `fetch` (the origin), `caches` (the edge cache; absent = none),
- * `subtle` (Web Crypto), `origin` (a loopback stand-in for souls.game). In Cloudflare these are the runtime's own.
+ * `subtle` (Web Crypto), `origin` (a loopback stand-in for soul.game). In Cloudflare these are the runtime's own.
  */
 async function respond(request, env, ctx, deps = {}) {
   const originFetch = deps.fetch ?? globalThis.fetch.bind(globalThis);
@@ -85,7 +86,7 @@ async function respond(request, env, ctx, deps = {}) {
   if (!env?.ASSETS) return refuse(500, 'binding', method);
   if (notModified(request, p)) return new Response(null, { status: 304, headers: { etag: `"${p.sha}"`, 'cache-control': IMMUTABLE } });
 
-  const cacheKey = new Request(`https://assets.eden.art/${p.key}`, { method: 'GET' });
+  const cacheKey = new Request(`https://cdn.soul.game/${p.key}`, { method: 'GET' });
   if (method === 'GET' && edge) {
     const cached = await edge.match(cacheKey).catch(() => undefined);
     if (cached) { const r = new Response(cached.body, cached); r.headers.set('x-eden-cdn', 'edge'); return r; }

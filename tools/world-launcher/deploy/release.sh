@@ -36,7 +36,7 @@ fi
 # CDN1: the asset CDN switch (default on; SIM_ASSETS_CDN_ENABLED=0 turns it off for one release), see the web build below.
 CDN="${SIM_ASSETS_CDN_ENABLED-1}"
 case "$CDN" in 0|1) ;; *) echo "SIM_ASSETS_CDN_ENABLED must be 0 or 1 (got '$CDN')"; exit 2;; esac
-CDN_ORIGIN="${SIM_ASSETS_CDN_ORIGIN:-https://assets.eden.art}"
+CDN_ORIGIN="${SIM_ASSETS_CDN_ORIGIN:-https://cdn.soul.game}"
 ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 cd "$ROOT"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "commit first: the release is exactly HEAD"; exit 1; }
@@ -74,7 +74,7 @@ echo "$BUILD" > "$OUT/BUILD"
 # the laptop's old-world build pins it (hotfix-integration-00x WEB-MANIFEST.json flags); the /worlds/w/eden fork runs that
 # world id. Without it the fork drew only the bare commons (lane FORKFIX). New worlds have other ids: unaffected.
 EDEN_WORLDS="${VITE_EDEN_EXPERIENCE_WORLD_IDS-pm-preview-eden-20261005}"
-# CDN1 (2026-10-20): reviewed CC0 models come from assets.eden.art (apps/web/src/cdn-manifest.json; tools/cdn/README.md).
+# CDN1 (2026-10-20): reviewed CC0 models come from cdn.soul.game (apps/web/src/cdn-manifest.json; tools/cdn/README.md).
 # The switch is build-time and off when absent in vite, so every live build from 0.25 (we-f62375187ae5) to 0.54 shipped
 # without it: the release defaults it ON. Turn it off for one release with SIM_ASSETS_CDN_ENABLED=0 release.sh ...
 [ "$CDN" = 1 ] || echo "   CDN OFF for this build (SIM_ASSETS_CDN_ENABLED=0): every model is served from origin"

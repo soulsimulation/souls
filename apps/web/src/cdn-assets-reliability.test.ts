@@ -8,7 +8,7 @@ const manifest = readCdnManifest({ version: 1, assets: { '/assets/probe.png': { 
 const page = 'https://sim.eden.art/w/eden/', url = new URL('/assets/probe.png', page).href;
 const flush = async () => { for (let i = 0; i < 8; i++) await new Promise<void>(setImmediate); };
 const setup = (t: TestContext) => t.mock.timers.enable({ apis: ['setTimeout'] });
-const transport = (fetch: typeof globalThis.fetch) => cdnFetch(fetch, manifest, 'https://assets.eden.art', page);
+const transport = (fetch: typeof globalThis.fetch) => cdnFetch(fetch, manifest, 'https://cdn.soul.game', page);
 
 test('six native connections can queue healthy origin headers past12s; all headers may be awaited before consuming', async t => {
   setup(t); let active = 0, queued = 0, admitted = 0;

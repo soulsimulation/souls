@@ -66,12 +66,12 @@ test('checked-in records validate: only world-scoped keys, own rights, live-rele
   }
   // The prepared world sections pass the real client reader and resolve only on their own world page.
   const client = readCdnManifest({ version: 1, assets: shared.assets, worlds: p.preparedManifest.worlds });
-  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://sim.eden.art/w/mars')?.bytes, 70772556);
-  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://sim.eden.art/w/eden'), undefined);
-  assert.equal(manifestAsset(client, '/world-assets/littlemartians/characters/kin/chebel.glb', 'https://sim.eden.art/w/littlemartians')?.licence, LICENCE);
+  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://soul.game/w/mars')?.bytes, 70772556);
+  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://soul.game/w/eden'), undefined);
+  assert.equal(manifestAsset(client, '/world-assets/littlemartians/characters/kin/chebel.glb', 'https://soul.game/w/littlemartians')?.licence, LICENCE);
   // Since CDN2's rule (Gene, 2026-10-20) the same file is also a shared served-public object; another world's page gets that one,
   // never the world-scoped publication.
-  assert.notEqual(manifestAsset(client, '/world-assets/littlemartians/characters/kin/chebel.glb', 'https://sim.eden.art/w/eden')?.licence, LICENCE);
+  assert.notEqual(manifestAsset(client, '/world-assets/littlemartians/characters/kin/chebel.glb', 'https://soul.game/w/eden')?.licence, LICENCE);
 });
 
 test('records refuse open-licence relabelling, unreviewed worlds and mismatched paths', () => {
@@ -94,13 +94,13 @@ test('apply uploads exactly the served bytes under world-scoped keys with world 
   const receipt = await publishScoped(p, { records: records(), credentials, fetcher });
   assert.equal(receipt.uploaded, 2); assert.equal(receipt.notServed, 0);
   const marsKey = scopedKey('/w/mars', hash(campus), '.glb');
-  assert.deepEqual([...bucket.keys()].sort(), [`/eden-assets/${marsKey}`, `/eden-assets/${scopedKey('/w/littlemartians', hash(kin), '.glb')}`].sort());
-  const stored = bucket.get(`/eden-assets/${marsKey}`);
+  assert.deepEqual([...bucket.keys()].sort(), [`/soul-game-assets/${marsKey}`, `/soul-game-assets/${scopedKey('/w/littlemartians', hash(kin), '.glb')}`].sort());
+  const stored = bucket.get(`/soul-game-assets/${marsKey}`);
   assert.deepEqual(stored.body, campus);
   assert.equal(stored.headers['x-amz-meta-licence'], 'world-scoped'); assert.equal(stored.headers['x-amz-meta-world'], '/w/mars');
   assert.equal(stored.headers['cache-control'], CACHE);
   // Evidence (public GET) precedes every R2 request for that object.
-  assert.ok(calls.indexOf('GET origin /browser/campus.glb?v=20260922b') < calls.indexOf(`HEAD r2 /eden-assets/${marsKey}`));
+  assert.ok(calls.indexOf('GET origin /browser/campus.glb?v=20260922b') < calls.indexOf(`HEAD r2 /soul-game-assets/${marsKey}`));
   const mars = receipt.results.find(r => r.world === '/w/mars');
   assert.match(mars.evidence[0].at, /^\d{4}-\d\d-\d\dT/); assert.equal(mars.evidence[0].sha256, hash(campus));
   // A repeated run verifies and skips; nothing is overwritten.
@@ -109,8 +109,8 @@ test('apply uploads exactly the served bytes under world-scoped keys with world 
   const { manifest, added } = mergeManifest({ version: 1, assets: {} }, receipt, { records: records() });
   assert.equal(added, 3);
   const client = readCdnManifest(manifest);
-  assert.equal(manifestAsset(client, '/world-assets/littlemartians/characters/chebel.glb', 'https://sim.eden.art/w/littlemartians')?.key, scopedKey('/w/littlemartians', hash(kin), '.glb'));
-  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://sim.eden.art/w/littlemartians'), undefined);
+  assert.equal(manifestAsset(client, '/world-assets/littlemartians/characters/chebel.glb', 'https://soul.game/w/littlemartians')?.key, scopedKey('/w/littlemartians', hash(kin), '.glb'));
+  assert.equal(manifestAsset(client, '/browser/campus.glb?v=20260922b', 'https://soul.game/w/littlemartians'), undefined);
 });
 
 test('files the origin does not serve, or serves differently, are never uploaded or mapped', async () => {
@@ -141,7 +141,7 @@ test('tampered plans and receipts stop before any request; shared publisher refu
   assert.equal(calls.length, 0);
   // Metadata conflict on an existing key is refused, never overwritten.
   const { fetcher: f2, bucket } = world();
-  const key = `/eden-assets/${scopedKey('/w/mars', hash(campus), '.glb')}`;
+  const key = `/soul-game-assets/${scopedKey('/w/mars', hash(campus), '.glb')}`;
   bucket.set(key, { body: campus, headers: { 'content-length': String(campus.length), 'content-type': 'model/gltf-binary', 'cache-control': CACHE, 'x-amz-meta-sha256': hash(campus), 'x-amz-meta-licence': 'world-scoped', 'x-amz-meta-world': '/w/eden' } });
   await assert.rejects(publishScoped(await planned(), { records: records(), credentials, fetcher: f2 }), /metadata differs/);
   // Merge needs served evidence for every mapped path and a live-origin receipt.
@@ -150,7 +150,7 @@ test('tampered plans and receipts stop before any request; shared publisher refu
   assert.throws(() => mergeManifest({ version: 1, assets: {} }, forged, { records: records() }), /served evidence/);
   assert.throws(() => mergeManifest({ version: 1, assets: {} }, { ...receipt, origin: 'http://127.0.0.1:1' }, { records: records() }), /receipt/);
   const scoped = (await planned()).objects[0];
-  await assert.rejects(publish({ version: 1, bucket: 'eden-assets', objects: [{ ...scoped, file: '/dev/null', licence: 'CC0-1.0' }] }, { credentials, fetcher }), /Invalid or duplicate/);
+  await assert.rejects(publish({ version: 1, bucket: 'soul-game-assets', objects: [{ ...scoped, file: '/dev/null', licence: 'CC0-1.0' }] }, { credentials, fetcher }), /Invalid or duplicate/);
 });
 
 test('public checker accepts world-scoped keys bound to their own SHA-256 and rejects mismatched ones', async () => {

@@ -44,7 +44,7 @@ test('the card says little: one short line per state, the arrival refusal says w
 });
 
 test('the Soul picture comes only from this site or https', () => {
-  assert.equal(safePhoto('https://assets.eden.art/p.webp'), 'https://assets.eden.art/p.webp');
+  assert.equal(safePhoto('https://cdn.soul.game/p.webp'), 'https://cdn.soul.game/p.webp');
   assert.equal(safePhoto('/worlds/w/x/media/p.png'), '/worlds/w/x/media/p.png');
   for (const bad of ['javascript:alert(1)', '//evil.test/p.png', 'http://x.test/p.png', 'data:image/png;base64,AA', null, undefined, '']) assert.equal(safePhoto(bad as string | null | undefined), null);
 });

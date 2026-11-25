@@ -1,7 +1,7 @@
 # God upload CDN
 
-`god-uploads.js` is the module Worker for `assets.eden.art/w/*`. It requires the existing `ASSETS` R2 binding.
-It pulls cache misses from `https://souls.game/w/<slug>/assets/<sha>.<ext>`, verifies the SHA-256 and size, then stores
+`god-uploads.js` is the module Worker for `cdn.soul.game/w/*` (route on the soul.game zone), with the R2 binding
+`ASSETS` → bucket `soul-game-assets`. It pulls cache misses from `https://soul.game/w/<slug>/assets/<sha>.<ext>`, verifies the SHA-256 and size, then stores
 at the unchanged `w/<slug>/assets/<sha>.<ext>` key. Old slug keys remain valid: the root launcher must retain those
 slug aliases. Never redirect authenticated agent APIs across origins as a substitute for launcher aliases.
 
@@ -9,11 +9,12 @@ slug aliases. Never redirect authenticated agent APIs across origins as a substi
 
 1. Deploy the root launcher and migrate its registry with the documented aliases. Verify upload routes at both
    canonical and old slugs reach the same world. The new Worker requires this upstream before serving cache misses.
-2. In the existing static asset bucket's CORS rule, retain `https://sim.eden.art` and `https://souls.game`, and add exactly `https://soul.game`.
+2. In the static asset bucket's (`soul-game-assets`) CORS rule, allow exactly `https://soul.game`, `https://souls.game` and `https://sim.eden.art`.
    Retain its methods and exposed headers; do not replace unrelated rules or use a wildcard. This bucket rule is
    separate from Worker CORS. Check a known static object with each Origin header.
-3. Record the current Worker version and deployed route/bindings. Deploy this module to that existing Worker using
-   the authorized Cloudflare CLI or dashboard, preserving its route and `ASSETS` binding. Account IDs, credentials,
+3. Record the current Worker version and deployed route/bindings. Deploy this module as a Worker on soul.game's
+   account with the route `cdn.soul.game/w/*` (fail open) and the binding `ASSETS` → `soul-game-assets`, using the
+   authorized Cloudflare CLI or dashboard. The old Worker on `assets.eden.art/w/*` stays as it is until that bucket is retired. Account IDs, credentials,
    deployment config and receipts belong in private operational records, not this repository.
 4. Run the verifier against an authorized scratch god folder. It uploads one fresh small GLB but does not place
    or define it in the world. The folder can name any allowed app origin and `/w/<slug>/` or `/worlds/w/<slug>/`.
@@ -40,7 +41,6 @@ Record the fallback in the release receipt and verify origin asset rendering. Re
 verified release. To roll back the Worker, restore the recorded version; its upstream URL must still reach the
 active world authority.
 
-For the soul.game domain move, keep the pull-through upstream on souls.game while DNS/Clerk are staged.
-The old host must continue proxying asset and authenticated API requests directly; browser-page redirects must
-not redirect these requests. Add the new static-bucket CORS origin and verify both fresh and cached responses
-before canonical activation; stale CDN headers may require a targeted cache purge. No R2 key or token changes.
+The pull-through upstream is soul.game itself: souls.game and sim.eden.art redirect every request there, and the
+Worker refuses a redirect, so it must never name either. Verify both fresh and cached responses after the bucket's
+CORS rule is set; stale CDN headers may require a targeted cache purge.

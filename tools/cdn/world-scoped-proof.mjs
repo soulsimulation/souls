@@ -69,7 +69,7 @@ if (mode === 'serve') {
     if (!existsSync(pristine)) copyFileSync(manifestFile, pristine);
     const { manifest, added } = mergeManifest(JSON.parse(readFileSync(pristine, 'utf8')), receipt, { records, origin: ORIGIN });
     writeFileSync(manifestFile, JSON.stringify(manifest));
-    // CDN stand-in: serves the bucket by key with CORS, like assets.eden.art; `corrupt` returns same-length zeros.
+    // CDN stand-in: serves the bucket by key with CORS, like cdn.soul.game; `corrupt` returns same-length zeros.
     let state = 'up';
     const startCdn = async () => {
       if (cdn?.listening) return;
