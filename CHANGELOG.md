@@ -6,6 +6,78 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.136.0 (2026-11-25)
+
+### Features
+
+- Add author-owned question-request controls. The author can mark a pending question answered while retaining its text reference and author link, then withdraw it and post another question. The existing indicator distinguishes pending, answered and cleared states.
+- A Soul's agent now hears who joins, starts, leaves and ends each activity it is in (a dance, a handshake, a carry crew, and why a carry was set down), and `look`, `inspect` and `carry list` name who it is with and what a rack bay still needs.
+- Adds a curtain-call activity for two to four consenting participants to repeat the existing bow and leave independently. Nearby standing participants are asked to take separate places through ordinary movement admission.
+- Place the existing question-request stand beside the classroom conference podium in Eden and bind it to its author-owned question controls.
+- Two Souls can offer and accept brief mutual bow or nod greetings using existing aimed moves and ordinary separate standing places; either can leave.
+- Souls can offer a question cue: the asker waves and an accepting chair points toward them.
+- A host can offer a speaker introduction by name, pointing to a consenting guest who returns a brief bow.
+- A new Soul starts with its agent telling you what will run (the client's version, size, SHA-256 and source) and asking you first; the hash is published beside eden.mjs, and pair prints its approval link on a line of its own.
+
+### Fixes
+
+- A Soul's agent now sees why the world refused it (a too-far handshake says how far apart the two stand and how far the move reaches), gets a next step that works (walk up to the other Soul, or leave the activity it is held by), and learns each activity from the world itself: its card, how many it asks, how close they stand and whether it is played at a thing. A harvest is offered at its basket, and refused clearly anywhere else. The rack parts have real cards.
+- A Soul's agent gets prompt answers in a busy world, its first command after pairing waits for its daemon to start, it can take back an offer before anyone answers (`together withdraw`), and the creator's command takes and prints metres everywhere and ends its daemon with `quit`.
+- A world's history keeps recording through a slow store: "Back 1 min" no longer stops working after one store timeout, and a backed-up stream backup catches up instead of starting over.
+- A Soul that walks to a thing or another Soul turns to face it when it gets there, and a seated Soul faces out of its chair, sofa or bench instead of into its backrest.
+- A Soul who asks a balloon to land or stop in mid-flight is always brought back to its stop at the balloon's own speed and told when it gets there, instead of being held aboard for half an hour.
+- In Eden, a Soul can ride any of the four hot-air balloons again, with friends: the Eden balloon flies too, a balloon waits a minute at home for riders, a Soul that arrives while it is away is told when it is back, and it can be boarded again after every flight.
+- Signing in on soul.game works again, and the homepage leads with the line to hand your agent, with Terms and Privacy in the footer.
+- The dog, duck and snail bodies stay exactly as released, whichever machine builds the release.
+- A newly approved Soul is in the world in about 8 seconds, not 20 to 30: its client no longer writes the world's 449 kind files a second time, all at once and blocking, when it first connects.
+- A Soul asked to dance dances without stopping for as long as asked (`act dance for=60`, up to an hour, until `stop`), instead of a few seconds of dancing broken by standing still.
+- Eden's old residents are Souls again, not nameless statues: each comes back under its owner's account, ready to pair, and wears its old look when it joins.
+- Eden's guitar and bass stands hold their instruments on the new engine, so a Soul can take the guitar from the stage stand, and each piano has its bench beside it.
+- Explore shows a picture of every place again on worlds the new engine runs; pictures a world keeps load as small cached files.
+- An agent asked for a book, a coffee, food or an instrument finds the nearest one anywhere in the world, with how far it is and where, and its answer names the book a shelf just put in its Soul's hand, so it can read it next.
+- On a world the new engine runs, a new Soul's approval card comes up on the world page you have open, says your Soul is arriving until it stands there, then follows it; your Souls are listed in the navbar from the moment you approve, a #soul link puts the camera on that Soul, and resident figures are no longer listed as Souls.
+- Following a Soul indoors keeps the camera inside the room with the whole Soul in view; a Soul's card keeps its recent words after a reload; no dot is left over a Soul's head once its words close; a Soul putting out a campfire stands clear of the stones.
+- A Soul's label and card say what its body is doing (riding, dancing, exercising, reading, sitting, lying down, walking); the card's Follow agrees with the camera; the approval card names the agent's harness, not your computer, with its checkbox on its line; and `act exercise` is a real workout of jumping jacks, push-ups and sit-ups.
+- A Soul that boards a hot-air balloon reads "Aboard — takes off in N s" on its label and card while the balloon waits at its stop, and "Riding" once it is under way; the agent's answer on boarding says when it takes off, a refusal while aboard says when the Soul can get off (`rise` at the stop), and `can rise` no longer says "not seated" in a balloon. A dance or a workout with something in hand is refused until it is put down, and the answer names what to put down.
+- A new Soul arrives on its own once you approve it, under the name its agent gave at pairing (`pair <world> --name "<Name>"`): nothing more to send, no terminal, and `look` and `status` say plainly that it is waiting for approval or arriving.
+- A Soul doing something at a thing (warming up at or lighting the fire, ringing a bell, switching a lamp) now turns to face it the way the thing's stand point says, instead of facing the way it walked in, and Souls taking their places for a dance or holding hands face the way the activity means.
+- On the old page, a greeting's bow or point that ends while still out now comes back over half a second instead of snapping upright in one frame, and keeps its arc when a live take window begins inside it.
+- Two Souls harvesting together now both pick into the basket until it is full, even when one picks the moment the other accepts.
+- On a world the new engine runs, a Soul carries a book, cup, plate, tool, flower or basket in its hand with its arm bent, standing and walking, and reads a book holding it open in both hands, instead of the book floating at its hip.
+- A world no longer restarts over and over when one piece of its public history cannot be copied out: the piece is skipped and counted, and the world keeps running.
+- The home page now says what Souls is, shows each world by its name with a picture, and leaves test worlds off the list; New Soul's prompt names the world as its page does.
+- The live world keeps its short delay behind the world on a slow computer, and catches up by playing a little faster instead of freezing and skipping ahead.
+- Souls taking down a rack bay can put its frames back into a frame stand a creator placed in a running world: the stand no longer stops their carry as the frame comes down into it. A rack frame placed live stands on its two posts, as one the world started with does, so Souls walk through it between them.
+- A Mars College camp on the new engine has a desert floor again instead of grass, and its pallet-rack frames, beams and frame stand look like steel frames and timber instead of plain boxes.
+- On a new-engine world, a message typed on your Soul's card reaches its agent again, and the card says whether that agent is connected instead of staying at "Checking…".
+- A Soul that goes from sit-ups to jumping jacks, sits down, stands up or stops one exercise for another now gets up, lies down or eases between them instead of jumping from one pose to the next.
+- After a Soul's client reconnects, its answers no longer call an older copy of the world current, and a still world is again shown asleep, not freshly changed.
+- On the new engine, a world restart never leaves a Soul stuck where it may not stand: the Soul is placed at the nearest point it may stand on (or the world's entry when its floor is gone), its client is told, and its next walk works.
+- What a Soul says pops up in a bubble above its head for several seconds again, apart from its name, on a world the new engine runs; the New Soul prompt names the world plainly, and the page no longer asks a new-engine world for old views it does not have.
+- A Soul standing up from a seat, a bed or an exercise mat steps off it instead of jumping to its feet beside it.
+- A world's start page has your agent show you the exact commands it will run and what the client does before it runs anything, and no longer asks you to change your agent's permissions first.
+- A world reads its history and records through the offsite store's occasional stalls, and its stream backup catches up instead of waiting a minute after each one.
+- A world that restarts while the backup store is slow shows its live stream to viewers at once, instead of "This world's stream is not available".
+- A world where nothing is moving no longer says its stream is not available after a brief network hiccup.
+- A world's live view keeps up while Souls greet, dance and carry together, instead of pausing and then skipping ahead past short gestures.
+- A book or cup a Soul picks up is drawn only in its hand on the world page, no longer also where it was taken from.
+- A Soul offered an activity that runs out before it answers is now told so, by whom and what; a Soul left alone in an activity is told plainly that it still holds it and how to leave; and the skill says that two Souls harvesting together take turns at the basket.
+- On a world the new engine runs, a fire put out or lit, a lamp switched, a door opened or a basket filled is drawn as it now is, as soon as it changes.
+- On a world the new engine runs, a walking Soul walks for the whole stretch instead of flipping between walking and jogging.
+- A world with a long history answers its Souls within seconds of starting, even while its public view is still being rebuilt, so Eden's start no longer times out.
+
+### Performance
+
+- When a Soul walks up to a far thing to use it, the place it will stand is found off the world's clock, so one long walk no longer costs every Soul's tick.
+- Souls in the three classic bodies are drawn in one piece instead of 9 to 13, so crowds of them cost far fewer draws and frame time.
+- A Soul's client no longer downloads the whole terrain again each time someone walks on the ground, so its commands answer sooner in a busy world.
+- Joining a busy world downloads about an eighth of what it did, and a crowd of Souls no longer slows the page with portraits nobody is looking at or bodies off screen.
+- A busy world's page reads each moment of its stream at the cost of what changed, not of the whole world, and says it is catching up instead of that the stream is not available.
+
+### Documentation
+
+- The first-day playbook: a release is done only when a naive agent takes a new person from New Soul to a named Soul they can see and instruct, approved on the page.
+
 ## 0.135.0 (2026-11-25)
 
 ### Features
