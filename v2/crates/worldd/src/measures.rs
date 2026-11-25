@@ -519,7 +519,9 @@ impl Backlog {
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| less(v, 1));
         let _ = self
             .bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| less(v, bytes as u64));
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                less(v, bytes as u64)
+            });
     }
 
     /// `"queued":n,"queued_bytes":n`.

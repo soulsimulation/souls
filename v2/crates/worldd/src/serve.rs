@@ -2199,10 +2199,7 @@ impl Store for Again {
                 }
                 other => other,
             };
-            if tried
-                .as_ref()
-                .is_err_and(|e| e.name == "store-unreachable")
-            {
+            if tried.as_ref().is_err_and(|e| e.name == "store-unreachable") {
                 unanswered = true;
             }
             tried
@@ -4122,7 +4119,9 @@ mod tests {
         let mut w = script::world(
             1,
             2,
-            Some(Box::new(move |b: &[u8]| logged.borrow_mut().push(b.to_vec()))),
+            Some(Box::new(move |b: &[u8]| {
+                logged.borrow_mut().push(b.to_vec())
+            })),
         );
         for t in 0..240u64 {
             script::tick(&mut w, t * 20, 2, 30 * 20);
@@ -4139,7 +4138,11 @@ mod tests {
         reference.flush().unwrap();
         let expected: Vec<String> = memory.list("").unwrap();
         assert!(
-            expected.iter().filter(|k| k.starts_with("bundles/")).count() >= 5,
+            expected
+                .iter()
+                .filter(|k| k.starts_with("bundles/"))
+                .count()
+                >= 5,
             "four bundles and a day index: {expected:?}"
         );
 

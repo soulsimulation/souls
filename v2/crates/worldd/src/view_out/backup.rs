@@ -620,7 +620,10 @@ mod tests {
             5,
             "the five the store holds are off the spool"
         );
-        assert!(matches!(worker.pass(), Ok(true)), "the next pass is current");
+        assert!(
+            matches!(worker.pass(), Ok(true)),
+            "the next pass is current"
+        );
         let sent = worker.store.sent.borrow().clone();
         let objects: Vec<&String> = sent.iter().filter(|k| k.contains("/objects/")).collect();
         let unique: BTreeSet<&String> = objects.iter().copied().collect();

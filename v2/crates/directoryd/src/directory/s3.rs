@@ -37,14 +37,22 @@ fn answer_within(len: usize) -> Duration {
     TIMEOUT + Duration::from_millis((len as u64).saturating_mul(1000) / SLOWEST_LINK)
 }
 
+/// The largest object a store's read takes, and how its write waits for an answer (one field, so [`S3`] stays small).
+#[derive(Clone, Copy)]
+enum Reads {
+    /// ureq's own cap (10 MiB), which every program but a world's store and an operator's tool keeps.
+    Capped,
+    /// A world's ([`S3::for_world`]): up to [`WORLD_READ_LIMIT`], and a write waits by its body ([`answer_within`]).
+    World,
+    /// An operator's tool's ([`S3::for_operator`], [`S3::for_probe`]): up to this many bytes.
+    Limit(u64),
+}
+
 /// One bucket of an S3-compatible store, and the prefix every key is put under.
 pub struct S3 {
     agent: ureq::Agent,
-    /// The largest object a read takes, in bytes: `None` is ureq's own cap (10 MiB), which every program but an
-    /// operator's copy keeps ([`S3::for_operator`]).
-    read_limit: Option<u64>,
-    /// Whether a write waits for its answer by its body's length ([`answer_within`]): a world's store's only.
-    scaled: bool,
+    /// The largest object a read takes, and how a write waits for its answer.
+    reads: Reads,
     /// `scheme://host[:port]`, with no path.
     endpoint: String,
     host: String,
@@ -102,8 +110,7 @@ impl S3 {
             .into();
         Ok(S3 {
             agent,
-            read_limit: None,
-            scaled: false,
+            reads: Reads::Capped,
             endpoint: endpoint.to_owned(),
             host: host.to_owned(),
             bucket: bucket.to_owned(),
@@ -131,8 +138,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(WORLD_READ_LIMIT);
-        self.scaled = true;
+        self.reads = Reads::World;
         self
     }
 
@@ -152,7 +158,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(read_limit);
+        self.reads = Reads::Limit(read_limit);
         self
     }
 
@@ -165,7 +171,7 @@ impl S3 {
             .http_status_as_error(false)
             .build()
             .into();
-        self.read_limit = Some(read_limit);
+        self.reads = Reads::Limit(read_limit);
         self
     }
 
@@ -445,9 +451,10 @@ impl Store for S3 {
         status(&res, key)?;
         let etag = etag(&res, key)?;
         let body = res.body_mut();
-        let bytes = match self.read_limit {
-            Some(n) => body.with_config().limit(n).read_to_vec(),
-            None => body.read_to_vec(),
+        let bytes = match self.reads {
+            Reads::World => body.with_config().limit(WORLD_READ_LIMIT).read_to_vec(),
+            Reads::Limit(n) => body.with_config().limit(n).read_to_vec(),
+            Reads::Capped => body.read_to_vec(),
         }
         .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
         Ok(Some(Object { etag, bytes }))
@@ -465,7 +472,7 @@ impl Store for S3 {
             // object's ETag) and takes the bare one (#1960).
             When::Is(e) => req.header("if-match", e),
         };
-        if self.scaled {
+        if matches!(self.reads, Reads::World) {
             req = req
                 .config()
                 .timeout_recv_response(Some(answer_within(bytes.len())))
