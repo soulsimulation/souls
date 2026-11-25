@@ -21,7 +21,7 @@ import { mkdirSync, writeFileSync, appendFileSync, existsSync, readdirSync } fro
 import { join, resolve } from 'node:path';
 import { isMain } from '../lib/is-main.mjs';
 import { REPO_ROOT } from '../lib/paths.mjs';
-import { naiveFolder, say, contamination, pairingIn, turnSummary, personReply, stopAgentProcesses } from './agent.mjs';
+import { naiveFolder, say, PERSON_RULE, contamination, pairingIn, turnSummary, personReply, stopAgentProcesses } from './agent.mjs';
 import { openBrowser, watchConsole, pageState, waitLive, shot } from './page.mjs';
 import { checkStep, arrivalChecks, mine } from './checks.mjs';
 import { judgeAll } from './judge.mjs';
@@ -57,12 +57,12 @@ export async function firstDay(opts) {
   for (const d of [shots, agentOut, join(out, 'state')]) mkdirSync(d, { recursive: true });
   const rep = { target: target.site ? target.site : 'local', stamp: opts.stamp, startedAt: new Date().toISOString(), build: opts.build ?? null, steps: [], turns: [], findings: [], videos: [], agent: { transcript: join(agentOut, 'transcript.jsonl') } };
   const steps = rep.steps;
-  let stack = null, browser = null, agentDir = null, sessionId = null, soul = null;
+  let stack = null, browser = null, agentDir = null, sessionId = null, soul = null, settings = null;
   const transcript = (e) => appendFileSync(rep.agent.transcript, JSON.stringify(e) + '\n');
   const turn = async (step, text, extra = {}) => {
     log(`${step}: person says "${text.slice(0, 80)}"`);
     let child = null; const kill = () => child?.kill('SIGTERM'); CLEANUP.add(kill);
-    const r = await say({ cwd: agentDir, text, sessionId, model, maxSec: extra.maxSec ?? 420, onSpawn: (p) => { child = p; }, onEvent: (e, all) => { transcript({ step, ...e }); return extra.onEvent?.(e, all); } });
+    const r = await say({ cwd: agentDir, text, sessionId, model, settings, maxSec: extra.maxSec ?? 420, onSpawn: (p) => { child = p; }, onEvent: (e, all) => { transcript({ step, ...e }); return extra.onEvent?.(e, all); } });
     CLEANUP.delete(kill);
     sessionId = r.sessionId ?? sessionId;
     const summary = turnSummary(r);
@@ -182,7 +182,7 @@ export async function firstDay(opts) {
       const r = await turn('S4', said, { onEvent });
       if (contaminated || pairing) break;
       const reply = personReply(r.final, { name: SOUL_NAME, ruleAdded });
-      if (reply.addRule) { mkdirSync(join(agentDir, '.claude'), { recursive: true }); writeFileSync(join(agentDir, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['Bash(node eden.mjs:*)'] } }, null, 2)); ruleAdded = true; }
+      if (reply.addRule) { settings = PERSON_RULE; ruleAdded = true; }
       said = reply.text;
     }
     if (contaminated) { rep.aborted = `the naive agent's session was contaminated: ${contaminated.join('; ')}`; s.ok = false; s.seen = rep.aborted; steps.push(s); return finish(); }

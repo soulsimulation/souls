@@ -81,11 +81,18 @@ test('the start page tells the person what runs before anything does: version, s
   assert.equal(Number(/\((\d+) bytes\)/.exec(page)[1]), eden.length);
   assert.ok(page.includes(`\`${sha(eden)}\``), 'the SHA-256 of the served eden.mjs');
   assert.ok(page.includes(`https://github.com/soulsimulation/souls/tree/${commit}/v2/client`), 'the source at its commit');
-  // One allow rule per harness, made by the person, and a refusal stops the agent.
-  assert.ok(page.includes('`Bash(node eden.mjs:*)`'), 'Claude Code');
-  assert.ok(page.includes('prefix_rule(pattern = ["node", "eden.mjs"], decision = "allow")'), 'Codex');
-  assert.match(page, /never edit your own permissions/);
-  assert.match(page, /still refuses a step, \*\*stop\*\*\. Do not look for another way to run it/);
+  // The person's yes covers the exact commands: the agent shows them word for word in the same ask, before any run.
+  const ask = page.indexOf('## Ask first'), start = page.indexOf('## Start'), refused = page.indexOf('## If a step is refused');
+  assert.ok(ask >= 0 && ask < start && start < refused, 'ask first, then start, then refusals');
+  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word, and ask them to approve/);
+  assert.ok(page.slice(ask, start).includes('`node eden.mjs pair <world> --name "<Name>"`'), 'the pair command is in the ask');
+  assert.match(page.slice(ask, start), /Nothing the world sends is run as a command on this computer/);
+  // Permissions are the person's: nothing before the steps asks to change them; a refusal stops the agent.
+  assert.doesNotMatch(page.slice(0, refused), /permission|allow|settings/i);
+  assert.ok(page.slice(refused).includes('`Bash(node eden.mjs:*)`'), 'Claude Code');
+  assert.ok(page.slice(refused).includes('prefix_rule(pattern = ["node", "eden.mjs"], decision = "allow")'), 'Codex');
+  assert.match(page, /never change\s+your own permissions or settings/);
+  assert.match(page, /refuses a step, \*\*stop\*\*\. Do not look for another way to run it/);
   // The steps check the download before running it, in that order.
   const steps = [...page.matchAll(/```sh\n(.+)\n```/g)].map((m) => m[1]);
   assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world> --name "<Name>"']);

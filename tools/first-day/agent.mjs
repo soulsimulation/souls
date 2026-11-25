@@ -72,10 +72,15 @@ export function pairingIn(events) {
   return null;
 }
 
-/** One line from the person to the agent. `sessionId` resumes; `onEvent` sees each event as it comes.
- *  → {sessionId, events, init, result, final, ms, exit, timedOut} */
-export function say({ cwd, text, sessionId = null, model = null, maxSec = 600, onEvent = () => {}, onSpawn = () => {}, bin = 'claude' }) {
-  const args = ['-p', text, ...AGENT_FLAGS, ...(sessionId ? ['--resume', sessionId] : []), ...(model ? ['--model', model] : [])];
+/** The allow rule a person adds when the agent asks for one (`/permissions`), as `--settings` JSON. A `.claude/settings.json`
+ *  written into the agent's folder is not it: Claude Code ignores a project file's allow rules in a folder whose trust
+ *  dialog was never accepted (the naive folder's, under `-p`), so that rule never reached the agent. */
+export const PERSON_RULE = JSON.stringify({ permissions: { allow: ['Bash(node eden.mjs:*)'] } });
+
+/** One line from the person to the agent. `sessionId` resumes; `settings` (JSON) is the person's own settings, e.g.
+ *  PERSON_RULE; `onEvent` sees each event as it comes. → {sessionId, events, init, result, final, ms, exit, timedOut} */
+export function say({ cwd, text, sessionId = null, model = null, settings = null, maxSec = 600, onEvent = () => {}, onSpawn = () => {}, bin = 'claude' }) {
+  const args = ['-p', text, ...AGENT_FLAGS, ...(settings ? ['--settings', settings] : []), ...(sessionId ? ['--resume', sessionId] : []), ...(model ? ['--model', model] : [])];
   const t0 = Date.now(), events = [];
   return new Promise((ok) => {
     const p = spawn(bin, args, { cwd, env: personEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
