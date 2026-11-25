@@ -1,7 +1,10 @@
 // Stage 4 (#4176): things' state and the weather of a world the new engine runs, on the old page. The old page draws
 // Eden's things from its entity layer (WorldEntityLayer: a snapshot, then `world-diff` edge messages); a door's leaf
-// turns with its entity's `state.open` and a lamp lights with `state.on` (gen-mesh/vocab-look.ts, world-env.ts), and
-// the sky's weather is the layer's `state.weather` (world-env.ts setWeatherOf). This module keeps what the v2 stream says
+// turns with its entity's `state.open`, a lamp lights and a fire burns with `state.on` or `state.lit`
+// (gen-mesh/vocab-look.ts, world-env.ts), a basket fills with `state.fruit`: each thing's kind state fields (its
+// `content/kinds` entry's, by number) are named by its entry and given to its old def by the def's own keys
+// (`drawnState`: an entry's `lit` is an older def's `on`), and the sky's weather is the layer's `state.weather`
+// (world-env.ts setWeatherOf). This module keeps what the v2 stream says
 // of them (the reader worker's node records: a thing's kind state fields, the world node's sky fields) and, when the
 // layer draws something else, makes the one `world-diff` that brings it to v2's state. Nothing here draws; the layer
 // does, as it draws any diff. The world's clock (calendar fields 60, 61) already rides the chunks (bridge.ts datetime).
@@ -15,16 +18,29 @@ type NodeLike = { id: string; kind: string; parent: string | null; origin?: stri
   tint?: [string, number][]; slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 
-/** Doors and lamps: a kind's state fields (`content/kinds`, by `n`) and the entity state key the old page draws them by
- *  (the entry's own name: `open`, `on`, `lit`, `level`). */
-const STATE: Record<string, [n: number, key: string, type: 'bool' | 'int' | 'name'][]> = {
-  door: [[6, 'open', 'bool']],
-  bollard_light: [[28, 'on', 'bool']], desk_lamp: [[28, 'on', 'bool']], pendant: [[28, 'on', 'bool']], lamp_post: [[28, 'on', 'bool']],
-  string_lights: [[28, 'on', 'bool']], twinkle_lights: [[28, 'on', 'bool']], floor_lamp: [[28, 'level', 'int']], crank_lamp: [[29, 'on', 'bool']],
-  oil_lantern: [[29, 'lit', 'bool']], candle: [[28, 'lit', 'bool']], candle_stand: [[28, 'lit', 'bool']],
+/** A content kind's state fields a look can read, by the entry's own name (`lit`, `on`, `open`, `fruit`): its field
+ *  number `n`, its type, its default (a bool as 0 or 1; what a node that never set it holds) and an enum's values
+ *  (the build's `kind-state.json` from `content/kinds`: kind-bounds.ts). */
+export type KindFields = Record<string, [n: number, type: string, dflt?: number | string | null, values?: string[]]>;
+/** Without the build's table (tests, a page built before it): doors, lamps, fires and a radio. */
+const FALLBACK: Record<string, KindFields> = {
+  door: { open: [6, 'bool'] },
+  bollard_light: { on: [28, 'bool'] }, desk_lamp: { on: [28, 'bool'] }, pendant: { on: [28, 'bool'] }, lamp_post: { on: [28, 'bool'] },
+  string_lights: { on: [28, 'bool'] }, twinkle_lights: { on: [28, 'bool'] }, floor_lamp: { level: [28, 'int'] }, crank_lamp: { on: [29, 'bool'] },
+  oil_lantern: { lit: [29, 'bool'] }, candle: { lit: [28, 'bool'] }, candle_stand: { lit: [28, 'bool'] }, campfire: { lit: [28, 'bool', 0] },
   // R3: a radio, on and its station (`content/kinds/music/radio.json`), which the old page's sound and dial read.
-  radio: [[28, 'on', 'bool'], [29, 'station', 'name']],
+  radio: { on: [28, 'bool'], station: [29, 'enum'] },
 };
+/** The build's table by plain kind name (`eden:campfire` and `mars:campfire` are both `campfire`'s; the full name wins). */
+const byPlain = (kinds: Record<string, KindFields>) => {
+  const out: Record<string, KindFields> = {};
+  for (const [k, f] of Object.entries(kinds)) { const p = k.split(':').pop()!; if (!out[p] || k.startsWith('eden:')) out[p] = f; }
+  return out;
+};
+/** The content kinds' state fields the page names things' fields by (`setKindFields`); until they are here, FALLBACK. */
+let TABLE: Record<string, KindFields> = {}, PLAIN: Record<string, KindFields> = {};
+/** The build's table of each content kind's state fields, once fetched (use-v2-souls.ts). */
+export function setKindFields(t: Record<string, KindFields>): void { TABLE = t; PLAIN = byPlain(t); }
 /** import-eden's field 27: the entry a thing borrows (a Mars chair is an `eden:chair`). */
 const F_ENTRY = 27;
 /** E6's weather fields (v2/web/src/sky/record.ts F): the kind, cloud, rain and wind 0 to 100, the next change (µs). */
@@ -45,23 +61,58 @@ export function tintState(rows: [string, number][] | undefined): string | undefi
   return [...whole, ...parts].join(' ');
 }
 
-/** A door's or lamp's state as the old page's entity holds it, from its v2 fields, and a creator's tint on any thing;
- *  null for a thing with neither, or one that holds none of its fields yet (it is drawn as the layer has it). */
-export function thingState(n: NodeLike): Record<string, boolean | number | string> | null {
-  const tint = tintState(n.tint), out = doorOrLamp(n);
+/** A thing's kind state by its entry's names (`{lit: false}`), from its v2 fields, and a creator's tint on any thing;
+ *  null for a thing with neither, or one that holds none of its fields yet (it is drawn as the layer has it). `kinds`:
+ *  the content kinds' state fields by full kind name (default the build's, `setKindFields`; else a fallback for doors,
+ *  lamps and fires). */
+export function thingState(n: NodeLike, kinds?: Record<string, KindFields>): Record<string, boolean | number | string> | null {
+  const tint = tintState(n.tint), out = kindFields(n, kinds);
   return tint === undefined ? out : { ...out, tint };
 }
 
-function doorOrLamp(n: NodeLike): Record<string, boolean | number | string> | null {
-  const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
-  // a door by its kind or entry (`eden:door`, or a `…_door` kind); field 6 alone is not one: another kind may use it
-  const name = plainName(entry), defs = STATE[name] ?? (name.endsWith('_door') ? STATE.door : undefined);
-  if (!defs || !n.fields) return null;
+function kindFields(n: NodeLike, kinds?: Record<string, KindFields>): Record<string, boolean | number | string> | null {
+  const fields = n.fields ?? {}, entry = typeof fields[F_ENTRY] === 'string' ? (fields[F_ENTRY] as string) : n.kind;
+  // by its kind or entry (`eden:campfire`, a Mars chair's `eden:chair`); a door also by a `…_door` kind (field 6 alone is
+  // not one: another kind may use it)
+  const full = entry.split('@')[0], name = plainName(entry), plain = kinds ? byPlain(kinds) : PLAIN;
+  const pick = (t: Record<string, KindFields>, p: Record<string, KindFields>) => t[full] ?? p[name] ?? (name.endsWith('_door') ? t['eden:door'] ?? p.door : undefined);
+  const defs = pick(kinds ?? TABLE, plain) ?? pick({}, FALLBACK);
+  if (!defs) return null;
   let out: Record<string, boolean | number | string> | null = null;
-  for (const [f, key, type] of defs) {
-    if (type === 'name') { const w = n.fields[f]; if (typeof w === 'string') (out ??= {})[key] = plainName(w); continue; }
-    const v = whole(n.fields[f]);
+  // a field the node does not hold is its entry's default (a campfire never lit is out), where the table has one
+  for (const [key, [f, type, dflt]] of Object.entries(defs)) {
+    const held = fields[f] ?? dflt ?? undefined;
+    if (type === 'enum') { if (typeof held === 'string') (out ??= {})[key] = plainName(held); continue; }
+    const v = whole(held);
     if (v !== null) (out ??= {})[key] = type === 'bool' ? v !== 0 : v;
+  }
+  return out;
+}
+
+/** The state keys a thing's old def is drawn by, its parts' `when`s, lights and sounds (`state.on`, `state.open`). */
+export type OldDef = { state?: Record<string, { type: string; values?: readonly string[] }> };
+/** Bools that say a thing burns or runs: the entry and the old def may name the same thing differently (a campfire's
+ *  entry says `lit`, today's def `on`). */
+const POWER = ['on', 'lit', 'playing', 'running'];
+/** A thing's kind state (its entry's names) as its old def draws it: a key the def has, as the def's type; a burning or
+ *  running bool by the def's own name for it; a lamp's brightness `level` as its `on`. A key the def does not draw is
+ *  left out (no redraw for it); with no def known, the state is kept as it is. A creator's tint is always kept. */
+export function drawnState(v2: Record<string, boolean | number | string>, def: OldDef | null | undefined): Record<string, boolean | number | string> {
+  if (!def) return v2;
+  const has = def.state ?? {}, out: Record<string, boolean | number | string> = {};
+  if (v2.tint !== undefined) out.tint = v2.tint;
+  const put = (k: string, v: boolean | number | string) => {
+    const t = has[k]?.type;
+    if (t === 'bool') out[k] = typeof v === 'string' ? v !== '' : typeof v === 'number' ? v !== 0 : v;
+    else if ((t === 'number' || t === 'int') && typeof v !== 'string') out[k] = Number(v);
+    else if (t === 'enum' && typeof v === 'string') { const s = has[k].values?.find((x) => x === v || x === v.replace(/_/g, ' ')); if (s !== undefined) out[k] = s; }
+    else if (t === 'string' && typeof v === 'string') out[k] = v;
+  };
+  for (const [k, v] of Object.entries(v2)) if (k !== 'tint' && has[k]) put(k, v);
+  const power = POWER.find((k) => typeof v2[k] === 'boolean'), drawnBy = POWER.find((k) => has[k]?.type === 'bool');
+  if (drawnBy && !(drawnBy in out)) {
+    if (power) put(drawnBy, v2[power]);
+    else if (typeof v2.level === 'number' && !has.level) put(drawnBy, v2.level > 0);
   }
   return out;
 }
@@ -129,8 +180,8 @@ export const turnOf = (to: Placed, was: boolean): number | number[] => (to.tilt 
 
 /** The entity layer, the parts read here (WorldEntityLayer's model and diff sequence, private there, read as world-env.ts
  *  reads them). */
-type EntityLike = { id: string; state?: Record<string, unknown>; in?: { parent: string; slot?: string }; p?: number[]; r?: number | number[]; s?: number };
-export type LayerLike = { seq?: unknown; model?: { entities: Map<string, EntityLike>; state?: { weather?: unknown };
+type EntityLike = { id: string; def?: string; state?: Record<string, unknown>; in?: { parent: string; slot?: string }; p?: number[]; r?: number | number[]; s?: number };
+export type LayerLike = { seq?: unknown; model?: { entities: Map<string, EntityLike>; state?: { weather?: unknown }; resolvedDef?(ref: string): OldDef | undefined;
   worldPose?(e: EntityLike): { x: number; y: number; z: number; yaw: number; s: number }; readPass?<T>(fn: () => T): T } | null };
 export type WorldDiff = { type: 'edge'; kind: 'world-diff'; seq: number; at: number; by: 'engine'; tick?: number;
   diff: { upserts: unknown[]; removes: string[]; defs: unknown[]; tiles: string[]; world?: { weather: OldWeather } } };
@@ -150,6 +201,23 @@ const sameWeather = (a: unknown, b: OldWeather) => {
   return !!o && (Object.keys(b) as (keyof OldWeather)[]).every((k) => o[k] === b[k]) && (o.until === undefined) === (b.until === undefined);
 };
 
+/** A state key as the layer draws it: as the entity holds it, else as its looks read a key it does not hold (a fire, a
+ *  lamp burns unless `on` or `lit` is false; a door is shut unless `open`), so a thing already drawn as v2 has it is not
+ *  sent again; any other key it does not hold is unknown. */
+const drawnAs = (state: Record<string, unknown> | undefined, k: string): unknown =>
+  state && k in state ? state[k] : POWER.includes(k) ? true : k === 'open' || k === 'locked' ? false : undefined;
+
+/** Each thing's kind state as its old def draws it, kept while neither changes (worldDiff runs five times a second). */
+const translated = new WeakMap<object, { def: unknown; out: Record<string, boolean | number | string> }>();
+function asDrawn(want: Record<string, boolean | number | string> | undefined, e: EntityLike, m: NonNullable<LayerLike['model']>) {
+  if (!want) return undefined;
+  const def = e.def && m.resolvedDef ? m.resolvedDef(e.def) : undefined, was = translated.get(want);
+  if (was && was.def === def) return was.out;
+  const out = drawnState(want, def);
+  translated.set(want, { def, out });
+  return out;
+}
+
 /** The one diff that brings the layer to v2's state (next in its sequence), or null when it draws it already (or has no
  *  model yet). A thing whose entity the layer does not hold is left out. `ticks`: the take tick each thing's state (and,
  *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
@@ -161,10 +229,11 @@ export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyM
   const upserts: unknown[] = [];
   let tick = 0;
   for (const id of new Set([...things.keys(), ...moved.keys()])) {
-    const e = m.entities.get(id), want = things.get(id), to = moved.get(id);
+    const e = m.entities.get(id), to = moved.get(id);
     if (!e) continue;
+    const want = asDrawn(things.get(id), e, m);
     let next: EntityLike = e;
-    if (want && !Object.entries(want).every(([k, v]) => e.state?.[k] === v)) next = { ...next, state: { ...e.state, ...want } };
+    if (want && !Object.entries(want).every(([k, v]) => drawnAs(e.state, k) === v)) next = { ...next, state: { ...e.state, ...want } };
     // K5: a thing v2 turns off its feet (carried laid flat) is drawn so, and stood up again when it is set down so
     const drawn = Array.isArray(e.r) ? e.r.slice(1).map(Number) : [];
     if (!to?.tilt && !drawn.some((v) => Math.abs(v) > 1e-3)) tilted.delete(id);
@@ -236,6 +305,15 @@ export class WorldState {
       else if (was !== at || this.moved.has(n.origin)) { this.origins.set(n.id, n.origin); this.ticks.set(n.origin, tick); moves = true; }
     }
     if (moves) this.place();
+  }
+
+  /** Every thing's state read again from its fields (the kinds' state table has arrived: `setKindFields`). */
+  restate(): void {
+    for (const n of this.nodes.values()) {
+      if (!n.origin) continue;
+      const s = thingState(n);
+      if (s) { this.things.set(n.origin, s); this.origins.set(n.id, n.origin); if (!this.ticks.has(n.origin)) this.ticks.set(n.origin, 0); }
+    }
   }
 
   /** A moved thing's world pose, again with every part that moves one (its frame may be what moved); while it is in a
