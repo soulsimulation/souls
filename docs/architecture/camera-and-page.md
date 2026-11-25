@@ -100,8 +100,11 @@ by number. `world-state.ts` names them by the thing's entry (`kind-state.json`, 
 from `content/kinds`: each kind's fields, numbers and defaults; a field the node never set is its default) and gives
 them to the thing's def by the def's own keys (`drawnState`: a key the def has; a burning or running bool by the def's
 own name for it, so an entry's `lit` is an older def's `on`; a lamp's `level` as its `on`). Each change is one
-`world-diff` the layer applies when the picture reaches the part that made it. The layer's lights and glows go out
-for `on: false` or `lit: false`.
+`world-diff` the layer applies when the picture reaches the part that made it. A thing drawn from the stream holds
+no state, and its looks read a missing key differently (a kit part's `when: on` hides, a light shines), so each thing
+gets its state explicitly once. The layer's lights and glows go out for `on: false` or `lit: false`. The world starts
+the way today's world was captured: import-eden seeds each thing's entry fields from the exported state (a lamp that
+was on is on, a burning fire is lit), so the page does not darken an imported world.
 
 A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
 the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to

@@ -68,16 +68,20 @@ test('the campfire put out and lit again on v2: the layer draws its def\'s on, e
   assert.equal(entities.get('e_fire')!.state.on, true, 'lit again');
 });
 
-test('a campfire never lit is out on v2 (its entry\'s default): drawn out, though the captured scene holds no state for it', () => {
+test('a campfire never lit is out on v2 (its entry\'s default): drawn out, though the scene from the stream holds no state for it', () => {
   assert.deepEqual(look('eden:campfire@ab', 'core-campfire', {}), { on: false }, 'the default, where the node holds no field 28');
   assert.deepEqual(look('eden:lamp_post', 'core-lamp-post', {}), { on: true }, 'a lamp post is on by default');
   const lib2 = coreLibrary(), fire = newest('core-campfire'), post = newest('core-lamp-post');
   const entities = new Map<string, { id: string; def: string; state?: Record<string, unknown> }>([['e_fire', { id: 'e_fire', def: fire.ref }], ['e_post', { id: 'e_post', def: post.ref }]]);
   const l = { seq: 1, model: { entities, resolvedDef: (ref: string) => lib2.get(ref) } } as LayerLike;
   const ws = new WorldState();
-  ws.receive({ t: 'part', p: { nodes: [{ id: 'a.1', kind: 'eden:campfire@ab', parent: 'w.1', origin: 'e_fire' }, { id: 'a.2', kind: 'eden:lamp_post', parent: 'w.1', origin: 'e_post' }], removed: [] } });
+  ws.receive({ t: 'part', p: { nodes: [{ id: 'a.1', kind: 'eden:campfire@ab', parent: 'w.1', origin: 'e_fire' }, { id: 'a.2', kind: 'eden:lamp_post', parent: 'w.1', origin: 'e_post', fields: { 28: 1 } }], removed: [] } });
   const d = ws.diff(l, 0)!;
-  assert.deepEqual(d.diff.upserts, [{ id: 'e_fire', def: fire.ref, state: { on: false } }], 'the fire is put out; the lamp post, drawn on already, is not sent');
+  // a thing drawn from the stream holds no state, and its looks read a key it does not hold differently (a kit's part
+  // `when: on` hides, a light shines): each is given its state once, then never again while it stays
+  assert.deepEqual(d.diff.upserts, [{ id: 'e_fire', def: fire.ref, state: { on: false } }, { id: 'e_post', def: post.ref, state: { on: true } }]);
+  for (const u of d.diff.upserts as { id: string; def: string; state: Record<string, unknown> }[]) entities.set(u.id, u);
+  assert.equal(ws.diff({ ...l, seq: 2 } as LayerLike, 0), null, 'drawn as v2 has it: nothing more to send');
 });
 
 test('a fire whose def says lit, put out, glows no more (its light and glow read lit as well as on)', () => {

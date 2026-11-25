@@ -201,12 +201,6 @@ const sameWeather = (a: unknown, b: OldWeather) => {
   return !!o && (Object.keys(b) as (keyof OldWeather)[]).every((k) => o[k] === b[k]) && (o.until === undefined) === (b.until === undefined);
 };
 
-/** A state key as the layer draws it: as the entity holds it, else as its looks read a key it does not hold (a fire, a
- *  lamp burns unless `on` or `lit` is false; a door is shut unless `open`), so a thing already drawn as v2 has it is not
- *  sent again; any other key it does not hold is unknown. */
-const drawnAs = (state: Record<string, unknown> | undefined, k: string): unknown =>
-  state && k in state ? state[k] : POWER.includes(k) ? true : k === 'open' || k === 'locked' ? false : undefined;
-
 /** Each thing's kind state as its old def draws it, kept while neither changes (worldDiff runs five times a second). */
 const translated = new WeakMap<object, { def: unknown; out: Record<string, boolean | number | string> }>();
 function asDrawn(want: Record<string, boolean | number | string> | undefined, e: EntityLike, m: NonNullable<LayerLike['model']>) {
@@ -233,7 +227,7 @@ export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyM
     if (!e) continue;
     const want = asDrawn(things.get(id), e, m);
     let next: EntityLike = e;
-    if (want && !Object.entries(want).every(([k, v]) => drawnAs(e.state, k) === v)) next = { ...next, state: { ...e.state, ...want } };
+    if (want && !Object.entries(want).every(([k, v]) => e.state?.[k] === v)) next = { ...next, state: { ...e.state, ...want } };
     // K5: a thing v2 turns off its feet (carried laid flat) is drawn so, and stood up again when it is set down so
     const drawn = Array.isArray(e.r) ? e.r.slice(1).map(Number) : [];
     if (!to?.tilt && !drawn.some((v) => Math.abs(v) > 1e-3)) tilted.delete(id);
