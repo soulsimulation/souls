@@ -2118,26 +2118,95 @@ impl Again {
         Ok(())
     }
 }
-impl Store for Again {
-    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
-        self.store.get(key)
-    }
-    fn list(&self, prefix: &str) -> Result<Vec<String>, Refusal> {
-        self.store.list(prefix)
-    }
-    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
-        let result = match self.store.put(key, bytes, when) {
-            Err(e) if e.name == "precondition-failed" && when == When::Absent => {
-                match self.store.get(key)? {
-                    Some(old) if old.bytes == bytes => Ok(old.etag),
-                    Some(old) if history_mutable_key(key) => {
-                        self.store.put(key, bytes, When::Is(&old.etag))
+std::thread_local! {
+    /// The waits between a running archiver's tries of a call the store does not answer ([`persistently`]).
+    static PERSIST: std::cell::Cell<Option<&'static [u64]>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with this thread's [`Again`] calls tried until the store answers them, after each of `waits` ms (the last
+/// repeats): a running archiver's write is never given up on, so the archiver never stops on a store out of reach,
+/// and the parts that come meanwhile wait in its queue, in order. The archive's open is not run so: it is tried whole
+/// ([`until_answered`]).
+fn persistently<T>(waits: &'static [u64], f: impl FnOnce() -> T) -> T {
+    let before = PERSIST.with(|p| p.replace(Some(waits)));
+    let out = f();
+    PERSIST.with(|p| p.set(before));
+    out
+}
+
+impl Again {
+    /// `call`, tried again while it answers `store-unreachable` when this thread runs [`persistently`] (else once):
+    /// `archive` in `health.json` says `behind` with the fault and the next try meanwhile, and `current` once answered.
+    fn answered<T>(&self, mut call: impl FnMut() -> Result<T, Refusal>) -> Result<T, Refusal> {
+        let Some(waits) = PERSIST.with(std::cell::Cell::get) else {
+            return call();
+        };
+        let mut tries = 0u64;
+        loop {
+            match call() {
+                Err(e) if e.name == "store-unreachable" && !waits.is_empty() => {
+                    tries += 1;
+                    // A rate-limited store's `Retry-After`, when longer, bounded (R18).
+                    let after = directoryd::directory::store::retry_after(&e)
+                        .map_or(0, |d| d.as_millis() as u64);
+                    let wait = waits[(tries as usize - 1).min(waits.len() - 1)].max(after);
+                    let fault = refusal(e);
+                    measures::ARCHIVE.behind(&fault, tries, wait);
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "worldd: the archive is behind, the world goes on: {fault}; try {tries} unanswered, the next in {wait} ms"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(wait));
+                }
+                answer => {
+                    if tries > 0 && answer.is_ok() {
+                        measures::ARCHIVE.current();
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "worldd: the archive caught up: the store answered after {tries} unanswered tries"
+                        );
                     }
-                    _ => Err(e),
+                    return answer;
                 }
             }
-            other => other,
-        }?;
+        }
+    }
+}
+
+impl Store for Again {
+    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
+        self.answered(|| self.store.get(key))
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>, Refusal> {
+        self.answered(|| self.store.list(prefix))
+    }
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
+        // A try the store did not answer may have been done: a later try refused on its condition is then read back,
+        // and these bytes there are this write's.
+        let mut unanswered = false;
+        let result = self.answered(|| {
+            let tried = match self.store.put(key, bytes, when) {
+                Err(e)
+                    if e.name == "precondition-failed" && (when == When::Absent || unanswered) =>
+                {
+                    match self.store.get(key)? {
+                        Some(old) if old.bytes == bytes => Ok(old.etag),
+                        Some(old) if when == When::Absent && history_mutable_key(key) => {
+                            self.store.put(key, bytes, When::Is(&old.etag))
+                        }
+                        _ => Err(e),
+                    }
+                }
+                other => other,
+            };
+            if tried
+                .as_ref()
+                .is_err_and(|e| e.name == "store-unreachable")
+            {
+                unanswered = true;
+            }
+            tried
+        })?;
         self.mirror(key, bytes)?;
         Ok(result)
     }
@@ -2163,7 +2232,9 @@ impl Off {
             if let Some(crate::compactor::Archive::Parts(p)) = &self.floor {
                 p.sent(record, self.parts);
             }
-            let _ = a.send((self.parts, bytes.to_vec()));
+            if a.send((self.parts, bytes.to_vec())).is_ok() {
+                measures::ARCHIVE_QUEUE.sent(bytes.len());
+            }
             self.parts += 1;
         }
     }
@@ -2184,8 +2255,8 @@ impl Off {
         });
         if let Some(a) = &self.archive {
             if self.based {
-                if record >= self.archive_base {
-                    let _ = a.send((record, bytes.to_vec()));
+                if record >= self.archive_base && a.send((record, bytes.to_vec())).is_ok() {
+                    measures::ARCHIVE_QUEUE.sent(bytes.len());
                 }
             } else if !input {
                 self.part(record, bytes);
@@ -2209,56 +2280,72 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
 /// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
 /// in `rx` in order (#3746). An open the store does not answer is tried again until it does (R17, `archive` in
-/// `health.json`).
+/// `health.json`); once open, each call the store does not answer is tried again after each of `waits` ms until it
+/// does ([`persistently`]), so a store out of reach never stops the archiver (`archive` says `behind` meanwhile).
 fn archiving(
     mut open: impl FnMut() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
     closed: impl Fn(u64) + Send + 'static,
+    waits: &'static [u64],
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     measures::ARCHIVE.recovering();
     std::thread::spawn(move || {
         // The open is the world's start too: its reads are patient (#1960), and tried again until answered (R17).
-        let mut a = until_answered("the archive", &measures::ARCHIVE, || patiently(&mut open))?;
-        // How far its closed objects reach, for the log's compactor (#3837).
-        let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
-        publish(&a);
-        let mut indexed = a.shelf.writes.bundles;
-        let (mut fresh, mut viewed) = (false, std::time::Instant::now());
-        loop {
-            if a.is_based() && a.refresh_redactions(text.redactions())? {
+        let a = until_answered("the archive", &measures::ARCHIVE, || patiently(&mut open))?;
+        // Once open, each of its calls is tried until the store answers it: the archiver never stops on a store out
+        // of reach, and parts wait in `rx` meanwhile, in order. Any other refusal still ends it, named in health.json.
+        persistently(waits, || archive_parts(a, &rx, &text, &closed))
+            .inspect_err(|e| measures::ARCHIVE.stopped(&refusal(e.clone())))
+    })
+}
+
+/// The archiver's loop once open ([`archiving`]).
+fn archive_parts(
+    mut a: Archiver<Again>,
+    rx: &Receiver<(u64, Vec<u8>)>,
+    text: &sim::text::Store,
+    closed: &impl Fn(u64),
+) -> Result<(), Refusal> {
+    // How far its closed objects reach, for the log's compactor (#3837).
+    let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
+    publish(&a);
+    let mut indexed = a.shelf.writes.bundles;
+    let (mut fresh, mut viewed) = (false, std::time::Instant::now());
+    loop {
+        if a.is_based() && a.refresh_redactions(text.redactions())? {
+            fresh = true;
+        }
+        match rx.recv_timeout(shipping::POLL * 20) {
+            Ok((n, bytes)) => {
+                measures::ARCHIVE_QUEUE.taken(bytes.len());
+                if a.is_based() {
+                    a.refresh_redactions(text.redactions())?;
+                }
+                a.push(n, bytes)?;
                 fresh = true;
             }
-            match rx.recv_timeout(shipping::POLL * 20) {
-                Ok((n, bytes)) => {
-                    if a.is_based() {
-                        a.refresh_redactions(text.redactions())?;
-                    }
-                    a.push(n, bytes)?;
-                    fresh = true;
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                if a.is_based() {
+                    a.refresh_redactions(text.redactions())?;
                 }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    if a.is_based() {
-                        a.refresh_redactions(text.redactions())?;
-                    }
-                    return a.flush();
-                }
-            }
-            if a.shelf.writes.bundles != indexed {
-                a.shelf.flush()?;
-                indexed = a.shelf.writes.bundles;
-            }
-            publish(&a);
-            if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                a.publish_open()?;
-                for (k, v) in a.open_views()? {
-                    a.shelf.put_view(&k, &v)?;
-                }
-                (fresh, viewed) = (false, std::time::Instant::now());
+                return a.flush();
             }
         }
-    })
+        if a.shelf.writes.bundles != indexed {
+            a.shelf.flush()?;
+            indexed = a.shelf.writes.bundles;
+        }
+        publish(&a);
+        if fresh && viewed.elapsed() >= VIEWS_EVERY {
+            a.publish_open()?;
+            for (k, v) in a.open_views()? {
+                a.shelf.put_view(&k, &v)?;
+            }
+            (fresh, viewed) = (false, std::time::Instant::now());
+        }
+    }
 }
 
 fn archive_bridge(
@@ -2579,7 +2666,7 @@ fn off_machine(
         let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
         report(
             "the archiver",
-            archiving(open, rx, Arc::clone(&text), publish),
+            archiving(open, rx, Arc::clone(&text), publish, &STREAM_RETRY_MS),
         );
         Some(tx)
     } else if let Some(kind) = built
@@ -2614,7 +2701,7 @@ fn off_machine(
         archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(open, rx, Arc::clone(&text), publish),
+            archiving(open, rx, Arc::clone(&text), publish, &STREAM_RETRY_MS),
         );
         Some(tx)
     } else {
@@ -4014,6 +4101,94 @@ mod tests {
         assert_eq!(archived.try_recv().unwrap(), (1, part));
         assert!(archived.try_recv().is_err());
         assert_eq!(legacy.parts, 2);
+    }
+
+    /// Eden, 24 Nov: one archive write the store never answered (`timeout: receive response` on the open day's
+    /// counts) ended the archiver's thread, and the world ran on with no bundle or day index written for hours. On the
+    /// S3 stand-in, while a world's parts come, writes refused (503) and writes done whose answers are lost: the
+    /// archiver never stops, says it is behind in `health.json` meanwhile, and every object, bundle and day index
+    /// lands with the bytes a store that always answered holds.
+    #[test]
+    fn an_archiver_keeps_going_through_a_store_that_does_not_answer_and_every_bundle_lands() {
+        use archive::script;
+        use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
+        use directoryd::directory::store::Memory;
+        let dir = std::env::temp_dir().join(format!("archiver-persists-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A world over four minutes, a tick a second: four bundles' windows, the last one open until the flush.
+        let parts = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
+        let logged = std::rc::Rc::clone(&parts);
+        let mut w = script::world(
+            1,
+            2,
+            Some(Box::new(move |b: &[u8]| logged.borrow_mut().push(b.to_vec()))),
+        );
+        for t in 0..240u64 {
+            script::tick(&mut w, t * 20, 2, 30 * 20);
+        }
+        let parts = parts.borrow().clone();
+        let root = w.tree.node(w.tree.root()).unwrap().id();
+        let kind = w.tree.node(w.tree.root()).unwrap().kind().clone();
+        // What a store that always answers holds.
+        let memory = Memory::default();
+        let mut reference = Archiver::open(&memory, "", &w.header, root, kind.clone()).unwrap();
+        for (n, p) in parts.iter().enumerate() {
+            reference.push(n as u64, p.clone()).unwrap();
+        }
+        reference.flush().unwrap();
+        let expected: Vec<String> = memory.list("").unwrap();
+        assert!(
+            expected.iter().filter(|k| k.starts_with("bundles/")).count() >= 5,
+            "four bundles and a day index: {expected:?}"
+        );
+
+        let s = StandIn::start(1000).unwrap();
+        let keys = |k: &str| match k {
+            "AWS_ACCESS_KEY_ID" => KEY_ID.to_owned(),
+            "AWS_SECRET_ACCESS_KEY" => "stand-in-secret".to_owned(),
+            _ => String::new(),
+        };
+        let bucket = supervisor::bucket::Bucket::parse(&format!("{}/w", s.url("souls")), keys)
+            .unwrap()
+            .for_world();
+        let again = Again {
+            store: Under {
+                store: Shared(Arc::new(Patient::new(bucket))),
+                prefix: "h/w/".into(),
+            },
+            public: dir.join("history"),
+            header: w.header.stored().to_vec(),
+        };
+        let (header, opening) = (w.header.clone(), again.clone());
+        let open = move || Archiver::open(opening.clone(), "", &header, root, kind.clone());
+        let text = Arc::new(
+            sim::text::Store::open_dir(
+                &dir.join("log.text"),
+                replica::ids::Minter::new(Scope([7; 16])),
+            )
+            .unwrap(),
+        );
+        let (tx, rx) = channel();
+        // Production's fault was on a write: the bundles' and the day index's refused, then answers lost.
+        s.refuse_writes(3, 503, "/bundles/");
+        let h = archiving(open, rx, text, |_| {}, &[10, 20, 40]);
+        for (n, p) in parts.into_iter().enumerate() {
+            if n == 120 {
+                s.fail_writes(40, Fail::Lost);
+            }
+            tx.send((n as u64, p)).unwrap();
+        }
+        drop(tx);
+        h.join()
+            .unwrap()
+            .expect("the archiver never stops on a store that does not answer");
+        for key in &expected {
+            let want = memory.get(key).unwrap().unwrap().bytes;
+            let got = again.get(key).unwrap();
+            assert_eq!(got.map(|o| o.bytes), Some(want), "{key} lands");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

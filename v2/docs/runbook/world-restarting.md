@@ -51,7 +51,19 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   holds the spool's head. Nothing is dropped: the spool holds what the store lacks, bounded only by the disk, as the
   log is (`behind_bytes` says how much). A restart, even after a SIGKILL, recovers the chain from the spool's head,
   so viewers keep the exact bytes they were shown. Do not delete `stream-backup/` on a running machine. A stop
-  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
+  (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first. Each object leaves the spool as soon
+  as the store holds it, so a refused pass resumes where it stopped and never sends the spool again.
+- **A store that stalls after the archive opens.** A running history archiver never stops on a store that does not
+  answer: the write (or read) it is on is tried again after 1, 2, 4 … s, then every 60 s, until the store answers,
+  and the parts that come meanwhile wait in order. The journal says `worldd: the archive is behind, the world goes on:
+  <fault>; try <n> unanswered, the next in <ms> ms`, then `the archive caught up`. `health.json` has
+  `"archive":{"state":"behind","fault":…,"tries":…,"next_try_ms":…,"queued":<parts>,"queued_bytes":<bytes>}`
+  (`current` once answered; `queued` is in every state). A write whose answer was lost is read back: these bytes there
+  are this write's. A refusal of another kind ends the archiver with `"state":"stopped"` and its fault; a restart
+  starts it again from the log.
+- **A world's writes wait for their answer by their size.** A write's body is sent once the connection's buffer holds
+  it, so a large object's tail may still be on the wire while the answer is awaited: a world's store waits 5 s for a
+  write's answer, plus 1 s per MiB sent. A small write that is not answered is still found within 5 s.
 - **A move to a new machine needs `stream_backup` current, or the spool copied with the world's folder.** A world
   that recovers from the store alone (no `stream-backup/`) cuts no part where the store's chain ends. Its first cut,
   once the world has moved past the recovered cursor, starts a new generation whose baseline holds those records, so

@@ -357,7 +357,7 @@ impl Measures {
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
         SHIPPING.json("shipping", &mut o);
-        ARCHIVE.json("archive", &mut o);
+        ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         CREATOR.json("creator", &mut o);
         o.push_str("}\n");
         o
@@ -491,6 +491,47 @@ pub static ARCHIVE: Stream = Stream(Mutex::new(String::new()));
 /// R17: the creator's record in the directory, as [`SHIPPING`]. While it is degraded, edits fail closed.
 pub static CREATOR: Stream = Stream(Mutex::new(String::new()));
 
+/// The parts handed to the history archiver and not yet taken by it, and their bytes (`archive.queued` and
+/// `archive.queued_bytes` in `health.json`): they wait in order while a write waits for the store (`behind`).
+pub struct Backlog {
+    parts: AtomicU64,
+    bytes: AtomicU64,
+}
+
+/// This process's archiver's queue.
+pub static ARCHIVE_QUEUE: Backlog = Backlog {
+    parts: AtomicU64::new(0),
+    bytes: AtomicU64::new(0),
+};
+
+impl Backlog {
+    /// A part of `bytes` bytes handed over.
+    pub fn sent(&self, bytes: usize) {
+        self.parts.fetch_add(1, Ordering::Relaxed);
+        self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    /// A part of `bytes` bytes taken.
+    pub fn taken(&self, bytes: usize) {
+        let less = |v: u64, by: u64| Some(v.saturating_sub(by));
+        let _ = self
+            .parts
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| less(v, 1));
+        let _ = self
+            .bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| less(v, bytes as u64));
+    }
+
+    /// `"queued":n,"queued_bytes":n`.
+    fn fields(&self) -> String {
+        format!(
+            "\"queued\":{},\"queued_bytes\":{}",
+            self.parts.load(Ordering::Relaxed),
+            self.bytes.load(Ordering::Relaxed)
+        )
+    }
+}
+
 impl Stream {
     pub fn recovering(&self) {
         self.set("{\"state\":\"recovering\"}".to_owned());
@@ -509,6 +550,15 @@ impl Stream {
     pub fn degraded(&self, fault: &str, tries: u64, next_try_ms: u64) {
         self.set(format!(
             "{{\"state\":\"degraded\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
+            quoted(fault)
+        ));
+    }
+
+    /// A running helper's write (the archiver's) the store did not answer, `tries` times so far, the last with `fault`;
+    /// it is tried again in `next_try_ms`, and what comes meanwhile waits in order.
+    pub fn behind(&self, fault: &str, tries: u64, next_try_ms: u64) {
+        self.set(format!(
+            "{{\"state\":\"behind\",\"fault\":\"{}\",\"tries\":{tries},\"next_try_ms\":{next_try_ms}}}",
             quoted(fault)
         ));
     }
@@ -559,6 +609,14 @@ impl Stream {
         if !s.is_empty() {
             o.push_str(&format!(",\"{name}\":"));
             o.push_str(&s);
+        }
+    }
+
+    /// As [`Stream::json`], with `fields` (`"k":v,...`) last inside the object.
+    fn json_with(&self, name: &str, fields: &str, o: &mut String) {
+        let s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(inside) = s.strip_suffix('}') {
+            o.push_str(&format!(",\"{name}\":{inside},{fields}}}"));
         }
     }
 }
@@ -632,6 +690,38 @@ mod tests {
                 b - 1
             );
         }
+    }
+
+    /// The archiver behind a store that does not answer says so in `health.json`, with the parts waiting for it.
+    #[test]
+    fn an_archive_behind_says_its_fault_and_the_parts_that_wait() {
+        let (archive, queue) = (
+            Stream(Mutex::new(String::new())),
+            Backlog {
+                parts: AtomicU64::new(0),
+                bytes: AtomicU64::new(0),
+            },
+        );
+        let json = || {
+            let mut o = String::new();
+            archive.json_with("archive", &queue.fields(), &mut o);
+            o
+        };
+        assert_eq!(json(), "", "unset: no field");
+        archive.behind("store-unreachable: k: timeout: receive response", 3, 4000);
+        queue.sent(10);
+        queue.sent(20);
+        queue.taken(10);
+        queue.sent(5);
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"behind\",\"fault\":\"store-unreachable: k: timeout: receive response\",\"tries\":3,\"next_try_ms\":4000,\"queued\":2,\"queued_bytes\":25}"
+        );
+        archive.current();
+        assert_eq!(
+            json(),
+            ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25}"
+        );
     }
 
     #[test]
