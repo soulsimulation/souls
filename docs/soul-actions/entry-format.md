@@ -418,7 +418,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   record of it for viewers at its start and every 15 s (a viewer who comes in mid-dance draws it from the next), each
   planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
-  SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+  SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)). A form that starts with a `take` naming no
+  move (a cup's `take`) first walks to its thing, unless the body is already within reach; the hand step of a `take`
+  or `put` naming no move lands only with its thing within reach of the body, else the run ends `out-of-reach` with
+  nothing moved ([#4086](https://github.com/soulsimulation/souls/issues/4086)).
 - **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
   (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
   microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The

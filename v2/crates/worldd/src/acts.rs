@@ -1117,6 +1117,17 @@ impl Geometry for Sight<'_> {
             fields,
         })
     }
+
+    /// A form's reach ([`within_reach`]) from where the controller has the body now, carried into the zone's frame,
+    /// to the node as the tree places it, measured by the node's own entry (#4086).
+    fn within_reach(&self, body: Id, node: Id) -> Option<bool> {
+        let seen = self.read(body)?;
+        let b = carried(self.tree, seen.parent, seen.position)?;
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        let entry = entry_in(self.kinds, self.tree, &n);
+        let entry = entry.as_deref().unwrap_or(&Json::Null);
+        Some(reach_between(entry, b, world_at(self.tree, node)?))
+    }
 }
 
 /// The pure reach measures, shared with the run gate's world (0.135 E19).
@@ -1613,6 +1624,12 @@ pub(crate) fn within_reach(
     let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
         return false;
     };
+    reach_between(entry, b, n)
+}
+
+/// Whether a body at `b` is within a form's reach of a thing of entry `entry` at `n` (both in the zone's frame): its
+/// half size and [`NEAR_MM`], across x and z.
+fn reach_between(entry: &Json, b: Vec3, n: Vec3) -> bool {
     let half = entry
         .get("geometry")
         .and_then(|g| g.get("bounds_mm"))

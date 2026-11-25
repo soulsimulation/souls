@@ -109,6 +109,10 @@ pub trait Geometry {
     fn position(&self, node: Id) -> Option<Vec3> {
         self.read(node).map(|s| s.position)
     }
+    /// Whether `body` is within a hand's reach of `node` ([`Host::within_reach`], #4086); `None` by default.
+    fn within_reach(&self, _body: Id, _node: Id) -> Option<bool> {
+        None
+    }
 }
 
 /// The world's side of a crossing: the track a body is carried along across `link` at `speed`, or `None` while it
@@ -321,6 +325,11 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
     fn plan_walk(&self, step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
         self.count();
         self.geometry.plan_walk(self.body, step, node, at, reach)
+    }
+
+    fn within_reach(&self, node: Id) -> Option<bool> {
+        self.count();
+        self.geometry.within_reach(self.body, node)
     }
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
