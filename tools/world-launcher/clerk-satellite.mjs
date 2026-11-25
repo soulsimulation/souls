@@ -42,7 +42,8 @@ export function primarySignInPage(auth, search) {
   if (!satellite || !primaryReturnTarget(search, '', satellite.domain, satellite.legacyDomains)) return null;
   const primary = new URL(satellite.signInUrl);
   const config = { primaryOrigin: primary.origin, signInUrl: satellite.signInUrl, domain: satellite.domain, legacyDomains: satellite.legacyDomains ?? [], satelliteOrigin: `https://${satellite.domain}` };
-  const source = `${auth.clerkIssuer}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`;
+  // Clerk Core 3: clerk-js 6 and, beside it, its UI (@clerk/ui 1), which Clerk.load is handed for mountSignIn.
+  const source = `${auth.clerkIssuer}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, uiSource = `${auth.clerkIssuer}/npm/@clerk/ui@1/dist/ui.browser.js`;
   const script = `
 (async () => {
   const config = ${literal(config)}, root = document.getElementById('sign-in');
@@ -52,7 +53,7 @@ export function primarySignInPage(auth, search) {
   const target = primaryReturnTarget(location.search, location.hash, config.domain, config.legacyDomains);
   if (!target) { root.textContent = 'This sign-in return address is not allowed.'; return; }
   try {
-    await Clerk.load({ signInUrl: config.signInUrl, allowedRedirectOrigins: [config.satelliteOrigin, ...config.legacyDomains.map(d => 'https://' + d)], signInForceRedirectUrl: target, signUpForceRedirectUrl: target });
+    await Clerk.load({ ui: { ClerkUI: globalThis.__internal_ClerkUICtor }, signInUrl: config.signInUrl, allowedRedirectOrigins: [config.satelliteOrigin, ...config.legacyDomains.map(d => 'https://' + d)], signInForceRedirectUrl: target, signUpForceRedirectUrl: target });
     if (Clerk.session) { location.replace(target); return; }
     root.textContent = '';
     Clerk.mountSignIn(root, { routing: 'hash', forceRedirectUrl: target, signUpForceRedirectUrl: target });
@@ -60,7 +61,7 @@ export function primarySignInPage(auth, search) {
 })();
 `;
   const hash = createHash('sha256').update(script).digest('base64');
-  return { html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Sign in to Souls</title></head><body><main id="sign-in">Loading sign-in…</main><script crossorigin="anonymous" data-clerk-publishable-key=${attribute(auth.clerkPublishableKey)} src=${attribute(source)}></script><script>${script}</script></body></html>`,
+  return { html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Sign in to Souls</title></head><body><main id="sign-in">Loading sign-in…</main><script crossorigin="anonymous" data-clerk-publishable-key=${attribute(auth.clerkPublishableKey)} src=${attribute(source)}></script><script crossorigin="anonymous" src=${attribute(uiSource)}></script><script>${script}</script></body></html>`,
     // Clerk's identity providers and verification frames use HTTPS. Inline code is pinned to this document.
     csp: `default-src 'none'; script-src ${auth.clerkIssuer} https://challenges.cloudflare.com https://*.protect.clerk.com https://static.cloudflareinsights.com 'sha256-${hash}'; worker-src 'self' blob:; connect-src https:; img-src https: data:; style-src https: 'unsafe-inline'; font-src https: data:; frame-src https:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'` };
 }

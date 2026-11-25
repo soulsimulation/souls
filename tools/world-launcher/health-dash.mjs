@@ -366,8 +366,9 @@ function fapi(k){try{return atob(k.split('_')[2]).replace(/\\$$/,'')}catch{retur
 async function signIn(){
   if(CFG.provider!=='clerk'||!CFG.key)return gate('Owner only. Open this page from the server itself.');
   if(!clerk){const host=fapi(CFG.key);if(!host)return gate('Sign-in is not configured.');
-    await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://'+host+'/npm/@clerk/clerk-js@5/dist/clerk.browser.js';s.async=true;s.crossOrigin='anonymous';s.dataset.clerkPublishableKey=CFG.key;s.onload=ok;s.onerror=no;document.head.appendChild(s)}).catch(()=>{});
-    if(!window.Clerk)return gate('Could not load sign-in.');clerk=window.Clerk;await clerk.load()}
+    const add=(src,key)=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.async=true;s.crossOrigin='anonymous';if(key)s.dataset.clerkPublishableKey=key;s.onload=ok;s.onerror=no;document.head.appendChild(s)}).catch(()=>{});
+    await Promise.all([add('https://'+host+'/npm/@clerk/clerk-js@6/dist/clerk.browser.js',CFG.key),add('https://'+host+'/npm/@clerk/ui@1/dist/ui.browser.js')]);
+    if(!window.Clerk)return gate('Could not load sign-in.');clerk=window.Clerk;await clerk.load({ui:{ClerkUI:window.__internal_ClerkUICtor}})}
   if(!clerk.session){gate('Owner only. Sign in to see it.',true);return false}
   token=await clerk.session.getToken();return true}
 function gate(text,btn){$('#main').hidden=true;const g=$('#gate');g.hidden=false;g.innerHTML='<p>'+esc(text)+'</p>'+(btn?'<button id="si">Sign in</button>':'');if(btn)$('#si').onclick=()=>clerk.openSignIn({forceRedirectUrl:location.href});$('#state').textContent='';return false}

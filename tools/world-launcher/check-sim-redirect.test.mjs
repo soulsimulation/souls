@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { checkRedirect } from './deploy/caddy/check-sim-redirect.mjs';
 
 const listen = (handler) => new Promise((yes) => { const s = createServer(handler).listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${s.address().port}`, close: () => s.close() })); });
-const BRIDGE = '<!doctype html><title>Sign in to Souls</title><main id="sign-in">Loading sign-in…</main><script src="https://clerk.example.test/npm/@clerk/clerk-js@5/dist/clerk.browser.js"></script>';
+const BRIDGE = '<!doctype html><title>Sign in to Souls</title><main id="sign-in">Loading sign-in…</main><script src="https://clerk.example.test/npm/@clerk/clerk-js@6/dist/clerk.browser.js"></script>';
 
 // what the Caddy file does, with switches to break one thing at a time
 function oldOrigin(canonical, broken = {}) {
