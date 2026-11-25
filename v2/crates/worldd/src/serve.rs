@@ -2203,10 +2203,18 @@ struct Again {
     header: Vec<u8>,
 }
 impl Again {
+    /// The public copy of `key`: its bytes checked ([`Again::check`]), then placed ([`Again::place`]), either refusal
+    /// returned (the tests' strict form of [`Again::mirrored`]).
+    #[cfg(test)]
     fn mirror(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
         if !history_public_key(key) {
             return Ok(());
         }
+        self.check(key, bytes)?;
+        self.place(key, bytes)
+    }
+    /// A public key's bytes are what they say they are. A refusal here is a corrupt archive, and ends the start.
+    fn check(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
         let fail = |detail: &str| Refusal {
             name: "history-export",
             detail: detail.into(),
@@ -2254,21 +2262,57 @@ impl Again {
             }
             _ => return Err(fail("public key refused")),
         }
+        Ok(())
+    }
+    /// Where the public copy of `key` sits in the export directory: at its key, except a day's event index once an
+    /// hour of that day has an object of its own (V4, an hour of [`replica::history::events::SPLIT`] events or more).
+    /// The day's key then names the directory of its hours, so its index sits in it as [`EVENTS_DAY_FILE`] (no hour's
+    /// name), and the viewers' origin serves it at the day's URL (`v2/tools/origin/origin.mjs`).
+    fn public_path(&self, key: &str) -> PathBuf {
+        let path = self.public.join(key);
+        if is_events_day(key) && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+            path.join(EVENTS_DAY_FILE)
+        } else {
+            path
+        }
+    }
+    /// Writes the checked `bytes` of `key` into the export directory: no symlink followed, an immutable copy never
+    /// changed. A refusal here is the mirror's alone; the store holds the key.
+    fn place(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
+        let fail = |detail: &str| Refusal {
+            name: "history-export",
+            detail: detail.into(),
+        };
+        let parts: Vec<_> = key.split('/').collect();
         let mut path = self.public.clone();
-        for component in std::iter::once("").chain(key.split('/').take(key.split('/').count() - 1))
-        {
-            if !component.is_empty() {
-                path.push(component);
+        // The export directory itself, then each directory of the key.
+        for at in 0..parts.len() {
+            if at > 0 {
+                path.push(parts[at - 1]);
             }
             match std::fs::symlink_metadata(&path) {
                 Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+                // The first hour of a day split off after the day's index was placed: the index moves into the day's
+                // directory, beside its hours.
+                Ok(m)
+                    if at > 0
+                        && m.is_file()
+                        && !m.file_type().is_symlink()
+                        && is_events_day(&parts[..at].join("/")) =>
+                {
+                    let aside = path.with_extension("tmp");
+                    std::fs::rename(&path, &aside)
+                        .and_then(|()| std::fs::create_dir(&path))
+                        .and_then(|()| std::fs::rename(&aside, path.join(EVENTS_DAY_FILE)))
+                        .map_err(|_| fail("cannot move the day index beside its hours"))?;
+                }
                 Ok(_) => return Err(fail("directory symlink or type mismatch")),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path)
                     .map_err(|_| fail("cannot create export directory"))?,
                 Err(_) => return Err(fail("cannot inspect export directory")),
             }
         }
-        let path = self.public.join(key);
+        let path = self.public_path(key);
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err(fail("file symlink or type mismatch"));
@@ -2293,24 +2337,39 @@ impl Again {
                     name: "history-export",
                     detail: "public object disappeared".into(),
                 })?;
-                self.mirrored(&key, &object.bytes);
+                self.mirrored(&key, &object.bytes)?;
             }
         }
         Ok(())
     }
-    /// [`Again::mirror`], whose refusal ends nothing: the store holds the key, the public copy of it is skipped, and
-    /// the fault is logged by its key and counted in `health.json` (`history_export`). A local failure never stops
-    /// the world.
-    fn mirrored(&self, key: &str, bytes: &[u8]) {
-        if let Err(e) = self.mirror(key, bytes) {
-            let fault = refusal(e);
-            measures::HISTORY_EXPORT.fault(key, &fault);
-            let _ = writeln!(
-                std::io::stderr(),
-                "worldd: the public history skips {key}, the world goes on: {fault}"
-            );
+    /// [`Again::mirror`], whose placing ends nothing: the store holds the key, a public copy that cannot be placed is
+    /// skipped, counted in `health.json` (`history_export`) and logged once per key. A local failure never stops the
+    /// world. Bytes that fail their check are refused as before: a corrupt archive stops at the start.
+    fn mirrored(&self, key: &str, bytes: &[u8]) -> Result<(), Refusal> {
+        if !history_public_key(key) {
+            return Ok(());
         }
+        self.check(key, bytes)?;
+        if let Err(e) = self.place(key, bytes) {
+            let fault = refusal(e);
+            if measures::HISTORY_EXPORT.fault(key, &fault) {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "worldd: the public history skips {key}, the world goes on: {fault}"
+                );
+            }
+        }
+        Ok(())
     }
+}
+
+/// A day's event index in the export directory, once that day's key is the directory of its split hours.
+const EVENTS_DAY_FILE: &str = "day";
+
+/// Whether `key` is a day's object of the public event index (`history/everyone/events/<day>`).
+fn is_events_day(key: &str) -> bool {
+    key.strip_prefix("history/everyone/events/")
+        .is_some_and(|day| !day.contains('/') && history_public_key(key))
 }
 std::thread_local! {
     /// The waits between a running archiver's tries of a call the store does not answer ([`persistently`]).
@@ -2398,7 +2457,7 @@ impl Store for Again {
             }
             tried
         })?;
-        self.mirrored(key, bytes);
+        self.mirrored(key, bytes)?;
         Ok(result)
     }
 }
@@ -4919,14 +4978,14 @@ mod tests {
         assert_eq!((h.queued, h.queued_bytes, h.end, h.next), (1, 3, 2, 2));
     }
 
-    /// Eden, 25 Nov: a day's event index is a file in the public mirror, and an hour of that day split off (V4, 1,000
-    /// events or more) wants the same path as a directory. The mirror refuses that key, and that refusal ends nothing:
-    /// the store holds both, the archiver's write answers, the fault is counted by its key, and the restore at a start
-    /// goes on past it.
+    /// Eden, 25 Nov: a day's event index was a file in the public mirror, and an hour of that day split off (V4, 1,000
+    /// events or more) wanted the same path as a directory, which ended the process. Both are exported now: the day's
+    /// index moves into the day's directory as `day` (the origin serves it at the day's URL), in either order. A copy
+    /// that cannot be placed is skipped, counted and logged once; bytes that fail their check still stop the start.
     #[test]
     fn a_day_index_and_its_split_hour_never_end_the_world() {
         use directoryd::directory::store::Store;
-        use replica::history::events::{EventIndex, events_key};
+        use replica::history::events::{Counts, EventIndex, Span, events_key};
         let header =
             Header::read(&fixture_bytes(replica::effects::FIXTURE_HEADER).unwrap()).unwrap();
         let dir = std::env::temp_dir().join(format!("split-export-{}", std::process::id()));
@@ -4966,46 +5025,81 @@ mod tests {
         .to_bytes()
         .unwrap();
         let (day_key, hour_key) = (events_key(day, None), events_key(day, Some(hour)));
-        // Eden's mirror: the day's index already a file (the folder store here cannot hold both keys either, so the
-        // mirror's state is set by hand; the bucket behind a world is an object store).
+        // Eden's mirror: the day's index placed as a file before its hour split off (the folder store here cannot hold
+        // both keys either, so that state is set by hand; the bucket behind a world is an object store).
         std::fs::create_dir_all(public.join(&day_key).parent().unwrap()).unwrap();
         std::fs::write(public.join(&day_key), &day_bytes).unwrap();
-        let before = measures::HISTORY_EXPORT.count();
-        // The refusal that ended Eden's process 49 times, by name: the mirror itself still refuses the key.
-        assert_eq!(
-            adapter.mirror(&hour_key, &hour_bytes).unwrap_err().detail,
-            "directory symlink or type mismatch"
-        );
-        // The archiver's write answers: the store holds the hour, the mirror skips it and counts it.
         adapter.put(&hour_key, &hour_bytes, When::Absent).unwrap();
-        let counted = measures::HISTORY_EXPORT.count();
-        assert!(counted > before);
-        assert_eq!(adapter.get(&hour_key).unwrap().unwrap().bytes, hour_bytes);
-        assert_eq!(std::fs::read(public.join(&day_key)).unwrap(), day_bytes);
-        // A start restores the mirror from the store and goes on past the key it cannot hold.
-        adapter.restore_public().unwrap();
-        let counted = {
-            let now = measures::HISTORY_EXPORT.count();
-            assert!(now > counted);
-            now
-        };
-        // The other order: the hours' directory first, then the day's file.
+        assert_eq!(std::fs::read(public.join(&hour_key)).unwrap(), hour_bytes);
+        assert_eq!(
+            std::fs::read(public.join(&day_key).join("day")).unwrap(),
+            day_bytes
+        );
+        assert!(!public.join(&day_key).with_extension("tmp").exists());
+        // Later writes of the day's index land beside its hours.
+        let later = EventIndex {
+            day,
+            hour: None,
+            split: vec![hour, hour + 1],
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        adapter.mirror(&day_key, &later).unwrap();
+        assert_eq!(
+            std::fs::read(public.join(&day_key).join("day")).unwrap(),
+            later
+        );
+        // The other order: an hour first, then its day's index.
         let day2 = day + 1;
-        std::fs::create_dir_all(public.join(events_key(day2, None))).unwrap();
-        let other_day = EventIndex {
+        let hour2 = EventIndex {
+            day: day2,
+            hour: Some(hour),
+            split: Vec::new(),
+            rows: Vec::new(),
+        }
+        .to_bytes()
+        .unwrap();
+        let day2_bytes = EventIndex {
             day: day2,
             hour: None,
             split: vec![hour],
             rows: Vec::new(),
-        };
+        }
+        .to_bytes()
+        .unwrap();
         adapter
-            .put(
-                &events_key(day2, None),
-                &other_day.to_bytes().unwrap(),
-                When::Absent,
-            )
+            .mirror(&events_key(day2, Some(hour)), &hour2)
             .unwrap();
-        assert!(measures::HISTORY_EXPORT.count() > counted);
+        adapter
+            .mirror(&events_key(day2, None), &day2_bytes)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(public.join(events_key(day2, None)).join("day")).unwrap(),
+            day2_bytes
+        );
+        assert_eq!(
+            std::fs::read(public.join(events_key(day2, Some(hour)))).unwrap(),
+            hour2
+        );
+        // A copy that cannot be placed (here a file where a directory goes) is skipped: the write answers, and the
+        // key is counted, held, and so logged once.
+        let counts_key = "history/everyone/counts/day/00020781";
+        std::fs::write(public.join("history/everyone/counts"), b"in the way").unwrap();
+        let before = measures::HISTORY_EXPORT.count();
+        let counts = Counts::new(Span::Day(day)).to_bytes().unwrap();
+        adapter.put(counts_key, &counts, When::Absent).unwrap();
+        assert!(measures::HISTORY_EXPORT.count() > before);
+        assert!(!measures::HISTORY_EXPORT.fault(counts_key, "again"));
+        adapter.restore_public().unwrap();
+        // Bytes that fail their check are refused, in the running archiver and at a start: a corrupt archive stops.
+        let corrupt = events_key(day + 2, None);
+        let refused = adapter
+            .put(&corrupt, b"not an index", When::Absent)
+            .unwrap_err();
+        assert_ne!(refused.name, "history-export");
+        assert!(!public.join(&corrupt).exists());
+        assert_eq!(adapter.restore_public().unwrap_err(), refused);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
