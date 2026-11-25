@@ -10,7 +10,7 @@
 //   node tools/first-day/first-day.mjs --local [--repo <checkout>] [--template worlds/templates/eden-2026.json]
 //   node tools/first-day/first-day.mjs --local --attach <world page url> --directory <directory url>
 //   node tools/first-day/first-day.mjs --site https://soul.game --profile <signed-in browser profile folder>
-//     [--headed] [--model <agent model>] [--judge-model <model>] [--explore E1,E3 | --no-explore] [--out <dir>]
+//     [--headed] [--settle <s>] [--model <agent model>] [--judge-model <model>] [--explore E1,E3 | --no-explore] [--out <dir>]
 //
 // --local starts the prod-like stack (tools/playtest/arena/new-engine/old-page.mjs, from --repo's checkout, which must
 // be built) and approves as the local test person (the page's dev sign-in name). --site approves through an owner's
@@ -52,7 +52,7 @@ export function startStack({ repo, template, dir, log }) {
 }
 
 export async function firstDay(opts) {
-  const { target, out, repo = REPO_ROOT, headed = false, model = null, judgeModel = null, explore = EXPLORE, log = (m) => process.stderr.write(`[first-day] ${m}\n`) } = opts;
+  const { target, out, repo = REPO_ROOT, headed = false, settleSec = 120, model = null, judgeModel = null, explore = EXPLORE, log = (m) => process.stderr.write(`[first-day] ${m}\n`) } = opts;
   const shots = join(out, 'shots'), agentOut = join(out, 'agent');
   for (const d of [shots, agentOut, join(out, 'state')]) mkdirSync(d, { recursive: true });
   const rep = { target: target.site ? target.site : 'local', stamp: opts.stamp, startedAt: new Date().toISOString(), build: opts.build ?? null, steps: [], turns: [], findings: [], videos: [], agent: { transcript: join(agentOut, 'transcript.jsonl') } };
@@ -286,8 +286,23 @@ export async function firstDay(opts) {
       }
 
       // S7 and the explore phase: one plain ask at a time, watched on the page
+      // the picture is settled when the person's Soul has not moved for 3 s and is not walking
+      const settled = async (sec) => {
+        const t = Date.now(); let prev = null, since = Date.now();
+        for (; Date.now() - t < sec * 1000; await sleep(1000)) {
+          const m = mine(await pageState(page), soul);
+          if (!m?.p) continue;
+          if (prev && (Math.hypot(m.p[0] - prev.p[0], m.p[2] - prev.p[2]) > 0.3 || m.doing === 'walking')) since = Date.now();
+          prev = m;
+          if (Date.now() - since >= 3000 && m.doing !== 'walking') return (Date.now() - t) / 1000;
+        }
+        return null;
+      };
       const ask = async (d) => {
-        const sd = { ...d, shots: [], notes: [] }; n = con.errors.length;
+        const sd = { ...d, title: d.title ?? d.ask, shots: [], notes: [] }; n = con.errors.length;
+        const wait = await settled(settleSec);
+        if (wait == null) sd.notes.push(`before this ask the page still showed the previous one playing after ${settleSec} s more`);
+        else if (wait > 5) sd.notes.push(`the page took ${Math.round(wait)} s more to finish showing the previous ask`);
         const before = await pageState(page);
         sd.shots.push(await capture(page, d.id, 'before'));
         const t = Date.now();
@@ -307,15 +322,17 @@ export async function firstDay(opts) {
           if (!mid && reacted != null && elapsed - reacted > 4) { sd.shots.push(await capture(page, d.id, 'mid')); mid = true; }
           last = m ?? last;
           const still = (Date.now() - lastMove) / 1000;
-          if (done && elapsed >= minSec && (still >= 5 || Date.now() - done > 60_000)) break;
-          if (elapsed > 360) { sd.notes.push('still moving after 6 minutes'); break; }
+          if (done && elapsed >= minSec && ((still >= 5 && m?.doing !== 'walking') || Date.now() - done > settleSec * 1000)) break;
         }
         await running;
+        const lagAfterReply = Math.max(0, (lastMove - done) / 1000);
         sd.shots.push(await capture(page, d.id, 'after'));
         const after = await pageState(page);
+        const stillGoing = mine(after, soul)?.doing === 'walking' || (Date.now() - lastMove) / 1000 < 5;
         sd.seconds = reacted != null ? Math.round(reacted * 10) / 10 : 'no visible reaction';
         sd.checks = [...checkStep(d, { before, after, trail: trailX, soul, consoleErrors: con.since(n) }),
-          { check: 'reacted-in-time', ok: reacted != null && reacted <= (d.limitSec ?? 15), detail: reacted != null ? `first visible change after ${reacted.toFixed(1)} s` : 'nothing visible changed', severity: 'major' }];
+          { check: 'reacted-in-time', ok: reacted != null && reacted <= (d.limitSec ?? 15), detail: reacted != null ? `first visible change after ${reacted.toFixed(1)} s` : 'nothing visible changed', severity: 'major' },
+          { check: 'seen-done', ok: !stillGoing && lagAfterReply <= 30, detail: stillGoing ? `the page still showed it moving ${settleSec} s after the agent said it was done` : `the picture settled ${Math.round(lagAfterReply)} s after the agent's reply`, severity: 'major' }];
         sd.consoleErrors = con.since(n);
         sd.agentSaid = rep.turns.at(-1)?.summary.final.slice(0, 400);
         writeFileSync(join(out, 'state', `${d.id}.json`), JSON.stringify({ before, after, trail: trailX.map((x) => ({ at: x.at, me: mine(x, soul), speech: x.speech.filter((w) => w.soul === soul.id), live: x.live, chip: x.chip, ticks: x.ticks })) }));
@@ -325,7 +342,9 @@ export async function firstDay(opts) {
 
       // S8 reload and come back
       s = def('S8'); n = con.errors.length;
+      await settled(settleSec);
       const pre = mine(await pageState(page), soul);
+      const s8before = await capture(page, 'S8', 'before');
       t0 = Date.now();
       await page.reload().catch(() => {});
       await waitLive(page, s.limitSec);
@@ -334,7 +353,7 @@ export async function firstDay(opts) {
       st = await pageState(page);
       const back = mine(st, soul);
       s.seconds = Math.round((Date.now() - t0) / 100) / 10;
-      s.shots = [await capture(page, 'S8', 'after')];
+      s.shots = [s8before, await capture(page, 'S8', 'after')];
       const moved = back?.p && pre?.p ? Math.hypot(back.p[0] - pre.p[0], back.p[2] - pre.p[2]) : null;
       s.checks = [{ check: 'still-there', ok: !!back?.p, detail: back?.p ? 'in the picture' : 'not in the picture after the reload', severity: 'blocker' },
         { check: 'still-named', ok: back?.name === soul.name, detail: `named ${back?.name ?? 'nothing'}`, severity: 'major' },
@@ -389,7 +408,7 @@ if (isMain(import.meta.url)) {
   let build = null;
   try { build = (await import('node:child_process')).execFileSync('git', ['-C', repo, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch { /* not a checkout */ }
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { for (const f of CLEANUP) { try { await f(); } catch { /* next */ } } process.exit(130); });
-  const rep = await firstDay({ target, out, repo, stamp, build, headed: has('headed'), model: opt('model'), judgeModel: opt('judge-model'), explore, template: opt('template', 'worlds/templates/eden-2026.json') });
+  const rep = await firstDay({ target, out, repo, stamp, build, settleSec: Number(opt('settle', 120)), headed: has('headed'), model: opt('model'), judgeModel: opt('judge-model'), explore, template: opt('template', 'worlds/templates/eden-2026.json') });
   console.log(JSON.stringify({ report: join(out, 'report.md'), passed: rep.passed, steps: rep.steps.length, findings: rep.findings.length, aborted: rep.aborted ?? null }));
   process.exit(rep.aborted ? 1 : 0);
 }

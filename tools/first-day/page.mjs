@@ -28,6 +28,8 @@ export function watchConsole(page) {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
   page.on('pageerror', (e) => errors.push(`pageerror: ${String(e.message ?? e).slice(0, 300)}`));
+  // which address failed, its path only (a console 404 does not say)
+  page.on('response', (r) => { if (r.status() >= 400) { try { errors.push(`${r.status()} ${new URL(r.url()).pathname.slice(0, 160)}`); } catch { /* not a URL */ } } });
   return { errors, since: (n) => errors.slice(n) };
 }
 
