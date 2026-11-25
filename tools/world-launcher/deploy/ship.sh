@@ -323,11 +323,20 @@ if step probe-check "the probe's verdict: 0 pass, 1 visitor bar missed (the rele
 fi
 
 # ---- 9 healthz ------------------------------------------------------------------------------------------------------
-if step healthz "public healthz reports this build, every world and hostOk"; then
+if step healthz "public healthz reports this build, every world and hostOk; /pair serves the pairing card"; then
   x_to "$OUT/live-health.json" "$CURL" -fsS --max-time 30 "$ORIGIN/__sim/healthz" || die "public healthz did not answer after activation"
   if [ "$DRY" = 0 ]; then
     W="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).remote.worlds" "$OUT/snapshot.json")"
     node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
+  fi
+  # 25 Nov: the pairing card through the front door (Caddy serves it from the live release; a folder it cannot traverse
+  # gave 403). A failure fails the release check, recorded like a post-live check; the later evidence still runs.
+  x_to "$OUT/pair-card.status" "$CURL" -sS --max-time 30 -o "$OUT/pair-card.html" -w '%{http_code}' "$ORIGIN/pair?code=TEST" || true
+  if [ "$DRY" = 0 ]; then
+    [ -f "$OUT/pair-card.html" ] || : > "$OUT/pair-card.html"
+    rc=0; node "$SHIPD/checks.mjs" pair-card "$OUT/pair-card.status" "$OUT/pair-card.html" > "$OUT/pair-card-check.txt" 2>&1 || rc=$?
+    sed 's/^/   /' "$OUT/pair-card-check.txt"; printf 'pair-card %s\n' "$rc" >> "$OUT/POSTLIVE.txt"
+    [ "$rc" = 0 ] || { say "   FAILED pair-card (exit $rc), recorded in $OUT/pair-card-check.txt; continuing"; FAILED="$FAILED pair-card"; }
   fi
   # --unload-still: the launcher the reload started says where its setting came from (0 removes the file: the default).
   # Missing is a named warning only: recorded in POSTLIVE.txt and annotated, never a failed check (the release still

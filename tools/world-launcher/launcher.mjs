@@ -131,6 +131,7 @@ import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, for
 import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
 import { movedAssets } from './moved-assets.mjs';
+import { placeShots } from './place-shots.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -302,6 +303,7 @@ export async function openLauncher(cfg = {}) {
   const templatesDir = resolve(cfg.templatesDir ?? join(root, 'worlds/templates'));
   // 24 Nov: a moved world's models and pictures, from the release's core assets and the box's shared upload store, as
   // its old process served them (moved-assets.mjs)
+  const shots = placeShots({ dir: join(dataDir, 'place-shots'), log: (s) => log(s) });   // a moved world's kept Explore pictures (place-shots.mjs)
   const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent
@@ -846,15 +848,16 @@ export async function openLauncher(cfg = {}) {
       targets: page, total: found.length, nextCursor: offset + page.length < found.length ? `${listing}:${offset + page.length}` : null }, { 'cache-control': 'no-store' });
     return true;
   }
-  /** D2b: Explore's place pictures of a world with no old process (POST /v1/world/context/views {refs}): every asked
-   *  ref `unavailable` (god/context-views.ts's shape), so the page keeps the place as text and neither asks again nor
-   *  logs a 404 (WorldContextViews.ts drain). At most 64 KB of body is read; anything unreadable is no refs. */
-  async function noPictures(req, res) {
+  /** D2b: Explore's place pictures of a world with no old process (POST /v1/world/context/views {refs}), in
+   *  god/context-views.ts's shape: the kept picture of a place as it is now (place-shots.mjs), else `unavailable` with
+   *  `draw: 'page'`, and the page draws that place itself (WorldContextViews.ts drain; before 25 Nov every card stayed a
+   *  generic house). At most 64 KB of body is read; anything unreadable is no refs. */
+  async function noPictures(req, res, slug, w) {
     let body = '';
     try { for await (const c of req) { body += c; if (body.length > 65_536) break; } } catch { /* gone */ }
     let refs = [];
     try { const r = JSON.parse(body)?.refs; if (Array.isArray(r)) refs = r.filter((x) => typeof x === 'string' && x.length <= 256).slice(0, 64); } catch { /* no refs */ }
-    json(res, 200, { views: refs.map((ref) => ({ ref, status: 'unavailable' })) }, { 'cache-control': 'no-store' });
+    json(res, 200, { views: shots.views(slug, refs, w.routeOnly ? null : cutover?.publishedPlaces(w)?.places) }, { 'cache-control': 'no-store' });
   }
   /** W1 (0.135): `/w/<slug>/v1/me` of a world with no old twin: who is signed in, as an old world's `/v1/me` names them
    *  (`me.userId`, `me.short`), so the page shows the visitor signed in. Their Souls there are the new engine's (the
@@ -1378,7 +1381,7 @@ export async function openLauncher(cfg = {}) {
       if (routeOnlyPage(req, res, v2, rest) || worldPage(req, res, slug, v2, rest)) return;
       if (rest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
       if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, v2, rest, url)) return;
-      if (req.method === 'POST' && rest === '/v1/world/context/views') { await noPictures(req, res); return; }
+      if (req.method === 'POST' && rest === '/v1/world/context/views') { await noPictures(req, res, slug, v2); return; }
       json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
     }
     if (!w) {
@@ -1437,10 +1440,10 @@ export async function openLauncher(cfg = {}) {
     // (Explore's place pictures among them: the page keeps those places as text), and its old process never starts.
     if (moved(w)) {
       if (routeOnlyPage(req, res, w, edgeRest) || worldPage(req, res, slug, w, edgeRest, true)) return;
-      if (movedAsset(req, res, edgeRest)) return;
+      if (movedAsset(req, res, edgeRest) || shots.serve(req, res, slug, edgeRest)) return;
       if (edgeRest === '/v1/me' && req.method === 'GET') { await routeOnlyMe(res, req.headers.authorization); return; }
       if ((req.method === 'GET' || req.method === 'HEAD') && coldRead(res, w, edgeRest, url)) return;
-      if (req.method === 'POST' && edgeRest === '/v1/world/context/views') { await noPictures(req, res); return; }
+      if (req.method === 'POST' && edgeRest === '/v1/world/context/views') { await noPictures(req, res, slug, w); return; }
       json(res, 404, { ok: false, code: 'world.new-engine', slug, message: 'This world runs on the new engine; this old route is not served for it.' }, { 'cache-control': 'no-store' }); return;
     }
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {

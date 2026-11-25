@@ -23,8 +23,9 @@ pub const RETRY_AFTER_S: u64 = 3;
 
 type Objects = Arc<Mutex<BTreeMap<String, (String, Vec<u8>)>>>;
 
-/// How many reads are still to be held, for how long each, and what their target holds ([`StandIn::stall_reads`]).
-type Stalls = Arc<Mutex<(usize, Duration, String)>>;
+/// How many reads are still to be held, for how long each, what their target holds, and whether writes are held too
+/// ([`StandIn::stall_reads`], [`StandIn::stall_calls`]).
+type Stalls = Arc<Mutex<(usize, Duration, String, bool)>>;
 
 /// How the stand-in fails the answer to a write it has done ([`StandIn::fail_writes`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,7 +111,14 @@ impl StandIn {
     /// reach (#1960).
     pub fn stall_reads(&self, n: usize, wait: Duration, matching: &str) {
         if let Ok(mut s) = self.stalls.lock() {
-            *s = (n, wait, matching.to_owned());
+            *s = (n, wait, matching.to_owned(), false);
+        }
+    }
+
+    /// [`StandIn::stall_reads`] for every call, writes and deletes too: a bucket that has stopped answering at all.
+    pub fn stall_calls(&self, n: usize, wait: Duration, matching: &str) {
+        if let Ok(mut s) = self.stalls.lock() {
+            *s = (n, wait, matching.to_owned(), true);
         }
     }
 
@@ -178,9 +186,10 @@ fn serve(
         }
         let mut parts = line.split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-        if method == "GET" || method == "HEAD" {
+        {
             let hold = stalls.lock().ok().and_then(|mut s| {
-                (s.0 > 0 && target.contains(s.2.as_str())).then(|| {
+                let held = s.3 || method == "GET" || method == "HEAD";
+                (held && s.0 > 0 && target.contains(s.2.as_str())).then(|| {
                     s.0 -= 1;
                     s.1
                 })

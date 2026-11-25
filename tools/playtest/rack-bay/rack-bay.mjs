@@ -16,8 +16,9 @@
 //             node tools/playtest/rack-bay/rack-bay.mjs local [--template worlds/templates/mars-camp.json] [--dir <folder>] [--record 240]
 //           With --stage live the yard is placed instead by the world's creator in one `souls-god.mjs batch`, as a staged
 //           world on soul.game would get it, each thing titled ("rack frame 1"); its slots have their points (#4688).
-//           One such run (24 Nov 2026) built the bay and took it down to the last step, where `part put` of frame 2
-//           back into the live-placed stand was refused `part.not-held` (82 of 90 commands); not yet looked into.
+//           It goes 6 m south of the template's own yard (`AT_LIVE`), which that world still holds as plain things. A
+//           live-placed stand is walked over as a seeded one is (no walk box), so a frame carried back comes down into
+//           it and its `part put` is not refused `part.not-held`.
 //   stage   the creator's `souls-god.mjs` lines that place the same yard live in a staged world (printed, not run):
 //             node tools/playtest/rack-bay/rack-bay.mjs stage
 //   run     the steps against four Souls already paired and standing in a world (soul.game's staged test world):
@@ -43,6 +44,9 @@ export const MAP = 'content/worlds/mars/map.json';
 /** The yard on mars-camp's open ground south of the campfire (metres): the stand, the two beams' places, the bay, and
  *  where the creator places the spare frame live. */
 export const AT = { stand: [-6, 20], beams: [[-4, 20], [-3.7, 20]], bay: [6, 20], spare: [-1, 22] };
+/** Where the creator places the yard live: 6 m south of the template's own, which a world started from the template
+ *  alone still holds as plain things (its frames' posts would stop a crew's carry into a stand placed over them). */
+export const AT_LIVE = { stand: [-6, 26], beams: [[-4, 26], [-3.7, 26]], bay: [6, 26], spare: [-1, 28] };
 /** The fixed camera on the yard for the clip: the camp's halls behind it. */
 export const CAMERA = { position: [0, 6, 31], target: [0, 1, 20.5], fov: 50 };
 /** The title the creator gives the frame it places live; the Souls name it only by this. */
@@ -57,7 +61,7 @@ export function templateFacts({ template = TEMPLATE, out }) {
 
 /** The yard as one creator edit (`souls-god.mjs batch`, all or none): the stand with a frame in each slot, two beams on
  *  the ground, the bay; each with the title Souls see it by. */
-export function stageBatch(ground, at = AT) {
+export function stageBatch(ground, at = AT_LIVE) {
   const m = (v) => v; // a batch's `at` is metres (#4700)
   return [
     { op: 'place', name: 1, kind: 'mars:frame_stand', in: ground, at: [m(at.stand[0]), 0, m(at.stand[1])], title: 'frame stand' },
@@ -69,7 +73,7 @@ export function stageBatch(ground, at = AT) {
 }
 
 /** The creator's lines that place the same yard live (printed for a staged world on soul.game). */
-export function stageLines(at = AT) {
+export function stageLines(at = AT_LIVE) {
   return [
     "# as the world's creator, in the creator's folder (souls-god.mjs paired with --creator <grant>)",
     "node souls-god.mjs describe   # the ground's id (kind ground): <ground>",
@@ -103,7 +107,7 @@ export async function pairCreator({ world, worldDir, dir }) {
 }
 
 /** The yard placed live by the creator in one edit, as `stageLines` prints it. → {ok, steps, bay, stand: their describes} */
-export async function stageLive(god, log = () => {}, at = AT) {
+export async function stageLive(god, log = () => {}, at = AT_LIVE) {
   const steps = [];
   const go = async (...words) => {
     const a = await god(...words);
@@ -300,7 +304,7 @@ async function main() {
   if (mode !== 'local') { console.error('usage: rack-bay.mjs local [--template t] [--dir d] [--record s] | stage | print | run --folder f --souls ada=..,bo=..,cy=..,di=..'); process.exit(2); }
   const { startOldPage } = await import('../arena/new-engine/old-page.mjs');
   const template = opt('template', TEMPLATE), record = Number(opt('record', 0));
-  const live = opt('stage', 'template') === 'live';
+  const live = opt('stage', 'template') === 'live', at = live ? AT_LIVE : AT;
   const world = await startOldPage({ template, dir: join(dir, 'world'), facts: live ? null : templateFacts({ template, out: dir }), history: false, marsWeb: opt('mars-web', undefined), log });
   out.page = world.page; out.template = template; out.stage = live ? 'live' : 'facts';
   const seats = {}, bodies = {};
@@ -308,7 +312,7 @@ async function main() {
   try {
     god = await pairCreator({ world: world.world, worldDir: join(dir, 'world', 'world'), dir });
     if (live) {
-      out.staged = await stageLive(god, log); save();
+      out.staged = await stageLive(god, log, at); save();
       if (!out.staged.ok) { log(`staging stopped: ${JSON.stringify(out.staged.failed)}`); return; }
     }
     for (const l of LABELS) {
@@ -320,11 +324,11 @@ async function main() {
     log(`page ${world.page}`);
     const play = async () => {
       const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
-      try { const v = await buildAndTakeDown(r, bodies, out.ids); out.builtAtS = (v.built - t0) / 1000; out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
+      try { const v = await buildAndTakeDown(r, bodies, out.ids, at.beams.map((b) => b.join(','))); out.builtAtS = (v.built - t0) / 1000; out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
       out.ms = Date.now() - t0; save();
       // a frame the creator places live, titled, which Ada and Bo name only by its title
       const n = r.lines.length;
-      try { out.spare = { ...(await spareFrame(god, r, seats, bodies, AT, log)), ok: true }; } catch (e) { out.spare = { ok: false, failed: e.message }; }
+      try { out.spare = { ...(await spareFrame(god, r, seats, bodies, at, log)), ok: true }; } catch (e) { out.spare = { ok: false, failed: e.message }; }
       out.spare.steps = r.lines.slice(n); out.steps = r.lines.slice(0, n); save();
     };
     if (record) {

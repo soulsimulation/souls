@@ -781,3 +781,71 @@ fn scenery_inside_a_building_is_on_its_floor_unless_its_entry_reaches_past_it() 
     assert_eq!(parent_key(&bare, "e_bubble"), "ground");
     assert_eq!(parent_key(&bare, "e_car"), "ground");
 }
+
+/// Old Eden's residents were exported as `core/humanoid@1` things (live Eden's facts, entries 4997–5018): a Soul is
+/// not a thing. The small world with two Souls' bodies in its facts loads to the same tree as the small world alone,
+/// the bake's counts less the bodies, and each body is listed by its origin id and name.
+#[test]
+fn a_souls_body_in_the_facts_is_no_thing() {
+    let body = |id: &str, name: &str, def: &str| {
+        format!(
+            r#"{{"id": "{id}", "def": "{def}", "ref": "core-humanoid@1", "parent": null, "pose": [5000, 0, 5000, 0],
+     "world": [5000, 0, 5000, 0], "scale_ppm": 1000000, "name": "{name}", "noEntry": "no row in the map",
+     "slots": [{{"n": 1, "id": "carry", "kind": "carry", "at": [0, 1000, 350], "yaw": 0, "capacity": 2}}]}}"#
+        )
+    };
+    let bodies = format!(
+        ",\n    {},\n    {}\n  ],\n  \"doors\": [",
+        body("h_277f3d50b1", "oriel", "core/humanoid@1"),
+        body("h_03fb85042a", "cleo", "core-humanoid@1")
+    );
+    let with = SMALL
+        .replacen("\n  ],\n  \"doors\": [", &bodies, 1)
+        .replacen(
+            r#"{"ref": "core-lake@1", "hash": "dd", "name": "core:lake", "form": "area"}"#,
+            r#"{"ref": "core-lake@1", "hash": "dd", "name": "core:lake", "form": "area"},
+    {"ref": "core-humanoid@1", "hash": "ee", "name": "core:humanoid", "form": "point", "layer": "solid", "slots": 1}"#,
+            1,
+        )
+        .replacen(r#""bake": {"things": 4,"#, r#""bake": {"things": 6,"#, 1)
+        .replacen(r#""slots": 1, "windows""#, r#""slots": 3, "windows""#, 1)
+        .replacen(r#""core-lake@1": 1}"#, r#""core-lake@1": 1, "core-humanoid@1": 2}"#, 1);
+    assert!(
+        with.contains("h_03fb85042a")
+            && with.contains(r#""things": 6"#)
+            && with.contains(r#""slots": 3"#)
+    );
+    let im = load(&with).expect("the small world with two bodies loads");
+    let (rows, by_ref, _) = count(&im);
+    for r in &rows {
+        assert_eq!(r.tree, r.bake, "{}", r.what);
+    }
+    assert_eq!(by_ref, im.by_ref);
+    assert!(
+        !im.by_ref.contains_key("core-humanoid@1"),
+        "{:?}",
+        im.by_ref
+    );
+    assert_eq!(
+        im.residents,
+        vec![
+            ("h_277f3d50b1".to_owned(), "oriel".to_owned()),
+            ("h_03fb85042a".to_owned(), "cleo".to_owned())
+        ]
+    );
+    // The same tree as the world without them: the same nodes and the same root, so the same world's name.
+    let alone = load(SMALL).unwrap();
+    assert_eq!(im.nodes, alone.nodes);
+    assert_eq!(im.tree.root(), alone.tree.root());
+    assert!(alone.residents.is_empty());
+
+    // A thing a body held would lose its parent: refused by name, never placed somewhere new.
+    let held = with.replacen(
+        r#""parent": "e_house", "pose": [0, 100"#,
+        r#""parent": "h_03fb85042a", "pose": [0, 100"#,
+        1,
+    );
+    assert_ne!(held, with);
+    let e = load(&held).err().expect("a thing on a body is refused");
+    assert!(e.contains("e_door") && e.contains("Soul's body"), "{e}");
+}

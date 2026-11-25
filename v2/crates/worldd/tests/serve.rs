@@ -1135,9 +1135,9 @@ fn i1960_a_world_starts_through_slow_store_reads_and_listens_on_an_unreachable_s
     w.kill();
 
     // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
-    // go unanswered for 6 s, past the client's 5 s.
+    // go unanswered for 6 s, past the client's 5 s, both tries of each (`s3.rs` HEDGE).
     // Since R17 the archive opens on its own thread, after the world listens.
-    s.stall_reads(2, Duration::from_secs(6), "/header");
+    s.stall_reads(4, Duration::from_secs(6), "/header");
     let begun = Instant::now();
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
@@ -2063,6 +2063,124 @@ fn r15_a_store_stall_delays_only_the_backup_never_a_viewer_and_it_catches_up() {
         );
         w.kill();
     }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// 25 Nov 2026 (Eden on 0.135.0): a store that holds every call, reads, writes and deletes, 30 s each while the world
+/// runs, never stops the public stream. Through 45 s of it, still and then walking, the pointer a page polls keeps
+/// moving at its usual pace (a still world's quiet time, a walking one's parts), a walk is answered and its parts are
+/// on the disk, and a viewer is never seconds behind the world.
+// A real process on the real clock: the stall and the pointer's times are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn a_store_that_holds_every_call_never_stops_the_public_stream() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use replica::stream::Pointer;
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+    const STALL: Duration = Duration::from_secs(45);
+    let d = scratch("store-holds");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/holds", s.url("souls"));
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let health = dir.join("health.json");
+    let end = Instant::now() + Duration::from_secs(60);
+    while !std::fs::read_to_string(&health)
+        .unwrap_or_default()
+        .contains("\"stream_backup\":{\"state\":\"current\"}")
+    {
+        assert!(
+            Instant::now() < end,
+            "the backup is current before the stall"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let pointer = {
+        let dir = dir.clone();
+        move || {
+            let world = json::parse(&std::fs::read_to_string(dir.join("views/world.json")).ok()?);
+            let stream = world.ok()?.get("stream")?.str()?.to_owned();
+            Pointer::read(&std::fs::read(dir.join(stream).join("pointer")).ok()?).ok()
+        }
+    };
+    let mut c = connect(&socket);
+    walk(&mut c, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(answer(&mut c).0, 1, "a walk before the stall");
+    // A viewer: how far the pointer's newest part or quiet time is behind the world's time now, every 100 ms; the most.
+    let (worst, looking) = (Arc::new(AtomicI64::new(0)), Arc::new(AtomicBool::new(true)));
+    let viewer = {
+        let (worst, looking, pointer) = (Arc::clone(&worst), Arc::clone(&looking), pointer.clone());
+        std::thread::spawn(move || {
+            while looking.load(Ordering::Relaxed) {
+                if let Some(p) = pointer() {
+                    let wall_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as i64;
+                    let world_now = p.anchor_world + (wall_ms - p.anchor_wall_ms as i64) * 1000;
+                    let shown = p.newest_to.max(p.quiet_until).unwrap_or(p.anchor_world);
+                    worst.fetch_max(world_now - shown, Ordering::Relaxed);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    std::thread::sleep(Duration::from_secs(3));
+    let before = worst.swap(0, Ordering::Relaxed);
+    s.stall_calls(usize::MAX, Duration::from_secs(30), "");
+    let began = Instant::now();
+    // Still for half the stall, then a walk: answered, and its parts on the disk while the store holds every call.
+    std::thread::sleep(STALL / 2);
+    let still = worst.swap(0, Ordering::Relaxed);
+    let newest = pointer().and_then(|p| p.newest);
+    walk(&mut c, body, root.scope(), ground, 2, -40, 30);
+    assert_eq!(answer(&mut c).0, 1, "a walk during the stall is answered");
+    let end = Instant::now() + Duration::from_secs(10);
+    while pointer()
+        .and_then(|p| p.newest)
+        .is_none_or(|n| newest.is_some_and(|f| n <= f))
+    {
+        assert!(
+            Instant::now() < end,
+            "the walk's parts are on the disk during the stall"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(STALL.saturating_sub(began.elapsed()));
+    looking.store(false, Ordering::Relaxed);
+    viewer.join().expect("the viewer");
+    let walking = worst.load(Ordering::Relaxed);
+    println!(
+        "a viewer behind the world: at most {} ms before the stall, {} ms still in it, {} ms walking in it",
+        before / 1000,
+        still / 1000,
+        walking / 1000
+    );
+    // The page says the stream is not available after 15 s with nothing new; a part is cut each 0.5 s.
+    assert!(
+        still.max(walking) < 5_000_000,
+        "a viewer was {} ms behind while the store held every call",
+        still.max(walking) / 1000
+    );
+    assert!(w.child.try_wait().expect("its state").is_none(), "still up");
+    let h = std::fs::read_to_string(&health).unwrap_or_default();
+    assert!(h.contains("\"stream\":{\"state\":\"serving\"}"), "{h}");
+    s.stall_calls(0, Duration::ZERO, "");
+    w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
 
