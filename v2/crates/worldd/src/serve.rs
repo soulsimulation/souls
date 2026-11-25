@@ -3482,6 +3482,12 @@ fn serve(args: &[String]) -> R<()> {
     .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
     .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     town.set_entry(entry);
+    match town.main_ground() {
+        Some((held, dry)) => println!(
+            "main ground: the entry's part holds {held} of {dry} dry pieces; the rest is sealed off from it"
+        ),
+        None => println!("main ground: no dry ground at the entry; no ground is sealed"),
+    }
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
     let trips = worldd::places::ride_trips(&town, &kinds, &places);

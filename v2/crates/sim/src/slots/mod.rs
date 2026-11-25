@@ -218,18 +218,21 @@ impl Climb<'_> {
     }
 
     /// Where the body stands at `p` on the floor, when it may land there: a dry floor point within a step's height
-    /// ([`crate::ground::STEP`]) of the floor it starts from, where no body stands, and never in ground sealed off from
-    /// the main ground for its size ([`Floors::sealed`]), where it would be shut in.
+    /// ([`crate::ground::STEP`]) of the floor it starts from, where no body stands.
     fn landing(&self, p: Vec3) -> Option<Vec3> {
         let b = self
             .floor
             .place_built(self.body, self.frame(), p, self.facing, self.build)
             .ok()?;
         let foot = b.pose.position.y - self.build.hover_mm * 1000;
-        ((foot - self.base).abs() <= crate::ground::STEP * 1000
-            && !(self.taken)(b.pose.position)
-            && !self.floors.sealed(self.node, b.pose.position, self.build))
-        .then_some(b.pose.position)
+        ((foot - self.base).abs() <= crate::ground::STEP * 1000 && !(self.taken)(b.pose.position))
+            .then_some(b.pose.position)
+    }
+
+    /// Whether landing at `l` leaves the body on the main ground: not in ground sealed off from it for its size
+    /// ([`Floors::sealed`]), where it would be shut in.
+    fn open(&self, l: Vec3) -> bool {
+        !self.floors.sealed(self.node, l, self.build)
     }
 
     /// Whether the straight line from `from` to `to` is a way out, sampled every [`CLIMB_SAMPLE`]: each point off the
@@ -273,8 +276,14 @@ impl Climb<'_> {
     }
 
     /// The nearest landing within [`CLIMB_BOUND`] of `from` with a way out, on a grid of [`CLIMB_STEP`] (ties by x,
-    /// then z): a sealed pocket nearer is passed over for the nearest unsealed landing ([`Climb::landing`]).
+    /// then z), on the main ground: a sealed pocket nearer is passed over for the nearest unsealed landing
+    /// ([`Climb::open`]).
     fn nearest(&self) -> Option<Vec3> {
+        self.nearest_where(&|l| self.open(l))
+    }
+
+    /// [`Climb::nearest`] among the landings `ok` keeps.
+    fn nearest_where(&self, ok: &dyn Fn(Vec3) -> bool) -> Option<Vec3> {
         let n = CLIMB_BOUND / CLIMB_STEP;
         let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
             .flat_map(|i| (-n..=n).map(move |j| (i * CLIMB_STEP, j * CLIMB_STEP)))
@@ -284,7 +293,7 @@ impl Climb<'_> {
         grid.sort_unstable();
         grid.into_iter()
             .map(|(_, dx, dz)| Vec3::new(self.from.x + dx, 0, self.from.z + dz))
-            .find_map(|p| self.landing(p).filter(|&l| self.way_out(l)))
+            .find_map(|p| self.landing(p).filter(|&l| ok(l) && self.way_out(l)))
     }
 }
 
@@ -293,8 +302,10 @@ impl Climb<'_> {
 /// (`others`, by slot), each with its own short search; then the nearest point of the floor within [`CLIMB_BOUND`] of
 /// the seat's point, on a grid of [`CLIMB_STEP`] (ties by x, then z). A target is a dry floor point within a step's
 /// height of the seat's floor where no body stands (`taken`), and the line to it passes only over water, wading
-/// ground or the seat's thing's own boxes (`own`) before it reaches the floor. Bounded and the same for the same
-/// inputs. `None`: no such floor within the bound.
+/// ground or the seat's thing's own boxes (`own`) before it reaches the floor. Never ground sealed off from the main
+/// ground ([`Floors::sealed`]) while an unsealed target is within the bound; with none, the nearest sealed one, so the
+/// body is never kept in its seat for good (a restart then places it out of the pocket). Bounded and the same for the
+/// same inputs. `None`: no such floor within the bound.
 #[allow(clippy::too_many_arguments)]
 pub fn climb_point<'a>(
     floor: &Surface,
@@ -322,12 +333,13 @@ pub fn climb_point<'a>(
         if let Some(p) = rise_point(floor, o, body, build)?
             && cl.near(p)
             && let Some(l) = cl.landing(p)
+            && cl.open(l)
             && cl.way_out(l)
         {
             return Ok(Some(l));
         }
     }
-    Ok(cl.nearest())
+    Ok(cl.nearest().or_else(|| cl.nearest_where(&|_| true)))
 }
 
 /// What a restart does with a body the log had standing ([`Slots::resume`], E11d).
@@ -1712,6 +1724,20 @@ pub fn clear_spot(
     step: i64,
     most: i64,
 ) -> Option<[i64; 2]> {
+    clear_spot_where(floor, from, taken, apart, step, most, &|_| true)
+}
+
+/// [`clear_spot`] among the points `ok` keeps: one it refuses (ground sealed off from the main ground) is passed over
+/// for the next nearest.
+pub fn clear_spot_where(
+    floor: &Surface,
+    from: [i64; 2],
+    taken: &[[i64; 2]],
+    apart: i64,
+    step: i64,
+    most: i64,
+    ok: &dyn Fn([i64; 2]) -> bool,
+) -> Option<[i64; 2]> {
     let n = most / step;
     let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
         .flat_map(|i| (-n..=n).map(move |j| (i * step, j * step)))
@@ -1736,6 +1762,7 @@ pub fn clear_spot(
                 && floor
                     .place(floor.node, frame, Vec3::new(p[0], 0, p[1]), Quat::IDENTITY)
                     .is_ok()
+                && ok(p)
         })
 }
 

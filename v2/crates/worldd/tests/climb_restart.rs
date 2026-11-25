@@ -1074,6 +1074,19 @@ fn on_a_small_island_in_a_large_sea_no_dry_point_is_sealed() {
     let (mut town, nodes) = town_of(&island());
     let ground = nodes["ground"];
     let sea = Vec3::new(20_000_000, 0, 20_000_000);
+    // The island's part is not the one with the most pieces: a rule by size would seal it.
+    let parts = town.map.parts(sim::routes::HANDS);
+    let size = |part: u32| parts.iter().filter(|&&q| q == part).count();
+    let on_island = town
+        .map
+        .spot(ground, Vec3::new(6_000_000, 0, 6_000_000))
+        .unwrap();
+    let island_part = parts[on_island.piece as usize];
+    assert!(
+        parts.iter().any(|&q| size(q) > size(island_part)),
+        "another part has more pieces than the island's ({})",
+        size(island_part)
+    );
     assert!(
         sim::mover::Floors::wet(&town, ground, sea),
         "the sea is water"

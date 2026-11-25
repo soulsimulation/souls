@@ -1653,9 +1653,21 @@ impl Town {
         };
     }
 
-    /// The world's entry as [`Town::set_entry`] took it: its node and point, µm. `None` when none is known.
-    pub fn entry(&self) -> Option<(Id, Vec3)> {
-        self.entry
+    /// The main ground as a start prints it: how many of the standard map's dry pieces are in the entry's part (the
+    /// main ground), and how many in all. `None` when no entry is known.
+    pub fn main_ground(&self) -> Option<(usize, usize)> {
+        let (node, at) = self.entry?;
+        let main = self.map.spot_near(node, at, AT_EDGE)?;
+        let parts = self.map.parts(crate::routes::HANDS);
+        let dry: Vec<u32> = (0..parts.len() as u32)
+            .filter(|&q| self.map.piece(q).ground == crate::gaits::Ground::Dry)
+            .collect();
+        let main_part = parts[main.piece as usize];
+        let held = dry
+            .iter()
+            .filter(|&&q| parts[q as usize] == main_part)
+            .count();
+        Some((held, dry.len()))
     }
 
     /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity

@@ -896,19 +896,20 @@ impl Bodies {
         if taken.iter().all(apart) {
             return moved;
         }
-        sim::slots::clear_spot(
+        // Never into ground sealed off from the main ground: the nearest clear point that is not.
+        let open = |q: [i64; 2]| {
+            let at = Vec3::new(q[0], p.position.y, q[1]);
+            !sim::mover::Floors::sealed(&self.town, p.frame.node, at, build)
+        };
+        sim::slots::clear_spot_where(
             floor,
             [p.position.x, p.position.z],
             &taken,
             RESTART_APART,
             100_000,
             5_000_000,
+            &open,
         )
-        // Never into ground sealed off from the main ground.
-        .filter(|q| {
-            let at = Vec3::new(q[0], p.position.y, q[1]);
-            !sim::mover::Floors::sealed(&self.town, p.frame.node, at, build)
-        })
         .and_then(|q| {
             floor
                 .place_built(

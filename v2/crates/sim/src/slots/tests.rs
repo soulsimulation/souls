@@ -1305,6 +1305,15 @@ fn a_climb_out_passes_over_a_sealed_pocket_for_the_main_ground() {
         "the bank, on the main ground"
     );
     assert!(w.c.carried(b));
+    // With every landing sealed the body still climbs out, to the nearest: never kept in its seat for good.
+    let all = [-5_000_000, -5_000_000, 5_000_000, 5_000_000];
+    let (mut w, b, _, handed) = seated_then_rise_sealed(floor(), &[LAKE], &[all]);
+    assert!(matches!(handed, Some(Ok(_))), "{handed:?}");
+    let [cl] = w.slots.climbs()[..] else {
+        panic!("one climb")
+    };
+    assert_eq!((cl.to.x, cl.to.z), (0, 800_000), "the nearest, sealed");
+    assert!(w.c.carried(b));
 }
 
 /// E11d review: the seat's thing (its own box, [`hull`]) is moored against another hull (z -1.3 m to -0.5 m, no
