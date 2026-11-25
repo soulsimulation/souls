@@ -12,7 +12,7 @@
 //
 // Bodies (a node owning a `souls:body-of` link) and what they hold are left out: a Soul is not content.
 
-import { decode, idText, plainKind } from '../brief/copy.mjs';
+import { allFields, decode, idText, plainKind } from '../brief/copy.mjs';
 
 export const FORMAT = 'souls-world/1';
 /** The most operations one edit carries (`replica::edit::OPS_MOST`). */
@@ -60,7 +60,7 @@ export function exportOf(copy, { names = new Map(), world = null, at = null } = 
     const m = decode(bytes);
     const owned = (m.get(9) ?? []).filter(([, l]) => l instanceof Map);
     if (owned.some(([, l]) => plainKind(l.get(1)) === 'souls:body-of')) { bodies++; continue; }
-    const fields = m.get(6) instanceof Map ? Object.fromEntries([...m.get(6)].map(([k, v]) => [Number(k), plainValue(v)])) : {};
+    const fields = m.get(6) instanceof Map ? Object.fromEntries([...allFields(copy, m)].map(([k, v]) => [Number(k), plainValue(v)])) : {};
     const pose = poseOf(m.get(7));
     nodes.push({
       id: idText(m.get(1)), kind: String(m.get(2)), parent: m.has(3) ? idText(m.get(3)) : null, fields,

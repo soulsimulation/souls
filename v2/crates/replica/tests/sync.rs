@@ -293,8 +293,9 @@ fn bounded_over(rounds: u64, window: u64, to: impl Fn(u64) -> replica::encode::V
         w.seal();
         if round == 2 * window {
             settled = Some(w.records.bytes());
-            // The crate's record as of this seal, which the next seal replaces.
-            watched = w.hash(world_id(CRATE)).map(Hash::to_bytes);
+            // The record holding the crate's field as of this seal, which the next seal replaces: the crate's own,
+            // or the field's when it is big (#4713).
+            watched = Some(holder(&w, world_id(CRATE), 1));
         }
         if let Some(watched) = &watched {
             let served = w.served().records(std::slice::from_ref(watched));
@@ -355,4 +356,142 @@ fn replaced_big_records_are_let_go_after_their_shorter_window() {
     bounded_over(3 * BIG_SEALS + 10, BIG_SEALS, |r| {
         replica::encode::Value::Bytes(vec![(r % 251) as u8; BIG_RECORD])
     });
+}
+
+/// As [`set_again`], on node `node`'s field `field`.
+fn set_on(round: u64, node: u64, field: u64, to: replica::encode::Value) -> Part {
+    use replica::encode::{Value, encode};
+    let Value::Map(mut p) = set_again(round, to).to_value() else {
+        unreachable!("a part is a map")
+    };
+    let Some(Value::Array(effects)) = p.get_mut(&2) else {
+        unreachable!("a part's entries")
+    };
+    let Some(Value::Map(e)) = effects.first_mut() else {
+        unreachable!("an entry is a map")
+    };
+    e.insert(6, world_id(node).to_value());
+    let Some(Value::Array(changes)) = e.get_mut(&7) else {
+        unreachable!("the entry's changes")
+    };
+    let Some(Value::Map(c)) = changes.first_mut() else {
+        unreachable!("a change is a map")
+    };
+    c.insert(2, world_id(node).to_value());
+    c.insert(3, Value::Uint(field));
+    Part::read(&encode(&Value::Map(p)).unwrap()).unwrap()
+}
+
+/// The hash of the record that holds field `field` of node `id`, as the world serves it: its big field's own record
+/// when its record names one (key 0, #4713), else its own record.
+fn holder(w: &World, id: Id, field: u64) -> Vec<u8> {
+    use replica::encode::{Value, decode};
+    let own = w.hash(id).unwrap().to_bytes();
+    let bytes = w
+        .served()
+        .records(std::slice::from_ref(&own))
+        .unwrap()
+        .remove(0);
+    let Value::Map(m) = decode(&bytes).unwrap().value else {
+        unreachable!("a record is a map")
+    };
+    if let Some(Value::Array(bigs)) = m.get(&0) {
+        for p in bigs {
+            if let Value::Array(p) = p
+                && let [Value::Uint(f), Value::Bytes(h)] = p.as_slice()
+                && *f == field
+            {
+                return h.clone();
+            }
+        }
+    }
+    assert!(
+        matches!(m.get(&6), Some(Value::Map(f)) if f.contains_key(&field)),
+        "the node holds the field"
+    );
+    own
+}
+
+/// #4713: every Soul's sync fetched mars-two's ground record again (8.4 MB) whenever a body on the ground moved: its
+/// terrain is in it, and a child's change re-hashes its parent. A big field is a record of its own, which a child's
+/// change leaves as it was: a sync after one fetches the parent's small record, not the field. The copy reads the
+/// field through its node's record, and a checkpoint's records read the tree back whole.
+#[test]
+fn a_childs_change_leaves_the_record_holding_its_parents_big_field_as_it_was() {
+    use replica::encode::{Value, decode};
+    use replica::tree::BIG_FIELD;
+    const ROOM: u64 = 1;
+    const TERRAIN: u64 = 25;
+    let terrain = Value::Bytes((0..1 << 20).map(|i| (i % 251) as u8).collect());
+    let h = header();
+    let scope = [world_id(0), world_id(1)];
+    let mut w = World {
+        tree: base(&h),
+        records: Records::default(),
+    };
+    w.seal();
+    // The crate's room stands for the ground: 1 MB of terrain (mars-two's is 8.4 MB), and the crate in it.
+    w.tree
+        .apply(&h, &set_on(0, ROOM, TERRAIN, terrain.clone()))
+        .unwrap();
+    w.seal();
+    let mut copy = Copy::default();
+    let first = copy.sync(&scope, &mut w.served()).unwrap();
+    assert!(first.got > 1 << 20, "a snapshot fetches the terrain");
+    let held = holder(&w, world_id(ROOM), TERRAIN);
+    for round in 1..=3 {
+        let room = w.hash(world_id(ROOM)).unwrap();
+        // The crate changes, as a body walking on the ground does.
+        w.tree
+            .apply(&h, &set_again(round, Value::Uint(round)))
+            .unwrap();
+        w.seal();
+        assert_ne!(
+            w.hash(world_id(ROOM)).unwrap(),
+            room,
+            "the room's hash covers the crate's"
+        );
+        assert_eq!(
+            holder(&w, world_id(ROOM), TERRAIN),
+            held,
+            "round {round}: the record holding the terrain is the same"
+        );
+        let s = copy.sync(&scope, &mut w.served()).unwrap();
+        assert!(
+            s.got < BIG_FIELD as u64,
+            "round {round}: a sync after the crate's change fetched {} B",
+            s.got
+        );
+    }
+    let own = w.hash(world_id(ROOM)).unwrap().to_bytes();
+    let Value::Map(room) = decode(copy.record(&own).unwrap()).unwrap().value else {
+        unreachable!("a record is a map")
+    };
+    assert_eq!(copy.field(&room, TERRAIN), Some(terrain.clone()));
+    let whole = w.tree.seal_whole().unwrap();
+    let mut records = std::collections::BTreeMap::new();
+    for (h, b) in &whole.nodes {
+        records.insert(h.to_bytes(), b.clone());
+    }
+    for (_, h, b) in &whole.audiences {
+        records.insert(h.to_bytes(), b.clone());
+    }
+    let audiences: Vec<_> = whole
+        .audiences
+        .iter()
+        .map(|(a, h, _)| (*a, h.to_bytes()))
+        .collect();
+    let back = Tree::unseal(&audiences, &mut |h| {
+        records.get(h).cloned().ok_or(Refusal {
+            name: "checkpoint-missing",
+            detail: String::new(),
+        })
+    })
+    .unwrap();
+    assert_eq!(
+        back.state_hashes_whole().unwrap(),
+        w.tree.state_hashes_whole().unwrap()
+    );
+    let n = back.node(back.handle(world_id(ROOM)).unwrap()).unwrap();
+    assert_eq!(n.fields().get(&TERRAIN), Some(&terrain));
 }

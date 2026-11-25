@@ -27,7 +27,7 @@ mod check;
 mod seal;
 
 pub use check::Rules;
-pub use seal::Sealed;
+pub use seal::{BIG_FIELD, Sealed};
 
 use crate::effects::{
     Body, Change, Effect, Flight, Header, LinkState, NodeState, Part, Refusal, State, TimerRec,
@@ -315,6 +315,16 @@ pub struct Tree {
     /// The state hash's SHA-256 of a node's record up to its children (`seal`, #1960), by slot, for nodes whose
     /// record is large: kept while only what is below the node changes, let go when the node itself does.
     heads: HashMap<u32, Sha256>,
+    /// The records of a node's big fields (`seal`, #4713), by slot and field: each one's hash, and whether a seal has
+    /// given its bytes yet. Kept while the node itself is unchanged, let go when it changes, as `heads` are.
+    bigs: HashMap<u32, BTreeMap<u64, Big>>,
+}
+
+/// A big field's record as kept (`Tree`'s `bigs`): its hash, and whether a seal has given it.
+#[derive(Clone, Copy)]
+struct Big {
+    hash: Hash,
+    given: bool,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
@@ -359,6 +369,7 @@ impl Tree {
             kept: None,
             rehashed: 0,
             heads: HashMap::new(),
+            bigs: HashMap::new(),
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -488,6 +499,7 @@ impl Tree {
             kept: self.kept.clone(),
             rehashed: 0,
             heads: HashMap::new(),
+            bigs: HashMap::new(),
         }
     }
 
@@ -622,6 +634,9 @@ impl Tree {
     fn touch(&mut self, slot: u32) {
         if !self.heads.is_empty() {
             self.heads.remove(&slot);
+        }
+        if !self.bigs.is_empty() {
+            self.bigs.remove(&slot);
         }
         self.touch_below(slot);
     }
@@ -850,6 +865,7 @@ impl Tree {
         let slot = match self.free.pop() {
             Some(s) => {
                 self.heads.remove(&s);
+                self.bigs.remove(&s);
                 let generation = self.nodes[s as usize].generation;
                 self.nodes[s as usize] = NodeRec { generation, ..rec };
                 s
@@ -880,6 +896,7 @@ impl Tree {
             self.moving_free.push(ix);
         }
         self.heads.remove(&slot);
+        self.bigs.remove(&slot);
         self.free.push(slot);
     }
 

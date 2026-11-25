@@ -1082,22 +1082,20 @@ fn held(copy: &Copy, wanted: &BTreeSet<(Id, u64)>) -> Result<BTreeMap<Id, Held>,
                 _ => None,
             }));
         }
-        let mut kept = BTreeMap::new();
-        if let Some(Value::Map(fields)) = m.get(&6) {
-            if let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok()) {
-                names_link.insert(id, link);
-            }
-            kept.extend(
-                fields
-                    .iter()
-                    .filter(|(f, _)| wanted.contains(&(id, **f)))
-                    .map(|(f, v)| (*f, v.clone())),
-            );
+        if let Some(Value::Map(fields)) = m.get(&6)
+            && let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok())
+        {
+            names_link.insert(id, link);
         }
+        // A wanted field may be a big field, in a record of its own (#4713): `Copy::field` reads either.
+        let kept: BTreeMap<u64, Value> = wanted
+            .range((id, 0)..=(id, u64::MAX))
+            .filter_map(|(_, f)| copy.field(&m, *f).map(|v| (*f, v)))
+            .collect();
         let definition = match m.get(&6) {
             Some(Value::Map(fields)) if defined::is_definition(&kind) => {
-                match (defined::named(fields), fields.get(&defined::ENTRY)) {
-                    (Some(full), Some(Value::Bytes(b))) => Some((full.to_owned(), b.clone())),
+                match (defined::named(fields), copy.field(&m, defined::ENTRY)) {
+                    (Some(full), Some(Value::Bytes(b))) => Some((full.to_owned(), b)),
                     _ => None,
                 }
             }
