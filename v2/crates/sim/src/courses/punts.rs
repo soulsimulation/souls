@@ -462,10 +462,24 @@ pub fn reach(waters: &[Water], terrain: Option<&Terrain>, from: Vec3, to: Xz) ->
 /// A course rowed once at [`ROWING`] from `here` through `points` from world time `now`, standing at the last for good.
 /// It states the time to that last stop as its `within`.
 pub fn once(here: Vec3, points: &[Vec3], now: Micros) -> Result<Course, Refusal> {
+    let points: Vec<(Vec3, Micros)> = points.iter().map(|&p| (p, 0)).collect();
+    once_through(here, &points, now, ROWING)
+}
+
+/// A course run once from `here` through `points` (each a point and how long it stands there, µs) from world time
+/// `now` at `speed` (µm a second), standing at the last for good: [`once`] with holds on the way, at the thing's own
+/// pace. It states the time to that last stop as its `within`.
+pub fn once_through(
+    here: Vec3,
+    points: &[(Vec3, Micros)],
+    now: Micros,
+    speed: i64,
+) -> Result<Course, Refusal> {
     let mut stations = vec![Station { at: here, dwell: 0 }];
-    for &p in points {
-        if stations.last().map(|s| s.at) != Some(p) {
-            stations.push(Station { at: p, dwell: 0 });
+    for &(p, dwell) in points {
+        match stations.last_mut() {
+            Some(s) if s.at == p => s.dwell = s.dwell.max(dwell),
+            _ => stations.push(Station { at: p, dwell }),
         }
     }
     if stations.len() < 2 {
@@ -474,7 +488,7 @@ pub fn once(here: Vec3, points: &[Vec3], now: Micros) -> Result<Course, Refusal>
     let mut c = Course {
         stations,
         shape: Shape::Once,
-        speed: ROWING,
+        speed,
         t0: now,
         within: Micros::MAX / 8,
     };
@@ -482,6 +496,27 @@ pub fn once(here: Vec3, points: &[Vec3], now: Micros) -> Result<Course, Refusal>
     c.within = t.legs.last().map_or(0, |l| l.start).max(1);
     c.load()?;
     Ok(c)
+}
+
+/// The points a course run once still goes through after world time `now`, its holds left out, ending at its last
+/// station: the way on from where it is. `None` for a course that is not run once, or before it starts.
+pub fn rest_of(c: &Course, now: Micros) -> Option<Vec<Vec3>> {
+    if c.shape != Shape::Once {
+        return None;
+    }
+    let t = c.load().ok()?;
+    let phase = now.checked_sub(t.t0).filter(|p| *p >= 0)?;
+    let mut pts: Vec<Vec3> = t
+        .legs
+        .iter()
+        .filter(|l| l.stop.is_none() && l.start + l.dur > phase)
+        .map(|l| l.to)
+        .collect();
+    let last = c.stations.last()?.at;
+    if pts.last() != Some(&last) {
+        pts.push(last);
+    }
+    Some(pts)
 }
 
 /// The way a steered punt rows back to its home (today's return): back along its wake, then round the rest of the lap
