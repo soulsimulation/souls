@@ -80,7 +80,7 @@ export function say({ cwd, text, sessionId = null, model = null, maxSec = 600, o
   return new Promise((ok) => {
     const p = spawn(bin, args, { cwd, env: personEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     onSpawn(p);
-    let buf = '', err = '', timedOut = false, stopped = false;
+    let buf = '', err = '', timedOut = false, stopped = false, answered = false, ended = null;
     const timer = setTimeout(() => { timedOut = true; p.kill('SIGTERM'); }, maxSec * 1000);
     p.stdout.on('data', (d) => {
       buf += d;
@@ -91,14 +91,19 @@ export function say({ cwd, text, sessionId = null, model = null, maxSec = 600, o
         e._at = Date.now() - t0; events.push(e);
         let r; try { r = onEvent(e, events); } catch { /* the watcher's own failure never stops the agent */ }
         if (r === 'stop') { stopped = true; p.kill('SIGTERM'); }
+        // The turn is over when the agent has answered: a background task it started (a `listen --follow`) keeps a
+        // `-p` process alive, so the process ends 5 s after a reply unless the agent goes on. A resumed session can
+        // open with an empty result for a stale task notice: that is not a reply.
+        if (e.type === 'result' && String(e.result ?? '').trim()) { clearTimeout(ended); ended = setTimeout(() => { answered = true; p.kill('SIGTERM'); }, 5000); }
+        else if (e.type === 'assistant') clearTimeout(ended);
       }
     });
     p.stderr.on('data', (d) => { err += d; });
     p.on('close', (exit) => {
-      clearTimeout(timer);
+      clearTimeout(timer); clearTimeout(ended);
       const init = events.find((e) => e.type === 'system' && e.subtype === 'init') ?? null;
-      const result = events.findLast((e) => e.type === 'result') ?? null;
-      ok({ sessionId: result?.session_id ?? init?.session_id ?? sessionId, events, init, result, final: String(result?.result ?? ''), ms: Date.now() - t0, exit, timedOut, stopped, stderr: err.slice(-2000) });
+      const result = events.findLast((e) => e.type === 'result' && String(e.result ?? '').trim()) ?? events.findLast((e) => e.type === 'result') ?? null;
+      ok({ sessionId: result?.session_id ?? init?.session_id ?? sessionId, events, init, result, final: String(result?.result ?? ''), ms: result?._at ?? Date.now() - t0, exit, timedOut: timedOut && !result, answered, stopped, stderr: err.slice(-2000) });
     });
   });
 }

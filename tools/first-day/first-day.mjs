@@ -318,7 +318,7 @@ export async function firstDay(opts) {
           { check: 'reacted-in-time', ok: reacted != null && reacted <= (d.limitSec ?? 15), detail: reacted != null ? `first visible change after ${reacted.toFixed(1)} s` : 'nothing visible changed', severity: 'major' }];
         sd.consoleErrors = con.since(n);
         sd.agentSaid = rep.turns.at(-1)?.summary.final.slice(0, 400);
-        writeFileSync(join(out, 'state', `${d.id}.json`), JSON.stringify({ before, after, trail: trailX.map((x) => ({ at: x.at, me: mine(x, soul), speech: x.speech.filter((w) => w.soul === soul.id), live: x.live, chip: x.chip })) }));
+        writeFileSync(join(out, 'state', `${d.id}.json`), JSON.stringify({ before, after, trail: trailX.map((x) => ({ at: x.at, me: mine(x, soul), speech: x.speech.filter((w) => w.soul === soul.id), live: x.live, chip: x.chip, ticks: x.ticks })) }));
         steps.push(sd);
       };
       for (const id of ['S7a', 'S7b', 'S7c']) await ask(def(id));

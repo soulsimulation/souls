@@ -58,6 +58,8 @@ export function pageState(page) {
         statusKey: q('.soul-meta .soul-status')?.dataset?.status ?? null, link: q('button.soul-link')?.dataset?.status ?? null, place: q('.soul-place')?.textContent?.trim() ?? null,
         owner: ['checking', 'connected', 'disconnected', 'approved-waiting', 'pairing'].includes(q('.soul-meta .soul-status')?.dataset?.status ?? '') } : null,
       live: q('[data-viewer-status]')?.textContent?.trim() ?? null,
+      // how far the picture is behind the world: the newest tick the stream has, less the tick drawn
+      ticks: { server: v?.takes?.serverTick ?? null, drawn: e?.depictedTick ?? null, dt: frame?.dt ?? null },
       signedIn: !!q('summary.account-avatar'),
       text: (document.body?.innerText ?? '').slice(0, 5000),
     };
