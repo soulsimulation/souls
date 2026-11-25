@@ -10,7 +10,7 @@ import { activityFrame, ACTIVITY_OVERLAYS, FACE_DOWN, LYING, type ActivityFrame,
 /** The posture an activity holds the body in. */
 export type PostureKind = 'stand' | 'back' | 'front' | 'seat' | 'ground';
 const SEAT_ACTS: ReadonlySet<string> = new Set(['sit', 'sit-down', 'stand-up']);
-/** Gait: a body that moves off at once is not held in a transition (its walk is the engine's). */
+/** Locomotion retains its native trajectory while a cosmetic floor exit finishes above the current root. */
 const MOVING: ReadonlySet<string> = new Set(['walk', 'wade', 'jog', 'run']);
 
 
@@ -83,7 +83,7 @@ function drawn(c: PostureChange, base: string | undefined, age: number): Posture
  * that attained layout, rather than finishing an unrelated queued get-up. The optional clock freezes the outgoing
  * procedural frame (including the sit-up/push-up cycle) at that same boundary. */
 export function postureNow(c: PostureChange | undefined, act: string, base?: string, clock?: { time: number; id: string }): PostureNow | null {
-  if (!c || c.age < 0 || MOVING.has(act)) return null;
+  if (!c || c.age < 0 || MOVING.has(act)&&!['back','front'].includes(postureKind(c.from,c.fromBase))) return null;
   const frozen = (a: string, ago: number) => clock ? activityFrame(a, c.fromBase ?? 'idle', clock.time - ago, clock.id) : null;
   const settle = (k: number): PostureNow => postureKind(c.to, base) === 'back' ? { settle: k, flat: { act: c.to, k }, ...(clock ? { frame: blendFrames(null, activityFrame(c.to, base ?? 'idle', clock.time, clock.id), k) } : {}) } : { settle: k };
   const b = c.before;
@@ -135,16 +135,17 @@ export function postureNow(c: PostureChange | undefined, act: string, base?: str
 }
 /** Phase boundaries are recorded-time blend anchors too: a library clip and a procedural frame need not have
  * identical skeletons at their nominal endpoints. Expose the exact schedule, including final return to live phase. */
-export function posturePhaseEnds(c: PostureChange, base?: string): number[] {
+export function posturePhaseEnds(c: PostureChange, base?: string, activity = c.to): number[] {
   const b=c.before, elapsed=b?b.age-c.age:0;
   const origin=b?postureNow({...b,age:elapsed,...(b.before?{before:shiftAge(b.before,-c.age)}:{})},b.to,c.fromBase):null;
   const to=postureKind(c.to,base);
-  if(origin?.rise!==undefined)return to==='front'?[TILT,2*TILT,2*TILT+ACT_BLEND]:[TILT,TILT+ACT_BLEND];
-  if(origin?.tilt)return to==='back'?[TILT,TILT+LIE_DOWN,TILT+LIE_DOWN+ACT_BLEND]:[TILT,TILT+ACT_BLEND];
+  const finish=(ends:number[])=>MOVING.has(activity)&&ends.length>1&&Math.abs(ends.at(-1)!-ends.at(-2)!-ACT_BLEND)<1e-6?ends.slice(0,-1):ends;
+  if(origin?.rise!==undefined)return finish(to==='front'?[TILT,2*TILT,2*TILT+ACT_BLEND]:[TILT,TILT+ACT_BLEND]);
+  if(origin?.tilt)return finish(to==='back'?[TILT,TILT+LIE_DOWN,TILT+LIE_DOWN+ACT_BLEND]:[TILT,TILT+ACT_BLEND]);
   if(origin?.flat)return to==='back'?[ACT_BLEND]:to==='front'?[FLATTEN,FLATTEN+GET_UP,FLATTEN+GET_UP+TILT,FLATTEN+GET_UP+TILT+ACT_BLEND]:[FLATTEN,FLATTEN+GET_UP];
   let end=0;const ends=phasesOf(c,base).map(p=>end+=p.s);
   if(postureKind(c.from,c.fromBase)==='stand'&&to==='front')ends.push(TILT+ACT_BLEND);
-  return ends;
+  return finish(ends);
 }
 
 function shiftAge(c: PostureChange, delta: number): PostureChange {

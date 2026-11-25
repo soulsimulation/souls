@@ -254,7 +254,7 @@ export class V2Bridge {
       if (m.ended) { endGesture(t.gestures, m.start, m.ended.at, m.run); continue; }
       // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
       const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
-      const g = readingFrom(m, heldProp) ?? gestureFrom(m, this.toward(m.target));
+      const g = readingFrom(m, heldProp) ?? gestureFrom(m, m.target === m.body ? null : this.toward(m.target));
       if (g) t.gestures.push(g);
     }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at, e.run); }

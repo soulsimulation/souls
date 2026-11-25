@@ -1143,7 +1143,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
+    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur && !lib.posture;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1208,14 +1208,14 @@ export class HumanViews {
       for(const action of v.libOn)action.stop();for(const action of Object.values(extra))action?.stop();
     }
     const libOn = new Set<THREE.AnimationAction>();
-    const libAt = (act: THREE.AnimationAction | null, weight: number, time: number) => {
+    const libAt = (act: THREE.AnimationAction | null, weight: number, time: number, loop = true) => {
       if (!act || weight <= 1e-4) return;
       if (!act.isRunning()) act.play();
       const d = act.getClip().duration;
-      act.time = ((time % d) + d) % d; act.setEffectiveWeight(weight + (libOn.has(act) ? act.getEffectiveWeight() : 0)); libOn.add(act);
+      act.time = loop ? ((time % d) + d) % d : Math.max(0,Math.min(d-1e-7,time)); act.setEffectiveWeight(weight + (libOn.has(act) ? act.getEffectiveWeight() : 0)); libOn.add(act);
     };
-    if (lib.cur) libAt(lib.cur.act, curW, lib.cur.time);
-    if (lib.prev) libAt(lib.prev.act, prevW, lib.prev.time);
+    if (lib.cur) libAt(lib.cur.act, curW, lib.cur.time, lib.cur.pick.mode==='loop');
+    if (lib.prev) libAt(lib.prev.act, prevW, lib.prev.time, lib.prev.pick.mode==='loop');
     // entry 42 (take 6): a gesture fading out under a hand actuator's reach also slows its own clip to a stop over the fade:
     // a look-around raising the hand kept moving it at its own speed while the arm reached for a drawer knob (0.095 m per 50 ms
     // together). Clip time = the reach start + ∫(1 − fade) — the same pose and speed at the reach start, at rest by its end.
@@ -1642,8 +1642,9 @@ export class HumanViews {
     // A transition starts from the pose actually drawn at its immutable activity boundary. The source evaluation
     // uses an isolated skeleton/mixer with the same immutable template; it never samples the previous frame.
     const pc = v.postureChange;
-    const noOwner = POSTURE_ORIGINS.has(pc?.from ?? v.activity) && POSTURE_ORIGINS.has(v.activity) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && w < .01;
-    const phase = pc ? posturePhaseEnds(pc,v.base).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
+    const floorToMove=!!pc&&['back','front'].includes(postureKind(pc.from,pc.fromBase))&&GAIT_ACTS.has(v.activity);
+    const noOwner = POSTURE_ORIGINS.has(pc?.from ?? v.activity) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove);
+    const phase = pc ? posturePhaseEnds(pc,v.base,v.activity).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
     if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
       this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
     } else if (!noOwner) v.postureOrigins?.clear();
@@ -1669,7 +1670,7 @@ export class HumanViews {
     const root = new THREE.Vector3(...v.cur.p);
     if (!origin) {
       const age = phase ? v.since===undefined?undefined:v.since-delta : pc.fromAge;
-      const snap = {...v.cur,expressionT:boundary,idleT:(boundary+(h.name.length*.37)%1)%v.rig.idle.getClip().duration};
+      const snap = {...v.cur,...(!phase&&!GAIT_ACTS.has(from)?{walkW:0,walkT:0}:{}),expressionT:boundary,idleT:(boundary+(h.name.length*.37)%1)%v.rig.idle.getClip().duration};
       // A separate skeleton AND mixer keep source evaluation out of the displayed rig's property-binding cache.
       // This private evaluator is never attached to the world and never loads appearances, props or network assets.
       const evaluator = new HumanViews(false);evaluator.templates=[v.rig.template];
@@ -1722,7 +1723,8 @@ export class HumanViews {
     }
     const body = out.cur?.pick.body;
     out.sleep = !!(out.cur && body === 'lie' && v.sleepPose);
-    out.still = body === 'lie' || body === 'swim' || body === 'tread';
+    const movingFloorExit=!!pn&&!!pc&&GAIT_ACTS.has(v.activity)&&['back','front'].includes(postureKind(pc.from,pc.fromBase));
+    out.still = body === 'lie' || body === 'swim' || body === 'tread' || movingFloorExit&&!!(pn.flat||pn.tilt);
     out.water = body === 'swim' || body === 'tread';
     return out;
   }

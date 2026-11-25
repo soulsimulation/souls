@@ -65,8 +65,8 @@ test('a seat: straight from standing to sit draws sit-down, from sit to standing
   assert.equal(postureNow(change('stand-up', 'idle', 0.1), 'idle'), null);
 });
 
-test('no transition while the body walks off, or without a change of posture', () => {
-  assert.equal(postureNow(change('situps', 'idle', 0.2), 'walk'), null);
+test('a floor exit continues cosmetically while the native body walks, without inventing standing transitions', () => {
+  assert.ok(postureNow(change('situps', 'walk', 0.2), 'walk')?.flat);
   assert.equal(postureNow(change('idle', 'jumping-jacks', 0.1), 'jumping-jacks'), null);
   assert.equal(postureNow(undefined, 'idle'), null);
 });

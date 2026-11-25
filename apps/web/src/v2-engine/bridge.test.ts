@@ -279,3 +279,10 @@ test('an old run end in the new move part cannot erase the new same-tick gesture
   const drawn=sampleTake(chunk.take as unknown as Take,(T0+1_000_000-chunk.fromTick*TICK_US)/1e6).entities[E];
   assert.equal(drawn.activity,'situps');
 });
+
+
+test('a self-target floor move never aims back at its old position while the native body walks',()=>{
+  const b=new V2Bridge({rulesVersion:'test/1'});b.receive({t:'snapshot',s:{nodes:[world,building,floor,body],removed:[]}});
+  for(let n=0;n<8;n++)b.receive(part(n,[['b.7','w.2',null,T0+n*500_000,1_000_000+n*500_000,0,0]],n===0?{moves:[{body:'b.7',name:'souls:stargaze',start:T0,ends:[T0+4_000_000],target:'b.7',run:'floor'}]}:{}));
+  const chunks=b.view.takes.chunks;for(const c of chunks){const take=c.take as unknown as Take;const e=sampleTake(take,.5).entities[E];assert.ok(Math.abs(e.yaw+Math.PI/2)<.01,'canonical floor rotation preserves the actual course heading');}
+});
