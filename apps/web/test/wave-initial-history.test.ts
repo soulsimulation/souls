@@ -112,3 +112,41 @@ test('initial history abort/deadline settles and does not adopt a late owner res
             assert.equal(h.loading, false);
     }
 });
+test('page arrival: a stream that already holds the window fetches nothing and draws the same prefix a fetch would', async () => {
+    const r = recording(), live = r.chunks.slice(4, 10), selected = r.chunks.find(c => c.fromTick === 160)!, ctl = new AbortController();
+    let count = 0;
+    const own = new WorldMotionHistory(async () => { count++; return []; }, ctl.signal);
+    await own.start(live, 200, 30, 'same', () => 'same');
+    assert.equal(count, 0, 'no history request');
+    assert.equal(own.loading, false);
+    const fetched = new WorldMotionHistory(async (from, to) => r.chunks.filter(c => c.toTick > from && c.fromTick < to).slice(0, 12), ctl.signal);
+    await fetched.start(r.chunks.slice(8, 10), 200, 30, 'same', () => 'same');
+    const ids = (cs: { fromTick: number }[]) => cs.map(c => c.fromTick);
+    assert.deepEqual(ids(own.history(live, selected, 170)), ids(fetched.history(live, selected, 170)));
+    assert.equal(own.enabled, true);
+    // a gap, or a second world base, in what the stream holds still asks for the window
+    for (const broken of [[...live.slice(0, 2), ...live.slice(3)], live.map((c, i) => i ? c : { ...c, take: { ...c.take, finalState: { ...c.take.finalState, base: { other: true } } } })]) {
+        let asked = 0;
+        await new WorldMotionHistory(async () => { asked++; return []; }, ctl.signal).start(broken as typeof live, 200, 30, 'same', () => 'same');
+        assert.equal(asked, 1);
+    }
+});
+test('page arrival: a stream that catches up while the window is fetched ends the wait; the late answer is ignored', async () => {
+    const r = recording(), selected = r.chunks.find(c => c.fromTick === 160)!, ctl = new AbortController();
+    let aborted = false;
+    const h = new WorldMotionHistory((_f, _t, _l, signal) => new Promise((_ok, no) => signal.addEventListener('abort', () => { aborted = true; no(Error('aborted')); }, { once: true })), ctl.signal);
+    // the stream's first chunks are an older window (it is catching up): the window asked for is that one's
+    const p = h.start(r.chunks.slice(5, 6), 120, 30, 'same', () => 'same');
+    assert.equal(h.loading, true);
+    assert.equal(h.start(r.chunks.slice(7, 10), 200, 30, 'same', () => 'same'), p, 'still short of the window of now: the same wait');
+    assert.equal(h.loading, true);
+    assert.equal(h.start(r.chunks.slice(4, 10), 200, 30, 'other', () => 'other'), p, 'another owner never ends this wait');
+    assert.equal(h.loading, true);
+    const live = r.chunks.slice(4, 10);
+    void h.start(live, 200, 30, 'same', () => 'same');
+    assert.equal(h.loading, false);
+    assert.equal(aborted, true, 'the request is cancelled');
+    await p;
+    assert.deepEqual(h.history(live, selected, 170).map(c => c.fromTick), [80, 100, 120, 140, 160, 180]);
+    assert.equal(h.enabled, true, 'the cancelled request does not turn it legacy');
+});

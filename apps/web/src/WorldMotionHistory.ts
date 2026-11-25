@@ -6,6 +6,16 @@ type Chunk = {
 };
 const identity = (c: Chunk) => JSON.stringify([c.take.id, c.take.startTick, c.take.ticks, c.take.baselineStateHash, c.take.finalStateHash, c.take.rulesVersion, c.take.dt]);
 const adjacent = (a: Chunk, b: Chunk) => a.toTick === b.fromTick && a.take.dt === b.take.dt && a.take.rulesVersion === b.take.rulesVersion && a.take.finalStateHash === b.take.baselineStateHash;
+/** Whether `live` (in order) reaches back to tick `from` with no gap and one world base: the window is all there. */
+const covers = (live: readonly Chunk[], from: number) => {
+    let i = live.length - 1;
+    while (live[i].fromTick > from) {
+        if (i === 0 || !adjacent(live[i - 1], live[i])) return false;
+        i--;
+    }
+    const base = live.at(-1)!.take.finalState.base, world = JSON.stringify(base);
+    return live.slice(i).every(c => c.take.finalState.base === base || JSON.stringify(c.take.finalState.base) === world);
+};
 /** One owner/epoch-local initial supplement. Never polls, guesses a missing chunk or mutates live input. */
 export class WorldMotionHistory {
     private state: 'new' | 'loading' | 'ready' | 'legacy' = 'new';
@@ -22,18 +32,38 @@ export class WorldMotionHistory {
     constructor(fetch: (from: number, to: number, limit: number, signal: AbortSignal) => Promise<Chunk[]>, signal: AbortSignal, requiredSeconds = 4, deadlineMs = 5000) { this.fetch = fetch; this.signal = signal; this.requiredSeconds = requiredSeconds; this.deadlineMs = deadlineMs; }
     get loading() { return this.state === 'new' || this.state === 'loading'; }
     get enabled() { return this.state === 'ready'; }
+    /** While loading: the window's first tick and the fetch's cancel, so a stream that has since caught up ends it. */
+    private waiting: { owner: string; cancel: () => void } | null = null;
     start(live: readonly Chunk[], serverTick: number, delayTicks: number, owner: string, currentOwner: () => string) {
-        if (this.pending || this.state !== 'new' || !live.length)
+        if (!live.length)
             return this.pending;
         const last = live.at(-1)!, dt = last.take.dt, from = Math.max(0, Math.floor(serverTick - delayTicks - this.requiredSeconds / dt)), to = last.toTick;
+        // page arrival: a stream that holds the whole window, hash-contiguous on one world (the new engine's bridge keeps
+        // its newest twelve seconds), needs nothing fetched; history() then draws from it exactly as from a fetched
+        // prefix. Checked again, against the window of now, on each call while a fetch is out: a stream still catching up
+        // (its first chunks hours old, its window long gone by the time a fetch of it answers) ends the wait.
+        if (this.state === 'loading' && this.waiting?.owner === owner && currentOwner() === owner && covers(live, from)) {
+            const { cancel } = this.waiting;
+            this.waiting = null;
+            this.state = 'ready';
+            cancel();
+            return this.pending;
+        }
+        if (this.pending || this.state !== 'new')
+            return this.pending;
+        if (covers(live, from)) {
+            this.state = 'ready';
+            return this.pending = Promise.resolve();
+        }
         this.state = 'loading';
         const ctl = new AbortController(), cancel = () => ctl.abort();
         this.signal.addEventListener('abort', cancel, { once: true });
         if (this.signal.aborted)
             ctl.abort();
         const deadline = setTimeout(cancel, this.deadlineMs);
+        this.waiting = { owner, cancel };
         this.pending = this.fetch(from, to, 12, ctl.signal).then(got => {
-            if (this.signal.aborted)
+            if (this.signal.aborted || this.state !== 'loading')
                 return;
             if (currentOwner() !== owner) {
                 this.state = 'legacy';
@@ -46,8 +76,8 @@ export class WorldMotionHistory {
             }
             this.saved = got.slice(0, 12);
             this.state = 'ready';
-        }, () => { if (!this.signal.aborted)
-            this.state = 'legacy'; }).finally(() => { clearTimeout(deadline); this.signal.removeEventListener('abort', cancel); });
+        }, () => { if (!this.signal.aborted && this.state === 'loading')
+            this.state = 'legacy'; }).finally(() => { this.waiting = null; clearTimeout(deadline); this.signal.removeEventListener('abort', cancel); });
         return this.pending;
     }
     /** Supply only a unique, hash-contiguous prefix for the actual first depicted frame. */
