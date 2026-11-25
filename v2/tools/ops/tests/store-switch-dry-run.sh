@@ -226,6 +226,11 @@ echo "--- check"
 out=$($SW check 2>&1) && ok "check passed" || no "check: $out"
 echo "$out"
 
+echo "--- chains"
+# Each world sends its whole stream chain to the new store (worldd, a store moved), with SWITCH_SKIP too.
+for _ in $(seq 1 30); do out=$($SW chains 2>&1) && break || sleep 1; done
+printf '%s\n' "$out" | grep -q 'chains complete' && ok "every world's stream chain is in the new store${SWITCH_SKIP:+ (SWITCH_SKIP $SWITCH_SKIP)}" || no "chains: $out"
+
 echo "--- undo, with the directory planted to fail at its start"
 echo souls-directory > "$D/fail-unit"
 calls=$(wc -l < "$D/copy.log")

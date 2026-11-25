@@ -153,7 +153,7 @@ jobs:
           # --bin names targets in every -p package: the programs and the tools are two builds (O18b, #3498).
           cargo build --release --locked -p worldd -p gatewayd -p directoryd
           cargo build --release --locked -p assets --bin assets-check
-          cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade --bin world-aside
+          cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade --bin world-aside --bin store-copy
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
