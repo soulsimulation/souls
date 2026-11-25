@@ -70,6 +70,12 @@
           "field": "pending",
           "to": true,
           "event": "request_shown"
+        },
+        {
+          "change": "set",
+          "field": "answered",
+          "to": false,
+          "event": "answer_mark_cleared"
         }
       ],
       "takes": {
@@ -119,6 +125,57 @@
           "field": "pending",
           "to": false,
           "event": "request_hidden"
+        },
+        {
+          "change": "set",
+          "field": "answered",
+          "to": false,
+          "event": "answer_mark_cleared"
+        }
+      ]
+    },
+    "mark_answered": {
+      "who": {
+        "link": "asker"
+      },
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "asker",
+          "end": "actor",
+          "says": "only_author"
+        },
+        {
+          "need": "state",
+          "field": "pending",
+          "is": true,
+          "says": "no_question"
+        },
+        {
+          "need": "state",
+          "field": "answered",
+          "is": false,
+          "says": "already_answered"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "answered",
+          "to": true,
+          "event": "question_marked_answered"
         }
       ]
     }
@@ -227,15 +284,25 @@
           "false": "#5b91c4",
           "true": "#e5ac3e"
         }
+      },
+      {
+        "part": "light",
+        "field": "answered",
+        "do": "tint",
+        "at": {
+          "true": "#76ad73"
+        }
       }
     ]
   },
   "text": {
-    "card": "One pending conference question: post it, then withdraw your request.",
+    "card": "Post a question, mark it answered, then withdraw your request.",
     "conference": "conference",
-    "howto_question": "Post one question request while the stand is free. Amber marks a pending request. Only its author may withdraw it. Speak using ordinary public speech; this stand neither gives a speech turn nor retains a conversation.",
+    "howto_question": "Post one question while the stand is free. Amber marks your pending question. Use mark_answered to declare it answered; green keeps your question on the stand until you withdraw it. Only its author may mark or withdraw it.",
     "question_pending": "A question is pending. Its author must use withdraw_question before the next request.",
-    "no_question": "No question is pending. Use post_question to request one."
+    "no_question": "No question is pending. Use post_question to request one.",
+    "only_author": "Only the author may mark this question answered.",
+    "already_answered": "You have already marked this question answered. Withdraw it when you are finished."
   },
   "card": {
     "text": "card",
@@ -252,6 +319,14 @@
     },
     "pending": {
       "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "answered": {
+      "n": 30,
       "type": "bool",
       "default": false,
       "audience": {
@@ -275,6 +350,9 @@
       "steps": [
         {
           "form": "post_question"
+        },
+        {
+          "form": "mark_answered"
         },
         {
           "form": "withdraw_question"

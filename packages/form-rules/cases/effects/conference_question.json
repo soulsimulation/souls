@@ -46,7 +46,8 @@
             "words": {
               "text": "w_next_steps"
             },
-            "pending": 1
+            "pending": 1,
+            "answered": 0
           },
           "links": {
             "asker": [
@@ -102,7 +103,8 @@
             "asker": []
           },
           "fields": {
-            "pending": 0
+            "pending": 0,
+            "answered": 0
           }
         }
       }
@@ -161,10 +163,16 @@
             "asker": []
           },
           "fields": {
-            "pending": 0
+            "pending": 0,
+            "answered": 0
           }
         }
       }
-    }
+    },
+    {"name":"mark_answered_preserves_reference_author_pending","state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":0,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"do":[{"act":{"this":"t1","form":"mark_answered"},"receipt":"r_mark","expect":{"verdict":"yes"}}],"after":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":1,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}}}},
+    {"name":"outsider_mark_denied_without_write","state":{"actor":"b2","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":0,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"do":[{"act":{"this":"t1","form":"mark_answered"},"receipt":"r_denied","expect":{"verdict":"no","reason":"not_linked","need":0}}],"after":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":0,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}}}},
+    {"name":"withdraw_clears_answer_mark","state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":1,"words":{"text":"w_next_steps"}},"links":{"asker":["b1"]}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"do":[{"act":{"this":"t1","form":"withdraw_question"},"receipt":"r_withdraw","expect":{"verdict":"yes"}}],"after":{"t1":{"kind":"eden:conference_question","fields":{"pending":0,"answered":0},"links":{"asker":[]}}}},
+    {"name":"post_resets_previous_answer_mark","state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question","fields":{"pending":0,"answered":1}},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"do":[{"act":{"this":"t1","form":"post_question","args":{"words":"w_second"}},"receipt":"r_post","expect":{"verdict":"yes"}}],"after":{"t1":{"kind":"eden:conference_question","fields":{"pending":1,"answered":0,"words":{"text":"w_second"}},"links":{"asker":["b1"]}}}},
+    {"name":"post_mark_withdraw_second_post_reuses_stand","state":{"actor":"b1","nodes":{"t1":{"kind":"eden:conference_question"},"b1":{"hands":{"left":null,"right":null}},"b2":{"hands":{"left":null,"right":null}}}},"do":[{"act":{"this":"t1","form":"post_question","args":{"words":"w_first"}},"receipt":"r_cycle0","expect":{"verdict":"yes"}},{"act":{"this":"t1","form":"mark_answered"},"receipt":"r_cycle1","expect":{"verdict":"yes"}},{"act":{"this":"t1","form":"withdraw_question"},"receipt":"r_cycle2","expect":{"verdict":"yes"}},{"act":{"this":"t1","form":"post_question","args":{"words":"w_second"}},"receipt":"r_cycle3","expect":{"verdict":"yes"}}],"after":{"t1":{"kind":"eden:conference_question","fields":{"words":{"text":"w_second"},"pending":1,"answered":0},"links":{"asker":["b1"]}}}}
   ]
 }
