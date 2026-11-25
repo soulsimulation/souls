@@ -79,7 +79,7 @@ type TurnLine = { type: 'edge'; conversation: string; tick: number; at: number }
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
 export type V2Soul = { id: string; entityId: string; name: string; description: string; doing: Doing; state: 'awake' | Wound };
 /** What a Soul is doing, derived from the copy as the v2 page derives its status (v2/web/src/souls/souls.ts), never sent. */
-export type Doing = 'speaking' | 'walking' | 'standing' | Wound | (typeof DOING)[keyof typeof DOING] | `aboard — takes off in ${number} s`;
+export type Doing = 'speaking' | 'walking' | 'standing' | Wound | (typeof DOING)[keyof typeof DOING] | `aboard — takes off in ${number}\u00a0s`;
 /** First-day round 4: how near the place it was put a thing on a course stands to be at its stop, µm. */
 const AT_STOP_UM = 500_000;
 type Wound = 'idle' | 'zombie' | 'asleep';
@@ -100,7 +100,7 @@ export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t
   if (speaking) return 'speaking';
   if (wound && wound.at <= t && wound.word !== 'awake') return wound.word;
   // First-day round 4: aboard a balloon still at its stop, it says so and when it takes off; "riding" once under way
-  if (activity === 'ride' && takesOffIn !== undefined) return `aboard — takes off in ${takesOffIn} s`;
+  if (activity === 'ride' && takesOffIn !== undefined) return `aboard — takes off in ${takesOffIn}\u00a0s`; // the number and its unit stay on one line
   const shown = activity !== undefined ? DOING[activity as keyof typeof DOING] : n && n.slot !== null ? DOING.sit : undefined;
   if (shown) return shown;
   if (activity === 'walk') return 'walking';

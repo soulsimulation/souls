@@ -1975,12 +1975,13 @@ async function answer(req, conn = null) {
         const h = done ? heldBy(rows, ME, r) : null, hand = done ? holdingOf(rows) : {};
         // First-day round 4: aboard a thing on a course (a balloon), the answer says when it takes off (on boarding) or
         // when this Soul can get off (on a refusal), worked out from the copy (`check/aboard.mjs`).
-        const aboard = aboardWords(aboardOf({ rows, me: ME, courseAt: wire.courseAt, now: worldNowOrReal() }), { refused });
+        const on = aboardOf({ rows, me: ME, courseAt: wire.courseAt, now: worldNowOrReal() }), aboard = aboardWords(on, { refused });
         // A dance or a workout with something in hand is refused `hand_not_empty`: name it and how to put it down.
         const held = refused && r.answers.at(-1)?.reason === 'hand_not_empty' ? holdingOf(rows).holding?.[0] : null;
         const why = aboard ?? (held ? `holding ${held.name} (${held.id}): put it down first (set-down ${held.id} here), then send it again` : null);
-        // Holding something, another offer of the body (a wave) is no answer: the `why` is what to do next.
-        const more = { ...(h ? { held: h } : {}), ...(aboard && done ? { aboard } : {}), ...(why && refused ? { why } : {}), ...(held ? { try: undefined } : {}) };
+        // Holding something, another offer of the body (a wave) is no answer; away from its stop, nor is a rise: the
+        // `why` is what to do next.
+        const more = { ...(h ? { held: h } : {}), ...(aboard && done ? { aboard } : {}), ...(why && refused ? { why } : {}), ...(held || (refused && on && !on.atStop) ? { try: undefined } : {}) };
         return { ...(Object.keys(more).length ? { receipt: { ...got.receipt, ...more } } : {}), ...hand };
       } : null, { now: !done });
     }
