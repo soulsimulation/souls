@@ -5,7 +5,7 @@
 import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
-import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
+import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
 import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
@@ -230,7 +230,9 @@ export class V2Bridge {
       const t = this.tracks.get(m.body);
       if (!t) continue;
       if (m.ended) { endGesture(t.gestures, m.start, m.ended.at); continue; }
-      const g = gestureFrom(m, this.toward(m.target));
+      // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
+      const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
+      const g = readingFrom(m, heldProp) ?? gestureFrom(m, this.toward(m.target));
       if (g) t.gestures.push(g);
     }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
@@ -286,6 +288,7 @@ export class V2Bridge {
     this.heldBy.delete(id);
     const t = this.tracks.get(holder);
     if (!t) return;
+    endReading(t.gestures, at);
     const other = [...this.heldBy].find(([, h]) => h === holder)?.[0];
     t.held.push({ at, prop: other ? propOf(this.nodes.get(other)?.kind ?? '') : null });
   }

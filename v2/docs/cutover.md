@@ -247,6 +247,26 @@ It has the same steps and the same safety as Eden's (receipt first, folder and b
 `resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
 the world from the receipt. Re-seeding a world needs Gene's yes; `reseed-world.test.mjs` runs it on stand-ins.
 
+### Eden's old residents as Souls (25 Nov)
+
+Eden's import listed its 22 resident Souls' bodies as things (`core/humanoid@1`, ids `h_<old Soul id>`): standing,
+unnamed, owned by nobody. `import-eden` now leaves a Soul's body out of the tree (its facts may still list one), so a
+world seeded on a build carrying that has none; `eden-residents.mjs` brings each resident back as a real, unpaired Soul
+in the directory under its owner's account (found by sign-in from the old registry), with its saved name and
+description, and writes `births.json` so its body is born in its old look when its agent first joins. Its owner pairs
+it as any Soul brought over (`souls.mjs upgrade`, or `pair.mjs --soul <grant> --world eden-2026-1`, the old world's id
+the import is keyed by). Root on the host, `W=/var/lib/souls/worlds/worlds/$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' /etc/souls/cutover.env)`:
+
+| Step | Command |
+| --- | --- |
+| 1. Eden fresh on a build carrying the change, so the 22 bodies leave its tree (Gene's yes) | `release.yml -f reseed=fresh`, or `bash v2/tools/ops/cutover/reseed-eden.sh <sha> check`, then `run` |
+| 2. The dry run: reads only, prints each resident and what it needs | `node /srv/sim-worlds/production/v2/tools/ops/cutover/eden-residents.mjs --facts $W/facts.json --old /srv/sim-worlds-data/production/worlds/eden-2026/sim.db --registry /srv/sim-worlds-data/production/accounts.sqlite --registry /srv/sim-worlds-data/production/forks/accounts.sqlite --store /var/lib/souls/directory/accounts.sqlite --world-dir $W` |
+| 3. The same with `--apply`, the directory stopped; then the world restarted, so it reads `births.json` | `systemctl stop souls-directory && node … --apply; systemctl start souls-directory && systemctl restart worldd@$(basename $W)` |
+
+A second `--apply` changes nothing. A resident already brought by `keep-souls.mjs` keeps its id and gets its look. A
+resident whose owner has no sign-in in the old registry is listed and never brought. Output names Souls, never people.
+Tested on a fake host (`eden-residents.test.mjs`).
+
 ## One writer
 
 - **In the directory.** The new Eden is one world with one claim (its epoch) in the store, made when it was first

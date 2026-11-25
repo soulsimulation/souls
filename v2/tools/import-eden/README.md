@@ -75,6 +75,12 @@ a bay; `content/kinds/construction`) is read by its own name, so a copy that onl
 The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
 `--map content/worlds/mars/map.json` it is a yard a crew builds from; without the map it is plain things.
 
+A Soul is not a thing (25 Nov): a live world's Souls' bodies (`core/humanoid@<n>`, Eden's 22 residents, ids
+`h_<old Soul id>`) are not exported as things but listed under `residents` (id, name, pose), and the loader leaves any
+the facts still list out of the tree (`Import::residents`, printed under "Souls' bodies left out"), with the bake's
+counts less them. A thing standing on such a body is refused by name. The Souls come back through the directory,
+unpaired, with `v2/tools/ops/cutover/eden-residents.mjs` (`v2/docs/cutover.md`).
+
 Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
 own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a
 thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that

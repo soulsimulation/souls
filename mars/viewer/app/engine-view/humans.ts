@@ -65,7 +65,7 @@ import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shor
 import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
-import { ACTIVITY_OVERLAYS, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
@@ -171,6 +171,8 @@ type View = {
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
   propWanted?: string;
+  /** Take time (s) the body began to carry its prop in one hand (the carry pose eases in from it). */
+  carrySince?: number;
   instrument?:string;
   game?:RecordedGame;
   gameTick?:number;
@@ -243,7 +245,9 @@ export type Diag = {
   handGame?: HandGameDiag;
 };
 /** Where an arm's target came from: engine hand points, a grip slot, or private frame/balance/ground-sleep contacts. */
-type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | null;
+type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | 'carry' | null;
+/** Seconds a carried thing's hand takes to come up to the carry point once it is held. */
+const CARRY_EASE = 0.4;
 /**
  * One person in a random-access frame (take replay / scrubbing). `walk` is the Walk clip weight
  * (0–1) and `walkDist` the metres walked along the track so far, so the Walk phase is a pure
@@ -1224,7 +1228,14 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const wantProp = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    // a thing the body carries (the engine's prop) with no activity posing the hands is in one hand at the carry point,
+    // standing or walking (below); a book is carried closed and read open
+    const held = !!propKind && propKind === v.propWanted;
+    const carried = held && !act?.hands && !clipBody && sitW === 0 && !fp && !gait;
+    if (!carried) v.carrySince = undefined; else if (v.carrySince === undefined || v.carrySince > tSec) v.carrySince = tSec;
+    const carryW = carried ? smooth(Math.min(1, (tSec - v.carrySince!) / CARRY_EASE)) : 0;
+    const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
@@ -1476,6 +1487,18 @@ export class HumanViews {
       });
       closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
+    } else if (carried && carryW > 0) {
+      // a carried thing: its hand at the carry point from its own shoulder (forearm forward, elbow bent), walking or
+      // standing; the other arm keeps the clip (its walk swing, its idle). The prop follows the drawn palm (below).
+      source = 'carry';
+      const side = carrySide(wantProp!), i = v.arms.findIndex((_, k) => armSide(v, k) === side);
+      if (i >= 0) {
+        const arm = v.arms[i], out = side === 'left' ? -1 : 1;
+        const t = arm.upper.getWorldPosition(V()).addScaledVector(_fwd, CARRY_HAND[0]).addScaledVector(_right, out * CARRY_HAND[1]).addScaledVector(UP, CARRY_HAND[2]);
+        targets[i] = t;
+        armTo(arm, t, carryW, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5));
+      }
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
     } else if (sitW > 0 && !seatClip) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
