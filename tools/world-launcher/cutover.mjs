@@ -301,7 +301,10 @@ function oneFence(binding) {
       let history = null;
       try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
       const version = replicaVersion();
+      // v2Views: whether the old views (snapshot, scene, items, platforms, kernel) are published; the page asks for none
+      // when they are not (apps/web scene-offer.ts oldViews), since each would answer 404
       return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
+        v2Views: this.published(w),
         ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written

@@ -14,6 +14,7 @@ import { EdgeLog, setKindFields, WorldState, type LayerLike } from './world-stat
 import { CreatorKinds } from './creator-kinds.ts';
 import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
+import { oldViews } from './source/scene-offer.ts';
 import { KIND_BOUNDS, KIND_LOOKS_URL, KIND_STATE_URL } from './source/kind-bounds.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
@@ -77,7 +78,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
      try {
-      const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
+      const scene = !oldViews() ? null : await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
       const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
@@ -116,7 +117,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
      } catch (e) { failed = true; console.warn('v2 stream:', e); }
     })();
     const get = (path: string) => fetch(apiPath(path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    void get('/v1/kernel').then((v) => { if (v && !st.kernel) st.kernel = v; });
+    if (oldViews()) void get('/v1/kernel').then((v) => { if (v && !st.kernel) st.kernel = v; });
     const t = setInterval(() => {
       if (bridge) {
         const v = bridge.view;
