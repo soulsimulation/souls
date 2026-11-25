@@ -253,6 +253,16 @@ fn env_u64(name: &str) -> Option<u64> {
     std::env::var(name).ok()?.parse().ok()
 }
 
+/// Whether a structural part is taken on a copy of the whole tree, as before 0.136 (a test's reference only).
+#[cfg(test)]
+fn copy_part() -> bool {
+    tests::COPY_PART.get()
+}
+#[cfg(not(test))]
+fn copy_part() -> bool {
+    false
+}
+
 fn fault(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
@@ -1210,6 +1220,8 @@ pub struct PublicWriter<S> {
     /// passed `fresh_at`, the cursor recovered ([`PublicWriter::fresh_generation`]).
     fresh: bool,
     fresh_at: u64,
+    /// A part refused part way through on the writer's own tree (0.136): every later record is refused with it.
+    poisoned: Option<Refusal>,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1722,6 +1734,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             spool: spool.map(|(dir, store)| backup::Spool::new(dir, store)),
             fresh: false,
             fresh_at: 0,
+            poisoned: None,
         };
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
@@ -2926,13 +2939,79 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         Ok(())
     }
+    /// A node is a row of the public projection when it is live in `t` and public (#3667).
+    fn visible(&self, t: &replica::tree::Tree, id: Id) -> bool {
+        t.handle(id)
+            .and_then(|h| t.node(h))
+            .is_some_and(|n| n.audience() == Audience::Everyone)
+            && !self.hidden(t, id)
+    }
+    /// A part's entries, one at a time, on the writer's own tree, as a viewer applies them; the view steps around each.
+    fn take_in_place(
+        &mut self,
+        part: &Part,
+        kept: &std::collections::BTreeSet<u64>,
+        view: &mut View,
+        duplicates: &mut Vec<(u64, Id)>,
+        migration_state: &mut Option<Value>,
+        was: &mut BTreeMap<Id, bool>,
+    ) -> R<()> {
+        let header = self.header.hash().to_bytes();
+        for effect in &part.effects {
+            // Each node this entry changes that the part's start did not list (`may_change`) is read as it is now,
+            // before the entry: nothing before it in the part changed it, or it would have been listed.
+            for id in self.canonical.touches(effect) {
+                if let std::collections::btree_map::Entry::Vacant(v) = was.entry(id) {
+                    v.insert(self.visible(self.canonical.tree(), id));
+                }
+            }
+            let before = Before::of(self.canonical.tree(), effect);
+            if effect.envelope.audience == Audience::Everyone
+                && let Body::Transfer(replica::effects::TransferRec::Arrive { transfer, .. }) =
+                    &effect.body
+                && self.canonical.tree().arrived().contains(transfer)
+                && !kept.contains(&effect.envelope.sequence)
+            {
+                duplicates.push((effect.envelope.sequence, *transfer));
+            }
+            let one = wire(Value::Map(BTreeMap::from([
+                (1, Value::Bytes(header.clone())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))?;
+            self.canonical.apply(&Part::read(&one)?)?;
+            if self.migration_cut == Some(self.canonical.version()) {
+                *migration_state = Some(self.shown(self.canonical.tree())?);
+            }
+            view.step(
+                &before,
+                effect,
+                self.canonical.tree(),
+                &Redactions::default(),
+            )?;
+        }
+        Ok(())
+    }
     fn apply_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        if let Some(e) = &self.poisoned {
+            return Err(e.clone());
+        }
         if record != self.cursor {
             return Err(fault(
                 "stream-source-gap",
                 "physical record does not follow",
             ));
         }
+        // A record refused once it began may leave the writer's tree part changed (0.136): the writer is poisoned and
+        // refuses every later record with the same refusal, so nothing is published from it.
+        let taken = self.apply_part_record(record, raw);
+        if let Err(e) = &taken {
+            self.poisoned = Some(e.clone());
+        }
+        taken
+    }
+    fn apply_part_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        // Read only by the whole-state reference (tests).
+        let _ = record;
         #[cfg(test)]
         if tests::WHOLE_STATE.get() {
             return self.apply_record_whole_state(record, raw);
@@ -2941,14 +3020,14 @@ impl<S: ObjectStore> PublicWriter<S> {
             let part = Part::read(raw)?;
             // The entries that put a thing into a closed container or touch one in it (#3948): never published.
             let kept = self.kept_out(&part);
-            // Whole canonical validation first. Never publish a partial producer result or private ledger. One copy
-            // takes the part entry by entry, as a viewer applies it (all of it or none); the view, the duplicates and
-            // the cut's state are kept only when every entry applied. The view reads the copy's tree around each
-            // entry: no whole state is built per entry (#3667).
+            // Whole canonical validation first. Never publish a partial producer result or private ledger. The part is
+            // taken entry by entry, as a viewer applies it; the view, the duplicates and the cut's state are kept only
+            // when every entry applied, and a part refused part way poisons the writer. The view reads the writer's tree
+            // around each entry: no whole state is built per entry (#3667).
             // A part of motion, fields and timers only (#3799) changes no node's parent and brings no node, so each
             // entry's view reads the same parent chains before and after it: the view steps over the tree as it stands,
             // and the part is applied to the one tree, all of it or none, with no copy. Any other part is taken entry by
-            // entry on a copy, as above.
+            // entry on the one tree too (below); only an empty part or another header's is checked on a copy.
             let simple = self.incremental
                 && self.migration_cut.is_none()
                 && !part.effects.is_empty()
@@ -3000,6 +3079,65 @@ impl<S: ObjectStore> PublicWriter<S> {
                     })
                     .collect();
                 self.changes.extend(changed);
+            } else if part.header == self.header.hash().to_bytes() && !copy_part() {
+                // Any other part is taken entry by entry on the one tree (0.136: a copy of the whole tree per part made
+                // a rebuild of Eden's 77k records take 906 s); a part with no entries is checked whole on it, as
+                // `Replica::apply` takes a part whole or not at all. Who was public before it is read first, for
+                // every node it can change (`may_change`). An entry refused part way leaves the tree part changed:
+                // the writer is poisoned ([`PublicWriter::apply_record`]), so nothing is published from it; the
+                // world's stream thread ends with it, as it did on any refusal.
+                let mut was: BTreeMap<Id, bool> = self
+                    .canonical
+                    .may_change(&part)
+                    .into_iter()
+                    .map(|id| (id, self.visible(self.canonical.tree(), id)))
+                    .collect();
+                let before_version = self.canonical.version();
+                let mut view = self.view.clone();
+                let (mut duplicates, mut migration_state) = (Vec::new(), None);
+                if part.effects.is_empty() {
+                    self.canonical.apply(&part)?;
+                }
+                self.take_in_place(
+                    &part,
+                    &kept,
+                    &mut view,
+                    &mut duplicates,
+                    &mut migration_state,
+                    &mut was,
+                )?;
+                self.view = view;
+                self.duplicates.extend(duplicates);
+                if migration_state.is_some() {
+                    self.migration_state = migration_state;
+                }
+                for (_, record) in self.view.take() {
+                    if Carried::read(&record)?.is_none() {
+                        let seq = stream_effect(&self.header, record.clone())?
+                            .envelope
+                            .sequence;
+                        if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
+                            self.records.push(record)
+                        }
+                    }
+                }
+                let mut changed = Vec::new();
+                for (id, v) in self.canonical.changed_since(before_version) {
+                    let Some(&before) = was.get(&id) else {
+                        return Err(fault(
+                            "stream-poisoned",
+                            format!("a node changed that the part could not change: {id:?}"),
+                        ));
+                    };
+                    if (before || self.visible(self.canonical.tree(), id))
+                        && self.migration_cut.is_none_or(|cut| v > cut)
+                    {
+                        changed.push((id, v));
+                    }
+                }
+                self.changes.extend(changed);
+                self.duplicates
+                    .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
             } else {
                 let mut checked = self.canonical.frozen();
                 if part.effects.is_empty() || part.header != self.header.hash().to_bytes() {
