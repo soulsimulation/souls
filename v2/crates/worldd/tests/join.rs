@@ -248,7 +248,7 @@ fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
       "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] },
-        "far": { "role": "stand", "at_mm": [3000, 0, 0] } },
+        "far": { "role": "stand", "at_mm": [1200, 0, 0] } },
       "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
         "fetch": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "far" }, { "step": "take" }],
           "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand" }] } } }"#,
@@ -999,7 +999,8 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     let (run, mut a, mut b) = serve("a3");
     a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
     let body = run.body_of(ada()).expect("born");
-    // The point is 3 m east of the vessel, which stands 300 mm from the birth: a walk of about 3.3 m first.
+    // The point is 1.2 m east of the vessel, within reach of it (#4086: a take from 3 m is a take at a distance), and
+    // the vessel stands 300 mm from the birth: a walk of about 1.5 m first.
     let fetched = a.act("test:fetch", Some(vessel()), BTreeMap::new());
     println!("A3 fetch: {fetched:?}");
     fetched.expect("walked to the point, then took the vessel");

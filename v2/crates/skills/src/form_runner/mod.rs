@@ -176,6 +176,16 @@ pub const APPROACH_REACH: i64 = 600_000;
 /// hand's point.
 pub const APPROACH_SHORT: i64 = 500_000;
 
+/// The point an approach before a bare `take` walks to ([`approach`], #4086): the thing's own origin, named apart from
+/// any point an entry declares.
+pub const TO_THING: &str = "souls:to-thing";
+
+/// How far from its thing the place that approach goes to may be, µm: a cup in the middle of a counter or a table is
+/// out of an arm's reach of every place a body may stand. With the approach's aim up to [`APPROACH_SHORT`] short of
+/// the thing and the walk ending on its place ([`crate::route::AT_SPOT`]), the body ends within 1.45 m of the thing,
+/// inside the world's reach for the hand's contact (half the thing's size and 1.5 m).
+pub const HAND_REACH: i64 = 900_000;
+
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
 /// ([`crate::route::AT_GOAL`]), so the seat is in reach where the walk stops.
@@ -554,7 +564,8 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
 /// A form that starts with a move at one of the thing's points, with no walk before it (a door's `open` at its
 /// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
 /// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
-/// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
+/// the nearest clear ground, before it acts (0.131 parity, #3688); one that starts with a bare `take` walks to the
+/// thing itself ([`TO_THING`], #4086). A form whose thing is in the actor's hand
 /// (`held_by_actor` with no `thing`: a cup's sip, a kettle's pour) does not walk; one that needs a thing argument in
 /// the hand (a sink's `wash` of a held bowl) still walks to its own point (0.135 E20).
 fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
@@ -569,6 +580,27 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
     let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
         return Ok(());
     };
+    // A form that starts with a bare `take` (a hand step with no move: a cup's take) first walks to its thing, as
+    // today's game walks to a thing before it picks it up (#4086, #4118): no take at a distance. The runner skips the
+    // walk for a body already within reach, and measures the reach again at the hand step's contact.
+    let bare_take = f
+        .get("steps")
+        .and_then(Value::arr)
+        .and_then(|s| s.get(k))
+        .and_then(|s| s.get("step"))
+        .and_then(Value::str)
+        == Some("take");
+    if matches!(bound[k], Step::Hand) && bare_take && !held {
+        let step = Step::WalkTo {
+            point: name(TO_THING),
+            at: Vec3::ZERO,
+            on: None,
+            approach: true,
+            face: None,
+        };
+        bound.insert(k, step);
+        return Ok(());
+    }
     if let Step::Move {
         at: Some(p),
         on: None,
@@ -1962,6 +1994,14 @@ impl Runner {
             Step::WalkTo {
                 at, on, approach, ..
             } => {
+                // An approach to a hand step's thing is not walked by a body already within reach of it (#4086).
+                if approach
+                    && matches!(self.steps.get(self.at + 1), Some(Step::Hand))
+                    && host.within_reach(self.node) == Some(true)
+                {
+                    self.planning = false;
+                    return self.advance(host);
+                }
                 // A thing argument's place is read now, at the step's start (F14).
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
@@ -1976,6 +2016,7 @@ impl Runner {
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
                 let reach = match self.steps.get(self.at + 1) {
                     Some(Step::Sit { .. }) => SIT_REACH,
+                    Some(Step::Hand) if approach => HAND_REACH,
                     _ if approach => APPROACH_REACH,
                     _ => REACH,
                 };
@@ -2018,7 +2059,10 @@ impl Runner {
                 let mut walk = Route::new(legs, self.limits.speed, self.limits.tick);
                 // A walk right before a move ends on the point the move is reached from, as a walk to a granted
                 // standing spot does (0.135 E20): AT_GOAL short of it, the move's point can be out of its reach.
-                if matches!(self.steps.get(self.at + 1), Some(Step::Move { .. })) {
+                if matches!(
+                    self.steps.get(self.at + 1),
+                    Some(Step::Move { .. } | Step::Hand)
+                ) {
                     walk.arrive = crate::route::AT_SPOT;
                 }
                 Next::Walk(Box::new(walk))
@@ -2052,7 +2096,12 @@ impl Runner {
                     stand,
                 }
             }
+            // A hand's contact needs its thing within reach, however the steps before it ended (#4086): an approach
+            // that found no way, a walk that stopped short, a thing moved meanwhile. Nothing is taken from afar.
             Step::Hand => {
+                if host.within_reach(self.node) == Some(false) {
+                    return self.end(host, name("out-of-reach"));
+                }
                 if self.hand == Some(self.at) {
                     self.effect_now();
                 }

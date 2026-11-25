@@ -88,6 +88,8 @@ struct Fake {
     next: u64,
     /// What the runner read, and where it stood then.
     reads: RefCell<Vec<(Id, Option<Vec3>)>>,
+    /// Whether the body is within a hand's reach of the node, as the world would say (`None`: it does not say).
+    reach: Option<bool>,
 }
 
 impl Host for Fake {
@@ -111,6 +113,9 @@ impl Host for Fake {
     }
     fn ask(&self, _: &Ask) -> Option<Answer> {
         None
+    }
+    fn within_reach(&self, _: Id) -> Option<bool> {
+        self.reach
     }
     fn set_timer(&mut self, _: Micros, _: Name) -> Id {
         self.next += 1;
@@ -190,6 +195,7 @@ fn a1_a_thing_argument_is_resolved_at_the_step_start() {
         places: BTreeMap::from([(node(), mm(1, 0, 1)), (other(), mm(5, 0, 5))]),
         next: 0,
         reads: RefCell::default(),
+        reach: None,
     };
     let mut r = Runner::new(steps, node(), Limits::default());
     h.places.insert(other(), mm(-7, 0, 2));
@@ -231,18 +237,124 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
         }]
     ));
     let grab = bind_with(&e, "grab", &Args::new()).expect("binds");
-    assert_eq!(grab, vec![Step::Hand]);
-    // A hand step with no move: its contact, the effect's instant, is its start, and the run ends done.
+    assert_eq!(&grab[1..], &[Step::Hand], "after its approach (#4086)");
+    // A hand step with no move: its contact, the effect's instant, is its start, and the run ends done. The body is
+    // within reach, so the approach is not walked.
     let mut h = Fake {
         places: BTreeMap::from([(node(), Vec3::ZERO)]),
         next: 0,
         reads: RefCell::default(),
+        reach: Some(true),
     };
     let mut r = Runner::new(grab, node(), Limits::default());
     let next = r.wake(&mut h, Woke::Start);
     assert!(matches!(next, Next::End(n) if n.as_str() == "done"));
     assert!(r.take_effect(), "the effect's instant came");
     assert!(!r.take_effect(), "once");
+}
+
+/// #4086, #4118: no take at a distance. A bare `take` (a hand step with no move, as 60 entries in `content/kinds`
+/// write it) binds to an approach to its thing, then the hand step. A body within reach takes at once, with no walk;
+/// one beyond reach walks first, and its hand's contact needs the thing within reach when the walk ends: a walk that
+/// stops short, or an approach that finds no way, ends `out-of-reach` with nothing taken.
+#[test]
+fn w10_a_bare_take_walks_to_its_thing_first_and_takes_only_within_reach() {
+    use replica::host::Progress;
+    let grab = bind_with(&entry(), "grab", &Args::new()).expect("binds");
+    println!("grab: {grab:?}");
+    assert!(
+        matches!(
+            &grab[..],
+            [Step::WalkTo { approach: true, at, on: None, .. }, Step::Hand] if *at == Vec3::ZERO
+        ),
+        "an approach to the thing's own place, then the hand step"
+    );
+    let host = |reach| Fake {
+        places: BTreeMap::from([(node(), mm(5000, 0, 0))]),
+        next: 0,
+        reads: RefCell::default(),
+        reach,
+    };
+    // Beyond reach: the body walks to the thing first, and takes it there.
+    let (mut h, mut r) = (
+        host(Some(false)),
+        Runner::new(grab.clone(), node(), Limits::default()),
+    );
+    assert!(
+        matches!(r.wake(&mut h, Woke::Start), Next::Walk(_)),
+        "walks to the thing"
+    );
+    assert!(!r.take_effect(), "nothing taken before the walk ends");
+    h.reach = Some(true);
+    assert!(
+        matches!(r.wake(&mut h, Woke::Walked(Progress::Done)), Next::End(n) if n.as_str() == "done")
+    );
+    assert!(r.take_effect(), "taken once there");
+    // The walk ended and the thing is still beyond reach (it stopped short, or the thing was moved): nothing taken.
+    let (mut h, mut r) = (
+        host(Some(false)),
+        Runner::new(grab.clone(), node(), Limits::default()),
+    );
+    assert!(matches!(r.wake(&mut h, Woke::Start), Next::Walk(_)));
+    let end = r.wake(&mut h, Woke::Walked(Progress::Done));
+    assert!(
+        matches!(&end, Next::End(n) if n.as_str() == "out-of-reach"),
+        "refused at contact"
+    );
+    assert!(!r.take_effect(), "nothing taken from afar");
+    // The approach finds no way (the move is tried from where the body stands): still nothing taken from afar.
+    struct NoWay(Fake);
+    impl Host for NoWay {
+        fn now(&self) -> Micros {
+            self.0.now()
+        }
+        fn body(&self) -> Id {
+            self.0.body()
+        }
+        // On a ground (another node), so the world is asked for the way.
+        fn read(&self, n: Id) -> Option<Seen> {
+            let mut seen = self.0.read(n)?;
+            seen.parent = Some(other());
+            Some(seen)
+        }
+        fn ask(&self, q: &Ask) -> Option<Answer> {
+            self.0.ask(q)
+        }
+        fn within_reach(&self, n: Id) -> Option<bool> {
+            self.0.within_reach(n)
+        }
+        fn plan_walk(&self, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+            replica::host::WalkPlan::Legs(Vec::new())
+        }
+        fn set_timer(&mut self, after: Micros, n: Name) -> Id {
+            self.0.set_timer(after, n)
+        }
+        fn clear_timer(&mut self, id: Id) {
+            self.0.clear_timer(id);
+        }
+        fn draw(&mut self) -> u64 {
+            self.0.draw()
+        }
+        fn control(&mut self, input: ControllerInput) {
+            self.0.control(input);
+        }
+        fn cross(&mut self, id: Id, speed: i64) {
+            self.0.cross(id, speed);
+        }
+        fn emit(&mut self, c: Vec<Change>, e: Option<Event>) -> Result<(), Refusal> {
+            self.0.emit(c, e)
+        }
+    }
+    let (mut h, mut r) = (
+        NoWay(host(Some(false))),
+        Runner::new(grab, node(), Limits::default()),
+    );
+    let end = r.wake(&mut h, Woke::Start);
+    assert!(
+        matches!(&end, Next::End(n) if n.as_str() == "out-of-reach"),
+        "no way, and out of reach"
+    );
+    assert!(!r.take_effect(), "nothing taken from afar");
 }
 
 #[test]
@@ -420,6 +532,7 @@ fn deferred_walk_keeps_its_deadline_and_reads_a_moved_target_again() {
             places: BTreeMap::from([(other(), mm(5, 0, 5))]),
             next: 0,
             reads: RefCell::default(),
+            reach: None,
         },
         ready: false,
         asked: RefCell::default(),
@@ -499,6 +612,7 @@ fn a_walk_the_planner_refuses_ends_the_form_with_the_planners_name() {
         places: BTreeMap::from([(other(), mm(5, 0, 5))]),
         next: 0,
         reads: RefCell::default(),
+        reach: None,
     });
     let mut runner = Runner::new(steps, node(), Limits::default());
     assert!(matches!(
