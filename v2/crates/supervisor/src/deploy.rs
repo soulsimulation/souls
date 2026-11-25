@@ -107,21 +107,25 @@ pub const ENTRIES_NEXT: &str = "entries.next";
 pub const ENTRIES_BEFORE: &str = "entries.before";
 
 /// Swaps `<state>/entries` for [`ENTRIES_NEXT`] (`forward`), the replaced ones kept as [`ENTRIES_BEFORE`], or back.
-/// Two renames in one folder; the world is restarted right after either, so it reads one whole set.
+/// Two renames in one folder; the world is restarted right after either, so it reads one whole set. When the second
+/// fails, the first is undone: the world is never left without `entries/`.
 pub fn swap_entries(state: &Path, forward: bool) -> std::io::Result<()> {
     let (live, next, before) = (
         state.join("entries"),
         state.join(ENTRIES_NEXT),
         state.join(ENTRIES_BEFORE),
     );
-    if forward {
+    // (where the live set goes, what comes in)
+    let (out, cur) = if forward {
         let _ = std::fs::remove_dir_all(&before);
-        std::fs::rename(&live, &before)?;
-        std::fs::rename(&next, &live)
+        (&before, &next)
     } else {
-        std::fs::rename(&live, &next)?;
-        std::fs::rename(&before, &live)
-    }
+        (&next, &before)
+    };
+    std::fs::rename(&live, out)?;
+    std::fs::rename(cur, &live).inspect_err(|_| {
+        let _ = std::fs::rename(out, &live);
+    })
 }
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -1223,6 +1227,10 @@ impl Deploy<'_> {
                 }
             };
         if let Err(why) = unit.restart() {
+            // Not restarted onto them: the world's own go back, as a deploy that never took them.
+            if swapped && swap_entries(&state, false).is_ok() {
+                note("entries: the world's own put back".into());
+            }
             return (Ended::NotDeployed { why }, tl, Some(r));
         }
         note("restarted: the canary watch begins".into());
@@ -1643,6 +1651,10 @@ mod tests {
             ("old".into(), "new".into())
         );
         assert!(!state.join(ENTRIES_BEFORE).exists());
+        // Nothing to swap in: the second rename fails, and the first is undone.
+        std::fs::remove_dir_all(state.join(ENTRIES_NEXT)).unwrap();
+        assert!(swap_entries(&state, true).is_err());
+        assert_eq!(read("entries"), "old", "never left without entries");
         let _ = std::fs::remove_dir_all(&state);
     }
 
