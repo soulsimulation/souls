@@ -171,7 +171,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { giveIntents } from '../give/give.mjs';
 import { KINDS as TOUCHES, activitiesIn, activityNamed } from '../together/together.mjs';
-import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -2130,6 +2130,10 @@ async function carry(req) {
   if (req.do === 'list') {
     return closing({ ok: true, crews: crews.map((c) => ({ ...c, with: (rows.get(c.id)?.members ?? []).map((m) => ({ name: nameIn(rows, m.body, mine), role: m.role.replace(/^[^:]*:/, ''), body: m.body })), started: Boolean(rows.get(c.id)?.started) })) }, null, { age });
   }
+  // A thing named by its name ("rack frame 1"), as look and find show it, is that thing's id.
+  const named = byName(req, rows);
+  if (named.code) return closing({ ok: false, code: named.code, detail: named.detail }, null, { age });
+  req = named;
   const kindOf = (id) => rows.get(id)?.entry ?? rows.get(id)?.kind;
   const at = placer(rows, (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
   // Where a crew's load is now: between its front and its back (it is carried at their middle), else where the copy
