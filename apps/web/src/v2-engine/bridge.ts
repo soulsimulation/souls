@@ -270,7 +270,10 @@ export class V2Bridge {
         // it from then on, so a body first seen standing is not held there until its next motion sample (#4217). Never
         // before the part that shows the move: a sit moves the record into the seat's slot without a motion sample, so
         // its `at` (its newest motion sample) is older than the move, and a sample there would be dropped (#4175).
-        if (n.parent && (!t.node || !samePlace(t.node, n))) { if (defer && t.node && (t.node.parent !== n.parent || t.node.slot !== n.slot)) moved.push(n); else this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos); }
+        // A walker's record moves too: it is where the part's last motion sample put it, so it lands after them. Before
+        // them it dropped the part's earlier samples, and at a walk's end (no `at`) it put the end of the walk at the
+        // part's start: a jog's burst of speed, then a step back.
+        if (n.parent && (!t.node || !samePlace(t.node, n))) { if (defer && t.node) moved.push(n); else this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos); }
         t.node = n; t.gone = null;
       }
       // A placed body with no motion yet stands where its record has it.
