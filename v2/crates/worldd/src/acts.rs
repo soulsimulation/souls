@@ -2669,7 +2669,9 @@ impl Acts {
                     Err(_) => false,
                 };
                 let permitted = bound
-                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                    && self
+                        .forms
+                        .may_or_linking(tree, &audiences, &|_| None, body, *node, &entry, form)
                         .is_ok();
                 if permitted
                     && let Err(e) = crate::needs::check(
@@ -2739,7 +2741,7 @@ impl Acts {
                     });
                     effects.extend(sets);
                 }
-                sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                forms.may_or_linking(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 // A slot of another thing is checked as `Forms::commit` checks it (E14): no body, nothing private
                 // to another, a slot its kind declares or a seat the world holds.
                 forms.other_slots(w, body, &entry, form, &all)?;

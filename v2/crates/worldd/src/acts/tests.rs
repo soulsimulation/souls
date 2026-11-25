@@ -130,7 +130,10 @@ fn a_bare_lie_in_a_bed_walks_to_it_by_its_own_form() {
             body: None,
             reflex: false,
         };
-        assert!(fixture_seat(&entry, "lie").is_some(), "{kind}: its lie's shape");
+        assert!(
+            fixture_seat(&entry, "lie").is_some(),
+            "{kind}: its lie's shape"
+        );
         assert!(
             acts.fixture_sit(&tree, &intent("eden:lie", BTreeMap::new())),
             "{kind}: a bare lie walks by its form"

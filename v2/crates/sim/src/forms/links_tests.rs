@@ -558,6 +558,28 @@ impl Bench {
     }
 }
 
+/// A swing's `get_off` asked before its seat is taken (on the way to it, or while sitting down) is the swinger-to-be's:
+/// who may lets the body whose own swing run links it through, so the swing is not left running while its get_off is
+/// refused `not-permitted` (Eden, 25 Nov). The get_off ends the swing and the body ends off it, unlinked.
+#[test]
+fn a_swings_get_off_before_its_seat_is_taken_ends_the_swing() {
+    let mut b = Bench::new();
+    b.entry = swing_entry();
+    b.sit_place();
+    assert!(matches!(b.commit("swing"), Ok(super::Asked::Started(_))));
+    b.tick();
+    assert_eq!(
+        b.links(id(100), USER).len(),
+        0,
+        "not linked before the sit's contact"
+    );
+    let off = b.commit("get_off");
+    assert!(matches!(off, Ok(super::Asked::Started(_))), "{off:?}");
+    assert_eq!(b.run(), "done", "got off");
+    assert_eq!(b.links(id(100), USER), vec![], "unlinked");
+    assert_eq!(b.forms.at(id(2)), None, "no swing left running");
+}
+
 /// E7 review: a seat taken and then only waited in (a swing) links its swinger at the seat's contact, not after the
 /// wait, since the posture outlives the run. So 10 s into a 30 s swing the swinger may `get_off`; and a Soul whose
 /// swing is left at 10 s stays linked, and may get off after.

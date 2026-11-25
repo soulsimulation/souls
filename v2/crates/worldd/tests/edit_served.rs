@@ -3125,8 +3125,14 @@ fn exercise_writes_each_of_its_three_moves_for_viewers() {
         .map(|m| m.0.rsplit(':').next().unwrap_or(""))
         .collect();
     assert_eq!(names, ["jumping_jacks", "push_ups", "sit_ups"], "{moves:?}");
-    assert!(moves.iter().all(|m| m.2 > m.1), "each planned past its start");
-    assert!(ended.is_some_and(|e| e >= moves[2].1), "the run ends after the last");
+    assert!(
+        moves.iter().all(|m| m.2 > m.1),
+        "each planned past its start"
+    );
+    assert!(
+        ended.is_some_and(|e| e >= moves[2].1),
+        "the run ends after the last"
+    );
 }
 
 /// One Soul's end of the world's socket (0.135 A2): its own connection, so two Souls' walks run at once and each
