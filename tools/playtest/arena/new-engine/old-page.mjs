@@ -33,7 +33,7 @@
 // (`pnpm build:viewer`, or --mars-web), caddy and what run.sh needs. Loopback only, fake minds, never a production world.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { isMain } from '../../../lib/is-main.mjs';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
@@ -53,15 +53,32 @@ export function frontDoor(front, { base, launcher, directory, origin, web, slugs
     .replaceAll('https://soul.game', base).replaceAll('localhost:@@PRODUCTION_PORT@@', `127.0.0.1:${launcher}`)
     .replaceAll('localhost:7310', directory).replaceAll('localhost:7320', origin).replaceAll('localhost:7330', origin)
     .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls-routes/slugs', slugs)
+    // the pairing card (/pair) and its script files: this checkout's built old page, as soul.game serves its release's
+    .replaceAll('/srv/sim-worlds/production/apps/web/dist', join(REPO_ROOT, 'apps/web/dist'))
     .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', join(REPO_ROOT, 'tools/world-launcher/deploy/caddy'));
 }
 
-/** run.sh's routes file with `slug` routed like its own world (`dev`): the same gateway, stream and history. */
+/** run.sh's routes file with `slug` routed to its own world (`dev`)'s gateway, its stream and history under the slug's
+ *  own name (`/s/w/<slug>/…`, served by `streamLinks`), as soul.game names a world's stream: the page takes the world's
+ *  name from its stream path (owner-mailbox.ts `v2WorldName`), and asks the directory for that world's pairing requests
+ *  and Souls under it, the name an agent pairs with (the bootstrap's `world`, the routes key). `dev` stays routed. */
 export function withRoute(routes, slug, from = 'dev') {
   const dev = routes.worlds?.[from];
   if (!dev) throw new Error(`the routes file has no ${from}`);
-  return { ...routes, worlds: { ...routes.worlds, [slug]: { ...dev, canonical: false } } };
+  const own = (p) => (typeof p === 'string' ? p.replace(`/s/w/${from}/`, `/s/w/${slug}/`) : p);
+  return { ...routes, worlds: { ...routes.worlds, [slug]: { ...dev, stream: own(dev.stream), ...(dev.history ? { history: own(dev.history) } : {}), canonical: false } } };
 }
+
+/** The origin's files for `slug`'s stream and history: run.sh's links for `dev` (`public/w/dev/{views,history}`), again
+ *  under the slug's name. */
+export function streamLinks(worldDir, slug) {
+  const at = join(worldDir, 'public/w', slug);
+  mkdirSync(at, { recursive: true });
+  for (const f of ['views', 'history']) if (!existsSync(join(at, f))) symlinkSync(join(worldDir, 'world', f), join(at, f));
+}
+
+/** The name a template gives its world ("Eden 2026"), which the launcher shows; else its file's name. */
+export const displayName = (template) => { try { const n = JSON.parse(readFileSync(template, 'utf8')).name; return typeof n === 'string' && n.trim() ? n.trim().slice(0, 40) : templateName(template); } catch { return templateName(template); } };
 
 /** The template's name as the launcher knows it (`worlds/templates/<name>.json`). */
 export const templateName = (template) => basename(template).replace(/\.json$/, '');
@@ -98,14 +115,14 @@ export function releaseBin() {
 /** With history on, run.sh's world keeps its records in a folder store and reads its one creator from the directory's
  *  record there (worldd `serve.rs` `creator`), which nothing in a local run writes: every creator edit would be refused
  *  `edit.not-the-creator`. So the world is registered there (`register-world`, as an imported world is on soul.game)
- *  under run.sh's name for it, its creator the one it was seeded with (Ada), and this waits until worldd has read it
+ *  under `name` (run.sh's `dev`, or the old page's slug, with its `label`), its creator the one it was seeded with (Ada), and this waits until worldd has read it
  *  (it reads the record again every 30 s). */
-export async function registerCreator(world, { waitMs = 60_000 } = {}) {
+export async function registerCreator(world, { name = WORLD, label = null, waitMs = 60_000 } = {}) {
   const seeded = JSON.parse(readFileSync(join(world.dir, 'world/world.json'), 'utf8'));
   if (!seeded.name || !seeded.creator) throw new Error('the seeded world names no instance or creator');
   const register = join(v2Bin(), 'register-world');
   if (!existsSync(register)) throw new Error(`no ${register} (cargo build -p directoryd --bin register-world)`);
-  execFileSync(register, [WORLD, '--instance', seeded.name, '--creator', seeded.creator], {
+  execFileSync(register, [name, '--instance', seeded.name, '--creator', seeded.creator, ...(label ? ['--label', label] : [])], {
     env: { ...process.env, DIRECTORYD_WORLD_STORE: join(world.dir, 'store') }, stdio: ['ignore', 'ignore', 'pipe'] });
   // worldd says `creator: <hex>:<n>` (the directory's form of the seeded `<hex>-<n>`) when it has read it
   const said = `creator: ${seeded.creator.replace(/-(\d+)$/, ':$1')}`, log = join(world.dir, 'logs/worldd.log');
@@ -130,6 +147,9 @@ export function genesisFor({ template, add = [], dir }) {
   const templatesDir = join(dir, 'templates');
   mkdirSync(templatesDir, { recursive: true });
   writeFileSync(join(templatesDir, `${name}.json`), JSON.stringify(g));
+  // the templates' default pictures (the home page's cards), as the launcher finds them beside the committed templates
+  const thumbs = join(REPO_ROOT, 'worlds/templates/thumbs');
+  if (existsSync(thumbs) && !existsSync(join(templatesDir, 'thumbs'))) symlinkSync(thumbs, join(templatesDir, 'thumbs'));
   return { template: join(templatesDir, `${name}.json`), name, templatesDir };
 }
 
@@ -191,19 +211,26 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   let creating = null;
   const stop = async () => { for (const p of procs.reverse()) kill(p); creating?.close(); if (world) await stopWorld(world); };
   try {
-    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history, env: { V2_BIN: releaseBin() } });
+    // the front door's port first: the directory's pairing link (`<public url>/pair?code=…`, what an agent prints) is
+    // the front door's, as on soul.game, where this page and its sign-in are, not run.sh's own page
+    const port = await freePorts(), launcher = port + 1, frontPort = port;
+    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history, port: await freePorts(port + 4),
+      env: { V2_BIN: releaseBin(), V2_PUBLIC_URL: `http://127.0.0.1:${frontPort}` } });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
-    if (history) await registerCreator(world);
-    const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;
+    // --create's directory row is run.sh's own world's; the old page's is its slug's, once the launcher has made it (below)
+    if (history && create) await registerCreator(world);
     const binding = join(dir, 'binding.json');
     if (create) return await withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPort, binding, front, procs, stop, setMade: (m) => { creating = m; }, log });
     procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
       '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: world.directory } }));   // MS: My Souls reads a moved world's Souls there
     const made = await fetch(`http://127.0.0.1:${launcher}/__sim/worlds`, { method: 'POST', headers: { authorization: 'Bearer dev:Ada', 'content-type': 'application/json' },
-      body: JSON.stringify({ name: genesis.name, template: genesis.name }) }).then((r) => r.json());
+      body: JSON.stringify({ name: displayName(genesis.template), template: genesis.name }) }).then((r) => r.json());
     if (!made?.slug) throw new Error(`the launcher made no world from ${genesis.name}: ${JSON.stringify(made).slice(0, 300)}`);
     const slug = made.slug;
     log(`old page's shell: /w/${slug}/`);
+    // the world under its slug's own name end to end: the directory's row (its creator, its label), the stream's path
+    if (history) await registerCreator(world, { name: slug, label: displayName(genesis.template) });
+    streamLinks(world.dir, slug);
 
     const routesFile = join(world.dir, 'routes.json');
     const routes = withRoute(JSON.parse(readFileSync(routesFile, 'utf8')), slug);

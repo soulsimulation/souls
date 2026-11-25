@@ -63,6 +63,13 @@ export function placeShots({ dir, log = () => {} }) {
         return s && t && SHA.test(s.sha ?? '') && s.target === targetKey(t) ? { ref, status: 'ready', thumb: `/v1/world/context/shot/${s.sha}.webp` } : { ref, status: 'unavailable', draw: 'page' };
       });
     },
+    /** The home page's card picture for a world with neither its owner's nor its template's (launcher thumbView): its
+     *  fullest kept place picture (the most bytes: the most to see), as the shot route serves it, else null. */
+    cover(slug) {
+      let best = null;
+      for (const s of Object.values(index(slug) ?? {})) if (SHA.test(s?.sha ?? '') && (!best || (s.bytes ?? 0) > (best.bytes ?? 0)) && existsSync(join(dir, slug, `${s.sha}.webp`))) best = s;
+      return best ? `/v1/world/context/shot/${best.sha}.webp` : null;
+    },
     /** True when `rest` is the shot route (answered: the file, 304 or 404). */
     serve(req, res, slug, rest) {
       const m = SHOT.exec(rest);

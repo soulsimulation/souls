@@ -239,6 +239,11 @@
           "need": "state",
           "field": "posture",
           "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
         }
       ],
       "steps": [
@@ -744,6 +749,11 @@
           "need": "state",
           "field": "posture",
           "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
         }
       ],
       "steps": [
@@ -780,6 +790,11 @@
           "need": "state",
           "field": "posture",
           "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
         }
       ],
       "steps": [
@@ -798,12 +813,65 @@
           "need": "state",
           "field": "posture",
           "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
         }
       ],
       "steps": [
         {
           "step": "move",
           "move": "sit_ups"
+        }
+      ],
+      "effects": []
+    },
+    "exercise": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "each": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jumping_jacks",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "push_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
+        },
+        {
+          "step": "move",
+          "move": "sit_ups",
+          "for_s": {
+            "arg": "each",
+            "default": 10
+          }
         }
       ],
       "effects": []
@@ -864,7 +932,8 @@
     }
   },
   "text": {
-    "card": "A body on its own: gestures, postures, going to things, carrying, pushing."
+    "card": "A body on its own: gestures, postures, going to things, carrying, pushing.",
+    "put_down_first": "Put down what you hold first (set-down <its id> here), then send it again: a dance or a workout takes both hands."
   },
   "card": {
     "text": "card"

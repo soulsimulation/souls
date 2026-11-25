@@ -45,6 +45,34 @@ export function coursePlaces(courseAt: CourseAt, nodes: Iterable<{ id: string; c
   return out;
 }
 
+/** First-day round 4: how far ahead `courseLeaves` looks for a still thing to move on, world µs. */
+export const LEAVES_LOOK_US = 10 * 60_000_000;
+
+/** First-day round 4: when each node on a course that stands still at world time `at` µs moves on again (world µs, to a
+ *  tenth of a second): a balloon waiting at its stop with a rider aboard takes off then. Left out when it is moving at
+ *  `at`, does not move within `look`, or its course is refused. The page says "Aboard — takes off in N s" from it. */
+export function courseLeaves(courseAt: CourseAt, nodes: Iterable<{ id: string; course?: Uint8Array }>, at: number,
+  look = LEAVES_LOOK_US, step = 1_000_000): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!Number.isFinite(at)) return out;
+  for (const n of nodes) {
+    if (!n.course) continue;
+    const course = n.course;
+    const still = (t: number) => { const v = courseAt(course, BigInt(Math.floor(t))); return Number(v[3]) === 0 && Number(v[4]) === 0 && Number(v[5]) === 0; };
+    try {
+      if (!still(at)) continue;
+      for (let t = at + step; t <= at + look; t += step) {
+        if (still(t)) continue;
+        let lo = t - step, hi = t;
+        while (hi - lo > 100_000) { const mid = Math.floor((lo + hi) / 2); if (still(mid)) lo = mid; else hi = mid; }
+        out[n.id] = hi;
+        break;
+      }
+    } catch { /* a course the replica refuses is not moved */ }
+  }
+  return out;
+}
+
 /** Adds `more` places to `held` (each node's in time order, a later one replacing an earlier one at the same time) and
  *  drops those before `cut` µs, keeping the last before it so a time just after `cut` still has a place. */
 export function keepPlaces(held: Map<string, number[]>, more: CoursePlaces | undefined, cut = -Infinity): void {

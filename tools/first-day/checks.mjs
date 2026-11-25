@@ -24,7 +24,13 @@ export function checkStep(step, { before, after, trail = [], soul, consoleErrors
   add('soul-visible', !!a?.p, a?.p ? `at ${a.p.map((v) => v.toFixed(1)).join(', ')}` : 'my Soul is not in the page\'s picture', 'blocker');
   add('soul-named', !!a?.name, a?.name ? `named ${a.name}` : 'no name', 'major');
   for (const c of step.checks ?? []) {
-    if (c === 'moved') { const d = dist2(b?.p, a?.p); add('moved', d != null && d > 1.5, d == null ? 'no position' : `moved ${d.toFixed(1)} m`); }
+    if (c === 'moved') {
+      // the farthest it got from where it started, up and down too: a Soul that goes upstairs, or around a building and
+      // back, moved even when it ends above or at its starting spot
+      const ds = [a, ...trail.map((t) => mine(t, soul))].filter((s) => s?.p && b?.p).map((s) => Math.hypot(s.p[0] - b.p[0], s.p[1] - b.p[1], s.p[2] - b.p[2]));
+      const d = ds.length ? Math.max(...ds) : null;
+      add('moved', d != null && d > 1.5, d == null ? 'no position' : `got ${d.toFixed(1)} m from where it started`);
+    }
     if (c === 'far') { const d = dist2(b?.p, a?.p); add('far', d != null && d > 25, d == null ? 'no position' : `${d.toFixed(1)} m from the start`); }
     if (c === 'near' && step.near) { const d = a?.p ? Math.hypot(a.p[0] - step.near[0], a.p[2] - step.near[1]) : null; add('near-target', d != null && d < 8, d == null ? 'no position' : `${d.toFixed(1)} m from it`); }
     if (c === 'seated') { const any = [a, ...trail.map((t) => mine(t, soul))].some((s) => s?.doing === 'seated' || s?.seatHeight != null); add('seated', any, `doing ${a?.doing ?? '?'}, seat ${a?.seatHeight ?? 'none'}`); }

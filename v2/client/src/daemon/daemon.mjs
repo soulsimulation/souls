@@ -150,8 +150,9 @@ import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
-import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
+import { BATCH_MOST, BATCH_READS, catalog, context, metresFrom, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
+import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
@@ -926,6 +927,19 @@ async function closing(out, f, { now = false, age = null } = {}) {
   return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...age, changed: changedBlock(changes) };
 }
 
+/** Whether this Soul's body is in a thing whose slots admit bodies (a seat, a bed, a balloon's basket), as the copy has it. */
+function inBodySlot(rows) {
+  const body = [...rows.values()].find((x) => x.soul === ME), on = body?.parent ? rows.get(body.parent) : null;
+  return Object.values(heldKinds()[on?.entry ?? on?.kind]?.slots ?? {}).some((x) => x?.admits === 'body');
+}
+
+/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind; `{}` for none. */
+function holdingOf(rows) {
+  const body = [...rows.values()].find((r) => r.soul === ME)?.id;
+  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => ({ id: r.id, name: r.name, kind: r.kind })) : [];
+  return held.length ? { holding: held } : {};
+}
+
 /** The copy brought current unless `now`, and its age fields (R10). */
 async function ageAfter({ now = false } = {}) {
   // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
@@ -1575,7 +1589,7 @@ async function answer(req, conn = null) {
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
       const heard = named(rows, heardSince.splice(0));
-      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const b = { ...brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) }), ...holdingOf(rows) };
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -1586,7 +1600,9 @@ async function answer(req, conn = null) {
       const deadline = performance.now() + REFRESH_WITHIN, age = await ageAfter();
       const hydrated = age.stale ? { ok: true } : await publicNames.hydrate(ws, deadline);
       if (!hydrated.ok) { age.stale = true; age.gap = { ms: 0, why: hydrated.reason }; }
-      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }), { age });
+      // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
+      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
+        metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
@@ -1634,9 +1650,15 @@ async function answer(req, conn = null) {
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = heldState(heldKinds()).nodes;
-        const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
-        return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
+        const nodes = heldState(heldKinds()).nodes, rows = rowsOf(copy);
+        // First-day round 4: in a thing that admits bodies (a seat, a bed, a balloon's basket) the body is seated, as
+        // the copy shows it, whatever its own last move was (a ride's form seats it with no move of its own).
+        const seated = inBodySlot(rows) || (state.seated ?? null);
+        let v = moveVerdict(wire.move_check, intent, { nodes, seated });
+        // Aboard a thing on a course that is away from its stop, a rise is refused until it is back: say when.
+        const aboard = aboardOf({ rows, me: ME, courseAt: wire.courseAt, now: worldNowOrReal() });
+        if (aboard && moveForm(intent?.verb) === 'rise' && !aboard.atStop) v = { verdict: 'no', reason: 'boarding-frame-away' };
+        return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)), ...(aboard && v.verdict !== 'yes' ? { aboard: aboardWords(aboard, { refused: true }) } : {}) }, null, { age });
       }
       const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
       const age = await ageAfter();
@@ -1947,7 +1969,21 @@ async function answer(req, conn = null) {
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
-      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
+      // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
+      const refused = r.answers.at(-1)?.answer === 'refused';
+      return closing(got, done || refused ? (rows) => {
+        const h = done ? heldBy(rows, ME, r) : null, hand = done ? holdingOf(rows) : {};
+        // First-day round 4: aboard a thing on a course (a balloon), the answer says when it takes off (on boarding) or
+        // when this Soul can get off (on a refusal), worked out from the copy (`check/aboard.mjs`).
+        const on = aboardOf({ rows, me: ME, courseAt: wire.courseAt, now: worldNowOrReal() }), aboard = aboardWords(on, { refused });
+        // A dance or a workout with something in hand is refused `hand_not_empty`: name it and how to put it down.
+        const held = refused && r.answers.at(-1)?.reason === 'hand_not_empty' ? holdingOf(rows).holding?.[0] : null;
+        const why = aboard ?? (held ? `holding ${held.name} (${held.id}): put it down first (set-down ${held.id} here), then send it again` : null);
+        // Holding something, another offer of the body (a wave) is no answer; away from its stop, nor is a rise: the
+        // `why` is what to do next.
+        const more = { ...(h ? { held: h } : {}), ...(aboard && done ? { aboard } : {}), ...(why && refused ? { why } : {}), ...(held || (refused && on && !on.atStop) ? { try: undefined } : {}) };
+        return { ...(Object.keys(more).length ? { receipt: { ...got.receipt, ...more } } : {}), ...hand };
+      } : null, { now: !done });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.
@@ -1974,6 +2010,16 @@ function suggestionFor(r) {
   if (!ID.test(target)) return null;
   const t = thingOf(target);
   if (!t.ok) return null;
+  // A form that needs the thing in hand (a book's `read`): pick it up first (the body walks to it), then send it again.
+  const verb = String(r.verbs[0] ?? '').replace(/^.*:/, ''), again = verb === 'walk' ? target : `${verb}:${target}`;
+  if (r.answers.at(-1)?.reason === 'not_held') return { act: `pick_up ${target}`, name: 'pick_up', checked: 'unknown', then: again };
+  // first-day E5: seated, lying or aboard (the body is in a thing that admits bodies), a walk or a form elsewhere is
+  // refused `resource-held` naming its target: stand up first, then send it again.
+  if (r.answers.at(-1)?.reason === 'resource-held') {
+    const rows = rowsOf(copy), body = [...rows.values()].find((x) => x.soul === ME), on = body?.parent ? rows.get(body.parent) : null;
+    const slots = on && on.id !== target ? Object.values(heldKinds()[on.entry ?? on.kind]?.slots ?? {}) : [];
+    if (slots.some((x) => x?.admits === 'body')) return { act: `${NS}:rise`, name: 'rise', checked: 'unknown', then: again, why: `${body.name} is in ${on.name}` };
+  }
   const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
   const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
   const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));

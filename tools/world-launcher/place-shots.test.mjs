@@ -37,3 +37,14 @@ test('a moved world\'s kept Explore picture is served small and immutable; a pla
     assert.equal((await fetch(`${base}/v1/world/context/shot/x/index.json`)).status, 418, 'only a hash-named picture is the route');
   } finally { server.close(); }
 });
+
+test('a world with no picture of its own shows its fullest kept place picture on the home page', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'place-shots-')), small = 'a'.repeat(64), big = 'b'.repeat(64);
+  mkdirSync(join(dir, 'eden'));
+  for (const [sha, n] of [[small, 10], [big, 20]]) writeFileSync(join(dir, 'eden', `${sha}.webp`), Buffer.alloc(n));
+  writeFileSync(join(dir, 'eden', 'index.json'), JSON.stringify({ schema: 'place-shots/1', shots: {
+    a: { target: 't', sha: small, bytes: 10 }, b: { target: 't', sha: big, bytes: 20 }, gone: { target: 't', sha: 'c'.repeat(64), bytes: 99 } } }));
+  const shots = placeShots({ dir });
+  assert.equal(shots.cover('eden'), `/v1/world/context/shot/${big}.webp`, 'the most bytes, among files that exist');
+  assert.equal(shots.cover('other'), null, 'none kept: no picture');
+});

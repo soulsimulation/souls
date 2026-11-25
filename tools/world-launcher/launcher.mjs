@@ -45,7 +45,7 @@
 //                                POST /__sim/worlds 503 site.creation-paused, with Retry-After; healthz `site` shows both
 //   POST /__sim/op/set-read-workers operator only: {slug, readWorkers: 0-4|null} → Stage B read workers from its next boot
 //                                (0 = off; null = the launcher's default: 1 with SIM_READ_WORKER=1, else off)
-//                                at its URL (listing.mjs; bench worlds and "… (scratch)" names are unlisted by default)
+//                                at its URL (listing.mjs; bench worlds, dev and test addresses and "… (scratch)" names are unlisted by default)
 //   POST /__sim/op/archive-world operator only: {slug, reason?} → stop it, move <data>/worlds/<slug> to <data>/archive/<id>/world,
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
@@ -311,7 +311,9 @@ export async function openLauncher(cfg = {}) {
   // default <data>/worlds/assets/moderation-site.jsonl (each world's DATA_DIR/../assets), unless the environment names it.
   const vetoed = adminVetoes({ ttlMs: cfg.moderationVetoTtlMs, siteLog: cfg.moderationSiteLog ?? (process.env.SIM_MODERATION_SITE_LOG || process.env.ASSET_DIR ? defaultSiteLog() : join(dataDir, 'worlds', 'assets', 'moderation-site.jsonl')) });
   const worldModeration = (w) => (w ? { file: join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf(w) } : null);
-  const thumbView = (w) => thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) });
+  // a world with neither picture shows its fullest kept Explore place picture (a moved world's, place-shots.mjs), never grey
+  const thumbView = (w) => { const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) }), c = t.thumbnail || !moved(w) ? null : shots.cover(w.slug);
+    return c ? { thumbnail: `${wp(w.slug)}${c}`, thumbnailSource: 'place' } : t; };
   const marsWebDir = cfg.marsWebDir ?? (existsSync(join(root, '.lane/mars-web')) ? join(root, '.lane/mars-web') : undefined);
   const log = cfg.log ?? ((s) => console.log(`[launcher] ${s}`));
   const flood = process.env.SIM_FLOOD === '0' ? () => null : launcherFlood({ log, limits: cfg.floodLimits });   // P2 coarse ceiling, see flood.mjs
@@ -770,7 +772,7 @@ export async function openLauncher(cfg = {}) {
     const row = directory.rows.get(slug), made = Number(row?.made);
     return { slug, worldId: routeOnlyId(slug), routeOnly: true, name: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : slug,
       template: typeof row?.template === 'string' ? row.template : null, createdAt: Number.isFinite(made) && made > 0 ? (made < 1e12 ? made * 1000 : made) : 0,
-      unlisted: row?.unlisted === true, god: typeof row?.creator === 'string' };
+      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
   }
   const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
   /** Whether a world is served without an old process: a world with no old twin, or (D2b, 0.134) a moved world, one its
@@ -779,7 +781,7 @@ export async function openLauncher(cfg = {}) {
    *  world's own defs since #4588), so nothing of it waits for, or wakes, an old process (cutover.mjs handle `cold`). */
   const oldCold = (w) => !!w && (!!w.routeOnly || moved(w));
   /** A world with no old twin as the world list shows it (the fields `describe` gives an old world's row). */
-  const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: w.unlisted, key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
+  const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
     basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
     templateName: templateList({ all: true }).find((x) => x.id === w.template)?.name ?? w.template, createdAt: w.createdAt, owner: null, god: w.god,
     entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
@@ -814,7 +816,7 @@ export async function openLauncher(cfg = {}) {
     const base = `${publicOrigin}${wp(w.slug)}`;
     const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), movedConfig(w)));
     const head = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new' };
-    res.writeHead(200, w.routeOnly ? { ...head, ...(w.unlisted ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
+    res.writeHead(200, w.routeOnly ? { ...head, ...(isUnlisted(w) ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
     return true;
   }
   /** 24 Nov: the page's polled old reads of a moved world whose old process sleeps (oldCold), in the shapes the old

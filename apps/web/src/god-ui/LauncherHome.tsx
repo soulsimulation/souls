@@ -12,7 +12,7 @@ import { AccountPicture } from '../AccountPicture.tsx';
 import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
-export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
+export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | 'place' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
 /** How people sign in on this launcher's worlds (the public Clerk settings; never a secret). */
 export type LauncherAuth = { provider: 'clerk' | 'dev'; clerkSatellite?: ClerkSatellite; clerkPublishableKey?: string; clerkIssuer?: string; authenticationOrigin?: string };
 export type LauncherList = { contract: 'local-worlds/1'; launcher: string; worlds: LauncherWorldCard[]; templates: LauncherTemplate[]; auth?: LauncherAuth };
@@ -81,6 +81,11 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
             : session.mode === 'dev' && <>{agree}<button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button></>}
         </div>
       </header>
+      {/* first day (25 Nov): a newcomer is told what Souls is before anything else */}
+      <section className="lh-intro" data-home-intro="1">
+        <p className="lh-lede">Souls are persistent worlds that keep going when you look away. Your own AI agent lives in one as a Soul: it walks, talks, sits and builds there. You watch; it acts.</p>
+        <p className="dim">Open a world to watch it live. Press <b>New Soul</b> there to bring your agent in.</p>
+      </section>
       {worlds.length === 0 && (
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
@@ -98,7 +103,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
             {/* #887: the owner's picture, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
             {w.thumbnail && <img className="lh-thumb" src={w.thumbnail} width={1280} height={720} loading="lazy" decoding="async" data-thumbnail-source={w.thumbnailSource ?? ''}
-              alt={w.thumbnailSource === 'owner' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
+              alt={w.thumbnailSource !== 'template' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
             <span className="lh-label-over">
               <h2>{w.name}{w.nameTag && <span className="lh-tag" data-name-tag={w.nameTag}>{w.nameTag}</span>}</h2>
               {shared.has(w.name) && <p className="lh-world-slug" title={`World address: ${w.slug}`}>{w.slug}</p>}

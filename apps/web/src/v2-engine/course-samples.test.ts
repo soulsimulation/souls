@@ -1,7 +1,16 @@
 // K4 (0.135): the places a worker posts for a node on a course, and the page's reading of them (course-samples.ts).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COURSE_MAX_PLACES, coursePlaces, keepPlaces, placeAt, type CourseAt } from './course-samples.ts';
+import { COURSE_MAX_PLACES, courseLeaves, coursePlaces, keepPlaces, placeAt, type CourseAt } from './course-samples.ts';
+
+test('first day, round 4: a still thing on a course says when it moves on (a balloon at its stop takes off); a moving one says nothing', () => {
+  // at its stop for the first 60 s of each 180 s lap, then away
+  const lap: CourseAt = (_f, t) => (Number(t) % 180_000_000 < 60_000_000 ? [0n, 0n, 0n, 0n, 0n, 0n] : [0n, 1n, 0n, 0n, 3_000_000n, 0n]);
+  const nodes = [{ id: 'balloon', course: new Uint8Array([1]) }, { id: 'bench' }];
+  assert.deepEqual(courseLeaves(lap, nodes, 18_000_000), { balloon: 60_000_000 });
+  assert.deepEqual(courseLeaves(lap, nodes, 100_000_000), {});
+  assert.deepEqual(courseLeaves(() => { throw new Error('course-bad'); }, nodes, 0), {});
+});
 
 const up: CourseAt = (_f, t) => [0n, t / 1000n, 0n, 0n, 0n, 0n];   // rises 1 µm each ms of world time
 

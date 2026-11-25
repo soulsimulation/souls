@@ -63,6 +63,11 @@ test('step checks read movement, nearness, posture, speech and banners from the 
   assert.equal(c['no-bad-banner'].ok, false);
   const still = Object.fromEntries(checkStep({ checks: ['moved', 'seated'] }, { before: soulAt([0, 0, 0]), after: soulAt([0.5, 0, 0]), soul: { id: 's_1' } }).map((x) => [x.check, x]));
   assert.equal(still.moved.ok, false); assert.equal(still.seated.ok, false);
+  // upstairs to the same spot on the floor above, or around and back, is a move
+  const up = Object.fromEntries(checkStep({ checks: ['moved'] }, { before: soulAt([0, 0, 0]), after: soulAt([0, 4, 0]), soul: { id: 's_1' } }).map((x) => [x.check, x]));
+  assert.equal(up.moved.ok, true);
+  const back = Object.fromEntries(checkStep({ checks: ['moved'] }, { before: soulAt([0, 0, 0]), after: soulAt([0, 0, 0]), trail: [soulAt([6, 0, 0])], soul: { id: 's_1' } }).map((x) => [x.check, x]));
+  assert.equal(back.moved.ok, true);
 });
 
 test('arrival needs the Soul in the world, named, in the navbar, the camera on it and its card connected', () => {

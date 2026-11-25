@@ -1,26 +1,35 @@
-//! Steering a rowing punt (#3603): today's `carrier_steer` (`mars/viewer/engine/vehicles/carrier.ts`) as two engine
-//! verbs ([`crate::engine`]) on the punt, from a rider seated in it. No code here names a kind: a thing on a course
-//! ([`replica::schedule::F_COURSE`]) is steered.
+//! Steering a rowing punt (#3603), or anything else on a course a rider is seated in (a balloon): today's
+//! `carrier_steer` (`mars/viewer/engine/vehicles/carrier.ts`) as engine verbs ([`crate::engine`]) on the thing, from a
+//! rider seated in it. No code here names a kind: a thing on a course ([`replica::schedule::F_COURSE`]) is steered.
 //!
-//! - **`carrier:steer`**, parameter 1 a point `[x, z]` (or `[x, y, z]`) µm in the punt's parent's frame: one straight
-//!   leg from where the punt is now, over water deep enough to float it, ending 3 m short of the first shore on the
-//!   way (`sim::courses::punts::reach`), rowed at 0.6 m/s.
-//! - **`carrier:land`**: back along its wake to where it left its own loop, round the rest of that lap, to its home.
-//!   A punt lets riders off only at its own bank: a land with a point (parameter 1, as a steer's) more than 6 m from
-//!   its home is refused `no-landing-spot`, as today's is.
-//! - **`carrier:stop`**: holds the punt where it is, refused `not-aloft` while it still stands at its own loop's
-//!   boarding stop.
-//! - **A hold runs out.** A steered punt standing where a steer or a stop left it, away from its home, rows back to it
-//!   by itself after 120 s with no new steer, as today's does ([`settle`]), so a rider is never left on the water.
-//! - **Written once.** Each is one entry on the punt: its course set to the new one, run once
+//! - **Always home.** Every course an ask writes ends at the thing's home, its own loop's first station, where riders
+//!   get off, and is flown at its own pace when that is faster than rowing (a balloon's 3 m/s; a punt rows at 0.6
+//!   m/s). Its holds are in the course, so the formula alone brings it home: a hold runs out with no tick, a sleeping
+//!   world or a restart, and a rider refused on the way is told when it is back there (`sim::slots`).
+//! - **`carrier:steer`**, parameter 1 a point `[x, z]` (or `[x, y, z]`) µm in the thing's parent's frame: one straight
+//!   leg from where it is now, over water deep enough to float it, ending 3 m short of the first shore on the way
+//!   (`sim::courses::punts::reach`); it holds there [`HOLD`] (today's 120 s), then goes back along its wake and round
+//!   the rest of the lap it left, to its home.
+//! - **`carrier:stop`**: holds it where it is for [`HOLD`], then on home as the course it was on goes (back along its
+//!   wake and round the rest of its lap when that one did not end at home). Refused `not-aloft` while it still stands
+//!   at its own loop's boarding stop.
+//! - **`carrier:land`**: on home at once, as the course it is on goes, its hold skipped; a second land never makes the
+//!   way longer. A thing still on its own course is already on its way to its stop and is refused `on-its-course`,
+//!   saying when it is back there (first-day round 3: a land mid-flight once sent a balloon round its whole ring at
+//!   rowing pace, its rider held aboard nearly half an hour with no word of when). A punt lets riders off only at its
+//!   own bank: a land with a point (parameter 1, as a steer's) more than 6 m from its home is refused
+//!   `no-landing-spot`, as today's is.
+//! - **Written once.** Each is one entry on the thing: its course set to the new one, run once
 //!   ([`replica::schedule::course::Shape::Once`]) from now, and its steer ([`replica::schedule::F_STEER`]: who steers,
 //!   the loop it left and when, the wake). A replay or a restart reads the same course; [`restore`] hands each course
-//!   to the slots again. The punt's riders are carried because their frame is its slot; nothing is written per tick.
+//!   to the slots again. Its riders are carried because their frame is its slot; nothing is written per tick.
 //! - **Refusals** keep today's names: `not-aboard` (the body is not seated in it), `steered` (another rider still
 //!   aboard steers it), `out-of-bounds` (more than 1200 m from its home), `no-water-route` (no open water that way),
-//!   `no-landing-spot`, `not-aloft`, and `steer-needs-a-point` for a steer with no point. Nothing moves on a refusal.
-//! - **Home again.** A steered punt standing at its home with nobody aboard takes up its own loop again from that
-//!   moment ([`settle`]), its boarding stop first: an entry of the world's.
+//!   `no-landing-spot`, `not-aloft`, `on-its-course`, and `steer-needs-a-point` for a steer with no point. Nothing
+//!   moves on a refusal.
+//! - **Home again.** A steered thing standing at its home with nobody aboard takes up its own loop again from that
+//!   moment ([`settle`]), its boarding stop first: an entry of the world's. A course logged before holds were written
+//!   into it (standing away from home for good) is still sent home after [`HOLD`] by [`settle`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -174,17 +183,12 @@ pub fn act(
     }
     let placed = node.place().map_or(Vec3::ZERO, |p| p.position);
     let (here, _) = place_at(fields, placed, now);
-    let steered = steering.is_some();
-    let mut s = steering.unwrap_or(Steer {
-        by: body,
-        own: course.clone(),
-        left: now,
-        wake: Vec::new(),
-    });
-    s.by = body;
-    let home = s.home();
+    let home = steering.as_ref().map_or_else(
+        || course.stations.first().map_or(Vec3::ZERO, |s| s.at),
+        Steer::home,
+    );
     let far = |d: i64| i128::from(d) * i128::from(d);
-    let next = match ask {
+    let reached = match ask {
         Ask::Steer => {
             let to = point(params)?;
             if far(to[0] - home.x) + far(to[1] - home.z) > far(STEER_RANGE) {
@@ -210,9 +214,7 @@ pub fn act(
             };
             let ground = node.parent().ok_or_else(no_route)?;
             let (waters, terrain) = punts::waters_of(live, ground).map_err(|_| no_route())?;
-            let at = punts::reach(&waters, terrain.as_ref(), here, to).ok_or_else(no_route)?;
-            s.wake.push(here);
-            punts::once(here, &[at], now)?
+            Some(punts::reach(&waters, terrain.as_ref(), here, to).ok_or_else(no_route)?)
         }
         Ask::Land => {
             if params.contains_key(&1) {
@@ -227,23 +229,11 @@ pub fn act(
                     ));
                 }
             }
-            punts::once(here, &punts::back(&s), now)?
+            None
         }
-        Ask::Stop => {
-            let boarding = !steered
-                && course
-                    .load()
-                    .is_ok_and(|t| matches!(t.stopped(now), Ok(Some(st)) if st.station == 0));
-            if boarding {
-                return Err(refusal(
-                    "not-aloft",
-                    format!("{} has not left yet", show(punt)),
-                ));
-            }
-            s.wake.push(here);
-            punts::once(here, &[], now)?
-        }
+        Ask::Stop => None,
     };
+    let (next, s) = plan(ask, punt, &course, steering, body, here, reached, now)?;
     let e = entry(
         live,
         punt,
@@ -257,6 +247,97 @@ pub fn act(
     )?;
     slots.moving(punt, &next, home)?;
     Ok(e)
+}
+
+/// What `body`'s `ask` of `punt` at `now` makes its course, from `course` (the one it is on), `steering` (its steer,
+/// when it is steered), `here` (where it is) and, for a steer, `reached` (where the leg ends): the new course and the
+/// steer it is written with.
+#[allow(clippy::too_many_arguments)]
+pub fn plan(
+    ask: Ask,
+    punt: Id,
+    course: &Course,
+    steering: Option<Steer>,
+    body: Id,
+    here: Vec3,
+    reached: Option<Vec3>,
+    now: Micros,
+) -> R<(Course, Steer)> {
+    let steered = steering.is_some();
+    let mut s = steering.unwrap_or(Steer {
+        by: body,
+        own: course.clone(),
+        left: now,
+        wake: Vec::new(),
+    });
+    s.by = body;
+    // Every course a rider's ask writes ends at its home, flown at the thing's own pace when that is faster than
+    // rowing (a balloon's 3 m/s), so a rider is never held away from the stop it leaves at, by a hold or a restart.
+    let speed = punts::ROWING.max(s.own.speed);
+    let home = s.home();
+    // At its home itself, not above it on the way up (a balloon) or down.
+    let at_home = |p: &Vec3| *p == home;
+    // The way home from here: on as the course it is on goes, when that ends at its home; else back along its wake
+    // and round the rest of the lap it left.
+    let way_home = |s: &Steer| -> Vec<(Vec3, Micros)> {
+        let pts = if at_home(&here) {
+            vec![home]
+        } else {
+            match punts::rest_of(course, now) {
+                Some(r) if r.last().is_some_and(at_home) => r,
+                _ => punts::back(s),
+            }
+        };
+        pts.into_iter().map(|p| (p, 0)).collect()
+    };
+    let next = match ask {
+        Ask::Steer => {
+            s.wake.push(here);
+            let mut pts = vec![(reached.unwrap_or(here), HOLD)];
+            pts.extend(punts::back(&s).into_iter().map(|p| (p, 0)));
+            punts::once_through(here, &pts, now, speed)?
+        }
+        Ask::Land if !steered => {
+            // On its own course it is already on its way to its stop: nothing to land from.
+            let t = course.load()?;
+            let back = t
+                .next(now, Some(0), 1)
+                .first()
+                .map(|st| st.arrives.max(now));
+            return Err(refusal(
+                "on-its-course",
+                match back {
+                    Some(b) if b <= now => {
+                        format!("{} is at its stop: rise to get off", show(punt))
+                    }
+                    Some(b) => format!(
+                        "{} flies its own course and lets riders off only at its stop; rise there: back at its stop at {b} us, in {} s",
+                        show(punt),
+                        (b - now + 999_999) / 1_000_000
+                    ),
+                    None => format!("{} flies its own course to its stop", show(punt)),
+                },
+            ));
+        }
+        Ask::Land => punts::once_through(here, &way_home(&s), now, speed)?,
+        Ask::Stop => {
+            let boarding = !steered
+                && course
+                    .load()
+                    .is_ok_and(|t| matches!(t.stopped(now), Ok(Some(st)) if st.station == 0));
+            if boarding {
+                return Err(refusal(
+                    "not-aloft",
+                    format!("{} has not left yet", show(punt)),
+                ));
+            }
+            let mut pts = vec![(here, HOLD)];
+            pts.extend(way_home(&s));
+            s.wake.push(here);
+            punts::once_through(here, &pts, now, speed)?
+        }
+    };
+    Ok((next, s))
 }
 
 /// The steered punts of `steered` that stand at their home at `now` with nobody aboard take up their own loop again
@@ -284,14 +365,16 @@ pub fn settle(
         let home = s.home();
         let Ok(t) = course.load() else { continue };
         let stopped = matches!(t.stopped(now), Ok(Some(_)));
-        let at_home = t.at(now).is_ok_and(|(p, _)| p.x == home.x && p.z == home.z);
+        let at_home = t.at(now).is_ok_and(|(p, _)| p == home);
         if stopped
             && !at_home
             && now >= course.t0.saturating_add(course.within).saturating_add(HOLD)
         {
             // The hold ran out: rowed home along its wake, its rider (if any) carried.
             let (here, _) = t.at(now).unwrap_or((home, Vec3::ZERO));
-            let back = punts::once(here, &punts::back(&s), now).and_then(|c| {
+            let way: Vec<(Vec3, Micros)> = punts::back(&s).into_iter().map(|p| (p, 0)).collect();
+            let speed = punts::ROWING.max(s.own.speed);
+            let back = punts::once_through(here, &way, now, speed).and_then(|c| {
                 let e = entry(
                     live,
                     punt,

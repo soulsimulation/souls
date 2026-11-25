@@ -201,6 +201,16 @@ export const LOCAL = [
 ];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
+/** The harnesses an agent may run in, by an environment variable each sets for the commands it runs. */
+const HARNESSES = [['CLAUDECODE', 'Claude Code'], ['CODEX_SANDBOX', 'Codex'], ['CODEX_THREAD_ID', 'Codex'], ['CURSOR_AGENT', 'Cursor'],
+  ['CURSOR_TRACE_ID', 'Cursor'], ['GEMINI_CLI', 'Gemini CLI']];
+/** The label the owner's approval card shows for this agent (first day, 25 Nov: it said "souls.mjs" and the computer's
+ *  name): the harness it runs in, "on this computer"; never the host's name. */
+export function agentLabel(env = process.env) {
+  const named = HARNESSES.find(([k]) => env[k])?.[1];
+  return `${named ?? 'An agent'} on this computer`;
+}
+
 /**
  * Starts W2's pairing detached, its lines in `<home>/pairing.log`, and gives its first: the link and code, or the
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
@@ -212,7 +222,7 @@ async function pairing(home, url, { within = 15_000, name } = {}) {
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
   // --start: once approved, the pairing starts the Soul's daemon, which joins the world by itself (named by --name).
-  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls.mjs', '--start', ...(name ? ['--name', name] : [])], {
+  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', agentLabel(), '--start', ...(name ? ['--name', name] : [])], {
     detached: true, stdio: ['ignore', out, out],
     env: { PATH: process.env.PATH ?? '', SOULS_HOME: home, ...(process.env.SOULS_REPLICA_PKG ? { SOULS_REPLICA_PKG: process.env.SOULS_REPLICA_PKG } : {}) },
   }).unref();
@@ -531,6 +541,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
           // 0.133: a walk's end, how far from its target it stood, metres
           ...(r?.receipt?.away_m != null ? { away_m: r.receipt.away_m } : {}),
+          // First-day round 4: aboard a balloon, when it takes off (done) or when this Soul can get off (refused).
+          ...(r?.receipt?.aboard ? { aboard: r.receipt.aboard } : {}),
           // R1b: refused, one offer of the same thing that would work instead.
           ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
           // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).

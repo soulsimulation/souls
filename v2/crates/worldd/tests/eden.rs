@@ -3382,7 +3382,10 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         vec![3, 3, 3, 1],
         "steered, stopped, landed, its own loop again"
     );
-    assert_eq!(logged[1].2, 2, "the stop: one station, where it is, held");
+    assert!(
+        logged[1].2 >= 2,
+        "the stop: held where it is, then its way home"
+    );
     assert_eq!(streamed, logged, "the public stream carries every course");
     let out = out.expect("the public stream carries the rider into slot 1 and out of it");
     let h = samples[out].1;
