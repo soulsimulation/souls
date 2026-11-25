@@ -163,7 +163,7 @@ test('0.135: a page that opens mid-dance draws the dance from the next record th
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
   // What the page draws each half second, read from each chunk as it is made (the bridge keeps only the last few).
-  const drawn = new Map<number, string>();
+  const drawn = new Map<number, string | undefined>();
   const N = 100; // 50 s of parts
   for (let n = 0; n < N; n++) {
     const from = T0 + n * 500_000, extra: Record<string, unknown> = {};

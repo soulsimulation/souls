@@ -17,7 +17,9 @@ use replica::time::Micros;
 use skills::form_runner::{Arg, Args, Limits, Next, Runner, Woke, bind_with};
 
 fn content(path: &str) -> Value {
-    let f = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content").join(path);
+    let f = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content")
+        .join(path);
     parse(&std::fs::read_to_string(f).expect("read")).expect("JSON")
 }
 
@@ -168,7 +170,10 @@ fn the_same_minute_given_as_a_whole_number_and_a_dance_with_no_for_dances_its_de
     assert_eq!(how, "done");
     assert_eq!(widest_gap(&moves), 0, "{moves:?}");
     let last = moves.last().expect("moves").1;
-    assert!((10_000_000..10_000_000 + dance_us()).contains(&last), "{last}");
+    assert!(
+        (10_000_000..10_000_000 + dance_us()).contains(&last),
+        "{last}"
+    );
 }
 
 #[test]
@@ -183,7 +188,11 @@ fn a_stop_during_a_long_dance_ends_it_at_the_next_phase_boundary() {
 #[test]
 fn a_dance_for_no_time_or_past_the_most_is_refused_by_name() {
     let e = content("kinds/body/humanoid.json");
-    for (n, why) in [("0", "out-of-range"), ("3601", "out-of-range"), ("soon", "arg-not-a-number")] {
+    for (n, why) in [
+        ("0", "out-of-range"),
+        ("3601", "out-of-range"),
+        ("soon", "arg-not-a-number"),
+    ] {
         let r = bind_with(&e, "dance", &secs(n));
         assert_eq!(r.map_err(|e| e.name), Err(why), "for={n}");
     }

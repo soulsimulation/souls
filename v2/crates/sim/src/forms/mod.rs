@@ -1986,10 +1986,16 @@ impl Forms {
                         // the latest its step can end (its start, its length and one more move); the other repeats
                         // write nothing, and the run's end (`souls:form-ended`) is where it stopped (0.135).
                         let repeat = fr.runner.repeat();
-                        if let Some(r) = w.moves.record(n).filter(|_| !repeat.is_some_and(|(_, _, again)| again)) {
+                        if let Some(r) = w
+                            .moves
+                            .record(n)
+                            .filter(|_| !repeat.is_some_and(|(_, _, again)| again))
+                        {
                             let mut r = r.clone();
                             let one = r.ends.last().map_or(0, |l| l.saturating_sub(r.start));
-                            if let (Some((since, length, _)), Some(last)) = (repeat, r.ends.last_mut()) {
+                            if let (Some((since, length, _)), Some(last)) =
+                                (repeat, r.ends.last_mut())
+                            {
                                 *last = since.saturating_add(length).saturating_add(one);
                             }
                             if let Some(t) = w.reach.aimed(body, &r.contact) {

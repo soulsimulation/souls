@@ -2978,27 +2978,24 @@ fn a_dance_for_a_while_is_a_move_record_every_15_s_for_viewers_and_ends_after_it
             }
         }
     }
-    let moves: Vec<_> = events
-        .iter()
-        .filter(|e| e.0 == "souls:form-move")
-        .collect();
+    let moves: Vec<_> = events.iter().filter(|e| e.0 == "souls:form-move").collect();
     let ended: Vec<_> = events
         .iter()
         .filter(|e| e.0 == "souls:form-ended")
         .collect();
     println!("dance events: {events:?}");
-    assert_eq!(moves.len(), 2, "a record at the start and 15 s on, not one a move");
+    assert_eq!(
+        moves.len(),
+        2,
+        "a record at the start and 15 s on, not one a move"
+    );
     let (start, planned) = (moves[0].1, *moves[0].2.last().expect("planned ends"));
     let again = moves[1].1 - start;
     assert!(
         (15_000_000..15_000_000 + 900_000).contains(&again),
         "the record again at the first move 15 s on: {again}"
     );
-    assert_eq!(
-        moves[1].2.last(),
-        Some(&planned),
-        "planned to the same end"
-    );
+    assert_eq!(moves[1].2.last(), Some(&planned), "planned to the same end");
     let end = ended.last().expect("the run ended").1;
     assert!(
         (start + 20_000_000..=start + 20_800_000 + 100_000).contains(&end),
