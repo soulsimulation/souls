@@ -3212,8 +3212,11 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
     // The activities as this start serves them, which the gateway hands out with the entries (`activities.json`).
+    // Whole or not at all: the gateway may read it at any moment.
     let served_path = dir.join(ACTIVITIES_FILE);
-    std::fs::write(&served_path, served.to_json()).map_err(io(&served_path))?;
+    let tmp = served_path.with_extension("json.tmp");
+    std::fs::write(&tmp, served.to_json()).map_err(io(&tmp))?;
+    std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
 

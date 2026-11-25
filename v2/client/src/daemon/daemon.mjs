@@ -171,6 +171,7 @@ import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair.mjs';
+import { activityTry, answerParts, readableDetail } from './refusal.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -286,17 +287,6 @@ function receiptSent(sequence, ranked, { target, replaces, words }) {
   entriesAt.set(sequence, entrySeq); // 0.133: the newest entry seen when it went; its own entries come after it
   if (receipts.size > RECEIPTS_KEPT) { const old = receipts.keys().next().value; receipts.delete(old); entriesAt.delete(old); }
   if (words === undefined && ranked[0] !== 'souls:cancel') going.push(sequence);
-}
-/** A refusal's detail as a person reads it: µm in metres, and each body or thing it names (the world's short form,
- *  `<first scope byte>:<counter>`) by its name and id in the copy, when one row there is it. */
-function readableDetail(text) {
-  const rows = [...rowsOf(copy).values()];
-  return text.slice(0, 400)
-    .replace(/(\d+) µm/g, (_, n) => `${(Number(n) / 1e6).toFixed(2)} m`)
-    .replace(/\b([0-9a-f]{2}):(\d+)\b/g, (short, b, n) => {
-      const hit = rows.filter((r) => r.id.startsWith(b) && r.id.endsWith(`-${n}`));
-      return hit.length === 1 ? `${hit[0].name || 'it'} (${hit[0].id})` : short;
-    });
 }
 function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
@@ -624,7 +614,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const [kind, a, b, c, d, names = '-', op = '-', ...said] = wire.wireFrame(bytes).split(' ');
+      const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -672,7 +662,7 @@ function connect() {
       // G7: an edit's receipt carries the ids its names became; its refusal, the operation that failed.
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
       // A refusal's own words (the world's detail: how far apart, what it reaches), after the seven fields.
-      const detail = kind === 'answer' && said.length ? readableDetail(said.join(' ')) : '';
+      const detail = said ? readableDetail(said, rowsOf(copy).values()) : '';
       const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...(detail ? { detail } : {}), ...edit };
       note(answered);
       keyAnswered(answered);
@@ -1861,20 +1851,10 @@ async function answer(req, conn = null) {
  * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
  */
 function suggestionFor(r) {
-  const target = String(r.target ?? '').split(' ')[0], reason = r.answers.at(-1)?.reason;
-  // Held by an activity, every other act is refused: leaving it comes first, not another offer that is refused too.
-  if (reason === 'resource-blocked') {
-    const held = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry') && ID.test(String(x.offer ?? '')));
-    return { command: held ? `together leave ${held.offer}` : 'find activity', why: 'this body is held by an activity: `together leave <its id or word>` first (`find activity` lists them)' };
-  }
-  // An activity's own verbs answer for the activity, not a thing to walk to: too far, walk up to the place it is
-  // played (the thing it is at) or to the Soul who offered it; any other refusal of one has no other offer.
-  if (r.verbs.some((v) => String(v).startsWith('activity:'))) {
-    if (reason !== 'together.too-far') return null;
-    const rows = rowsOf(copy), parent = rows.get(target)?.parent, at = parent && !/(^|:)ground$/.test(String(rows.get(parent)?.kind ?? '').split('@')[0]) ? parent : null;
-    const to = at ?? logged.findLast((x) => x.offer === target && ID.test(String(x.from ?? '')))?.from;
-    return to ? { act: `walk:${to}`, name: 'walk', checked: 'unknown', why: at ? 'walk to the thing it is played at, then accept again' : 'walk up to the Soul who offered it, then accept again' } : null;
-  }
+  const target = String(r.target ?? '').split(' ')[0];
+  // Held by an activity, or an activity's own verb: the activity's next step (`refusal.mjs`), not another offer.
+  const held = activityTry(r, { rows: rowsOf(copy), logged });
+  if (held !== undefined) return held;
   if (!ID.test(target)) return null;
   const t = thingOf(target);
   if (!t.ok) return null;

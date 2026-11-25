@@ -82,6 +82,9 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   let held = {};
   try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
   if (!(held.files ?? []).every((f) => existsSync(join(dir, f)))) held = { files: held.files }; // a file gone: fetch all
+  // The served activities are in the same answer: a mark from before they were kept (no `activities`), or one whose
+  // activities file is gone, is fetched again whole, not revalidated by its tag.
+  if (held.activities === undefined || (held.activities && !existsSync(activitiesFile(home, world)))) held = { files: held.files };
   const r = await fetch(entriesOf(gateway), {
     headers: { authorization: `Bearer ${token}`, ...(held.etag ? { 'if-none-match': held.etag } : {}) },
     signal: AbortSignal.timeout(within),
@@ -107,7 +110,7 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const now = new Set(files);
   for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
-  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
   renameSync(`${mark}.tmp`, mark);
   return { entries: files.length, changed: true };
 }
