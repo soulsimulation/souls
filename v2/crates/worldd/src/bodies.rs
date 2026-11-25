@@ -1296,15 +1296,6 @@ impl Bodies {
         // walker, stood back from it by [`select::GAP`], it steps back toward the walker a metre at a time to the first
         // point a body may stand on that the walker's walk may reach (`View::stand_reached`, no route search): the
         // nearest walkable point at its edge on the walker's way there. A walker already within it is there.
-        eprintln!(
-            "DBG goal {:?} fields {:?} half {:?} pose {:?}",
-            node,
-            tree.handle(node)
-                .and_then(|h| tree.node(h))
-                .map(|n| n.fields().keys().copied().collect::<Vec<_>>()),
-            place_half_width(tree, node),
-            self.pose(body)
-        );
         if let Some(half) = place_half_width(tree, node)
             && let Some((frame, at)) = self.pose(body)
         {
@@ -2650,14 +2641,22 @@ fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> 
     best.map(|(_, _, p)| p)
 }
 
-/// Whether `node` is a place on the ground of its own (a landform, a water, an area, a path: a node the facts' places
-/// make, with what it is a place of and an outline or a line), which a walk goes to the edge of (`Bodies::goal`) and
-/// faces (`Bodies::face`): how far its edge lies from its shape, µm (0 for an outline, half a line's width).
+/// Whether `node` is a place on the open ground of its own (a landform, a water, an area, a path: a child of the ground
+/// with an outline or a line and no solids, seats or floors, nor rooms within it), which a walk goes to the edge of
+/// (`Bodies::goal`) and faces (`Bodies::face`): how far its edge lies from its shape, µm (0 for an outline, half a
+/// line's width when the walkers' tree keeps it, else 0).
 fn place_half_width(tree: &Tree, node: Id) -> Option<i64> {
-    use sim::ground::scene::{F_LINE_WIDTH, F_PLACE_OF};
+    use sim::ground::scene::{F_LINE_WIDTH, GROUND};
     let n = tree.node(tree.handle(node)?)?;
+    let on_ground = n
+        .parent()
+        .and_then(|p| tree.node(tree.handle(p)?))
+        .is_some_and(|g| g.kind().as_str().split('@').next() == Some(GROUND));
     let f = n.fields();
-    if !f.contains_key(&F_PLACE_OF) {
+    let built = [select::F_SOLIDS, select::F_SLOTS, select::F_SURFACES]
+        .iter()
+        .any(|k| f.contains_key(k));
+    if !on_ground || built || main_room(tree, node).is_some() {
         return None;
     }
     if f.contains_key(&select::F_OUTLINE) {
