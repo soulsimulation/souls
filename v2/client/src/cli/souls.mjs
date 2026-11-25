@@ -510,6 +510,8 @@ export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
 export const ACT_WAIT_MS = 60_000;
 /** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
 export const ACT_WAIT_MARGIN_MS = 15_000;
+/** The most a repeated move goes on, s (`skills::form_runner::FOR_MOST_S`): an act that asks for it is held. */
+export const FOR_MOST_S = 3600;
 /** The longest `act --wait` waits, however long the act: past it, the answer says when the act ends and returns. */
 export const ACT_WAIT_LONGEST_MS = 300_000;
 
@@ -538,13 +540,14 @@ const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
 export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
   const until = now() + ms;
-  let given = null; // when the world's progress answer was first seen here, and how long it gives the act, ms
+  // An activity whose moves keep up longer than this wait (`lasts_s`, the daemon's: a dance held until the next act,
+  // an hour at most, or a long `for=`) is said once the world has it under way, with when the world ends it at the
+  // latest. Any other act (a walk, a sit, whose deadline may be long) is waited for as before.
+  const outlastsWait = sent.lasts_s !== undefined && sent.lasts_s * 1000 + ACT_WAIT_MARGIN_MS > ms;
   for (;;) {
     const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
     const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
-    if (last?.answer === 'accepted' && last.left_s !== undefined) given ??= now() + last.left_s * 1000;
-    // The world gives the act longer than this wait (a dance held until the next act, an hour's at most): said now.
-    const outlasts = last?.answer === 'accepted' && given !== null && given > until;
+    const outlasts = outlastsWait && last?.answer === 'accepted';
     const over = now() >= until || outlasts;
     if (ENDED(last) || over) {
       // The last read closes the answer as any command does: the copy's version and what changed since the act.
@@ -568,8 +571,9 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(phase === 'refused' && r?.receipt?.why ? { why: r.receipt.why } : {}) };
       }
       if (outlasts) {
-        return { ...sent, ...(r?.ok ? r : {}), phase: 'running', stillRunning: true, ends_by: last.ends_by, left_s: last.left_s,
-          detail: `running: it goes on until your next act or \`stop ${sent.sequence}\`, at the latest ${last.left_s} s from now (${last.ends_by})` };
+        const held = sent.lasts_s >= FOR_MOST_S;
+        return { ...sent, ...(r?.ok ? r : {}), phase: 'running', stillRunning: true, ...(last.ends_by ? { ends_by: last.ends_by } : {}),
+          detail: `running: ${held ? 'it goes on until your next act' : `it goes on ${sent.lasts_s} s, or until your next act`} or \`stop ${sent.sequence}\`${last.ends_by ? `; the world ends it by ${last.ends_by} at the latest` : ''}` };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };

@@ -88,6 +88,27 @@ export function offersOf(id, entry, { moving = false } = {}) {
   return out;
 }
 
+/** Whether form `f` is a gesture `say --gesture` may play (C26): moves alone, taking at most `toward` and how long it
+ *  keeps up (`for`, a move's `for_s`: a clap held for a while). */
+export function isGesture(f) {
+  return Boolean(f?.steps?.length) && f.steps.every((x) => x.step === 'move')
+    && Object.keys(f.takes ?? {}).every((k) => k === 'toward' || f.steps.some((x) => x.for_s?.arg === k));
+}
+
+/**
+ * Continuous activities: how long form `f` keeps its moves up, s: each repeated move step's (`for_s`) count from the
+ * act's `args` (`for=60`) or the step's default (3600: held until the next act or `stop`), summed; a step with neither
+ * is one move (0). Undefined for a form that repeats no move.
+ */
+export function repeatsOf(f, args = {}) {
+  const reps = (f?.steps ?? []).filter((st) => st?.for_s !== undefined);
+  if (!reps.length) return undefined;
+  return reps.reduce((sum, { for_s: r }) => {
+    const n = Number(typeof r === 'number' ? r : args?.[r?.arg] ?? r?.default ?? 0);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+}
+
 /** The offer's words for `act`: given arguments, then each parameter's `default` the arguments leave out. */
 export function actWords(offer, args = []) {
   const named = new Set(args.map((a) => String(a).split('=')[0]));

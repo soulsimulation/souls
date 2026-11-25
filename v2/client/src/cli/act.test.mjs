@@ -179,21 +179,26 @@ test('continuous activities: `for=` takes s, m or h; a held act --wait comes bac
   assert.deepEqual(['for=60', 'for=90s', 'for=2m', 'for=1h', 'for=5min', 'for=soon', 'gait=run'].map(forSeconds),
     ['for=60', 'for=90', 'for=120', 'for=3600', 'for=300', 'for=soon', 'gait=run']);
   assert.deepEqual(requestOf(['act', 'dance', 'for=1m', '--wait']).req.acts, ['dance', 'for=60']);
-  // A dance held until the next act: the world's progress answer gives it an hour; --wait says so and returns.
+  // A dance held until the next act (the daemon's `lasts_s`, from its form): --wait says so once the world has it under way.
   let t = 0;
-  const sent = { ok: true, sequence: 9, sent: true };
+  const wait = (sent, answers, ms = ACT_WAIT_MS) => actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers(t) } }), sent,
+    { ms, now: () => t, sleep: async (d) => { t += d; } });
   const held = { answer: 'accepted', left_s: 3610, ends_by: '2026-11-25T22:00:10.000Z' };
-  const ask = async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: t < 400 ? [] : [held] } });
-  const out = await actEnd(ask, sent, { ms: ACT_WAIT_MS, now: () => t, sleep: async (ms) => { t += ms; } });
-  assert.deepEqual([out.phase, out.stillRunning, out.left_s, out.ends_by], ['running', true, 3610, held.ends_by]);
+  const out = await wait({ ok: true, sequence: 9, sent: true, lasts_s: 3600 }, (now) => (now < 400 ? [] : [held]));
+  assert.deepEqual([out.phase, out.stillRunning, out.ends_by], ['running', true, held.ends_by]);
   assert.ok(t < 1000, `it came back as soon as the world answered, not after the window: ${t} ms`);
-  assert.match(out.detail, /until your next act or `stop 9`, at the latest 3610 s from now/);
-  // A minute's dance the world gives 70 s fits its 75 s window: waited out, as before.
+  assert.match(out.detail, /^running: it goes on until your next act or `stop 9`; the world ends it by 2026-11-25T22:00:10.000Z at the latest$/);
+  // A dance for ten minutes outlasts the 5 min window too, and says how long.
   t = 0;
-  const minute = { answer: 'accepted', left_s: 70, ends_by: 'x' };
-  const done = await actEnd(async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: t < 60_800 ? [minute] : [minute, { answer: 'receipt' }] } }), sent,
-    { ms: 75_000, now: () => t, sleep: async (ms) => { t += ms; } });
-  assert.equal(done.phase, 'done');
+  assert.match((await wait({ ok: true, sequence: 9, sent: true, lasts_s: 600 }, () => [held], ACT_WAIT_LONGEST_MS)).detail, /it goes on 600 s, or until your next act/);
+  // A minute's dance fits its 75 s window, and a sit across a room the world gives half an hour (its walk's deadline)
+  // repeats nothing: each is waited out to its receipt, as before.
+  for (const [sent, ms] of [[{ ok: true, sequence: 9, sent: true, lasts_s: 60 }, 75_000], [{ ok: true, sequence: 10, sent: true }, ACT_WAIT_MS]]) {
+    t = 0;
+    const accepted = { answer: 'accepted', left_s: 1810, ends_by: 'x' };
+    const done = await wait(sent, (now) => (now < 9_000 ? [accepted] : [accepted, { answer: 'receipt' }]), ms);
+    assert.deepEqual([done.phase, done.stillRunning], ['done', undefined], JSON.stringify(sent));
+  }
 });
 
 test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {

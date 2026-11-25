@@ -2125,9 +2125,10 @@ impl Acts {
         out
     }
 
-    /// Whether `body`'s Soul has a form act running or waiting to run (`Forms::running`).
+    /// Whether `body`'s Soul has a form act running or waiting to run (`Forms::running`). A run in a repeated move (a
+    /// dance held until the Soul's next act) is not: joining an activity is that next act, so its place walk ends it.
     pub fn acting(&self, body: Id) -> bool {
-        self.forms.running(body)
+        self.forms.running(body) && !self.forms.in_repeat(body)
     }
 
     /// Whether `body` sits in the seat of another thing its form took, still linked by it (E14b): an act stopped

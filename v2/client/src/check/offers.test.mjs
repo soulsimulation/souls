@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from './offers.mjs';
+import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from './offers.mjs';
 import { argsOf, requestOf } from '../cli/souls.mjs';
 
 const ID = `${'ab'.repeat(16)}-7`;
@@ -106,4 +106,11 @@ test('continuous activities: a held activity says it goes on until the next act,
   for (const once of ['wave', 'clap', 'jump', 'stretch', 'sing', 'listen']) assert.match(of(once).lasts, /^once; for=<seconds> keeps it up/, once);
   assert.equal(of('exercise').lasts, '10 s for each of its 3 moves, back to back, unless each=<seconds>');
   assert.equal(of('bow').lasts, undefined, 'a bow is a bow');
+  // `say --gesture` still plays each, though it now takes how long it lasts; never a walk or a form taking a thing.
+  for (const g of ['clap', 'jump', 'stretch', 'sing', 'listen', 'wave', 'wave_at', 'dance', 'bow']) assert.ok(isGesture(humanoid.forms[g]), g);
+  for (const g of ['go_to', 'touch', 'pick_up', 'stand']) assert.ok(!isGesture(humanoid.forms[g]), g);
+  // How long each keeps up, s, as `act --wait` reads it: held, a set time, once, a workout's three, nothing repeated.
+  const f = humanoid.forms;
+  assert.deepEqual([repeatsOf(f.dance), repeatsOf(f.dance, { for: 60 }), repeatsOf(f.wave), repeatsOf(f.wave, { for: 20 }), repeatsOf(f.exercise), repeatsOf(f.exercise, { each: 5 }), repeatsOf(f.bow), repeatsOf(f.go_to)],
+    [3600, 60, 0, 20, 30, 15, undefined, undefined]);
 });

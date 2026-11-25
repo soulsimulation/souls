@@ -158,7 +158,7 @@ import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptOne } from '../check/kept.mjs';
-import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
+import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
@@ -1243,7 +1243,7 @@ function towardOf(req) {
   if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
   const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
-  const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
+  const gestures = Object.entries(forms).filter(([, f]) => isGesture(f));
   // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
   const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
@@ -1328,6 +1328,12 @@ function actsOf(words) {
     }
   }
   return out;
+}
+
+/** Continuous activities: how long candidate `c`'s form keeps its moves up, s (`repeatsOf`), from its target's kind. */
+function repeatsFor(c) {
+  const r = c?.form ? rowsOf(copy).get(c.this) : null;
+  return r ? repeatsOf(heldKinds()[r.entry ?? r.kind]?.forms?.[c.form], c.args) : undefined;
 }
 
 /** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
@@ -1713,6 +1719,7 @@ async function answer(req, conn = null) {
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      const lasts = repeatsFor(keep[0]);
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
       // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
       // otherwise it carries the Soul's given name, so no join of this client births a nameless body.
@@ -1721,7 +1728,7 @@ async function answer(req, conn = null) {
       const words = plainJoin ? givenName() ?? undefined : undefined;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, words, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
-      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
+      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(lasts !== undefined ? { lasts_s: lasts } : {}), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}), ...(unlinked ? { unlinked } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
     case 'set-down': {
