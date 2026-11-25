@@ -1,5 +1,5 @@
 import type { WorldLocation, WorldLocationPage } from './WorldLocations.ts';
-type Target = {
+export type Target = {
     ref: string;
     title: string;
     point: [
@@ -34,6 +34,16 @@ type Target = {
         ];
     };
 };
+/** A listed place as Explore's location (also what tools/world-launcher/place-shots.mjs has the page draw). */
+export function contextLocation(t: Target, revision: number | string, label?: string): WorldLocation {
+    const camera = t.viewpoint ?? t.camera;
+    return { id: 'context:' + t.ref, regionId: 'context:' + t.ref, label: t.title,
+        previewRevision: revision,
+        previewLabel: label ?? 'Architectural context · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.',
+        target: camera?.at ?? t.point,
+        p: camera?.eye ?? [t.point[0] + t.radius * 1.5, t.point[1] + t.radius, t.point[2] + t.radius * 1.5] as [number, number, number],
+        radius: t.radius, ...(t.enclosed && camera ? { inside: { p: camera.eye, target: camera.at } } : {}) };
+}
 /** Explore and Soul clients use the same server records. Work exists only for a visible request. */
 export class WorldContextViews {
     locations: readonly WorldLocation[] = [];
@@ -56,7 +66,10 @@ export class WorldContextViews {
     private signal: AbortSignal;
     private changed: () => void;
     private supported: boolean;
-    constructor(api: (path: string) => string, signal: AbortSignal, changed: () => void = () => { }, supported = true) { this.api = api; this.signal = signal; this.changed = changed; this.supported = supported; }
+    private draw: ((location: WorldLocation) => Promise<string | null>) | null;
+    /** `draw`: the page's own picture of a place, for a place whose server answers `unavailable` with `draw: 'page'` (a
+     *  moved world, whose old process never runs: tools/world-launcher/place-shots.mjs keeps the ones published). */
+    constructor(api: (path: string) => string, signal: AbortSignal, changed: () => void = () => { }, supported = true, draw: ((location: WorldLocation) => Promise<string | null>) | null = null) { this.api = api; this.signal = signal; this.changed = changed; this.supported = supported; this.draw = draw; }
     page(): WorldLocationPage {
         return { total: this.total, more: !!this.nextCursor, loading: this.loading, query: this.query, error: this.error };
     }
@@ -116,15 +129,7 @@ export class WorldContextViews {
                 return;
             }
             if (!append && revision !== this.revision) this.cancelPictures();
-            const locations = data.targets.map(t => {
-                const camera = t.viewpoint ?? t.camera;
-                return { id: 'context:' + t.ref, regionId: 'context:' + t.ref, label: t.title,
-                    previewRevision: revision,
-                    previewLabel: this.ready.get(t.ref)?.label ?? 'Architectural context · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.',
-                    target: camera?.at ?? t.point,
-                    p: camera?.eye ?? [t.point[0] + t.radius * 1.5, t.point[1] + t.radius, t.point[2] + t.radius * 1.5] as [number, number, number],
-                    radius: t.radius, ...(t.enclosed && camera ? { inside: { p: camera.eye, target: camera.at } } : {}) };
-            });
+            const locations = data.targets.map(t => contextLocation(t, revision, this.ready.get(t.ref)?.label));
             this.locations = append ? [...new Map([...this.locations, ...locations].map(location => [location.id, location])).values()] : locations;
             this.revision = revision;
             this.total = data.total ?? this.locations.length;
@@ -178,6 +183,14 @@ export class WorldContextViews {
                             label = `Architectural context${view.photo.cutaway ? ' · Cutaway (classified roof/wall removed)' : ''} · ${view.photo.provenance?.camera === 'authored' ? 'authored camera' : 'geometric camera'} · front ${view.photo.provenance?.front ?? 'unknown'} · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.`;
                             this.locations = this.locations.map(location => location.id === 'context:' + view.ref ? { ...location, previewLabel: label } : location);
                             this.changed();
+                        }
+                        const location = view.status === 'unavailable' && view.draw === 'page' && this.draw ? this.locations.find(l => l.id === 'context:' + view.ref) : undefined;
+                        if (location && this.draw) {
+                            const resolve = waiting.get(view.ref), draw = this.draw;
+                            waiting.delete(view.ref);
+                            // drawn here, one at a time (WorldPlacePreviews paces them); kept only while this listing stands
+                            void draw(location).catch(() => null).then(url => { if (signal.aborted) { resolve?.(null); return; } if (url) this.ready.set(view.ref, { url }); resolve?.(url); });
+                            continue;
                         }
                         // #2192: the compact WebP when the server has one; both URLs are content-keyed and cached immutable
                         const url = view.status === 'ready' && (view.thumb || view.url) ? this.api(view.thumb || view.url) : null;

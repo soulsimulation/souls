@@ -148,6 +148,11 @@ for (const e of m.entities.values()) {
     rec.door = { open: v !== false };
     doorThings.push({ id: e.id, x: wp.x, y: wp.y, z: wp.z });
   }
+  // #4784: its state as today's page draws it (the entity's, over its def's defaults; bools and whole numbers), which
+  // the import gives to its entry's fields of that meaning, so a lamp on today starts on and a burning fire lit
+  const captured = Object.fromEntries(Object.entries({ ...Object.fromEntries(Object.entries((d.state ?? {}) as Record<string, { default?: unknown }>).map(([k, f]) => [k, f?.default])), ...(e.state ?? {}) })
+    .filter(([, v]) => typeof v === 'boolean' || (typeof v === 'number' && Number.isSafeInteger(v))));
+  if (Object.keys(captured).length) rec.state = captured;
   if (e.shape) rec.shape = { ...(e.shape.path ? { path: e.shape.path.map(pt) } : {}), ...(e.shape.area ? { area: e.shape.area.map(pt) } : {}), ...(e.shape.width !== undefined ? { width: mm(e.shape.width) } : {}) };
   const geo = isWorldShape ? ((v: number) => mm(v)) : S, G = isWorldShape ? pt : P;
   // Only a solid or surface thing's colliders block, as today's engine bridge takes them (engine-bridge.ts): scenery
