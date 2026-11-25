@@ -74,9 +74,9 @@ export function roomOf(rows, me) {
 /**
  * The brief, as an object whose JSON is under `most` bytes: `{ room, here, bodies, outward, changed, age, left }`.
  * `rows` are the copy's rows by id, `me` my body's id (if the copy holds it), `changes` what changed since my last
- * turn (`copy.mjs` `changedBetween`), `ageMs` the copy's age.
+ * turn (`copy.mjs` `changedBetween`), `doing` the activities I am in, as lines (`in`), `ageMs` the copy's age.
  */
-export function brief(rows, { me, changes = [], heard = [], ageMs = 0, version, most = BRIEF_MOST } = {}) {
+export function brief(rows, { me, changes = [], heard = [], doing = [], ageMs = 0, version, most = BRIEF_MOST } = {}) {
   const at = whereOf(rows, me), room = roomOf(rows, me), mine = at?.body.id ?? me;
   const said = heard.length ? { heard: heardBlock(heard) } : {};
   if (!room) return { room: null, note: 'The copy holds nothing yet.', ...said, age: ageText(ageMs), changed: changedBlock(changes) };
@@ -90,6 +90,7 @@ export function brief(rows, { me, changes = [], heard = [], ageMs = 0, version, 
     ...(version !== undefined ? { at: version } : {}),
     room: { name: room.name, kind: room.kind, ...(room.path.length ? { in: room.path.slice(-2).reverse().join(', ') } : {}) },
     ...(at?.seat ? { seat: { name: at.seat.name, kind: at.seat.kind, id: at.seat.id } } : {}),
+    ...(doing.length ? { in: doing } : {}),
     ...said,
     here: [],
     bodies,

@@ -285,6 +285,7 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
                 reach: 0,
                 door: None,
                 ring: None,
+                aim: None,
             },
         }],
         ..Default::default()

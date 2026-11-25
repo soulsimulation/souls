@@ -19,8 +19,11 @@ import { unreadFormat } from '../stream-format.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
+/** How often a catch-up says how far behind it is (#4684). */
+const CATCHING_MS = 1000;
 
-type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number };
+type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number }
+  | { t: 'catching'; behind: number };
 // This worker's own scope, taken once: a test harness that loads several workers in one process gives each its own.
 const scope = self as unknown as Worker;
 const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, transfer);
@@ -87,6 +90,9 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const own = f.get(102);
   if (Array.isArray(own)) rec.defBodies = own.flatMap((r) => (Array.isArray(r) && r[0] instanceof Uint8Array && r[1] instanceof Uint8Array
     ? [[new TextDecoder().decode(r[0]), new TextDecoder().decode(r[1])] as [string, string]] : []));
+  // the open ground's palette (import-eden's field 103, `souls:<palette>`), which the page colours its ground by
+  const palette = f.get(103);
+  if (typeof palette === 'string' && f.has(25)) rec.groundPalette = palette;
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));
@@ -161,6 +167,14 @@ async function run(stream: URL) {
     return bytes;
   };
   const query = (q: Map<number, unknown>) => decode(player.query(encode(q)), { useMaps: true });
+  // #4684: the changed nodes in one query (7), read at the part's size; null once a replica refuses it (an older one).
+  let manyOk = true;
+  const many = (ids: readonly IdValue[]): Map<string, Map<number, unknown>> | null => {
+    if (!manyOk) return null;
+    try {
+      return new Map((query(new Map<number, unknown>([[1, 7], [2, ids]])) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v]));
+    } catch { manyOk = false; return null; }
+  };
   const resolveWords = (nodes: NodeRec[]) => {
     for (const r of nodes) {
       if (r.name) r.name = words.get(r.name) ?? null;
@@ -169,37 +183,60 @@ async function run(stream: URL) {
     }
   };
   // Preserve opaque local records in the WASM/public copy and here. Drawing may only observe a complete actual
-  // public frame chain; a missing private frame is never an identity/world transform.
-  const drawable = (id: string): boolean => {
+  // public frame chain; a missing private frame is never an identity/world transform. Its depth from the root, or -1.
+  const depthOf = (id: string): number => {
     const seen = new Set<string>();
     for (let depth = 0; depth <= 32; depth++) {
-      if (seen.has(id)) return false;
+      if (seen.has(id)) return -1;
       seen.add(id);
       const n = known.get(id);
-      if (!n) return false;
-      if (n.parent === null) return true;
+      if (!n) return -1;
+      if (n.parent === null) return depth;
       id = n.parent;
     }
-    return false;
+    return -1;
   };
+  // #4684: what a part changes is worked out from the nodes it changed and the nodes under them, not the whole world:
+  // the records by their frame (kept whether or not the frame is known), and the nodes on a course.
+  const under = new Map<string, Set<string>>();
+  const coursed = new Set<string>();
+  const unhang = (n: NodeRec | undefined) => {
+    if (n?.parent == null) return;
+    const s = under.get(n.parent);
+    if (s?.delete(n.id) && !s.size) under.delete(n.parent);
+  };
+  const onCourse = () => [...coursed].filter(id => drawn.has(id)).map(id => known.get(id)!);
   const observe = (nodes: NodeRec[], removed: string[], samples: PartRec['samples'], rest?: Omit<PartRec, 'nodes' | 'removed' | 'samples'>) => {
-    for (const id of removed) known.delete(id);
-    for (const node of nodes) known.set(node.id, node);
-    const next = new Set([...known.keys()].filter(drawable));
+    for (const id of removed) { unhang(known.get(id)); known.delete(id); coursed.delete(id); }
+    for (const node of nodes) {
+      unhang(known.get(node.id));
+      known.set(node.id, node);
+      if (node.parent !== null) { let s = under.get(node.parent); if (!s) under.set(node.parent, s = new Set()); s.add(node.id); }
+      if (node.course || node.seats) coursed.add(node.id); else coursed.delete(node.id);
+    }
+    // Only a changed or removed node, or one under it, can become drawable or stop being: every other one stays as it was.
+    const touched = new Set<string>([...removed, ...nodes.map(n => n.id)]);
+    for (const id of touched) for (const k of under.get(id) ?? []) touched.add(k);
     const changed = new Set(nodes.map(n => n.id));
-    const visible = [...next].filter(id => changed.has(id) || !drawn.has(id)).map(id => {
+    const shown: [number, string][] = [], gone: string[] = [];
+    for (const id of touched) {
+      const d = depthOf(id);
+      if (d < 0) { if (drawn.delete(id)) gone.push(id); continue; }
+      if (changed.has(id) || !drawn.has(id)) shown.push([d, id]);
+      drawn.add(id);
+    }
+    shown.sort((a, b) => a[0] - b[0]); // a frame before what is in it
+    const visible = shown.map(([, id]) => {
       const n = known.get(id)!;
       return { ...n, ...(n.tiles ? { tiles: n.tiles.map(t => [t[0], t[1], t[2].slice(), t[3].slice()] as NonNullable<NodeRec['tiles']>[number]) } : {}) };
     });
-    const gone = [...drawn].filter(id => !next.has(id));
-    drawn = next;
     const transfer: Transferable[] = [];
     // A retained unresolved record may become drawable later; transfer fresh buffers, retaining its exact bytes.
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
     // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
-    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, [...next].map(id => known.get(id)!), rest.from, rest.to) : {};
+    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, onCourse(), rest.from, rest.to) : {};
     if (rest) coursedTo = Math.max(coursedTo, rest.to);
-    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
+    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => drawn.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
   // #4535: a baseline in a format this page's bundle cannot read is never played: the page reloads for the new one
@@ -239,6 +276,10 @@ async function run(stream: URL) {
   // #3822: a joiner far behind plays the parts the clock would cut past anyway (more than BEHIND_US + CUT_US before
   // the newest) deferred: no digest each, nothing read back or posted. The state they make is then checked against
   // the newest claimed digest once and shown as one snapshot; the parts after it play as before.
+  // #4684: it says how far behind it is as it goes (at most every CATCHING_MS, across polls), so a page whose reader is
+  // catching up says so rather than that the stream is not there; only for a part it played, so a reader whose parts
+  // stop coming says nothing and the page's silence notice still shows.
+  let saidAt = -Infinity;
   const catchUp = async (p: StreamPointer, last: number): Promise<boolean> => {
     let any = false;
     while (Number(player.next()) <= last) {
@@ -248,6 +289,7 @@ async function run(stream: URL) {
       version = JSON.parse(player.playDeferred(bytes)).version;
       addWords(said);
       any = true;
+      if (performance.now() - saidAt >= CATCHING_MS) { saidAt = performance.now(); post({ t: 'catching', behind: (p.newest ?? n) - n }); }
     }
     if (!any) return false;
     player.verify();
@@ -269,6 +311,7 @@ async function run(stream: URL) {
       (id) => query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>,
       () => new Map((decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v])),
       nodeRec,
+      many,
     );
     const samples = JSON.parse(player.samples());
     let happened: PartRec['happened'] = [];
@@ -311,7 +354,7 @@ async function run(stream: URL) {
     const to = sleep.asleep ? Math.max(quiet ?? -Infinity, sleep.stillUntil == null ? now : Math.min(now, sleep.stillUntil)) : quiet;
     let courses: CoursePlaces = {};
     if (to !== null && to > coursedTo && Number.isFinite(coursedTo) && replica.courseAt) {
-      courses = coursePlaces(replica.courseAt, [...drawn].map(id => known.get(id)!).filter(Boolean), coursedTo, to);
+      courses = coursePlaces(replica.courseAt, onCourse(), coursedTo, to);
       coursedTo = to;
     }
     post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}) } });

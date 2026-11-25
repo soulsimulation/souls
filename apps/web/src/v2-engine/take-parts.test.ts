@@ -2,6 +2,7 @@
 // way; a part with an entry and no def in the layer is handed to CreatorKinds as a definition, once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { placedOf, WorldState } from './world-state.ts';
 import { CarriedParts, bundledEntries, headingAt, sampleAt, type PartNode } from './take-parts.ts';
 import { kindDef } from './creator-kinds.ts';
@@ -159,4 +160,25 @@ test('K5: a carried thing of the captured world moves with its carriers laid fla
   assert.deepEqual(down.p, [14, 0, 0], 'set down');
   assert.deepEqual(down.r, [0, 0, 0], 'stood up again');
   assert.equal(step(6), null, 'and left there');
+});
+
+test('the construction kinds\' own entries draw their own shapes (looks.shape): a rack frame is its posts and braces, not one box', () => {
+  const dir = new URL('../../../../content/kinds/construction/', import.meta.url);
+  const entry = (f: string) => new Uint8Array(readFileSync(new URL(f, dir)));
+  const shapes = (kind: string, f: string) => {
+    const d = kindDef(kind, entry(f))!.def;
+    assert.doesNotMatch(d.name, /-box$/, `${f}: not its bounds box`);
+    return (d.make as unknown as { args: { shapes: { size: number[] }[] } }).args.shapes;
+  };
+  const frame = shapes('mars:rack_upright@1220eb', 'rack_upright.json');
+  assert.equal(frame.length, 5, 'two posts and three braces');
+  assert.deepEqual(frame[0].size, [0.076, 2.438, 0.076], 'a post as tall as the frame, in metres');
+  assert.equal(shapes('mars:rack_upright_6m@1220ec', 'rack_upright_6m.json').length, 7);
+  assert.equal(shapes('mars:rack_beam@1220cc', 'rack_beam.json').length, 3, 'the beam and its two clips');
+  assert.equal(shapes('mars:frame_stand@1220aa', 'frame_stand.json').length, 5, 'its base and four chocks');
+  // and a frame placed live (no origin) is handed to CreatorKinds with its own entry, that look included
+  const { kinds, applied } = fake();
+  const parts = new CarriedParts(kinds, bundledEntries({ u: JSON.parse(new TextDecoder().decode(entry('rack_upright.json'))) }));
+  parts.receive({ t: 'snapshot', s: { nodes: [place, ground, node('fa', 'mars:rack_upright@1220eb', 'g.1', [0, 0, 0])], removed: [] } });
+  assert.equal(JSON.parse(new TextDecoder().decode(applied.flat()[0].entry)).looks.shape.shapes.length, 5);
 });
