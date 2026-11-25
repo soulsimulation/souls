@@ -23,10 +23,10 @@ Logged in on this computer (`login <world url> [--as alias]`, then `login --wait
 ## The loop
 
 1. **Look.** `look` (or `here`): your room, the places around it, what changed, and `age`.
-2. **Find the id.** `find <words>`: places, things, acts, nearest first; every word must match a name: use one or two (`find library`, then `find armchair`). Same name twice: pick by where it is, or ask; never guess an id. `inspect <id>` lists a thing's offers, each with the act that sends it. Several reads in one call: `query '[{"find":"library"},{"kind":"<kind>","near":"me"}]'` or `batch '[{"look":{}},{"inspect":"<id>"}]'`; `catalog` lists the kinds here, `context [<words>]` named places.
-3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there; `gait=jog` or `gait=run` hurries) or `<verb>:<id>` (`sit:<id>`); ids after a verb's act are its things (`fill:<cup id> <tap id>`). Another thing's seat: `attend:<id> seat=<bench id>/left`. The first the world can take is done; the rest are fallbacks. Give fallbacks for what others may want: `act sit:<id> sit:<id> --wait`. Walk to a seat, then sit. A building's id goes in, to its largest room; a Soul's ends 1.2 m beside them. Your own body's acts go by name: `act wave`, `act clap`, `act lie_down`, `act pick_up <thing id>` (`inspect` your body to list them). `set-down <held id> here` (or `next_to <id>`) puts down what you hold. A boat: `act carrier:steer:<boat id> x=<m> z=<m>` (or `carrier:stop`, `carrier:land`).
+2. **Find the id.** `find <words>`: places, things, acts, nearest first; every word must match a name: use one or two (`find library`, then `find armchair`). Same name twice: pick by where it is, or ask; never guess an id. `inspect <id>` lists a thing's offers, each with the act that sends it. Several reads in one call: `query '[{"kind":"<kind>","near":"me"}]'` or `batch '[{"look":{}},{"inspect":"<id>"}]'`; `catalog` lists the kinds here, `context [<words>]` named places.
+3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there; `gait=jog` or `gait=run` hurries) or `<verb>:<id>` (`sit:<id>`); ids after a verb's act are its things (`fill:<cup id> <tap id>`). Another thing's seat: `attend:<id> seat=<bench id>/left`. The first the world can take is done; the rest are fallbacks. Give fallbacks for what others may want: `act sit:<id> sit:<id> --wait`. Walk to a seat, then sit. A building's id goes in, to its largest room; a Soul's ends 1.2 m beside them. Your own body's acts go by name: `act wave`, `act clap`, `act lie_down`, `act pick_up <id>` (`inspect` your body to list them). `set-down <held id> here` (or `next_to <id>`) puts down what you hold. A boat: `act carrier:steer:<id> x=<m> z=<m>` (or `carrier:stop`, `carrier:land`).
 4. **Read the answer.** With `--wait` it returns the act's end: `phase` `done`, or `refused` with its `code`; still going after 60 s, `stillRunning` says how to check. Without it, `ok: true` only means sent. Not sure it went (a timeout)? Resend with the same `--key <k>`: one write. `receipt [<sequence>]` shows an act's answers so far; `stop` ends your own act where you stand (seated, `act <ns>:rise`). `quit` ends the daemon.
-5. **Report** what happened. A fallback is not the first choice: say which one held (`act --wait` names it; `look`, your seat).
+5. **Report** what happened. A fallback is not the first choice: say which one held (`act --wait` names it).
 
 To see: `view` (your sight as words; `--out <file.jpg>` a picture, `--map` from overhead), or `shoot <name> --out <file.png>` for a place, Soul or thing (`--eyes`: a Soul's own view). Read the file and show it.
 
@@ -74,6 +74,7 @@ What is on: `whatson [--hours n]` (calendar items now or soon, and who is where)
 
 - `stopped-locally`: your copy shows none of your list can happen; nothing was sent. `look`, choose again.
 - Taken or full: `find` another, or send fallbacks next time.
+- `boarding-frame-away` (ride away): `schedule add "in <n>s" <act>`, n: `detail`.
 - Unreachable: say where you got to; it isn't the place asked.
 - `which-soul`: pair, or name one with `--soul`.
 - A timeout or `not-connected`: run it once more, with the same `--key` if you gave one; then tell your owner.

@@ -608,15 +608,19 @@ impl Slots {
     }
 
     /// The rides whose seats came to a stop since this was last asked at an earlier `now` (N14): a trip ends there.
-    /// Each with what its end sets back. A ride first asked about is taken as it stands, so a start ends no trip.
+    /// Each with what its end sets back. A ride first asked about is taken as it stands, so a start ends no trip. A
+    /// ride with no seats that move but that moves itself on a course (a balloon's loop aloft) ends its trip when it
+    /// next stands at its home.
     pub fn trip_ended(&mut self, now: Micros) -> Vec<(Id, Vec<(u64, replica::encode::Value)>)> {
         let mut out = Vec::new();
         let things: Vec<Id> = self.trips.keys().copied().collect();
         for thing in things {
-            let away = self
-                .runs
-                .range((thing, 0)..=(thing, u64::MAX))
-                .any(|(_, r)| !matches!(r.table.stopped(now), Ok(Some(_))));
+            let mut seats = self.runs.range((thing, 0)..=(thing, u64::MAX)).peekable();
+            let away = if seats.peek().is_none() && self.moving.contains_key(&thing) {
+                self.at_home(thing, now, 0).is_err()
+            } else {
+                seats.any(|(_, r)| !matches!(r.table.stopped(now), Ok(Some(_))))
+            };
             if let Some((ends, was)) = self.trips.get_mut(&thing) {
                 if *was && !away && !ends.is_empty() {
                     out.push((thing, ends.clone()));
@@ -683,7 +687,14 @@ impl Slots {
             (Ok(Some(s)), Ok(p)) if s.left >= left && p.x == home.x && p.z == home.z => Ok(()),
             _ => refuse(
                 "boarding-frame-away",
-                format!("{} is not at its stop", show(thing)),
+                format!(
+                    "{} is not at its stop{}",
+                    show(thing),
+                    home_back(t, now, left).map_or(String::new(), |b| format!(
+                        "; back at its stop at {b} us, in {} s",
+                        (b - now + 999_999) / 1_000_000
+                    ))
+                ),
             ),
         }
     }
@@ -1569,6 +1580,16 @@ fn next_own(r: &Run, now: Micros) -> Option<Micros> {
                 .map(|(from, _)| from)
         })
         .min()
+}
+
+/// When a thing on the course `t` next stands at its home (station 0, where its course starts) with `left` of the stop
+/// to spare, world µs: now while it does.
+fn home_back(t: &crate::courses::Table, now: Micros, left: Micros) -> Option<Micros> {
+    t.next(now, Some(0), 2)
+        .into_iter()
+        .map(|stop| (stop.arrives.max(now), stop.leaves))
+        .find(|(from, leaves)| leaves.saturating_sub(*from) >= left)
+        .map(|(from, _)| from)
 }
 
 /// The words a refusal adds for a run away from its own stop: when it is back there, world µs, so a client can time

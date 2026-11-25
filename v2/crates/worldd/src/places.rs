@@ -194,6 +194,32 @@ pub fn runs(
     out
 }
 
+/// What the trips of the rides that fly a loop from their stop set back when they end (a balloon's `under_way`,
+/// `sim::courses::rides::trip_ends`): each thing of `places` on a course whose entry in `kinds` has a ride that
+/// [`sim::courses::rides::Ride::loops_aloft`], with its ends. Its trip ends when it next stands at its home, so a balloon
+/// set off once is boarded again.
+pub fn ride_trips(
+    town: &Town,
+    kinds: &[(String, Json)],
+    places: &[PlaceAt],
+) -> Vec<(Id, Vec<(u64, replica::encode::Value)>)> {
+    let things: std::collections::BTreeSet<Id> = places.iter().map(|p| p.thing).collect();
+    things
+        .into_iter()
+        .filter_map(|thing| {
+            let node = town.tree.handle(thing).and_then(|h| town.tree.node(h))?;
+            node.fields().get(&replica::schedule::F_COURSE)?;
+            let name = import_eden::entry_name(node.kind().as_str(), node.fields());
+            let (_, entry) = kinds.iter().find(|(k, _)| k == name)?;
+            sim::courses::rides::Ride::of(entry)?
+                .loops_aloft()
+                .then_some(())?;
+            let ends = sim::courses::rides::trip_ends(entry);
+            (!ends.is_empty()).then_some((thing, ends))
+        })
+        .collect()
+}
+
 /// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
 /// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
 /// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.

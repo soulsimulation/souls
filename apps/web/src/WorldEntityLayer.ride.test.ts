@@ -12,14 +12,14 @@ arrivalMark('card-done');  // motion runs (it is held under the arrival card)
 
 const balloonDef = { tags: ['balloon', 'carrier'], components: { hover: { amp: 0.2, period: 4 } }, make: { kind: 'kit' } };
 
-async function layerWithBalloon() {
+async function layerWithBalloon(name: string | null = 'eden-balloon') {
   (globalThis as { location?: unknown }).location ??= new URL('http://offline.invalid/w/fixture');
   const index = new URL('./gen-mesh/index.ts', import.meta.url).href;
   const hooks = registerHooks({ load(url, context, next) { return url === index ? { format: 'module', shortCircuit: true, source: "export { meshFor } from './registry.ts';" } : next(url, context); } });
   const { WorldEntityLayer } = await import('./WorldEntityLayer.ts').finally(() => hooks.deregister());
   const layer = new WorldEntityLayer((p) => p);
   layer.active = true;
-  const entity = { id: 'e1', name: 'eden-balloon', def: 'd1', in: { parent: 'world' }, seed: 1 };
+  const entity = { id: 'e1', ...(name ? { name } : {}), def: 'd1', in: { parent: 'world' }, seed: 1 };
   const inner = layer as unknown as { model: unknown; drawn: Map<string, unknown>; thingsGroup: THREE.Group };
   inner.model = { entities: new Map([['e1', entity]]), resolvedDef: () => balloonDef, ground: () => ({ extent: [0, 0, 0, 0] }) };
   const obj = new THREE.Group(); obj.position.set(-20, 0, -9); inner.thingsGroup.add(obj);
@@ -50,4 +50,14 @@ test('ride balloon: the drawn entity follows a moving Core twin, grounded then a
   }
   layer.poseOverride('eden-balloon', null); frame(); frame();
   assert.deepEqual(obj.position.toArray(), [-20, 0, -9], 'back at its own pose when the twin is gone');
+});
+
+test('ride balloon: one with no name (a new-engine world records it under its id) is a ride by its id and follows its twin', async () => {
+  const { layer, obj, frame } = await layerWithBalloon(null);
+  assert.deepEqual(layer.rideNames(), ['e1']);
+  const aloft: [number, number, number] = [-105.5, 83.8, -278.8];
+  for (let f = 0; f < 3; f++) { layer.poseOverride('e1', aloft, 0); frame(); }
+  assert.deepEqual(obj.position.toArray().map((v) => +v.toFixed(3)), aloft);
+  layer.poseOverride('e1', null); frame(); frame();
+  assert.deepEqual(obj.position.toArray(), [-20, 0, -9], 'home when the twin is gone');
 });

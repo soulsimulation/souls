@@ -655,6 +655,25 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
         &[("eden:sofa".into(), sofa.clone())],
     );
     assert_eq!(one, seats);
+    // A thing that names the entry but declares no slots of its own (Eden's launch balloon, a `core/balloon` by another
+    // name) has no shape of its own to fit: it takes the entry's seats as the entry places them.
+    let bare = SMALL.replace(
+        r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
+        r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa"},"#,
+    );
+    assert_ne!(bare, SMALL);
+    let im = load(&bare).expect("loads");
+    let (seats, all) = import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa.clone())]);
+    assert_eq!(all, 3);
+    let got: Vec<_> = seats.iter().map(|s| (s.slot, s.at, s.stand)).collect();
+    assert_eq!(
+        got,
+        vec![
+            (1, v(-600, 520, 100), v(-600, 0, 740)),
+            (2, v(0, 520, 100), v(0, 0, 740)),
+            (3, v(600, 520, 100), v(600, 0, 740)),
+        ]
+    );
     // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
     let im = load(SMALL).expect("loads");
     let n = im

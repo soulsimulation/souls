@@ -18,7 +18,7 @@
       "takes": {
         "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
       },
-      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
       "steps": [{"step":"walk_to","point":{"arg":"seat"}}],
       "effects": [
         {"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"},
@@ -31,7 +31,7 @@
       "takes": {
         "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
       },
-      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
       "steps": [{"step":"walk_to","point":{"arg":"seat"}}],
       "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
     }

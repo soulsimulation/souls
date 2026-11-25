@@ -3,8 +3,11 @@
 //! point, that does not return along a line and whose ground is the air is a vehicle that lifts off its stop and comes
 //! back to it: it flies today's loop round its own home (`apps/server/src/god/rides.ts` `balloonRoute`, the ring a
 //! god's balloon flies): straight up above its home, a 150 m ring that rises and falls between 40 m and 80 m over the
-//! ground beneath it, and straight down again, at the ride's own speed, waiting at its home for riders for 30 s each lap.
-//! At its home is the only stop, so riders board and leave there only (`crate::slots` `boardable`), as a punt's.
+//! ground beneath it, and straight down again, at the ride's own speed, waiting at its home for riders for a minute each
+//! lap (a god balloon's wait on today's engine), so a few Souls told when it is back board it together. At its home is
+//! the only stop, so riders board and leave there only (`crate::slots` `boardable`), as a punt's; a Soul refused there
+//! while it is away is told when it is back. Its trip ends when it is home again: what its `start` form set goes back
+//! ([`trip_ends`], `crate::slots::Slots::trip_ended`).
 //!
 //! A ride with two different stops (riders board at one point of the thing and leave at another) moves its riders inside
 //! a thing that stays where it is: its seats move (N14, [`seat_runs`]). The thing gets no course; each seat gets its own,
@@ -38,8 +41,8 @@ use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
 
-/// How long a ride waits at its stop for riders each lap, µs (a punt's 30 s).
-pub const BOARDING: Micros = 30_000_000;
+/// How long a ride waits at its stop for riders each lap, µs: a minute, twice a punt's 30 s.
+pub const BOARDING: Micros = 60_000_000;
 /// The ring's radius, µm (today's 150 m).
 pub const RING: i64 = 150_000_000;
 /// The ring's middle height over the ground beneath it, µm, and how far it rises and falls about it (today's 60 m and
@@ -411,19 +414,19 @@ mod tests {
         let home = Vec3::new(290_000_000, 0, 65_000_000);
         let c = course(&air, home, |_, _| Some(0), 0).expect("a loop");
         let t = c.load().unwrap();
-        // Today's ring round its home takes about six minutes, here at the ride's 3 m/s.
+        // The ring round its home and the wait take about six and a half minutes, here at the ride's 3 m/s.
         assert!(
-            (330_000_000..390_000_000).contains(&t.period),
+            (360_000_000..420_000_000).contains(&t.period),
             "{}",
             t.period
         );
-        // At its home only it stops, for 30 s; after that it is aloft, 40 m to 80 m up on the ring.
+        // At its home only it stops, for a minute; after that it is aloft, 40 m to 80 m up on the ring.
         let stopped = t.stopped(0).unwrap().expect("at its stop");
         assert_eq!(stopped.station, 0);
         assert_eq!(t.at(0).unwrap().0, home);
         let mut highest = 0;
         let mut lowest = i64::MAX;
-        for s in (40..t.period / 1_000_000 - 40).map(|s| s * 1_000_000) {
+        for s in (70..t.period / 1_000_000 - 40).map(|s| s * 1_000_000) {
             assert!(t.stopped(s).unwrap().is_none(), "no stop aloft at {s}");
             let p = t.at(s).unwrap().0;
             if (p.x - home.x).abs() > 1_000_000 || (p.z - home.z).abs() > 1_000_000 {

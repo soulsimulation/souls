@@ -866,10 +866,19 @@ fn with_rides(
     let mut k = 0;
     for t in things.iter_mut() {
         let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
-        let Some(ride) = t
-            .get("def")
+        // The entry a thing names of its own (its world's map: Eden's launch balloon is an `eden:balloon`), else its
+        // kind's, as `import_eden::entry_name` reads the thing.
+        let own = t
+            .get("entry")
             .and_then(Json::str)
-            .and_then(|d| names.get(d))
+            .map(|e| replica::world_model::plain(e).to_owned());
+        let Some(ride) = own
+            .or_else(|| {
+                t.get("def")
+                    .and_then(Json::str)
+                    .and_then(|d| names.get(d))
+                    .cloned()
+            })
             .and_then(|n| rides.get(n.as_str()))
         else {
             continue;
@@ -933,7 +942,7 @@ static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
 /// never read as now's. The build's own hash is in the key too ([`build_id`]), so a deploy of a new build computes them
 /// again.
-const COURSES_FORMAT: &str = "souls/facts-courses/1";
+const COURSES_FORMAT: &str = "souls/facts-courses/2";
 
 /// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
 /// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
@@ -3454,6 +3463,7 @@ fn serve(args: &[String]) -> R<()> {
     stamp("body classes");
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
+    let trips = worldd::places::ride_trips(&town, &kinds, &places);
     stamp("places to sit placed");
     for (thing, r) in &runs {
         // As a balloon's loop is printed (`with_rides`): where a client's own timetable can be checked.
@@ -3652,7 +3662,14 @@ fn serve(args: &[String]) -> R<()> {
             places.clone(),
             runs.clone(),
             builds,
-        );
+        )
+        .map(|mut b| {
+            // A balloon's trip ends when it is home again: what its start form set goes back.
+            for (thing, ends) in &trips {
+                b.slots.trip_ends(*thing, ends.clone());
+            }
+            b
+        });
         stamp("places to sit registered");
         b
     }));

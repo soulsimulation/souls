@@ -804,11 +804,12 @@ export class WorldEntityLayer {
       this.recordedItems.delete(id);this.missingItemAt.delete(id);this.overrides.delete(id);this.overrideYaw.delete(id);if(d)d.settled=false;
     }
   }
-  /** Names of world-level god things with a native ride twin: the god's balloons (def carrier + tag balloon). */
+  /** Names of world-level god things with a native ride twin: the god's balloons (def carrier + tag balloon). One with no
+   *  name (a new-engine world's balloon, recorded under its thing's id) goes by its id. */
   rideNames(): string[] {
     if (!this.model) return [];
     const out: string[] = [];
-    for (const e of this.model.entities.values()) { if (!e.name || e.in.parent !== 'world') continue; const def = this.model.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideBalloonDef(def)) out.push(e.name); }
+    for (const e of this.model.entities.values()) { if (e.in.parent !== 'world') continue; const def = this.model.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideBalloonDef(def)) out.push(e.name || e.id); }
     return out;
   }
   /** D1: native carrier ids of world-level god rides that are not balloons (a ferris wheel, a carousel): the thing stays
@@ -845,7 +846,8 @@ export class WorldEntityLayer {
       for (const e of m.entities.values()) if (e.name && e.in.parent === 'world' && !map.has(e.name)) map.set(e.name, e);
       this.names = { key, size: m.entities.size, map };
     }
-    return this.names.map.get(name);
+    const top = m.entities.get(name);   // a ride with no name goes by its id (rideNames)
+    return this.names.map.get(name) ?? (top && !top.name && top.in.parent === 'world' ? top : undefined);
   }
   /** K4 (0.135): the id of the top-level thing named `name` (a new-engine world records a ride under its thing's id). */
   idNamed(name: string): string | undefined { return this.entityNamed(name)?.id; }

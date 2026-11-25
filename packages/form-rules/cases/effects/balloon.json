@@ -1,9 +1,9 @@
 {
  "format": "souls-effect-cases/1",
- "about": "eden:balloon (core/balloon@1, 4 placed): four riders stand in the basket, entered on foot through its door; the flight starts with ride and ends on its track.",
+ "about": "eden:balloon (core/balloon@1, 4 placed): four riders stand in the basket, entered on foot through its door; the flight starts with ride and ends on its track. Riders board while it stands at home, set off or not: the world takes them only then.",
  "cases": [
   {
-   "name": "balloon_board_then_set_off_then_nobody_gets_on",
+   "name": "balloon_board_then_set_off_then_another_gets_on",
    "state": {
     "actor": "b1",
     "now_us": 0,
@@ -12,7 +12,8 @@
       "loose": [
        "b1",
        "t1",
-       "b2"
+       "b2",
+       "b3"
       ]
      },
      "t1": {
@@ -34,6 +35,13 @@
       ]
      },
      "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
       "kind": "eden:humanoid",
       "hands": {
        "left": null,
@@ -135,15 +143,33 @@
       "this": "t1",
       "form": "board",
       "args": {
-       "seat": "rider_2"
+       "seat": "rider_3"
       }
      },
      "receipt": "rballoon_boar2",
      "expect": {
-      "verdict": "no",
-      "reason": "field_differs",
-      "need": 0
-     }
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "t1",
+         "slot": "rider_3"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     },
+     "actor": "b3"
     }
    ],
    "after": {
@@ -158,6 +184,9 @@
       ],
       "rider_1": [
        "b1"
+      ],
+      "rider_3": [
+       "b3"
       ]
      }
     }
