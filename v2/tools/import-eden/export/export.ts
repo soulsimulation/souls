@@ -52,6 +52,8 @@ if (!live) m.library = coreLibrary();
 // and revision, `def` and `entry`), as a backup's do (X6); a kind with no row names none and keeps its own name.
 const MAP = live ? '' : arg('--map', '');
 const entryOf = MAP ? backup.entryMap(MAP) : null;
+// A row may name the kind its copies are (`kind`): the rack yard's stand, frames, beams and bay are the construction kinds.
+const kindOf = backup.kindMap(arg('--map', live ? 'content/worlds/eden/map.json' : ''));
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -108,7 +110,7 @@ for (const e of m.entities.values()) {
   const d = defOf(e), b = bakeOf(e), s = scale.get(e.id)!, wp = world.get(e.id)!;
   const ref = d.ref;
   keepOwn(d);
-  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
+  if (!kinds.has(ref)) kinds.set(ref, { ref, hash: d.hash, name: kindOf(ref) ?? kindName(d.name), form: d.form, layer: (d as { layer?: string }).layer ?? null, door: isDoorDef(d as never), mesh: d.make.kind === 'mesh', slots: d.slots.length });
   // Its tree parent: the room it sits in (a room slot), else its parent thing (with the slot, if any), else the ground.
   const parent = e.in.parent === 'world' ? null : e.in.parent;
   const pe = parent ? m.entities.get(parent)! : undefined;

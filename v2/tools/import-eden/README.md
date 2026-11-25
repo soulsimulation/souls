@@ -68,6 +68,10 @@ a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entr
 (`content/worlds/mars/map.json`). worldd and the client look an entry up by that name, else by the kind's own. A
 borrowed seat or bed is set at the thing's own slot of the same number (its def's geometry), with the entry's stand
 offset from it; an entry seat the thing has no slot for is not offered.
+A row may instead name the kind its copies are (`kind`): a kind that joins parts (a frame stand, a rack frame, a beam,
+a bay; `content/kinds/construction`) is read by its own name, so a copy that only borrowed its entry would never join.
+The rack yard of `worlds/templates/mars-camp.json` is named so by the Mars map: exported with
+`--map content/worlds/mars/map.json` it is a yard a crew builds from; without the map it is plain things.
 
 Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
 own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a

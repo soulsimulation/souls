@@ -10,7 +10,8 @@
 //                                                by name, its slots and what holds each, what is in it, its marks (R8b)
 //   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
 //                                                things, roads and zones, each with its centre and size in metres (R8d)
-//   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; metres in the parent
+//   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--title '<name>'] [--field n=v ...]   a new thing;
+//                                                metres in the parent; --title is the name Souls see it by ("rack frame 1")
 //   souls-god.mjs place <kind> --path '[[x,z],...]' [--width m] | --area '[[x,z],...]' | --rect cx,cz,w,d
 //                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
 //                                                (metres), as today's place by a shape
@@ -27,7 +28,8 @@
 //   souls-god.mjs hours <id> --open 07:00-15:00 [--open 09:00-13:00@sat,sun ...] | --closed
 //                                                its opening hours, the whole schedule at once (field 81, E7)
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
-//                                                later op names an earlier place by its "name" number
+//                                                later op names an earlier place by its "name" number; a place's
+//                                                "title" is the name Souls see it by, words (field 4, as about --title)
 //   souls-god.mjs weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1]
 //                         [--minutes 5..360]       the world's weather until then; E6's own weather resumes after
 //   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
@@ -91,7 +93,7 @@
 //                                                a calendar entry there (eden:calendar_entry), its words kept by the
 //                                                world for everyone; HH:MM is its next one on the world's calendar
 //   souls-god.mjs about <id> --title '<t>' [--alias '<a>' ...] | --set '{"title":..,"aliases":[..]}' | --clear
-//                                                a place's title and aliases (today's `about`), kept by the world as
+//                                                a place's or a thing's title and aliases (today's `about`), kept as
 //                                                words for everyone; Souls' find matches either
 //   souls-god.mjs status | quit                  the daemon: where it is; ended (`stop` too, today's word)
 //   souls-god.mjs catalog [--category c] [--has slot:sit|form:<f>|point:<role>|state:<field>]   every kind, one each
@@ -246,7 +248,7 @@ export const FIX = {
   'edit.stale': 'something you changed was changed by someone else first: describe, then send again',
   'edit.too-many-operations': 'split the batch: at most 256 operations',
   'edit.too-many-nodes': 'remove less at once',
-  'edit.batch': 'see the usage: souls-god.mjs with no arguments',
+  'edit.batch': 'see the usage: souls-god.mjs with no arguments; a field\'s plain string is a name (namespace:name): give a placed thing the name Souls see it by as "title": "rack frame 1"',
   'edit.unanswered': 'the world did not answer in time (10 s, a land edit 120 s): describe to see whether it was done',
   'undo.nothing': 'there is no edit left to undo',
   'undo.nothing-to-redo': 'redo follows an undo; a new edit clears what could be redone',
@@ -384,17 +386,18 @@ export function opsOf(verb, words, { related = false } = {}) {
   if (verb === 'batch') {
     let ops;
     try { ops = JSON.parse(args.join(' ')); } catch { throw usage('batch takes a JSON list of operations'); }
-    if (!Array.isArray(ops)) throw usage('batch takes a JSON list of operations');
-    // A place's or a move's `at` is metres, as every flag is.
-    return ops.map((o) => (o && Array.isArray(o.at) ? { ...o, at: o.at.map((v) => (Number.isFinite(Number(v)) ? mmOf(v) : v)) } : o));
+    // A place's or a move's `at` is metres, as every flag is (#4700).
+    const metresAt = (o) => (o && Array.isArray(o.at) ? { ...o, at: o.at.map((v) => (Number.isFinite(Number(v)) ? mmOf(v) : v)) } : o);
+    return Array.isArray(ops) ? ops.map(titled).map(metresAt) : ops;
   }
   if (verb === 'place') {
     const on = takeOpt(args, '--on');
     const into = takeOpt(args, '--in') ?? on, at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
     const row = takeOpt(args, '--row'), grid = takeOpt(args, '--grid'), gap = takeOpt(args, '--gap'), along = takeOpt(args, '--along');
+    const title = takeOpt(args, '--title');
     const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
-    if (!args[0] || into === undefined) throw usage('place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]');
-    const one = { op: 'place', kind: args[0], in: node(into), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}) };
+    if (!args[0] || into === undefined) throw usage('place <kind> --in <id> [--at x,y,z] [--slot n] [--title \'<name>\'] [--field n=v]');
+    const one = titled({ op: 'place', kind: args[0], in: node(into), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}), ...(title !== undefined ? { title } : {}) });
     if (row === undefined && grid === undefined && gap === undefined && along === undefined) return [{ ...one, name: 1, ...(at ? { at: xyz(at) } : {}) }];
     return spotsOf(at, row, grid, gap, along).map((p, i) => ({ ...one, name: i + 1, at: p }));
   }
@@ -464,6 +467,15 @@ export function eventOf(words) {
 /** A place's title and aliases (`brief/copy.mjs` F_TITLE, F_ALIASES): the words, or false to clear. */
 export const ABOUT = { title: 4, aliases: 101 };
 const ALIASES_MOST = 64;
+
+/** A place op's `title`, the name Souls see the thing by ("rack frame 1": one line of words, spaces and all), as its
+ *  field 4 in words, as `about --title` sets it after. A field's plain string is a name (`namespace:name`), not words. */
+export function titled(op) {
+  if (!op || typeof op !== 'object' || op.op !== 'place' || op.title === undefined) return op;
+  const { title, ...rest } = op;
+  if (typeof title !== 'string' || !title.trim() || /[\r\n]/.test(title)) throw usage('a title is one line of words');
+  return { ...rest, fields: { ...(rest.fields ?? {}), [ABOUT.title]: { words: title.trim() } } };
+}
 
 /** `about`'s batch: today's `about <ref> --set JSON | --clear`, or its `--title` and `--alias` parts. */
 export function aboutOps(words) {

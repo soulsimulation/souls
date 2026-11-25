@@ -152,6 +152,11 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
     [{ op: 'move', node: 'aa-1', at: [500, 0, -1250] }, { op: 'set', node: 'aa-1', field: 3, value: 7 }]);
   assert.deepEqual(requestOf(['quit']).req, { op: 'stop' }, '#4700: quit ends the creator\'s daemon, as a Soul\'s');
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
+  // a place's title is the name Souls see it by: field 4 in words, from the flag or a batch's "title"
+  assert.deepEqual(opsOf('place', ['mars:rack_upright', '--in', 'aa-0', '--title', 'rack frame 1']), [{ op: 'place', name: 1, kind: 'mars:rack_upright', in: 'aa-0', fields: { 4: { words: 'rack frame 1' } } }]);
+  assert.deepEqual(opsOf('batch', [JSON.stringify([{ op: 'place', name: 1, kind: 'k', in: 'aa-0', title: ' frame 1 ', fields: { 9: 2 } }, { op: 'remove', node: 'aa-1' }])]),
+    [{ op: 'place', name: 1, kind: 'k', in: 'aa-0', fields: { 9: 2, 4: { words: 'frame 1' } } }, { op: 'remove', node: 'aa-1' }]);
+  for (const bad of ['', 'a\nb', 7]) assert.throws(() => opsOf('batch', [JSON.stringify([{ op: 'place', name: 1, kind: 'k', in: 'aa-0', title: bad }])]), (e) => e.code === 'usage');
   // R8c: history asks one place, thing or Soul, with an optional span in world µs
   assert.deepEqual(historyOf(['--at', 'square']), { op: 'history', at: 'square' });
   assert.deepEqual(historyOf(['--thing', 'aa-3', '--since', '100', '--until', '200']), { op: 'history', thing: 'aa-3', since: 100, until: 200 });

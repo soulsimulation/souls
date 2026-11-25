@@ -22,7 +22,7 @@
 //     {"op":"events","since":n}  #3705: the events numbered after `since`, kept or not yet taken; takes nothing
 //   and R7's (#2701), each answer ending with `at` (the copy's version) and `changed` (what changed since the answer
 //   before, by name, capped, the rest counted), the copy brought current first (#4700: a Soul's copy a compare confirmed
-//   within 1 s, holding its own writes, is current already; a copy nothing confirmed for 4 s is compared unasked):
+//   within 1 s, holding its own writes, is current already; a copy nothing confirmed for 3 to 5 s is compared unasked):
 //     {"op":"look"}                       the brief (`../brief/brief.mjs`)
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
@@ -169,7 +169,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { KINDS as TOUCHES, activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
-import { carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries, refreshKindsText } from '../pair/pair.mjs';
@@ -894,9 +894,12 @@ const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 /** A copy confirmed this recently answers a command at once (`refresh`): R8's bound for a copy current enough to
  *  refuse an act, so a check made on it is still made. */
 const RECENT_MS = CURRENT_MS;
-/** A still world's copy is confirmed this often with no command asking (`beat`): one compare of its hashes, so an
- *  act's answer, which does not ask, is not `unconfirmed` after a long turn (#4700's audit: 10 to 60 s). */
-const CONFIRM_EVERY_MS = 4000;
+/** A still world's copy is confirmed about this often with no command asking (`beat`): one compare of its hashes, so
+ *  an act's answer, which does not ask, is not `unconfirmed` after a long turn (#4700's audit: 10 to 60 s). Each wait
+ *  is drawn afresh from 3 to 5 s, so daemons that signed in together (a world's restart) do not ask in step. */
+const CONFIRM_EVERY_MS = 4000, CONFIRM_SPREAD_MS = 2000;
+const confirmWait = () => CONFIRM_EVERY_MS - CONFIRM_SPREAD_MS / 2 + Math.random() * CONFIRM_SPREAD_MS;
+let confirmAfter = confirmWait();
 
 const OPS = new Set([
   'carry',
@@ -2067,12 +2070,13 @@ async function give(req) {
     req = { ...req, to: Array.isArray(req.to) ? req.to.map(named) : named(req.to) };
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
-  if ((req.do === 'accept' || req.do === 'decline') && req.offer !== undefined && !ID.test(String(req.offer))) {
+  if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
     const w = String(req.offer).toLowerCase().replace(/_/g, '-');
-    const e = logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w))
-      // offered while this daemon was not running: the newest activity of that kind in the copy
+    // A leave by word is of the newest activity of that kind in the copy (this Soul may have made it); an answer is of
+    // the newest offer of it to this Soul, else, offered while this daemon was not running, the newest in the copy.
+    const e = (req.do === 'leave' ? null : logged.findLast((x) => (x.kind === 'together' || x.kind === 'carry' || x.kind === 'give') && x.what === 'offered' && (x.touch === w || x.kind === w)))
       ?? (() => { const a = activityNamed(activitiesIn(kinds), w) ?? (TOUCHES[w] ? { kind: TOUCHES[w].split('@')[0].replace(/_activity$/, '') } : null); const r = a && rows.filter((x) => x.kind === `${a.kind}_activity`).at(-1); return r ? { offer: r.id } : null; })();
-    if (!e) return { ok: false, code: 'together-no-offer', detail: `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
+    if (!e) return { ok: false, code: 'together-no-offer', detail: req.do === 'leave' ? `no ${w.slice(0, 40)} here: \`find activity\` lists the activities in the copy` : `no open offer of ${w.slice(0, 40)} to this Soul: \`wait\` shows each offer and its id`, ...ageNow() };
     req = { ...req, offer: e.offer };
   }
   // #4700: a withdraw by its word is of this Soul's own newest offer of it: the node of that kind its offer made (not
@@ -2110,6 +2114,10 @@ async function carry(req) {
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
   const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
   const me = all.find((r) => r.soul === ME)?.id ?? null;
+  // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
+  if (req.do === 'offer' && Array.isArray(req.to)) {
+    req = { ...req, to: req.to.map((w) => (ID.test(String(w)) ? w : all.find((r) => r.soul && r.id !== me && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w)) };
+  }
   // Who is in each crew, as this Soul knows it: the bodies it offered the crew to, or the one that offered it.
   state.crews ??= {};
   const crews = crewsIn(rows);
@@ -2124,6 +2132,10 @@ async function carry(req) {
   }
   for (const id of Object.keys(state.crews)) if (!rows.has(id)) delete state.crews[id];
   if (req.do === 'list') return closing({ ok: true, crews: crews.map((c) => ({ ...c, ...(state.crews[c.id] ? { with: state.crews[c.id] } : {}) })) }, null, { age });
+  // A thing named by its name ("rack frame 1"), as look and find show it, is that thing's id.
+  const named = byName(req, rows);
+  if (named.code) return closing({ ok: false, code: named.code, detail: named.detail }, null, { age });
+  req = named;
   const kindOf = (id) => rows.get(id)?.entry ?? rows.get(id)?.kind;
   const at = placer(rows, (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
   // Where a crew's load is now: between its front and its back (it is carried at their middle), else where the copy
@@ -2309,8 +2321,8 @@ function idleCheck(now) {
 function beat() {
   const now = Date.now(), s = state.schedule;
   idleCheck(now);
-  // Nothing confirmed the copy or was sent for CONFIRM_EVERY_MS (a sent intent's receipt brings its own follow).
-  if (signedIn && !syncing && confirmedAt !== null && performance.now() - Math.max(confirmedAt, sentAt) > CONFIRM_EVERY_MS) refresh();
+  // Nothing confirmed the copy or was sent for about CONFIRM_EVERY_MS (a sent intent's receipt brings its own follow).
+  if (signedIn && !syncing && confirmedAt !== null && performance.now() - Math.max(confirmedAt, sentAt) > confirmAfter) { confirmAfter = confirmWait(); refresh(); }
   const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
   if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
   s.beat = now;

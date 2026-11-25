@@ -25,7 +25,7 @@ export function coreAssets(): Record<string, AssetInfo> {
 }
 
 export type Upload = { sha: string; kind: string; ext: string; bytes: number; name: string | null };
-type MapRow = { def: string; entry?: string; waiting?: string; issue?: number; note?: string };
+type MapRow = { def: string; entry?: string; kind?: string; waiting?: string; issue?: number; note?: string };
 
 /** The world ids a backup file holds (one, for a world's own sim.db). */
 export function worldsIn(path: string): string[] {
@@ -48,6 +48,15 @@ const mapKey = (ref: string) => ref.replace(/^core\//, 'core-');
 export function entryMap(mapPath: string): (ref: string) => string | undefined {
   const rows = (JSON.parse(readFileSync(mapPath, 'utf8')).rows as MapRow[]).filter((r) => r.entry);
   const by = new Map(rows.map((r) => [mapKey(r.def), r.entry!]));
+  return (ref) => by.get(mapKey(ref));
+}
+
+/** A world map's kind for each def ref whose copies are that kind (rows with a `kind`). A kind that joins parts (a rack
+ *  frame, a beam, a frame stand, a bay) is read by its own name, so its copies are of it rather than borrowing its entry. */
+export function kindMap(mapPath: string): (ref: string) => string | undefined {
+  if (!existsSync(mapPath)) return () => undefined;
+  const rows = (JSON.parse(readFileSync(mapPath, 'utf8')).rows as MapRow[]).filter((r) => r.kind);
+  const by = new Map(rows.map((r) => [mapKey(r.def), r.kind!]));
   return (ref) => by.get(mapKey(ref));
 }
 
@@ -100,7 +109,7 @@ export function fromBackup(path: string, world: string, mapPath: string, assetsD
     const thing = (e: Entity, d: { ref: string; make: unknown }) => {
       const asset = named([d.make, e.state, e.params]);
       const row = map?.get(mapKey(d.ref));
-      const none = !map ? 'no map in the repository' : !row ? 'no row in the map' : row.entry ? null : `waiting${row.waiting ? ' ' + row.waiting : ''}${row.issue ? ` (#${row.issue})` : ''}`;
+      const none = !map ? 'no map in the repository' : !row ? 'no row in the map' : row.entry || row.kind ? null : `waiting${row.waiting ? ' ' + row.waiting : ''}${row.issue ? ` (#${row.issue})` : ''}`;
       return { ...(asset.length ? { asset } : {}), ...(row?.entry ? { entry: row.entry } : {}), ...(none ? { noEntry: none } : {}) };
     };
     const file = readFileSync(path);

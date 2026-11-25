@@ -2793,6 +2793,423 @@
           }
         }
       ]
+    },
+    {
+      "note": "the rack yard (0.135): a frame stand holding two pallet-rack frames, two loose beams beside it and the site of one bay, on the open ground south of the campfire, in the construction kinds a crew builds with (content/kinds/construction; content/worlds/mars/map.json names each copy's kind)",
+      "group": "yard",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-frame-stand",
+            "version": 1,
+            "description": "A low timber stand that holds two pallet-rack frames upright until a crew takes one.",
+            "tags": [
+              "build",
+              "rack",
+              "stand",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "size": [
+                      1.42,
+                      0.1,
+                      0.6
+                    ],
+                    "tint": "wood"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "wood": {
+                "type": "color",
+                "default": "#a07a4f",
+                "doc": "timber colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.42,
+                0.1,
+                0.6
+              ]
+            },
+            "palette": {
+              "wood": "#a07a4f"
+            },
+            "slots": [
+              {
+                "id": "frame_1",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0.1,
+                  -0.15
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "frame_2",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0.1,
+                  0.15
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ],
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-rack-frame",
+            "version": 1,
+            "description": "A pallet-rack upright frame: two steel posts 2.4 m tall, braced; two people carry it.",
+            "tags": [
+              "build",
+              "rack",
+              "frame",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.572,
+                      1.219,
+                      0
+                    ],
+                    "size": [
+                      0.076,
+                      2.438,
+                      0.076
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.572,
+                      1.219,
+                      0
+                    ],
+                    "size": [
+                      0.076,
+                      2.438,
+                      0.076
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.319,
+                      0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      1.238,
+                      0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      2.307,
+                      0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "steel": {
+                "type": "color",
+                "default": "#3f6fa8",
+                "doc": "frame colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.22,
+                2.438,
+                0.076
+              ]
+            },
+            "palette": {
+              "steel": "#3f6fa8"
+            },
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-rack-beam",
+            "version": 1,
+            "description": "A pallet-rack beam, 2.7 m of orange steel; two people carry it.",
+            "tags": [
+              "build",
+              "rack",
+              "beam",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.051,
+                      0
+                    ],
+                    "size": [
+                      0.05,
+                      0.102,
+                      2.742
+                    ],
+                    "tint": "beam"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "beam": {
+                "type": "color",
+                "default": "#e0782a",
+                "doc": "beam colour"
+              }
+            },
+            "size": {
+              "box": [
+                0.05,
+                0.102,
+                2.742
+              ]
+            },
+            "palette": {
+              "beam": "#e0782a"
+            },
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-rack-bay",
+            "version": 1,
+            "description": "The site of one pallet-rack bay: two frames stand in it and beams join them.",
+            "tags": [
+              "build",
+              "rack",
+              "bay",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "none"
+            },
+            "size": {
+              "box": [
+                1.219,
+                2.438,
+                2.972
+              ]
+            },
+            "slots": [
+              {
+                "id": "upright_a",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0,
+                  -1.448
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "upright_b",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0,
+                  1.448
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_high_l",
+                "kind": "socket",
+                "p": [
+                  -0.572,
+                  0.863,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_high_r",
+                "kind": "socket",
+                "p": [
+                  0.572,
+                  0.863,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_low_l",
+                "kind": "socket",
+                "p": [
+                  -0.572,
+                  0.254,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_low_r",
+                "kind": "socket",
+                "p": [
+                  0.572,
+                  0.254,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ],
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "place",
+          "def": "mars-frame-stand@1",
+          "name": "frame-stand",
+          "tmp": "$fs",
+          "p": [
+            -6,
+            20
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-frame@1",
+          "name": "rack-frame-1",
+          "in": {
+            "parent": "$fs",
+            "slot": "frame_1"
+          },
+          "p": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-frame@1",
+          "name": "rack-frame-2",
+          "in": {
+            "parent": "$fs",
+            "slot": "frame_2"
+          },
+          "p": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-beam@1",
+          "name": "rack-beam-1",
+          "p": [
+            -4,
+            20
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-beam@1",
+          "name": "rack-beam-2",
+          "p": [
+            -3.7,
+            20
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-bay@1",
+          "name": "rack-bay",
+          "p": [
+            6,
+            20
+          ]
+        }
+      ]
     }
   ]
 }

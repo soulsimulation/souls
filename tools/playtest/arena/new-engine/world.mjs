@@ -18,12 +18,13 @@ const EXPORT = join(REPO_ROOT, 'v2/tools/import-eden/export/export.ts');
 /** run.sh serves its one world under this name (`/w/dev/`). */
 export const WORLD = 'dev';
 
-/** The template's facts, exported once into `out` (the same template gives the same bytes). → the facts' path */
-export function exportFacts(template, out) {
+/** The template's facts, exported once into `out` (the same template gives the same bytes); `map`, a world's map
+ *  (`content/worlds/<world>/map.json`), names its things' entries and kinds. → the facts' path */
+export function exportFacts(template, out, map = null) {
   const t = resolve(REPO_ROOT, template);
   if (!existsSync(t)) throw new Error(`no template ${template}`);
   mkdirSync(resolve(out, '..'), { recursive: true });
-  execFileSync(process.execPath, [EXPORT, '--template', t, '--out', out], { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
+  execFileSync(process.execPath, [EXPORT, '--template', t, '--out', out, ...(map ? ['--map', resolve(REPO_ROOT, map)] : [])], { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
   return out;
 }
 

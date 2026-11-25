@@ -44,7 +44,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 
 | Verb | What it does |
 | --- | --- |
-| `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
+| `place <kind> --in <id> [--at x,y,z] [--slot n] [--title '<name>'] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id. `--title` is the name Souls see it by and can call it (`rack frame 1`) |
 | `place <kind> --path '[[x,z],...]' [--width m]` | a road, footpath, hedge or wall along a line (metres), on the open ground unless `--in` |
 | `place <kind> --area '[[x,z],...]' \| --rect cx,cz,w,d \| --circle cx,cz,r` | a lawn, pitch, bed or named area (`eden:place`, with `--field 15=<its kind>`) over an area |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
@@ -53,7 +53,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
-| `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
+| `about <id> --title '<t>' [--alias '<a>' ...]` | a place's or a thing's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
@@ -103,13 +103,17 @@ A batch is a JSON list. Each operation is one of:
 ```json
 {"op": "place", "name": 1, "kind": "room", "in": "<id>", "at": [0, 0, 0]}
 {"op": "move", "node": "<id or name>", "at": [1, 0, 0.5]}
-{"op": "set", "node": "<id or name>", "field": 1, "value": 1}
+{"op": "set", "node": "<id or name>", "field": 4, "value": {"words": "the old mill"}}
 {"op": "remove", "node": "<id or name>"}
 ```
 
 `name` is a number you choose for each place in the batch. A later operation can use that number instead of an id,
 for example placing a thing `"in": 1` inside the room the same batch places. The answer maps each name to the id the
 world gave it: `"names": {"1": "<id>", "2": "<id>"}`.
+
+A place may add `"title": "<words>"`: the name Souls see the thing by in `look` and `find`, and can call it by
+(`part take <crew> "rack frame 1"`). It is field 4 as words, as `about --title` sets it later. A field's plain string
+is a name (`namespace:name`), never words: `"fields": {"4": "frame 1"}` is refused.
 
 Example: a room with two things in it, in one step.
 
