@@ -1331,6 +1331,40 @@ fn id_of(header: &Header) -> String {
 /// Writes `bytes` under `path` once (rule 4): whole and synced under `<name>.tmp`, then linked to its name, which fails
 /// if the name exists. A writer killed mid-write leaves only its `.tmp`, which the next write of that name replaces; a
 /// file under a final name is always whole. A name already written must hold the same bytes.
+/// A write the public writer runs beside its own on a scoped thread, or here, in turn, when the OS makes no thread:
+/// a refused thread costs only the overlap, as the writes were before, never the stream (`Scope::spawn` would
+/// panic the writer's thread outside its refusals, and its health would still say serving).
+enum Beside<'scope, T> {
+    Thread(std::thread::ScopedJoinHandle<'scope, R<T>>),
+    Here(R<T>),
+}
+
+fn beside<'scope, T: Send + 'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    write: impl Fn() -> R<T> + Send + Copy + 'scope,
+) -> Beside<'scope, T> {
+    #[cfg(test)]
+    if tests::NO_THREADS.get() {
+        return Beside::Here(write());
+    }
+    match std::thread::Builder::new().spawn_scoped(s, write) {
+        Ok(h) => Beside::Thread(h),
+        Err(_) => Beside::Here(write()),
+    }
+}
+
+impl<T> Beside<'_, T> {
+    /// The write's outcome; a panic on its thread is a refused write (`stream-write`).
+    fn join(self, panicked: &'static str) -> R<T> {
+        match self {
+            Beside::Thread(h) => h
+                .join()
+                .unwrap_or_else(|_| Err(fault("stream-write", panicked))),
+            Beside::Here(done) => done,
+        }
+    }
+}
+
 fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
@@ -1539,14 +1573,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         std::thread::scope(|s| {
             let others: Vec<_> = rest
                 .iter()
-                .map(|o| s.spawn(move || spool.object(&key(o), o)))
+                .map(|o| beside(s, move || spool.object(&key(o), o)))
                 .collect();
             let mut done = spool.object(&key(first), first);
             for h in others {
-                let written = h
-                    .join()
-                    .unwrap_or_else(|_| Err(fault("stream-write", "an object's writer panicked")));
-                done = done.and(written);
+                done = done.and(h.join("an object's writer panicked"));
             }
             done
         })
@@ -3592,11 +3623,14 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.generation_dir().join(format!("{number}.text")),
         );
         let (part_written, text_written) = std::thread::scope(|s| {
-            let text = s.spawn(|| immutable(&text_file, &text));
-            (immutable(&part_file, &bytes), text.join())
+            let text = beside(s, || immutable(&text_file, &text));
+            (
+                immutable(&part_file, &bytes),
+                text.join("the text file's writer panicked"),
+            )
         });
         part_written?;
-        text_written.map_err(|_| fault("stream-write", "the text file's writer panicked"))??;
+        text_written?;
         lap.mark(8);
         self.last_to = Some(sp.to);
         if let Some(began) = began {

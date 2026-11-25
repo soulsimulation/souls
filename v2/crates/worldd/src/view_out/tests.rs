@@ -21,6 +21,8 @@ thread_local! {
     pub(super) static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// How many whole-tree projections the public writer's idle has made (#3603).
     pub(super) static IDLE_PROJECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The OS makes no thread for the writer's side-by-side writes ([`super::beside`]).
+    pub(super) static NO_THREADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn header() -> Header {
@@ -3799,6 +3801,24 @@ fn i4192_takes_sits_and_links_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts
 }
 
 fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
+    i4192_run_with(incremental, false)
+}
+
+/// The writer's side-by-side writes (a part's recovery objects to the spool, its two files) are done in turn on its own
+/// thread when the OS makes none, never a panic of the stream's thread: the same files and spool, byte for byte.
+#[test]
+fn a_writer_with_no_thread_to_spare_writes_the_same_parts_in_turn() {
+    let (beside, _) = i4192_run_with(true, true);
+    NO_THREADS.set(true);
+    let (in_turn, _) = i4192_run_with(true, true);
+    NO_THREADS.set(false);
+    assert!(beside.len() > 1000, "the log published");
+    assert!(beside == in_turn, "the parts written in turn differ");
+}
+
+/// `spooled`: the recovery chain goes to a spool beside the views (R15), as a served world's does, and the spool's
+/// files are compared too.
+fn i4192_run_with(incremental: bool, spooled: bool) -> (Vec<u8>, u64) {
     use replica::effects::TransferRec;
     let h = header();
     let mut actual = Replica::restored(
@@ -3806,7 +3826,10 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
         replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
         0,
     );
-    let d = scratch(&format!("4192-rows-{incremental}"));
+    let d = scratch(&format!(
+        "4192-rows-{incremental}-{spooled}-{}",
+        NO_THREADS.get()
+    ));
     let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
     let store = directoryd::directory::store::Memory::default();
     let words = Arc::new(
@@ -3823,7 +3846,7 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
     let said = words
         .write(b"words on the child", Audience::Everyone, child)
         .unwrap();
-    let mut out = PublicWriter::open(
+    let mut out = PublicWriter::open_spooled(
         PublicStart {
             root: &d.join("views"),
             header: &h,
@@ -3837,6 +3860,8 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
             history: None,
         },
         &store,
+        Closed::default(),
+        spooled.then(|| (d.join("spool"), "test-store".to_owned())),
     )
     .unwrap();
     out.incremental = incremental;
@@ -3945,6 +3970,32 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
         all.extend(bytes);
     }
     all.extend(wire(out.public_player().state().clone()).unwrap());
+    if spooled {
+        // Every file under the spool, by its path there.
+        let mut todo = vec![d.join("spool")];
+        let mut spool = Vec::new();
+        while let Some(dir) = todo.pop() {
+            for e in fs::read_dir(&dir).expect("the spool") {
+                let path = e.expect("an entry").path();
+                if path.is_dir() {
+                    todo.push(path);
+                } else {
+                    let name = path
+                        .strip_prefix(d.join("spool"))
+                        .unwrap()
+                        .display()
+                        .to_string();
+                    spool.push((name, fs::read(&path).expect("its bytes")));
+                }
+            }
+        }
+        spool.sort();
+        assert!(!spool.is_empty(), "the recovery chain went to the spool");
+        for (name, bytes) in spool {
+            all.extend(name.into_bytes());
+            all.extend(bytes);
+        }
+    }
     (all, out.whole_cuts - whole)
 }
 
