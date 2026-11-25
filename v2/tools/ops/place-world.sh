@@ -16,7 +16,9 @@
 #                                                 install's view key (--view-key /etc/souls/view.key, made here once
 #                                                 when absent), which checks a signed-in page's view token, and
 #                                                 the world's uploads folder (--uploads <folder>/uploads, #1960), where
-#                                                 its creator's checked models and pictures are kept and served by hash
+#                                                 its creator's checked models and pictures are kept and served by hash,
+#                                                 and the directory's mailbox (--mailbox <directory> --mailbox-key
+#                                                 /etc/souls/mailbox.key, R13), the owner's messages to its Souls
 #   /etc/systemd/system/worldd@<name>.service.d/place.conf   WORLDD_SOCKET, the socket worldd serve binds
 #   /etc/systemd/system/multi-user.target.wants/{worldd,souls-gateway}@<name>.service   the instances, enabled
 #   /var/lib/souls/views/w/<name>/{views,history}  links the origin serves, so the page's ?world=<name> finds them
@@ -109,12 +111,17 @@ if [ "$DATA_ONLY" = 0 ]; then
   # --uploads (#1960): the creator's uploads, kept in the world's folder (the gateway makes it if missing; its checker
   # is the install's assets-check beside gatewayd); after the view key, as existing worlds' files gain it by hand.
   VIEW_KEY=/etc/souls/view.key
-  if [ ! -e "$R$VIEW_KEY" ]; then
-    (umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$R$VIEW_KEY")
-    if [ -z "$R" ] && getent group souls > /dev/null 2>&1; then chown root:souls "$VIEW_KEY"; fi
-    chmod 640 "$R$VIEW_KEY"
-  fi
-  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s --wake %s --world-name %s%s --view-key %s --uploads %s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$DATA/worlds/alarms.sock" "$NAME" "$EXCHANGE" "$VIEW_KEY" "$WORLD/uploads")
+  # --mailbox (R13): the owner's messages from the page reach the Soul's client through the installed directory, with
+  # the install's mailbox key (install.sh writes it once, beside the view key; made here too when absent). Without it
+  # the page's every send is refused `no-mailbox`. Last, as existing worlds' files gain it by hand (install.md).
+  MAILBOX_KEY=/etc/souls/mailbox.key
+  for k in "$VIEW_KEY" "$MAILBOX_KEY"; do
+    [ ! -e "$R$k" ] || continue
+    (umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$R$k")
+    if [ -z "$R" ] && getent group souls > /dev/null 2>&1; then chown root:souls "$k"; fi
+    chmod 640 "$R$k"
+  done
+  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s --wake %s --world-name %s%s --view-key %s --uploads %s --mailbox %s --mailbox-key %s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$DATA/worlds/alarms.sock" "$NAME" "$EXCHANGE" "$VIEW_KEY" "$WORLD/uploads" "${DIRECTORY:-127.0.0.1:7310}" "$MAILBOX_KEY")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
   if [ -e "$R$DROPIN" ]; then [ "$(cat "$R$DROPIN")" = "$DROP_TEXT" ] || die "world configuration differs"; else printf '%s\n' "$DROP_TEXT" > "$R$DROPIN"; fi

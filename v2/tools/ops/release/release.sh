@@ -34,6 +34,11 @@
 #                                  $ETC/cutover-binding.json, as the launcher finds it) that names no catalogue gets
 #                                  bodiesDir $LIB/web/assets/bodies: its page draws the bodies Souls wear, served at
 #                                  /w/<slug>/v2/bodies/ (the launcher reads the file again within a second)
+#   mailbox plan|apply|check       the owner's messages (R13): plan prints what apply would change (the mailbox key,
+#                                  made once, 0600; `--mailbox-key` in directory.args; `--mailbox <directory>
+#                                  --mailbox-key` in each gateway-<world>.env), apply changes it; check sends one
+#                                  owner's message for a grant no Soul holds through each world's gateway and wants it
+#                                  accepted. move applies before the gateways restart and checks after the directory
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
@@ -284,6 +289,116 @@ bodies_binding() {
   fi
 }
 
+# The owner's messages (R13): every world's gateway reads them from the directory with the install's mailbox key
+# (gatewayd --mailbox <directory> --mailbox-key <key>; directoryd --mailbox-key <key>). Without them a message sent
+# from a Soul's card is refused `no-mailbox`. MAILBOX_CFG <etc> plan|apply [<uid> <gid>]: the key made once (0600, the
+# services' user), `--mailbox-key` added to directory.args and both flags to each gateway-<world>.env, when missing;
+# a flag already there is left as it is. One line per change (`would …` in a plan), then `changed:` and what changed:
+# `directory` and the worlds whose gateway file changed. Nothing when there is no directory.args (no directory here).
+MAILBOX_CFG='const fs = require("fs"), crypto = require("crypto"), path = require("path");
+const [etc, mode, uid, gid] = process.argv.slice(1), apply = mode === "apply", key = path.join(etc, "mailbox.key"), changed = [];
+const say = (what) => console.log(`mailbox: ${apply ? "" : "would "}${what}`);
+const args = path.join(etc, "directory.args");
+if (!fs.existsSync(args)) { console.log(`mailbox: no directory here (${args}); nothing to set`); console.log("changed:"); process.exit(0); }
+const words = (v) => v.replace(/^(["\x27])(.*)\1$/, "$2").split(/\s+/).filter(Boolean);
+const flag = (v, f) => { const w = words(v), i = w.indexOf(f); return i < 0 ? null : (w[i + 1] ?? ""); };
+const add = (v, more) => { const q = /^(["\x27]).*\1$/.test(v) ? v[0] : ""; const inner = q ? v.slice(1, -1) : v; return q + (inner.trimEnd() + " " + more).trim() + q; };
+// edit <file> <NAME> <fn(value) -> new value | null>: the line NAME=…, rewritten in place (same mode and owner)
+const edit = (file, name, fn) => {
+  const text = fs.readFileSync(file, "utf8"), re = new RegExp(`^(\\s*(?:export\\s+)?${name}=)(.*)$`, "m"), m = text.match(re);
+  if (!m) { console.log(`mailbox: ${file} has no ${name} line; left as it is`); return false; }
+  const next = fn(m[2]);
+  if (next === null) return false;
+  if (apply) {
+    const st = fs.statSync(file), tmp = `${file}.mailbox.new`;
+    fs.writeFileSync(tmp, text.replace(re, (_, k) => k + next), { mode: st.mode & 0o777 });
+    if (process.getuid() === 0) fs.chownSync(tmp, st.uid, st.gid);
+    fs.renameSync(tmp, file);
+  }
+  return true;
+};
+if (!fs.existsSync(key)) {
+  say(`make ${key} (a new key, 0600)`);
+  if (apply) {
+    fs.writeFileSync(key, crypto.randomBytes(32).toString("hex"), { mode: 0o600, flag: "wx" });
+    if (process.getuid() === 0 && uid) fs.chownSync(key, Number(uid), Number(gid));
+  }
+  changed.push("key");
+}
+const listen = flag(fs.readFileSync(args, "utf8").match(/^\s*(?:export\s+)?DIRECTORYD_ARGS=(.*)$/m)?.[1] ?? "", "--listen") || "127.0.0.1:7310";
+if (edit(args, "DIRECTORYD_ARGS", (v) => flag(v, "--mailbox-key") !== null ? null : add(v, `--mailbox-key ${key}`))) {
+  say(`add --mailbox-key ${key} to ${args}`); changed.push("directory");
+}
+for (const f of fs.readdirSync(etc).filter((f) => /^gateway-.+\.env$/.test(f)).sort()) {
+  const file = path.join(etc, f), world = f.slice(8, -4);
+  let more = "";
+  if (edit(file, "GATEWAYD_ARGS", (v) => {
+    more = [flag(v, "--mailbox") === null ? `--mailbox ${listen}` : "", flag(v, "--mailbox-key") === null ? `--mailbox-key ${key}` : ""].filter(Boolean).join(" ");
+    return more ? add(v, more) : null;
+  })) { say(`add ${more} to ${file}`); changed.push(world); }
+}
+if (!changed.length) console.log("mailbox: the key, the directory and every gateway already have it");
+console.log(`changed: ${changed.join(" ")}`);'
+# MAILBOX_PROBE <etc>: through each world's gateway (its gateway-<world>.env: --listen, --view-key), as an owner's page
+# sends: a view token for a grant no Soul holds (minted with the install's view key, two minutes), then `put` one
+# message for it. `accepted` is the directory's id for it: the gateway has its mailbox and the directory took its key.
+# Nothing reads the message (no client signs in for that grant, no page holds it) and it expires unread. Exits 1
+# unless every gateway accepted.
+MAILBOX_PROBE='const fs = require("fs"), crypto = require("crypto"), path = require("path");
+const etc = process.argv[1], GRANT = `soul-${"f".repeat(32)}-0`;
+const files = fs.readdirSync(etc).filter((f) => /^gateway-.+\.env$/.test(f)).sort();
+const flag = (v, f) => { const w = v.replace(/^(["\x27])(.*)\1$/, "$2").split(/\s+/), i = w.indexOf(f); return i < 0 ? null : w[i + 1]; };
+const cborText = (s) => { const b = Buffer.from(s); const h = b.length < 24 ? [0x60 + b.length] : b.length < 256 ? [0x78, b.length] : [0x79, b.length >> 8, b.length & 255]; return Buffer.concat([Buffer.from(h), b]); };
+const probe = (world, listen, viewKey) => new Promise((done) => {
+  const expires = Math.floor(Date.now() / 1000) + 120, body = `view.${expires}.${GRANT}`;
+  const token = `${body}.${crypto.createHmac("sha256", Buffer.from(fs.readFileSync(viewKey, "utf8").trim(), "hex")).update(body).digest("hex")}`;
+  const ws = new WebSocket(`ws://${listen}/v2/ws`); ws.binaryType = "arraybuffer";
+  let step = 0;
+  const end = (what) => { clearTimeout(t); try { ws.close(); } catch {} done(what); };
+  const t = setTimeout(() => end("no-answer"), 10_000);
+  ws.onopen = () => ws.send(Buffer.from([0xa2, 0x01, 0x02, 0x02, 0x40]));
+  ws.onerror = () => end("not-reachable");
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") {
+      if (!ev.data.startsWith("{\"sent\"")) return;
+      const s = JSON.parse(ev.data).sent ?? {};
+      return end(s.id ? `accepted ${s.id}` : `refused ${s.refused}`);
+    }
+    const text = Buffer.from(ev.data).toString("latin1");
+    if (step === 0) { step = 1; return ws.send(Buffer.concat([Buffer.from([0xa1, 0x01]), cborText(token)])); }
+    if (step === 1 && text.includes("view.started")) { step = 2; return ws.send(`put ${GRANT}\nrelease check: a message for no Soul; it expires unread`); }
+    if (step === 1 && text.includes("refused")) return end("refused view-token");
+  };
+});
+(async () => {
+  let bad = 0;
+  if (!files.length) console.log("mailbox: no gateway here to check");
+  for (const f of files) {
+    const world = f.slice(8, -4), v = fs.readFileSync(path.join(etc, f), "utf8").match(/^\s*(?:export\s+)?GATEWAYD_ARGS=(.*)$/m)?.[1] ?? "";
+    const listen = flag(v, "--listen"), viewKey = flag(v, "--view-key");
+    const got = !listen ? "refused no-listen" : !viewKey ? "refused no-view-key" : await probe(world, listen, viewKey);
+    if (!got.startsWith("accepted")) bad++;
+    console.log(`mailbox: ${world}: an owner send ${got.startsWith("accepted") ? `is ${got}` : `was not accepted (${got})`}`);
+  }
+  process.exit(bad ? 1 : 0);
+})();'
+
+# mailbox plan|apply|check: MAILBOX_CFG's plan or change (apply prints `changed:` last), or MAILBOX_PROBE's check.
+mailbox() {
+  local u='' g=''
+  case ${1:-} in
+    plan) node -e "$MAILBOX_CFG" "$ETC" plan ;;
+    apply)
+      if id "${RELEASE_ACCOUNT:-souls}" > /dev/null 2>&1; then
+        u=$(id -u "${RELEASE_ACCOUNT:-souls}") g=$(id -g "${RELEASE_ACCOUNT:-souls}")
+      fi
+      node -e "$MAILBOX_CFG" "$ETC" apply "$u" "$g"
+      ;;
+    check) node -e "$MAILBOX_PROBE" "$ETC" ;;
+    *) die "mailbox plan|apply|check" ;;
+  esac
+}
+
 bodies() {
   case ${1:-} in
     worlds) shift && [ $# -ge 1 ] || die "bodies worlds <page.tar> [<world>...]"; bodies_worlds "$@" ;;
@@ -324,8 +439,17 @@ move() {
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done
+  # The owner's messages (R13): the key and the flags, when missing, before the gateways and the directory restart on
+  # the release below and read them. A rerun of a release whose gateways or directory had moved restarts what changed.
+  local mb changed
+  mb=$(mailbox apply) || refuse "release.mailbox-config: $(tail -1 <<< "$mb")"
+  grep -v '^changed:' <<< "$mb" || true
+  changed=$(sed -n 's/^changed: *//p' <<< "$mb")
   if [ -f "$rel/moved/gateway" ]; then
     echo "move: the gateway already moved by this release"
+    for w in $changed; do
+      case $w in key | directory) ;; *) echo "move: souls-gateway@$w restarts for its mailbox"; systemctl restart "souls-gateway@$w" || true ;; esac
+    done
   else
     echo "move: gateway-upgrade to ${gw:0:16}…"
     install -m 755 "$rel/bin/assets-check" "$LIB/.assets-check.new" && mv "$LIB/.assets-check.new" "$LIB/assets-check"
@@ -360,6 +484,10 @@ move() {
   # Last, once the worlds and the gateway are on the release: the directory, then the viewers' origin. Each restart is
   # a blip of a second or two; the page tries again.
   local s l
+  if [ -f "$rel/moved/directory" ] && grep -qw directory <<< "$changed"; then
+    echo "move: souls-directory.service restarts for its mailbox key"
+    systemctl restart souls-directory.service || true
+  fi
   for s in $SERVICES; do
     case $s in
       directory)
@@ -373,6 +501,12 @@ move() {
         ;;
     esac
   done
+  # After the restarts: an owner's send through each world's gateway must be accepted, not refused `no-mailbox`.
+  if [ -f "$ETC/directory.args" ] && grep -qw directory <<< " $SERVICES "; then
+    local seen
+    seen=$(mailbox check) || { echo "$seen"; refuse "release.mailbox-unreachable: an owner's send was not accepted"; }
+    echo "$seen"
+  fi
   echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page, the served client$([ -z "$SERVICES" ] || echo ', the directory and the origin')"
 }
 
@@ -591,9 +725,9 @@ main() {
   local cmd=${1:-}
   shift || true
   case $cmd in
-    checks | bundle | stage | verify | move | bodies | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
+    checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
     reseed-undo) reseed_undo "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 

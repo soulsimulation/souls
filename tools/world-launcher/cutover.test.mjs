@@ -84,6 +84,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     assert.equal(eden.v2Stream, '/s/eden/', 'routed: the route\'s stream'); assert.equal(eden.worldKey, 'eden', 'the rest of the config kept');
     assert.equal(eden.v2Bodies, '/v2/bodies/', 'routed: the body catalogue\'s directory');
     assert.deepEqual([eden.v2Gateway, eden.v2Directory], ['/w/eden/v2/ws', '/'], 'routed (B3-2b): where the owner\'s box finds the gateway and the directory');
+    assert.equal(eden.v2Views, false, 'no old views published: the page asks for none (each would answer 404)');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
   // cdn-walk (24 Nov): the routed page loads the replica by version, so both files are immutable; the plain addresses
@@ -477,7 +478,7 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   assert.equal((await get('/v1/me', { authorization: 'Bearer dev:ada' })).status, 200);
   const views = await fetch(`${base}/w/eden/v1/world/context/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"refs":["r1"]}' });
   assert.equal(views.status, 200, 'Explore\'s place pictures: never a 404, and nothing asked of an old process');
-  assert.deepEqual(await views.json(), { views: [{ ref: 'r1', status: 'unavailable' }] }, 'each asked place has no picture: the page keeps it as text and asks no more');
+  assert.deepEqual(await views.json(), { views: [{ ref: 'r1', status: 'unavailable', draw: 'page' }] }, 'a place with no kept picture: the page draws it itself (place-shots.mjs)');
   const act = await fetch(`${base}/w/eden/v1/edge/act`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(act.status, 409);
   // its old live socket is never opened either

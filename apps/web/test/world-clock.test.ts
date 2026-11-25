@@ -30,8 +30,8 @@ test('#3377 the time slider starts at the world\'s time, to its 15-minute step, 
   assert.equal(worldMinutes('not a time'),null);
 });
 
-test('a pop-up stays ~4.5 s, a little longer for long lines, never past ~6.5 s', () => {
-  assert.equal(popupMs('Hello there.'),4500);
-  assert.ok(popupMs('x'.repeat(80))>4500&&popupMs('x'.repeat(80))<6500);
-  assert.equal(popupMs('x'.repeat(400)),6500);
+test('a pop-up stays 6 s, longer for long lines (reading time), never past 10 s', () => {
+  assert.equal(popupMs('Hello there.'),6000);
+  assert.ok(popupMs('x'.repeat(80))>6000&&popupMs('x'.repeat(80))<10000);
+  assert.equal(popupMs('x'.repeat(400)),10000);
 });

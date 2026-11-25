@@ -1136,6 +1136,7 @@ fn measure(
                 at,
                 on: None,
                 approach: false,
+                face: None,
             }];
             if turned {
                 skills::form_runner::turn(&mut steps, place.orientation).unwrap();

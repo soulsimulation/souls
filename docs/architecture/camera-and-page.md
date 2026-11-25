@@ -56,7 +56,11 @@ v2 adapter turns the engine's public stream into that frame's input.
    never moved.
 4. **Takes.** `apps/web/src/v2-engine/takes.ts` (`chunkOf`) turns those samples into one-second `mars-take/4`
    chunks, the format the old server streams. Each tick carries the body's position, its heading (from its motion),
-   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A chunk is built only once
+   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A held thing is the hand
+   prop: the old renderer (`humans.ts`) carries it in one hand at the engine's carry point, standing and walking, a
+   book closed; a move at a book in the body's own hand (its `read` form) is the `read` pose, the book open in both
+   hands, until the run ends. A load two Souls carry is not a prop: it rides its carry (`take-parts.ts`), gripped.
+   A chunk is built only once
    the world is past its end, so a body is never pushed past its newest sample.
    A thing on a course (a balloon, a punt) is in the chunks too (0.135 K4): a `vehicle` record with a `carrier`,
    under the page's id for that thing, where the replica's `courseAt` has it at each tick. The page's own layers draw
@@ -94,6 +98,17 @@ own kind, else the def the world's own things of its kind have, else the library
 entry's own shape (`looks.shape`, in its state: the parts its `when`s pick and its looks table moves), else a box the
 size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`; the
 shapes come in one data file beside the bundle, `KIND_LOOKS_URL`, fetched once, and replace the boxes when it lands).
+
+A thing's state (a fire lit or out, a lamp on or off, a door open, a basket's fruit) is its node's kind state fields,
+by number. `world-state.ts` names them by the thing's entry (`kind-state.json`, a second data file the build writes
+from `content/kinds`: each kind's fields, numbers and defaults; a field the node never set is its default) and gives
+them to the thing's def by the def's own keys (`drawnState`: a key the def has; a burning or running bool by the def's
+own name for it, so an entry's `lit` is an older def's `on`; a lamp's `level` as its `on`). Each change is one
+`world-diff` the layer applies when the picture reaches the part that made it. A thing drawn from the stream holds
+no state, and its looks read a missing key differently (a kit part's `when: on` hides, a light shines), so each thing
+gets its state explicitly once. The layer's lights and glows go out for `on: false` or `lit: false`. The world starts
+the way today's world was captured: import-eden seeds each thing's entry fields from the exported state (a lamp that
+was on is on, a burning fire is lit), so the page does not darken an imported world.
 
 A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
 the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to

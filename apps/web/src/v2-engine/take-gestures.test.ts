@@ -5,7 +5,7 @@ import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { readFileSync } from 'node:fs';
 import { ACTIVITY_OVERLAYS, CYCLES, FACE_DOWN, LYING } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
-import { cut, endGesture, gestureAt, gestureFrom, gestureOf, LOOP_HOLD } from './take-gestures.ts';
+import { cut, endGesture, endReading, gestureAt, gestureFrom, gestureOf, LOOP_HOLD, readingFrom } from './take-gestures.ts';
 import { chunkOf, TICK_US, type Body } from './takes.ts';
 
 const FROM = 2000, t0 = FROM * TICK_US, frame = { rulesVersion: 'test/1', datetime: null };
@@ -132,4 +132,35 @@ test('0.134 T2: a held hand let go (its record again, ended) ends that hold then
   endGesture(gestures, t0, t0 + 2_000_000);
   assert.equal(g.end, t0 + 2_000_000);
   assert.equal(other.end, t0 + 900_000, 'another move is left as it was');
+});
+
+test('0.135: a dance for a while is one record planned to its latest end; it dances throughout and stops where its run ended', () => {
+  // `act dance for=60`: one record, its contact 0.4 s in, planned to 60 s and one more move; the run ends at 60.8 s.
+  const g = [gestureFrom({ name: 'eden:dance', start: 0, ends: [400_000, 61_600_000], target: 'v2_a', run: 'run-1' })!];
+  for (let t = 0; t < 60_800_000; t += 100_000) assert.equal(gestureAt(g, t), 'dance', `dancing at ${t / 1e6} s`);
+  cut(g, 60_800_000);
+  assert.equal(gestureAt(g, 60_800_000), null, 'standing once its run ended');
+  // A stop 20.1 s into an hour's dance ends its run at the next phase, 20.4 s: the dance stops there.
+  const h = [gestureFrom({ name: 'eden:dance', start: 0, ends: [400_000, 3_600_800_000], run: 'run-2' })!];
+  assert.equal(gestureAt(h, 20_300_000), 'dance');
+  cut(h, 20_400_000);
+  assert.equal(gestureAt(h, 20_400_000), null);
+});
+
+test('a move at a book the body holds is reading it: the old read pose with the book, to the run\'s end or the let-go', () => {
+  assert.equal(readingFrom({ start: t0 }, 'cup'), null, 'a look at a cup in the hand is a look');
+  assert.equal(readingFrom({ start: t0 }, null), null, 'a look at a book on a shelf is a look');
+  const g = readingFrom({ start: t0, run: 'r1' }, 'book')!;
+  assert.equal(g.activity, 'read');
+  const body: Body = { entity: 'v2_r', soul: 's-r', name: 'Ri', heading: 0, gestures: [g], held: [{ at: t0 - 500_000, prop: 'book' }],
+    samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }] };
+  cut(body.gestures!, t0 + 2_000_000); // the read form ended at 2 s
+  const take = chunkOf([body], FROM, frame, 60).take as unknown as Take, at = (s: number) => sampleTake(take, s).entities.v2_r;
+  assert.equal(at(1).activity, 'read', 'reading while the run lasts (past the look move\'s own end)');
+  assert.equal(at(1).state.prop, 'book', 'the book is the prop the read pose holds open');
+  assert.equal(at(2.5).activity, 'idle', 'standing again once the run ended, the book still held');
+  assert.equal(at(2.5).state.prop, 'book');
+  const put = [readingFrom({ start: t0 }, 'book')!];
+  endReading(put, t0 + 700_000);
+  assert.equal(gestureAt(put, t0 + 800_000), null, 'the book put down ends the reading');
 });

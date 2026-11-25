@@ -155,3 +155,103 @@ test('PL: on the stream\'s own cadence the page never plays up to the newest chu
   // cover a walker's next sample (every 0.2 s, p99 0.25 s)
   assert.ok(BEHIND_US >= 250_000 && BEHIND_US <= CHUNK * TICK_US);
 });
+
+test('0.135: a page that opens mid-dance draws the dance from the next record the world writes again, to the run\'s end', () => {
+  // The dance (`act dance for=60`) began 20 s before this page's first part, so the page never saw its first record. The
+  // world writes it again every 15 s, each planned to the latest the dance can end; the run ends 60.8 s after it began.
+  const began = T0 - 20_000_000, planned = began + 60_000_000 + 800_000, again = T0 + 10_000_000, ended = began + 60_800_000;
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  // What the page draws each half second, read from each chunk as it is made (the bridge keeps only the last few).
+  const drawn = new Map<number, string | undefined>();
+  const N = 100; // 50 s of parts
+  for (let n = 0; n < N; n++) {
+    const from = T0 + n * 500_000, extra: Record<string, unknown> = {};
+    if (again >= from && again < from + 500_000) extra.moves = [{ body: 'b.7', name: 'souls:dance', start: again, ends: [again + 400_000, planned], target: 'b.7', run: '9' }];
+    if (ended >= from && ended < from + 500_000) extra.runEnds = [{ body: 'b.7', at: ended, how: 'done' }];
+    b.receive(part(n, n === 0 ? [['b.7', 'w.2', null, T0, 1_000_000, 0, 0]] : [], extra));
+    for (const c of b.view.takes.chunks) for (let tick = c.fromTick; tick < c.toTick; tick++) {
+      const s = Math.round((tick * TICK_US - T0) / 100_000) / 10;
+      if (s * 2 !== Math.round(s * 2) || drawn.has(s)) continue;
+      const e = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+      if (e) drawn.set(s, e.activity);
+    }
+  }
+  const at = (s: number) => drawn.get(s);
+  assert.equal(at(5), 'idle', 'before the record comes again the page has nothing to draw');
+  for (let s = 10.5; s < 40.5; s += 0.5) assert.equal(at(s), 'dance', `dancing ${s} s after the page opened`);
+  assert.equal(at(42), 'idle', 'standing once the run ended');
+});
+
+test('a Soul that walked up to a turned chair sits facing out of it, never the way it walked (its back to the back)', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
+  // a chair 3 m east, turned a quarter turn about +y, so its front (+z, where its stand point is) faces world +x
+  const chair = { ...node('c.1', 'w.0', [3_000_000, 0, 0], { kind: 'eden:chair@1' }), rot: [half, 0, half, 0] as [number, number, number, number], slots: [[1, 0, 470, 20, 0, 1]] };
+  const ada = node('b.7', 'w.0', [5_000_000, 0, 0], { kind: 'souls:body@1', soul: 'soul-abc-7', name: 'Ada', at: T0 });
+  b.receive({ t: 'snapshot', s: { nodes: [ground, chair, ada], removed: [] } });
+  // walks west to its stand point (1 m over 1 s), then sits at 1.5 s
+  for (let n = 0; n < 12; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = n <= 2 ? [['b.7', 'w.0', null, T0 + n * 500_000, 5_000_000 - n * 500_000, 0, 0]] : [];
+    const seated = { ...ada, parent: 'c.1', slot: 1, pos: [0, 0, 0], at: T0 + 1_000_000 };
+    // and rises at 4 s, back to its stand point
+    const risen = { ...ada, pos: [4_000_000, 0, 0], at: T0 + 4_000_000 };
+    b.receive(part(n, samples, n === 3 ? { nodes: [seated] } : n === 8 ? { nodes: [risen] } : {}));
+  }
+  const at = (s: number) => {
+    const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
+    return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+  };
+  assert.ok(Math.abs(Math.abs(at(0.5).yaw) - Math.PI) < 0.002, `walking west: ${at(0.5).yaw}`);
+  assert.equal(at(3).activity, 'sit');
+  assert.ok(Math.abs(at(3).yaw) < 0.002, `seated, it faces out of the chair (+x): ${at(3).yaw}`);
+  assert.equal(at(5).activity, 'idle');
+  assert.ok(Math.abs(at(5).yaw) < 0.002, `risen, it still faces out of the chair, never turning back to it: ${at(5).yaw}`);
+});
+
+test('a walk that ends with the world turning the body (to face what it walked to) is drawn turning there, smoothly', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
+  const ada = node('b.7', 'w.0', [0, 0, 0], { kind: 'souls:body@1', soul: 'soul-abc-7', name: 'Ada', at: T0 });
+  b.receive({ t: 'snapshot', s: { nodes: [ground, ada], removed: [] } });
+  // walks 2 m along +x over 2 s; at 2.5 s the world turns it a quarter turn where it stands, to face +z (worldd
+  // Bodies::face; the page's heading is atan2(dz, dx), so +z is pi/2, the orientation a turn of -pi/2 about +y)
+  const turned = [Math.cos(-Math.PI / 4) * Q, 0, Math.sin(-Math.PI / 4) * Q, 0] as [number, number, number, number];
+  for (let n = 0; n < 14; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = n <= 4 ? [['b.7', 'w.0', null, T0 + n * 500_000, n * 500_000, 0, 0]] : [];
+    if (n === 5) samples.push(['b.7', 'w.0', null, T0 + 2_500_000, 2_000_000, 0, 0]);
+    b.receive(part(n, samples, n === 5 ? { nodes: [{ ...ada, pos: [2_000_000, 0, 0], rot: turned, at: T0 + 2_500_000 }] } : {}));
+  }
+  const at = (s: number) => {
+    const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
+    return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+  };
+  assert.ok(Math.abs(at(1).yaw) < 0.002, 'it faces the way it walks (+x)');
+  assert.ok(Math.abs(at(2.25).yaw) < 0.002, 'stopped, it still faces the way it came until the world turns it');
+  const mid = at(2.65).yaw;
+  assert.ok(mid > 0.05 && mid < Math.PI / 2 - 0.05, `turning, not snapped: ${mid}`);
+  assert.ok(Math.abs(at(3.5).yaw - Math.PI / 2) < 0.002, `then it faces where the world turned it (+z): ${at(3.5).yaw}`);
+});
+
+test('a walker\'s record lands after its part\'s motion samples: no burst to a jog at the walk\'s end, no step back', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
+  // as the world writes it: 1.4 m/s, a sample every 0.2 s (off the parts' half-second grid), and each part the body's record where its last sample put
+  // it; the walk ends 0.35 s into part 12, whose record carries no motion time (local Eden, 25 Nov: a 15 m/s burst)
+  const speed = 1.4, end = T0 + 12 * 500_000 + 350_000, x = (at: number) => 1_000_000 + Math.round((Math.min(at, end) - T0) * speed);
+  for (let n = 0; n < 24; n++) {
+    const from = T0 + n * 500_000, samples: [string, string, number | null, number, number, number, number][] = [];
+    for (let at = Math.ceil((from - 50_000) / 200_000) * 200_000 + 50_000; at < from + 500_000 && at < end; at += 200_000) samples.push(['b.7', 'w.2', null, at, x(at), 0, 0]);
+    if (from <= end && end < from + 500_000) samples.push(['b.7', 'w.2', null, end, x(end), 0, 0]);
+    const last = samples.at(-1);
+    b.receive(part(n, samples, last ? { nodes: [{ ...body, pos: [last[4], 0, 0], at: last[3] === end ? null : last[3] }] } : {}));
+  }
+  const pos: number[][] = [];
+  for (const c of b.view.takes.chunks) {
+    const take = c.take as unknown as Take;
+    for (let k = c === b.view.takes.chunks[0] ? 0 : 1; k <= CHUNK; k++) pos.push(sampleTake(take, k * DT).entities[E].p);
+  }
+  // the floor's +x is the world's -z: walking on, z only falls, and never faster than a walk
+  const steps = pos.slice(1).map((p, i) => pos[i][2] - p[2]);
+  assert.ok(steps.length > 100 && Math.max(...steps) <= speed * DT * 1.05 && Math.min(...steps) >= -1e-6, `steps ${Math.min(...steps).toFixed(3)}..${Math.max(...steps).toFixed(3)} m a tick`);
+});

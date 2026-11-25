@@ -10,11 +10,12 @@ import { apiPath } from '../world-path.ts';
 import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { StreamLife, streamNotice } from './stream-health.ts';
-import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
+import { EdgeLog, setKindFields, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
 import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
-import { KIND_BOUNDS, KIND_LOOKS_URL } from './source/kind-bounds.ts';
+import { oldViews } from './source/scene-offer.ts';
+import { KIND_BOUNDS, KIND_LOOKS_URL, KIND_STATE_URL } from './source/kind-bounds.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
@@ -67,12 +68,17 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       const enc = new TextEncoder();
       parts.addLooks(new Map(Object.entries(all).map(([k, e]) => [k, enc.encode(JSON.stringify(e))])));
     }).catch(() => {});
-    let errorAtParts: number | null = null;
+    // each kind's state fields, which name a thing's fields so its old def draws them (a fire lit or out, a lamp on or off)
+    if (KIND_STATE_URL) void fetch(KIND_STATE_URL).then((r) => (r.ok ? r.json() : null)).then((t: Parameters<typeof setKindFields>[0] | null) => {
+      if (stopped || !t) return;
+      setKindFields(t); world.restate();
+    }).catch(() => {});
+    let errorAtParts: number | null = null, errorAt: number | null = null;
     const life = new StreamLife();
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
      try {
-      const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
+      const scene = !oldViews() ? null : await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
       const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
@@ -111,7 +117,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
      } catch (e) { failed = true; console.warn('v2 stream:', e); }
     })();
     const get = (path: string) => fetch(apiPath(path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    void get('/v1/kernel').then((v) => { if (v && !st.kernel) st.kernel = v; });
+    if (oldViews()) void get('/v1/kernel').then((v) => { if (v && !st.kernel) st.kernel = v; });
     const t = setInterval(() => {
       if (bridge) {
         const v = bridge.view;
@@ -131,7 +137,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
           conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: x.description, owner: '', intent: null, intentText: '',
             mood: '', energy: '', doing: x.doing, native: false, body: { state: x.state, doing: null, since: 0 } } satisfies PublicSoul]));
         }
-        if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
+        if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; errorAt = performance.now(); console.warn('v2 stream:', v.error); }
         // a new part, a still world's pointer moving its time on (B2-3) or a catch-up's word (#4684): the stream alive
         life.see(v, performance.now());
         // K1, K5: the moving frames where the page draws now (the newest chunk's end, less the play delay, and the time
@@ -147,7 +153,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
-      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
+      st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, errorAt, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
       force((n) => n + 1);
     }, 200);
     return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };
