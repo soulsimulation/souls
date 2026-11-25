@@ -453,13 +453,6 @@ struct Waiting {
     limits: Limits,
 }
 
-/// The seats a form done at `node` reserves in place of its whole thing (#4575), read from the form's entry as bound:
-/// each `sit` or `lie` step's slot, and the standing slot a `reparent` of the actor hands it into, on the thing the
-/// step names (E14) or `node`. A form reserves only those when taking them is all it does to the thing: every step a
-/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own. Any other step or
-/// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
-/// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
-/// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
 /// 0.135: the facing a run's body takes when its walk step is done, by [`crate::controller::facing_toward`] (the one
 /// rule a walk to a thing keeps too): the way the step's stand point says (its `face`), else toward the walk's point,
 /// else (on the point) toward the thing's origin. The node is read as the runner read it (the world's geometry, else
@@ -503,6 +496,13 @@ fn arrival<G: Geometry, R>(w: &World<'_, G, R>, fr: &FormRun) -> Option<replica:
     }
 }
 
+/// The seats a form done at `node` reserves in place of its whole thing (#4575), read from the form's entry as bound:
+/// each `sit` or `lie` step's slot, and the standing slot a `reparent` of the actor hands it into, on the thing the
+/// step names (E14) or `node`. A form reserves only those when taking them is all it does to the thing: every step a
+/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own. Any other step or
+/// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
+/// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
+/// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
 fn slots_taken(
     node: Id,
     steps: &[Step],

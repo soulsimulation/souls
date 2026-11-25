@@ -280,7 +280,11 @@ fn facing(entry: &Value, p: &str) -> Result<Option<Vec3>, Refusal> {
         name: "point-unturnable",
         detail: format!("{p}: {e:?}"),
     };
-    let q = Quat::from_yaw_mdeg(i64::try_from(*mdeg).unwrap_or(0)).map_err(bad)?;
+    let mdeg = i64::try_from(*mdeg).map_err(|_| Refusal {
+        name: "point-unturnable",
+        detail: format!("{p}: yaw_mdeg out of range"),
+    })?;
+    let q = Quat::from_yaw_mdeg(mdeg).map_err(bad)?;
     q.rotate(Vec3::new(0, 0, 1_000_000)).map(Some).map_err(bad)
 }
 
