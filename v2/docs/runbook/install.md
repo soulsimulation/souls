@@ -17,7 +17,7 @@ sends to these programs once the owner places its site file. Routing between the
 | The settings folder, which today's launcher enters (not lists) to read its cut-over binding, `cutover-binding.json` | `/etc/souls/` | root:souls, 751 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | The view key (64 hex digits), written once, never overwritten: the directory (`--view-key` in `directory.args`) signs a signed-in page's view tokens with it and every world's gateway (`--view-key` in its `gateway-<world>.env`, from `place-world.sh`) checks them. An install made before 24 Nov 2026 has none: add the flag to both by hand, as soul.game was | `/etc/souls/view.key` | root:souls, 640 |
-| The mailbox key (64 hex digits), written once, never overwritten: every world's gateway (`--mailbox 127.0.0.1:7310 --mailbox-key` in its `gateway-<world>.env`, from `place-world.sh`) reads its owners' messages from the directory (`--mailbox-key` in `directory.args`) with it, so a message typed on a Soul's card reaches its client. An install made before 25 Nov 2026 has none, and every send is refused `no-mailbox`: add it by hand (below) | `/etc/souls/mailbox.key` | root:souls, 640 |
+| The mailbox key (64 hex digits), written once, never overwritten: every world's gateway (`--mailbox 127.0.0.1:7310 --mailbox-key` in its `gateway-<world>.env`, from `place-world.sh`) reads its owners' messages from the directory (`--mailbox-key` in `directory.args`) with it, so a message typed on a Soul's card reaches its client. An install made before 25 Nov 2026 had none, and every send was refused `no-mailbox`: the next release's move makes it (0600, souls) and adds the flags (below) | `/etc/souls/mailbox.key` | root:souls, 640 (made by a release: souls, 600) |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
 | Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
@@ -58,22 +58,13 @@ for f in /etc/souls/gateway-*.env; do
 done
 ```
 
-A world placed before 25 Nov 2026 has no `--mailbox`, so the owner's message box on a Soul's card answers
-`Message could not be sent (no-mailbox)`. Add the key once, the directory's flag, then each world's, and restart them:
-
-```sh
-sudo test -e /etc/souls/mailbox.key || sudo sh -c 'umask 077; od -An -tx1 -N32 /dev/urandom | tr -d " \n" > /etc/souls/mailbox.key'
-sudo chown root:souls /etc/souls/mailbox.key && sudo chmod 640 /etc/souls/mailbox.key
-sudo grep -q -- '--mailbox-key' /etc/souls/directory.args ||
-  sudo sed -i -E 's|^(DIRECTORYD_ARGS=.*[^"])("?)$|\1 --mailbox-key /etc/souls/mailbox.key\2|' /etc/souls/directory.args
-sudo systemctl restart souls-directory
-for f in /etc/souls/gateway-*.env; do
-  w=${f#/etc/souls/gateway-}; w=${w%.env}
-  sudo grep -q -- ' --mailbox ' "$f" && continue
-  sudo sed -i -E 's|^(GATEWAYD_ARGS=.*[^"])("?)$|\1 --mailbox 127.0.0.1:7310 --mailbox-key /etc/souls/mailbox.key\2|' "$f"
-  sudo systemctl restart "souls-gateway@$w"
-done
-```
+A world placed before 25 Nov 2026 has no `--mailbox`, so the owner's message box on a Soul's card answered
+`Message could not be sent (no-mailbox)`. Nothing is done by hand: every release's move applies it (`release.sh mailbox
+apply`, [release.md](../release.md)): the key made once (0600, the services' user), `--mailbox-key` added to
+`directory.args` and `--mailbox <the directory's --listen> --mailbox-key` to each `gateway-<world>.env` when missing,
+before the gateways and the directory restart on the release; after them it sends one owner's message through each
+world's gateway and stops with `release.mailbox-unreachable` unless each is accepted. `release.sh mailbox plan` (the
+release workflow's plan step) shows what it would change and changes nothing.
 
 **Does it fit beside today's system?** Production: 8 cores, 30.6 GB of memory, about 173 GB of disk free. Today's
 worlds use 6.3 GB, and their unit may use at most 26 GB (O14, `v2/docs/machines.md`). With the new system's 3 GB
