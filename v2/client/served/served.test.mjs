@@ -21,7 +21,7 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 test('A2: each served file\'s version, length and hash equal the manifest\'s', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle'), x = join(dir, 'x');
   for (const d of [bins, page, pkg, x]) mkdirSync(d);
-  for (const b of ['worldd', 'gatewayd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
+  for (const b of ['worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -67,4 +67,41 @@ test('the served client carries the land verbs\' ground model and its zod (#3695
   // The daemon imports the land verbs this way (`worldBatch`); a client without zod refused them `land.unavailable`.
   const land = await import(pathToFileURL(join(unpacked, 'v2/client/src/creator/terrain/land.mjs')).href);
   assert.equal(typeof land.landOps, 'function');
+});
+
+test('the start page tells the person what runs before anything does: version, size, hash, source, approval', async () => {
+  const { build } = await import('./build.mjs');
+  const out = join(dir, 'start-page'), commit = 'b'.repeat(40);
+  const c = build({ out, version: '2.5.2', commit });
+  const page = readFileSync(join(out, 'instructions.md'), 'utf8'), eden = readFileSync(join(out, 'eden.mjs'));
+  assert.doesNotMatch(page, /\{\{/, 'every fact is stamped');
+  // The facts the agent gives its person, before the first download: what runs and how to check it.
+  assert.match(page, /Before you download or run anything, tell your user/);
+  assert.match(page, /the Souls client 2\.5\.2: one JavaScript file of \d+\.\d MB \((\d+) bytes\)/);
+  assert.equal(Number(/\((\d+) bytes\)/.exec(page)[1]), eden.length);
+  assert.ok(page.includes(`\`${sha(eden)}\``), 'the SHA-256 of the served eden.mjs');
+  assert.ok(page.includes(`https://github.com/soulsimulation/souls/tree/${commit}/v2/client`), 'the source at its commit');
+  // One allow rule per harness, made by the person, and a refusal stops the agent.
+  assert.ok(page.includes('`Bash(node eden.mjs:*)`'), 'Claude Code');
+  assert.ok(page.includes('prefix_rule(pattern = ["node", "eden.mjs"], decision = "allow")'), 'Codex');
+  assert.match(page, /never edit your own permissions/);
+  assert.match(page, /still refuses a step, \*\*stop\*\*\. Do not look for another way to run it/);
+  // The steps check the download before running it, in that order.
+  const steps = [...page.matchAll(/```sh\n(.+)\n```/g)].map((m) => m[1]);
+  assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world>']);
+  // The hash beside the client, served at the world's address, and the commit in /v1/config.
+  assert.equal(readFileSync(join(out, 'eden.mjs.sha256'), 'utf8'), `${sha(eden)}  eden.mjs\n`);
+  assert.equal(answer(out, '/w/eden/eden.mjs.sha256').body.toString(), `${sha(eden)}  eden.mjs\n`);
+  assert.equal(c.commit, commit);
+  assert.equal(c.files.find((f) => f.name === 'instructions.md').sha256, sha(Buffer.from(page)));
+  const check = spawnSync('shasum', ['-a', '256', '-c', 'eden.mjs.sha256'], { cwd: out, encoding: 'utf8' });
+  if (check.error?.code !== 'ENOENT') assert.equal(check.stdout.trim(), 'eden.mjs: OK', check.stderr);
+});
+
+test('pair prints its approval as plain lines: the link alone, the site to sign in to, the code, the world page', async () => {
+  const { approvalText } = await import('../src/cli/souls.mjs');
+  const link = 'https://soul.game/pair?request=r_1';
+  assert.equal(approvalText({ link, code: 'KQ7-4XM' }),
+    'Approve this Soul: open this link while signed in to soul.game, and check it shows the code KQ7-4XM:\n' +
+    `${link}\nThe card also appears on the world page if it is open.\n`);
 });

@@ -27,9 +27,10 @@
 //!    words}`, the words read from K16 for that subscriber's audiences, and left out when it may not read them (C6,
 //!    #3390). An entry that records no hearers (a `say` on a world whose tick does not work them out yet, C5 #3369) is
 //!    heard by the bodies within its reach in the tier's own index, the one interest sets read. An offer goes to the
-//!    bodies asked and its answer to the asker (`replica::activity::addressed`); an activity's join, start, leave,
-//!    end and carry set-down (`replica::activity::TO_MEMBERS`, 0.135) to its members wherever they stand: those it held
-//!    as the entry was written and those the entry joins, and its end to those who left it before too.
+//!    bodies asked, its answer to the asker, and its lapse to the bodies it names too
+//!    (`replica::activity::addressed`); an activity's join, start, leave, end and carry set-down
+//!    (`replica::activity::TO_MEMBERS`, 0.135) to its members wherever they stand: those it held as the entry was
+//!    written and those the entry joins, and its end to those who left it before too.
 //!
 //! 6. **Audience** (T7 rule 5, T8): a subscriber is sent the public entries and those of the audience ids it is in
 //!    ([`Hub::subscribe_as`]; the gateway resolves them for its grant), never another audience's. An activity's
@@ -790,7 +791,8 @@ impl Hub {
                 } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
                     && !to.is_empty()
                 {
-                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    // An offer to each body asked, its decline to the asker, its lapse to the asker and those it names (E8,
+                    // C2): addressed like speech.
                     said.push((bytes_of(e.to_value())?, to, readers.clone(), None));
                 }
             }

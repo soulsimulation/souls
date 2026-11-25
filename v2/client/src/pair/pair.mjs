@@ -72,13 +72,19 @@ export function entriesOf(gateway) {
  * The world's kind entries (#3760): fetched from the gateway's `GET /v2/entries` with the Soul's token, sent with the
  * tag of the last copy kept (`<home>/kinds/.entries-<world>.json`), so an unchanged world sends nothing. Each entry is
  * written as `<home>/kinds/<kind, : as .>.json`, where the checks read them (`check/state.mjs` `kindsIn`), and an
- * entry this world sent before and no longer does is removed. Resolves to `{entries, changed}`; rejects on a refusal.
+ * entry this world sent before and no longer does is removed. The world's activities as it serves them (one
+ * `souls-activities/1` record after the entries: each one's served name, card, distance and place) go to
+ * `<home>/kinds/.activities-<world>.json` (`activitiesServed`), removed when the world sends none. Resolves to
+ * `{entries, changed}`; rejects on a refusal.
  */
 export async function refreshEntries({ home, world, gateway, token, within = 10000 }) {
   const dir = join(home, 'kinds'), mark = join(dir, `.entries-${encodeURIComponent(world)}.json`);
   let held = {};
   try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
   if (!(held.files ?? []).every((f) => existsSync(join(dir, f)))) held = { files: held.files }; // a file gone: fetch all
+  // The served activities are in the same answer: a mark from before they were kept (no `activities`), or one whose
+  // activities file is gone, is fetched again whole, not revalidated by its tag.
+  if (held.activities === undefined || (held.activities && !existsSync(activitiesFile(home, world)))) held = { files: held.files };
   const r = await fetch(entriesOf(gateway), {
     headers: { authorization: `Bearer ${token}`, ...(held.etag ? { 'if-none-match': held.etag } : {}) },
     signal: AbortSignal.timeout(within),
@@ -92,7 +98,9 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   const list = await r.json();
   if (!Array.isArray(list)) throw new Refused('entries-answer', 'the entries are not a list');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const files = [];
+  const files = [], served = activitiesFile(home, world);
+  const activities = list.find((e) => e?.format === 'souls-activities/1' && Array.isArray(e.activities));
+  if (activities) { writeFileSync(`${served}.tmp`, JSON.stringify(activities)); renameSync(`${served}.tmp`, served); } else rmSync(served, { force: true });
   for (const e of list) {
     if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
     const f = `${e.kind.replaceAll(':', '.')}.json`;
@@ -102,9 +110,16 @@ export async function refreshEntries({ home, world, gateway, token, within = 100
   }
   const now = new Set(files);
   for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
-  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files, activities: Boolean(activities) }) + '\n');
   renameSync(`${mark}.tmp`, mark);
   return { entries: files.length, changed: true };
+}
+
+const activitiesFile = (home, world) => join(home, 'kinds', `.activities-${encodeURIComponent(world)}.json`);
+
+/** The world's activities as it serves them (`refreshEntries`), `{format, activities}`; null when none are kept. */
+export function activitiesServed(home, world) {
+  try { return JSON.parse(readFileSync(activitiesFile(home, world), 'utf8')); } catch { return null; }
 }
 
 /**
@@ -217,7 +232,7 @@ if (isMain(import.meta.url)) {
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
       soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'),
-      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: 'Open the link signed in, check the code matches, and approve.' }),
+      onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: `Open the link while signed in to ${new URL(link, opt('--directory')).host}, check the code matches, and approve. The card also appears on the world page if it is open.` }),
     });
     say({ ok: true, ...out });
   } catch (e) {

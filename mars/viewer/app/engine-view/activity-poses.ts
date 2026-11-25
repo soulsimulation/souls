@@ -89,6 +89,10 @@ export function idPhase(id: string): number { let h = 2166136261; for (let i = 0
 export const MIC_HAND: HandGoal = [0.55 - 0.252 - 0.014, 0.024, 1.402];
 const SING_REACH = 1.1;
 export const SING_LET_GO = 1.0;
+/** One-off gestures whose pose is still out when their move ends (a greeting's bow and point are 1.15 s, their arcs
+ *  2.5 s), and the seconds such a gesture takes to come back after it ends (`released`), from where it was at `priorAge`. */
+export const RETURNS: ReadonlySet<string> = new Set(['bow', 'point']);
+export const GESTURE_RETURN = 0.5;
 /** Singing at a mic stand: the right hand eases onto the mic and holds it there; the left hangs easy and moves a little
  *  with the beat; she sways with the beat (one sway over two beats, eased in), leans a little toward the mic, her head
  *  lifts a touch on each sung note and her chest rises on the in-breath where a phrase ends (the rigs have no jaw). On
@@ -112,6 +116,13 @@ export function activityFrame(activity: string, base: string, seconds: number, i
   const gap = Math.max(0.3, Math.min(1.6, opts.gap ?? GAP[activity] ?? 0.9)), mid = gap / 2;
   const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.min(1, since / a)) * (1 - S(Math.max(0, since - b) / 0.5));
   const f: ActivityFrame = { hands: null, feetOut: 0, hop: 0, lean: 0, side: 0, lying: null, look: 0 };
+  if (opts.released !== undefined && RETURNS.has(activity)) {
+    const out = activityFrame(activity, base, seconds, id, { ...opts, released: undefined, since: opts.priorAge });
+    if (!out) return out;
+    const w = 1 - S(Math.min(1, opts.released / GESTURE_RETURN));
+    out.lean *= w; out.look *= w; out.side *= w; out.handW = [w, w];
+    return out;
+  }
   const down = seated ? -0.36 : -0.34;
   if(opts.game&&['play-frisbee','play-petanque','play-volleyball'].includes(activity)){
     const g=opts.game,shownTick=opts.gameTick??0,tick=g.releaseFrameTick??shownTick,dt=opts.gameDt??.05;

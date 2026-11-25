@@ -6,7 +6,7 @@ import {orderedSoulIds,readSoulRecency,selectedSoulIds} from './soul-recency.ts'
 import type {PublicSoul} from '@souls/protocol';
 import {worldKey,worldPath} from './world-path.ts';
 import {requestSoulConversations} from './dialogue-speaking.ts';
-import {soulAvatars} from './SoulAvatars.ts';
+import {soulAvatars, wantPortrait} from './SoulAvatars.ts';
 import {soulAvatarImage} from './soul-avatar-source.ts';
 import type {Api} from './useSouls.ts';
 import {useOwnedAgentPresence} from './agent-presence.ts';
@@ -26,6 +26,7 @@ export function useMySouls(){
 export function SoulAvatar({soul}:{soul:PublicSoul}){
  const [failedPhoto,setFailedPhoto]=useState<string|null>(null);
  const [,refresh]=useState(0);useEffect(()=>{const change=()=>refresh(n=>n+1);soulAvatars.events.addEventListener('change',change);return()=>soulAvatars.events.removeEventListener('change',change);},[]);
+ useEffect(()=>wantPortrait(soul.id),[soul.id]);  // the world draws a body portrait only while one shows
  const image=soulAvatarImage(soul,worldPath,soulAvatars.images.get(soul.id),failedPhoto),source=soulAvatars.sources.get(soul.id);let hash=0;for(const c of soul.id)hash=(hash*31+c.charCodeAt(0))>>>0;
  return image?<img key={image.key} className="soul-avatar" src={image.src} data-avatar-source={image.kind} data-profile-photo-hash={image.hash} data-avatar-entity={image.kind==='generated'?source?.entityId:undefined} data-avatar-model={image.kind==='generated'?source?.model:undefined} data-avatar-body-root={image.kind==='generated'?source?.bodyRoot:undefined} onError={image.kind==='profile-photo'?()=>setFailedPhoto(image.key):undefined} alt=""/>:<span className="soul-avatar initials" style={{background:`hsl(${hash%360} 38% 46%)`}} aria-hidden="true">{soul.name.split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>;
 }

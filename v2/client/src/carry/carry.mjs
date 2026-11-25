@@ -212,7 +212,9 @@ export function carryIntents(req, ctx) {
       if (!to.length || to.length > 5 || !to.every(id) || (req.on !== undefined && !id(req.on))) return usage;
       const carry = carryEntryOf(kinds);
       if (!carry) return no('carry-kind-unknown', 'no carry entry among the kinds this machine holds (`kinds/`)');
-      const pin = activityPin(...carry), front = `${carry[0].split(':')[0]}:front`;
+      // The name the world serves the crew's activity by; worked out from its entry only for a world serving none.
+      const pin = ctx.served?.activities?.find((a) => a?.kind === carry[0] && typeof a.name === 'string')?.name ?? activityPin(...carry);
+      const front = `${carry[0].split(':')[0]}:front`;
       return [{ verb: 'activity:offer', target: req.on ?? ground, params: { 1: pin, 2: front, 3: to } }];
     }
     case 'accept': case 'decline': case 'leave':

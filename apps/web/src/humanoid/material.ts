@@ -59,5 +59,11 @@ export function humanoidMaterial(palette: Float32Array, patternId: number): THRE
   m.userData.humanoid = {palette, pattern};
   m.onBeforeCompile = shader => humanoidCompile(shader, palette, pattern);
   m.customProgramCacheKey = () => HUMANOID_PROGRAM_KEY;
+  // Material.copy drops the hooks: a copy (a fading body's ghost) would draw white without them
+  m.clone = function (this: THREE.MeshStandardMaterial) {
+    const c = THREE.MeshStandardMaterial.prototype.clone.call(this) as THREE.MeshStandardMaterial;
+    c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = this.customProgramCacheKey; c.userData.humanoid = this.userData.humanoid; c.clone = this.clone;
+    return c;
+  };
   return m;
 }

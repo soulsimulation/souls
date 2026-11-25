@@ -1,11 +1,13 @@
-// release.sh's release-head checks and the reseed it carries (0.133 R13), with stand-ins for gh and the machine's
-// programs: the merge queue's green ci run counts for ci-ok and the v2 legs, and a staged release runs Eden's reseed
-// pre-check with its own world-aside and kinds.
+// release.sh's release-head checks, the reseed it carries (0.133 R13) and its move of the directory and the origin,
+// with stand-ins for gh and the machine's programs: the merge queue's green ci run counts for ci-ok and the v2 legs, a
+// staged release runs Eden's reseed pre-check with its own world-aside and kinds, and the move restarts the directory
+// and the origin once, after the worlds and the gateway, on the release's programs and units, and puts each back on its
+// previous ones when it does not answer as healthy.
 //   node --test v2/tools/ops/release/release.test.mjs
 
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -47,6 +49,7 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; world-aside lists 3 objects.
   exe(join(bins, 'worldd'), 'exit 0');
   exe(join(bins, 'gatewayd'), 'exit 0');
+  exe(join(bins, 'directoryd'), 'exit 0');
   exe(join(bins, 'deploy'), 'echo 1220' + '0'.repeat(64));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
@@ -97,6 +100,108 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   assert.equal(run(['reseed-undo', 'nope', 'check'], env).status, 2);
 });
 
+test('move: the directory and the origin go on the release once, after the worlds and the gateway, and go back when unhealthy', () => {
+  const t = join(dir, 'services'), bins = join(t, 'bins'), page = join(t, 'page'), pkg = join(t, 'pkg');
+  const client = join(t, 'client'), out = join(t, 'bundle');
+  for (const d of [page, pkg, join(client, 'src'), join(client, 'skill'), join(client, 'served')]) mkdirSync(d, { recursive: true });
+  // Stand-ins: deploy and gateway-upgrade say what they moved in the machine's log; directoryd is the release's.
+  exe(join(bins, 'worldd'), 'exit 0');
+  exe(join(bins, 'gatewayd'), 'exit 0');
+  exe(join(bins, 'directoryd'), '# the release\'s directoryd');
+  exe(join(bins, 'deploy'), 'echo "deploy $1" >> "$LOG"');
+  exe(join(bins, 'gateway-upgrade'), 'echo "gateway-upgrade" >> "$LOG"');
+  exe(join(bins, 'world-aside'), 'exit 0');
+  exe(join(bins, 'assets-check'), 'exit 0');
+  writeFileSync(join(page, 'index.html'), '<!doctype html>');
+  writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
+  writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  const bundled = run(['bundle', out, sha, '0.135.1', bins, page, client, pkg]);
+  assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+  for (const a of ['directoryd', 'origin\\.tar', 'units\\.tar']) assert.match(bundled.stdout, new RegExp(`  ${a} +1220`));
+  const unitsDir = join(here, '../units');
+  const read = (f) => readFileSync(f, 'utf8');
+
+  // One machine: two worlds (the first's stream named in its views/world.json), the previous directoryd, origin and
+  // directory unit (the origin's unit is already the release's), and systemctl and curl that write to its log. curl
+  // answers the directory 401 and the origin 200, unless BAD_DIRECTORY or BAD_ORIGIN makes the release's one unhealthy.
+  const machine = (name, extra = {}) => {
+    const m = join(t, name), data = join(m, 'data'), lib = join(m, 'lib'), etc = join(m, 'etc'), units = join(m, 'units');
+    const shim = join(m, 'shim'), log = join(m, 'log');
+    for (const d of [etc, units, join(lib, 'origin')]) mkdirSync(d, { recursive: true });
+    const worlds = ['a', 'b'].map((c) => `${c.repeat(32)}-${c.repeat(32)}-0`);
+    for (const w of worlds) mkdirSync(join(data, 'worlds/worlds', w, 'views'), { recursive: true });
+    writeFileSync(join(data, 'worlds/worlds', worlds[0], 'views/world.json'), '{"stream": "views/root/", "history": "history/"}');
+    writeFileSync(join(lib, 'directoryd'), '# the previous directoryd\n');
+    writeFileSync(join(lib, 'origin/origin.mjs'), '// the previous origin\n');
+    writeFileSync(join(units, 'souls-directory.service'), '# the previous unit\n');
+    writeFileSync(join(units, 'souls-origin.service'), readFileSync(join(unitsDir, 'souls-origin.service')));
+    writeFileSync(join(etc, 'directory.args'), 'DIRECTORYD_ARGS=--listen 127.0.0.1:7999 --store /nowhere\n');
+    exe(join(shim, 'systemctl'), 'echo "systemctl $*" >> "$LOG"');
+    exe(join(shim, 'curl'), [
+      'for a in "$@"; do url=$a; done',
+      'echo "curl $url" >> "$LOG"',
+      'case $url in',
+      '  */v1/account/session) if [ -n "$BAD_DIRECTORY" ] && grep -q release "$RELEASE_LIB/directoryd"; then printf 500; else printf 401; fi ;;',
+      '  *) if [ -n "$BAD_ORIGIN" ] && ! grep -q previous "$RELEASE_LIB/origin/origin.mjs"; then printf 503; else printf 200; fi ;;',
+      'esac',
+    ].join('\n'));
+    const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc, RELEASE_UNITS: units,
+      RELEASE_HEALTH_S: '1', LOG: log, PATH: `${shim}:${process.env.PATH}`, ...extra };
+    const staged = run(['stage', out], env);
+    assert.equal(staged.status, 0, staged.stdout + staged.stderr);
+    return { env, lib, units, worlds, rel: join(data, 'releases', sha), lines: () => read(log).trim().split('\n') };
+  };
+
+  // Healthy: both worlds and the gateway first, then one daemon-reload for the changed directory unit, then each
+  // service restarted once and asked; the release's programs and units are in place and nothing is left beside them.
+  const ok = machine('ok');
+  const moved = run(['move', sha], ok.env);
+  assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+  assert.deepEqual(ok.lines(), [
+    `deploy ${ok.worlds[0]}`, `deploy ${ok.worlds[1]}`, 'gateway-upgrade',
+    'systemctl daemon-reload', 'systemctl restart souls-directory.service', 'curl http://127.0.0.1:7999/v1/account/session',
+    'systemctl restart souls-origin.service', `curl http://localhost:7320/w/${ok.worlds[0]}/views/root/pointer`,
+  ]);
+  assert.equal(read(join(ok.lib, 'directoryd')), read(join(bins, 'directoryd')));
+  assert.equal(read(join(ok.lib, 'origin/origin.mjs')), read(join(here, '../../origin/origin.mjs')));
+  assert.equal(read(join(ok.units, 'souls-directory.service')), read(join(unitsDir, 'souls-directory.service')));
+  assert.equal(existsSync(join(ok.lib, '.directoryd.prev')) || existsSync(join(ok.lib, '.origin.prev')), false);
+  assert.match(moved.stdout, /souls-directory\.service answers 401/);
+  assert.match(moved.stdout, /souls-origin\.service answers 200/);
+  assert.match(moved.stdout, /the directory and the origin$/m);
+  // a second dispatch of the same release restarts nothing again
+  const before = ok.lines().length;
+  assert.equal(run(['move', sha], ok.env).status, 0);
+  assert.equal(ok.lines().slice(before).filter((l) => l.startsWith('systemctl')).length, 0);
+
+  // An unhealthy directory: its previous program and unit go back, it is restarted on them, and the release stops
+  // before the origin.
+  const bad = machine('bad-directory', { BAD_DIRECTORY: '1' });
+  const refused = run(['move', sha], bad.env);
+  assert.equal(refused.status, 3, refused.stdout + refused.stderr);
+  assert.match(refused.stdout, /refused: release\.directory-unhealthy: souls-directory\.service answered 500, not 401, on 1220[0-9a-f]{12}…; back on its previous program it answers 401/);
+  assert.equal(read(join(bad.lib, 'directoryd')), '# the previous directoryd\n');
+  assert.equal(read(join(bad.units, 'souls-directory.service')), '# the previous unit\n');
+  assert.deepEqual(bad.lines().filter((l) => l.startsWith('systemctl')), [
+    'systemctl daemon-reload', 'systemctl restart souls-directory.service', 'systemctl daemon-reload', 'systemctl restart souls-directory.service',
+  ]);
+  assert.equal(existsSync(join(bad.rel, 'moved/directory')), false);
+
+  // An unhealthy origin: the directory stays on the release; the previous origin folder goes back.
+  const badOrigin = machine('bad-origin', { BAD_ORIGIN: '1' });
+  const refusedOrigin = run(['move', sha], badOrigin.env);
+  assert.equal(refusedOrigin.status, 3, refusedOrigin.stdout + refusedOrigin.stderr);
+  assert.match(refusedOrigin.stdout, /refused: release\.origin-unhealthy: souls-origin\.service answered 503, not 200, .*answers 200/);
+  assert.equal(read(join(badOrigin.lib, 'origin/origin.mjs')), '// the previous origin\n');
+  assert.equal(existsSync(join(badOrigin.lib, 'origin/site.mjs')), false);
+  assert.equal(read(join(badOrigin.lib, 'directoryd')), read(join(bins, 'directoryd')));
+  assert.equal(existsSync(join(badOrigin.rel, 'moved/directory')), true);
+  assert.equal(existsSync(join(badOrigin.rel, 'moved/origin')), false);
+  // the origin's unit was already the release's: only the directory's change reloaded systemd
+  assert.equal(badOrigin.lines().filter((l) => l === 'systemctl daemon-reload').length, 1);
+});
+
 test('a move gives each world the page\'s body catalogue before its deploy, and the binding the page\'s catalogue folder', () => {
   const root = join(dir, 'bodies'), bins = join(root, 'bins'), page = join(root, 'page'), out = join(root, 'bundle');
   const data = join(root, 'data'), etc = join(root, 'etc'), lib = join(root, 'lib'), worlds = join(data, 'worlds/worlds');
@@ -106,6 +211,7 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
   writeFileSync(join(page, 'assets/bodies/bodies.json'), released);
   exe(join(bins, 'worldd'), 'exit 0');
   exe(join(bins, 'gatewayd'), 'exit 0');
+  exe(join(bins, 'directoryd'), 'exit 0');
   // deploy restarts the world: the stand-in says whether the world's folder held a catalogue then
   const deployed = join(root, 'deployed');
   exe(join(bins, 'deploy'), `if [ -f "$WORLDS_ROOT/worlds/$1/bodies.json" ]; then echo "$1 has" >> "${deployed}"; else echo "$1 none" >> "${deployed}"; fi`);
@@ -132,7 +238,8 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
     { oldWorldId: 'lab-1', canonicalSlug: 'lab', routesFile: '/r.json', clientDir: '/c', v2Bodies: '/elsewhere/' }] }, null, 2));
   const bundled = run(['bundle', out, sha, '0.135', bins, page, client, pkg]);
   assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
-  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc };
+  // the directory and origin step has its own test
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc, RELEASE_SERVICES: '' };
   const staged = run(['stage', out], env);
   assert.equal(staged.status, 0, staged.stdout + staged.stderr);
   const moved = run(['move', sha, 'none'], env);

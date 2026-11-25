@@ -37,17 +37,13 @@
 //   souls.mjs converse list                   the conversations in the copy
 //   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
-//   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
-//                                             one's move is aimed at the other (0.134 T1); holding hands, the first to walk leads the other
-//                                             beside it (0.135 R1); a leave, a sit or lie, or the other's own walk or act lets go (T2)
-//   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
-//   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
-//   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
+//   souls.mjs together kinds                  the activities the world serves: each one's word, card, how many it asks,
+//                                             how near they stand and where it is played (anywhere, or at a thing)
+//   souls.mjs together offer <word> <body id|name> [...]   offers it (`hug`, `dance` to up to seven, `follow`, ...); one
+//                                             played at a thing is offered at the nearest of that kind (0.134 T1, 0.135)
+//   souls.mjs together accept|decline|leave <offer id | word>   answers the newest offer of it, or leaves it
 //   souls.mjs together withdraw <offer id | activity>   takes back your own offer before it is answered (#4700); an
 //                                             accept after it is refused offer-withdrawn
-//   souls.mjs together offer <activity> <body id|name> [...]   any other activity the world serves, by its word
-//                                             (`together kinds` lists them); accept|decline <activity> answers the
-//                                             newest offer of it (0.135)
 //   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
 //   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
@@ -223,6 +219,17 @@ async function pairing(home, url, { within = 15_000 } = {}) {
     await new Promise((r) => setTimeout(r, 50));
   }
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
+}
+
+/**
+ * The approval as plain lines for the person (`pair` writes them to stderr beside its JSON answer): the link alone on
+ * its line, so a terminal or a chat shows it as a link, the site to be signed in to, the code, and where else the card is.
+ */
+export function approvalText({ link, code }) {
+  let site = 'the world\'s site';
+  try { site = new URL(link).host; } catch { /* a link that is not a url is still printed as it came */ }
+  return `Approve this Soul: open this link while signed in to ${site}, and check it shows the code ${code}:\n${link}\n` +
+    'The card also appears on the world page if it is open.\n';
 }
 
 /** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
@@ -484,6 +491,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
         const phase = end.answer === 'receipt' ? 'done' : end.answer;
         return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
           ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
+          // The world's own words for why (`together.too-far`: how far apart, how far its move reaches).
+          ...(phase === 'refused' && end.detail ? { detail: end.detail } : {}),
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
           // 0.133: a walk's end, how far from its target it stood, metres
@@ -689,7 +698,11 @@ if (isMain(import.meta.url)) {
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
-    else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
+    else if (req.op === 'pair') {
+      const paired = req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url);
+      if (paired?.step === 'approve' && paired.link) process.stderr.write(approvalText(paired));
+      out(paired); process.exit(0);
+    }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
       // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
