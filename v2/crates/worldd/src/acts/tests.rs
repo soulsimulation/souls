@@ -1209,6 +1209,21 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     );
     assert!(high > reach, "4 m straight overhead: {high}");
     assert_eq!(low, 0, "1 m up, straight overhead");
+    // #5063: what a look or a point beyond its reach may be made at from afar, from the body's own floor only: a room
+    // of its storey, not one a storey up or a Soul there; from the open ground beside the building, the building but
+    // not a room inside it, behind its walls.
+    assert!(sight.seen(below.0, r0), "a room of its own storey");
+    assert!(!sight.seen(below.0, r1), "a room a storey up");
+    assert!(!sight.seen(below.0, on.0), "a Soul a storey up");
+    assert!(sight.seen(on.0, r1), "upstairs, its own storey's room");
+    assert!(
+        sight.seen(outside.0, building),
+        "the building, from the ground beside it"
+    );
+    assert!(
+        !sight.seen(outside.0, r0),
+        "a room behind the building's walls"
+    );
 }
 
 /// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the

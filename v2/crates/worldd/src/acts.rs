@@ -1331,6 +1331,45 @@ impl Reach for Sight<'_> {
         }
         Some(thing)
     }
+
+    /// #5063: a thing is seen from afar from the body's own floor, as the client's sight takes only its own room's
+    /// things: a body on the open ground sees what is in no building, one on a building's floor what that floor
+    /// carries ([`Sight::carry`]). A thing in another building, or a storey up or down, is behind a wall. A building
+    /// is a thing with a floor of its own to walk; ground cover's floors (a lawn, a path) are the open ground's.
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        let Some(me) = self.bodies.get(&body) else {
+            return false;
+        };
+        let floor = self.body_on_floor(body, me).0;
+        if let Some(b) = self.bodies.get(&thing) {
+            return self.body_on_floor(body, b).0 == floor;
+        }
+        let parent = |id: Id| {
+            self.tree
+                .handle(id)
+                .and_then(|h| self.tree.node(h)?.parent())
+        };
+        let kids = |id: Id| self.tree.handle(id).and_then(|h| self.tree.children(h));
+        self.with_view(body, |v| {
+            let walked = |id: Id| {
+                kids(id).is_some_and(|k| {
+                    k.iter().filter_map(|&c| self.tree.node(c)).any(|f| {
+                        plain(f.kind()) == import_eden::FLOOR
+                            && v.on_floor(f.id(), Vec3::ZERO)
+                                .is_some_and(|(o, ..)| o == f.id())
+                    })
+                })
+            };
+            let mut building = parent(thing);
+            while let Some(b) = building.filter(|&b| !walked(b)) {
+                building = parent(b);
+            }
+            let mine = parent(floor).filter(|&b| walked(b));
+            building == mine
+                && (mine.is_none() || self.carry(v, thing, Vec3::ZERO, &|f| f == floor).is_some())
+        })
+        .unwrap_or(false)
+    }
 }
 
 pub use sim::reach::{AT_ARG, AT_SELF};
