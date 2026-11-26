@@ -37,12 +37,14 @@
 //!   activity that ends.
 //!
 //! - **Every carrier within reach of its grip (#5067 item 3).** The set-in track and the way back move the crew's node
-//!   while its carriers stand, so a put is refused before anyone moves when a carrier still holding the part would not
-//!   be within reach of its grip ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above
-//!   its feet) where the track starts or where it ends (`part.grip-out-of-reach`, naming it); on a straight track a
-//!   carrier who stands is nearest one end or the other. While a track runs, a carrier who has moved out of reach of
-//!   its grip stops it by name: a set-in goes back as a refused seating does, a way back stops where it is and the part
-//!   is set down there (`crate::engine`).
+//!   while its carriers stand, so a put is refused before anyone moves when it would take a carrier's grip out of its
+//!   reach ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above its feet): each carrier
+//!   within reach where the track starts must be within reach where it ends (`part.grip-out-of-reach`, naming it); on a
+//!   straight track a carrier who stands is farthest from its grip at one end or the other. A carrier already out of
+//!   reach at the start (one who took a frame from 2 m off, say: how near a take must be is the take's own admission)
+//!   is not held to it. While a track runs, a carrier held to its reach who moves out of it stops the track by name: a
+//!   set-in goes back as a refused seating does, a way back stops where it is and the part is set down on the floor
+//!   under it (`crate::engine`).
 //!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
@@ -153,6 +155,8 @@ pub struct Setting {
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
+    /// The carriers within reach of their grips where its track started (#5067 item 3): they stay within reach.
+    pub holding: Vec<Id>,
 }
 
 /// The crews' seating in a running world.
@@ -478,9 +482,14 @@ impl Assembly {
             }
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
-        // #5067 item 3: every carrier within reach of its grip where the set-in starts and where it ends.
-        out_of_reach(carriers, from)?;
-        out_of_reach(carriers, (at, from.1))?;
+        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
+        // a straight track, so all the way). One already out of reach is not moved farther by it, but is not held to it.
+        let holding: Vec<Carrier> = carriers
+            .iter()
+            .filter(|c| out_of_reach(&[**c], from).is_ok())
+            .copied()
+            .collect();
+        out_of_reach(&holding, (at, from.1))?;
         let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
         if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
             return Err(refusal(
@@ -576,21 +585,28 @@ impl Assembly {
                 velocity,
                 end: (at, from.1),
                 span: apart,
+                holding: holding.iter().map(|c| c.body).collect(),
             },
         );
         Ok(effects)
     }
 
     /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3), on its ground, µm, with
-    /// when that track ends and whether it is the way back.
-    pub fn tracks(&self, now: Micros) -> Vec<(Id, (Vec3, Quat), Micros, bool)> {
+    /// when that track ends, whether it is the way back, and the carriers held to their reach on it.
+    pub fn tracks(&self, now: Micros) -> Vec<(Id, (Vec3, Quat), Micros, bool, &[Id])> {
         let at = |p: Vec3, v: Vec3, dt: Micros| {
             let m = |a: i64, v: i64| a + (i128::from(v) * i128::from(dt) / 1_000_000) as i64;
             Vec3::new(m(p.x, v.x), m(p.y, v.y), m(p.z, v.z))
         };
         let going = self.setting.iter().map(|(a, s)| {
             let dt = now.clamp(s.t0, s.due) - s.t0;
-            (*a, (at(s.start.0, s.velocity, dt), s.start.1), s.due, false)
+            (
+                *a,
+                (at(s.start.0, s.velocity, dt), s.start.1),
+                s.due,
+                false,
+                s.holding.as_slice(),
+            )
         });
         let back = self.returning.iter().map(|(a, (s, end, track))| {
             // It gets to where its set-in started at `end`: back from there by the time left.
@@ -599,7 +615,13 @@ impl Assembly {
                 _ => Vec3::ZERO,
             };
             let left = -(end.saturating_sub(now).max(0));
-            (*a, (at(s.start.0, v, left), s.end.1), *end, true)
+            (
+                *a,
+                (at(s.start.0, v, left), s.end.1),
+                *end,
+                true,
+                s.holding.as_slice(),
+            )
         });
         going.chain(back).collect()
     }

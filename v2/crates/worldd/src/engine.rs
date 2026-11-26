@@ -1853,9 +1853,19 @@ impl Engine {
         // seating does, a way back stops where it is and the part is set down there.
         if self.asm.as_ref().is_some_and(|s| s.setting_in()) {
             let tr = tree.get_or_insert_with(|| live.frozen());
-            let tracks = self.asm.as_ref().map(|s| s.tracks(now)).unwrap_or_default();
-            for (activity, node, _, back) in tracks {
-                let carriers = self.reaches(tr, c, slots, activity);
+            let tracks: Vec<_> = self
+                .asm
+                .as_ref()
+                .map(|s| {
+                    s.tracks(now)
+                        .into_iter()
+                        .map(|(a, node, _, back, holding)| (a, node, back, holding.to_vec()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (activity, node, back, holding) in tracks {
+                let mut carriers = self.reaches(tr, c, slots, activity);
+                carriers.retain(|c| holding.contains(&c.body));
                 let Err(why) = crate::assembly::out_of_reach(&carriers, node) else {
                     continue;
                 };

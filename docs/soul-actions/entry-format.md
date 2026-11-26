@@ -102,8 +102,10 @@ audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: pha
 the two hands 0.2 m either side of where the carrier holds along the load's length, from the carry's back toward its
 front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
 ends) and `souls:released` (set down, seated or broken off; the last holds kept). A side carrier who leaves takes only its
-own hold away. A seating never moves a part out of a carrier's reach of its grip (0.7 m on the plan, its standing reach
-above its feet): refused before anyone moves, or stopped while its track runs, as `part.grip-out-of-reach`.
+own hold away. A load that stands as it is held (a frame taken standing) is held where each grip lies along its
+carriers' line, at the load's edge and the carry's height. A seating never moves a part out of the reach of a carrier
+who could reach its grip when the seating began (0.7 m on the plan, its standing reach above its feet): refused before
+anyone moves, or stopped while its track runs, as `part.grip-out-of-reach`.
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.

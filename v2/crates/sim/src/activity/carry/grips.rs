@@ -17,7 +17,10 @@
 //!   its floor up). The hands are [`HAND_HALF`] either side of where the carrier holds along the load's long axis (kept
 //!   within its length): an end carrier at its grip, a side carrier at the grip's edge on the side it stands. The hands
 //!   are in the order they lie along the carry, from its back toward its front, so a page gives each to the hand on that
-//!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point.
+//!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point. A load that stands as
+//!   it is held (a frame taken standing) is taken along the line its carriers stand on, as the lift's own check takes
+//!   it: each carrier holds where its grip lies along that line, kept to the load's edge, at the carry's height, its
+//!   hands above and below.
 //!
 //! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs, 5?: until µs, 6: [hold, ...]}`, a hold
 //! `{1: body, 2: point:<grip>, 3: [x, y, z], 4: [[x, y, z], [x, y, z]]}`. B9's board, a load of no entry, has no grips:
@@ -276,9 +279,47 @@ pub fn assign(
             + i128::from(a.z) * i128::from(b.z))
             / 1_000_000
     };
+    // A load that stands as it is held (a frame taken standing) is taken along the line its carriers stand on
+    // (`Load::check_lift` with no axis): each grip at its place along that line from the load's middle, kept to the
+    // load's extent there, at the carry's height (its slot's), a side's at the load's edge on the side it stands.
+    let standing = load.lies_along(held.1)?.is_none();
+    let middle_c = held
+        .0
+        .plus(held.1.rotate(load.middle).map_err(pose_refusal)?)
+        .map_err(pose_refusal)?;
+    let mut ext = Vec3::ZERO;
+    for k in 0..8 {
+        let s = |b: i64, v: i64| if k & b == 0 { v } else { -v };
+        let h = load.half;
+        let c = held
+            .1
+            .rotate(Vec3::new(s(1, h.x), s(2, h.y), s(4, h.z)))
+            .map_err(pose_refusal)?;
+        ext = Vec3::new(
+            ext.x.max(c.x.abs()),
+            ext.y.max(c.y.abs()),
+            ext.z.max(c.z.abs()),
+        );
+    }
+    let stood_at = |g: &Grip, across: Option<i64>| -> R<Vec3> {
+        let z = match across {
+            Some(c) if c < 0 => middle_c.z - ext.z,
+            Some(_) => middle_c.z + ext.z,
+            None => middle_c.z,
+        };
+        let c = Vec3::new(
+            middle_c.x + g.along.clamp(-ext.x, ext.x),
+            0.clamp(middle_c.y - ext.y, middle_c.y + ext.y),
+            z,
+        );
+        conj(held.1)?
+            .rotate(c.minus(held.0).map_err(pose_refusal)?)
+            .map_err(pose_refusal)
+    };
     let hold = |body: Id, g: &Grip, across: Option<i64>| -> R<Hold> {
         // A side carrier holds at its grip's edge on the side it stands: half the load's extent that way.
         let contact = match across {
+            _ if standing => stood_at(g, across)?,
             Some(c) => {
                 let a = conj(held.1)?
                     .rotate(Vec3::new(0, 0, if c < 0 { -1_000_000 } else { 1_000_000 }))
@@ -443,6 +484,31 @@ mod tests {
                 assert_eq!(edge.signum(), place[1].signum(), "{kind} {}", hold.grip);
                 assert_eq!(edge.abs(), load.half_width, "{kind} {}", hold.grip);
             }
+        }
+    }
+
+    #[test]
+    fn a_frame_taken_standing_is_held_at_its_edges_along_its_carriers_line() {
+        let e = entry("construction", "rack_upright");
+        let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+        // Taken as it stands, its foot 0.9 m below the slot (its carriers' feet), its width along the carry.
+        let held = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
+        let h = assign(&g, &load, held, id(1), id(2), &[]).unwrap();
+        assert_eq!(names(&h), ["grip_high", "grip_low"]);
+        for (hold, x) in h.iter().zip([609_500, -609_500]) {
+            // At its edge toward the carrier, at the carry's height, its hands 0.2 m above and below.
+            assert_eq!(
+                hold.hands[0],
+                Vec3::new(x, 900_000 - HAND_HALF, 0),
+                "{}",
+                hold.grip
+            );
+            assert_eq!(
+                hold.hands[1],
+                Vec3::new(x, 900_000 + HAND_HALF, 0),
+                "{}",
+                hold.grip
+            );
         }
     }
 
