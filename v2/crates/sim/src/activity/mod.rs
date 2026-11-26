@@ -1231,7 +1231,15 @@ impl Activities {
         } else {
             load
         };
-        self.emit(tree, node, audience, by, "souls:carry-track", fields, Vec::new())
+        self.emit(
+            tree,
+            node,
+            audience,
+            by,
+            "souls:carry-track",
+            fields,
+            Vec::new(),
+        )
     }
 
     /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.

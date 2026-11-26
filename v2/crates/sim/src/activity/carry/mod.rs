@@ -227,8 +227,13 @@ fn blend(a: Quat, b: Quat, n: i128, d: i128) -> R<Quat> {
         q = q.map(|v| -v);
     }
     let part = |v: i128| i64::try_from(v).unwrap_or(0);
-    Ok(Quat::new(part(q[0]), part(q[1]), part(q[2]), part(q[3]))
-        .unwrap_or(if 2 * n < d { a } else { b }))
+    Ok(
+        Quat::new(part(q[0]), part(q[1]), part(q[2]), part(q[3])).unwrap_or(if 2 * n < d {
+            a
+        } else {
+            b
+        }),
+    )
 }
 
 /// The pose `at` of the way from `from` at `t0` to `to` at `t1` (#5067): its position in a straight line, its turn
@@ -1391,7 +1396,10 @@ impl Carry {
         at: Micros,
         transfer: impl FnOnce() -> R<Id>,
     ) -> R<bool> {
-        let Some(h) = self.hoist.filter(|h| h.phase != Phase::Lift && (at > h.t0 || at >= h.t1)) else {
+        let Some(h) = self
+            .hoist
+            .filter(|h| h.phase != Phase::Lift && (at > h.t0 || at >= h.t1))
+        else {
             return Ok(false);
         };
         let (p, q) = self.floored(h.floor, between(h.from, h.to, (h.t0, h.t1), at)?)?;
@@ -1598,7 +1606,8 @@ impl Carry {
         let (c, q) = Carry::pose(front, back)?;
         let from = self.track.last().map_or((c, q), |t| (t.1, t.2));
         let floor = Vec3::new(c.x, c.y - HEIGHT, c.z);
-        let times = self.lower_from(tree, at, node, from, HEIGHT, (floor, q), Phase::SetDown, by)?;
+        let times =
+            self.lower_from(tree, at, node, from, HEIGHT, (floor, q), Phase::SetDown, by)?;
         if let Some(h) = self.hoist.as_mut() {
             h.transfer = Some(transfer);
         }

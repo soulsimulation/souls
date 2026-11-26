@@ -173,7 +173,11 @@ fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64
         ss.windows(2).all(|w| w[1].0 - w[0].0 == TICK) && ss.len() as i64 == ticks,
         "{name}: a sample a tick"
     );
-    assert_eq!(ss.last().map(|s| s.0), Some(t1), "{name}: its last at its end");
+    assert_eq!(
+        ss.last().map(|s| s.0),
+        Some(t1),
+        "{name}: its last at its end"
+    );
     let step = |a: &Pose, b: &Pose| {
         (i128::from(a.position.x - b.position.x).pow(2)
             + i128::from(a.position.y - b.position.y).pow(2)
@@ -181,7 +185,11 @@ fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64
         .isqrt() as i64
     };
     let total: i64 = ss.windows(2).map(|w| step(&w[0].1, &w[1].1)).sum();
-    let most = ss.windows(2).map(|w| step(&w[0].1, &w[1].1)).max().unwrap_or(0);
+    let most = ss
+        .windows(2)
+        .map(|w| step(&w[0].1, &w[1].1))
+        .max()
+        .unwrap_or(0);
     println!(
         "{name}: {} samples over {} ms, {} mm in all, at most {} mm a tick",
         ss.len(),
@@ -208,7 +216,10 @@ fn lifted(
     lay: (Vec3, Quat),
 ) -> (i64, i64) {
     let ws = words(dir, activity);
-    let lift = ws.iter().find(|w| w.phase == "souls:lift").expect("souls:lift");
+    let lift = ws
+        .iter()
+        .find(|w| w.phase == "souls:lift")
+        .expect("souls:lift");
     let up = ws
         .iter()
         .find(|w| w.phase == "souls:lifted")
@@ -271,7 +282,12 @@ fn set_down(
         (down.t0, down.t1, down.t1),
         "{name}: released as the set-down ended, when it said it would"
     );
-    let ss = one_track(&format!("{name}'s set-down"), dir, activity, (down.t0, down.t1));
+    let ss = one_track(
+        &format!("{name}'s set-down"),
+        dir,
+        activity,
+        (down.t0, down.t1),
+    );
     let before = samples(dir, activity)
         .into_iter()
         .rfind(|(at, _)| *at <= down.t0)
@@ -298,11 +314,10 @@ fn set_down(
     let at = (last.position, last.orientation);
     let (d, q) = apart_by(composed(&ss.last().unwrap().1, &held), at);
     let low = lowest(entry, at);
-    println!("{name}: released {d} µm (turn {q}) from where the track held it, its lowest corner at y {low} µm");
-    assert!(
-        d <= 1_000 && q <= 1 << 16,
-        "{name}: no jump at the release"
+    println!(
+        "{name}: released {d} µm (turn {q}) from where the track held it, its lowest corner at y {low} µm"
     );
+    assert!(d <= 1_000 && q <= 1 << 16, "{name}: no jump at the release");
     assert!(low.abs() <= 2_000, "{name}: on the floor, not in it: {low}");
     at
 }
@@ -466,15 +481,28 @@ async fn hoist_crews_of_two_four_and_six_lift_and_set_down_on_tracks() {
         &std::fs::read_to_string(d.join("entries").join("rack_upright_6m.json")).unwrap(),
     )
     .unwrap();
-    let rail_entry = json::parse(
-        &std::fs::read_to_string(d.join("entries").join("timber_rail.json")).unwrap(),
-    )
-    .unwrap();
+    let rail_entry =
+        json::parse(&std::fs::read_to_string(d.join("entries").join("timber_rail.json")).unwrap())
+            .unwrap();
     let beam_entry = construction("rack_beam.json");
     let loads = [
         ("two, the rack beam", 2, beam, beam_entry, beam_at(), true),
-        ("four, the timber rail", 4, rail, rail_entry, rail_at(), true),
-        ("six, the 6.1 m frame", 6, tall, tall_entry, upright_at(), false),
+        (
+            "four, the timber rail",
+            4,
+            rail,
+            rail_entry,
+            rail_at(),
+            true,
+        ),
+        (
+            "six, the 6.1 m frame",
+            6,
+            tall,
+            tall_entry,
+            upright_at(),
+            false,
+        ),
     ];
     for (name, n, load, entry, at, north) in loads {
         let l = Load::of(&entry).unwrap();
@@ -495,7 +523,11 @@ async fn hoist_crews_of_two_four_and_six_lift_and_set_down_on_tracks() {
         );
     }
     drop(served);
-    assert!(broke(&dir).is_empty(), "nothing broke off: {:?}", broke(&dir));
+    assert!(
+        broke(&dir).is_empty(),
+        "nothing broke off: {:?}",
+        broke(&dir)
+    );
     println!(
         "#5067: crews of two, four and six lifted and set down the rack beam, the timber rail and the 6.1 m frame, \
          each lift and set-down a track of the carry's node, a sample a tick, said at its start and its end"
@@ -586,7 +618,10 @@ async fn hoist_a_lift_let_go_mid_way_and_one_cut_off_by_a_restart_end_at_rest() 
     );
     // The set-down from mid-lift goes back along the lift's track: not straight down from where the carriers were.
     let (dd, dq) = apart_by(back, lay);
-    println!("let go: the beam rests {dd} µm (turn {dq}) from where it lay; released at {} µs", rel.at);
+    println!(
+        "let go: the beam rests {dd} µm (turn {dq}) from where it lay; released at {} µs",
+        rel.at
+    );
     assert!(dd <= 1_000 && dq <= 1 << 16, "back where it lay");
     assert_eq!(broke(&dir), vec!["souls:partner-left".to_owned()]);
     a.act("activity:leave", carry, BTreeMap::new())
@@ -602,8 +637,7 @@ async fn hoist_a_lift_let_go_mid_way_and_one_cut_off_by_a_restart_end_at_rest() 
     drop(served);
     let ws = words(&dir, carry);
     assert!(
-        ws.iter().any(|w| w.phase == "souls:lift")
-            && !ws.iter().any(|w| w.phase == "souls:lifted"),
+        ws.iter().any(|w| w.phase == "souls:lift") && !ws.iter().any(|w| w.phase == "souls:lifted"),
         "stopped mid-lift: {ws:?}"
     );
     let last = *samples(&dir, carry).last().expect("a sample of the lift");

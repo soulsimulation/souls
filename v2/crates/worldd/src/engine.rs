@@ -334,7 +334,15 @@ fn break_off(
     let (a, load) = (carry.activity, carry.board);
     if let Some(h) = lift {
         let w = (now, actor, cause);
-        activities.carry_track(tree, a, load, "souls:lift-cancelled", (h.t0, now), Some(why), w)?;
+        activities.carry_track(
+            tree,
+            a,
+            load,
+            "souls:lift-cancelled",
+            (h.t0, now),
+            Some(why),
+            w,
+        )?;
     }
     if let Some(t) = track {
         let w = (now, actor, cause);

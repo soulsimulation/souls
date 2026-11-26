@@ -627,7 +627,9 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
     for k in 1..=(t1 - t0) / TICK {
         lowered += 1;
         let done = carry
-            .lower(&mut s.town.tree, t0 + k * TICK, || unreachable!("its own id"))
+            .lower(&mut s.town.tree, t0 + k * TICK, || {
+                unreachable!("its own id")
+            })
             .expect("lowered");
         assert_eq!(done, t0 + k * TICK >= t1);
     }
