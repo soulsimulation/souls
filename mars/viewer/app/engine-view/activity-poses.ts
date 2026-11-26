@@ -139,7 +139,7 @@ export function gameArmBlend(g:RecordedGame,tick:number,dt:number):number{const 
 export function activityFrame(activity: string, base: string, seconds: number, id: string, opts: FrameOpts = {}): ActivityFrame | null {
   const ph = idPhase(id), t = seconds + ph * 7, seated = base === 'sit' || base === 'sit-ground';
   const gap = Math.max(0.3, Math.min(1.6, opts.gap ?? GAP[activity] ?? 0.9)), mid = gap / 2;
-  const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.min(1, since / a)) * (1 - S(Math.max(0, since - b) / 0.5));
+  const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.max(0, Math.min(1, since / a))) * (1 - S(Math.min(1, Math.max(0, since - b) / 0.5)));
   const f: ActivityFrame = { hands: null, feetOut: 0, hop: 0, lean: 0, side: 0, lying: null, look: 0 };
   if (opts.released !== undefined && RETURNS.has(activity)) {
     const out = activityFrame(activity, base, seconds, id, { ...opts, released: undefined, since: opts.priorAge });

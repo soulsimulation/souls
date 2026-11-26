@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {templateFromGltf} from './people.ts';
+import {CHARACTER_WIRE} from './character-wire.ts';
 import {HumanViews, setHumanGround, type SampledHuman} from './humans.ts';
 
 // Real production skin and animation, not an ankle diagnostic or a replacement clip.
@@ -13,7 +14,8 @@ async function template(name: string) {
   const loader = new GLTFLoader();
   loader.register(() => ({name:'gesture-test-material', loadMaterial:async()=>new THREE.MeshStandardMaterial()}));
   const read = async (file:string) => {const b=await readFile(rigDir+'/'+file);return loader.parseAsync(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),'');};
-  const mesh=await read(`animated-${name}.mesh.glb`), clips=await read('clips-ual.glb');
+  const wire=CHARACTER_WIRE[name as keyof typeof CHARACTER_WIRE];
+  const mesh=await read(wire.mesh), clips=await read(wire.clips);
   mesh.animations=clips.animations;
   return templateFromGltf(name,mesh);
 }
@@ -209,4 +211,45 @@ test('dedicated seats, floor, locomotion, paired and held owners ignore upright 
     for(const control of controls){const a=draw(control,false),b=draw(control,true);assert(distance(a.points,b.points)<1e-5,JSON.stringify(control)+' retains its existing whole pose');assert.deepEqual(a.root,b.root);assert.deepEqual(a.bones,b.bones);}
     assert(distance(draw({},false,true).points,draw({},true,true).points)<1e-5,'live speaking is an explicit unrecorded owner and is not reconstructed from a silent origin');
   }finally{setHumanGround(null);}
+});
+
+
+test('epoch-clock procedural exits stay within their authored lift and recorded age',async t=>{
+  const [{TakePeople},{Runtime},{Spatial},{emptyWorld,human},{TakeRecorder},{openGround},{activityFrame}]=await Promise.all([
+    import('./take-replay.ts'),import('../../engine/runtime/runtime.ts'),import('../../engine/spatial/service.ts'),
+    import('../../engine/world/factory.ts'),import('../../engine/take/recorder.ts'),import('../../engine/test/frame-fixtures.ts'),import('./activity-poses.ts')]);
+  const clock=1795673464.302144,age=.15214385,boundary=clock-age;
+  // One-off envelopes must finish at zero, never extrapolate the smoothstep polynomial after its domain.
+  for(const act of ['shrug','slump','look','touch'])for(const since of [-.01,0,.175,.35,.8,1,1.5,2,3.7,4.99]){
+    const f=activityFrame(act,'idle',clock,'epoch-control-1',{since})!;
+    assert(f.hop>=0&&f.hop<=.03,act+' keeps its authored vertical range');
+    assert(Math.abs(f.lean)<=.281&&Math.abs(f.look)<=.401,act+' keeps its authored body range');
+    for(const hand of f.hands??[])for(const component of hand??[])assert(Math.abs(component)<=1,act+' keeps finite natural hand targets');
+  }
+  assert.equal(activityFrame('shrug','idle',clock,'epoch-control-1',{since:.5})!.hop,.03,'the held shrug profile is preserved');
+  assert.equal(activityFrame('shrug','idle',clock,'epoch-control-1',{since:2})!.hop,0,'a completed envelope stays completed');
+  for(const name of ['woman','casual']){
+    const scene=openGround(),world=emptyWorld('epoch-gesture',scene),id='epoch-control-1',body=human(id,1,-1,{yaw:1.571});world.entities[id]=body;
+    const runtime=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),recorder=new TakeRecorder(runtime,{rulesVersion:'epoch-gesture'});
+    for(let tick=0;tick<80;tick++){body.human!.activity=tick>=40&&tick<50?'shrug':'idle';runtime.step();}
+    const people=new TakePeople(recorder.finish()),rig=await template(name);people.setTemplates([rig]);
+    const views=(people as unknown as {humans:HumanViews}).humans;
+    const idle=people.take.changes.filter(c=>c[1]===id&&c[2]==='activity').at(-1)![0]*people.take.dt;
+    const draw=(time:number)=>{people.show(time,boundary+time-idle);return views.meshPoints(id,1);};
+    setHumanGround(()=>0);
+    try{
+      let maxLift=0;const minima:Record<string,number>={};
+      for(let n=0;n<=120;n++){
+        draw(idle-.6+n*.01);const root=views.bodyObject(id)!.position;
+        assert(Math.abs(root.x-1)<1e-8&&Math.abs(root.z+1)<1e-8,'native horizontal anchor is unchanged');
+        maxLift=Math.max(maxLift,root.y);assert(root.y>=0&&root.y<=.030001,'only the authored three-centimetre hop may move the drawn holder');
+        for(const [part,row] of Object.entries(skin(views,id)))minima[part]=Math.min(minima[part]??Infinity,row.min);
+      }
+      for(const part of ['footL','footR','legL','legR'])assert(minima[part]>=-.0001,part+' remains within the existing numerical contact budget');
+      const before=draw(idle-1e-5),after=draw(idle+1e-5);t.diagnostic(JSON.stringify({name,exitDelta:distance(before,after)}));assert(distance(before,after)<.001,'recorded outgoing age keeps the whole-pose exit continuous');
+      const continuous=draw(idle+age),fresh=new TakePeople(people.take);fresh.setTemplates([rig]);
+      try{fresh.show(idle+age,clock);assert(distance(continuous,(fresh as unknown as {humans:HumanViews}).humans.meshPoints(id,1))<1e-5,'epoch-clock fresh seek matches continuous playback');}finally{fresh.dispose();}
+      t.diagnostic(JSON.stringify({rig:name,maxLift,minima,boundaryDelta:distance(before,after)}));
+    }finally{people.dispose();setHumanGround(null);}
+  }
 });

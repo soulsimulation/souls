@@ -1127,7 +1127,7 @@ export class HumanViews {
       : pn?.tilt ? pn.frame ?? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
       : pn?.flat ? pn.frame ?? blendFrames(null, activityFrame(pn.flat.act, v.base, tSec - (pn.flat.ago ?? 0), pairPhase, { actorId: h.name }), pn.flat.k)
       : pn ? blendFrames(null, act0, pn.settle)
-      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name }), act0, smooth(v.since! / ACT_BLEND))
+      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name, since:v.prevDuration===undefined?undefined:v.prevDuration+v.since! }), act0, smooth(v.since! / ACT_BLEND))
       : act0;
     const tilt = pn?.tilt ? pn.tilt.k : 1;
     if(act&&pn?.tilt)act={...act,handW:[(act.handW?.[0]??1)*tilt,(act.handW?.[1]??1)*tilt]};
@@ -1713,7 +1713,7 @@ export class HumanViews {
     const origin = v.clipOrigin;
     const originFrame = origin ? activityFrame(origin.sample.activity ?? 'idle', origin.sample.baseActivity ?? 'idle', tSec - origin.age, h.name, { since: origin.sample.activityAge }) : null;
     const clipBoundary = !!origin && origin.age >= 0 && origin.age < CLIP_FADE && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.transfer && !v.watering && !v.cup && !v.letGo && !v.lastHandActuator && !v.handHold && !v.rps && !v.propWanted && !v.prop?.obj.visible && !v.instrument && !v.speaking && !v.formPress?.length && !v.shore && !waterFrom && sitW === 0 && w < .01
-      && !act?.pairedContact && !originFrame?.pairedContact && !act?.hop && !originFrame?.hop && !act?.ride && !originFrame?.ride && !lib.posture && !lib.still
+      && !act?.pairedContact && !originFrame?.pairedContact && (!act?.hop || ACTIVITY_OVERLAYS.has(v.activity)) && (!originFrame?.hop || ACTIVITY_OVERLAYS.has(origin.sample.activity ?? 'idle')) && !act?.ride && !originFrame?.ride && !lib.posture && !lib.still
       && postureKind(v.activity, v.base) === 'stand' && postureKind(origin.sample.activity ?? 'idle', origin.sample.baseActivity) === 'stand'
       && origin.sample.walk < .01 && !origin.sample.instrument;
     if (clipBoundary) {
