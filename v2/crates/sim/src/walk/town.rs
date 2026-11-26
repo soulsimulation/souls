@@ -2708,7 +2708,8 @@ impl Ground for Grounds<'_> {
             return None;
         }
         let r = self.map.route(self.tree, from, to, HANDS).ok()?;
-        Some(r.length as i64 * 1000)
+        // As a body walks it, not by the coarse search's middles of the squares' edges (#5012's short walk).
+        Some(r.walked as i64 * 1000)
     }
 
     fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {

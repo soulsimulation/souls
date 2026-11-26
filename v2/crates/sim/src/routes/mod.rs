@@ -237,6 +237,11 @@ pub struct Route {
     pub waypoints: Vec<[i64; 3]>,
     /// Its length by the coarse search, mm.
     pub length: u64,
+    /// Its length as a body walks it, mm ([`Map::walked`]): never more than `length`. The coarse search measures a
+    /// crossing from a square's edge at the middle of the whole stretch it shares with the next square (up to 16 m
+    /// long), so a goal just past an edge can measure several metres longer than its walk; this is what N9's spot
+    /// tables weigh a place by.
+    pub walked: u64,
     /// Portals taken from the search's queue.
     pub searched: u32,
 }
@@ -324,6 +329,23 @@ fn mm(um: i64) -> i64 {
 
 fn cross(o: [i64; 2], a: [i64; 2], b: [i64; 2]) -> i64 {
     (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+}
+
+/// Where a walk from `s` to `t` (mm) crosses the portal `a`–`b`: where the straight line between them meets it, else
+/// the portal's end that makes the way through it shorter.
+fn crossing(a: [i64; 2], b: [i64; 2], s: [i64; 2], t: [i64; 2]) -> [i64; 2] {
+    let (ca, cb) = (i128::from(cross(s, t, a)), i128::from(cross(s, t, b)));
+    let (ds, dt) = (i128::from(cross(a, b, s)), i128::from(cross(a, b, t)));
+    // `a` and `b` on either side of the line s–t (or on it), and `s` and `t` on either side of the portal's.
+    if ca != cb && ca * cb <= 0 && ds * dt <= 0 {
+        let k = |u: i64, v: i64| u + (i128::from(v - u) * ca / (ca - cb)) as i64;
+        return [k(a[0], b[0]), k(a[1], b[1])];
+    }
+    if len2(s, a) + len2(a, t) <= len2(s, b) + len2(b, t) {
+        a
+    } else {
+        b
+    }
 }
 
 /// The part of the segment `a`–`b` inside the box `[x0, z0, x1, z1]` (mm), if any: Liang–Barsky, its bounds kept
@@ -1797,13 +1819,15 @@ impl Map {
         let start_xz = [from.at[0], from.at[2]];
         let direct = (from.piece == to.piece).then(|| {
             let first_line = self.line_in(sc, from.piece, start_xz, goal_xz);
+            let length = first_line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u64;
             Route {
                 size: self.size,
                 hops: vec![Hop::Patch {
                     at: self.pieces[from.piece as usize].at,
                     piece: from.piece,
                 }],
-                length: first_line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u64,
+                length,
+                walked: length,
                 first_line,
                 waypoints: Vec::new(),
                 searched: 0,
@@ -1882,6 +1906,7 @@ impl Map {
             .map(|(p, _)| self.portals[*p as usize].world)
             .collect();
         let length = u64::from(sc.seen[goal as usize].1);
+        let walked = self.walked(sc, start_xz, goal_xz, &chain).min(length);
         let target = chain
             .first()
             .filter(|(p, _)| *p != goal)
@@ -1893,8 +1918,42 @@ impl Map {
             first_line,
             waypoints,
             length,
+            walked,
             searched,
         })
+    }
+
+    /// The length of a searched route's `chain` as a body walks it, mm: across each square's edge where the straight
+    /// way on from the last crossing to the goal meets that portal (or at the portal's end nearer that way), each piece's
+    /// own line between (#5012's short walk: measured at the middle of a 16 m stretch, a grip 2.8 m past a square's edge
+    /// cost 7.9 m more than its walk, so a place 3.5 m short of it on the walker's own square was granted instead).
+    /// `u64::MAX` for a route across a link (a doorway, a stair, a shore): its ends lie on other frames, and it keeps the
+    /// coarse length.
+    fn walked(
+        &self,
+        sc: &mut Scratch,
+        start: [i64; 2],
+        end: [i64; 2],
+        chain: &[(u32, u32)],
+    ) -> u64 {
+        let goal = self.portals.len() as u32;
+        let (mut at, mut total) = (start, 0u64);
+        for &(p, via) in chain {
+            if via & LINK != 0 {
+                return u64::MAX;
+            }
+            if p == goal {
+                return total + u64::from(self.run(sc, via, at, end));
+            }
+            let por = &self.portals[p as usize];
+            if por.link != NONE {
+                return u64::MAX;
+            }
+            let c = crossing(por.a, por.b, at, end);
+            total += u64::from(self.run(sc, via, at, c));
+            at = c;
+        }
+        u64::MAX
     }
 }
 
