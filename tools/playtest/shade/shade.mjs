@@ -17,7 +17,9 @@
 //   local   the template's world served like production under the old page (arena/new-engine/old-page.mjs), four or
 //           six test Souls paired, the build and take-down run against the template's own yard, and with
 //           --record <seconds> one uncut clip of the old page at a fixed camera on the yard.
-//             node tools/playtest/shade/shade.mjs local --crew 4|6 [--dir <folder>] [--record 600] [--mars-web <dir>]
+//             node tools/playtest/shade/shade.mjs local --crew 4|6|4,6 [--dir <folder>] [--record 600] [--mars-web <dir>]
+//           With --crew 4,6 four build and take it down, then six, in the same world (the yard back where it was).
+//           With --frames <s> a picture of the page at the same camera every <s> seconds instead of a clip.
 //   print   the steps as the shell lines a person types, one Soul each:
 //             node tools/playtest/shade/shade.mjs print --crew 4|6
 //
@@ -191,15 +193,16 @@ export async function printLines(n) {
 
 async function main() {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
-  const mode = argv[0], n = Number(opt('crew', 4));
-  if (n !== 4 && n !== 6) throw new Error('--crew 4 or 6');
+  // --crew 4,6: each crew in turn in the same world, the yard back where it was between them
+  const mode = argv[0], crews = String(opt('crew', 4)).split(',').map(Number), n = Math.max(...crews);
+  if (!crews.every((c) => c === 4 || c === 6)) throw new Error('--crew 4, 6 or 4,6');
   if (mode === 'print') return printLines(n);
-  if (mode !== 'local') { console.error('usage: shade.mjs local --crew 4|6 [--dir d] [--record s] [--mars-web d] | print --crew 4|6'); process.exit(2); }
+  if (mode !== 'local') { console.error('usage: shade.mjs local --crew 4|6|4,6 [--dir d] [--record s] [--mars-web d] | print --crew 4|6'); process.exit(2); }
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
-  const dir = resolve(opt('dir', join(REPO_ROOT, '.local/shade', `${stamp}-crew${n}`)));
+  const dir = resolve(opt('dir', join(REPO_ROOT, '.local/shade', `${stamp}-crew${crews.join('-')}`)));
   mkdirSync(dir, { recursive: true });
   const log = (s) => console.error(`shade: ${s}`);
-  const out = { mode, crew: n, steps: [] };
+  const out = { mode, crews, runs: [] };
   const save = () => writeFileSync(join(dir, 'shade.json'), JSON.stringify(out, null, 1));
   const { startOldPage } = await import('../arena/new-engine/old-page.mjs');
   const template = opt('template', TEMPLATE), record = Number(opt('record', 0));
@@ -214,17 +217,58 @@ async function main() {
     }
     out.ids = await findIds(seats.ada); out.bodies = bodies; out.before = await partsWhere(seats.ada, out.ids); save();
     const play = async () => {
-      const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
-      try {
-        await (n === 6 ? buildSix : buildFour)(r, bodies, out.ids);
-        out.builtAtS = (Date.now() - t0) / 1000; out.built = await partsWhere(seats.ada, out.ids); save();
-        log(`built in ${out.builtAtS.toFixed(0)} s`);
-        await takeDown(r, bodies, out.ids);
-        out.ok = true;
-      } catch (e) { out.ok = false; out.failed = e.message; }
-      out.ms = Date.now() - t0; save();
+      const start = Date.now();
+      for (const c of crews) {
+        const t0 = Date.now(), r = runner(seats, log, start), run = { crew: c, fromS: (t0 - start) / 1000, steps: r.lines };
+        out.runs.push(run);
+        log(`crew of ${c}: building`);
+        try {
+          await (c === 6 ? buildSix : buildFour)(r, bodies, out.ids);
+          run.builtInS = (Date.now() - t0) / 1000; run.built = await partsWhere(seats.ada, out.ids); save();
+          log(`crew of ${c}: built in ${run.builtInS.toFixed(0)} s`);
+          await takeDown(r, bodies, out.ids);
+          run.ok = true;
+        } catch (e) { run.ok = false; run.failed = e.message; }
+        run.ms = Date.now() - t0; run.after = await partsWhere(seats.ada, out.ids); save();
+        log(run.ok ? `crew of ${c}: done: ${r.lines.length} commands, 0 refused, built in ${run.builtInS.toFixed(0)} s, all in ${(run.ms / 1000).toFixed(0)} s` : `crew of ${c}: stopped: ${run.failed}`);
+        if (!run.ok) break;
+      }
+      out.ok = out.runs.length === crews.length && out.runs.every((x) => x.ok);
     };
-    if (record) {
+    const every = Number(opt('frames', 0));
+    if (every) {
+      // Frames instead of a clip: the old page at the fixed camera, one picture every `every` seconds while the crews
+      // work, named by the seconds since the first command (a clip's sound and menus time out on a loaded machine).
+      const { createRequire } = await import('node:module');
+      const { takeUrl } = await import('../../launch-video/capture.mjs');
+      const { cameraShot } = await import('../../launch-video/scene.mjs');
+      const { worldArrived } = await import('../lib/arrival.mjs');
+      const chromium = createRequire(join(REPO_ROOT, 'mars/viewer/package.json'))('@playwright/test').chromium;
+      const browser = await chromium.launch({ headless: true, args: ['--ignore-gpu-blocklist'] });
+      const frames = join(dir, 'frames');
+      mkdirSync(frames, { recursive: true });
+      out.frames = { dir: frames, every, camera: CAMERA, shots: [] };
+      try {
+        const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+        const shot = cameraShot({ fixed: CAMERA }, 7200, 16 / 9);
+        await page.route((u) => u.pathname === '/__lv/shot.json', (rt) => rt.fulfill({ contentType: 'application/json', body: JSON.stringify(shot) }));
+        await page.goto(takeUrl(world.page, { hour: '12:00', shot: true }), { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(worldArrived, null, { timeout: 300_000 });
+        await page.waitForFunction(() => !!window.__soulsShot, null, { timeout: 60_000 });
+        await page.evaluate(() => window.__soulsShot.cue());
+        await new Promise((res) => setTimeout(res, 5000));
+        const t0 = Date.now();
+        let going = true;
+        const done = play().finally(() => { going = false; });
+        while (going) {
+          const at = Math.round((Date.now() - t0) / 1000), file = join(frames, `t${String(at).padStart(5, '0')}.png`);
+          await page.screenshot({ path: file }).then(() => out.frames.shots.push(at)).catch(() => {});
+          await Promise.race([done, new Promise((res) => setTimeout(res, every * 1000))]);
+        }
+        await new Promise((res) => setTimeout(res, 3000));
+        await page.screenshot({ path: join(frames, 'end.png') }).catch(() => {});
+      } finally { await browser.close(); }
+    } else if (record) {
       const { capture } = await import('../../launch-video/capture.mjs');
       const { cameraShot } = await import('../../launch-video/scene.mjs');
       let done = null;
@@ -232,8 +276,8 @@ async function main() {
       out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', fps: 24, mbps: 4, hour: '12:00', shot: cameraShot({ fixed: CAMERA }, record, 16 / 9), log, onPlay: () => { out.clip.playAt = Date.now(); done = play(); } });
       await done;
     } else await play();
-    out.after = await partsWhere(seats.ada, out.ids); save();
-    log(out.ok ? `done: ${out.steps.length} commands, 0 refused, built in ${out.builtAtS.toFixed(0)} s, all in ${(out.ms / 1000).toFixed(0)} s` : `stopped: ${out.failed}`);
+    save();
+    log(out.ok ? 'done' : 'stopped');
   } finally {
     for (const s of Object.values(seats)) await s.stop();
     save(); await world.stop();
