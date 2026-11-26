@@ -947,7 +947,7 @@ fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
 }
 
 /// A whole number of the encoding as an `i64`.
-fn int_of(v: &replica::encode::Value) -> Option<i64> {
+pub(crate) fn int_of(v: &replica::encode::Value) -> Option<i64> {
     match v {
         replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
         replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),

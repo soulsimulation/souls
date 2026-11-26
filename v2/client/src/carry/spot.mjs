@@ -70,7 +70,7 @@ const inside = (bay, p) => {
  * name: `carry-crew-unseen` (nothing lifted), `carry-crew-too-small`, `carry-spot-wrong-load`, `carry-spot-no-fit`,
  * `carry-spot-full`. `ctx` as `carryIntents` takes it, with `heldBy(crew)`, `crewEnds(crew)` (its ids, and `at`:
  * [front, back] on the plan, µm), `crewSize(crew)` and `loose()` (the ids of things on the open ground). → {point:
- * [x, z] µm, bay} or a refusal
+ * [x, z] µm, bay, heading: the load's there (a unit [x, z]), or null without the crew's ends} or a refusal
  */
 export function toSpot(req, ctx, spot) {
   const { kinds, kindOf, placeOf, me } = ctx;
@@ -96,5 +96,6 @@ export function toSpot(req, ctx, spot) {
   const mine = placeOf(me);
   if (!mine) return no('carry-me-unseen', 'this Soul\'s body is not in the copy yet: look first');
   const off = [mine.pos[0] - mid[0], mine.pos[2] - mid[1]];
-  return { point: [bay.point[0] + c * off[0] - s * off[1], bay.point[1] + s * off[0] + c * off[1]], bay: bay.name };
+  // The load's heading there, from its back toward its front: the front's walk names it, and the world turns the crew.
+  return { point: [bay.point[0] + c * off[0] - s * off[1], bay.point[1] + s * off[0] + c * off[1]], bay: bay.name, heading: a ? u : null };
 }

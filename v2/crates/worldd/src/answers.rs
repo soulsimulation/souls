@@ -1260,10 +1260,14 @@ struct Clock {
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
     /// Each carrier keeping its place from its crew's front (moving-group rule 3), by (carry, carrier): the
-    /// `souls:follow` order kept for it, by intent.
-    carry_follows: BTreeMap<(Id, Id), Id>,
+    /// `souls:follow` order kept for it, by intent, the front's walk it was made for, and whether it turns.
+    carry_follows: BTreeMap<(Id, Id), (Id, Id, bool)>,
+    /// Each walk taken since the last tick that names a carry's heading at its goal (its parameter 3, moving-group
+    /// rule 3), by intent: read when it starts, if it leads a carry.
+    headings: BTreeMap<Id, [i64; 2]>,
     /// Carriers that walked their own way during their front's walk, by (the front's walk, carrier): each keeps its
-    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place).
+    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place), and no
+    /// turn of that walk moves it.
     carry_own: BTreeSet<(Id, Id)>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
@@ -2523,6 +2527,16 @@ impl Clock {
                 stamps,
             },
         );
+        // Moving-group rule 3: a walk's parameter 3, a carry's heading at its goal (`[x, z]`), kept until it starts.
+        if let (Taken::Move(_), Some(Value::Array(h))) = (&taken, intent.parameters.get(&3))
+            && let [Some(x), Some(z)] = [
+                h.first().and_then(acts::int_of),
+                h.get(1).and_then(acts::int_of),
+            ]
+            && h.len() == 2
+        {
+            self.headings.insert(id, [x, z]);
+        }
         match taken {
             // A move aimed at a described spot (E2) is resolved by a checker even with bodies, and bound at commit.
             Taken::Form(act) if self.bodies.is_none() || act.spot.is_some() => {
@@ -4438,6 +4452,11 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
+        // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
+        // 3), as the walkers' map learns a load's place only when it is set down or seated.
+        if let Some(e) = self.engine.as_ref() {
+            b.runner.carrying(e.carried_loads());
+        }
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
@@ -4954,26 +4973,32 @@ impl Clock {
 
     /// Carrying together (`v2/docs/moving-group.md` rule 3): while a lifted carry's front walks, each other carrier
     /// that is not moving on its own (no move of its own, no order of its own) walks with it by its own `souls:follow`
-    /// order, keeping the place it stood at from the front when the order began (parameter 4, `[x, z]` µm on the
-    /// plan); the crew moves as one and does not turn. A carrier's own act ends its order (B2: it claims the legs),
-    /// and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
-    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where
-    /// it chose (a scripted crew's carrier arriving first is not dragged on past its place); it takes a place again at
-    /// the front's next walk. An order is cancelled when its carrier is no longer in the carry, or the carry is over.
-    /// A carry that broke off (`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops its front's
-    /// walk too, ended by that reason: the whole group stops with one reason. Written in the tick, with the rest.
+    /// order, keeping its place in the carry's frame ([`engine::Keeps`]: the back its span behind the front, a side
+    /// where it stood at the lift) as an offset from the front on the plan (parameter 4, `[x, z]` µm). When the front's
+    /// walk turns the crew (its heading at the goal named, or a pose of the carry's way, [`engine::Led`]) the order
+    /// names the goal and the offset there too (parameter 5): the place swings with the front, so one walk turns the
+    /// load square. When that walk ends, wherever the front stood (a spot short of its goal), the order is replaced by
+    /// one that turns from the load's heading then to the turned one, its goal where the front stands, so the turn is
+    /// finished there (as a pivot, at the skill's swing pace). A carrier's own act ends its order (B2: it claims the
+    /// legs), and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where it
+    /// chose (a scripted crew's carrier arriving first is not dragged on past its place), turned by none of that walk;
+    /// it takes a place again at the front's next walk, where the frame has it then, turned as the frame is. A new walk
+    /// of the front replaces the orders when it or the walk before turns the crew. An order is cancelled when its
+    /// carrier is no longer in the carry, or the carry is over. A carry that broke off (`souls:partner-left`,
+    /// `souls:carriers-apart`, `souls:carry-blocked`) stops its front's walk too, ended by that reason: the whole
+    /// group stops with one reason. Written in the tick, with the rest.
     fn keep_carry_orders(&mut self, now: Micros) {
         let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
             return;
         };
         let over = e.led_over();
         let running = e.carry_follows();
-        let leading = e.leading();
         if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
             self.carry_own.clear();
             return;
         }
-        let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.0, r.2)).collect();
+        let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.activity, r.walker)).collect();
         let mut cancel: Vec<sim::orders::Order> = Vec::new();
         let gone: Vec<(Id, Id)> = self
             .carry_follows
@@ -4982,7 +5007,7 @@ impl Clock {
             .copied()
             .collect();
         for k in gone {
-            let Some(order) = self.carry_follows.remove(&k) else {
+            let Some((order, _, _)) = self.carry_follows.remove(&k) else {
                 continue;
             };
             if let Some(o) = b.orders.open(k.1).filter(|o| o.intent == order) {
@@ -4992,12 +5017,12 @@ impl Clock {
         // An order ended by itself (the carrier's own act took its legs, or it could not keep its place) is forgotten;
         // its carrier is still in the carry.
         self.carry_follows
-            .retain(|(_, f), order| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+            .retain(|(_, f), (order, _, _)| b.orders.open(*f).is_some_and(|o| o.intent == *order));
         // Walking its own way lasts as long as the front's walk it began during.
         self.carry_own.retain(|(walk, _)| {
-            leading
+            running
                 .iter()
-                .any(|l| l.1 == *walk && b.moving(l.0) == Some(*walk))
+                .any(|k| k.led.walk == *walk && b.moving(k.front) == Some(*walk))
         });
         let basis = Version {
             lineage: self.lineage,
@@ -5006,24 +5031,46 @@ impl Clock {
             sequence: self.replica.version(),
         }
         .to_value();
-        for (a, front, walker, soul) in running {
-            if self.carry_follows.contains_key(&(a, walker)) {
-                continue;
-            }
-            let Some(walk) = leading.iter().find(|l| l.0 == front).map(|l| l.1) else {
-                continue;
-            };
-            if b.moving(front) != Some(walk) {
-                continue;
-            }
-            if b.moving(walker).is_some() {
+        let int = |n: i64| match u64::try_from(n) {
+            Ok(u) => Value::Uint(u),
+            Err(_) => Value::Nint(n.unsigned_abs() - 1),
+        };
+        for k in running {
+            let (a, walker, walk) = (k.activity, k.walker, k.led.walk);
+            let going = b.moving(k.front) == Some(walk);
+            // A carrier walking its own way during the front's walk keeps its own legs for the rest of that walk: no
+            // order, and no turn of that walk moves it; it rejoins at the front's next walk.
+            if going && b.moving(walker).is_some() {
                 self.carry_own.insert((walk, walker));
                 continue;
             }
-            if self.carry_own.contains(&(walk, walker)) || b.orders.open(walker).is_some() {
+            if self.carry_own.contains(&(walk, walker)) {
                 continue;
             }
-            let (Some((on, f)), Some((own, w))) = (b.pose(front), b.pose(walker)) else {
+            let (replaces, finish) = match self.carry_follows.get(&(a, walker)).copied() {
+                // The walk that turns the crew has ended, wherever the front stood (a spot short of its goal, say):
+                // the turn is finished there, each place its turned one.
+                Some((_, made_for, true)) if made_for == walk && !going => (true, true),
+                Some((_, made_for, _)) if made_for == walk => continue,
+                // The front's new walk: a turn either way takes the places again; a straight one keeps them.
+                Some((order, _, turned)) => {
+                    if !going || (!turned && k.led.turn.is_none()) {
+                        if going {
+                            self.carry_follows.insert((a, walker), (order, walk, false));
+                        }
+                        continue;
+                    }
+                    (true, false)
+                }
+                None => (false, false),
+            };
+            if (!going && !finish)
+                || b.moving(walker).is_some()
+                || (!replaces && b.orders.open(walker).is_some())
+            {
+                continue;
+            }
+            let (Some((on, here)), Some((own, _))) = (b.pose(k.front), b.pose(walker)) else {
                 continue;
             };
             if on != own {
@@ -5033,30 +5080,39 @@ impl Clock {
                 continue;
             };
             self.next_intent += 1;
-            let int = |n: i64| match u64::try_from(n) {
-                Ok(u) => Value::Uint(u),
-                Err(_) => Value::Nint(n.unsigned_abs() - 1),
+            // Finished where the front stands: from the load's heading now to the turned one, the front at its goal.
+            let at = engine::on_plan(k.place, k.heading);
+            let turn = match (finish, k.led.turn) {
+                (true, Some((_, h))) => Some(([here.x, here.z], h)),
+                (_, turn) => turn,
             };
+            let mut parameters = BTreeMap::from([(4, Value::Array(vec![int(at[0]), int(at[1])]))]);
+            if let Some((goal, h)) = turn {
+                let end = engine::on_plan(k.place, h);
+                parameters.insert(
+                    5,
+                    Value::Array(vec![int(goal[0]), int(goal[1]), int(end[0]), int(end[1])]),
+                );
+            }
             let order = Intent {
-                actor: Actor::Soul(soul),
+                actor: Actor::Soul(k.soul),
                 verb: Name::new(skills::orders::FOLLOW).unwrap_or_else(|| unreachable!("a name")),
-                target: Some(Target::Node(front)),
-                parameters: BTreeMap::from([(
-                    4,
-                    Value::Array(vec![int(w.x - f.x), int(w.z - f.z)]),
-                )]),
+                target: Some(Target::Node(k.front)),
+                parameters,
                 sequence: 0,
                 basis: basis.clone(),
                 expiry: now.saturating_add(sim::orders::LONGEST),
                 resources: Vec::new(),
                 fallbacks: Vec::new(),
-                replaces: None,
+                // The order this carrier kept for the front's last walk, ended now (it is the Soul's at sequence 0).
+                replaces: replaces.then_some(0),
                 body: None,
                 reflex: false,
             };
             match crate::orders::accept(b, &order, walker, id, now) {
                 Ok(()) => {
-                    self.carry_follows.insert((a, walker), id);
+                    self.carry_follows
+                        .insert((a, walker), (id, walk, turn.is_some() && !finish));
                 }
                 Err(r) => eprintln!(
                     "worldd: {}'s place in its carry was refused: {r}",
@@ -5106,10 +5162,12 @@ impl Clock {
         let mut asks = Vec::new();
         for (id, m) in std::mem::take(&mut self.moving) {
             let Some(o) = self.open.get(&id) else {
+                self.headings.remove(&id);
                 continue;
             };
             let (actor, sequence) = (o.actor, o.sequence);
             if expired(o.expiry, now) {
+                self.headings.remove(&id);
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
             } else {
                 asks.push((id, m));
@@ -5143,6 +5201,24 @@ impl Clock {
                     .map(|s| (*id, s))
             })
             .collect();
+        // Each walk's goal, its first ask's node and point (moving-group rule 3: where a carry's front turns its crew).
+        let goals: BTreeMap<Id, (Id, Vec3)> = asks
+            .iter()
+            .filter_map(|(id, a)| match a.ask {
+                replica::move_check::Ask::Walk {
+                    node,
+                    point: Some(p),
+                    ..
+                } => Some((*id, (node, p))),
+                _ => None,
+            })
+            .collect();
+        let mut headings = BTreeMap::new();
+        for (id, _) in &asks {
+            if let Some(h) = self.headings.remove(id) {
+                headings.insert(*id, h);
+            }
+        }
         let started = b.start_committed(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
@@ -5162,6 +5238,8 @@ impl Clock {
                     id,
                     now,
                     true,
+                    goals.get(&id).copied(),
+                    headings.get(&id).copied(),
                 );
             }
             for (body, id) in seated {
@@ -5173,6 +5251,8 @@ impl Clock {
                         id,
                         now,
                         false,
+                        None,
+                        None,
                     );
                 }
             }
@@ -6525,6 +6605,7 @@ pub fn start<S: Storage + 'static>(
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
         carry_follows: BTreeMap::new(),
+        headings: BTreeMap::new(),
         carry_own: BTreeSet::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
