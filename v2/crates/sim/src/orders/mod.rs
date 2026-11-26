@@ -119,12 +119,15 @@ pub enum What {
     Hold { stance: Stance, hands: Vec<Name> },
     /// Follow `leader` (the target) within `band` µm (parameters 1 and 2), or keep a place `beside` it, that many µm
     /// to its side (parameter 3, 0.135 R1: walking hand in hand), or a place `at` an offset from it on the plan
-    /// (parameter 4, `[x, z]` µm: carrying together, `v2/docs/moving-group.md` rule 3).
+    /// (parameter 4, `[x, z]` µm: carrying together, `v2/docs/moving-group.md` rule 3), turning as the leader nears
+    /// its goal when parameter 5 names it and the offset there (`[goal x, goal z, x, z]` µm: a crew turned with its
+    /// front).
     Follow {
         leader: Id,
         band: (i64, i64),
         beside: Option<i64>,
         at: Option<[i64; 2]>,
+        turn: Option<([i64; 2], [i64; 2])>,
     },
     /// Stand in line for the slot of `slot` (the target), and take it at the head by `act` (parameter 1), if named.
     Queue { slot: Id, act: Option<Name> },
@@ -242,7 +245,7 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
             What::Hold { stance, hands }
         }
         FOLLOW => {
-            has(&[1, 2, 3, 4])?;
+            has(&[1, 2, 3, 4, 5])?;
             let near = p.get(&1).map_or(Some(BAND.0), read_int);
             let far = p.get(&2).map_or(Some(BAND.1), read_int);
             let beside = match p.get(&3).map(read_int) {
@@ -268,12 +271,32 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
                 },
                 Some(_) => return bad("a place at is [x, z] µm from the leader"),
             };
+            let turn = match p.get(&5) {
+                None => None,
+                Some(Value::Array(a)) => match a.iter().map(read_int).collect::<Option<Vec<_>>>() {
+                    Some(v)
+                        if v.len() == 4
+                            && at.is_some()
+                            && v[2].abs() <= PLACE_MOST
+                            && v[3].abs() <= PLACE_MOST =>
+                    {
+                        Some(([v[0], v[1]], [v[2], v[3]]))
+                    }
+                    _ => {
+                        return bad(
+                            "a turn is [goal x, goal z, x, z] µm, the place at the goal at most 20 m from the leader, with a place at",
+                        );
+                    }
+                },
+                Some(_) => return bad("a turn is [goal x, goal z, x, z] µm"),
+            };
             match (near, far) {
                 (Some(n), Some(f)) if 0 <= n && n <= f => What::Follow {
                     leader: node()?,
                     band: (n, f),
                     beside,
                     at,
+                    turn,
                 },
                 _ => return bad("a band is 0 <= nearest <= furthest, µm"),
             }
@@ -492,7 +515,8 @@ impl Orders {
                 band,
                 beside,
                 at,
-            } => Box::new(follow(*leader, *band, *beside, *at, until)),
+                turn,
+            } => Box::new(follow(*leader, *band, *beside, *at, *turn, until)),
             What::Queue { .. } => Box::new(Queue { until }),
         };
         let driver = c.claim(body, &skill.shape())?;

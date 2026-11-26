@@ -636,6 +636,80 @@ pub struct Runner {
     out_places: BTreeMap<Id, (Id, u64)>,
     /// The walkers' line requests still out at the planner (S8): each walker's leg end and the batch it went in.
     out_lines: BTreeMap<Id, (Vec3, u64)>,
+    /// The loads being carried, as the world last sampled them ([`Carried`]): a walker keeps apart from each as from
+    /// bodies standing in a row, unless it carries it. Set by the world each tick ([`Runner::carrying`]).
+    carried: Vec<Carried>,
+}
+
+/// A load being carried (moving-group rule 3: a carry's rider), as a walker's `Ask::Near` sees it: the walkers' map
+/// learns where a load rests only when it is set down or seated, so while it is carried it stands among the bodies
+/// near instead, as points across its outline on the plan, each under the load's own id, at the load's height and
+/// moving with it. Its carriers do not see it: they stand at its ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Carried {
+    pub load: Id,
+    /// The node it is carried over, whose frame its points are in.
+    pub node: Id,
+    pub points: Vec<Vec3>,
+    pub velocity: Vec3,
+    pub carriers: Vec<Id>,
+}
+
+/// The most apart two points that stand for a carried load are, µm: a walker's two radii and their slack (the route
+/// skill's own space, [`skills::route::ROOM`]) twice over are more, so no walker passes between them.
+pub const CARRIED_GAP: i64 = 400_000;
+
+impl Carried {
+    /// A load whose long axis runs from `back` to `front` on the plan (µm) and that is `half_width` wide each side of
+    /// it, at height `y`: points every [`CARRIED_GAP`] at most, along its length and across its width, drawn in a
+    /// walker's own space ([`skills::route::ROOM`]) from its outline, so a walker kept two spaces from each keeps clear
+    /// of the outline.
+    pub fn new(
+        load: Id,
+        node: Id,
+        (front, back): ([i64; 2], [i64; 2]),
+        half_width: i64,
+        y: i64,
+        velocity: Vec3,
+        carriers: Vec<Id>,
+    ) -> Carried {
+        let room = skills::route::ROOM;
+        let d = [front[0] - back[0], front[1] - back[1]];
+        let l = i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2);
+        let l = i64::try_from(l.isqrt()).unwrap_or(0);
+        let mut points = Vec::new();
+        if l > 0 {
+            let inset = |half: i64| (half - room).max(0);
+            let (along, across) = (inset(l / 2), inset(half_width));
+            let count = |half: i64| half * 2 / CARRIED_GAP + 1;
+            let (na, nc) = (count(along), count(across));
+            let mid = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2];
+            let at = |k: i64, n: i64, half: i64| {
+                if n == 1 {
+                    0
+                } else {
+                    -half + 2 * half * k / (n - 1)
+                }
+            };
+            for i in 0..na {
+                let a = at(i, na, along);
+                for j in 0..nc {
+                    let c = at(j, nc, across);
+                    let x = i128::from(a) * i128::from(d[0]) - i128::from(c) * i128::from(d[1]);
+                    let z = i128::from(a) * i128::from(d[1]) + i128::from(c) * i128::from(d[0]);
+                    let v = |n: i128| i64::try_from(n / i128::from(l)).unwrap_or(0);
+                    points.push(Vec3::new(mid[0] + v(x), y, mid[1] + v(z)));
+                }
+            }
+        }
+        Carried {
+            load,
+            node,
+            points,
+            velocity,
+            carriers,
+        }
+    }
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -827,6 +901,8 @@ struct Here<'a> {
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     settled: &'a BTreeSet<Id>,
+    /// The loads being carried ([`Carried`]).
+    carried: &'a [Carried],
     /// A body's kind, named once a tick, not at each read (#3213).
     kind: Name,
     /// With a planner (K18b): its lines of the last tick, and the lines asked for in this one. Without, the town
@@ -863,7 +939,12 @@ impl Geometry for Here<'_> {
                     z,
                 ))
             }),
-            Ask::Near { radius } => Some(Answer::Near(near(self.controller, body, *radius))),
+            Ask::Near { radius } => Some(Answer::Near(near(
+                self.controller,
+                self.carried,
+                body,
+                *radius,
+            ))),
         }
     }
 
@@ -912,12 +993,34 @@ impl Geometry for Here<'_> {
 }
 
 /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
-/// the controller's index holds them: where the mover left them at the end of the last tick (N16).
-fn near(controller: &Controller, body: Id, radius: i64) -> Vec<Near> {
+/// the controller's index holds them: where the mover left them at the end of the last tick (N16). Then the points of
+/// each load being carried over that node within `radius` ([`Carried`]), unless `body` carries it, in load order.
+fn near(controller: &Controller, carried: &[Carried], body: Id, radius: i64) -> Vec<Near> {
     let Some(me) = controller.body(body) else {
         return Vec::new();
     };
     let (node, p) = crate::index::place_of(me);
+    let mut out = near_bodies(controller, body, node, p, radius);
+    let r = i128::from(radius).pow(2);
+    for c in carried {
+        if c.node != node || c.carriers.contains(&body) {
+            continue;
+        }
+        for q in &c.points {
+            if i128::from(q.x - p[0]).pow(2) + i128::from(q.z - p[1]).pow(2) <= r {
+                out.push(Near {
+                    id: c.load,
+                    position: *q,
+                    velocity: c.velocity,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The other bodies not carried across a link on `node` within `radius` of `p`, in id order.
+fn near_bodies(controller: &Controller, body: Id, node: Id, p: [i64; 2], radius: i64) -> Vec<Near> {
     let found = controller.near().bodies_within(node, p, radius);
     // Sized once: in a crowd each walker has many near it, every tick.
     let mut out = Vec::with_capacity(found.len());
@@ -964,6 +1067,7 @@ impl Runner {
             chunk: CHUNK,
             out_places: BTreeMap::new(),
             out_lines: BTreeMap::new(),
+            carried: Vec::new(),
         }
     }
 
@@ -1115,7 +1219,13 @@ impl Runner {
     /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
     /// they stood at the end of the last tick.
     pub fn near(&self, body: Id, radius: i64) -> Vec<Near> {
-        near(&self.controller, body, radius)
+        near(&self.controller, &self.carried, body, radius)
+    }
+
+    /// The loads being carried now, as the world sampled them at the end of the last tick ([`Carried`]): what the
+    /// next tick's walkers keep apart from, besides each other.
+    pub fn carrying(&mut self, carried: Vec<Carried>) {
+        self.carried = carried;
     }
 
     /// The paired edit already rebound these exact bodies off-clock; ordinary reground remains for other callers.
@@ -1358,6 +1468,7 @@ impl Runner {
                 now: self.now,
                 seed: self.seed,
                 planned,
+                carried: &self.carried,
             },
             &mut self.minter,
             &mut self.runs,

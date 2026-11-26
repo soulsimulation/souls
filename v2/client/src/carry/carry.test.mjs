@@ -85,6 +85,14 @@ test('carry to walks this Soul so the load reaches the point or the slot, keepin
   assert.equal(carryIntents({ do: 'to', crew: id(8), where: '1,2' }, { ...ctx, crewMiddle: () => null }).code, 'carry-crew-unseen');
 });
 
+test('into a slot, the walk names the load\'s heading there, from its back toward this carrier\'s end: the front\'s turns the crew', () => {
+  // This Soul stands on the slot's -z side of the load's middle, so its end of the load goes in at -z.
+  assert.deepEqual(send({ do: 'to', crew: id(8), where: id(5), slot: 'upright_a' })[0].params[3], [0, -1e6]);
+  assert.deepEqual(carryIntents({ do: 'to', crew: id(8), where: id(5), slot: 'upright_a' }, { ...ctx, crewMiddle: () => [0.7e6, 0] })[0].params[3],
+    [0, 1e6], 'on the +z side');
+  assert.equal(send({ do: 'to', crew: id(8), where: '25,6' })[0].params[3], undefined, 'to a point: no turn');
+});
+
 test('a beam carried into a slot past a beam seated at the height it is carried is refused before anyone moves', () => {
   // The bay at (12, 6) m: a beam seated in beam_high_l (slot 3) or beam_low_l (slot 5); the crew holds a beam, its
   // length along the bay's z, west of the bay or east of it.

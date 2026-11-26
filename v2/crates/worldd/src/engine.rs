@@ -174,13 +174,51 @@ pub struct Engine {
     found: BTreeMap<Id, (WayAsk, Way)>,
     /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
     entries: Json,
-    /// Each lifted carry whose front has walked (`v2/docs/moving-group.md` rule 3): its front, which leads, and the
-    /// front's latest walk. While the carry lasts its other carriers keep their places from the front, by follow
-    /// orders `crate::answers` keeps ([`Engine::carry_follows`]).
-    led: BTreeMap<Id, (Id, Id)>,
+    /// Each lifted carry whose front has walked (`v2/docs/moving-group.md` rule 3): its front, which leads, the
+    /// front's latest walk, and the turn that walk takes the crew through, if any. While the carry lasts its other
+    /// carriers keep their places from the front, by follow orders `crate::answers` keeps ([`Engine::carry_follows`]).
+    led: BTreeMap<Id, Led>,
     /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
     broke: BTreeMap<Id, &'static str>,
 }
+
+/// A lifted carry's front walking (moving-group rule 3): its body, its walk, and where that walk turns the crew: the
+/// walk's goal and the carry's heading there (x, z on its ground's plan, from its back toward its front), when the walk
+/// names one (walk parameter 3, the client's `carry to <bay> <slot>`) or goes to a pose of the carry's way (0.135 R2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Led {
+    pub front: Id,
+    pub walk: Id,
+    pub turn: Option<([i64; 2], [i64; 2])>,
+}
+
+/// A carrier keeping its place in a led carry (moving-group rule 3): the carry, its front, the carrier's body and
+/// Soul, its place in the carry's frame (`[along, across]` µm from the front, +along from the back toward the front,
+/// +across as [`Carry::place_of`] has it), the carry's heading now (from its last sample) and the front's walk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keeps {
+    pub activity: Id,
+    pub front: Id,
+    pub walker: Id,
+    pub soul: Id,
+    pub place: [i64; 2],
+    pub heading: [i64; 2],
+    pub led: Led,
+}
+
+/// A place `[along, across]` in a carry's frame as an offset on the plan, the carry heading `h` (x, z, any length,
+/// not zero): along `h` and across it (`[-h.z, h.x]`), as [`Carry::place_of`] reads a place.
+pub fn on_plan(place: [i64; 2], h: [i64; 2]) -> [i64; 2] {
+    let (h0, h1) = (i128::from(h[0]), i128::from(h[1]));
+    let l = (h0 * h0 + h1 * h1).isqrt().max(1);
+    let (a, c) = (i128::from(place[0]), i128::from(place[1]));
+    let v = |n: i128| i64::try_from(n / l).unwrap_or(0);
+    [v(a * h0 - c * h1), v(a * h1 + c * h0)]
+}
+
+/// How near a pose of a carry's way (0.135 R2) its front's walk must go to turn the crew to that pose, µm: half the
+/// way's lattice step.
+pub const WAY_POSE_NEAR: i64 = turn::STEP / 2;
 
 /// The kind of thing an activity of `kind` is played at (its entry's own, `<entry>_activity`), when its entry in
 /// `entries` plays it through forms; None for one played anywhere (a touch, a dance) or a kind of no entry.
@@ -1228,11 +1266,7 @@ impl Engine {
             Some(by),
         )?;
         // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
-        if self
-            .led
-            .get(&activity)
-            .is_some_and(|(front, _)| *front != body)
-        {
+        if self.led.get(&activity).is_some_and(|l| l.front != body) {
             self.broke.insert(activity, "souls:partner-left");
         }
         if let Some(s) = self.asm.as_mut() {
@@ -2693,6 +2727,9 @@ impl Engine {
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
     /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    /// `goal`, for a walk: the node it goes to and its point there; `heading`, the walk's parameter 3 (moving-group
+    /// rule 3: a carry's heading at the goal, from its back toward its front).
+    #[allow(clippy::too_many_arguments)]
     pub fn walked(
         &mut self,
         live: &Tree,
@@ -2701,10 +2738,21 @@ impl Engine {
         intent: Id,
         now: Micros,
         walk: bool,
+        goal: Option<(Id, Vec3)>,
+        heading: Option<[i64; 2]>,
     ) {
-        // Carrying together (moving-group rule 3): the walk of a lifted carry's front leads its crew.
+        // Carrying together (moving-group rule 3): the walk of a lifted carry's front leads its crew, turning it when
+        // the walk names the carry's heading at its goal or goes to a pose of the way the lift found.
         if walk && let Some(a) = self.front_of(body) {
-            self.led.insert(a, (body, intent));
+            let turn = self.turn_of(a, goal, heading);
+            self.led.insert(
+                a,
+                Led {
+                    front: body,
+                    walk: intent,
+                    turn,
+                },
+            );
             return;
         }
         if walk && self.activities.lead(&self.moves, body) {
@@ -2786,31 +2834,139 @@ impl Engine {
         })
     }
 
-    /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,
-    /// but the front, that keeps a place from it: its activity, the front's body, the walker's body and Soul.
-    pub fn carry_follows(&self) -> Vec<(Id, Id, Id, Id)> {
+    /// Each load being carried, where its carry's last sample has it, as walkers keep apart from it (moving-group rule
+    /// 3, [`sim::host::Carried`]): its outline as it is held, between its ends along the carry, at its carriers' feet,
+    /// moving at its last two samples' pace; seen by every walker but its own carriers.
+    pub fn carried_loads(&self) -> Vec<sim::host::Carried> {
         let mut out = Vec::new();
-        for (a, (front, _)) in &self.led {
-            if !self.carries.contains_key(a) {
+        for (a, carry) in &self.carries {
+            let (Ok(Some((f, b))), Ok((plan, _))) = (carry.ends(), carry.load.as_held()) else {
+                continue;
+            };
+            let Some(&(t1, c1, _)) = carry.track.last() else {
+                continue;
+            };
+            let d = [f[0] - b[0], f[1] - b[1]];
+            let l = (i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2)).isqrt();
+            if l == 0 {
                 continue;
             }
-            for m in self.activities.members(*a).unwrap_or(&[]) {
-                if m.body != *front {
-                    out.push((*a, *front, m.body, m.soul));
+            let h = |v: i64| {
+                i64::try_from(i128::from(v) * i128::from(plan.half_length) / l).unwrap_or(0)
+            };
+            let mid = [(f[0] + b[0]) / 2, (f[1] + b[1]) / 2];
+            let ends = (
+                [mid[0] + h(d[0]), mid[1] + h(d[1])],
+                [mid[0] - h(d[0]), mid[1] - h(d[1])],
+            );
+            let velocity = match carry
+                .track
+                .len()
+                .checked_sub(2)
+                .and_then(|k| carry.track.get(k))
+            {
+                Some(&(t0, c0, _)) if t1 > t0 => {
+                    let v = |a: i64, b: i64| {
+                        i64::try_from(i128::from(b - a) * 1_000_000 / i128::from(t1 - t0))
+                            .unwrap_or(0)
+                    };
+                    Vec3::new(v(c0.x, c1.x), 0, v(c0.z, c1.z))
                 }
-            }
+                _ => Vec3::ZERO,
+            };
+            let carriers = self
+                .activities
+                .members(*a)
+                .unwrap_or(&[])
+                .iter()
+                .map(|m| m.body)
+                .collect();
+            out.push(sim::host::Carried::new(
+                carry.board,
+                carry.ground,
+                ends,
+                plan.half_width,
+                c1.y - sim::activity::carry::HEIGHT,
+                velocity,
+                carriers,
+            ));
         }
         out
     }
 
-    /// The front's latest walk in each led carry, by its body: a carrier that is not walking keeps its place from the
-    /// front while the front's walk goes ([`Engine::carry_follows`]).
-    pub fn leading(&self) -> Vec<(Id, Id)> {
-        self.led
-            .iter()
-            .filter(|(a, _)| self.carries.contains_key(a))
-            .map(|(_, l)| *l)
-            .collect()
+    /// Where carry `a`'s front walk to `goal` turns its crew (moving-group rule 3): the goal on its ground's plan and
+    /// the carry's heading there, `heading` when the walk names one (not zero), else the heading of the pose of the
+    /// carry's way (0.135 R2) whose front is within [`WAY_POSE_NEAR`] of the goal. None for a walk to another node, or
+    /// one that names no heading and goes to no pose of a way: the crew moves without turning.
+    fn turn_of(
+        &self,
+        a: Id,
+        goal: Option<(Id, Vec3)>,
+        heading: Option<[i64; 2]>,
+    ) -> Option<([i64; 2], [i64; 2])> {
+        let carry = self.carries.get(&a)?;
+        let (node, p) = goal?;
+        if node != carry.ground {
+            return None;
+        }
+        let at = [p.x, p.z];
+        if let Some(h) = heading.filter(|h| *h != [0, 0]) {
+            return Some((at, h));
+        }
+        carry.way.iter().find_map(|(f, b)| {
+            let near = (i128::from(f[0] - at[0]).pow(2) + i128::from(f[1] - at[1]).pow(2))
+                <= i128::from(WAY_POSE_NEAR).pow(2);
+            let h = [f[0] - b[0], f[1] - b[1]];
+            (near && h != [0, 0]).then_some((at, h))
+        })
+    }
+
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,
+    /// but the front, that keeps a place from it ([`Keeps`]): the back `span` behind the front, each side at its place
+    /// from the carry's middle at the lift or take ([`Carry::sides`]); a member with no place is left out.
+    pub fn carry_follows(&self) -> Vec<Keeps> {
+        let mut out = Vec::new();
+        for (a, led) in &self.led {
+            let Some(carry) = self.carries.get(a) else {
+                continue;
+            };
+            let Ok(Some((f, b))) = carry.ends() else {
+                continue;
+            };
+            let heading = [f[0] - b[0], f[1] - b[1]];
+            if heading == [0, 0] {
+                continue;
+            }
+            for (k, m) in self
+                .activities
+                .members(*a)
+                .unwrap_or(&[])
+                .iter()
+                .enumerate()
+            {
+                let place = match k {
+                    0 => continue,
+                    1 => [-carry.span, 0],
+                    _ => match carry.sides.iter().find(|(s, _)| *s == m.body) {
+                        Some((_, [along, across])) => [along - carry.span / 2, *across],
+                        None => continue,
+                    },
+                };
+                if m.body == led.front {
+                    continue;
+                }
+                out.push(Keeps {
+                    activity: *a,
+                    front: led.front,
+                    walker: m.body,
+                    soul: m.soul,
+                    place,
+                    heading,
+                    led: *led,
+                });
+            }
+        }
+        out
     }
 
     /// The led carries that are over (set down, put, or broken off) since the last call, forgotten here: for each that
@@ -2825,11 +2981,11 @@ impl Engine {
             .collect();
         let mut out = Vec::new();
         for a in over {
-            let Some((front, walk)) = self.led.remove(&a) else {
+            let Some(led) = self.led.remove(&a) else {
                 continue;
             };
             if let Some(why) = self.broke.remove(&a) {
-                out.push((front, walk, why));
+                out.push((led.front, led.walk, why));
             }
         }
         self.broke.retain(|a, _| self.led.contains_key(a));
