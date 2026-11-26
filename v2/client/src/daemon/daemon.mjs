@@ -1624,7 +1624,8 @@ async function clonePlan(w) {
   const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...lifted });
   if (made.ok === false) return made;
   let plan;
-  try { plan = importOf(made.file, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+  // #5006 row 33: a copy keeps its titles and calendar words, as an import of an export does
+  try { plan = importOf({ ...made.file, words: target.words }, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
   return { plan, says: made.says, copies: made.file.nodes.filter((n) => n.parent === src.parent && n.id.startsWith('clone-')).map((n) => n.id) };
 }
 
@@ -1951,7 +1952,8 @@ async function answer(req, conn = null) {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
       return {
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
+      // #5006 row 17: `name` only for a thing's own name (a title, a body's name), never its kind and counter
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.titled ? { name: r.name } : {}), ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });

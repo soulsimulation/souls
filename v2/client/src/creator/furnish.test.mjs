@@ -102,3 +102,27 @@ test('#3961: a furnish whose ways check dropped a piece is still one edit under 
   assert.equal(under.ops.filter((o) => o.in === `${S}-4`).length, 4, JSON.stringify(under.ops));
   assert.match(under.says, /5 pieces in 1 rooms, 1 dropped; dropped: e_1\/kitchen-chair-2 \(would cut the way/);
 });
+
+test('#5006 row 22: a piece turned east or west is checked by its own footprint turned, never one facing south', () => {
+  // A 2.8 × 3.6 m bedroom whose door to the landing is in its east wall; today's cottage bed (1.47 × 2.06 m) facing east
+  // along the west wall would stand 2.06 m into the room, its foot in the doorway's way.
+  const Q90 = Math.round(Math.SQRT1_2 * (1 << 30));
+  const bedroom = (doorZ) => [
+    { id: `${S}-1`, kind: 'eden:ground@1', parent: null, fields: {} },
+    { id: `${S}-2`, kind: 'eden:cottage@1', parent: `${S}-1`, fields: { 2: hex('core-cottage@3') }, pose: pose(`${S}-1`) },
+    { id: `${S}-3`, kind: 'eden:floor@1', parent: `${S}-2`, fields: { 5: 0 }, pose: pose(`${S}-2`) },
+    { id: `${S}-4`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`),
+      fields: { 1: hex('e_1/bedroom'), 11: [[-1500, -1200], [1300, -1200], [1300, 2400], [-1500, 2400]], 22: [[{ id: `${S}-9` }, 'eden:door', 1300, doorZ, 90000, 800, 2100]] },
+      links: [{ id: `${S}-9`, type: 'eden:doorway', ends: [`${S}-4`, `${S}-5`], owner: 0 }] },
+    { id: `${S}-5`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`, [3_000_000, 0, 0]), fields: { 1: hex('e_1/landing'), 11: [[-1600, -1200], [1600, -1200], [1600, 2400], [-1600, 2400]] } },
+  ];
+  const bed = { kinds: { 'eden:room@1': {}, 'eden:bed@1': {} }, entries: { 'eden:bed': { geometry: { bounds_mm: [1470, 960, 2060] } } } };
+  // the door level with the room's middle: no pose keeps the bed out of its way (it was let in, facing east, at x -0.43)
+  const blocked = furnishOps(bedroom(600), `${S}-4`, bed);
+  assert.equal(blocked.ops.length, 0, JSON.stringify(blocked.ops));
+  assert.deepEqual(blocked.dropped.find((d) => d.name === 'e_1/bedroom-bed'), { name: 'e_1/bedroom-bed', why: 'in a doorway' });
+  // the door nearer the foot of the room: the bed stands facing south, west of the doorway's way
+  const free = furnishOps(bedroom(900), `${S}-4`, bed);
+  assert.deepEqual(free.ops.map((o) => [o.kind, o.at, o.orientation]), [['eden:bed@1', [-350, 0, -130], [1 << 30, 0, 0, 0]]]);
+  assert.notEqual(free.ops[0].orientation[2], Q90);
+});

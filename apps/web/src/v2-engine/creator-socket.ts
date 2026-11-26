@@ -26,7 +26,7 @@ export type Op =
   | { op: 'move'; node: string; at: Spot; rot?: Turn; slot?: number | null }
   | { op: 'remove'; node: string };
 /** What an edit asks: a batch of sets (weather), a build batch, or an undo or a redo of the newest edit (G4). */
-export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number }[] } | { ops: Op[] };
+export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number | number[] }[] } | { ops: Op[] };
 /** An answer, as the panel reads it: a receipt maps a place's batch name to its new id (`<scope hex>.<counter>`). */
 export type Frame =
   | { t: 'outcome'; name: string }
@@ -108,13 +108,21 @@ export function readFrame(v: unknown): Frame {
 
 /** E6's weather on the world node (`replica::sky`; v2/client/src/creator/world.mjs `weatherOps`): kind, cloud, rain and
  *  wind 0 to 100, and its end. The panel's Rain and Haze are rain and fog, for an hour of world time. */
-const SKY = { WEATHER_UNTIL: 65, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
-const KINDS = { rain: [90, 60, 30], fog: [60, 0, 5] } as const;
+const SKY = { WEATHER_UNTIL: 65, STRIKE: 69, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
+const KINDS = { rain: [90, 60, 30], fog: [60, 0, 5], storm: [100, 90, 80] } as const;
 export function weatherSets(world: string, kind: keyof typeof KINDS, now: number, minutes = 60): Asked {
   const [cloud, rain, wind] = KINDS[kind];
   return { sets: [{ node: world, field: SKY.WEATHER, value: `souls:${kind}` }, { node: world, field: SKY.CLOUD, value: cloud },
     { node: world, field: SKY.RAIN, value: rain }, { node: world, field: SKY.WIND, value: wind },
     { node: world, field: SKY.WEATHER_UNTIL, value: now + Math.round(minutes * 60_000_000) }] };
+}
+
+/** #5006 row 13: the panel's Lightning on a v2 world, as on the old one: a storm for an hour and one strike at `at`
+ *  (metres on the open ground, where the camera looks), as the agent's `weather --kind storm` and `strike x,z` set them. */
+export function lightningSets(world: string, at: [number, number] | null, now: number): Asked {
+  const storm = weatherSets(world, 'storm', now) as Extract<Asked, { sets: unknown }>;
+  if (!at) return storm;
+  return { sets: [...storm.sets, { node: world, field: SKY.STRIKE, value: [Math.round(at[0] * 1000), Math.round(at[1] * 1000), now] }] };
 }
 
 /** What the session needs of a socket: a browser WebSocket in the page, a stand-in in tests. */
@@ -285,6 +293,13 @@ export class V2Creator {
     const w = worldNow();
     if (!w?.world || typeof w.newestTo !== 'number') return Promise.reject(new Error('The world\'s sky is not loaded yet.'));
     return this.edit(weatherSets(w.world, kind, w.newestTo), kind === 'rain' ? 'Rain.' : 'Haze.');
+  }
+
+  /** A storm and a strike at `at` (metres), one edit (#5006 row 13). */
+  lightning(at: [number, number] | null): Promise<string> {
+    const w = worldNow();
+    if (!w?.world || typeof w.newestTo !== 'number') return Promise.reject(new Error('The world\'s sky is not loaded yet.'));
+    return this.edit(lightningSets(w.world, at, w.newestTo), 'Lightning.');
   }
 
   /** The old command box's inbox (god-store.ts `GodInbox`) from the creator's mailbox: `text` sent first when given.

@@ -270,7 +270,8 @@ export function rowsOf(copy) {
     // thing by its field 30 words (a screen's title, a calendar entry's words) when they read as a name, never by a
     // page of text there (a book's first page, #4837: a held book is named by its title, `brief.mjs` `holdingOf`).
     const body = of || kind === 'souls:body', at30 = wordsAt(copy, fields, F_BODY_NAME);
-    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? (body ? at30 : asName(at30)) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const given = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? (body ? at30 : asName(at30));
+    const name = given ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
@@ -287,6 +288,8 @@ export function rowsOf(copy) {
     // (not enumerable: printed only where an answer names them)
     const said = saidAt(copy, fields);
     if (said) Object.defineProperty(rows.get(id), 'words', { value: said });
+    // #5006 row 17: the name is the thing's own (a title, a name given it), not its kind and counter (not enumerable)
+    if (given != null) Object.defineProperty(rows.get(id), 'titled', { value: true });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   walk.done();

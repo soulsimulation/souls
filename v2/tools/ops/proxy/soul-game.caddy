@@ -23,7 +23,8 @@
 # - Pairing, for the new Soul client: /pair (the pairing card, built by the old page's build: pair.html in today's
 #   release, X2; its own script files from there too), /v1/pair/* and /v1/agent/account[/*] to the directory (7310),
 #   and /v1/account/view-token (the old page's sign-in exchanged for the owner's message box, #4250); every other
-#   /v1/account/* path and /v1/auth/config stay with today's launcher.
+#   /v1/account/* path and /v1/auth/config stay with today's launcher. A creator's /v1/worlds/welcome and
+#   /v1/worlds/visitors go to the directory too; the world list, /v1/worlds, stays with the launcher.
 # - Body files: /assets/* comes from the install's page folder (/usr/local/lib/souls/web: the body files under
 #   assets/bodies/, v2/tools/ops/release/bodies.ts) where such a file exists, else from today's launcher.
 # - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
@@ -111,8 +112,9 @@ https://soul.game {
 	# /v1/account/view-token: the old page exchanges its sign-in there for the owner's message box (#4250); the owner's
 	# Souls on the new engine, their names, their retire, keep and disconnect (/v1/account/souls, /v1/account/souls/profile,
 	# /v1/account/souls/retire, /v1/account/souls/keep, /v1/account/souls/revoke: the navbar, the approval card and the
-	# Soul card on a world page, first day 25 Nov and 0.137), which the launcher does not serve
-	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account/view-token /v1/account/souls /v1/account/souls/profile /v1/account/souls/retire /v1/account/souls/keep /v1/account/souls/revoke
+	# Soul card on a world page, first day 25 Nov and 0.137), which the launcher does not serve; and a creator's welcome
+	# words and visitors (`souls-god welcome`, `visitors`: /v1/worlds/welcome, /v1/worlds/visitors, #5006 row 36)
+	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account/view-token /v1/account/souls /v1/account/souls/profile /v1/account/souls/retire /v1/account/souls/keep /v1/account/souls/revoke /v1/worlds/welcome /v1/worlds/visitors
 	handle @pairing {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {

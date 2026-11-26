@@ -241,7 +241,8 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
 
   // ---- the world's god: everything in the one God Mode view ----
   const env = (body: unknown) => G.god('/v1/god/env', { method: 'POST', body: JSON.stringify(body) });
-  const weather = (kind: 'rain' | 'lightning' | 'haze') => v2 && kind !== 'lightning' ? run(kind, async () => (await v2).weather(kind === 'rain' ? 'rain' : 'fog'), (r) => r as string) : run(kind, async () => {
+  // #5006 row 13: on a v2 world Lightning too is the creator's own edit, a storm and a strike where the camera looks
+  const weather = (kind: 'rain' | 'lightning' | 'haze') => v2 ? run(kind, async () => (kind === 'lightning' ? (await v2).lightning(viewCentre()) : (await v2).weather(kind === 'rain' ? 'rain' : 'fog')), (r) => r as string) : run(kind, async () => {
     if (kind === 'rain') return env({ weather: { kind: 'rain', intensity: 0.8 }, note: 'weather' });
     if (kind === 'haze') return env({ weather: { kind: 'fog', intensity: 0.6 }, note: 'weather' });
     await env({ weather: { kind: 'storm', intensity: 0.8 }, note: 'weather' });
@@ -278,7 +279,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     </div>
     <div className="gm-tool-group" role="group" aria-label="Weather" data-weather="1" title="The same as your agent's weather and strike: each press is one edit">
       <button type="button" className="gm-tool" data-weather-kind="rain" disabled={!!busy} onClick={() => weather('rain')}>Rain</button>
-      {!v2 && <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>}
+      <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>
       <button type="button" className="gm-tool" data-weather-kind="haze" disabled={!!busy} onClick={() => weather('haze')}>Haze</button>
     </div>
     {v2 && <div className="gm-tool-group" role="group" aria-label="Build" data-build="1" title="Place, move and remove things yourself: each change is one edit">

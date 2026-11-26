@@ -38,6 +38,9 @@ test('the front door sends the owner\'s Soul calls of a world page to the direct
   for (const p of ['/v1/account/souls', '/v1/account/souls/profile', '/v1/account/souls/retire', '/v1/account/view-token']) assert.ok(paths.includes(p), p);
   // The card's Keep (clears the agent's ask) and Disconnect on a new-engine world: the old page's revoke has the Soul's id between
   for (const p of ['/v1/account/souls/keep', '/v1/account/souls/revoke']) assert.ok(paths.includes(p), p);
+  // #5006 row 36: a creator's `welcome` and `visitors` ask the directory at the world's own origin; the list stays put
+  for (const p of ['/v1/worlds/welcome', '/v1/worlds/visitors']) assert.ok(paths.includes(p), p);
+  assert.ok(!paths.includes('/v1/worlds') && !paths.includes('/v1/worlds/*'), 'the world list stays with today\'s launcher');
 });
 
 let dir, gateway, relay, stats, port, asked;

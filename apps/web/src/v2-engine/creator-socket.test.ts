@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, lightningSets, VERB } = await import('./creator-socket.ts');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -167,4 +167,13 @@ test('#5006: the panel\'s inbox says the creator\'s agent is connected only whil
   assert.deepEqual(await said(), [true, 'listening'], 'another grant\'s agent is not the creator\'s');
   sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: false } }));
   assert.deepEqual(await said(), [false, 'away'], 'gone again: the line comes back');
+});
+
+test('#5006 row 13: Lightning is a storm for an hour and one strike where the camera looks, as the agent\'s weather and strike set them', async () => {
+  const { s, sent } = signedIn();
+  void s.edit(lightningSets(WORLD, [12.34, -8], 5_000_000_000));
+  const ops = (dec(sent.at(-1)!).get(4) as Map<number, unknown>).get(1) as Map<number, unknown>[];
+  assert.deepEqual(ops.map((o) => [o.get(1), o.get(3), o.get(4)]), [[3, 75, 'souls:storm'], [3, 76, 100], [3, 77, 90], [3, 78, 80],
+    [3, 65, 5_000_000_000 + 3_600_000_000], [3, 69, [12_340, -8_000, 5_000_000_000]]], 'v2/client world.mjs KINDS.storm and strikeOps');
+  assert.deepEqual(lightningSets(WORLD, null, 1), weatherSets(WORLD, 'storm', 1), 'no view yet: the storm alone');
 });

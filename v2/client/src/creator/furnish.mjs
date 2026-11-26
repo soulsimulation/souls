@@ -186,7 +186,9 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
         const hx = (side ? size[2] : size[0]) / 2 + 40, hz = (side ? size[0] : size[2]) / 2 + 40;
         if (ax1 - ax0 < 2 * hx || az1 - az0 < 2 * hz) { why = 'too big for the room'; continue; }
         const p = R([ax0 + hx + fx * (ax1 - ax0 - 2 * hx), az0 + hz + fz * (az1 - az0 - 2 * hz)]);
-        const box = turned(p, [hx - 40, hz - 40], fyaw + th);
+        // its footprint is its own width and depth turned as it faces (#5006 row 22: one facing east or west was
+        // checked as if it faced south, so a bed across a room was let into a doorway's way or kept out of a free one)
+        const box = turned(p, [size[0] / 2, size[2] / 2], fyaw + th);
         if (solid(size) && zones.slice(0, doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'in a doorway'; continue; }
         if (zones.slice(doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'at the stairs'; continue; }
         if (solid(size) && taken.some((t) => meets(box, t))) { why = 'overlaps another piece'; continue; }
