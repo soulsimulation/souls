@@ -327,7 +327,7 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
 
 /// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
 /// by `serve` from the world as its log leaves it, once (#3672).
-struct Built {
+pub(crate) struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
     ground: Id,
@@ -1055,7 +1055,11 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 }
 
 /// [`build`] with its facts' courses kept in `cache` (S5).
-fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
+pub(crate) fn build_with(
+    cache: Option<&Path>,
+    facts: &str,
+    entries: &[(String, Json)],
+) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
     // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
@@ -1195,7 +1199,7 @@ fn owners_text(built: &Built) -> String {
 }
 
 /// [`owners_text`] read back. A missing or unreadable file gives none, and then no kind is paired.
-fn owners(dir: &Path) -> BTreeMap<String, String> {
+pub(crate) fn owners(dir: &Path) -> BTreeMap<String, String> {
     std::fs::read_to_string(dir.join("header.kinds"))
         .unwrap_or_default()
         .lines()
@@ -1275,10 +1279,15 @@ fn own_header(
 /// targets keep this build's defined pins, so the creator's client still loads it. Any other unmatched revision is not
 /// guessed: one only this build pins cannot be made in this world until it is reseeded (`kind-not-in-header`, per
 /// act); one only the header pins has no rules (`kind-unknown`, per act). When the header is this build's, nothing
-/// changes. Prints what differs, each paired pin in full.
-fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
+/// changes. Prints what differs, each paired pin in full, and returns the world's pins with no definition here (the
+/// entries upgrade refuses a change that leaves one, `entries_upgrade`).
+pub(crate) fn adopt(
+    built: &mut Built,
+    header: Header,
+    owners: &BTreeMap<String, String>,
+) -> Vec<String> {
     if header.stored() == built.header.stored() {
-        return;
+        return Vec::new();
     }
     let unmatched = |of: &Header, by: &Header| -> BTreeMap<String, Vec<String>> {
         let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1353,6 +1362,7 @@ fn adopt(built: &mut Built, header: Header, owners: &BTreeMap<String, String>) {
         unknown.join(", ")
     );
     built.header = header;
+    unknown
 }
 
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
@@ -1500,7 +1510,7 @@ fn instance(root: Id) -> String {
 }
 
 /// Every `souls-entry/1` file under `dir`, by kind.
-fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
+pub(crate) fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(io(dir))?
         .filter_map(|e| Some(e.ok()?.path()))
@@ -2219,7 +2229,7 @@ fn recorded_body(
     // A body that sat stands at its seat's stand point until its seat is held again, or for good when the seat is gone
     // or taken: at a point it may stand on.
     let moved = if pose.support == replica::pose::Support::Slot {
-        worldd::bodies::legal_near(surface, id, frame, point, facing, build)?
+        worldd::bodies::legal_near(town, surface, id, frame, point, facing, build)?
     } else {
         sim::slots::placed_off(surface, id, frame, point, facing, build)?
     };
@@ -3545,7 +3555,7 @@ fn serve(args: &[String]) -> R<()> {
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
         let (header, owners) = own_header(&dir, &built, &found.records)?;
-        adopt(&mut built, header, &owners);
+        let _ = adopt(&mut built, header, &owners);
     }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
@@ -3661,6 +3671,47 @@ fn serve(args: &[String]) -> R<()> {
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
+    // Births by the world's arrival place (`world.json`'s `arrival`, the middle of a place its facts name), else its
+    // entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground that holds it is the main
+    // ground: a stand point or a restart is never put in ground no walk from there reaches.
+    let int = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    // A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the entry, and
+    // the start says why.
+    let arrived = match meta.get("arrival") {
+        None => None,
+        Some(_) => std::fs::read_to_string(&facts)
+            .map_err(|e| e.to_string())
+            .and_then(|text| arrival(&meta, &text))
+            .unwrap_or_else(|e| {
+                eprintln!("worldd: arrival-refused: {e}; Souls arrive at the entry");
+                None
+            }),
+    };
+    if let Some((x, z)) = arrived {
+        println!(
+            "worldd: Souls arrive at {} ({:.3},{:.3} m)",
+            meta.get("arrival").and_then(Json::str).unwrap_or(""),
+            x as f64 / 1000.0,
+            z as f64 / 1000.0
+        );
+    }
+    let entry = arrived
+        .or_else(|| match meta.get("entry").and_then(Json::arr) {
+            Some([x, z]) => int(x).zip(int(z)),
+            _ => None,
+        })
+        .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+        .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    town.set_entry(entry);
+    match town.main_ground() {
+        Some((held, dry)) => println!(
+            "main ground: the entry's part holds {held} of {dry} dry pieces; the rest is sealed off from it"
+        ),
+        None => println!("main ground: no dry ground at the entry; no ground is sealed"),
+    }
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
     let trips = worldd::places::ride_trips(&town, &kinds, &places);
@@ -3829,40 +3880,6 @@ fn serve(args: &[String]) -> R<()> {
     std::fs::rename(&tmp, &served_path).map_err(io(&served_path))?;
 
     let ground = built.ground;
-
-    // Births by the world's arrival place (`world.json`'s `arrival`, the middle of a place its facts name), else its
-    // entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
-    let int = |v: &Json| match v {
-        Json::Int(n) => i64::try_from(*n).ok(),
-        _ => None,
-    };
-    // A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the entry, and
-    // the start says why.
-    let arrived = match meta.get("arrival") {
-        None => None,
-        Some(_) => std::fs::read_to_string(&facts)
-            .map_err(|e| e.to_string())
-            .and_then(|text| arrival(&meta, &text))
-            .unwrap_or_else(|e| {
-                eprintln!("worldd: arrival-refused: {e}; Souls arrive at the entry");
-                None
-            }),
-    };
-    if let Some((x, z)) = arrived {
-        println!(
-            "worldd: Souls arrive at {} ({:.3},{:.3} m)",
-            meta.get("arrival").and_then(Json::str).unwrap_or(""),
-            x as f64 / 1000.0,
-            z as f64 / 1000.0
-        );
-    }
-    let entry = arrived
-        .or_else(|| match meta.get("entry").and_then(Json::arr) {
-            Some([x, z]) => int(x).zip(int(z)),
-            _ => None,
-        })
-        .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
-        .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     cfg.join = Some(Join {
         entry: (ground, entry),
         family: humanoid()?,

@@ -188,6 +188,10 @@ export class WorldDirector {
   current: DirectorChoice | null = null;
   since = -Infinity;
   private started: number | null = null;
+  /** Phone arrival (early-arrival.ts): the card lifted over the opening view seconds before the live world came, so that
+   *  view was the establishing shot already. The first opening is then over at once: the first choice is the Souls, not
+   *  7 to 14 s more of the same view. Survives reset() (the first take's scene resets the broadcast); used by one opening. */
+  openingShown = false;
   private banned = new Map<string, number>();
   private cooling = new Map<string, number>();
   private recentLandmarks: string[] = [];
@@ -220,7 +224,7 @@ export class WorldDirector {
     const now = input.now;
     // The opening starts when the town views are available (the Eden scenery may arrive a moment after people).
     // A placeholder framing before the scenery loads does not count against cut discipline: the opening is the real first cut.
-    if (input.landmarks.length && this.started === null) { this.started = now; this.lastCut = -Infinity; }
+    if (input.landmarks.length && this.started === null) { this.started = this.openingShown ? now - OPENING : now; this.openingShown = false; this.lastCut = -Infinity; }
     for (const [k, until] of this.banned) if (until <= now) this.banned.delete(k);
     for (const [k, until] of this.cooling) if (until <= now) this.cooling.delete(k);
     const all = candidates({ ...input, arrivals: input.arrivals ?? this.arrivals(input) }).filter(c => !this.banned.has(c.key));

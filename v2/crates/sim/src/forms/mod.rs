@@ -960,6 +960,72 @@ impl Forms {
         self.by_body.contains_key(&body) || self.waiting.contains_key(&body)
     }
 
+    /// Whether form `form` of `node`'s kind `entry` is for those its `who` link names (`who: {link: t}`), takes down
+    /// the actor's own link of that type, and `body`'s own run in progress is on `node` and links it so: a swing
+    /// walked to and not yet sat in, whose `get_off` is the swinger's. Who may lets that body through ([`Forms::may_or_linking`]): its new act ends the run as any new act
+    /// does, so asking to get off on the way stops the swing instead of being refused while it goes on.
+    pub fn linking(
+        &self,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+    ) -> bool {
+        let f = entry.get("forms").and_then(|fs| fs.get(form));
+        let (Some(Who::Link(t)), Some(kind)) = (
+            f.and_then(Who::read),
+            entry.get("kind").and_then(|k| k.str()),
+        ) else {
+            return false;
+        };
+        // Only a way off: a form that takes down the actor's own link of that type (get_off, get_up, leave). Any
+        // other form of those the link names (a see-saw's push, a board's page) stays theirs alone.
+        let unlinks = f
+            .and_then(|f| f.get("effects"))
+            .and_then(|e| e.arr())
+            .is_some_and(|es| {
+                es.iter().any(|e| {
+                    e.get("change").and_then(|c| c.str()) == Some("unlink")
+                        && e.get("link").and_then(|l| l.str()) == Some(t.as_str())
+                        && e.get("from").and_then(|a| a.str()) == Some("actor")
+                })
+            });
+        if !unlinks {
+            return false;
+        }
+        let ty = audience::link_type(kind, &t);
+        self.by_body
+            .get(&body)
+            .and_then(|run| self.runs.get(run))
+            .is_some_and(|fr| {
+                fr.node == node
+                    && fr.effects.iter().any(|e| {
+                        matches!(e, form_runner::Effect::Link { ty: l, .. } if l.as_str() == ty)
+                    })
+            })
+    }
+
+    /// [`may`], or yes for a body whose own run on `node` links it as the form's `who` asks ([`Forms::linking`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn may_or_linking(
+        &self,
+        tree: &Tree,
+        audiences: &BTreeMap<Id, BTreeSet<Id>>,
+        names: &dyn Fn(Id) -> Option<String>,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+    ) -> Result<(), Refusal> {
+        may(tree, audiences, names, body, node, entry, form).or_else(|r| {
+            if r.name == "not-permitted" && self.linking(body, node, entry, form) {
+                Ok(())
+            } else {
+                Err(r)
+            }
+        })
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
@@ -1590,7 +1656,7 @@ impl Forms {
         let known =
             self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
         if !known {
-            may(w.tree, audiences, names, body, node, entry, form)?;
+            self.may_or_linking(w.tree, audiences, names, body, node, entry, form)?;
             other_slots(w, &self.slots_of, body, entry, form, args)?;
         }
         match bound {
@@ -2035,6 +2101,25 @@ impl Forms {
                 let mut found = found.clone();
                 if let Some(at) = at {
                     found.contact = at;
+                }
+                // A move made from a seat (`Move::seated`: a stretch, a slump) by a body in a seat, a bed or a standing
+                // slot leaves its legs where the slot holds them (#4143): it neither claims nor blocks them, which the
+                // slot's hold would refuse `resource-held` while the client's form rules say yes. Every other move (a
+                // jump, a dance, a bow) still claims the legs, and the seat's hold refuses it: a gateway sit writes no
+                // `posture`, so a form's posture need alone would let it play through the seat.
+                if found.seated
+                    && w.places
+                        .as_ref()
+                        .is_some_and(|p| p.slots.held_by(body).is_some())
+                {
+                    use replica::bodies::{Class, Want};
+                    found.claims.retain(|c| {
+                        !matches!(
+                            c,
+                            Want::All(Class::Locomotion) | Want::One(Class::Locomotion)
+                        )
+                    });
+                    found.blocks.retain(|c| *c != Class::Locomotion);
                 }
                 match w.moves.start(
                     w.controller,

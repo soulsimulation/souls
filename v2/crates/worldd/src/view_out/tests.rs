@@ -19,6 +19,8 @@ use std::process::Command;
 thread_local! {
     /// Replays with the whole-state reference path instead of the tree-reading one (#3667's regression).
     pub(super) static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Takes every structural part on a copy of the whole tree, as before 0.136: the in-place path's reference.
+    pub(super) static COPY_PART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// How many whole-tree projections the public writer's idle has made (#3603).
     pub(super) static IDLE_PROJECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// The OS makes no thread for the writer's side-by-side writes ([`super::beside`]).
@@ -2773,7 +2775,13 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
     use replica::effects::TransferRec;
     WHOLE_STATE.set(whole_state);
     let h = header();
-    let d = scratch(&format!("3667-replay-{whole_state}"));
+    // Two tests replay it at once: each its own folder.
+    let thread =
+        format!("{:?}", std::thread::current().id()).replace(|c: char| !c.is_ascii_digit(), "");
+    let d = scratch(&format!(
+        "3667-replay-{whole_state}-{}-{thread}",
+        COPY_PART.get()
+    ));
     let views = d.join("views");
     let n = |s: u8| Id::new(Scope([0x90 + s; 16]), 1).unwrap();
     let (body, hidden, carrier, child, foreign) = (n(1), n(2), n(3), n(4), n(5));
@@ -4510,4 +4518,243 @@ fn t_late_a_thing_taken_out_of_a_closed_container_is_still_a_whole_cut() {
     assert_eq!(rows_state, whole_state);
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
     assert_eq!(rows_whole, 1, "taking out is a whole cut");
+}
+
+/// soul.game's store move (25 Nov 2026): a world whose store moves to a new bucket, with no copy of its recovery chain
+/// there, restarts on this machine from its spool and backs its whole chain up to the new store: after one pass the new
+/// store holds a head and every object of the chain, and a writer on a fresh disk (a new machine) recovers from it.
+/// Before, the new store got the head alone (its objects were already in `kept/`, never queued again), and a new
+/// machine's recovery was refused `stream-recovery-missing`.
+#[test]
+fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
+    use directoryd::directory::store::{Memory, Store as _};
+    let h = header();
+    let d = scratch("store-move");
+    let (views, spool) = (d.join("views"), d.join("spool"));
+    let old: &'static Memory = Box::leak(Box::default());
+    let new: &'static Memory = Box::leak(Box::default());
+    fn start<'a>(
+        root: &'a Path,
+        h: &'a Header,
+        initial: Replica,
+        record: u64,
+        checkpoint: Option<Vec<u8>>,
+    ) -> PublicStart<'a> {
+        PublicStart {
+            root,
+            header: h,
+            key: key(h),
+            initial,
+            record,
+            checkpoint,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        }
+    }
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open_spooled(
+        start(&views, &h, actual.frozen(), 0, None),
+        old,
+        Closed::default(),
+        Some((spool.clone(), "old-store".to_owned())),
+    )
+    .unwrap();
+    let body = Id::new(Scope([72; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    out.back_up(old, Box::new(|_| {})).unwrap();
+    assert!(
+        out.drainer().unwrap().drain(Duration::from_secs(20)),
+        "the old store holds the spool's head"
+    );
+    drop(out);
+    let chain = old.list("").unwrap();
+    assert!(chain.iter().any(|k| k.ends_with("head")), "{chain:?}");
+    assert!(
+        chain.iter().filter(|k| k.contains("objects/")).count() > 1,
+        "{chain:?}"
+    );
+    // The move: the same machine, its views and spool, on a new and empty store.
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 1);
+    let mut moved = PublicWriter::open_spooled(
+        start(&views, &h, actual.frozen(), 1, Some(cp.clone())),
+        new,
+        Closed::default(),
+        Some((spool.clone(), "new-store".to_owned())),
+    )
+    .unwrap();
+    moved.back_up(new, Box::new(|_| {})).unwrap();
+    assert!(
+        moved.drainer().unwrap().drain(Duration::from_secs(20)),
+        "the new store holds the spool's head"
+    );
+    let state = moved.public_player().state().clone();
+    drop(moved);
+    let there = new.list("").unwrap();
+    for key in &chain {
+        assert!(there.contains(key), "the new store lacks {key}: {there:?}");
+    }
+    // A new machine: no views, no spool; the chain from the new store alone.
+    let fresh = PublicWriter::open_spooled(
+        start(&d.join("fresh-views"), &h, actual.frozen(), 1, Some(cp)),
+        new,
+        Closed::default(),
+        Some((d.join("fresh-spool"), "new-store".to_owned())),
+    )
+    .unwrap();
+    assert_eq!(fresh.public_player().state(), &state);
+    assert_eq!(fresh.source_cursor(), 1);
+}
+
+/// 0.136 review: a subtree in flight across parts (its leave in one record, its arrive in the next) is landed and then
+/// walked again in the same part, removed or sent off. The writer takes the part on its own tree, reading who was
+/// public before it only for what the part can change: it must take both as a copy of the whole tree did, byte for
+/// byte, and never refuse them (`stream-poisoned`).
+#[test]
+fn a_flight_landed_and_walked_in_one_part_is_taken_as_a_copy_took_it() {
+    for linked in [false, true] {
+        for then in ["remove", "leave"] {
+            let reference = flight_output(true, then, linked);
+            let tree = flight_output(false, then, linked);
+            assert!(
+                reference == tree,
+                "{then} (linked {linked}): the in-place part differs"
+            );
+        }
+    }
+}
+
+/// 0.136: #3667's replay log (moves, leaves, arrives, returns, settles, carried arrives, creates), taken in place,
+/// publishes the same bytes as taken on a copy of the whole tree per part.
+#[test]
+fn replay_in_place_publishes_the_same_bytes_as_a_copy_per_part() {
+    COPY_PART.set(true);
+    let reference = replay_output(false);
+    COPY_PART.set(false);
+    let tree = replay_output(false);
+    assert!(reference.len() > 1000, "the log published");
+    assert!(reference == tree, "the in-place replay differs");
+}
+
+fn flight_output(copy: bool, then: &str, linked: bool) -> Vec<u8> {
+    use replica::effects::TransferRec;
+    COPY_PART.set(copy);
+    let h = header();
+    let views = scratch(&format!("flight-{copy}-{then}-{linked}")).join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let n = |s: u8| Id::new(Scope([0xA0 + s; 16]), 1).unwrap();
+    let (carrier, child, t1, t2, stay) = (n(1), n(2), n(3), n(4), n(5));
+    let everyone = Audience::Everyone;
+    let mut source = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: source.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let destination = Pose {
+        frame: Frame {
+            node: h.zone,
+            slot: None,
+        },
+        position: Vec3::new(5, 0, 5),
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: h.zone,
+            height: 0,
+        },
+    };
+    let leave = |seq: u64, transfer: Id| {
+        w3e_effect(
+            seq,
+            carrier,
+            everyone,
+            Body::Transfer(TransferRec::Leave {
+                transfer,
+                node: carrier,
+                lineage: h.lineage,
+                zone: h.zone,
+                pose: destination,
+            }),
+        )
+    };
+    // With `linked`, a node that stays owns a link to the child, which stays indexed at both ends while it flies.
+    let o = if linked { 2 } else { 0 };
+    let last = if then == "remove" {
+        w3e_effect(
+            4 + o,
+            carrier,
+            everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Remove { node: carrier },
+                rest: Rest::new(),
+            }]),
+        )
+    } else {
+        leave(4 + o, t2)
+    };
+    let arrive = w3e_effect(
+        3 + o,
+        h.zone,
+        everyone,
+        Body::Transfer(TransferRec::Arrive {
+            transfer: t1,
+            carried: Vec::new(),
+        }),
+    );
+    let mut first = vec![
+        w3e_create(&h, 0, carrier, h.zone, everyone),
+        w3e_create(&h, 1, child, carrier, everyone),
+    ];
+    if linked {
+        first.push(w3e_create(&h, 2, stay, h.zone, everyone));
+        first.push(w3e_effect(
+            3,
+            stay,
+            everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Link {
+                    link: n(6),
+                    ty: Name::new("souls:near").unwrap(),
+                    ends: [stay, child],
+                    owner: replica::world_model::End::First,
+                    audience: everyone,
+                },
+                rest: Rest::new(),
+            }]),
+        ));
+    }
+    let log = vec![first, vec![leave(2 + o, t1)], vec![arrive, last]];
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        source.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes)
+            .unwrap_or_else(|e| panic!("{then} record {i}: {e}"));
+        out.flush().unwrap();
+    }
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    COPY_PART.set(false);
+    all
 }
