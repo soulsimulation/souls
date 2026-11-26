@@ -192,7 +192,8 @@ On a world the new engine runs, Forsake world asks the world's directory, signed
 offer replaces the last; the link is the world page's `#worldoffer/<code>`), `/v1/worlds/handoff/cancel {world}`,
 `/v1/worlds/handoff/accept {world, code}` (the signed-in recipient becomes the creator; asking again is safe), and
 `POST /v1/worlds/archive {world, confirm}` → `{archived}` or 202 `{pending}`; while Souls of other people live in the world
-(unretired, paired for it, held by another account) archive is refused `409 archive-others-live-here` with their count
+(unretired and paired for it under any of its names, or brought over for it and not yet paired, held by another account;
+the operator's test Souls do not count) archive is refused `409 archive-others-live-here` with their count
 (`souls`), and the creator hands the world on or waits until they have left. A directory that could not finish one
 refuses it before anything changes: archive with no archive initializer (`503 archive-unavailable`), acceptance with no
 world-authority map (`503 world-authority-required`) or one that does not name the world (`409 world-unplaced`).
