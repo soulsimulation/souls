@@ -2541,6 +2541,9 @@ impl ClassGround for ClassGrounds<'_> {
             .map(|g| g.overflow_at(node, p))
             .unwrap_or_default()
     }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.get(&size)?.start(node, p)
+    }
 }
 
 impl Ground for Grounds<'_> {
@@ -2549,6 +2552,19 @@ impl Ground for Grounds<'_> {
         let w = self.map.get().world(s.piece, s.at);
         let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
         Some((um(s.at), um(w)))
+    }
+
+    /// Where it stands, else the nearest point of the ground within [`AT_EDGE`] of it: the walk's own start
+    /// (`plan_on`, `View::search`), so a spot ask leaves from where the walk will (0.137 trial: a body pressed on a
+    /// stump's edge, its centre a hair off the ground, was refused every target though its walk left from there).
+    fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(node, p).or_else(|| {
+            let m = self.map.get();
+            let s = m.spot_near(node, p, AT_EDGE)?;
+            let w = m.world(s.piece, s.at);
+            let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
+            Some((um(s.at), um(w)))
+        })
     }
 
     fn passage(&self, node: Id, p: Vec3) -> bool {

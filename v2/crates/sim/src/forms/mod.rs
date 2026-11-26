@@ -31,8 +31,9 @@
 //!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. A form
 //!   that only takes seats (#4575, [`slots_taken`]: a bench's `sit`, a boat's `board`) holds those seats and not its
 //!   whole thing, so two Souls sit on one bench at once; the second racing for the same seat is refused
-//!   `place-taken`, and a form that holds the whole thing (a carry, a vehicle's drive) and a seat's run refuse each
-//!   other `thing-reserved`. The log's reservation link is the same either way. However
+//!   `place-taken`, and a form that holds the whole thing (a carry) and a seat's run refuse each other
+//!   `thing-reserved`. A seat's form that also sets a field of its thing (a ride's `under_way`) still holds only its
+//!   seats, so four Souls board one balloon at once. The log's reservation link is the same either way. However
 //!   a run ends, one entry removes the reservation and names the ending (a `souls:form-ended` event with its name),
 //!   and the world ends the run's walk, move and timers with it: no path frees one alone. Ending never undoes an
 //!   effect.
@@ -507,10 +508,12 @@ fn arrival<G: Geometry, R>(w: &World<'_, G, R>, fr: &FormRun) -> Option<replica:
 /// The seats a form done at `node` reserves in place of its whole thing (#4575), read from the form's entry as bound:
 /// each `sit` or `lie` step's slot, and the standing slot a `reparent` of the actor hands it into, on the thing the
 /// step names (E14) or `node`. A form reserves only those when taking them is all it does to the thing: every step a
-/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own. Any other step or
-/// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
-/// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
-/// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
+/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own or a field of the thing
+/// set to a value (a ride's `under_way`: riders who set it off together all set it so; a balloon's `ride` holds its
+/// rider's place in the basket, never the basket). Any other step or effect (a move or a hand at the thing, a field
+/// moved by an amount, an amount, a take or put, a make or removal, a timer, an unlink of everyone's links) or a long
+/// form's stages reserves the whole thing, as does a form that takes no seat: a carry takes it into a hand. Empty for
+/// those.
 fn slots_taken(
     node: Id,
     steps: &[Step],
@@ -525,9 +528,12 @@ fn slots_taken(
                 Step::WalkTo { .. } | Step::Sit { .. } | Step::Rise | Step::Wait(_)
             )
         })
-        && effects
-            .iter()
-            .all(|e| matches!(e, E::Link { .. } | E::Unlink { all: false, .. }));
+        && effects.iter().all(|e| {
+            matches!(
+                e,
+                E::Link { .. } | E::Unlink { all: false, .. } | E::Set { .. }
+            )
+        });
     let mut taken: Vec<(Id, u64)> = steps
         .iter()
         .filter_map(|s| match s {
