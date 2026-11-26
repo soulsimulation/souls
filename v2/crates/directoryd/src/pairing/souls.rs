@@ -120,6 +120,19 @@ impl Pairing {
         store(rows.collect())
     }
 
+    /// How many unretired Souls paired for `world` are held by an account other than `account` (#5006: a creator
+    /// archives a world only while no one else's Souls live there; their own Souls do not count).
+    pub fn others_living(&self, world: &str, account: &str) -> Result<u64, &'static str> {
+        let db = self.db.lock().expect("the store");
+        store(db.query_row(
+            "SELECT COUNT(*) FROM soul_profiles_v1 p JOIN paired_souls_v1 ps ON ps.grant_text = p.grant_text
+              WHERE p.world = ?1 AND p.retired_at IS NULL AND p.grant_text LIKE 'soul-%' AND ps.account <> ?2",
+            params![world, account],
+            |r| r.get::<_, i64>(0),
+        ))
+        .map(|n| n.max(0) as u64)
+    }
+
     /// The world the request with this poll `secret` named, if it named one (#3702: its welcome goes with the token).
     pub fn world_by_secret(&self, secret: &str) -> Option<String> {
         let hash = to_hex(&sha256(secret.as_bytes()));

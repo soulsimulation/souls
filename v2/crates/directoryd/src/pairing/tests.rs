@@ -2081,3 +2081,36 @@ fn a_removal_write_is_tried_again_after_a_short_failure() {
     });
     assert!(failed.is_err() && tries == 3, "{tries}");
 }
+
+#[test]
+fn others_living_counts_unretired_souls_of_the_world_held_by_other_accounts() {
+    let (p, _) = store();
+    {
+        let db = p.db.lock().unwrap();
+        for (grant, account, world, retired) in [
+            ("soul-aa-0", "acct_cid", Some("garden"), None),
+            ("soul-bb-0", "acct_dee", Some("garden"), None),
+            ("soul-cc-0", "acct_bea", Some("garden"), None),
+            ("soul-dd-0", "acct_cid", Some("garden"), Some(5)),
+            ("soul-ee-0", "acct_cid", Some("forest"), None),
+            ("soul-ff-0", "acct_cid", None, None),
+            ("creator-gg-0", "acct_cid", Some("garden"), None),
+        ] {
+            db.execute(
+                "INSERT INTO paired_souls_v1(grant_text, account) VALUES (?1, ?2)",
+                rusqlite::params![grant, account],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO soul_profiles_v1(grant_text, world, retired_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![grant, world, retired],
+            )
+            .unwrap();
+        }
+    }
+    // Bea's own Soul, a retired one, another world's, one with no world and a creator grant do not count.
+    assert_eq!(p.others_living("garden", "acct_bea"), Ok(2));
+    assert_eq!(p.others_living("garden", "acct_cid"), Ok(2));
+    assert_eq!(p.others_living("forest", "acct_cid"), Ok(0));
+    assert_eq!(p.others_living("meadow", "acct_bea"), Ok(0));
+}

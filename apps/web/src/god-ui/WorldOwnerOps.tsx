@@ -136,7 +136,7 @@ export function V2ForsakeWorld({ name, here = forsakeHere() }: { name: string; h
       </section>
       <section className="gm-danger" data-ops="archive">
         <h3>Archive</h3>
-        <p>Stops the world and takes it off the list. Nothing is deleted: its Souls, history and address are kept, and an operator can restore it. Everyone's Souls here stop with it until then.</p>
+        <p>Stops the world and takes it off the list. Nothing is deleted: its Souls, history and address are kept, and an operator can restore it. While other people's Souls live here it cannot be archived: hand it on instead, or wait until they have left.</p>
         {archived === 'archived'
           ? <p className="gm-danger-note" role="status" data-ops-archived="archived">Archived. Its data is kept; an operator can restore it.</p>
           : <>

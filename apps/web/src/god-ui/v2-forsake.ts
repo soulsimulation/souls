@@ -23,7 +23,7 @@ export function forsakeHere(): { place: ForsakePlace; world: string } | null {
 /** A refusal the directory named. */
 export class Refused extends Error {
   readonly refused: string;
-  constructor(name: string) { super(refusalText(name)); this.refused = name; }
+  constructor(name: string, detail: Record<string, unknown> = {}) { super(refusalText(name, detail)); this.refused = name; }
 }
 
 const WORDS: Record<string, string> = {
@@ -48,8 +48,15 @@ const WORDS: Record<string, string> = {
   'world-authority-required': 'This server cannot hand worlds on.',
   'world-unplaced': 'This world is not placed on this server, so it cannot be handed on here.',
 };
-/** The plain words for a refusal's name. */
-export const refusalText = (name: string): string => WORDS[name] ?? `Refused (${name}).`;
+/** Other people's Souls living in the world hold its archive (the directory says how many). */
+const othersLiveHere = (souls: unknown): string => {
+  const n = typeof souls === 'number' && Number.isSafeInteger(souls) && souls > 0 ? souls : null;
+  const who = n === 1 ? 'A Soul of someone else\'s lives here' : n ? `${n} Souls of other people live here` : 'Souls of other people live here';
+  return `${who}, and archiving would stop ${n === 1 ? 'it' : 'them'} with the world. Hand the world on instead, or wait until ${n === 1 ? 'it has' : 'they have'} left.`;
+};
+/** The plain words for a refusal's name (and the directory's detail, where it gives one). */
+export const refusalText = (name: string, detail: Record<string, unknown> = {}): string =>
+  name === 'archive-others-live-here' ? othersLiveHere(detail.souls) : WORDS[name] ?? `Refused (${name}).`;
 
 /** The bearer the directory's world routes take for this page's sign-in, or null when signed out. */
 export async function worldsBearer(place: Pick<ForsakePlace, 'session'>, token: () => Promise<string | null> = () => pageSession().getToken()): Promise<string | null> {
@@ -67,7 +74,7 @@ async function ask(place: ForsakePlace, path: string, body: Record<string, unkno
       body: JSON.stringify(body), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(15_000) });
   } catch { throw new Error('The directory did not answer. Try again: the same step is safe to repeat.'); }
   const d = await r.json().catch(() => ({})) as Record<string, unknown>;
-  if (!r.ok) throw new Refused(typeof d.refused === 'string' ? d.refused : `http-${r.status}`);
+  if (!r.ok) throw new Refused(typeof d.refused === 'string' ? d.refused : `http-${r.status}`, d);
   return { status: r.status, body: d };
 }
 

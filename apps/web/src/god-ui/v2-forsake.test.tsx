@@ -68,6 +68,12 @@ test('archive: the exact name or no request at all; pending, then archived, by a
   assert.equal(await F.archiveWorld(page, 'hamlet', 'hamlet', { token: token('x'), post: answering(200, { archived: true }).post }), 'archived');
   const err = await F.archiveWorld(page, 'hamlet', 'hamlet', { token: token('x'), post: answering(409, { refused: 'archive-handoff-pending' }).post }).catch((e) => e);
   assert.match(err.message, /Cancel the open handoff link first/);
+  // other people's Souls living here hold it: the count, and the two ways out
+  const three = await F.archiveWorld(page, 'hamlet', 'hamlet', { token: token('x'), post: answering(409, { refused: 'archive-others-live-here', souls: 3 }).post }).catch((e) => e);
+  assert.equal(three.refused, 'archive-others-live-here');
+  assert.equal(three.message, '3 Souls of other people live here, and archiving would stop them with the world. Hand the world on instead, or wait until they have left.');
+  assert.match(F.refusalText('archive-others-live-here', { souls: 1 }), /^A Soul of someone else's lives here, .* stop it .* until it has left\.$/);
+  assert.match(F.refusalText('archive-others-live-here'), /^Souls of other people live here/);
 });
 
 test('God Mode\'s Forsake on a new-engine world: hand on and archive, no co-builders, no delete', () => {
@@ -79,6 +85,7 @@ test('God Mode\'s Forsake on a new-engine world: hand on and archive, no co-buil
   assert.match(html, /data-ops="archive"/);
   assert.match(html, /Type <code>hamlet<\/code> to confirm/);
   assert.match(html, /Nothing is deleted/);
+  assert.match(html, /While other people&#x27;s Souls live here it cannot be archived: hand it on instead, or wait until they have left\./);
   assert.doesNotMatch(html, /data-ops="cobuilders"/);
   assert.doesNotMatch(html, /\bDelete\b/i);
   const lost = renderToStaticMarkup(<V2ForsakeWorld name="Hello Hamlet" here={null} />);

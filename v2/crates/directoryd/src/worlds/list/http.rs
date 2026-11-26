@@ -294,6 +294,32 @@ pub fn archive(req: &Request, app: &App) -> Answer {
     if !super::archive::configured() {
         return refuse(503, "archive-unavailable");
     }
+    // While Souls of other people live in the world, archiving would stop them with it: refused by name with their
+    // count (the coordinator's default for #5006); the creator hands the world on, or waits until they have left. The
+    // creator's own Souls do not count. Asked only of an active world, and before the world list is locked (pairing's
+    // owner reader takes that lock while it reads).
+    match worlds.is_creator(world, account.principal) {
+        Ok(true) => {}
+        Ok(false) => return refuse(403, "not-the-creator"),
+        Err(e) => return world_refusal(e),
+    }
+    let active = {
+        let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
+        super::archive::get(&inner.dir.store, world).is_ok_and(|p| p.state == "active")
+    };
+    if active && let Some(pairing) = &app.pairing {
+        match pairing.others_living(world, &account.account) {
+            Ok(0) => {}
+            Ok(souls) => {
+                return (
+                    409,
+                    json!({"refused": "archive-others-live-here", "souls": souls}),
+                    "archive-others-live-here".into(),
+                );
+            }
+            Err(_) => return refuse(503, "store"),
+        }
+    }
     let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
     match super::archive::begin(
         &inner.dir.store,

@@ -8,7 +8,7 @@
 
 import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -65,6 +65,17 @@ async function exchange(who) {
   const r = await fetch(`http://${gateway}/v2/creator-token`, { method: 'POST', headers: { authorization: `Bearer test:${who}` } });
   const b = await r.json();
   return r.ok ? b.grant : b.refused;
+}
+/** A new Soul of `who`'s, paired for the world as an agent asks and its owner approves on the card: its grant. */
+async function soulOf(who) {
+  const secret = randomBytes(32).toString('hex');
+  const asked = await fetch(`http://${directory}/v1/pair/request`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ secret_hash: createHash('sha256').update(secret).digest('hex'), device: `${who}'s laptop`, label: `${who}'s agent`, new: true, scope: 'soul', world: WORLD }) }).then((r) => r.json());
+  assert.ok(asked.code, JSON.stringify(asked));
+  const approved = await fetch(`http://${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: asked.code, confirm: true, test_person: who }) }).then((r) => r.json());
+  assert.equal(approved.approved, true, JSON.stringify(approved));
+  return approved.soul;
 }
 const listed = async () => ((await (await fetch(`http://${directory}/v1/worlds`)).json()).worlds ?? []).some((w) => w.name === WORLD);
 const grantOf = (principal) => `creator-${principal.replace(':', '-')}`;
@@ -127,6 +138,21 @@ test('the creator hands the world on with a one-use link; a signed-in person acc
   assert.match(readFileSync(tokens, 'utf8'), new RegExp(`^# souls-creator/1 1 ${bea}$`, 'm'));
   assert.deepEqual(await page('/v1/worlds/handoff/offer', 'Ada', { world: WORLD }), { status: 403, body: { refused: 'not-the-creator' } });
   assert.ok(await listed(), 'the world stays on the list');
+});
+
+test('archiving waits while other people\'s Souls live in the world; the creator\'s own do not count', async () => {
+  const cids = await soulOf('Cid');
+  await soulOf('Bea');
+  assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD }), { status: 409, body: { refused: 'archive-others-live-here', souls: 1 } });
+  assert.deepEqual(readdirSync(inbox), [], 'nothing is queued');
+  assert.ok(await listed(), 'the world stays on the list');
+  // the creator's other way out is still open: an offer can be made (and cancelled)
+  assert.equal((await page('/v1/worlds/handoff/offer', 'Bea', { world: WORLD })).status, 200);
+  assert.equal((await page('/v1/worlds/handoff/cancel', 'Bea', { world: WORLD })).status, 200);
+  // once Cid's Soul has left (its owner retires it), nothing else of anyone else's lives here
+  const left = await fetch(`http://${directory}/v1/account/souls/retire`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ soul: cids, confirm: true, test_person: 'Cid' }) }).then((r) => r.json());
+  assert.equal(left.ok, true, JSON.stringify(left));
 });
 
 test('the creator archives the world: the stop is queued once, it leaves the list, and nothing is deleted', async () => {
