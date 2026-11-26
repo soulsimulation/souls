@@ -23,7 +23,7 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  let height=rigid?Math.max(size.x,size.y,size.z):Math.max(size.y*.42,size.x*.85),slack=rigid?1.05:1.4;
  const headBox=!rigid&&head&&skins.length?skinnedTo(head,skins):null;
  if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.15-height/2;slack=1.05;}
- else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=1;}
+ else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=skins.length?1:1.4;/* a plain mesh on a bone (the ghost): its outline, not a face, sets the edge */}
  else if(!rigid)target.y=box.max.y-size.y*.17;
  return{box,target,height,slack};
 }
