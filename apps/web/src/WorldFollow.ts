@@ -55,7 +55,7 @@ export class WorldFollow {
   /** #2201 A1: sightline rays cast so far, and in the last resolve call (the camera trace's cost meter). */
   private cast=0;
   rays=0;
-  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();this.near.at=-Infinity;this.drawnBlocked=null;this.clearAll=false;
+  reset(){this.decoupled=this.turned=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();this.near.at=-Infinity;this.drawnBlocked=null;this.clearAll=false;
     this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;this.inside=false;this.insideAt.at=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
@@ -238,6 +238,7 @@ export class WorldFollow {
     if(!this.gesture||this.clock-this.userAt>GESTURE_GAP)this.gesture={turn:0,zoom:1};
     this.gesture.turn+=before.angleTo(after);this.gesture.zoom*=after.length()/before.length();
     if(this.gesture.zoom>PULL_OUT.ratio||this.gesture.turn>PULL_OUT.angle)this.decoupled=true;
+    if(this.gesture.turn>PULL_OUT.angle)this.turned=true;
     // Decoupled, the camera is exactly where the gesture put it (within the zoom bounds); coupled, the gesture scales the
     // asked-for distance, which the search comes back to.
     const length=this.decoupled?Math.max(FOLLOW_NEAR,Math.min(FOLLOW_MAX,after.length())):Math.max(FOLLOW_MIN,Math.min(FOLLOW_MAX,this.requested.length()*after.length()/before.length()));
@@ -250,6 +251,11 @@ export class WorldFollow {
   private gesture:{turn:number;zoom:number}|null=null;
   /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
   get held(){return this.decoupled;}
+  /** Trial of 0.137: true once the viewer dragged the view round. A zoom out alone keeps its distance (`held`) and still
+   *  follows the Soul, so the page goes on saying "Following" for it, never "Your view stays put" (the viewer read that
+   *  as the follow being dropped). */
+  get turnedAway(){return this.decoupled&&this.turned;}
+  private turned=false;
   /** #1317: the offset the viewer asked for (the camera trace's desired pose), or null before the first frame. */
   get desired():THREE.Vector3|null{return this.requested;}
   private decoupled=false;
