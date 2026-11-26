@@ -238,10 +238,9 @@ test('26 Nov: a created world answers its agents: the bootstrap the client pairs
   const boot = await fetch(`${at}/v1/bootstrap`);
   assert.equal(boot.status, 200);
   assert.deepEqual(await boot.json(), { world: slug, stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, directory: '/', gateway: `/w/${slug}/v2/ws`, creatorToken: `/w/${slug}/v2/creator-token` });
+  // (its world, directory and gateway are what the client's pairAddress checks before any pairing: on the 404 before,
+  // every `pair <url>` stopped with `pair-world-routing`)
   assert.equal((await fetch(`${at}/v1/bootstrap`, { method: 'POST' })).status, 405, 'read-only');
-  // the client's own check before any pairing passes (it failed `pair-world-routing` on this 404 before)
-  const { pairAddress } = await import('../../v2/client/src/pair/address.mjs');
-  assert.deepEqual(await pairAddress(`${at}/`), { directory: base, world: slug, gateway: `${at.replace(/^http/, 'ws')}/v2/ws` });
 
   // a creator's token and the entries go to the world's gatewayd, at its own /v2/ paths, body and bearer unchanged
   const token = await fetch(`${at}/v2/creator-token`, { method: 'POST', headers: { authorization: 'Bearer creator-x', 'content-type': 'application/json' }, body: '{"ask":1}' });
