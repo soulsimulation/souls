@@ -1805,7 +1805,7 @@ fn trial_0137_a_seated_bodys_form_at_another_thing_rises_first() {
         e.how.as_str()
     );
     assert_eq!(e.how.as_str(), "done", "not resource-held");
-    assert_eq!(held, None, "out of the seat");
+    assert_eq!(held, None, "out of its place");
     let p = b.c.body(body).expect("a body").pose;
     assert!(
         matches!(p.support, replica::pose::Support::Surface { .. }),
