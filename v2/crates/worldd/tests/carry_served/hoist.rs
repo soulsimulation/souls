@@ -155,12 +155,12 @@ fn held_in(dir: &Path, load: Id, activity: Id) -> Pose {
         .expect("lifted into the carry's slot")
 }
 
-/// The samples of `node` from `t0` to `t1`, checked as one track: one a tick, the first at `t0`, the last at `t1`,
-/// never a step more than twice the even pace (no jump). Returns them.
+/// The samples of `node` after `t0` to `t1`, checked as one track begun at `t0`: one a tick, the last at `t1`, never a
+/// step more than twice the even pace (no jump). Returns them.
 fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64, Pose)> {
     let ss: Vec<(i64, Pose)> = samples(dir, node)
         .into_iter()
-        .filter(|(at, _)| (t0..=t1).contains(at))
+        .filter(|(at, _)| *at > t0 && *at <= t1)
         .collect();
     let ticks = (t1 - t0) / TICK;
     assert!(
@@ -169,7 +169,7 @@ fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64
         t1 - t0
     );
     assert!(
-        ss.windows(2).all(|w| w[1].0 - w[0].0 == TICK),
+        ss.windows(2).all(|w| w[1].0 - w[0].0 == TICK) && ss.len() as i64 == ticks,
         "{name}: a sample a tick"
     );
     assert_eq!(ss.last().map(|s| s.0), Some(t1), "{name}: its last at its end");
@@ -217,7 +217,7 @@ fn lifted(name: &str, dir: &Path, activity: Id, load: Id, lay: (Vec3, Quat)) -> 
         .find(|(at, _)| *at == lift.t0)
         .expect("the node's first sample at the lift")
         .1;
-    let ss = one_track(&format!("{name}'s lift"), dir, activity, (lift.t0 + TICK, lift.t1));
+    let ss = one_track(&format!("{name}'s lift"), dir, activity, (lift.t0, lift.t1));
     let (d, q) = apart_by(composed(&start, &held), lay);
     println!("{name}: lifted from {d} µm (turn {q}) of where it lay");
     assert!(
@@ -262,7 +262,7 @@ fn set_down(
         (down.t0, down.t1, down.t1),
         "{name}: released as the set-down ended, when it said it would"
     );
-    let ss = one_track(&format!("{name}'s set-down"), dir, activity, (down.t0 + TICK, down.t1));
+    let ss = one_track(&format!("{name}'s set-down"), dir, activity, (down.t0, down.t1));
     let before = samples(dir, activity)
         .into_iter()
         .rfind(|(at, _)| *at <= down.t0)
