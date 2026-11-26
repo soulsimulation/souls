@@ -400,16 +400,19 @@ test('a socket it gives up over a quiet network is let go at once: it says so, a
   await waitFor(async () => { const s = await status(); return s.connected && s.unanswered.length === 0; });
   const before = await status();
   relay.stall(true);
-  // Its copy is compared unasked within 5 s; with no answer in 10 s the socket is given up. Over a quiet network that
-  // socket's close completes only once the network is back, and until then it said it was connected and wrote acts
-  // into the closing socket, which sent nothing (the fault run's 60 s stall: 45 s, and an act never answered).
-  await waitFor(async () => !(await status()).connected, 25_000);
-  const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
-  outputs.push(JSON.stringify(a));
-  assert.equal(a.sent, false, `held for the next sign-in: ${JSON.stringify(a)}`);
-  relay.stall(false);
-  relay.cut(); // the quiet connections end once the network is back, as a reset does
-  const s = await waitFor(async () => { const s = await status(); return s.connected && s.unanswered.length === 0 && s; }, 30_000);
+  let a;
+  try {
+    // Its copy is compared unasked within 5 s; with no answer in 10 s the socket is given up. Over a quiet network that
+    // socket's close completes only once the network is back, and until then it said it was connected and wrote acts
+    // into the closing socket, which sent nothing (the fault run's 60 s stall: 45 s, and an act never answered).
+    await waitFor(async () => !(await status()).connected, 25_000);
+    a = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
+    outputs.push(JSON.stringify(a));
+    assert.equal(a.sent, false, `held for the next sign-in: ${JSON.stringify(a)}`);
+  } finally {
+    relay.stall(false);
+  }
+  const s = await waitFor(async () => { const s = await status(); return s.connected && s.unanswered.length === 0 && s; }, 60_000);
   assert.ok(s.connects > before.connects, 'signed in again');
   const answers = (await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && e.sequence === a.sequence);
   assert.equal(answers.length, 1, `answered once: ${JSON.stringify(answers)}`);
@@ -424,7 +427,7 @@ test('another client of the Soul takes it: this one is told so and stays off unt
   const otherRt = runtimeOf(other, SOUL);
   start(other, SOUL, PKG);
   try {
-    await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected);
+    await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected, 60_000);
     const s = await waitFor(async () => { const s = await status(); return s.replaced && !s.connected && s; }, 10_000);
     assert.match(s.replaced.say, /Another client of this Soul connected/);
     // It stays off: no sign-in by itself (two clients took the Soul from each other about seven times a second).

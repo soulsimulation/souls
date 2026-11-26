@@ -126,7 +126,8 @@
 // - **Another client of this Soul** signing in takes the Soul (the last device wins): the gateway closes this socket
 //   as `agent.replaced` (4001), and this daemon does not sign in again by itself, so two clients do not take the Soul
 //   from each other several times a second. Its answers say so (`gap.why` `replaced`, `status`'s `replaced`), a `wait`
-//   is woken by a `replaced` event, and its agent's next command other than a wait or a status signs it in again.
+//   is woken by a `replaced` event, and its agent's next command (not a wait, a read, a status or a stop) signs it in
+//   again.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
@@ -1584,6 +1585,8 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
+/** What does not take the Soul back from another client: waiting, reading what came, the daemon's own state, stopping. */
+const PASSIVE = new Set(['wait', 'status', 'pending', 'listen', 'read', 'events', 'stats', 'trace', 'receipt', 'stop']);
 /** Another client of this Soul took it (`REPLACED`): this one's agent asked for something, so it signs in again. */
 function takeBack() {
   if (replacedAt === null || ws || stopping) return;
@@ -1594,14 +1597,15 @@ function takeBack() {
 }
 
 async function answer(req, conn = null) {
-  if (req.key !== undefined && !['wait', 'status', 'pending', 'listen'].includes(req.op)) takeBack();
+  if (req.key !== undefined && !PASSIVE.has(req.op)) takeBack();
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); takeBack(); }
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
+  if (!PASSIVE.has(req.op)) takeBack();
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
