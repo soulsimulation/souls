@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { arrivalMark, whenArrivalCardGone } from './arrival-marks.ts';
+import { arrivalMark, arrivalOver, liveOver, whenArrivalCardGone } from './arrival-marks.ts';
 
 test('?shot readiness waits for the card to be gone and faded, gives up at its bound, stops on abort', async (ctx) => {
   let t = 0; const now = () => t, wait = (fn: () => void) => { t += 50; setImmediate(fn); };
@@ -20,4 +20,14 @@ test('LiveWorld sets __shotReady only after the card is gone', () => {
   const src = readFileSync(new URL('./LiveWorld.tsx', import.meta.url), 'utf8');
   const i = src.indexOf('await whenArrivalCardGone({signal:abort.signal});'), j = src.indexOf('__shotReady=true');
   assert.ok(i > 0 && j > i, 'the card wait comes before the ready flag');
+});
+
+test('the entity layer\'s fill waits for the first live frame, not for the card', () => {
+  arrivalMark('card-done');
+  assert.equal(arrivalOver(), true);
+  assert.equal(liveOver(Infinity), false, 'the card gone, nothing live yet');
+  arrivalMark('first-live-frame');
+  assert.equal(liveOver(Infinity), true);
+  const src = readFileSync(new URL('./WorldEntityLayer.ts', import.meta.url), 'utf8'), fill = src.slice(src.indexOf('private async fillRest('));
+  assert.match(fill.slice(0, 600), /while \(!liveOver\(\)\)/, 'fillRest starts at the first live frame');
 });
