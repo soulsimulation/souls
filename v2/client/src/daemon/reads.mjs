@@ -60,7 +60,7 @@ export function placeOf(rows, id, memo = new Map()) {
 function anchorOf(rows, near, me) {
   if (near === 'me') return me && rows.get(me) ? me : null;
   if (rows.get(near)) return near;
-  return find(rows.values(), near, { limit: 1 }).found[0]?.id ?? null;
+  return find(rows, near, { limit: 1 }).found[0]?.id ?? null;
 }
 /** How far each row is from node `id`, metres (`row => metres`), or null when the copy lacks it. `placed`: `find`'s
  *  distances, none for a row nothing above it places (a zone at the ground's origin is not `1 m` from a Soul there). */
@@ -98,9 +98,9 @@ function answer(rows, q, me) {
   if (a?.error) return a;
   const by = a ? { near: { id: a.id, name: rows.get(a.id).name, within: a.metres } } : {};
   if (typeof q.find === 'string') {
-    const f = find(rows.values(), q.find, { limit: limitOf(q.limit), ...(a ? { within: a.near } : {}) });
+    const f = find(rows, q.find, { limit: limitOf(q.limit), ...(a ? { within: a.near } : {}) });
     if (!a) return f;
-    const all = f.found.length ? [] : find(rows.values(), q.find, { limit: 1, metres: a.from }).found.map((x) => rows.get(x.id));
+    const all = f.found.length ? [] : find(rows, q.find, { limit: 1, metres: a.from }).found.map((x) => rows.get(x.id));
     return { ...f, found: withMetres(f.found, a.near), ...beyond(f.found, a, all), ...by };
   }
   if (typeof q.place === 'string' || typeof q.in === 'string') {

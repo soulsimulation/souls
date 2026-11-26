@@ -56,17 +56,84 @@ export function placeName(path) {
   return (named.length ? named.slice(-3) : path.slice(-2)).reverse().join(', ');
 }
 
+/**
+ * The copy's rows by their words, for `find` on a Map of rows (`rowsOf`): each word's stem names the rows holding it
+ * in any field, so a find scores only the rows its words can hit, not every row (Eden's 9,588 scored at each find held
+ * the daemon's loop 0.1 to 0.4 s, 26 Nov 2026). A row's words count its kind's (`kindWordsOf`) as what it is. Kept per
+ * kind entries; a changed copy's Map is followed by its rows that changed (`rowsOf` gives the same row for a node
+ * that did not), so an index is built once and then changed by what a sync changed.
+ */
+const INDEXES = new WeakMap(), NO_KINDS = {};
+function indexOf(rows, kinds) {
+  const slot = kinds ?? NO_KINDS;
+  let x = INDEXES.get(slot);
+  if (x?.rows === rows) return x;
+  if (!x) INDEXES.set(slot, (x = { rows: new Map(), byStem: new Map(), words: new Map(), of: new Map(), kindWords: new Map() }));
+  const was = x.rows;
+  for (const [id, row] of rows) {
+    const old = was.get(id);
+    if (old === row) continue;
+    if (old) drop(x, old);
+    add(x, row, kinds);
+  }
+  for (const [id, old] of was) if (!rows.has(id)) drop(x, old);
+  x.rows = rows;
+  return x;
+}
+function add(x, row, kinds) {
+  const k = row.entry ?? row.kind;
+  if (kinds && !x.kindWords.has(k)) x.kindWords.set(k, kindWordsOf(kinds[k]));
+  const own = wordsOf(row), kw = x.kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+  const all = [...new Set([...w.name, ...w.id, ...w.alias, ...w.kind, ...w.what])];
+  x.of.set(row, { w, all });
+  for (const word of all) {
+    put(x.byStem, stem(word), row);
+    put(x.words, word, row);
+  }
+}
+function drop(x, row) {
+  const at = x.of.get(row);
+  if (!at) return;
+  x.of.delete(row);
+  for (const word of at.all) {
+    take(x.byStem, stem(word), row);
+    take(x.words, word, row);
+  }
+}
+const put = (m, k, row) => { let s = m.get(k); if (!s) m.set(k, (s = new Set())); s.add(row); };
+const take = (m, k, row) => { const s = m.get(k); if (s && s.delete(row) && !s.size) m.delete(k); };
+/** The rows a word can hit (`hit`): those holding a word of its stem, or, for a word of four letters or more, a word it begins. */
+function rowsHit(x, q, into) {
+  for (const row of x.byStem.get(stem(q)) ?? []) into.add(row);
+  if (q.length >= 4) for (const [word, rs] of x.words) if (word.startsWith(q)) for (const row of rs) into.add(row);
+}
+
 /** The rows the words find, best first (then nearest, then by name), at most `limit`, and how many more there were.
+ *  `rows` is the rows' list, or the copy's Map of rows by id (`rowsOf`), which is searched by its words (`indexOf`).
  *  `metres(row)`, when given, is how far the row is from the asker: each found row carries it (world-wide, no radius).
  *  `kinds`, the kind entries by kind, adds each kind's words (`kindWordsOf`). */
 export function find(rows, words, { limit = 8, within, metres, kinds } = {}) {
   const q = tokensOf(words), out = [], kindWords = new Map();
   if (!q.length) return { found: [], note: 'Say what to find.' };
-  for (const row of rows) {
+  // A row any word scores holds a word each of them hits, and a whole name standing in the words holds one of them:
+  // the rows no word hits score nothing, and are passed by without reading them.
+  let x = null, hits = null, list = rows;
+  if (rows instanceof Map) {
+    x = indexOf(rows, kinds);
+    hits = new Set();
+    for (const w of q) rowsHit(x, w, hits);
+    list = rows.values();
+  }
+  for (const row of list) {
+    if (hits && !hits.has(row)) continue;
     if (within && !within.has(row.id)) continue;
-    const k = row.entry ?? row.kind;
-    if (kinds && !kindWords.has(k)) kindWords.set(k, kindWordsOf(kinds[k]));
-    const own = wordsOf(row), kw = kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+    let w = x?.of.get(row)?.w;
+    if (!w) {
+      const k = row.entry ?? row.kind;
+      if (kinds && !kindWords.has(k)) kindWords.set(k, kindWordsOf(kinds[k]));
+      const own = wordsOf(row), kw = kindWords.get(k);
+      w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+    }
     const full = w.name.join(' ') === q.join(' '), inside = nameIn(q, w.name);
     const s = full ? 100 + score(q, w) : inside ? 50 + inside : score(q, w);
     if (s) out.push({ s, row, m: metres?.(row) ?? Infinity });
