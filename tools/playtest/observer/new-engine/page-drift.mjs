@@ -6,6 +6,12 @@
 //     node tools/playtest/observer/new-engine/page-drift.mjs <out dir> [template]
 //   node tools/playtest/observer/new-engine/page-drift.mjs --gaps <out dir>/trace.jsonl
 //
+// A step is `words` (a command as is), `find` (act on the first result, or the first whose id, kind or name matches
+// `pick`) or `near` (log the Soul's distance to a thing three ways: its client's own copy, the public stream's record,
+// and the drawn place: a record that disagrees with the client points at the world's public stream, a drawn place
+// that disagrees with the record at the page). Each trace row also has the bridge's newest sample of each body (`last`:
+// when, whether it follows a course, its seat) and the samples it could not place (`unplaced`, `frames`).
+//
 // POSDRIFT_BUILD names a checkout whose v2/target holds release binaries and the replica package and whose v2/web/dist
 // is built (default this one; V2_BIN, V2_REPLICA_PKG and V2_WEB override, as run.sh reads them). --gaps prints each
 // stretch where the drawn place is over 3 m from the record.
@@ -70,10 +76,13 @@ let running = true;
     const to = bridge.view.newestTo;
     if (to !== null) {
       const shown = to - BEHIND_US - 12 * TICK_US;
-      const row = { wall: Date.now(), to, shown };
+      const row = { wall: Date.now(), to, shown, unplaced: bridge.view.unplaced, frames: bridge.view.unplacedFrames.slice(-3) };
       for (const s of seats) {
         const b = s.info().body; if (!b) continue;
-        row[s.label] = { rec: recorded(b), drawn: drawn(b, shown), recAt: viewer.node(b)?.at ?? null, parent: viewer.node(b)?.parent, slot: viewer.node(b)?.slot };
+        // the bridge's newest sample of the body: when, whether it follows a course (`on`) or sits (`seat`)
+        const last = bridge['tracks'].get(pageKey(b))?.samples.at(-1);
+        row[s.label] = { rec: recorded(b), drawn: drawn(b, shown), recAt: viewer.node(b)?.at ?? null, parent: viewer.node(b)?.parent, slot: viewer.node(b)?.slot,
+          last: last ? { at: last.at, on: !!last.on, seat: last.seat ?? null } : null };
       }
       appendFileSync(trace, JSON.stringify(row) + '\n');
     }
@@ -95,8 +104,16 @@ writeFileSync(join(out, 'status0.json'), JSON.stringify(await look(fern), null, 
 const script = JSON.parse(process.env.POSDRIFT_SCRIPT ?? '[]');
 for (const step of script) {
   const s = seats.find((x) => x.label === step.who);
-  if (step.find) {
-    const f = await find(s, step.find);
+  if (step.near) {
+    // the client's own distance to a thing (its copy), against the stream record's and the drawn place's (the page's)
+    const f = (await find(s, step.near)).filter((r) => !step.pick || new RegExp(step.pick, 'i').test(`${r.id} ${r.kind} ${r.name}`))[0];
+    const b = s.info().body, w = f ? bridge['world'](pageKey(f.id)) : null, at = w ? [w.p[0] / 1e6, w.p[2] / 1e6] : null;
+    const rec = recorded(b), dr = drawn(b, bridge.view.newestTo - BEHIND_US - 12 * TICK_US)?.p;
+    const away = (p) => (p && at ? Math.hypot(p[0] - at[0], p[2] - at[1]).toFixed(1) : null);
+    log(s.label, 'near', step.near, f?.id, 'client', f?.distance_m ?? f?.away_m, 'record', away(rec), 'drawn', away(dr));
+  } else if (step.find) {
+    // `pick`: the first result whose id, kind or name matches it (default the first)
+    const f = (await find(s, step.find)).filter((r) => !step.pick || new RegExp(step.pick, 'i').test(`${r.id} ${r.kind} ${r.name}`));
     log(s.label, 'find', step.find, '->', JSON.stringify(f.slice(0, 3).map((r) => [r.id, r.kind, r.name, r.distance_m ?? r.away_m])));
     if (f[0]) await act(s, 'act', ...(step.verb ? [`${step.verb}:${f[0].id}`] : [f[0].id]), ...(step.wait === false ? [] : ['--wait']));
   } else if (step.words) await act(s, ...step.words);
