@@ -1188,6 +1188,9 @@ pub struct PublicWriter<S> {
     links: std::collections::BTreeSet<Id>,
     left: std::collections::BTreeSet<Id>,
     moved: std::collections::BTreeSet<Id>,
+    /// The nodes the open cut's removes took out, each with what was under it, read before each part applied: their
+    /// rows go, and the links and timers that went with them are among `links` and `timers` (a gesture's end).
+    gone: std::collections::BTreeSet<Id>,
     /// Cuts worked out whole since the writer opened (#4192).
     pub whole_cuts: u64,
     /// The references each node row of the published state holds, and those of the rest of it (#3799).
@@ -1723,6 +1726,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             links: std::collections::BTreeSet::new(),
             left: std::collections::BTreeSet::new(),
             moved: std::collections::BTreeSet::new(),
+            gone: std::collections::BTreeSet::new(),
             whole_cuts: 0,
             refs: None,
             still_at: None,
@@ -1990,7 +1994,13 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-words", "a row is a pair"));
             };
             let id = replica::effects::read_id(&p[0])?;
-            Ok((id, replica::audience::references(&p[1])))
+            // A node taken out is a row of its id alone: no references.
+            Ok((
+                id,
+                p.get(1)
+                    .map(replica::audience::references)
+                    .unwrap_or_default(),
+            ))
         };
         // From a whole state: the one after a whole cut, or the one before the first cut by rows.
         let version = |v: &Value| match v {
@@ -2530,6 +2540,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .unwrap_or(self.closed.len());
                 self.closed.split_off(keep)
             };
+            // The current chain, which the backup's clean-up never deletes (#4954).
+            if let Some(spool) = &self.spool {
+                spool.live(self.live.iter().map(|h| self.object_key(h)).collect());
+            }
             for (record, _) in gone.iter().rev() {
                 let key = self.object_key(record);
                 if let Some(spool) = &self.spool {
@@ -2699,15 +2713,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     /// R15: backs this writer's spooled recovery chain up to `store` on its own thread ([`backup`]), telling `report`
-    /// how it stands. A writer opened without a spool has nothing to back up.
-    pub fn back_up<T: ObjectStore + Send + 'static>(
+    /// how it stands, and deletes old generations from it through `cleanup`, another client, on a thread of their own
+    /// (#4954). A writer opened without a spool has nothing to back up.
+    pub fn back_up<T: ObjectStore + Send + 'static, C: ObjectStore + Send + 'static>(
         &mut self,
         store: T,
+        cleanup: C,
         report: Box<dyn Fn(BackupState) + Send>,
     ) -> R<()> {
         let prefix = self.prefix.clone();
         match &mut self.spool {
-            Some(spool) => backup::start(spool, store, prefix, report),
+            Some(spool) => backup::start(spool, store, cleanup, prefix, report),
             None => Ok(()),
         }
     }
@@ -3020,6 +3036,11 @@ impl<S: ObjectStore> PublicWriter<S> {
             let part = Part::read(raw)?;
             // The entries that put a thing into a closed container or touch one in it (#3948): never published.
             let kept = self.kept_out(&part);
+            let waiting = if self.incremental {
+                self.note_removed(&part)
+            } else {
+                Vec::new()
+            };
             // Whole canonical validation first. Never publish a partial producer result or private ledger. The part is
             // taken entry by entry, as a viewer applies it; the view, the duplicates and the cut's state are kept only
             // when every entry applied, and a part refused part way poisons the writer. The view reads the writer's tree
@@ -3207,7 +3228,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
             // What the cut can be published from (#3799): motion, fields set and nodes set in a slot touch only their
             // rows; links made or ended only theirs; a leave whose arrive is in the same cut only the rows of what it
-            // moved (#4192).
+            // moved (#4192); a remove only the rows of what it took out.
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -3231,13 +3252,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 | replica::effects::Change::Unlink { link } => {
                                     self.links.insert(*link);
                                 }
-                                c => {
-                                    prof::cause(match c {
-                                        replica::effects::Change::Remove { .. } => "remove",
-                                        _ => "other-change",
-                                    });
-                                    self.structural = true
-                                }
+                                // A node taken out with what is under it, its links and its timers: their rows, noted
+                                // before the part applied (`note_removed`).
+                                replica::effects::Change::Remove { .. } => {}
                             }
                         }
                     }
@@ -3269,6 +3286,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 }
             }
+            self.note_landed(waiting);
             let at = part.effects.last().map(|e| e.envelope.at);
             if let Some(at) = at {
                 let win = at.div_euclid(stream::PERIOD_US);
@@ -3403,6 +3421,70 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.links.clear();
         self.left.clear();
         self.moved.clear();
+        self.gone.clear();
+    }
+    /// Notes what each remove in `part` takes out, read on the writer's tree before the part applies: the node and
+    /// every node under it in `gone`, the links at any of them in `links` and their timers in `timers`, so the cut can
+    /// publish their rows gone rather than work out the public state whole. A node put under one of them earlier in
+    /// the same part is not noted: one made in the cut was never public, and one moved there is not live at the cut,
+    /// which is then worked out whole.
+    ///
+    /// A node made in the part takes in the links already made to its id (`Tree` rule 7), public until then: the
+    /// nodes made and the links waiting for each are returned, so that those of one taken out in the same part are
+    /// noted once it has applied ([`PublicWriter::note_landed`]). One that stays makes the cut whole (`bare`).
+    fn note_removed(&mut self, part: &Part) -> Vec<(Id, Vec<Id>)> {
+        let tree = self.canonical.tree();
+        let mut gone = std::collections::BTreeSet::new();
+        let mut waiting = Vec::new();
+        let removes = part.effects.iter().any(|e| {
+            matches!(&e.body, Body::Changes(cs)
+                if cs.iter().any(|c| matches!(c.change, replica::effects::Change::Remove { .. })))
+        });
+        if !removes {
+            return waiting;
+        }
+        for e in &part.effects {
+            let Body::Changes(cs) = &e.body else {
+                continue;
+            };
+            for c in cs {
+                if let replica::effects::Change::Create { node, .. } = &c.change {
+                    let links = tree.links_at(*node);
+                    if !links.is_empty() {
+                        waiting.push((*node, links.iter().map(|e| e.link).collect()));
+                    }
+                }
+                let replica::effects::Change::Remove { node } = &c.change else {
+                    continue;
+                };
+                let mut todo: Vec<_> = tree.handle(*node).into_iter().collect();
+                while let Some(h) = todo.pop() {
+                    if let Some(n) = tree.node(h) {
+                        gone.insert(n.id());
+                    }
+                    self.links
+                        .extend(tree.links_of(h).unwrap_or(&[]).iter().map(|e| e.link));
+                    todo.extend_from_slice(tree.children(h).unwrap_or(&[]));
+                }
+            }
+        }
+        self.timers.extend(
+            tree.timers()
+                .iter()
+                .filter(|(_, t)| gone.contains(&t.node))
+                .map(|(id, _)| *id),
+        );
+        self.gone.extend(gone);
+        waiting
+    }
+    /// After a part applied: the links that waited for a node it made ([`PublicWriter::note_removed`]) are noted
+    /// when the part also took that node out, so the cut publishes them gone.
+    fn note_landed(&mut self, waiting: Vec<(Id, Vec<Id>)>) {
+        for (node, links) in waiting {
+            if self.canonical.tree().handle(node).is_none() {
+                self.links.extend(links);
+            }
+        }
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
@@ -3436,14 +3518,26 @@ impl<S: ObjectStore> PublicWriter<S> {
                     );
                 }
             }
+            // A node a remove took out: its row gone; one the cut made and took out was never public. Any other not
+            // live here (sent away, or moved under one taken out before it went) is left to the whole cut.
+            ids.extend(&self.gone);
+            let mut sure = true;
             let rows = ids
                 .iter()
-                .filter_map(|id| {
-                    let n = tree.node_state_of(*id)?;
-                    (n.audience == Audience::Everyone && !self.hidden(tree, *id))
-                        .then(|| (*id, n.to_value()))
+                .filter_map(|id| match tree.node_state_of(*id) {
+                    Some(n) => (n.audience == Audience::Everyone && !self.hidden(tree, *id))
+                        .then(|| (*id, Some(n.to_value()))),
+                    None if self.gone.contains(id) || self.made.contains(id) => Some((*id, None)),
+                    None => {
+                        sure = false;
+                        None
+                    }
                 })
                 .collect();
+            // A node taken out while a public flight is open is left to the whole cut: a flight's link to it, or a
+            // flying node framed by it, is in rows (keys 4, 8 and 9) this cut does not hold. No flying node, no flight.
+            sure &= self.gone.is_empty()
+                || replica::stream::public::flying_ids(self.player.state())?.is_empty();
             // A link's row as the public state holds it: public, with no end a node here that is not public or is
             // hidden in a closed container (#3948); none once ended. One with an end not live here (a node in flight,
             // or gone) is left to the whole cut.
@@ -3518,7 +3612,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
-            match (timers, links, landed && bare) {
+            match (timers, links, landed && bare && sure) {
                 (Some(timers), Some(links), true) => {
                     self.player
                         .row_delta(tree.next(), rows, timers, links, &self.made)?
@@ -3624,7 +3718,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
-        // A cut of rows only (#3799) adds and removes no node, so no flying child becomes live in it.
+        // A cut by rows (#3799) lands no flight, so no flying child becomes live in it.
         let flying = replica::stream::public::flying_ids(self.player.state())?;
         if let Some(after) = after.as_ref().filter(|_| !flying.is_empty()) {
             let before = object_map(&wire(self.player.state().clone())?)?;
@@ -3684,12 +3778,31 @@ impl<S: ObjectStore> PublicWriter<S> {
             ids.extend(rows_of(self.player.state()));
             ids
         });
-        let changed = self
-            .changes
-            .iter()
-            .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
-            .map(|(i, v)| (*i, *v))
-            .collect::<Vec<_>>();
+        // A cut by rows names versions only of nodes in the published state or made with a row in its delta, as a
+        // whole cut names them only of nodes in the state before or after it: one it made and took out again, or one
+        // left out (C5) that a remove took out, is in neither.
+        let made_rows: std::collections::BTreeSet<Id> = match &delta {
+            Some(Value::Map(d)) => match d.get(&2) {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(p) if p.len() == 2 => replica::effects::read_id(&p[0]).ok(),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+        let mut changed = Vec::new();
+        for (i, v) in &self.changes {
+            if shown_ids.as_ref().is_some_and(|s| !s.contains(i))
+                || after.is_none() && !made_rows.contains(i) && !self.player.holds(*i)?
+            {
+                continue;
+            }
+            changed.push((*i, *v));
+        }
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
         // is brought up to date from (#4192).
         let whole_delta = match &after {

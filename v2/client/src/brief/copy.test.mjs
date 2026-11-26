@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../history/day.mjs';
-import { allFields, posesOf, rememberPublicWords, rowsOf, takeRecords, wordsOf } from './copy.mjs';
+import { allFields, posesOf, rememberPublicWords, rowsOf, shapesOf, takeRecords, wordsOf } from './copy.mjs';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc');
@@ -95,6 +95,20 @@ test('a node\'s fields read its big field from its own record', () => {
   assert.equal(f.get(24), 64000);
   assert.deepEqual(f.get(25).map(([x, z]) => [x, z]), [[0, 0]]);
   assert.equal(allFields({ record: () => undefined }, ground).has(25), false, 'not held: left out');
+});
+
+// #5006 finding 5: a creator's where, clear and free read each node's shape from the copy, with no browser.
+test('a node\'s shape: its slot, outline, solids, slots, line and scale, mm in its own frame', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return Buffer.from(h, 'hex'); };
+  const cup = put(new Map([[1, [scope, 3]], [2, 'eden:cup'], [3, [scope, 2]], [4, 1], [10, []]]));
+  const table = put(new Map([[1, [scope, 2]], [2, 'eden:table'], [3, [scope, 1]], [6, new Map([[12, [[0, 0, 500, 250, 0, 0, 700]]], [13, [[1, 500, 0, 0, 90000, 1]]], [23, 2_000_000]])], [10, [cup]]]));
+  const path = put(new Map([[1, [scope, 4]], [2, 'eden:footpath'], [3, [scope, 1]], [6, new Map([[16, [[0, 0], [5000, 0]]]])], [10, []]]));
+  const room = put(new Map([[1, [scope, 1]], [2, 'eden:room'], [6, new Map([[11, [[0, 0], [4000, 0], [4000, 2000]]]])], [10, [table, path]]]));
+  const s = shapesOf({ roots: () => JSON.stringify({ 0: room.toString('hex') }), record: (h) => held.get(h) });
+  assert.deepEqual(s.get('73636f7065-1'), { outline: [[0, 0], [4000, 0], [4000, 2000]] });
+  assert.deepEqual(s.get('73636f7065-2'), { solids: [[0, 0, 500, 250, 0, 0, 700]], slots: [[1, 500, 0, 0, 90000, 1]], scale: 2_000_000 });
+  assert.deepEqual(s.get('73636f7065-3'), { slot: 1 });
+  assert.deepEqual(s.get('73636f7065-4'), { line: [[0, 0], [5000, 0]] });
 });
 
 // #4837: a book a shelf's take made holds its title and first page as references (fields 29 and 30 of eden:book), and

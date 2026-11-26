@@ -1,5 +1,6 @@
 //! The session exchange (Engine v2 W5, #2801; shared with V13, #2745): a page signed in with W1's session gets a
-//! short token for the world's one creator, so a browser holds the creator's socket without the creator's agent.
+//! short token for the world's one creator, so a browser holds a creator's socket beside the creator's agent's (each
+//! is answered on its own socket: `shared` in lib.rs, #5006).
 //!
 //! `POST /v2/creator-token` with `Authorization: Bearer <session>`: W1's session as the page holds it (a provider's
 //! token, or `test:<name>` where the directory has the sign-in for test worlds on). The gateway asks the directory who

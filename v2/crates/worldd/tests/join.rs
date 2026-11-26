@@ -1182,9 +1182,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
 /// Re-pinned by the arrival fix: a body is born facing its entry's point, not +x (same 905 records, 2,342 motion
 /// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
-/// difference.
+/// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
+/// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
+/// previous pin (aafd0a80...), so it is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "aafd0a803ed6f47d528f15e74f0805bb90216f418974a78a7b066b420ed8e585";
+    "f7b20d34002b6b05b9ed86605a1e940eca51750dabd4656ad3f255f9d2030bd1";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

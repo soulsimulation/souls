@@ -405,6 +405,29 @@ export function posesOf(copy) {
   return out;
 }
 
+/**
+ * The shape facts a creator's `where`, `clear`, `free` and words-`look` read (#5006 finding 5; the fields replica
+ * `select` reads a shape from): by id, its slot (field 4) and, when it has them, its outline `[x, z]` (11), solids
+ * `[cx, cz, hx, hz, yaw mdeg, ...]` (12), slots `[n, x, y, z, yaw mdeg, ...]` (13) and line `[x, z]` (16, a road or
+ * path), mm in its own frame, and its scale in parts per million (23). Rows never carry these; only the creator's `space` answer does.
+ */
+export function shapesOf(copy) {
+  const out = new Map(), walk = walkOf(copy), todo = Object.values(JSON.parse(copy.roots()));
+  const nums = (v) => (Array.isArray(v) ? v.map(nums) : Number(v));
+  while (todo.length) {
+    const d = walk.read(todo.pop());
+    if (!d) continue;
+    const { m } = d, f = allFields(copy, m), get = (n) => f.get(n) ?? f.get(BigInt(n)), s = {};
+    if (m.has(4)) s.slot = Number(m.get(4));
+    for (const [n, k] of [[11, 'outline'], [12, 'solids'], [13, 'slots'], [16, 'line']]) if (Array.isArray(get(n))) s[k] = nums(get(n));
+    if (get(23) !== undefined) s.scale = Number(get(23));
+    out.set(idText(m.get(1)), s);
+    todo.push(...(m.get(10) ?? []).map(hex));
+  }
+  walk.done();
+  return out;
+}
+
 /** What changed between two sets of rows: the names added, removed or changed in their own record, in name order. */
 export function changedBetween(before, after) {
   const out = [];

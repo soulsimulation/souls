@@ -6525,7 +6525,8 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     println!("plan: {out}");
     assert_eq!(status, 0, "{out}");
     assert!(
-        out.contains("change eden:humanoid ") && out.contains("1 would change, 0 unchanged"),
+        out.contains("change eden:humanoid ")
+            && out.contains("1 would change, 0 would be added, 0 unchanged"),
         "{out}"
     );
     assert_eq!(
@@ -6536,7 +6537,10 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     let (status, out) = entries_cmd("stage", &w.dir, &release);
     println!("stage: {out}");
     assert_eq!(status, 0, "{out}");
-    assert!(out.contains("1 staged, 0 unchanged"), "{out}");
+    assert!(
+        out.contains("1 changed and 0 added staged, 0 unchanged"),
+        "{out}"
+    );
     assert_eq!(
         std::fs::read(&file).unwrap(),
         seeded,
@@ -6555,7 +6559,7 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     );
     let (_, again) = entries_cmd("stage", &w.dir, &release);
     assert!(
-        again.contains("0 would change, 1 unchanged (nothing to stage)")
+        again.contains("0 would change, 0 would be added, 1 unchanged (nothing to stage)")
             && !w.dir.join("entries.next").exists(),
         "staged again: {again}"
     );
@@ -6674,6 +6678,575 @@ fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
     }
     assert_eq!(bytes[0], bytes[1], "the same entry on both");
     assert_eq!(starts[0], starts[1], "both start at the same state");
+}
+
+/// The group gesture the upgrade tests add (#4954): one of those Eden lacked on 0.138.
+const GESTURE: &str = "eden:wave_together";
+
+/// The world's log, record for record.
+fn log_records(w: &Seeded) -> Vec<Vec<u8>> {
+    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+}
+
+/// An intent of `soul` with `parameters` on the world's socket, and its end (a receipt, kind 1, or a refusal).
+fn intent_on(
+    s: &mut UnixStream,
+    w: &Seeded,
+    soul: Id,
+    sequence: u64,
+    verb: &str,
+    target: Id,
+    parameters: BTreeMap<u64, Value>,
+) -> Got {
+    let i = Intent {
+        actor: Actor::Soul(soul),
+        verb: Name::new(verb).unwrap(),
+        target: Some(Target::Node(target)),
+        parameters,
+        sequence,
+        basis: basis(w.root.scope(), 0),
+        expiry: answers::now() + 120_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    s.write_all(&bytes).unwrap();
+    socket_end(s)
+}
+
+/// New Soul Actions reach a running world with the release (#4954). A world seeded from `facts` with the entries in
+/// `old` (before the gesture existed), two Souls born at `at`, runs once (each Soul's body born by a step) and stops.
+/// Then the release's upgrade step with its entries in `release`: `entries plan` lists the gesture as an addition and
+/// changes nothing; `entries stage` and the deploy's swap put it in the world's entries; the next start defines it in the
+/// world's history at its first tick. The log before the upgrade is unchanged record for record, the whole log replays
+/// from empty under the world's own header, and one Soul offers the gesture to the other, who accepts: it starts, two
+/// members in its two roles.
+fn a_gesture_added_by_the_upgrade_starts(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+) -> (PathBuf, Seeded, Id) {
+    a_gesture_added_by_the_upgrade_starts_with(tag, facts, old, release, at, 2)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] in a world seeded with `souls` Souls; only the first two are born.
+fn a_gesture_added_by_the_upgrade_starts_with(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+    souls: u64,
+) -> (PathBuf, Seeded, Id) {
+    let d = scratch(tag);
+    let w = seed_entries(&d, facts, souls, at, Some(old));
+    let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
+    let activity = format!("{GESTURE}_activity");
+    let (a, b) = (w.souls[0], w.souls[1]);
+    {
+        let s = serve_with(&w, &d.join("s1"), None);
+        let line = s.line("activities: ", 900);
+        assert!(!line.contains(&activity), "seeded before it: {line}");
+        s.line("listening ", 900);
+        let mut souls = connect_socket(&d.join("s1"));
+        souls
+            .set_read_timeout(Some(Duration::from_secs(120)))
+            .unwrap();
+        // Each Soul's first intent births its body; a step of a metre keeps the two 2 m apart.
+        for (k, soul) in [a, b].into_iter().enumerate() {
+            let x = (at.0 + 2 * k as i64) * M;
+            walk(&mut souls, &w, soul, 1, x, at.1 * M + M);
+            println!("step {k}: {:?}", socket_end(&mut souls));
+        }
+    }
+    let before = log_records(&w);
+    let (status, out) = entries_cmd("plan", &w.dir, release);
+    println!("plan: {out}");
+    assert_eq!(status, 0, "{out}");
+    assert!(
+        out.contains(&format!("entries: {name}: add {GESTURE} ")),
+        "{out}"
+    );
+    assert!(
+        !w.dir.join("entries.next").exists(),
+        "a plan changes nothing"
+    );
+    let (status, out) = entries_cmd("stage", &w.dir, release);
+    assert_eq!(status, 0, "{out}");
+    // What the release's deploy does between the pin and the restart.
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let file = w
+        .dir
+        .join("entries")
+        .join(format!("{}.json", GESTURE.replace(':', ".")));
+    assert!(file.exists(), "added as a seed writes it");
+    let (_, again) = entries_cmd("plan", &w.dir, release);
+    assert!(!again.contains(" add "), "added once: {again}");
+
+    let s = serve_with(&w, &d.join("s2"), None);
+    let line = s.line("activities: ", 900);
+    assert!(line.contains(&activity), "served after the upgrade: {line}");
+    let defined = s.line("kinds defined: ", 900);
+    println!("{defined}");
+    assert!(defined.contains(&format!("{activity}@")), "{defined}");
+    let mut souls = connect_socket(&d.join("s2"));
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    // The definitions follow the world's history; nothing before them changed, and the whole log replays (served_copy
+    // applies every part from empty, under the header the world keeps).
+    let after = log_records(&w);
+    assert!(after.len() > before.len(), "the definitions are logged");
+    assert_eq!(
+        after[..before.len()],
+        before[..],
+        "the log before the upgrade is unchanged, record for record"
+    );
+    let body_b = body_of(&w, b);
+    let offered = intent_on(
+        &mut souls,
+        &w,
+        a,
+        2,
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned_activity(&w, &activity)),
+            (2, Value::Text(Name::new("eden:one").unwrap())),
+            (3, Value::Array(vec![body_b.to_value()])),
+        ]),
+    );
+    println!("offer: {offered:?}");
+    assert_eq!(offered.kind, 1, "offered: {offered:?}");
+    let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+    let accepted = intent_on(
+        &mut souls,
+        &w,
+        b,
+        2,
+        "activity:accept",
+        gesture,
+        BTreeMap::new(),
+    );
+    println!("accept: {accepted:?}");
+    assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+    assert!(started_within(&w, gesture), "the gesture starts");
+    // The whole log, the gesture's parts and its definition among them, still replays from empty.
+    let _ = served_copy(&w);
+    (d, w, gesture)
+}
+
+/// Whether the log holds `souls:activity-started` on `activity`, within 20 s.
+fn started_within(w: &Seeded, activity: Id) -> bool {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let started = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| e.envelope.node == activity)
+            .flat_map(|e| e.events.iter().flatten())
+            .any(|ev| ev.name.as_str() == "souls:activity-started");
+        if started || Instant::now() > end {
+            return started;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on N2's test world: seeded with the body alone. Then a later release
+/// changes the added gesture (its lead bows): a new revision of its activity, which the next start takes at the
+/// revision the world defined, as a header's kind is taken; nothing is defined again. The gesture open across the
+/// restart keeps its rules (its member leaves it), a new one is offered, accepted and starts, and a creator's edit that
+/// changes the ground (a wall, so the town and the planner commit it under their own rules) and makes a node of the
+/// gesture's activity at the world's revision commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
+    let d = scratch("added-tw");
+    let content = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let (old, release) = (d.join("old"), d.join("release"));
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::create_dir_all(release.join("greetings")).unwrap();
+    std::fs::copy(
+        content.join("body/humanoid.json"),
+        old.join("humanoid.json"),
+    )
+    .unwrap();
+    std::fs::copy(
+        content.join("body/humanoid.json"),
+        release.join("humanoid.json"),
+    )
+    .unwrap();
+    std::fs::copy(
+        content.join("greetings/wave_together.json"),
+        release.join("greetings/wave_together.json"),
+    )
+    .unwrap();
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
+        "added-tw-w",
+        &testworld::generate(1, 0).unwrap().text,
+        &old,
+        &release,
+        (-40, 30),
+    );
+    let path = release.join("greetings/wave_together.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replacen("\"move\": \"wave\"", "\"move\": \"bow\"", 1),
+    )
+    .unwrap();
+    let (status, out) = entries_cmd("stage", &w.dir, &release);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("change {GESTURE} ")), "{out}");
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let (c, creator) = creator(0xc4);
+    static_creator(&w, c);
+    let records = log_records(&w).len();
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
+    let line = s.line("kinds added since the world's header: ", 900);
+    println!("{line}");
+    assert!(
+        line.contains(": 0 to define at the first tick []")
+            && line
+                .split_once("taken at the world's revision [")
+                .is_some_and(|(_, taken)| taken.contains(&format!("{activity}@"))),
+        "{line}"
+    );
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let (a, b) = (w.souls[0], w.souls[1]);
+    // The gesture open across the restart is of the world's revision, whose rules this start took: its members leave
+    // it, each with a receipt, and the last one's leave takes it out.
+    for soul in [b, a] {
+        let left = intent_on(
+            &mut souls,
+            &w,
+            soul,
+            3,
+            "activity:leave",
+            open,
+            BTreeMap::new(),
+        );
+        println!("leave the open gesture: {left:?}");
+        assert_eq!(left.kind, 1, "left at the world's revision: {left:?}");
+    }
+    let body_b = body_of(&w, b);
+    let pinned = pinned_activity(&w, &activity);
+    let offered = intent_on(
+        &mut souls,
+        &w,
+        a,
+        4,
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned.clone()),
+            (2, Value::Text(Name::new("eden:one").unwrap())),
+            (3, Value::Array(vec![body_b.to_value()])),
+        ]),
+    );
+    assert_eq!(
+        offered.kind, 1,
+        "offered at the world's revision: {offered:?}"
+    );
+    let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+    let accepted = intent_on(
+        &mut souls,
+        &w,
+        b,
+        4,
+        "activity:accept",
+        gesture,
+        BTreeMap::new(),
+    );
+    assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+    assert!(started_within(&w, gesture), "the changed gesture starts");
+    let created = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            replica::effects::Body::Changes(cs) => Some(cs),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| {
+            matches!(&c.change, replica::effects::Change::Create { kind, .. }
+                if kind.as_str() == replica::kinds::defined::kind().0)
+        })
+        .count();
+    assert!(log_records(&w).len() > records);
+    assert_eq!(created, 2, "the gesture and its activity, defined once");
+    // A creator's edit through the walkers' town (a wall changes the ground) that makes a node of the activity at the
+    // world's revision: the town and the planner commit it under the rules this start took.
+    let Value::Array(pin) = &pinned else {
+        panic!("a pin")
+    };
+    let (Value::Text(plain), Value::Bytes(hash)) = (&pin[0], &pin[1]) else {
+        panic!("a pin's name and hash")
+    };
+    let full = Name::new(&format!(
+        "{}@{}",
+        plain.as_str(),
+        replica::encode::to_hex(hash)
+    ))
+    .unwrap();
+    let made = Op::Place {
+        name: 2,
+        kind: full,
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(-30 * M, 0, 34 * M),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(&w, creator, 1, 0, vec![wall(&w, -30 * M, 30 * M), made]),
+    )
+    .await;
+    println!("a wall and the gesture's activity at the world's revision: {got:?}");
+    assert_eq!(got.kind, 1, "the edit commits: {got:?}");
+}
+
+/// The release's library (`content/kinds`) as a world seeded before the group gestures had it: without `greetings/`.
+fn library_before_the_gestures(d: &Path) -> (PathBuf, PathBuf) {
+    let release = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let old = d.join("old");
+    assert!(
+        Command::new("cp")
+            .arg("-R")
+            .arg(&release)
+            .arg(&old)
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::remove_dir_all(old.join("greetings")).unwrap();
+    (old, release)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on Eden's facts, its library before the group gestures. Needs the Eden
+/// facts file (`EDEN_FACTS`, else `.local/import-eden/eden-2026.facts.json`; `v2/tools/import-eden/README.md`).
+#[test]
+#[ignore = "needs the generated Eden facts file (EDEN_FACTS)"]
+fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let d = scratch("added-eden");
+    let (old, release) = library_before_the_gestures(&d);
+    a_gesture_added_by_the_upgrade_starts(
+        "added-eden-w",
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &old,
+        &release,
+        (52, 3),
+    );
+}
+
+/// What the public stream spends on parts that touch a kind the release added (#4954 review): Eden after the upgrade,
+/// its two Souls offering, accepting and leaving the group gesture `SOULS_GESTURES` times (default 40), each part
+/// touching the gesture's node, a kind its header does not pin, `SOULS_GESTURE_PAUSE_MS` (default 400) after each act so
+/// the writer cuts each on its own. Run with `STREAM_PROFILE=1` (and `--release`); prints the stream writer's profile
+/// lines (`public-stream profile:` with its whole cuts and its stages' time) and their sums. Needs the Eden facts file
+/// (`EDEN_FACTS`). With `SOULS_PAIRS` (default 1), that many pairs of Souls a few metres apart do it at once, each step
+/// for every pair in turn before the pause: a crowd whose gestures start and end in the same parts.
+#[test]
+#[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
+fn eden_gesture_parts_on_the_public_stream() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let times: u64 = std::env::var("SOULS_GESTURES")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(40);
+    let pause = Duration::from_millis(
+        std::env::var("SOULS_GESTURE_PAUSE_MS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(400),
+    );
+    let pairs: u64 = std::env::var("SOULS_PAIRS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1);
+    let d = scratch("added-eden-stream");
+    let (old, release) = library_before_the_gestures(&d);
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts_with(
+        "added-eden-stream-w",
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &old,
+        &release,
+        (52, 3),
+        2 * pairs,
+    );
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    // Pair `j` stands in a grid of four columns 5 m apart and rows 4 m apart, its two Souls 2 m apart; the first pair
+    // where the setup left it. Each Soul past the first two is born by its walk there.
+    for k in 2..2 * pairs {
+        let j = (k / 2) as i64;
+        let x = 52 + 5 * (j % 4) + 2 * (k % 2) as i64;
+        walk(
+            &mut souls,
+            &w,
+            w.souls[k as usize],
+            1,
+            x * M,
+            (4 + 4 * (j / 4)) * M,
+        );
+        println!("Soul {k}: {:?}", socket_end(&mut souls));
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let crowd: Vec<(Id, Id, Id)> = (0..pairs as usize)
+        .map(|j| {
+            let (a, b) = (w.souls[2 * j], w.souls[2 * j + 1]);
+            let body = t
+                .links_at(b)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body");
+            (a, b, body)
+        })
+        .collect();
+    drop(copy);
+    let pinned = pinned_activity(&w, &activity);
+    let mut seq = 3;
+    let leave = |souls: &mut UnixStream, seq: u64, (a, b): (Id, Id), gesture: Id| {
+        for soul in [b, a] {
+            let left = intent_on(
+                souls,
+                &w,
+                soul,
+                seq,
+                "activity:leave",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(left.kind, 1, "left: {left:?}");
+        }
+    };
+    leave(&mut souls, seq, (crowd[0].0, crowd[0].1), open);
+    let t = Instant::now();
+    for _ in 0..times {
+        seq += 1;
+        let mut gestures = Vec::new();
+        for &(a, _, body_b) in &crowd {
+            let offered = intent_on(
+                &mut souls,
+                &w,
+                a,
+                seq,
+                "activity:offer",
+                w.ground,
+                BTreeMap::from([
+                    (1, pinned.clone()),
+                    (2, Value::Text(Name::new("eden:one").unwrap())),
+                    (3, Value::Array(vec![body_b.to_value()])),
+                ]),
+            );
+            assert_eq!(offered.kind, 1, "offered: {offered:?}");
+            gestures.push(created_by(&w, &offered.entries, &format!("{activity}@")));
+        }
+        std::thread::sleep(pause);
+        for (&(_, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            let accepted = intent_on(
+                &mut souls,
+                &w,
+                b,
+                seq,
+                "activity:accept",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        }
+        std::thread::sleep(pause);
+        seq += 1;
+        for (&(a, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            leave(&mut souls, seq, (a, b), gesture);
+        }
+    }
+    println!(
+        "{times} gestures by {pairs} pairs offered, accepted and left in {:?}",
+        t.elapsed()
+    );
+    // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.
+    let end = Instant::now() + Duration::from_secs(30);
+    let (mut parts, mut whole, mut staged) = (0u64, 0u64, 0u64);
+    let after = |l: &str, key: &str| -> u64 {
+        l.split_once(key)
+            .and_then(|(_, r)| r.split(|c: char| !c.is_ascii_digit()).next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match s.lines.recv_timeout(left) {
+            Ok(l) if l.starts_with("public-stream profile: ") => {
+                println!("{l}");
+                parts += after(&l, " parts ");
+                whole += after(&l, " whole-cuts ");
+                staged += after(&l, " staged ");
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    println!(
+        "public stream: {parts} parts, {whole} cut whole, {staged} ms staged ({} ms a part)",
+        staged.checked_div(parts).unwrap_or(0)
+    );
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on an older Mars world's facts, its library before the group gestures.
+/// Needs the Mars template's facts file (`MARS_FACTS`, else `.local/import-eden/mars-two.facts.json`; `tests/mars.rs`).
+#[test]
+#[ignore = "needs the generated Mars facts file (MARS_FACTS)"]
+fn a_mars_world_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("MARS_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/mars-two.facts.json"));
+    let d = scratch("added-mars");
+    let (old, release) = library_before_the_gestures(&d);
+    a_gesture_added_by_the_upgrade_starts(
+        "added-mars-w",
+        &std::fs::read_to_string(&facts).expect("the Mars facts file"),
+        &old,
+        &release,
+        (-6, -30),
+    );
 }
 
 /// A Soul's next act ends its held dance (continuous activities): `act dance` with no `for` is one run that goes on
