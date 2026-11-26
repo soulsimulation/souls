@@ -26,7 +26,8 @@
 //!
 //! - **Reserved, and ended in one entry** (F3, #2768). Accepting a form writes one entry at commit, in arrival order:
 //!   a `souls:form-started` event and, when the form is done at a thing, the reservation, a `souls:reserves` link from
-//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`] reserves nothing. A
+//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`], or one that only
+//!   walks to its thing and waits there ([`only_there`]: a warm by a fire, a bridge's cross), reserves nothing. A
 //!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. A form
 //!   that only takes seats (#4575, [`slots_taken`]: a bench's `sit`, a boat's `board`) holds those seats and not its
 //!   whole thing, so two Souls sit on one bench at once; the second racing for the same seat is refused
@@ -544,6 +545,18 @@ fn slots_taken(
     taken.sort_unstable();
     taken.dedup();
     taken
+}
+
+/// Whether a form with `steps` and `effects` only goes to its thing and stays there a while (a warm by a campfire, a
+/// bridge's cross, a building's walk to a room): every step a walk or a wait, no effect and no long form's stages. It
+/// moves, seats and changes nothing of the thing, so it reserves nothing there: several Souls warm at one fire at once,
+/// and sit on its logs while others warm. Any move, seat, hand or change of the thing reserves as before.
+fn only_there(steps: &[Step], effects: &[form_runner::Effect], long: bool) -> bool {
+    !long
+        && effects.is_empty()
+        && steps
+            .iter()
+            .all(|s| matches!(s, Step::WalkTo { .. } | Step::Wait(_)))
 }
 
 /// Whether `step` changes the body's posture (a seat taken or left, a ground posture): a run in one is let finish it.
@@ -1472,7 +1485,9 @@ impl Forms {
                 }
             }
         }
-        let reserves = node != body && !self.shared.contains(&node);
+        let reserves = node != body
+            && !self.shared.contains(&node)
+            && !only_there(&steps, &effects, long.is_some());
         // A form that only takes seats reserves those seats, not its whole thing (#4575): two Souls sit on one bench
         // at once, while a form that moves, carries or changes the thing holds all of it.
         let taken = match reserves {

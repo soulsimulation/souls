@@ -74,7 +74,7 @@ export function OwnerGod({ banner, connectUrl, tools, prayers, more, forsake, pa
 const STATE_WORD = { 'not-paired': 'Not paired', connecting: 'Connecting' } as const;
 /** Until the agent is connected: its state, the one line to give it, and the steps after it. */
 function Connect({ url, state }: { url: string; state: keyof typeof STATE_WORD }) {
-  const line = `Read ${url} and follow its God mode section to control this world.`;
+  const line = `Read ${url} and follow it to build this world as its god.`;
   const [copied, setCopied] = useState(false), [manual, setManual] = useState(false);
   useEffect(() => { if (!copied) return; const t = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(t); }, [copied]);
   const copy = async () => { if (await copyText(line)) setCopied(true); else setManual(true); };
@@ -85,7 +85,7 @@ function Connect({ url, state }: { url: string; state: keyof typeof STATE_WORD }
       <li className={state === 'not-paired' ? 'now' : 'done'}>Give your agent this line:</li>
     </ol>
     <div className="gm-connect-line">
-      <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow its God mode section to control this world.</p>
+      <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow it to build this world as its god.</p>
       <button type="button" className="gm-copy" data-connect-copy="1" onClick={() => void copy()} aria-label="Copy the line for your agent">{copied ? 'Copied' : 'Copy'}</button>
     </div>
     {manual && <input className="gm-prompt" aria-label="Line for your agent" value={line} readOnly autoFocus onFocus={(e) => e.target.select()} />}

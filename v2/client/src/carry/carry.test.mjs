@@ -83,6 +83,29 @@ test('carry to walks this Soul so the load reaches the point or the slot, keepin
   assert.equal(carryIntents({ do: 'to', crew: id(8), where: '1,2' }, { ...ctx, crewMiddle: () => null }).code, 'carry-crew-unseen');
 });
 
+test('a beam carried into a slot past a beam seated at the height it is carried is refused before anyone moves', () => {
+  // The bay at (12, 6) m: a beam seated in beam_high_l (slot 3) or beam_low_l (slot 5); the crew holds a beam, its
+  // length along the bay's z, west of the bay or east of it.
+  const crew = id(8), held = id(10), seated = id(11);
+  const copy = (slot) => {
+    const r = new Map(rows);
+    r.set(held, { id: held, kind: 'mars:rack_beam', parent: crew, pos: [0, 0, 0], rot: YAW90 });
+    r.set(seated, { id: seated, kind: 'mars:rack_beam', parent: id(5), pos: [0, 0, 0] });
+    const place = placer(r, (n) => (n === seated ? slot : null), (x) => kinds[x?.kind]);
+    return { ...ctx, placeOf: place, kindOf: (n) => r.get(n)?.kind, seated: (n) => (n === id(5) ? [{ id: seated, slot }] : []), heldBy: (c) => (c === crew ? held : null) };
+  };
+  const to = (slot, from, high = 3) => carryIntents({ do: 'to', crew, where: id(5), slot }, { ...copy(high), crewMiddle: () => from });
+  const r = to('beam_high_r', [4e6, 6e6]);
+  assert.equal(r.code, 'carry-way-crossed', 'from the west, past the first high beam');
+  assert.match(r.detail, /beam_high_l/);
+  assert.equal(to('beam_high_r', [20e6, 6e6])[0].verb, 'eden:walk', 'from the east it does not pass it');
+  assert.equal(to('beam_high_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'a beam seated low is carried over');
+  assert.equal(to('beam_low_l', [4e6, 6e6]).code, 'carry-way-crossed', 'under a high beam already seated, at the height it is carried');
+  assert.equal(to('beam_low_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'past a low beam to the far low slot');
+  // Without the copy's slots (an older daemon), nothing is read and the walk is sent.
+  assert.equal(carryIntents({ do: 'to', crew, where: id(5), slot: 'beam_high_r' }, { ...ctx, crewMiddle: () => [4e6, 6e6] })[0].verb, 'eden:walk');
+});
+
 test('a part is taken, seated in a slot by name or number, laid on the ground, or taken out', () => {
   const part = (r) => carryIntents({ kind: 'part', ...r }, ctx);
   assert.deepEqual(part({ do: 'take', crew: id(8), part: id(4) }), [{ verb: 'part:take', target: id(8), params: { 1: id(4) } }]);

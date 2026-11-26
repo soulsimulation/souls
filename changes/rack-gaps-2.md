@@ -1,0 +1,4 @@
+---
+type: fix
+---
+Crews building a pallet-rack bay hit fewer dead ends. A crew of three or four can now take, seat and lay down a part with `part`; before, only a crew of exactly two could. A crew whose members were still busy in another activity when they accepted now starts once the last of them is free. Until it starts, a lift is refused with the reason, for example which member is still held and by what. Before, it never started and gave no reason. `carry to <bay> <slot>` now refuses up front, naming the part in the way, when the straight way passes a part already seated in another slot at the height the load is carried, such as the second high beam passing the first. Before, the carry broke off and the beam was set down under the first one. A creator's `place` or `move` of a loose thing far off the open ground, such as a value in millimetres where metres were meant, is now refused with `edit.off-ground`. Before, it put a beam 24 km away.

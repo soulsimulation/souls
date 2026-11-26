@@ -2,6 +2,23 @@
   "format": "souls-entry/1",
   "kind": "eden:helter_skelter",
   "owner": "thing",
+  "points": {
+    "door": { "role": "stand", "at_mm": [0, 0, 2950] },
+    "bottom": { "role": "stand", "at_mm": [-2950, 0, -1000] }
+  },
+  "forms": {
+    "slide_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "door" },
+        { "step": "wait", "us": 10000000 },
+        { "step": "walk_to", "point": "bottom" }
+      ],
+      "effects": []
+    }
+  },
   "geometry": {
     "bounds_mm": [
       5500,

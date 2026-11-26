@@ -133,3 +133,9 @@ test('concurrent 401s share replacement mint and a late old-token 401 cannot era
   late.resolve(Response.json({}, { status: 401 })); await requests[2];
   assert.equal(mints, 1); assert.equal(api.storedToken(), 'god_first-1_replacement');
 });
+
+test('25 Nov: the god line and the connect link name the creator guide every world serves, not SKILL.md (a 404)', t => {
+  const api = fixture(t).load();
+  assert.equal(api.creatorGuide('https://soul.game/w/eden'), 'https://soul.game/w/eden/creator.md');
+  assert.equal(api.godPrompt('https://soul.game/w/eden'), 'Read https://soul.game/w/eden/creator.md and follow it to build this world as its god.');
+});
