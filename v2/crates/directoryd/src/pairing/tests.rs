@@ -1368,6 +1368,34 @@ fn n3720_a_new_soul_past_the_accounts_cap_is_refused_too_many_and_a_retire_makes
 }
 
 #[test]
+fn first_day_an_approved_new_soul_is_listed_by_the_name_its_agent_asked_for() {
+    let (p, tokens) = store();
+    let approved = |account: &str, soul: Option<&str>, name: &str| {
+        let (_, code) = ask(&p, "studio laptop", soul, soul.is_some(), T0);
+        p.ask_world(&code, "mars").expect("a world");
+        p.ask_name(&code, name).expect("kept");
+        p.approve(account, &code, T0).expect("approved")
+    };
+    let name_of = |account: &str| p.mine(account).expect("souls")[0].name.clone();
+    // At the approval, before its daemon polls for the token and before any world has its body.
+    let fern = approved("acct_owner", None, "Fern");
+    assert_eq!(name_of("acct_owner").as_deref(), Some("Fern"));
+    let mut souls = tokens.file_name().unwrap().to_os_string();
+    souls.push(".souls");
+    let file = std::fs::read_to_string(tokens.with_file_name(&souls)).unwrap();
+    assert!(
+        file.contains(&format!("words {fern} {} -", to_hex(b"Fern"))),
+        "{file}"
+    );
+    // A Soul that has a name keeps it.
+    approved("acct_owner", Some(&fern), "Moss");
+    assert_eq!(name_of("acct_owner").as_deref(), Some("Fern"));
+    // A name another Soul of the world has is not given; the approval stands.
+    approved("acct_other", None, "fern");
+    assert_eq!(name_of("acct_other"), None);
+}
+
+#[test]
 fn n3720_a_name_another_soul_of_the_world_has_is_refused_name_taken() {
     let (p, _) = store();
     let named = |n: &str| souls::Profile {

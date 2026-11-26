@@ -12,6 +12,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 import { soulRetireWait } from '../account/account.mjs';
+import { folderOf } from './home.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -118,6 +119,7 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   const hash = (token) => createHash('sha256').update(token).digest('hex');
   const token = Object.values(json(join(home, 'credentials.json')).souls[first.soul])[0].token;
   assert.ok(readFileSync(tokensFile, 'utf8').includes(hash(token)), 'the token still works');
+  assert.match(readFileSync(join(folderOf(home), 'AGENTS.md'), 'utf8'), new RegExp(first.soul), 'the guide lists it while it lives here');
   // The owner confirms on the page; `retire wait` sees it, and the dead token leaves the home.
   assert.equal((await page('/v1/account/souls/retire', { soul: first.grant, confirm: true })).status, 200);
   // The world hears of it from the directory's Souls file beside the gateway's tokens (worldd directory.rs), and the
@@ -127,6 +129,8 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   const waited = await souls(home, 'retire', 'wait');
   assert.deepEqual([waited.retire, waited.retired], ['done', true]);
   assert.equal(json(join(home, 'credentials.json')).souls?.[first.soul], undefined);
+  // First day (26 Nov): the folder's guide no longer lists it, so the next chat there is not told it lives here.
+  assert.doesNotMatch(readFileSync(join(folderOf(home), 'AGENTS.md'), 'utf8'), new RegExp(first.soul));
   assert.ok(!(await mine()).some((s) => s.soul === first.grant), 'off the list');
 
   // revoke needs the account login, as today's.

@@ -483,4 +483,7 @@ The page with many Souls ([#2554](https://github.com/soulsimulation/souls/issues
 `-f command=page -f args='--souls 12,50,200,500 --shape event' -f repeats=2 -f cores=world=1` runs
 `tools/test-harness/page-souls.mjs`, which grows one fake-mind Eden 2026 to each size with raw Souls on a load shape
 and records frame time, draws, GPU time, heap and long tasks for desktop and phone, Broadcast and a high Free view. Its
-`REPORT.md` holds the table; the frame times are relative to the runner's GPU, not a visitor's.
+`REPORT.md` holds the table; the frame times are relative to the runner's GPU, not a visitor's. `--ab name=query;name2=query2`
+runs every arm once per variant on the same world, alternating (the page's own A/B switches, such as `tagCull=0`), and
+`--tiers`, `--cameras`, `--profile-at` and `--trace-sec` pick the arms, the sizes profiled and a main-thread trace (style,
+layout and script time per second).

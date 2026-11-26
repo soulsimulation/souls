@@ -93,8 +93,22 @@ and cost nothing. They print JSON; add `--lines` for one line per kind.
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
-These are all the verbs there are. If you know today's god command (`eden-god`), its undo, place by relation, land,
-weather, search of kinds and the others are not here yet; do not try them. `v2/docs/creator-verbs.md` maps each one.
+The world itself, and a few more:
+
+| Verb | What it does |
+| --- | --- |
+| `weather [--kind clear\|cloudy\|rain\|wind\|fog\|storm] [--minutes 5..360]` | the world's weather until then; its own weather resumes after |
+| `sky --palette <name>` · `strike <x,z \| id>` | the sky's palette (`clear-day`, `dusk`, ...); lightning at a point or on a place |
+| `land <hill\|knoll\|mountain\|raise\|lower\|flatten\|plateau\|terrace\|valley\|ditch\|cliff\|pond\|lake> ...` | the ground and its water, one edit (`land hill --at x,z --height 5..60 --radius 20..300`, `land pond --circle cx,cz,r`); what stands on it moves with it, and a Soul standing there refuses it |
+| `hours <id> --open 07:00-15:00 [--open 09:00-13:00@sat,sun]` \| `--closed` | a place's opening hours, the whole schedule at once |
+| `recolor <id> '#rrggbb' [--part <part>]` | a tint on a thing, or on one named part; `undo` takes it back |
+| `map` · `describe <id>` | the world at a glance (buildings, named things, roads, zones, in metres); one thing in full |
+| `history --at <place> \| --thing <id> \| --soul <name>` | what happened there, from the world's public history |
+| `own <id> <soul id\|god\|none>` · `access <id> private\|public\|none` · `zone <name> <use> --rect ...` | who owns a thing or a place; a private one; a land-use zone |
+
+`node souls-god.mjs` with no arguments prints every verb with all its flags. Today's god command (`eden-god`) has a
+few more that are not here: placing `--near`, `--inside`, `--along`, `--between`; prayers and answers; handing the
+world on. Do not try them.
 
 ### Batches
 

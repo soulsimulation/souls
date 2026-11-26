@@ -4111,6 +4111,15 @@ fn serve(args: &[String]) -> R<()> {
         stream_world,
         generation.as_deref(),
     );
+    // ... and its clean-up of old generations, on another thread with another client (#4954): a slow delete holds
+    // back no put. It deletes under the same generation the backup puts under.
+    let cleanup_store = Generation::new(
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
+        stream_world,
+        generation.as_deref(),
+    );
     // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address (and
     // its generation's place), so a store moved to another bucket or place is learned again rather than fenced on.
     let backup_identity = replica::encode::to_hex(&replica::ids::sha256(
@@ -4327,6 +4336,7 @@ fn serve(args: &[String]) -> R<()> {
                 measures::BACKUP.backup(&view_out::BackupState::Current);
                 writer.back_up(
                     backup_store,
+                    cleanup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
