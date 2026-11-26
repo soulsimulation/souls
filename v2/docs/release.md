@@ -126,14 +126,18 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    folder with a `template` file: `eden-2026`, `mars-camp`) is seeded again from what it carries (facts, entries,
    moves, entry point, body catalogue) by the release's `worldd`, published by its `publish-template` and dry-run
    forked by its `worldd`, all in `.templates.next` beside the catalogue, never in it (the directory lists every folder
-   in it holding a `template` file). A dry run stops there and changes nothing. A real release then renames into place,
-   back to back: the release's `worldd` and `ops/` in the library (the previous kept as `.worldd.prev`, `.ops.prev`),
-   the pin (`.placement.json.prev`) and each template (the previous under `templates/.aside/<name>`). The directory
-   reads the catalogue (each template's name, lineage and zone) only at its start, and a republished template has a
-   fresh lineage, so it is restarted when that changed and must answer `401` as above; if it does not, every rename
-   goes back and it is restarted on the previous catalogue (`release.placement-directory-unhealthy`). Any failure
+   in it holding a `template` file; a dot-named one is refused, `release.placement-stray`). A dry run stops there and
+   changes nothing. A real release then renames into place, back to back: the release's `worldd` and `ops/` in the
+   library (the previous kept as `.worldd.prev`, `.ops.prev`), the pin (`.placement.json.prev`) and each template (the
+   previous under `templates/.aside/<name>`); a file is renamed over the live one, so it is never missing. Nothing
+   creates meanwhile: `souls-place.path` is stopped and a placement in flight waited for (`release.placement-busy`
+   after 300 s), and the directory, which reads the catalogue (each template's name, lineage and zone) only at its
+   start and would take a create under the old lineage, is down from just before the renames until just after, when
+   that catalogue changed (a republished template has a fresh lineage). It must then answer `401` as above; if it does
+   not, or a rename fails, every rename goes back (`release.placement-directory-unhealthy`, `-swap`). Any failure
    before the renames (`release.template-seed`, `-publish`, `-fork`) fails the job and leaves the previous templates,
-   `worldd` and pin. Done once per release (`moved/placement`).
+   `worldd` and pin. Done once per release (`moved/placement`). `rollback-v2.yml` moves worlds only: the library, the
+   pin and the templates stay on the release, the previous ones beside them for a hand put-back.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already

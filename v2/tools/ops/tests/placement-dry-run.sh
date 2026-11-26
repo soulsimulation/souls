@@ -66,7 +66,9 @@ cp "$t/worldd" "$data/worlds/builds/$h/worldd"
 cp "$t/templates" "$data/releases/$sha/bin/templates"
 bash "$repo/v2/tools/ops/install.sh" ops "$data/releases/$sha/ops"
 printf '{"commit":"%s","version":"0.0.0","artifacts":[\n{"name":"worldd","hash":"%s","bytes":1}\n]}\n' "$sha" "$h" > "$data/releases/$sha/manifest.json"
-export RELEASE_DATA=$data WORLDS_ROOT=$data/worlds RELEASE_ETC=$etc RELEASE_LIB=$lib RELEASE_SERVICES=
+# No unit of this machine is ever asked or stopped: a systemctl that finds nothing running.
+mkdir -p "$D/shim" && printf '#!/bin/sh\nexit 3\n' > "$D/shim/systemctl" && chmod 755 "$D/shim/systemctl"
+export PATH=$D/shim:$PATH RELEASE_DATA=$data WORLDS_ROOT=$data/worlds RELEASE_ETC=$etc RELEASE_LIB=$lib RELEASE_SERVICES=
 
 echo "== placement check"
 bash "$release" placement "$sha" check | tee "$D/check.txt" || true

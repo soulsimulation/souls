@@ -467,8 +467,13 @@ echo "$$" > "$o/$n/lineage"; echo "$(cat "$s/boot") lineage $$" > "$o/$n/templat
     library: lib, placement: join(etc, 'placement-data'), portFirst: 7500, portLast: 7999 };
   writeFileSync(join(etc, 'placement.json'), `${JSON.stringify(config)}\n`);
   chmodSync(join(etc, 'placement.json'), 0o640);
-  // systemctl logs; curl answers the directory 401, or 500 while BAD_DIRECTORY is set.
-  exe(join(shim, 'systemctl'), `echo "$*" >> ${log}`);
+  // systemctl: the path unit and the directory run, souls-place.service is placing a world only while BUSY is set; it
+  // logs every other call. curl answers the directory 401, or 500 while BAD_DIRECTORY is set.
+  exe(join(shim, 'systemctl'), `case "$*" in
+  "is-active --quiet souls-place.service") [ -n "$BUSY" ] ;;
+  "is-active --quiet "*) exit 0 ;;
+  *) echo "$*" >> ${log} ;;
+esac`);
   exe(join(shim, 'curl'), 'if [ -n "$BAD_DIRECTORY" ]; then echo 500; else echo 401; fi');
   // Everything under the library and the settings, by path and bytes.
   const tree = (root) => {
@@ -499,18 +504,36 @@ echo "$$" > "$o/$n/lineage"; echo "$(cat "$s/boot") lineage $$" > "$o/$n/templat
   unchanged('a failed fork');
   assert.deepEqual(restarts(), []);
 
+  // A world still being placed: it is waited for, then nothing is renamed and the path unit runs again.
+  const busy = run(['placement', sha, 'run'], { ...env, BUSY: '1', RELEASE_PLACE_WAIT_S: '1' });
+  assert.equal(busy.status, 3, busy.stdout + busy.stderr);
+  assert.match(busy.stdout, /refused: release\.placement-busy: souls-place\.service was still placing a world after 1 s; nothing renamed/);
+  unchanged('a placement in flight');
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'start souls-place.path']);
+  rmSync(log);
+
   // A directory that does not answer on the new catalogue: all of it goes back, and it is restarted on the previous one.
   const unhealthy = run(['placement', sha, 'run'], { ...env, BAD_DIRECTORY: '1' });
   assert.equal(unhealthy.status, 3, unhealthy.stdout + unhealthy.stderr);
   assert.match(unhealthy.stdout, /refused: release\.placement-directory-unhealthy: souls-directory\.service answered 500, not 401/);
   unchanged('an unhealthy directory');
-  assert.deepEqual(restarts(), ['restart souls-directory.service', 'restart souls-directory.service']);
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'stop souls-directory.service', 'start souls-directory.service',
+    'start souls-place.path', 'restart souls-directory.service']);
   rmSync(log);
+
+  // A stray folder the directory would list as a template stops even a check, by name.
+  mkdirSync(join(tpl, '.mars-camp.new'));
+  writeFileSync(join(tpl, '.mars-camp.new/template'), 'pins old\n');
+  const stray = run(['placement', sha, 'check'], env);
+  assert.equal(stray.status, 3, stray.stdout + stray.stderr);
+  assert.match(stray.stdout, /refused: release\.placement-stray: .*\/\.mars-camp\.new is listed by the directory/);
+  rmSync(join(tpl, '.mars-camp.new'), { recursive: true });
 
   const ran = run(['placement', sha, 'run'], env);
   assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-  assert.match(ran.stdout, /souls-directory\.service answers 401\nplacement: new worlds are made on 1220/);
-  assert.deepEqual(restarts(), ['restart souls-directory.service'], 'the directory once, to read the new catalogue');
+  assert.match(ran.stdout, /souls-directory\.service reads the new catalogue and answers 401\nplacement: new worlds are made on 1220/);
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'stop souls-directory.service', 'start souls-directory.service',
+    'start souls-place.path'], 'nothing creates during the renames; the directory starts on the new catalogue');
   assert.equal(pinOf(join(lib, 'worldd')), built, 'the library\'s worldd is the release\'s');
   assert.equal(readFileSync(join(lib, '.worldd.prev'), 'utf8'), '#!/bin/sh\n# the previous worldd\n');
   assert.equal(readFileSync(join(lib, 'ops/place-created-world.mjs'), 'utf8'), readFileSync(join(here, '../place-created-world.mjs'), 'utf8'));
@@ -535,5 +558,5 @@ echo "$$" > "$o/$n/lineage"; echo "$(cat "$s/boot") lineage $$" > "$o/$n/templat
   const again = run(['placement', sha, 'run'], env);
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.match(again.stdout, /already done by this release/);
-  assert.deepEqual(restarts(), ['restart souls-directory.service']);
+  assert.equal(restarts().length, 4);
 });

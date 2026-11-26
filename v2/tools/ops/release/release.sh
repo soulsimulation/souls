@@ -58,11 +58,13 @@
 #   placement <sha> check|run      New world on this release's build ($ETC/placement.json; with none, nothing to do):
 #                                  each template of the catalogue (a folder with a `template` file) seeded, published
 #                                  by the release's publish-template and dry-run forked by its worldd, in a folder
-#                                  beside the catalogue; check stops there and changes nothing. run then renames into
-#                                  place the library's worldd and ops/ (the previous: .worldd.prev, .ops.prev), the pin
-#                                  (.placement.json.prev) and each template (templates/.aside/<name>), and restarts the
-#                                  directory when the catalogue it reads changed; if it is then unhealthy, all of it
-#                                  goes back. A failure before the renames changes nothing: the previous templates stay
+#                                  beside the catalogue; check stops there and changes nothing. run then, with
+#                                  souls-place.path stopped (a placement in flight waited for) and the directory down
+#                                  when the catalogue it reads changes, renames into place the library's worldd and
+#                                  ops/ (the previous: .worldd.prev, .ops.prev), the pin (.placement.json.prev) and each
+#                                  template (templates/.aside/<name>), and starts them again; if a rename fails or the
+#                                  directory is then unhealthy, all of it goes back. A failure before the renames
+#                                  changes nothing: the previous templates stay
 #   news <sha> <version> <link> <date>   one release entry in $DATA/news.jsonl, keyed by its link; refuses
 #                                  `release.not-live` unless this release moved every world
 # A refusal prints `refused: <name>: <why>` and exits 3; it changes nothing it has not already done.
@@ -739,30 +741,55 @@ conf() { node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileS
 PIN='const fs = require("fs"), [file, build, out] = process.argv.slice(1), c = JSON.parse(fs.readFileSync(file, "utf8"));
 const st = fs.statSync(file); c.build = build; fs.writeFileSync(out, JSON.stringify(c) + "\n"); fs.chmodSync(out, st.mode & 0o777);
 if (process.getuid() === 0) fs.chownSync(out, st.uid, st.gid);'
-# The catalogue as the directory reads it at its start: each folder with a `template` file, by name and that file's hash.
-catalogue() {
-  local t
+# The catalogue as the directory reads it at its start: each folder with a `template` file, dot-names too, by name and
+# that file's hash.
+catalogue() (
+  shopt -s dotglob nullglob
   for t in "$1"/*/; do
     if [ -f "$t/template" ]; then echo "$(basename "$t") $(hash "$t/template")"; fi
   done
-}
-# swap <new> <live> <prev>: <new> renamed to <live>, the previous <live> kept as <prev> (replacing an older one).
+)
+# swap <new> <live> <prev>: the previous <live> kept as <prev> (replacing an older one), then <new> renamed to <live>,
+# over a file in one rename, so it is never missing. Returns 1 at the first failure, with what it did recorded.
 swap() {
-  rm -rf "$3"
-  if [ -e "$2" ]; then mv "$2" "$3"; fi
-  mv "$1" "$2"
+  rm -rf "$3" || return 1
+  if [ -d "$2" ]; then
+    mv "$2" "$3" || return 1
+  elif [ -e "$2" ]; then
+    cp -p "$2" "$3" || return 1
+  fi
   SWAPPED+=("$2" "$3")
+  mv -f "$1" "$2"
 }
-# Every swap undone, last first: each <prev> back as its <live>.
+# Every swap undone, last first: each <prev> back as its <live>, or a <live> that had none removed.
 unswap() {
-  local i
+  local i live prev
   for ((i = ${#SWAPPED[@]} - 2; i >= 0; i -= 2)); do
-    if [ -e "${SWAPPED[i + 1]}" ]; then
-      rm -rf "${SWAPPED[i]}"
-      mv "${SWAPPED[i + 1]}" "${SWAPPED[i]}"
+    live=${SWAPPED[i]} prev=${SWAPPED[i + 1]}
+    if [ -d "$prev" ]; then
+      rm -rf "$live" && mv "$prev" "$live" || true
+    elif [ -e "$prev" ]; then
+      mv -f "$prev" "$live" || true
+    else
+      rm -rf "$live"
     fi
   done
+  SWAPPED=()
 }
+# quiet <unit>: stopped when it runs, and started again by resume. resume: every unit quiet stopped, last first.
+STOPPED=()
+quiet() { systemctl is-active --quiet "$1" 2> /dev/null && systemctl stop "$1" && STOPPED+=("$1"); }
+resume() {
+  local i
+  for ((i = ${#STOPPED[@]} - 1; i >= 0; i--)); do systemctl start "${STOPPED[i]}" || true; done
+  STOPPED=()
+}
+# put <new> <live> <prev>: swap, or every rename back, every stopped unit started and the release stopped.
+put() { swap "$@" || {
+  unswap
+  resume
+  refuse "release.placement-swap: $2 not renamed into place; every rename is back"
+}; }
 
 # republish <name> <template> <work> <worldd> <publish-template>: the template seeded again from what it carries (its
 # facts, entries, moves, entry point and body catalogue), published as <work>/out/<name> and dry-run forked, all by
@@ -794,7 +821,7 @@ republish() {
 }
 
 placement() {
-  local sha=${1:-} act=${2:-} cfg=$ETC/placement.json rel lib tpl pin h w next was now names t s plan=()
+  local sha=${1:-} act=${2:-} cfg=$ETC/placement.json rel lib tpl pin h w next was now names t s dir= plan=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "placement <sha> check|run"
   rel=$DATA/releases/$sha
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
@@ -818,8 +845,11 @@ placement() {
   rm -rf "$next"
   mkdir -p "$next"
   was=$(catalogue "$tpl")
-  names=$(awk '{print $1}' <<< "$was" | tr '\n' ' ')
+  names=$(awk '{print $1}' <<< "$was" | paste -sd ' ' -)
   echo "placement: ${sha:0:12}: worldd ${h:0:16}…, templates: ${names:-none}"
+  for t in $names; do
+    [[ $t != .* ]] || refuse "release.placement-stray: $tpl/$t is listed by the directory as a template no release can name: move it out"
+  done
   for t in $names; do republish "$t" "$tpl/$t" "$next/$t" "$w" "$rel/bin/templates"; done
   cmp -s "$w" "$lib/worldd" || plan+=("the library's worldd")
   diff -rq "$rel/ops" "$lib/ops" > /dev/null 2>&1 || plan+=("its ops/")
@@ -829,7 +859,7 @@ placement() {
     echo "placement: run would rename into place: ${plan[*]:-nothing}; check only, nothing changed"
     return 0
   fi
-  # Everything made and checked first; then the renames, back to back.
+  # Everything made and checked first.
   if ! cmp -s "$w" "$lib/worldd"; then install -m 755 "$w" "$lib/.worldd.new"; fi
   if ! diff -rq "$rel/ops" "$lib/ops" > /dev/null 2>&1; then
     rm -rf "$lib/.ops.new"
@@ -838,27 +868,39 @@ placement() {
   fi
   if [ "$pin" != "$h" ]; then node -e "$PIN" "$cfg" "$h" "$ETC/.placement.json.new"; fi
   for t in $names; do chmod -R u=rwX,go=rX "$next/$t/out/$t"; done
+  now=$(for t in $names; do echo "$t $(hash "$next/$t/out/$t/template")"; done)
+  # Then the renames, back to back, with nothing creating: no placement starts, one already placing finishes (a template
+  # renamed under its fork would leave that world half made), and the directory, which takes a create under the lineage
+  # it read at its start, is down until it reads the new catalogue (a create under the old lineage is refused for good).
+  quiet souls-place.path || true
+  s=$((SECONDS + ${RELEASE_PLACE_WAIT_S:-300}))
+  while systemctl is-active --quiet souls-place.service 2> /dev/null; do
+    if [ "$SECONDS" -ge "$s" ]; then
+      resume
+      refuse "release.placement-busy: souls-place.service was still placing a world after ${RELEASE_PLACE_WAIT_S:-300} s; nothing renamed"
+    fi
+    sleep 1
+  done
+  if [ "$now" != "$was" ] && grep -qw directory <<< " $SERVICES " && quiet souls-directory.service; then dir=1; fi
+  [ ${#STOPPED[@]} = 0 ] || echo "placement: ${STOPPED[*]} stopped for the renames"
   mkdir -p "$tpl/.aside"
-  if [ -f "$lib/.worldd.new" ]; then swap "$lib/.worldd.new" "$lib/worldd" "$lib/.worldd.prev"; fi
-  if [ -d "$lib/.ops.new" ]; then swap "$lib/.ops.new" "$lib/ops" "$lib/.ops.prev"; fi
-  if [ -f "$ETC/.placement.json.new" ]; then swap "$ETC/.placement.json.new" "$cfg" "$ETC/.placement.json.prev"; fi
-  for t in $names; do swap "$next/$t/out/$t" "$tpl/$t" "$tpl/.aside/$t"; done
+  if [ -f "$lib/.worldd.new" ]; then put "$lib/.worldd.new" "$lib/worldd" "$lib/.worldd.prev"; fi
+  if [ -d "$lib/.ops.new" ]; then put "$lib/.ops.new" "$lib/ops" "$lib/.ops.prev"; fi
+  if [ -f "$ETC/.placement.json.new" ]; then put "$ETC/.placement.json.new" "$cfg" "$ETC/.placement.json.prev"; fi
+  for t in $names; do put "$next/$t/out/$t" "$tpl/$t" "$tpl/.aside/$t"; done
+  resume
   echo "placement: renamed into place: ${plan[*]:-nothing}"
-  now=$(catalogue "$tpl")
   if [ "$now" = "$was" ]; then
     echo "placement: the catalogue the directory reads is unchanged: not restarted"
-  elif ! grep -qw directory <<< " $SERVICES "; then
-    echo "placement: no directory runs here (RELEASE_SERVICES): not restarted"
-  else
-    echo "placement: souls-directory.service restarts to read the catalogue"
+  elif [ -z "$dir" ]; then
+    echo "placement: no directory runs here: none to restart"
+  elif ! s=$(answers 401 -X POST "$(directory_url)/v1/account/session"); then
+    echo "placement: souls-directory.service answered $s, not 401: the previous worldd, ops/, pin and templates go back"
+    unswap
     systemctl restart souls-directory.service || true
-    if ! s=$(answers 401 -X POST "$(directory_url)/v1/account/session"); then
-      echo "placement: souls-directory.service answered $s, not 401: the previous worldd, ops/, pin and templates go back"
-      unswap
-      systemctl restart souls-directory.service || true
-      refuse "release.placement-directory-unhealthy: souls-directory.service answered $s, not 401, on the republished catalogue; the previous one is back"
-    fi
-    echo "placement: souls-directory.service answers 401"
+    refuse "release.placement-directory-unhealthy: souls-directory.service answered $s, not 401, on the republished catalogue; the previous one is back"
+  else
+    echo "placement: souls-directory.service reads the new catalogue and answers 401"
   fi
   touch "$rel/moved/placement"
   echo "placement: new worlds are made on ${h:0:16}…"
