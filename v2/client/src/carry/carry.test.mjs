@@ -229,6 +229,13 @@ test('a carry\'s offer reaches the asked Soul as a carry; the crews are listed w
   const pin = activityPin('mars:carry', kinds['mars:carry']);
   const ev = { name: 'souls:offer', fields: { 1: id(8), 2: pin, 3: [id(7)], 4: 60_000_000, 5: id(6) } };
   assert.deepEqual(offerNote(ev, id(7)), { kind: 'carry', what: 'offered', offer: id(8), from: id(6) });
+  // With its entry's world time, the offer says how long it has left; a crew offered to several, how accepts renew it.
+  const crew = { ...ev, fields: { ...ev.fields, 3: [id(7), id(9)], 4: 70_000_000, 7: 60_000_000, 8: 310_000_000 } };
+  assert.deepEqual(offerNote(crew, id(7), 10_000_000), {
+    kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 60, each_accept_s: 60, open_most_s: 300,
+    note: 'open 60 s; each accept keeps it open 60 s more for the rest, 300 s at most: answer before it lapses',
+  });
+  assert.deepEqual(offerNote(ev, id(7), 15_000_000), { kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 45, note: 'open 45 s: answer before it lapses' });
   const held = new Map([...rows, [id(10), { id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam', parent: id(8) }]]);
   assert.deepEqual(crewsIn(held), [{ id: id(8), on: id(1), holds: [{ id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam' }] }]);
 });
@@ -272,6 +279,9 @@ test('an open crew offer is accepted by its offerer\'s name, or the newest with 
     { kind: 'carry', what: 'offered', offer: id(31), from: cy }];
   const offers = openCrewOffers(logged, crews, mine);
   assert.deepEqual(offers, [{ crew: id(30), from: ada }, { crew: id(31), from: cy }], 'gone (33) and joined (32) offers are not open');
+  // A crew that formed stays in the copy after its offer lapsed: the lapse told to this Soul closes it.
+  const lapsed = [...logged, { kind: 'conversation', what: 'lapsed', conversation: id(30), from: ada }];
+  assert.deepEqual(openCrewOffers(lapsed, crews, mine), [{ crew: id(31), from: cy }], 'a lapsed offer is not open');
   const nameOf = (b) => ({ [ada]: 'Ada', [cy]: 'Cy' })[b];
   assert.deepEqual(crewOffered('ada', offers, nameOf), { crew: id(30) });
   assert.deepEqual(crewOffered(undefined, offers, nameOf), { crew: id(31) }, 'the newest');
