@@ -1874,7 +1874,7 @@ fn a_seated_body_takes_a_thing_within_reach_from_its_seat() {
     assert_eq!(
         b.slots.as_ref().and_then(|s| s.held_by(body)),
         Some(chair),
-        "taken from its seat, still seated"
+        "taken without rising, still in the chair"
     );
 }
 
