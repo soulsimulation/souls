@@ -144,10 +144,16 @@ type Watchers = BTreeMap<u64, (Vec<Vec<u8>>, mpsc::Sender<String>)>;
 /// after a random wait, resumes by cursor and sends again every intent it has no answer for.
 pub const RESTART: u16 = 1012;
 
-/// The gateway's own refusal of an intent from one of a creator's sockets whose sequence another of its sockets sent
-/// and has no answer for yet (#5006): the world keeps one numbering per creator and would take the second as a repeat
-/// of the first, answering it with the first's answer. Its client numbers above it and sends again.
+/// The gateway's own refusal of an intent from one of a creator's sockets under a sequence another of its sockets,
+/// still signed in, sent and has no answer for yet, or had answered among the last [`ENDED`] (#5006): the world keeps
+/// one numbering per creator and would take the second as a repeat of the first, answering it with the first's answer
+/// (a repeat of one of its last answered is answered from its kept answers, `sim::commit::acts::KEPT`). Its client
+/// numbers above it and sends again.
 pub const SEQUENCE_IN_USE: &str = "intent.seq-in-use";
+
+/// How many of a shared grant's answered intents the gateway remembers the sender of: as many as the world keeps
+/// answers per actor to answer a repeat with (`sim::commit::acts::KEPT`).
+pub const ENDED: usize = 16;
 
 #[derive(Default)]
 struct Hub {
@@ -169,9 +175,20 @@ struct Held {
     /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
     /// begun after the pickup are told to the owner, so an older act never reads as the answer.
     doing: BTreeMap<u64, String>,
-    /// A shared grant's intents not yet answered, by sequence: the session that sent each, so their answers go to
-    /// that socket alone (#5006). Empty for a Soul's grant.
-    senders: BTreeMap<u64, u64>,
+    /// A shared grant's intents not yet answered, by sequence: who sent each, so their answers go to that socket
+    /// (#5006). Empty for a Soul's grant.
+    senders: BTreeMap<u64, Out>,
+    /// A shared grant's last [`ENDED`] answered intents, `(sequence, session)`, oldest first ([`SEQUENCE_IN_USE`]).
+    ended: std::collections::VecDeque<(u64, u64)>,
+}
+
+/// An intent out on a shared grant: the session that sent it, and the newest session signed in then. A socket signed
+/// in since may be its sender's client back on a new socket (its old one may linger half-open, unnoticed), and the
+/// client daemon never sends an intent twice, so its answers go there too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Out {
+    session: u64,
+    newest: u64,
 }
 
 /// One signed-in socket: its queue of the stream's frames, its queue for the owner's messages, and the ids of the
@@ -197,20 +214,30 @@ pub fn shared(grant: Grant) -> bool {
 }
 
 impl Held {
-    /// The sessions a frame answering `a` goes to: on a shared grant, the socket that sent the intent while it is
-    /// still signed in; otherwise (a Soul's grant, an answer the world handed over from before a restart, a bulk
-    /// edit's, or one whose socket has gone and whose client may be back on another) every socket of the grant. The
-    /// sender is forgotten when the answer ends the intent.
+    /// The sessions a frame answering `a` goes to. On a shared grant, for an intent a socket of it sent: that socket,
+    /// and any signed in since it was sent ([`Out`]); never the others, which signed in before and are other clients.
+    /// Otherwise (a Soul's grant, an answer the world handed over from before a restart, a bulk edit's): every socket
+    /// of the grant. The sender is moved to [`Held::ended`] when the answer ends the intent.
     fn route(&mut self, a: Answering) -> Vec<u64> {
-        let sender = if a.ends {
+        let out = if a.ends {
             self.senders.remove(&a.sequence)
         } else {
             self.senders.get(&a.sequence).copied()
         };
-        match sender.filter(|s| self.sessions.contains_key(s)) {
-            Some(s) => vec![s],
-            None => self.sessions.keys().copied().collect(),
+        let Some(out) = out else {
+            return self.sessions.keys().copied().collect();
+        };
+        if a.ends {
+            if self.ended.len() == ENDED {
+                self.ended.pop_front();
+            }
+            self.ended.push_back((a.sequence, out.session));
         }
+        self.sessions
+            .keys()
+            .copied()
+            .filter(|s| *s == out.session || *s > out.newest)
+            .collect()
     }
 }
 
@@ -330,23 +357,36 @@ impl Gateway {
         }
     }
 
-    /// The socket signed in as `session` sends intent `sequence` for `grant`. On a shared grant its answers go to
-    /// that socket alone from now ([`Held::route`]); `false`, and nothing noted, when another socket of the grant
-    /// still signed in sent the same sequence and has no answer for it yet ([`SEQUENCE_IN_USE`]).
+    /// The socket signed in as `session` sends intent `sequence` for `grant`, now. On a shared grant its answers go
+    /// to that socket from now ([`Held::route`]); `false`, and nothing noted, when another socket of the grant, still
+    /// signed in, sent the same sequence and it is out or among the last answered ([`SEQUENCE_IN_USE`]).
     pub fn sending(&self, grant: Grant, sequence: u64, session: u64) -> bool {
         if !shared(grant) {
             return true;
         }
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let newest = hub.next_session;
         let held = hub.grants.entry(grant.key()).or_default();
-        if let Some(s) = held.senders.get(&sequence)
-            && *s != session
-            && held.sessions.contains_key(s)
+        let other = |s: u64| s != session && held.sessions.contains_key(&s);
+        if held
+            .senders
+            .get(&sequence)
+            .is_some_and(|o| other(o.session))
+            || held.ended.iter().any(|(q, s)| *q == sequence && other(*s))
         {
             return false;
         }
-        held.senders.insert(sequence, session);
+        held.senders.insert(sequence, Out { session, newest });
         true
+    }
+
+    /// An intent [`Gateway::sending`] noted was answered on its socket alone, by the gateway, before it reached the
+    /// world or its stream (an own answer, not kept): its sender is forgotten.
+    pub fn unsent(&self, grant: Grant, sequence: u64) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(held) = hub.grants.get_mut(&grant.key()) {
+            held.senders.remove(&sequence);
+        }
     }
 
     /// The mailbox's open messages, `(grant key, id, text frame)`: each given once to each of its grant's signed-in
@@ -586,7 +626,7 @@ mod tests {
             let hub = self.hub.lock().unwrap();
             hub.grants
                 .get(&g.key())
-                .map(|h| h.senders.iter().map(|(q, s)| (*q, *s)).collect())
+                .map(|h| h.senders.iter().map(|(q, o)| (*q, o.session)).collect())
                 .unwrap_or_default()
         }
     }
@@ -691,10 +731,10 @@ mod tests {
             got(&mut agent),
             [b"agent-21".to_vec(), b"agent-22".to_vec()]
         );
-        // The page's answer, its socket gone: kept for a resume and given to the sockets still there, as a socket
-        // that comes back may be the page's.
+        // The page's answer, its socket gone: kept for its resume, and not given to the agent, which signed in
+        // before the page sent it.
         gw.deliver(creator.key(), ends(20), at(3), b"page-20".to_vec());
-        assert_eq!(got(&mut agent), [b"page-20".to_vec()]);
+        assert!(got(&mut agent).is_empty());
         let cursor = Value::Array(vec![
             Value::Bytes(vec![7; 16]),
             Value::Array(Vec::new()),
@@ -732,15 +772,53 @@ mod tests {
         );
         assert_eq!(gw.senders(creator), [(30, page.session)]);
         gw.deliver(creator.key(), ends(30), at(1), b"page-30".to_vec());
-        // Answered: the world's own sequence table answers a repeat from here (`intent.stale-seq`).
+        // Answered lately: the world would answer a repeat with the page's kept answer.
+        assert!(
+            !gw.sending(creator, 30, agent.session),
+            "the page's, lately answered"
+        );
+        // Every older answered one is the world's `intent.stale-seq`, by name, on the agent's socket.
+        for q in 100..100 + ENDED as u64 {
+            assert!(gw.sending(creator, q, page.session));
+            gw.deliver(creator.key(), ends(q), at(2), Vec::new());
+        }
         assert!(gw.sending(creator, 30, agent.session));
-        // Out from a socket that has gone: the one sending it now takes it (a client back on a new socket).
+        // Sent from a socket that has gone: the one sending it now takes it (a client back on a new socket).
         assert!(gw.sending(creator, 31, page.session));
         gw.detach(creator, page.session);
         assert!(gw.sending(creator, 31, agent.session));
         assert_eq!(
             gw.senders(creator),
             [(30, agent.session), (31, agent.session)]
+        );
+    }
+
+    #[test]
+    fn a_client_back_on_a_new_socket_gets_its_answer_while_its_old_one_lingers() {
+        let gw = gateway();
+        let creator = grant("creator");
+        let mut page = sign_in(&gw, creator);
+        let mut old = sign_in(&gw, creator);
+        assert!(gw.sending(creator, 40, old.session));
+        // The agent's network died unnoticed by the gateway: its client signs in again; the old socket lingers.
+        let mut back = sign_in(&gw, creator);
+        let progress = Answering {
+            sequence: 40,
+            ends: false,
+        };
+        gw.deliver(
+            creator.key(),
+            progress,
+            at(1),
+            b"agent-40-accepted".to_vec(),
+        );
+        gw.deliver(creator.key(), ends(40), at(2), b"agent-40".to_vec());
+        let both = [b"agent-40-accepted".to_vec(), b"agent-40".to_vec()];
+        assert_eq!(got(&mut back), both, "the client on its new socket");
+        assert_eq!(got(&mut old), both);
+        assert!(
+            got(&mut page).is_empty(),
+            "the page signed in before it was sent"
         );
     }
 

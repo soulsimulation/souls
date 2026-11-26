@@ -344,7 +344,7 @@ async fn edit_on(from: &mut Ws, other: &mut Ws, names: (&str, &str), bytes: Vec<
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_creators_page_and_agent_edit_in_turn_and_each_gets_every_answer() {
+async fn a_creators_page_and_agent_edit_in_turn_each_answered_on_its_own_socket() {
     // #5006: the creator's page (signed in with a token from the session exchange) and the creator's agent (its own
     // paired token) hold the creator's grant at once, on one real world.
     let built = toggles::World::build(1, 0, 0);

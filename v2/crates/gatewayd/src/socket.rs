@@ -661,17 +661,6 @@ fn take_intent(
             return Some(own_answer(Answer::Unread { reason }));
         }
     };
-    // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket alone; a
-    // sequence another of them sent and has no answer for yet is refused here, on this socket, never sent.
-    if !gw.sending(grant, intent.sequence, session) {
-        let now = gw.link.now();
-        return Some(refused(
-            intent.actor,
-            intent.sequence,
-            crate::SEQUENCE_IN_USE,
-            now,
-        ));
-    }
     if intent.actor != actor {
         return refuse(
             gw,
@@ -687,6 +676,16 @@ fn take_intent(
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
+    // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
+    // another of them sent, out or lately answered, is refused here, on this socket, and never sent.
+    if !gw.sending(grant, sequence, session) {
+        return Some(refused(
+            actor,
+            sequence,
+            crate::SEQUENCE_IN_USE,
+            gw.link.now(),
+        ));
+    }
     match gw
         .link
         .submit(grant.key(), actor, intent.sequence, bytes, received, left)
@@ -696,7 +695,13 @@ fn take_intent(
             gw.sent_intent(&grant.key(), sequence, verb.as_str());
             None
         }
-        Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
+        Sent::Restarting => {
+            let own = refuse(gw, grant, actor, sequence, RESTARTING);
+            if own.is_some() {
+                gw.unsent(grant, sequence);
+            }
+            own
+        }
     }
 }
 
