@@ -898,7 +898,7 @@ fn arrival_named(edit: &Edit) -> Option<(usize, Id)> {
             }
             _ => None,
         })
-        .last()?;
+        .next_back()?;
     Some((i, place?))
 }
 
