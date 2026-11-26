@@ -1575,7 +1575,8 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, with the
-/// answers of the tick in which a form's run or a gateway walk's route gets its deadline (W11, #4087).
+/// answers of the tick in which a form's run, a gateway walk's route or a gateway sit's, lie's or rise's move gets its
+/// deadline (W11, #4087).
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
