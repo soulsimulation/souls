@@ -134,7 +134,7 @@ fn diagnose() {
     let ids: Vec<Id> = im.nodes.values().copied().collect();
     let mut n_unreached = 0;
     for id in ids {
-        let Some((floor, at, _)) = town.view().on_floor(id, Vec3::ZERO) else {
+        let Some((floor, _, _)) = town.view().on_floor(id, Vec3::ZERO) else {
             continue;
         };
         if floor == ground || floor == id {
@@ -187,6 +187,8 @@ fn diagnose() {
         let mut why: BTreeMap<String, usize> = BTreeMap::new();
         let mut x = lo.x - reach;
         while x <= hi.x + reach {
+            x += step;
+            let x = x - step;
             let mut z = lo.z - reach;
             while z <= hi.z + reach {
                 let p = Vec3::new(x, middle.y, z);
