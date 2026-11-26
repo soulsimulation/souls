@@ -1293,6 +1293,28 @@ impl Carry {
         .map(Some)
     }
 
+    /// Sets the board down at once where the carry last had it (its last sample, or `here`, the frame's pose, when it
+    /// has none), at rest on `node`, under the transfer id `transfer`: one change of parent, no track. For a part a lone
+    /// holder lays down beside its bay, or a retiring last holder's (0.135 A2), which no crew carries; a carry that
+    /// breaks off goes down on a track ([`Carry::release`]).
+    pub fn set_down_here(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        here: Option<(Vec3, Quat)>,
+        transfer: Id,
+    ) -> R<()> {
+        let Some((c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
+            return refuse("carry-set-down-nowhere", "no sample of the carry");
+        };
+        let c = Vec3::new(c.x, c.y - HEIGHT, c.z);
+        let c = Vec3::new(c.x, c.y + self.rests_on(tree, node, c, q)?, c.z);
+        let (position, orientation) = self.load.resting(c, q)?;
+        let entries = self.put_entries(tree, node, position, orientation, transfer)?;
+        self.write(tree, at, entries)
+    }
+
     /// Starts a set-down's track (#5067) at `at` from the node's pose `from` (the open ground's frame), `height` above
     /// its carriers' floor: the node keeps its turn and goes straight down until the held load is where it rests on
     /// `node`, its middle over `rest`'s point on the floor turned `rest`'s turn (in `node`'s frame, [`Carry::rests_on`],
