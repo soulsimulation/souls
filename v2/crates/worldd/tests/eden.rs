@@ -5317,6 +5317,61 @@ fn books_made(dir: &Path) -> Vec<(Id, Id, BTreeMap<u64, Value>)> {
     out
 }
 
+/// The public words (key 27) a whole sync of the world in `dir` gets beside its records, by reference: asked on the
+/// world's own socket as the gateway asks (R5b's frames: the place's hash, then every record it reaches, 64 to a
+/// request), with no actor.
+fn served_words(dir: &Path) -> BTreeMap<Id, Vec<u8>> {
+    use replica::sync::{self, Copy, wire};
+    let mut s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let mut words = BTreeMap::new();
+    let mut ask = |m: BTreeMap<u64, Value>| -> BTreeMap<u64, Value> {
+        let bytes = encode(&Value::Map(m)).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).unwrap();
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).unwrap();
+        let Value::Map(a) = decode(&frame).unwrap().value else {
+            panic!("a sync answer")
+        };
+        if let Some(Value::Array(pairs)) = a.get(&worldd::views::names::PUBLIC_WORDS) {
+            for p in pairs {
+                if let Value::Array(p) = p
+                    && let [r, Value::Bytes(w)] = p.as_slice()
+                {
+                    words.insert(replica::effects::read_id(r).unwrap(), w.clone());
+                }
+            }
+        }
+        a
+    };
+    let mut copy = Copy::default();
+    let a = ask(BTreeMap::from([
+        (wire::ASK, Value::Uint(1)),
+        (wire::IDS, Value::Array(vec![])),
+    ]));
+    let (ids, hashes) = sync::read_hashes(&a).expect("hashes");
+    let mut d = copy.compare(&ids, hashes);
+    for n in 2.. {
+        let asked = copy.ask(&mut d, wire::RECORDS_MOST);
+        if asked.is_empty() {
+            break;
+        }
+        let hs = asked.iter().cloned().map(Value::Bytes).collect();
+        let a = ask(BTreeMap::from([
+            (wire::ASK, Value::Uint(n)),
+            (wire::RECORDS, Value::Array(hs)),
+        ]));
+        copy.take(&mut d, &asked, sync::read_records(&a).expect("records"))
+            .expect("the records match their hashes");
+    }
+    copy.finish(d).expect("the sync finishes");
+    words
+}
+
 /// #4837: books carry their titles and first pages as world facts, on Eden as it is served, seeded with its stock
 /// (`seed --stock content/worlds/eden/stock.json`). Souls born by the library's door each walk to a different shelf
 /// (bookcases and bookshelves) and take a book. Each book made holds, as its title and first page (eden:book's fields
@@ -5435,8 +5490,24 @@ fn books_carry_their_titles_and_first_pages_from_their_shelves() {
         .collect();
     let answers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
     let made = books_made(&dir);
+    // The world's words as a client's sync gets them (the gateway's path): beside each record that holds a reference.
+    std::thread::sleep(worldd::SEAL_EVERY * 2);
+    let words = served_words(&dir);
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
+    let served_as = |fields: &BTreeMap<u64, Value>, n: u64, want: &str| {
+        let r = replica::audience::reference(fields.get(&n).expect("the field")).unwrap();
+        assert_eq!(
+            words
+                .get(&r)
+                .map(|w| String::from_utf8_lossy(w).into_owned()),
+            Some(want.to_owned()),
+            "field {n}'s words, served beside its record"
+        );
+    };
+    let (_, title, page) = row_of(start).unwrap();
+    served_as(start, 29, &title);
+    served_as(start, 30, &page);
     let mut titles = std::collections::BTreeSet::new();
     for (def, id, shelf, body, walked, took) in answers {
         println!("TAKE {def} {id}: walk {walked:?}; take {took:?}");
@@ -5461,6 +5532,8 @@ fn books_carry_their_titles_and_first_pages_from_their_shelves() {
         assert_eq!(fields.get(&30), expected.get(&30), "{id}: its first page");
         let (row, title, page) = row_of(fields).expect("a title and a first page");
         println!("BOOK {def} {id}: row {row} \"{title}\": {page}");
+        served_as(fields, 29, &title);
+        served_as(fields, 30, &page);
         titles.insert(title);
     }
     assert!(
