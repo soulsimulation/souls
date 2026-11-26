@@ -551,6 +551,31 @@ fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
 }
 
 #[test]
+fn the_owners_keep_clears_the_agents_retire_ask_and_nothing_else() {
+    let (p, tokens) = store();
+    let (token, grant) = pair_in(&p, "acct_owner", "mars");
+    let hash = to_hex(&sha256(token.as_bytes()));
+    p.ask_retire(&token).expect("asked");
+    assert_eq!(p.keep("acct_other", &grant), Err("not-yours"));
+    assert!(
+        p.mine("acct_owner").expect("souls")[0].retire_asked,
+        "only its owner keeps it"
+    );
+    p.keep("acct_owner", &grant).expect("kept");
+    let m = &p.mine("acct_owner").expect("souls")[0];
+    assert!(
+        !m.retire_asked && m.device.is_some(),
+        "the ask is cleared; still paired"
+    );
+    assert!(
+        std::fs::read_to_string(&tokens).unwrap().contains(&hash),
+        "the token still works"
+    );
+    p.retire("acct_owner", &grant, T0).expect("retired");
+    assert_eq!(p.keep("acct_owner", &grant), Err("soul-retired"));
+}
+
+#[test]
 fn r18_a_former_soul_pairs_only_as_the_soul_x11_brought_over_for_its_owner() {
     let (p, _) = store();
     let brought = format!("soul-{}-0", "ab".repeat(16));
