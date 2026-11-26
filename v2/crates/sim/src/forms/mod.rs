@@ -323,6 +323,9 @@ pub struct Ended {
     pub body: Id,
     pub at: Micros,
     pub how: Name,
+    /// The words of the refusal it ended by, when the world refused its step's move (`look: 31200 mm to 05:12, reach
+    /// 20000 mm`), for its act's answer; never logged.
+    pub why: Option<String>,
 }
 
 struct FormRun {
@@ -627,6 +630,9 @@ pub struct Forms {
     /// The world's stocked containers (#4837): a `create` of a stock's kind at one gives the made thing its carried
     /// fields ([`Forms::stocks`]).
     stocks: std::sync::Arc<Stocks>,
+    /// While a run is woken by the world's refusal of its step ([`Forms::refused`]): the run, the refusal's name and
+    /// its words, which its end carries ([`Ended::why`]) when it ends by that name in the same wake.
+    refusal: Option<(RunId, Name, String)>,
 }
 
 /// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
@@ -803,6 +809,7 @@ impl Forms {
                 body: o.body,
                 at: now,
                 how: name("restart"),
+                why: None,
             });
         }
         f
@@ -1107,6 +1114,7 @@ impl Forms {
                 body,
                 at: now,
                 how: name("left"),
+                why: None,
             });
             return Ok(());
         }
@@ -1152,6 +1160,7 @@ impl Forms {
                 body: node,
                 at: now,
                 how: name("body-gone"),
+                why: None,
             });
         }
         // A run that holds a seat of the thing, or holds it shared as its own (#4575), ends with it, as one that
@@ -1593,6 +1602,7 @@ impl Forms {
                         body,
                         at: now,
                         how: name("left"),
+                        why: None,
                     });
                 }
                 return Ok(Asked::Started(run));
@@ -1991,6 +2001,21 @@ impl Forms {
         self.handle(w, run, next, now);
     }
 
+    /// The world refused run `run`'s step as it started it (a move out of reach, a seat taken): the run is woken by
+    /// the refusal's name, and an end by that name in this wake keeps its words for the act's answer.
+    fn refused<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        run: RunId,
+        r: Refusal,
+        now: Micros,
+    ) {
+        let how = name(r.name);
+        self.refusal = Some((run, how.clone(), r.detail));
+        self.wake(w, run, Woke::Moved(how), now);
+        self.refusal = None;
+    }
+
     fn handle<G: Geometry, R: Reach>(
         &mut self,
         w: &mut World<'_, G, R>,
@@ -2093,13 +2118,11 @@ impl Forms {
                         now,
                     )
                     .pop()
-                    .map_or_else(
-                        || Err(name("place-unknown")),
-                        |(_, r)| r.map_err(|e| name(e.name)),
-                    );
+                    .map(|(_, r)| r);
                 match taken {
-                    Ok(n) => fr.mv = Some(n),
-                    Err(how) => self.wake(w, run, Woke::Moved(how), now),
+                    Some(Ok(n)) => fr.mv = Some(n),
+                    Some(Err(r)) => self.refused(w, run, r, now),
+                    None => self.wake(w, run, Woke::Moved(name("place-unknown")), now),
                 }
             }
             // A ground posture where the body stands (C25, SA-G3): its legs held in that stance until a rise or a walk.
@@ -2164,7 +2187,7 @@ impl Forms {
                     now,
                 ) {
                     Ok(n) => fr.mv = Some(n),
-                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                    Err(r) => self.refused(w, run, r, now),
                 }
             }
             Next::Move { name: mv, node, at } => {
@@ -2243,7 +2266,7 @@ impl Forms {
                                 .push(entry(&o, now, Vec::new(), name(MOVED), fields));
                         }
                     }
-                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                    Err(r) => self.refused(w, run, r, now),
                 }
             }
         }
@@ -2391,11 +2414,17 @@ impl Forms {
             link: fr.held.filter(|_| !removed).map(|(_, l)| l),
         };
         self.write_end(&o, now, how.clone());
+        let why = self
+            .refusal
+            .take()
+            .filter(|(r, n, _)| *r == run && *n == how)
+            .map(|(.., why)| why);
         self.ended.push(Ended {
             run,
             body: fr.body,
             at: now,
             how,
+            why,
         });
         if let Some(p) = self.waiting.remove(&fr.body) {
             let (body, run) = (fr.body, p.run);
@@ -2418,6 +2447,7 @@ impl Forms {
                     body,
                     at: now,
                     how: name(r.name),
+                    why: None,
                 }),
             }
         }

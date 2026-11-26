@@ -148,8 +148,9 @@ export async function runUiLifecycleProof({ root, withFixtureSession, report, sa
           }
           check('extra wall card remains usable as text', ['ready', 'unavailable'].includes(terminal.status), { ref: target.ref, status: terminal.status, reason: terminal.reason });
         }
-        const label = await button.getAttribute('aria-description');
-        check('architectural disclosure ' + target.ref, /Architectural context.*fixed daylight.*default doors.*no Souls/.test(label ?? ''), { label });
+        // #5038: a card is named by its place alone, with no hover text about how its picture was made
+        const label = await button.getAttribute('aria-description') ?? await button.getAttribute('title');
+        check('card named by its place only ' + target.ref, label === null, { label });
       }
       await Promise.all([...responseTasks]); await settled();
       await snapshot('ui-explore-ready');

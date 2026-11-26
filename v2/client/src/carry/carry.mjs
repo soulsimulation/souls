@@ -14,8 +14,10 @@
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
 //   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
 //                                     middle, or a bay's slot), keeping this Soul's place at the load. The front's
-//                                     walks the whole crew (the world keeps each carrier's place); the others may send
-//                                     their own, at the moment --go names when it names one
+//                                     walks the whole crew (the world keeps each carrier's place) and, into a slot or
+//                                     a loading spot's bay, turns it square (the walk names the load's heading there,
+//                                     parameter 3); the others may send their own, at the moment --go names when it
+//                                     names one
 //   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
@@ -207,6 +209,12 @@ export function byName(req, rows) {
 }
 
 const walk = (ns, ground, [x, z]) => ({ verb: `${ns}:walk`, target: ground, params: { 1: [Math.round(x), 0, Math.round(z)] } });
+/** A walk with the crew's load's heading at its end (parameter 3, from its back toward its front, µm on the plan): sent
+ *  by the crew's front, the world turns the whole crew with it as it walks; from any other carrier it is not read. */
+const heading = (w, h) => {
+  if (h) w.params[3] = [Math.round(h[0] * M) || 0, Math.round(h[1] * M) || 0];
+  return w;
+};
 
 /**
  * The intents a `carry` or `part` request sends, in order, or a refusal by name. `ctx`: `ns` (the world's form
@@ -271,7 +279,7 @@ export function carryIntents(req, ctx) {
       if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
         // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
         const s = toSpot(req, ctx, req.where);
-        return s.code ? s : Object.assign([walk(ns, ground, s.point)], { bay: s.bay });
+        return s.code ? s : Object.assign([heading(walk(ns, ground, s.point), s.heading)], { bay: s.bay });
       }
       let dest = pointOf(req.where);
       if (!dest && id(req.where)) {
@@ -311,12 +319,12 @@ export function carryIntents(req, ctx) {
         const crossed = crossedOnTheWay(req, ctx, at, s, mid, mouth);
         if (crossed) return crossed;
         if (!w) {
-          const d = Math.hypot(...off) * (dot(off, sz) < 0 ? -1 : 1);
-          return [walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d])];
+          const side = dot(off, sz) < 0 ? -1 : 1, d = Math.hypot(...off) * side;
+          return [heading(walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d]), [sz[0] * side, sz[1] * side])];
         }
         const end = ends.ids.includes(me);
         const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
-        return [walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across])];
+        return [heading(walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across]), u)];
       }
       return [walk(ns, ground, [dest[0] + off[0], dest[1] + off[1]])];
     }
@@ -519,7 +527,7 @@ export function nextStep(req, { load = null, bay = null } = {}) {
     case 'grip': return 'you are at your end: the one who leads offers the crew (carry offer <name>); each other accepts (carry accept <their name>)';
     case 'offer': return `wait for an accept (\`wait\` shows joined); then take or lift it (part take ${c} <part> | carry lift ${c} <load>) and say where it goes`;
     case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; when the front walks it (carry to ${c} <where>), you walk with it, keeping your place`;
-    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes; the front sends carry to ${c} <x,z | bay id> [<slot>] and the crew walks with it, each in its place (into a slot, every carrier sends the same carry to, so it turns square)`;
+    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes; the front sends carry to ${c} <x,z | bay id> [<slot>] and the crew walks with it, each in its place (into a slot, it turns the load square too)`;
     case 'to': return `when every carrier has arrived, one of you seats it (part put ${c} <bay id> <slot>) or sets it down (carry set-down ${c})`;
     case 'part put':
       if (bay?.left?.length) return `seated: ${bay.built}; still to fill: ${bay.left.join(', ')}. A seated frame stays held while one of you stays in its crew; the others: carry leave ${c}`;

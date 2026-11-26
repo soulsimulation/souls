@@ -36,7 +36,6 @@ type Deps = {
     god: GodMode;
     edge: EdgeLedger;
     worldUrl: string;
-    build?: string;
     /** Trusted local art store. Absent preserves legacy asset-only originals. */
     artOriginals?: ArtOriginals;
     levelAt?: (x: number, z: number, y: number) => number;
@@ -176,7 +175,9 @@ export function mountContextViews(app: Hono, d: Deps) {
         if (!target)
             return null;
         const s = renderScene(), renderTarget = contextStage('capture.camera', () => cameraFor(target, true));
-        return { key: contextStage('capture.key', () => contextHash(['context-render/2', 'context-photo/3', d.build ?? 'dev', s.key, renderTarget, detail])), revision: s.revision, payload: { snapshot: s.snapshot, target: renderTarget, detail } };
+        // #5038: the key is the scene and the place (and how pictures are drawn: bump these names when that changes), never
+        // the build, so a picture is kept across releases unless what it shows changed
+        return { key: contextStage('capture.key', () => contextHash(['context-render/2', 'context-photo/3', s.key, renderTarget, detail])), revision: s.revision, payload: { snapshot: s.snapshot, target: renderTarget, detail } };
     };
     const capture = d.renderer ?? (async (i: ContextInput, signal: AbortSignal) => {
         const payload = i.payload as {

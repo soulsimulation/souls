@@ -730,8 +730,8 @@ export const CARRY_HELP = [
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place; to turn it square into a slot, every carrier sends the same, at once: the leader names the moment (UTC) and each sends it with --go, which sets off then. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
-  'carry to <crew id> the loading spot   every carrier at once: the load goes into the spot\'s first free bay (the answer names it); then one sends carry set-down',
+  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place, and turns it square into a slot. A carrier who sends its own walk keeps to it (--go sets it off at that UTC moment) and stays where it ends until the front walks again. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
+  'carry to <crew id> the loading spot   the load goes into the spot\'s first free bay, square (the answer names it): the front\'s walks the whole crew; then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
@@ -740,7 +740,7 @@ export const CARRY_HELP = [
   'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
   'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. When the front of a lifted load walks (its `carry to`), the rest of the crew walks with it, each keeping its place, and the load does not turn; to turn it square into a slot, every carrier sends that same `carry to`. A carrier who walks elsewhere or leaves can break the carry off, and the load is set down (`set-down` in `wait`, `why`). A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
+const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. When the front of a lifted load walks (its `carry to`), the rest of the crew walks with it, each keeping its place; into a slot or a loading spot\'s bay, the crew turns with it so the load goes in square. A carrier who sends its own walk keeps to it and stays where it ends until the front walks again. A carrier who walks elsewhere or leaves can break the carry off, and the load is set down (`set-down` in `wait`, `why`). A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
 
 /** `help build`: how a rack bay goes up, step by step, as a crew of Souls does it. */
 export const BUILD_HELP = [
@@ -752,7 +752,7 @@ export const BUILD_HELP = [
   'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
   'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
 ];
-const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; the front\'s carry to walks the whole crew, and into a slot every carrier sends the same one.';
+const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; the front\'s carry to walks the whole crew, into a slot square.';
 
 /**
  * A carry step's `next` (the daemon's `nextStep`), made true to how it ended: none for a refused step (its refusal
