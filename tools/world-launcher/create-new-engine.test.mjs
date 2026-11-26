@@ -39,11 +39,23 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
     writeFileSync(routes, JSON.stringify(table));
   };
 
-  const stub = { asks: [], rows: new Map(), expired: 0, firstSeen: new Map(), startingLeft: new Map(), fail: [...(opts.fail ?? [])] };
+  const stub = { asks: [], settings: [], rows: new Map(), expired: 0, firstSeen: new Map(), startingLeft: new Map(), fail: [...(opts.fail ?? [])] };
   const directory = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const answer = (status, body) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
-    if (req.method === 'GET' && req.url === '/v1/worlds') return answer(200, { worlds: [...stub.rows.values()], templates: ['hello-hamlet'] });
+    // the public list (asked with no sign-in) leaves an unlisted world out, as directoryd's list_for(None) does
+    if (req.method === 'GET' && req.url === '/v1/worlds') return answer(200, { worlds: [...stub.rows.values()].filter((r) => r.unlisted !== true), templates: ['hello-hamlet'] });
+    if (req.method === 'POST' && req.url === '/v1/worlds/settings') {
+      // a world's switches, by its creator alone (http.rs settings)
+      const ask = JSON.parse(Buffer.concat(chunks).toString('utf8')), token = /^Bearer (test:\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+      stub.settings.push({ ...ask, token });
+      if (!token) return answer(401, { refused: 'token-missing' });
+      const row = stub.rows.get(ask.world);
+      if (!row) return answer(404, { refused: 'world-missing' });
+      if (row.creator !== `principal-of-${token.slice(5).split('.')[0]}`) return answer(403, { refused: 'not-the-creator' });
+      if (typeof ask.unlisted === 'boolean') row.unlisted = ask.unlisted;
+      return answer(200, { world: row });
+    }
     if (req.method !== 'POST' || req.url !== '/v1/worlds') return answer(404, { refused: 'not-found' });
     const ask = JSON.parse(Buffer.concat(chunks).toString('utf8')), token = /^Bearer (test:\S+)$/.exec(req.headers.authorization ?? '')?.[1];
     stub.asks.push({ ...ask, token });
@@ -262,4 +274,42 @@ test('26 Nov: a created world answers its agents: the bootstrap the client pairs
   const none = await fetch(`${base}/w/nowhere/v1/bootstrap`);
   assert.deepEqual([none.status, (await none.json()).code], [404, 'world.not-served']);
   assert.match(await upgrade('/w/nowhere/v2/ws'), /^HTTP\/1\.1 404/);
+});
+
+test('26 Nov: a created world\'s creator unlists and lists it as an old world\'s owner does, in the directory, and the list follows', async t => {
+  // live (my-mars-lab-2): POST /__sim/worlds/<slug>/unlisted was the fence's 409 world.new-engine, and the world stayed listed
+  const { base, stub, create } = await fixture(t);
+  const first = await create({ name: 'Mars Lab', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  const made = await create({ name: 'Mars Lab', template: 'hello-hamlet', key: first.body.key, slug: first.body.slug }, 'Bearer dev:ada');
+  assert.equal(made.status, 201, JSON.stringify(made.body));
+  const slug = made.body.slug;
+  const unlist = async (unlisted, authorization) => {
+    const r = await fetch(`${base}/__sim/worlds/${slug}/unlisted`, { method: 'POST', headers: { 'content-type': 'application/json', ...(authorization ? { authorization } : {}) }, body: JSON.stringify({ unlisted }) });
+    return { status: r.status, body: await r.json() };
+  };
+  const listed = async () => (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === slug);
+  assert.equal((await listed())?.name, 'Mars Lab');
+
+  // signed out, or someone else: refused, and it stays listed
+  assert.deepEqual([(await unlist(true)).status, stub.settings.length], [401, 0], 'signed out: the directory is not asked');
+  const other = await unlist(true, 'Bearer dev:bo');
+  assert.deepEqual([other.status, other.body.code, other.body.refused], [403, 'forbidden', 'not-the-creator']);
+  assert.equal((await unlist('yes', 'Bearer dev:ada')).status, 400, 'unlisted: true or false');
+  assert.equal((await listed())?.name, 'Mars Lab', 'still listed');
+
+  // its creator: the directory sets the row, asked with her own sign-in; off the list at once, its page still served
+  const off = await unlist(true, 'Bearer dev:ada');
+  assert.deepEqual([off.status, off.body], [200, { ok: true, slug, unlisted: true }]);
+  assert.deepEqual(stub.settings.at(-1), { world: slug, unlisted: true, token: 'test:ada' });
+  assert.equal(await listed(), undefined, 'off the list');
+  const page = await fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } });
+  assert.equal(page.status, 200); assert.match(page.headers.get('x-robots-tag') ?? '', /noindex/, 'served, not indexed');
+  assert.equal(JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await page.text())[1]).worldName, 'Mars Lab', 'under the name the directory last gave');
+  // and stays off once the launcher's copy is asked again (the directory's public list leaves it out)
+  assert.equal((await (await fetch(`${base}/__sim/worlds/${slug}`)).json()).world?.unlisted, true);
+
+  // listed again by its creator
+  const on = await unlist(false, 'Bearer dev:ada');
+  assert.deepEqual([on.status, on.body.unlisted], [200, false]);
+  assert.equal((await listed())?.name, 'Mars Lab', 'back on the list');
 });
