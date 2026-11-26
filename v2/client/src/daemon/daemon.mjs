@@ -773,10 +773,12 @@ function connect() {
     counts.drops++;
     const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
     const wait = Math.round(most / 2 + Math.random() * most / 2);
-    // A probe its agent overtook (`takeBack` while it was out) falls through: the agent asked, so the Soul is taken.
-    if (code === REPLACED && (!free || replacedAt !== null)) {
+    // Signed in, this socket held the Soul and a newer client took it. Not signed in, it asked only if free and a live
+    // client holds it; unless its agent asked meanwhile (`takeBack`): then it falls through, and the Soul is taken.
+    const held = step === 'stream';
+    if (code === REPLACED && (held || replacedAt !== null)) {
       cutWhy = 'replaced';
-      if (!free) {
+      if (held) {
         replacedAt = Date.now();
         log('another client of this Soul signed in (the last to connect wins); signing in again at the next command, or once it is free');
         note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
@@ -785,7 +787,7 @@ function connect() {
       // from it (or held it against this ask), then gone: it asks again soon, still only if free.
       const soon = Date.now() - gaveUpAt <= 10_000, again = soon ? wait : REPLACED_RETRY_MS;
       if (soon) attempt++;
-      if (free) log(`another client of this Soul still holds it; asking again in ${again} ms`);
+      if (!held) log(`another client of this Soul still holds it; asking again in ${again} ms`);
       retryTimer = setTimeout(() => { if (replacedAt !== null && !ws && !stopping) connect(); }, again);
       return;
     }
