@@ -284,6 +284,29 @@ pub fn check_fence(bytes: &[u8], instance: &str) -> R<()> {
     refuse("world-archived", "the local archive fence is installed")
 }
 
+/// Whether an archive of `world` would get past [`begin`]'s own refusals of its row (a world still being made, an
+/// offered handoff, a pending acceptance, an archive or restore under way): only such an archive is held for the
+/// Souls living there (#5006), so every other one is refused by its own name, as before.
+pub(super) fn would_begin<S: Store>(store: &S, world: &str) -> bool {
+    let Ok((_, rows)) = read_rows(store) else {
+        return false;
+    };
+    let Some(row) = rows
+        .iter()
+        .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+    else {
+        return false;
+    };
+    row.get("ready") != Some(&Json::Bool(false))
+        && row.get("_handoff_offer").is_none()
+        && read(store, row).is_ok_and(|p| p.state == "active")
+}
+
+/// Whether this directory has an archive initializer to finish an archive (#5006).
+pub(super) fn configured() -> bool {
+    std::env::var_os("DIRECTORYD_PLACEMENT").is_some()
+}
+
 pub(super) fn enqueue(request: &str) -> R<()> {
     let root = std::env::var_os("DIRECTORYD_PLACEMENT")
         .map(PathBuf::from)

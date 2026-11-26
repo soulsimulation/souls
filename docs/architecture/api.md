@@ -187,6 +187,17 @@ Each `url` opens the world page at `#worldoffer/<code>`; nothing changes until t
 that account can accept. In the web app these are under **Forsake world** in the god panel. Co-builder invitations
 are refused with `403 cobuilders-off`: a world has one god.
 
+On a world the new engine runs, Forsake world asks the world's directory, signed in as its world routes sign in
+(`directoryd` `worlds/list/http.rs`): `POST /v1/worlds/handoff/offer {world}` → `{code, expires}` (one use, 7 days, a new
+offer replaces the last; the link is the world page's `#worldoffer/<code>`), `/v1/worlds/handoff/cancel {world}`,
+`/v1/worlds/handoff/accept {world, code}` (the signed-in recipient becomes the creator; asking again is safe), and
+`POST /v1/worlds/archive {world, confirm}` → `{archived}` or 202 `{pending}`; while Souls of other people live in the world
+(unretired and paired for it under any of its names, or brought over for it and not yet paired, held by another account;
+the operator's test Souls do not count) archive is refused `409 archive-others-live-here` with their count
+(`souls`), and the creator hands the world on or waits until they have left. A directory that could not finish one
+refuses it before anything changes: archive with no archive initializer (`503 archive-unavailable`), acceptance with no
+world-authority map (`503 world-authority-required`) or one that does not name the world (`409 world-unplaced`).
+
 **Operator commands.** `node tools/world-launcher/op.mjs <command>` posts to `<B>/__sim/op/<command>`, accepted only
 from loopback on the launcher's machine: `create-world`, `set-claimable` (`--claimable false` makes a godless world
 unclaimable: claim, mint and pairing approval answer 403 `not-claimable`), `set-unlisted`, `archive-world`,

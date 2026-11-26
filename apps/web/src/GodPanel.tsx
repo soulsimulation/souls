@@ -36,6 +36,8 @@ const landingPreviewKey = typeof location === 'undefined' ? null : takePreviewKe
 const PAIRED_KEY = `sim.godPaired:${worldKey}`;
 // 0.133 item 6: loaded when the creator opens Build, not with the panel
 const BuildBar = lazy(() => import('./god-ui/BuildBar.tsx').then((m) => ({ default: m.BuildBar })));
+// #5006: Forsake on a new-engine world is loaded when the creator opens it, not with the panel
+const V2ForsakeWorld = lazy(() => import('./god-ui/V2ForsakeWorld.tsx').then((m) => ({ default: m.V2ForsakeWorld })));
 const PHONE = () => typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches;  // P6: landscape phones (coarse pointer) too
 // Phones keep their own remembered choice and start compact: the open panel covers most of a small screen.
 const openKey = () => 'sim.godPanel.open' + (PHONE() ? '.phone' : '');
@@ -154,7 +156,8 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt, soulName }: { flagM
   const who = (session.label ?? 'you').replace(/^dev:/, '');
   const claim = () => run('claim', G.claim, () => 'This world is yours.');
   // G1 (0.133): on a v2 world undo, redo and the weather are the creator's own edits on its socket; the note shows the
-  // receipt's words or the refusal's name. Strike, flags and Forsake have no creator verb there and are not shown.
+  // receipt's words or the refusal's name. Strike and flags have no creator verb there and are not shown; Forsake asks
+  // the world's directory, which holds its creator (V2ForsakeWorld, #5006).
   // 0.133 item 6: Build (BuildBar.tsx) places, moves and removes things with the same socket's edits.
   const v2 = G.v2Creator();
   // #5006 row 15: a v2 world's prayers on the creator's socket (the directory's list for this creator's worlds), each
@@ -330,7 +333,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt, soulName }: { flagM
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting source={prayerSource} />} more={more}
-      forsake={v2 ? null : <ForsakeWorld name={name} />} />}
+      forsake={v2 ? <Suspense fallback={null}><V2ForsakeWorld name={name} /></Suspense> : <ForsakeWorld name={name} />} />}
   </>;
 }
 
