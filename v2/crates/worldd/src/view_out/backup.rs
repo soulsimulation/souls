@@ -34,8 +34,10 @@
 //! to it since ([`Spool::live`]), and each delete is checked against both under the lock the writer names an object
 //! under; one the chain comes to name while its delete is under way goes back in the spool's queue and is put again
 //! ([`Named`]). Nothing is deleted until a backup pass begun after the chain was last handed over has left the store
-//! holding its head, so never an object of an older chain the store's head still names. A generation's record is
-//! deleted after its objects, so a restart still finds one whose delete waits.
+//! holding its head, so never an object of an older chain the store's head still names. A copy in `kept/` leaves it
+//! before its delete is sent, so a stop meanwhile leaves no copy saying the store holds it (the start queues what it
+//! finds in `deleting/` again). A generation's record is deleted after its objects and every older generation's, so a
+//! restart, which walks back from the newest record, still finds one whose delete waits.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -54,11 +56,14 @@ pub const BACKOFF_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60
 /// Old generations' recovery objects the clean-up deletes before it looks for new work (#3833): it goes on at once
 /// while more wait, one delete at a time, so its pace is the store's.
 const DELETES_PER_PASS: usize = 64;
-/// The generations closed long enough ago to delete waiting for the clean-up's thread to take them, at most: it takes
-/// them within a second, and a rollover adds one; past it the newest are left in the store until a restart finds them.
+/// The generations waiting for the clean-up's thread held with the chain's objects as they were then, at most: past
+/// it, each is held by its key alone (a chain's objects are about 40 KB; a backup fenced for a day holds 720).
 const PRUNES_HELD: usize = 64;
 /// The spool's copies of the objects the store holds, under their store keys.
 const KEPT: &str = "kept";
+/// The copies of objects whose delete from the store is under way: moved here from `kept/` before the delete is sent,
+/// so a stop before it is settled leaves no copy saying the store holds them; a start puts them back in the queue.
+const DELETING: &str = "deleting";
 
 /// How the backup stands, for `health.json`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,12 +95,11 @@ pub struct Spool {
     progress: Arc<Progress>,
 }
 
-/// Old generations' records to delete by, each with the objects the chain then named (never deleted), held for the
-/// clean-up's thread; and those not held, past [`PRUNES_HELD`] (a restart finds them again).
+/// Old generations' records to delete by, oldest first, held for the clean-up's thread, each with the objects the chain
+/// then named (never deleted; past [`PRUNES_HELD`] held, none: the check at each delete alone keeps the chain's).
 #[derive(Default)]
 struct Held {
     records: Vec<(String, BTreeSet<Vec<u8>>)>,
-    dropped: u64,
 }
 
 type Prunes = Arc<Mutex<Held>>;
@@ -111,6 +115,8 @@ struct Named {
     /// The backup's passes finished when the chain was handed over: the clean-up deletes nothing until a pass begun
     /// after that leaves the store holding the spool's head, so never an object of a chain the store's head still names.
     handed_at: u64,
+    /// The chain before (handed over and written since), which the store's head may still name until that pass.
+    before: BTreeSet<String>,
     /// Objects the clean-up deleted from the store while the chain came to name them again: the backup keeps none of
     /// them on this disk before it has put it once more ([`Cleanup::settle`]).
     resend: BTreeSet<String>,
@@ -119,6 +125,11 @@ struct Named {
 impl Named {
     fn names(&self, key: &str) -> bool {
         self.handed.contains(key) || self.since.contains(key)
+    }
+
+    /// Whether a chain the store's head may name, now or after the backup's next passes, names `key`.
+    fn wants(&self, key: &str, progress: &Progress) -> bool {
+        self.names(key) || (self.before.contains(key) && !progress.past(self.handed_at))
     }
 }
 
@@ -263,17 +274,19 @@ impl Spool {
     pub(super) fn read(&self, key: &str) -> Option<Vec<u8>> {
         std::fs::read(self.path(key))
             .or_else(|_| std::fs::read(self.kept(key)))
+            .or_else(|_| std::fs::read(self.dir.join(DELETING).join(key)))
             .ok()
     }
 
     /// An old generation's record to delete by, with the objects the current chain names (never deleted).
     pub(super) fn prune(&self, record_key: String, live: BTreeSet<Vec<u8>>) {
         if let Ok(mut held) = self.prunes.lock() {
-            if held.records.len() < PRUNES_HELD {
-                held.records.push((record_key, live));
+            let live = if held.records.len() < PRUNES_HELD {
+                live
             } else {
-                held.dropped += 1;
-            }
+                BTreeSet::new()
+            };
+            held.records.push((record_key, live));
         }
         if let Some(t) = &self.tidy {
             let _ = t.try_send(());
@@ -285,8 +298,10 @@ impl Spool {
     /// the clean-up deletes nothing until the store holds it.
     pub(super) fn live(&self, keys: BTreeSet<String>) {
         let mut named = named(&self.live);
-        named.handed = keys;
-        named.since.clear();
+        let handed = std::mem::replace(&mut named.handed, keys);
+        let since = std::mem::take(&mut named.since);
+        named.before = handed;
+        named.before.extend(since);
         named.handed_at = self.progress.passes.load(Ordering::Acquire);
     }
 
@@ -379,6 +394,14 @@ pub(super) fn start<S: ObjectStore + Send + 'static, C: ObjectStore + Send + 'st
             }
         );
     }
+    // A stop while deletes were under way (#4954): the store may lack what they named, and the chain may name it again.
+    // Back in the queue, put again create-only; one the chain no longer names is deleted again from its record.
+    let (back, _) = requeue(&spool.dir, DELETING, &prefix);
+    if back > 0 {
+        eprintln!(
+            "worldd: {back} stream objects whose delete was under way at the stop are queued for the store again"
+        );
+    }
     let known = confirmed.is_some();
     let confirmed = confirmed.flatten();
     let tried = std::fs::read(spool.dir.join(tried_key(&head_key)))
@@ -420,17 +443,18 @@ fn requeue_if_moved(
     if !moved || std::fs::read(&marker).ok().as_deref() == Some(store.as_bytes()) {
         return None;
     }
-    let done = requeue(dir, prefix);
+    let done = requeue(dir, KEPT, prefix);
     // Best effort: without it a restart before the first head queues what was put again (the store keeps one copy).
     let _ = super::write_whole(&marker, store.as_bytes());
     Some(done)
 }
 
-/// The chain's objects kept on this disk (`kept/<prefix>objects/`) back in the spool's queue (`<prefix>objects/`), for
-/// a store that holds none of them: how many were queued, and how many could not be (they stay kept and readable).
-fn requeue(dir: &Path, prefix: &str) -> (u64, u64) {
+/// The chain's objects kept on this disk under `from` (`kept/<prefix>objects/`, or `deleting/`) back in the spool's
+/// queue (`<prefix>objects/`), for a store that may hold none of them: how many were queued, and how many could not be
+/// (they stay where they are, and readable).
+fn requeue(dir: &Path, from: &str, prefix: &str) -> (u64, u64) {
     let rel = format!("{prefix}objects");
-    let Ok(entries) = std::fs::read_dir(dir.join(KEPT).join(&rel)) else {
+    let Ok(entries) = std::fs::read_dir(dir.join(from).join(&rel)) else {
         return (0, 0);
     };
     let to = dir.join(&rel);
@@ -735,20 +759,27 @@ impl<S: ObjectStore> Worker<S> {
     }
 }
 
-/// What the clean-up has to do: an old generation's record to read (with the objects the chain then named, never
-/// deleted), one of its objects to delete (with the record's key), or the record itself to delete once none of its
-/// objects waits: a restart finds an object only through its record.
+/// What the clean-up has to do, each in its generation (numbered in the order handed over, oldest first): an old
+/// generation's record to read (with the objects the chain then named, never deleted), one of its objects to delete,
+/// or the record itself to delete once nothing of its generation or an older one waits. A restart finds an object only
+/// through its record, and a record only through every newer one (each names the one before).
 enum Job {
-    Record(String, BTreeSet<Vec<u8>>),
-    Object(String, String),
-    Drop(String),
+    Record(String, BTreeSet<Vec<u8>>, u64),
+    Object(String, u64),
+    Drop(String, u64),
 }
 
 impl Job {
     #[cfg(test)]
     fn key(&self) -> &str {
         match self {
-            Job::Record(k, _) | Job::Object(k, _) | Job::Drop(k) => k,
+            Job::Record(k, _, _) | Job::Object(k, _) | Job::Drop(k, _) => k,
+        }
+    }
+
+    fn generation(&self) -> u64 {
+        match self {
+            Job::Record(_, _, g) | Job::Object(_, g) | Job::Drop(_, g) => *g,
         }
     }
 }
@@ -788,6 +819,8 @@ struct Cleanup<S> {
     refused: u64,
     /// Objects found named by the current chain, so not deleted.
     kept_live: u64,
+    /// Generations taken so far: the next one's number.
+    generations: u64,
 }
 
 impl<S: ObjectStore> Cleanup<S> {
@@ -809,6 +842,7 @@ impl<S: ObjectStore> Cleanup<S> {
             deleted: 0,
             refused: 0,
             kept_live: 0,
+            generations: 0,
         }
     }
 
@@ -863,7 +897,7 @@ impl<S: ObjectStore> Cleanup<S> {
     }
 
     /// Whether the store holds the current chain's head: else nothing is read or deleted, and the generations handed
-    /// over wait where they are held ([`PRUNES_HELD`]).
+    /// over wait where they are held.
     fn open(&self) -> bool {
         self.live
             .lock()
@@ -871,27 +905,29 @@ impl<S: ObjectStore> Cleanup<S> {
     }
 
     /// How the clean-up stands, in `health.json` (`stream_cleanup`): old generations not read yet (held, or in line),
-    /// each standing for its objects; the deletes in line; those of them tried again after a refusal; and the
-    /// generations not held, which a restart finds again.
+    /// each standing for its objects; the deletes in line; and those of them tried again after a refusal.
     fn gauge(&self) {
-        let (held, dropped) = self
-            .prunes
-            .lock()
-            .map_or((0, 0), |h| (h.records.len(), h.dropped));
-        let unread = self
+        let held = self.prunes.lock().map_or(0, |h| h.records.len());
+        let jobs = self
             .due
             .iter()
-            .map(|(_, j)| j)
-            .chain(self.later.iter().map(|(_, _, j)| j))
-            .filter(|j| matches!(j, Job::Record(..)))
-            .count();
+            .map(|(n, j)| (*n, j))
+            .chain(self.later.iter().map(|(_, n, j)| (*n, j)));
+        let (mut unread, mut deletes, mut retrying) = (0u64, 0u64, 0u64);
+        for (n, j) in jobs {
+            if matches!(j, Job::Record(..)) {
+                unread += 1;
+            } else {
+                deletes += 1;
+                retrying += u64::from(n > 0);
+            }
+        }
         crate::measures::CLEANUP.set(
-            (held + unread) as u64,
-            (self.due.len() + self.later.len() - unread) as u64,
-            self.later.iter().filter(|(_, n, _)| *n > 0).count() as u64,
+            held as u64 + unread,
+            deletes,
+            retrying,
             self.deleted,
             self.refused,
-            dropped,
         );
     }
 
@@ -902,11 +938,11 @@ impl<S: ObjectStore> Cleanup<S> {
     /// Up to [`DELETES_PER_PASS`] reads and deletes at `now`; the deletes it made, and the refusal that ended it.
     fn pass(&mut self, now: Instant) -> (u64, Option<String>) {
         if let Ok(mut held) = self.prunes.lock() {
-            self.due.extend(
-                held.records
-                    .drain(..)
-                    .map(|(key, live)| (0, Job::Record(key, live))),
-            );
+            for (key, live) in held.records.drain(..) {
+                self.due
+                    .push_back((0, Job::Record(key, live, self.generations)));
+                self.generations += 1;
+            }
         }
         // What has waited its time goes back in line, behind the rest.
         let (again, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.later)
@@ -922,14 +958,14 @@ impl<S: ObjectStore> Cleanup<S> {
             };
             let step = match &job {
                 // This disk's copy first: the store is read only for a record this machine never held.
-                Job::Record(key, live) => match std::fs::read(self.kept(key)) {
+                Job::Record(key, live, g) => match std::fs::read(self.kept(key)) {
                     Ok(b) => {
-                        self.expand(key, &b, live);
+                        self.expand(key, &b, live, *g);
                         Step::Next
                     }
                     Err(_) => match self.store.get(key) {
                         Ok(Some(o)) => {
-                            self.expand(key, &o.bytes, live);
+                            self.expand(key, &o.bytes, live, *g);
                             Step::Next
                         }
                         // Gone already.
@@ -937,7 +973,7 @@ impl<S: ObjectStore> Cleanup<S> {
                         Err(e) => Step::Refused(e),
                     },
                 },
-                Job::Drop(key) => self.objects_of(key).unwrap_or_else(|| self.delete(key)),
+                Job::Drop(key, g) => self.older(*g).unwrap_or_else(|| self.delete(key)),
                 Job::Object(key, _) => self.delete(key),
             };
             match step {
@@ -967,18 +1003,22 @@ impl<S: ObjectStore> Cleanup<S> {
         (done, None)
     }
 
-    /// Where `record`'s objects still wait: in line ([`Step::Behind`]), or their back-off ([`Step::After`] the last).
-    fn objects_of(&self, record: &str) -> Option<Step> {
-        let of = |j: &Job| matches!(j, Job::Object(_, r) if r == record);
+    /// Where jobs of generation `g` or an older one still wait, for its record: in line ([`Step::Behind`]), or their
+    /// back-off ([`Step::After`] the last).
+    fn older(&self, g: u64) -> Option<Step> {
         let after = self
             .later
             .iter()
-            .filter(|(_, _, j)| of(j))
+            .filter(|(_, _, j)| j.generation() <= g)
             .map(|(at, _, _)| *at)
             .max();
         match after {
             Some(at) => Some(Step::After(at)),
-            None => self.due.iter().any(|(_, j)| of(j)).then_some(Step::Behind),
+            None => self
+                .due
+                .iter()
+                .any(|(_, j)| j.generation() <= g)
+                .then_some(Step::Behind),
         }
     }
 
@@ -996,6 +1036,14 @@ impl<S: ObjectStore> Cleanup<S> {
             if !self.progress.past(named.handed_at) {
                 return Step::Wait;
             }
+            // Before the delete is sent: a stop before it is settled leaves no copy saying the store holds it.
+            let doomed = self.dir.join(DELETING).join(key);
+            if doomed
+                .parent()
+                .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
+            {
+                let _ = std::fs::rename(self.kept(key), &doomed);
+            }
         }
         let deleted = self.store.delete(key);
         self.settle(key);
@@ -1005,31 +1053,34 @@ impl<S: ObjectStore> Cleanup<S> {
         }
     }
 
-    /// After `key`'s delete, answered or not: its copy on this disk goes, under the lock the writer names an object
-    /// under. Unless the chain came to name it meanwhile (a words file repeats across generations): then the writer
-    /// found that copy and spooled nothing, or spooled it and the backup put it before the delete landed. Either way the
-    /// store may lack it, so it goes back in the spool's queue and the backup puts it once more before it keeps it.
+    /// After `key`'s delete, answered or not, under the lock the writer names an object under: its copies on this disk
+    /// go. Unless a chain the store's head may name came to name it meanwhile (a words file repeats across
+    /// generations): then the writer found no copy and spooled it, and the backup may have put it before the delete
+    /// landed, or the old chain's last head named it. Either way the store may lack it, so it goes back in the spool's
+    /// queue and the backup puts it once more before it keeps it.
     fn settle(&self, key: &str) {
         let mut named = named(&self.live);
+        let doomed = self.dir.join(DELETING).join(key);
         let kept = self.kept(key);
-        if !named.names(key) {
-            let _ = std::fs::remove_file(kept);
+        if !named.wants(key, &self.progress) {
+            let _ = std::fs::remove_file(&doomed);
+            let _ = std::fs::remove_file(&kept);
             return;
         }
         let queued = self.dir.join(key);
         if !queued.is_file()
-            && kept.is_file()
             && queued
                 .parent()
                 .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
         {
-            let _ = std::fs::rename(&kept, &queued);
+            let _ = std::fs::rename(&doomed, &queued).or_else(|_| std::fs::rename(&kept, &queued));
         }
+        let _ = std::fs::remove_file(&doomed);
         named.resend.insert(key.to_owned());
     }
 
     /// An old generation's record read: its objects the chain then did not name, then the record, first in line.
-    fn expand(&mut self, record_key: &str, bytes: &[u8], live: &BTreeSet<Vec<u8>>) {
+    fn expand(&mut self, record_key: &str, bytes: &[u8], live: &BTreeSet<Vec<u8>>, g: u64) {
         let Ok(r) = super::object_map(bytes) else {
             return;
         };
@@ -1040,14 +1091,11 @@ impl<S: ObjectStore> Cleanup<S> {
                 if let replica::encode::Value::Bytes(h) = o
                     && !live.contains(h)
                 {
-                    jobs.push(Job::Object(
-                        format!("{prefix}objects/{}", to_hex(h)),
-                        record_key.to_owned(),
-                    ));
+                    jobs.push(Job::Object(format!("{prefix}objects/{}", to_hex(h)), g));
                 }
             }
         }
-        jobs.push(Job::Drop(record_key.to_owned()));
+        jobs.push(Job::Drop(record_key.to_owned(), g));
         for job in jobs.into_iter().rev() {
             self.due.push_front((0, job));
         }
@@ -1768,6 +1816,59 @@ mod tests {
             "the record last, after its refused objects"
         );
         assert!(cleanup.store.store.list("").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review of #4990, second read, blocking: a stop (a sleep, SIGTERM) between a delete landing and its settling left
+    /// the copy in `kept/`, which says the store holds the object. After the restart the writer, naming it again, found
+    /// that copy and spooled nothing, and the store lacked it while the chain named it. The copy now leaves `kept/`
+    /// before the delete is sent, and the start queues what it finds in `deleting/` again.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The pass is driven by hand.
+    fn a_stop_between_a_delete_and_its_settling_puts_the_object_again() {
+        let dir =
+            std::env::temp_dir().join(format!("backup-stop-mid-delete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store: &'static Memory = Box::leak(Box::default());
+        let record = generation(store, "s/w/", 0, &[WORDS.to_vec()]);
+        let words = format!("s/w/objects/{}", to_hex(&replica::ids::sha256(WORDS)));
+        let spool = Spool::new(dir.clone(), "test-store".into());
+        spool.keep(&words, WORDS);
+        spool.live(BTreeSet::new());
+        backed_up(&spool);
+        spool.prune(record, BTreeSet::new());
+        let mut cleanup = cleanup(
+            &spool,
+            Hooked {
+                store,
+                before_delete: Box::new(|key: &str| {
+                    if key == words {
+                        store.delete(key).unwrap();
+                        panic!("the world stops after the delete lands");
+                    }
+                }),
+                after_put: Box::new(|_: &str| {}),
+            },
+        );
+        let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            cleanup.pass(Instant::now())
+        }));
+        assert!(stopped.is_err());
+        assert!(store.get(&words).unwrap().is_none(), "the delete landed");
+        drop(cleanup);
+        drop(spool);
+        // The restart: the backup starts, then the writer names the words again for a new part.
+        let mut spool = Spool::new(dir.clone(), "test-store".into());
+        start(&mut spool, store, store, "s/w/".into(), Box::new(|_| {})).unwrap();
+        spool.object(&words, WORDS).unwrap();
+        spool.head("s/w/head", b"head").unwrap();
+        assert!(spool.drainer().unwrap().drain(Duration::from_secs(20)));
+        assert!(
+            store.get(&words).unwrap().is_some(),
+            "the store holds it again"
+        );
+        assert_eq!(spool.read(&words).as_deref(), Some(WORDS));
+        drop(spool);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
