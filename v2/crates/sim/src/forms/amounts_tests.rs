@@ -36,6 +36,9 @@ const MAX: i64 = 1_000;
 const AMOUNT: u64 = 1;
 /// The vessel's well, a second amount of the same thing (#4103).
 const WELL: u64 = 4;
+/// A second leaf and its well, as a tea caddy's mint (#4103).
+const MINT: u64 = 5;
+const MINT_WELL: u64 = 6;
 
 /// The one kind of thing: an amount (whole grams, 0 to 1,000), one slot that holds a thing, and a form for each
 /// effect. `KIND` stands for its full name, filled in once K3 has named it.
@@ -117,6 +120,9 @@ const ENTRY: &str = r#"{
     "blend": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "green": { "type": "count" }, "mint": { "type": "count" } },
       "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": { "arg": "green" }, "event": "green_added" },
         { "change": "transfer", "field": "mint", "from": "this", "into": "this", "into_field": "mint_well", "amount": { "arg": "mint" }, "event": "mint_added" }] },
+    "recover": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "well", "from": "this", "into": "this", "into_field": "amount", "amount": 4, "event": "green_recovered" },
+        { "change": "transfer", "field": "mint_well", "from": "this", "into": "this", "into_field": "mint", "amount": 4, "event": "mint_recovered" }] },
     "to_drops": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
       "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "drops", "amount": 1, "event": "dropped" }] },
     "to_lit": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
@@ -1268,8 +1274,8 @@ fn last_sets(b: &Bench) -> Vec<(Id, u64, Value, Option<i64>)> {
 
 /// #4103: a transfer between two fields of one thing (`into_field`, both ends `"this"`) moves the least of what it
 /// asks and what the source has above its least, as two plain sets (no `by`) in one part, through the tree's commit;
-/// more than the other field's room is refused `no-room` and nothing to move `nothing-to-move`, each writing nothing,
-/// as the reference refuses them. An amount given by a count argument binds as that number. A resend after a restart
+/// more than the other field's room is refused `no-room`, writing nothing, as the reference refuses it; nothing to move
+/// writes both fields as they are. An amount given by a count argument binds as that number. A resend after a restart
 /// moves nothing again, and a fresh observer sees the same.
 #[test]
 fn a_transfer_between_two_fields_of_one_thing_moves_once_in_one_part() {
@@ -1323,11 +1329,19 @@ fn a_transfer_between_two_fields_of_one_thing_moves_once_in_one_part() {
     // The well is full: refused by name, nothing written.
     assert_eq!(run(&mut b, "to_well", &[]), Ok("no-room".into()));
     assert_eq!(amounts(&b), (300, 100));
-    // Asked for more than the well holds: what it holds moves; then nothing is left to move.
+    // Asked for more than the well holds: what it holds moves; then nothing is left to move, which is not refused:
+    // both fields are written as they are.
     assert_eq!(run(&mut b, "from_well", &[]), Ok("done".into()));
     assert_eq!(amounts(&b), (400, 0));
-    assert_eq!(run(&mut b, "from_well", &[]), Ok("nothing-to-move".into()));
+    assert_eq!(run(&mut b, "from_well", &[]), Ok("done".into()));
     assert_eq!(amounts(&b), (400, 0));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, WELL, Value::Uint(0), None),
+            (thing, AMOUNT, Value::Uint(400), None)
+        ]
+    );
     // A field of another thing is not this transfer.
     assert_eq!(
         run(&mut b, "to_other_well", &[]),
@@ -1351,8 +1365,6 @@ fn a_transfer_between_two_fields_of_one_thing_moves_once_in_one_part() {
 /// fields as they are, so its key is in the log and a resend, before and after a restart, is the first receipt.
 #[test]
 fn a_blend_of_no_mint_moves_the_green_and_leaves_the_mint() {
-    const MINT: u64 = 5;
-    const MINT_WELL: u64 = 6;
     let mut b = Bench::new(1, 1, &[8]);
     let thing = id(100);
     let fields = |b: &Bench| {
@@ -1398,6 +1410,77 @@ fn a_blend_of_no_mint_moves_the_green_and_leaves_the_mint() {
     ));
     assert_eq!((fields(&b), b.log.len()), ((5, 3, 7, 1), logged));
     assert_eq!(fields(&replayed(&b, &[8])), (5, 3, 7, 1));
+}
+
+/// #4103 review: a blend of four green and no mint leaves the mint well empty; the recover after it moves the green
+/// back and nothing of the mint, writing the mint's two fields as they are, never refused (the reference's `measure`
+/// takes the least of what is asked and what is there, and only `no_room` refuses), and the caddy blends again. Between
+/// two things the same: a pour from an empty source is done, with its two sets by 0.
+#[test]
+fn a_recover_with_nothing_of_one_leaf_moves_the_other_and_the_caddy_blends_again() {
+    let mut b = Bench::new(1, 1, &[8]);
+    let thing = id(100);
+    let fields = |b: &Bench| {
+        let n = b
+            .tree
+            .node(b.tree.handle(thing).expect("a"))
+            .expect("a node");
+        let int = |f: u64, default: i64| match n.fields().get(&f) {
+            Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
+            _ => default,
+        };
+        (
+            int(AMOUNT, 0),
+            int(WELL, 0),
+            int(MINT, 8),
+            int(MINT_WELL, 0),
+        )
+    };
+    let blend = |green: i64, mint: i64| [("green", Arg::Int(green)), ("mint", Arg::Int(mint))];
+    assert_eq!(run_at(&mut b, "blend", &blend(4, 0), 1), Ok("done".into()));
+    assert_eq!(fields(&b), (4, 4, 8, 0));
+    assert_eq!(run_at(&mut b, "recover", &[], 2), Ok("done".into()));
+    assert_eq!(fields(&b), (8, 0, 8, 0));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, WELL, Value::Uint(0), None),
+            (thing, AMOUNT, Value::Uint(8), None),
+            (thing, MINT_WELL, Value::Uint(0), None),
+            (thing, MINT, Value::Uint(8), None)
+        ]
+    );
+    assert_eq!(run_at(&mut b, "blend", &blend(0, 1), 3), Ok("done".into()));
+    assert_eq!(fields(&b), (8, 0, 7, 1));
+    assert_eq!(fields(&replayed(&b, &[8])), (8, 0, 7, 1));
+
+    let mut b = Bench::new(1, 2, &[0, 950]);
+    let entry = b.entry.clone();
+    let (pitcher, cup) = (id(100), id(101));
+    start(
+        &mut b,
+        &entry,
+        id(2),
+        pitcher,
+        "pour_by",
+        cup,
+        &[("n", Arg::Int(30))],
+        1,
+    )
+    .expect("binds");
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    let how = b.p.forms.ended.pop().expect("ended").how;
+    assert_eq!(how.as_str(), "done");
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (pitcher, AMOUNT, Value::Uint(0), Some(0)),
+            (cup, AMOUNT, Value::Uint(950), Some(0))
+        ]
+    );
 }
 
 /// A transfer's two fields are whole numbers of one unit, as the reference measures them: a field of another unit is

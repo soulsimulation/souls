@@ -7,8 +7,8 @@
 //!   (`field-unknown` when it has none, or it is not an `int`); the two ends' units must be one (`units-differ`). It
 //!   works out one number, as the reference's `measure` does: the least of what was asked and what the source has
 //!   above its least (`"room"` asks the room the target has left). More than that room is refused `no-room`, never
-//!   moved in part; nothing to move for a positive ask is refused `nothing-to-move`; an ask of 0 (a caddy's blend of
-//!   no mint) moves nothing and writes both fields as they are. It writes the source's set (minus it) and the
+//!   moved in part; nothing to move (an ask of 0, or a source at its least) is never refused: it writes both fields
+//!   as they are, as the reference does. It writes the source's set (minus it) and the
 //!   target's (plus it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to
 //!   zero. The two ends' kinds may number the field differently: the tree's balance sums by the field's name (T6
 //!   rule 3.4, E5b). Between two fields of one thing (`into_field`, #4103: a stock into a well) the same one number
@@ -605,18 +605,10 @@ impl Cx<'_> {
                         format!("{} has room for {room}, {moved} asked", show(into)),
                     );
                 }
-                // An ask of 0 (a caddy's blend of no mint) moves nothing: both fields are written as they are, so its
-                // receipt is in the log like any other effect's.
-                if moved <= 0 && *amount != Amount::Units(0) {
-                    return refuse(
-                        "nothing-to-move",
-                        format!(
-                            "{} has {there}, {} has room for {room}",
-                            show(from),
-                            show(into)
-                        ),
-                    );
-                }
+                // Nothing to move (an ask of 0, as a caddy's blend of no mint, or a source at its least, as a caddy's
+                // recover of an empty mint well) is never refused, as the reference never refuses it: both fields are
+                // written as they are, so its receipt is in the log like any other effect's and the form's other
+                // effects stand.
                 // Between two fields of one thing the two sets are plain: the tree balances `by`s by the field's
                 // name, and these are two names. Both come from the one number worked out here.
                 let by = |b: i64| (from != into).then_some(b);
