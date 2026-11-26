@@ -754,6 +754,7 @@ test('pairing asks for the creator scope and keeps the creator\'s token', async 
   } finally { server.close(); }
   assert.equal(asked[0].scope, 'creator');
   assert.equal(asked[0].soul, `creator-${'ab'.repeat(16)}-4`);
+  assert.equal(asked[0].world, 'w', 'a creator\'s request names its world, whose owner the approval checks');
   assert.equal(asked[0].new, undefined);
   const seat = readSeat(at, `c_${'ab'.repeat(16)}-4`);
   assert.deepEqual(seat.grant, { actor: 'creator', scope: 'ab'.repeat(16), counter: 4n });

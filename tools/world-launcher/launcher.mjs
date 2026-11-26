@@ -1738,6 +1738,11 @@ export async function openLauncher(cfg = {}) {
       const agentsRest = cutoverSlug ? path.replace(/^\/(?:w|__sim\/worlds)\/[^/]+/, '') : '';
       if (cutoverWorld && /^\/v1\/account\/agents(?:\/[^/]{1,128}\/revoke)?$/.test(agentsRest) && cutover.v2Stream(cutoverWorld)) { await movedAgents(req, res, agentsRest); return; }
       if (cutoverWorld && agentsRest === '/v1/account/session' && cutover.v2Stream(cutoverWorld)) { await movedSession(req, res); return; }
+      // 26 Nov: and before it, a world with no old twin answers its agents as the front door routes a moved world's: the
+      // bootstrap they pair from, and its gateway's paths at its own gatewayd (cutover.mjs `agent`)
+      const agent = cutoverWorld?.routeOnly ? cutover.agent(cutoverWorld.slug, agentsRest) : null;
+      if (agent?.bootstrap) { if (req.method === 'GET' || req.method === 'HEAD') json(res, 200, agent.bootstrap, { 'x-content-type-options': 'nosniff' }); else json(res, 405, { refused: 'read-only' }); return; }
+      if (agent) { if (agent.port) proxyHttp(req, res, agent.port, { path: agentsRest + url.search, noindex: true }); else json(res, 503, { refused: 'world-routing-unconfigured' }); return; }
       if (cutoverWorld && cutover.handle(req, res, cutoverWorld, url, { cold: oldCold(cutoverWorld), config: () => movedConfig(cutoverWorld) })) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
@@ -2077,6 +2082,10 @@ export async function openLauncher(cfg = {}) {
     const u = req.url ?? '', rel = !B ? u : u.startsWith(`${B}/`) ? u.slice(B.length) : '';
     const slug = rel.match(/^\/w\/([a-z][a-z0-9-]{0,31})(?:[/?]|$)/)?.[1];
     const w = slug && !closing.has(slug) && registry.get(slug);
+    // 26 Nov: a world with no old twin: its agents' socket goes to its own gatewayd (cutover.mjs `agent`), at /v2/ws
+    const only = !w && /^\/w\/([a-z0-9][a-z0-9-]{0,62})\/v2\/ws(\?free=1)?$/.exec(rel);
+    const agent = only && routeOnlyWorld(only[1]) ? cutover?.agent(only[1], '/v2/ws') : null;
+    if (agent?.port) { req.url = `/v2/ws${only[2] ?? ''}`; pipeUpgrade(req, socket, head, agent.port); return; }
     if (!w) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     // lane L1: WebSockets count toward the address's concurrent ceiling
     const slot = ceilings.socket(slug, behindProxy ? addressKey(req.headers['x-forwarded-for']) : null);   // #2543
