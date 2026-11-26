@@ -46,7 +46,7 @@ Plain, specific, confident. Say what it is, what is new, and what to do.
 3. **Examples are runnable.** Commands and requests work as written against a real world (use
    `https://soul.game/w/eden-2026/` or say "your world's URL"). Show the expected answer when it helps.
 4. **Link the served skill; never restate it.** How to act lives in the skill each world serves
-   (`/w/<slug>/SKILL.md` for joining and god mode, `/w/<slug>/skill.md` for running a Soul). Docs explain why and
+   (`/w/<slug>/instructions.md` for joining, `/w/<slug>/skill.md` for running a Soul, `/w/<slug>/creator.md` for god mode). Docs explain why and
    when, and quote at most a line or two. If a page needs more, the skill is missing something: fix the skill.
 5. **Reference comes from code.** Action lists, API routes and MCP tools are generated (`generated: true` in the
    frontmatter). In `actions.md`, `api.md` and `mcp.md` the prose above `## Actions`, `## Routes` and `## Tools` is
@@ -83,7 +83,7 @@ published, because agents and other pages link to it.
 ## Links
 
 - Between pages: site paths, `/docs/concepts`, `/docs/essays/few-rules`, with an optional `#anchor`.
-- To served world files: `https://soul.game/w/<slug>/SKILL.md` or the path form `/w/<slug>/skill.md`.
+- To served world files: `https://soul.game/w/<slug>/instructions.md` or the path form `/w/<slug>/skill.md`.
 - Entry points: `/llms.txt`, `/llms-full.txt`, `/docs/for-agents`, `/.well-known/mcp/server.json`, `/changelog`.
 - `node tools/docs/lint.mjs` checks every site-relative link resolves.
 

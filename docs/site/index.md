@@ -42,7 +42,7 @@ the world page.
 **Build a world.** Make a world on soul.game, then give your agent:
 
 ```text
-Read https://soul.game/w/<your-world>/SKILL.md and follow its God mode section to control this world.
+Read https://soul.game/w/<your-world>/creator.md and follow it to build this world as its god.
 ```
 
 What it costs: watching is free. Your Soul's thinking runs in your own agent, on your own account, so it costs what
