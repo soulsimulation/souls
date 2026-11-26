@@ -35,8 +35,8 @@ import {BringAgent} from './BringAgent.tsx';
 import {OldWorldApprovals} from './OldWorldApprovals.tsx';
 import {useV2AccountSouls,v2World} from './v2-engine/owner-mailbox.ts';  // a moved world's Soul requests are the directory's (V2PairDialog.tsx)
 import {answerApprovalTabs,approvalChannelName,approvalFromHash,askOpenTab} from './approval-link.ts';
-import {useApprovalFollow} from './useApprovalFollow.ts';
-import {FOLLOW_SOUL_WAIT_MS,cameraOnSoul,onFollowSoulRequest,onSoulPresentQuery,requestFollowSoul} from './follow-soul-request.ts';
+import {useApprovalFollow,useFollowHold} from './useApprovalFollow.ts';
+import {FOLLOW_SOUL_WAIT_MS,cameraOnSoul,onBroadcastChosen,onFollowSoulRequest,onSoulPresentQuery,requestFollowSoul} from './follow-soul-request.ts';
 import {onLookAtRequest} from './look-at-request.ts';
 import {worldClockAt,worldMinutes,worldTimeText} from './world-clock.ts';
 import type { WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
@@ -163,7 +163,12 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   const handleRef=useRef<WorldViewerHandle|null>(null);handleRef.current=viewerHandle;
   // the approval card's "your Soul is arriving…" ends when the Soul's body is in this window's copy (V2PairDialog.tsx)
   useEffect(()=>onSoulPresentQuery(id=>{const r=sim.conn.replica,s=r.souls.get(id);return !!s&&!!r.entities[s.entityId];}),[]);// eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>onFollowSoulRequest((soulId,approved)=>{if(approved&&!meRef.current?.souls.includes(soulId))refreshMe(sim);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
+  // 0.137: a #soul link and the owner's Soul after pairing stay followed until the viewer chooses otherwise (useFollowHold)
+  const [followHold,setFollowHold]=useState<string|null>(()=>hashTab().soul??null);
+  const releaseFollowHold=useCallback(()=>setFollowHold(null),[]);
+  useEffect(()=>onBroadcastChosen(releaseFollowHold),[releaseFollowHold]);
+  useFollowHold(followHold,viewerHandle,viewerState,releaseFollowHold);
+  useEffect(()=>onFollowSoulRequest((soulId,approved)=>{if(approved&&!meRef.current?.souls.includes(soulId))refreshMe(sim);if(approved)setFollowHold(soulId);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
   // #2466: the homepage's My Souls opens <world>?follow=1#soul/<id>: the camera follows that Soul, not only selects it
   // First day (25 Nov): any page opened on #soul/<id> puts the camera on that Soul (it opened the card, the camera stayed elsewhere)
   useEffect(()=>{const soul=hashTab().soul;if(soul)requestFollowSoul(soul);},[]);

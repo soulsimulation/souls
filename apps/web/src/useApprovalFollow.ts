@@ -1,5 +1,6 @@
 import {useEffect} from 'react';
 import type {WorldViewerHandle,WorldViewerState} from './WorldViewer.ts';
+import {followHoldStep} from './follow-soul-request.ts';
 
 /** Approval confirms server readiness; playback can still depict an older take. */
 export function useApprovalFollow(pending:{soulId:string;scope:string}|null,scope:string,authed:boolean,handle:WorldViewerHandle|null,state:WorldViewerState|null,complete:(followed:boolean)=>void){
@@ -17,4 +18,19 @@ export function useApprovalFollow(pending:{soulId:string;scope:string}|null,scop
     const timer=setInterval(attempt,500);
     return()=>clearInterval(timer);
   },[pending,scope,authed,handle,state]);
+}
+
+/** A #soul link or the owner's Soul after pairing (follow-soul-request.ts followHoldStep): while the camera is on Broadcast
+ *  the viewer did not choose, follow `soulId` again; `release` when the viewer chose something else. */
+export function useFollowHold(soulId:string|null,handle:WorldViewerHandle|null,state:WorldViewerState|null,release:()=>void){
+  const step=soulId?followHoldStep(soulId,state):'keep';
+  useEffect(()=>{
+    if(!soulId)return;
+    if(step==='release'){release();return;}
+    if(step!=='refollow')return;
+    const attempt=()=>{if(handle?.canFollowSoul?.(soulId)&&handle.selectSoul(soulId))handle.setCameraMode('follow');};
+    attempt();
+    const timer=setInterval(attempt,500);
+    return()=>clearInterval(timer);
+  },[soulId,step,handle,release]);
 }
