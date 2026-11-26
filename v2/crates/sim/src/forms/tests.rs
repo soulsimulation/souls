@@ -2778,7 +2778,12 @@ fn i4187_a_waiting_act_is_turned_with_its_thing_once() {
     use skills::form_runner::Step;
     let (entry, form) = entries().remove(0);
     let yaw = 90_000;
-    let turned = |p: Vec3| Quat::from_yaw_mdeg(yaw).expect("a turn").rotate(p).expect("turns");
+    let turned = |p: Vec3| {
+        Quat::from_yaw_mdeg(yaw)
+            .expect("a turn")
+            .rotate(p)
+            .expect("turns")
+    };
     let stand = |b: &Bench, run| match b.forms.runs.get(&run).and_then(|fr| fr.runner.step()) {
         Some(Step::WalkTo { at, .. }) => Some(*at),
         _ => None,
@@ -2800,8 +2805,14 @@ fn i4187_a_waiting_act_is_turned_with_its_thing_once() {
         };
         match case {
             "mid-sit" => {
-                b.steps(body, chair, vec![sit, Step::Wait(500_000)], intent(body, 0), limits)
-                    .expect("started");
+                b.steps(
+                    body,
+                    chair,
+                    vec![sit, Step::Wait(500_000)],
+                    intent(body, 0),
+                    limits,
+                )
+                .expect("started");
                 b.until_moving(body, 0);
             }
             "mid-rise" => {
@@ -2841,8 +2852,14 @@ fn i4187_a_waiting_act_is_turned_with_its_thing_once() {
     }
     let want = turned(points(&entry)["stand"]);
     for (case, goal, off) in seen {
-        assert_eq!(goal, want, "{case}: the stand point turned once with the bell");
-        assert!(off < 100_000, "{case}: arrived at the turned stand point, {off} µm off");
+        assert_eq!(
+            goal, want,
+            "{case}: the stand point turned once with the bell"
+        );
+        assert!(
+            off < 100_000,
+            "{case}: arrived at the turned stand point, {off} µm off"
+        );
     }
 }
 
