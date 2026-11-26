@@ -4064,7 +4064,7 @@ fn serve(args: &[String]) -> R<()> {
     worldd::directory::watch(told, world.events.clone(), answers);
     crate::watchdog::watch(
         world.beat.clone(),
-        crate::watchdog::Real::start(),
+        crate::watchdog::Real::start().ahead(world.ahead),
         crate::watchdog::LIMIT_MS,
     );
     let views_dir = views.clone();

@@ -254,7 +254,7 @@ pub fn run(args: &[String]) -> i32 {
         .unwrap_or(crate::watchdog::HARD_MS);
     crate::watchdog::watch_to(
         world.beat.clone(),
-        crate::watchdog::Real::start(),
+        crate::watchdog::Real::start().ahead(world.ahead),
         limit,
         hard,
     );
