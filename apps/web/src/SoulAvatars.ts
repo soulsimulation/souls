@@ -8,11 +8,13 @@ export function wantPortrait(id:string){soulAvatars.wanted.set(id,(soulAvatars.w
 export const PORTRAIT_TINTS=['#c4dcf2','#c4e6cf','#d6cdef','#bfe3e6','#d6e6bd','#c9d1f3','#ebcbe5','#efe6b8','#f2cdd6'] as const;
 /** The Soul's portrait background: FNV-1a of its id, mixed, into PORTRAIT_TINTS (stable across renders, browsers and the server). */
 export function portraitTint(id:string):string{let h=0x811c9dc5;for(let i=0;i<id.length;i++){h^=id.charCodeAt(i);h=Math.imul(h,0x01000193);}h=Math.imul(h^h>>>16,0x85ebca6b);h=Math.imul(h^h>>>13,0xc2b2ae35);h^=h>>>16;/* a final mix: ids that differ only at the end spread too */return PORTRAIT_TINTS[(h>>>0)%PORTRAIT_TINTS.length];}
+/** Where a portrait's camera looks from, relative to its target: in front of the body (+X) and a little to its side. */
+const PORTRAIT_VIEW=new THREE.Vector3(1,.08,.45).normalize();
 const activityProp=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(p.name.startsWith('activity prop:'))return true;return false;};
 /** Fit visible portrait geometry and aim at its actual head, independent of world pose/hidden helpers. */
 export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
- root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;root.updateMatrixWorld(true);const box=new THREE.Box3(),skins:THREE.SkinnedMesh[]=[],hiddenBones=new Set<THREE.Object3D>();let head:THREE.Object3D|null=null;
- root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible){if((o as THREE.SkinnedMesh).isSkinnedMesh)for(const b of (o as THREE.SkinnedMesh).skeleton.bones)hiddenBones.add(b);return;}if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
+ root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;root.updateMatrixWorld(true);const box=new THREE.Box3(),skins:THREE.SkinnedMesh[]=[],hiddenBones=new Set<THREE.Object3D>(),face=new THREE.Box3();let head:THREE.Object3D|null=null;
+ root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible){if((o as THREE.SkinnedMesh).isSkinnedMesh)for(const b of (o as THREE.SkinnedMesh).skeleton.bones)hiddenBones.add(b);return;}if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if(o.userData.portraitFace)face.union(new THREE.Box3().setFromObject(o));if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
  // a head bone only a hidden skin follows (a rigid mesh such as the ghost, carried by a hidden rig) is not this body's head
  if(head&&hiddenBones.has(head)&&!skins.some(s=>s.skeleton.bones.includes(head as THREE.Bone)))head=null;
  if(box.isEmpty()||![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite))return null;const size=box.getSize(new THREE.Vector3()),target=box.getCenter(new THREE.Vector3());
@@ -25,6 +27,10 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.15-height/2;slack=1.05;}
  else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=skins.length?1:1.4;/* a plain mesh on a bone (the ghost): its outline, not a face, sets the edge */}
  else if(!rigid)target.y=box.max.y-size.y*.17;
+ // a creature marks its face (a head, a snail's eye stalks): frame it as seen from the portrait's view, 1.3x, and a little below
+ if(rigid&&!face.isEmpty()){const r=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),u=new THREE.Vector3().crossVectors(PORTRAIT_VIEW,r),mid=face.getCenter(new THREE.Vector3()),c=new THREE.Vector3();let w=0,h=0;
+  for(let i=0;i<8;i++){c.set(i&1?face.max.x:face.min.x,i&2?face.max.y:face.min.y,i&4?face.max.z:face.min.z).sub(mid);w=Math.max(w,Math.abs(c.dot(r)));h=Math.max(h,Math.abs(c.dot(u)));}
+  height=Math.min(2.6*Math.max(w,h),height);target.copy(mid);target.y-=height*.1;slack=1;}
  return{box,target,height,slack};
 }
 /** World box of the skinned vertices that follow `head` or a bone under it most (their largest skin weight), or null. */
@@ -60,7 +66,7 @@ export class WorldSoulAvatars{
    // the frame's height is `height` at the target, with the view's slack, seen from a three-quarter view
    const distance=height*slack/(2*Math.tan(this.camera.fov*Math.PI/360));
    // Both rigs and canonical ceramic heads face local +X after their model adapter.
-   this.camera.position.copy(target).add(new THREE.Vector3(1,.08,.45).normalize().multiplyScalar(distance));this.camera.lookAt(target);this.scene.background=new THREE.Color(portraitTint(id));
+   this.camera.position.copy(target).addScaledVector(PORTRAIT_VIEW,distance);this.camera.lookAt(target);this.scene.background=new THREE.Color(portraitTint(id));
    const renderer=this.renderer,previous=renderer.getRenderTarget(),viewport=renderer.getViewport(new THREE.Vector4()),scissor=renderer.getScissor(new THREE.Vector4()),scissorTest=renderer.getScissorTest(),autoClear=renderer.autoClear;
    // setRenderTarget uses physical96px even on a Retina world canvas; setViewport would multiply by its pixel ratio.
    // The copy into a pixel buffer is queued here, before the target is used again; only the wait for it is later.
