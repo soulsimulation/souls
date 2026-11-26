@@ -2,7 +2,7 @@ import {useEffect,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {MENU_SOULS_SHOWN,menuSoulsShown,menuSoulsSlot,subscribeMenuSoulsSlot} from './hud-menu.ts';
 import {NavbarMenu} from './NavbarMenu.tsx';
-import {orderedSoulIds,readSoulRecency,selectedSoulIds} from './soul-recency.ts';
+import {freshSoulIds,orderedSoulIds,readSeenSouls,readSoulRecency,selectedSoulIds,writeSeenSouls} from './soul-recency.ts';
 import type {PublicSoul} from '@souls/protocol';
 import {worldKey,worldPath} from './world-path.ts';
 import {requestSoulConversations} from './dialogue-speaking.ts';
@@ -45,6 +45,8 @@ export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,rece
  const remember=(id:string)=>setRecent(prev=>selectedSoulIds(id,prev,ids));
  useEffect(()=>{if(!ids.length)return;try{localStorage.setItem(recencyKey,JSON.stringify(recent.filter(id=>ids.includes(id))));}catch{}},[recent,recencyKey,ids.join(',')]);
  useEffect(()=>{if(selectedId&&ids.includes(selectedId))remember(selectedId);},[selectedId,ids.join(',')]);
+ // First day (26 Nov): a Soul this browser has not listed before (just paired) comes first, so the avatars show it
+ useEffect(()=>{if(!ids.length)return;const seenKey=recencyKey+'.seen',seen=readSeenSouls(seenKey),fresh=freshSoulIds(ids,seen);writeSeenSouls(seenKey,ids,seen);if(fresh.length)setRecent(prev=>orderedSoulIds(ids,[...fresh,...prev]));},[ids.join(','),recencyKey]);
  // First day (25 Nov): an owned Soul with no body in this world's view yet is listed as arriving, never left out
  const pinned=orderedSoulIds(ids,recent).flatMap(id=>{const soul=souls.get(id);return soul?[soul]:arriving?.has(id)&&ID.test(id)?[{id,name:arriving.get(id)??'Your new Soul'} as PublicSoul]:[];});
  const agent=useOwnedAgentPresence(api,pinned.slice(0,3).map(s=>s.id));
