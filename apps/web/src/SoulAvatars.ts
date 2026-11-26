@@ -15,12 +15,12 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible)return;if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
  if(box.isEmpty()||![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite))return null;const size=box.getSize(new THREE.Vector3()),target=box.getCenter(new THREE.Vector3());
  // #5039: frame the head and the top of the shoulders. With skinned meshes the head is what is skinned to the head bone
- // (face, hair, a hat; Pip's big eyes): the frame is 1.8x its height (1.4x its width when wider), its top a tenth of
+ // (face, hair, a hat; Pip's big eyes): the frame is 1.8x its height (1.4x its width when wider), its top 15 % of
  // the head over the crown. Without (a bone and plain meshes), h is the height above the head joint, bounded by the
  // body's size, the frame from 0.75 h under the joint to 0.12 h over the crown. Either way at most 45 % of the body.
- let height=rigid?Math.max(size.x,size.y,size.z):Math.max(size.y*.42,size.x*.85),slack=rigid?1.05:1.25;
+ let height=rigid?Math.max(size.x,size.y,size.z):Math.max(size.y*.42,size.x*.85),slack=rigid?1.05:1.4;
  const headBox=!rigid&&head&&skins.length?skinnedTo(head,skins):null;
- if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.1-height/2;slack=1;}
+ if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.15-height/2;slack=1.05;}
  else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=1;}
  else if(!rigid)target.y=box.max.y-size.y*.17;
  return{box,target,height,slack};
