@@ -91,6 +91,17 @@ export type ClipOrigin = {
   drawn?: DrawnOrigin;
 };
 type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion };
+function poseBones(model:THREE.Object3D) {
+  const joints:THREE.Object3D[]=[];model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});return joints;
+}
+function drawnOrigin(model:THREE.Object3D,holder:THREE.Object3D,root:THREE.Vector3,nativeQ:THREE.Quaternion):DrawnOrigin {
+  return {bones:poseBones(model).map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:holder.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(holder.quaternion)};
+}
+function blendDrawn(holder:THREE.Object3D,joints:THREE.Object3D[],target:{bones:DrawnOrigin['bones'];p:THREE.Vector3;q:THREE.Quaternion},origin:DrawnOrigin,k:number,root:THREE.Vector3,nativeQ:THREE.Quaternion){
+  target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin.bones[i].q,s.q,k);});
+  holder.position.copy(root).add(origin.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));
+  holder.quaternion.copy(nativeQ).multiply(origin.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));holder.updateMatrixWorld(true);
+}
 type View = {
   postureOrigins?: Map<string, DrawnOrigin>;
   clipOrigins?: Map<string, DrawnOrigin>;
@@ -1718,7 +1729,7 @@ export class HumanViews {
 
   private blendClipOrigin(v: View, c: ClipOrigin, time: number, sourcePose: boolean) {
     const h=v.rig.holder, root=new THREE.Vector3(...v.cur.p), nativeQ=new THREE.Quaternion().setFromAxisAngle(UP,-v.cur.yaw);
-    const joints:THREE.Object3D[]=[];v.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});
+    const joints=poseBones(v.rig.model);
     const target={bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
     if(v.clipContext!==c.context){v.clipOrigins?.clear();v.clipContext=c.context;}
     const cache=v.clipOrigins??=new Map();let origin=c.drawn;
@@ -1737,8 +1748,7 @@ export class HumanViews {
             const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,
               ...(origin&&prior?{clipOrigin:{age:prior.age,sample:prior.sample,drawn:origin}}:{})};
             evaluator.setFrame([sample],boundary-source.offset);evaluator.render(1);
-            const old=evaluator.bodyObject(h.name)!;const bones:THREE.Object3D[]=[];old.traverse(o=>{if((o as THREE.Bone).isBone)bones.push(o);});
-            origin={bones:bones.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:old.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(old.quaternion)};
+            const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
             if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
           }
         } finally {evaluator.clear();}
@@ -1746,9 +1756,7 @@ export class HumanViews {
     }
     if(!origin)return;
     const k=smooth(c.age/CLIP_FADE);
-    target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin.bones[i].q,s.q,k);});
-    h.position.copy(root).add(origin.offset.clone().lerp(target.p.sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));
-    h.quaternion.copy(nativeQ).multiply(origin.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));h.updateMatrixWorld(true);
+    blendDrawn(h,joints,target,origin,k,root,nativeQ);
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
@@ -1761,7 +1769,7 @@ export class HumanViews {
     const key = JSON.stringify([Math.round(boundary*1e6),pc.from,pc.fromBase,pc.fromAge,before,v.cur.p,v.cur.yaw,pc.fromWalk??null,phase],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
     const cache = v.postureOrigins ??= new Map();
     let origin = cache.get(key);
-    const joints:THREE.Object3D[]=[];v.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});
+    const joints=poseBones(v.rig.model);
     const target = {bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
     const root = new THREE.Vector3(...v.cur.p);
     if (!origin) {
@@ -1775,15 +1783,13 @@ export class HumanViews {
         restAge:REST_ACTS.has(from)?age:undefined,restFrom:REST_ACTS.has(from)&&age!==undefined?boundary-age:undefined});
       try {
         evaluator.pose(old,1,undefined,true);
-        const sourceJoints:THREE.Object3D[]=[];old.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)sourceJoints.push(o);});
-        origin={bones:sourceJoints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:old.rig.holder.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(old.rig.holder.quaternion)};
+        origin=drawnOrigin(old.rig.model,old.rig.holder,root,nativeQ);
       } finally { evaluator.clear(); }
       // Cache only values derived from immutable boundaries. Eviction changes cost, never the evaluated pose.
       if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key,origin!);}
     }
     const k=smooth((pc.age-phase)/ACT_BLEND);
-    target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin!.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin!.bones[i].q,s.q,k);});
-    h.position.copy(root).add(origin!.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));h.quaternion.copy(nativeQ).multiply(origin!.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));h.updateMatrixWorld(true);
+    blendDrawn(h,joints,target,origin!,k,root,nativeQ);
   }
 
   /**
