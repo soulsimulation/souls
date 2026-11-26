@@ -24,7 +24,7 @@ test('an early departure that ends everyone’s dance fails before a success rep
       calls.push([index, ...words]);
       if (words[0] === 'say') return { ok: true, sequence: 1, to: { sequence: 2 } };
       if (words[0] === 'events') return { events: [{ kind: 'heard', words: calls.findLast((row) => row[1] === 'say')?.[2] }] };
-      if (words[0] === 'inspect') return { state: { on: false } };
+      if (words[0] === 'inspect') return { state: { on: 0 } };
       if (words[0] === 'look') return { ok: true, doing: calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
       return receipt();
     },
@@ -37,7 +37,7 @@ test('an early departure that ends everyone’s dance fails before a success rep
   const seats = Array.from({length:5},(_,i)=>({label:String(i),body:`body-${i}`,cli:async(...words)=>{
     if(words[0]==='say') return {ok:true,sequence:1,to:{sequence:2}};
     if(words[0]==='events') return {events:[{kind:'heard',words:i===1?'Welcome! Would you like to dance?':'Yes, let us dance together!'}]};
-    if(words[0]==='inspect') return {state:{on:true}};
+    if(words[0]==='inspect') return {state:{on:1}};
     return receipt();
   }}));
   await assert.rejects(performParty({seats,jukebox:'jukebox',mode:'silent',pause:async()=>{}}),/remain off/);

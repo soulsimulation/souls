@@ -80,7 +80,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
     await walk(operator, guests[0].body);
   } else {
     const music = await command(operator, 'inspect', jukebox);
-    assert.equal(music.state?.on, false, 'silent mode requires the jukebox to remain off');
+    assert(music.state?.on === false || music.state?.on === 0, 'silent mode requires the jukebox to remain off');
   }
   completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
   for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
@@ -101,7 +101,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   if (mode === 'jukebox') await act(operator, 'switch_off', jukebox);
   else {
     const music = await command(operator, 'inspect', jukebox);
-    assert.equal(music.state?.on, false, 'silent mode must finish with the jukebox off');
+    assert(music.state?.on === false || music.state?.on === 0, 'silent mode must finish with the jukebox off');
   }
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
