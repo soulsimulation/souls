@@ -416,7 +416,11 @@ impl Follow {
         pace: i64,
         offset: [i64; 2],
     ) -> Progress {
-        let place = Vec3::new(them.x + offset[0], me.y, them.z + offset[1]);
+        let place = Vec3::new(
+            them.x.saturating_add(offset[0]),
+            me.y,
+            them.z.saturating_add(offset[1]),
+        );
         let gap = apart(me, place);
         if self.lost(host, gap > LET_GO) {
             return Progress::Failed(name(LOST_PLACE));

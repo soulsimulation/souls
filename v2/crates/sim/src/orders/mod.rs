@@ -59,6 +59,9 @@ type R<T> = Result<T, Refusal>;
 pub const LONGEST: Micros = 3_600_000_000;
 /// A follow's band when the intent names none, µm: nearest and furthest along the leader's trail.
 pub const BAND: (i64, i64) = (1_000_000, 2_500_000);
+/// The farthest a follow's place may be from its leader, µm, beside or at an offset on either axis: well past a crew's
+/// widest span, and far from where a step's sum could overflow.
+pub const PLACE_MOST: i64 = 20_000_000;
 /// A queue's head counts as on the stand point this near, µm.
 pub const ARRIVED: i64 = 50_000;
 /// The most spots tried along a line.
@@ -244,14 +247,24 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
             let far = p.get(&2).map_or(Some(BAND.1), read_int);
             let beside = match p.get(&3).map(read_int) {
                 None => None,
-                Some(Some(w)) if w > 0 => Some(w),
-                Some(_) => return bad("a place beside is a width over 0, µm"),
+                Some(Some(w)) if w > 0 && w <= PLACE_MOST => Some(w),
+                Some(_) => return bad("a place beside is a width over 0, µm, at most 20 m"),
             };
             let at = match p.get(&4) {
                 None => None,
                 Some(Value::Array(a)) => match a.iter().map(read_int).collect::<Option<Vec<_>>>() {
-                    Some(v) if v.len() == 2 && beside.is_none() => Some([v[0], v[1]]),
-                    _ => return bad("a place at is [x, z] µm from the leader, and not beside"),
+                    Some(v)
+                        if v.len() == 2
+                            && beside.is_none()
+                            && v.iter().all(|c| c.abs() <= PLACE_MOST) =>
+                    {
+                        Some([v[0], v[1]])
+                    }
+                    _ => {
+                        return bad(
+                            "a place at is [x, z] µm from the leader, each at most 20 m, and not beside",
+                        );
+                    }
                 },
                 Some(_) => return bad("a place at is [x, z] µm from the leader"),
             };
