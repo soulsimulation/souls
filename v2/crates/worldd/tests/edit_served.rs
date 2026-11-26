@@ -7055,6 +7055,103 @@ fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
     );
 }
 
+/// What the public stream spends on parts that touch a kind the release added (#4954 review): Eden after the upgrade,
+/// its two Souls offering, accepting and leaving the group gesture `SOULS_GESTURES` times (default 100), each part
+/// touching the gesture's node, a kind its header does not pin. Run with `STREAM_PROFILE=1` (and `--release`); prints
+/// the stream writer's profile lines (`public-stream profile:` with its whole cuts and its stages' time). Needs the Eden
+/// facts file (`EDEN_FACTS`).
+#[test]
+#[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
+fn eden_gesture_parts_on_the_public_stream() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let times: u64 = std::env::var("SOULS_GESTURES")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(100);
+    let d = scratch("added-eden-stream");
+    let (old, release) = library_before_the_gestures(&d);
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
+        "added-eden-stream-w",
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &old,
+        &release,
+        (52, 3),
+    );
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let (a, b) = (w.souls[0], w.souls[1]);
+    let body_b = body_of(&w, b);
+    let pinned = pinned_activity(&w, &activity);
+    let mut seq = 3;
+    let leave = |souls: &mut UnixStream, seq: u64, gesture: Id| {
+        for soul in [b, a] {
+            let left = intent_on(
+                souls,
+                &w,
+                soul,
+                seq,
+                "activity:leave",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(left.kind, 1, "left: {left:?}");
+        }
+    };
+    leave(&mut souls, seq, open);
+    let t = Instant::now();
+    for _ in 0..times {
+        seq += 1;
+        let offered = intent_on(
+            &mut souls,
+            &w,
+            a,
+            seq,
+            "activity:offer",
+            w.ground,
+            BTreeMap::from([
+                (1, pinned.clone()),
+                (2, Value::Text(Name::new("eden:one").unwrap())),
+                (3, Value::Array(vec![body_b.to_value()])),
+            ]),
+        );
+        assert_eq!(offered.kind, 1, "offered: {offered:?}");
+        let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+        let accepted = intent_on(
+            &mut souls,
+            &w,
+            b,
+            seq,
+            "activity:accept",
+            gesture,
+            BTreeMap::new(),
+        );
+        assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        seq += 1;
+        leave(&mut souls, seq, gesture);
+    }
+    println!(
+        "{times} gestures offered, accepted and left in {:?}",
+        t.elapsed()
+    );
+    // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.
+    let end = Instant::now() + Duration::from_secs(30);
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match s.lines.recv_timeout(left) {
+            Ok(l) if l.starts_with("public-stream profile: ") => println!("{l}"),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+}
+
 /// [`a_gesture_added_by_the_upgrade_starts`] on an older Mars world's facts, its library before the group gestures.
 /// Needs the Mars template's facts file (`MARS_FACTS`, else `.local/import-eden/mars-two.facts.json`; `tests/mars.rs`).
 #[test]
