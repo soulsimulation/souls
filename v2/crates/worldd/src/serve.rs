@@ -637,9 +637,9 @@ fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: 
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
 ///
-/// With the facts' terrain when it read it (S12): the punts change no ground, so [`with_rides`] reads it from here
-/// rather than loading the facts again.
-fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> {
+/// With the facts' waters and terrain when it read them (S12): the punts change no ground, so [`with_rides`] reads them
+/// from here rather than loading the facts again.
+fn with_punts(facts: &str) -> R<(String, Option<Waters>)> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
         return Ok((facts.to_owned(), None));
@@ -662,7 +662,7 @@ fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> 
         view.stand_near(ground, p, 0, None).is_some()
     });
     if moorings.is_empty() {
-        return Ok((facts.to_owned(), Some(terrain)));
+        return Ok((facts.to_owned(), Some((waters, terrain))));
     }
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
@@ -756,7 +756,23 @@ fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> 
             _ => return Err(format!("the facts have no '{key}' list")),
         }
     }
-    Ok((f.to_json(), Some(terrain)))
+    Ok((f.to_json(), Some((waters, terrain))))
+}
+
+/// The open ground's standing and running waters and its terrain (`sim::courses::punts::waters_of`).
+type Waters = (Vec<sim::ground::Water>, Option<sim::ground::Terrain>);
+
+/// The water speed of a boat's entry, µm a second: its `vehicle` on `deep_water` (`content/kinds/vehicles`: a rowing
+/// boat, a canoe), read from the entry's data, never its kind's name. `None` for anything else.
+fn boat_speed(entry: &Json) -> Option<i64> {
+    let v = entry.get("vehicle")?;
+    if v.get("ground").and_then(Json::str) != Some("deep_water") {
+        return None;
+    }
+    match v.get("speed_mm_s")? {
+        Json::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000).filter(|s| *s > 0),
+        _ => None,
+    }
 }
 
 /// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
@@ -821,28 +837,34 @@ fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
 /// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
 /// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
-/// `terrain` is the facts' ground's terrain when [`with_punts`] read it, else it is read here.
-fn with_rides(
-    facts: &str,
-    entries: &[(String, Json)],
-    terrain: Option<Option<sim::ground::Terrain>>,
-) -> R<String> {
+///
+/// Boats too: each thing on the ground whose entry has a `vehicle` on `deep_water` ([`boat_speed`]: a rowing boat, a
+/// canoe) and that floats where it stands (`sim::courses::punts::floating`) gets a course that stands at its mooring for
+/// good, run at its entry's speed. That makes it a carrier a seated rider steers over the water (`carrier:steer`,
+/// `worldd::carrier`) and lands back at that mooring, its landing, where riders board and get off. A boat on dry
+/// ground gets none. `waters` are the facts' ground's waters and terrain when [`with_punts`] read them, else they are
+/// read here.
+fn with_rides(facts: &str, entries: &[(String, Json)], waters: Option<Waters>) -> R<String> {
     let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
         .iter()
         .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
         .filter(|(_, r)| r.loops_aloft())
         .collect();
-    if rides.is_empty() {
+    let boats: BTreeMap<&str, i64> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), boat_speed(e)?)))
+        .collect();
+    if rides.is_empty() && boats.is_empty() {
         return Ok(facts.to_owned());
     }
-    let terrain = match terrain {
-        Some(t) => t,
+    let (waters, terrain) = match waters {
+        Some(w) => w,
         None => {
             let im = import_eden::load(facts)?;
             let Some(&ground) = im.nodes.get("ground") else {
                 return Ok(facts.to_owned());
             };
-            sim::ground::Terrain::of(&im.tree, ground)?
+            sim::courses::punts::waters_of(&im.tree, ground)?
         }
     };
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
@@ -880,17 +902,18 @@ fn with_rides(
             .get("entry")
             .and_then(Json::str)
             .map(|e| replica::world_model::plain(e).to_owned());
-        let Some(ride) = own
-            .or_else(|| {
-                t.get("def")
-                    .and_then(Json::str)
-                    .and_then(|d| names.get(d))
-                    .cloned()
-            })
-            .and_then(|n| rides.get(n.as_str()))
-        else {
+        let Some(entry) = own.or_else(|| {
+            t.get("def")
+                .and_then(Json::str)
+                .and_then(|d| names.get(d))
+                .cloned()
+        }) else {
             continue;
         };
+        let (ride, boat) = (rides.get(entry.as_str()), boats.get(entry.as_str()));
+        if ride.is_none() && boat.is_none() {
+            continue;
+        }
         let Some([x, y, z]) = t
             .get("world")
             .and_then(Json::arr)
@@ -902,24 +925,47 @@ fn with_rides(
             continue;
         }
         let home = Vec3::new(x * 1000, y * 1000, z * 1000);
-        let t0 = k * 60_000_000;
-        let Some(c) = sim::courses::rides::course(
-            ride,
-            home,
-            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
-            t0,
-        ) else {
-            continue;
+        let c = if let Some(ride) = ride {
+            let t0 = k * 60_000_000;
+            let Some(c) = sim::courses::rides::course(
+                ride,
+                home,
+                |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+                t0,
+            ) else {
+                continue;
+            };
+            k += 1;
+            println!(
+                "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+                t.get("name").and_then(Json::str).unwrap_or("?"),
+                home.x as f64 / 1e6,
+                home.z as f64 / 1e6,
+                c.load().map_or(0, |t| t.period),
+                c.t0
+            );
+            c
+        } else {
+            let speed = boat.copied().unwrap_or(sim::courses::punts::ROWING);
+            if !sim::courses::punts::floating(&waters, terrain.as_ref(), home.x, home.z) {
+                continue;
+            }
+            let Ok(c) = sim::courses::punts::once_through(home, &[], 0, speed) else {
+                continue;
+            };
+            println!(
+                "boat: {} moored at {:.3},{:.3} m",
+                t.get("name").and_then(Json::str).unwrap_or("?"),
+                home.x as f64 / 1e6,
+                home.z as f64 / 1e6
+            );
+            c
         };
-        k += 1;
-        println!(
-            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
-            t.get("name").and_then(Json::str).unwrap_or("?"),
-            home.x as f64 / 1e6,
-            home.z as f64 / 1e6,
-            c.load().map_or(0, |t| t.period),
-            c.t0
-        );
+        let shape = match c.shape {
+            sim::courses::Shape::Loop => 1,
+            sim::courses::Shape::ThereAndBack => 2,
+            sim::courses::Shape::Once => 3,
+        };
         let stations = c
             .stations
             .iter()
@@ -930,7 +976,7 @@ fn with_rides(
             "course".to_owned(),
             Json::Obj(vec![
                 ("stations".to_owned(), Json::Arr(stations)),
-                ("shape".to_owned(), int(1)),
+                ("shape".to_owned(), int(shape)),
                 ("speed".to_owned(), int(c.speed)),
                 ("t0".to_owned(), int(c.t0)),
                 ("within".to_owned(), int(c.within)),
@@ -950,14 +996,14 @@ static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
 /// never read as now's. The build's own hash is in the key too ([`build_id`]), so a deploy of a new build computes them
 /// again.
-const COURSES_FORMAT: &str = "souls/facts-courses/2";
+const COURSES_FORMAT: &str = "souls/facts-courses/3";
 
 /// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
 /// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
 fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
-    let (punts, terrain) = with_punts(facts)?;
+    let (punts, waters) = with_punts(facts)?;
     stamp("facts: punts");
-    let rides = with_rides(&punts, entries, terrain)?;
+    let rides = with_rides(&punts, entries, waters)?;
     stamp("facts: rides");
     with_entry_kinds(&rides, entries)
 }
@@ -4226,6 +4272,29 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A boat is read from its entry's data: a `vehicle` on `deep_water` (a rowing boat at 1.5 m/s, a canoe), never a
+    /// bicycle on level ground or a punt, whose course is its mooring's.
+    #[test]
+    fn a_boat_is_a_vehicle_on_deep_water_by_its_entry() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let row = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_boat.json"
+        ));
+        let canoe = read(include_str!(
+            "../../../../content/kinds/vehicles/canoe.json"
+        ));
+        let bike = read(include_str!(
+            "../../../../content/kinds/vehicles/bicycle.json"
+        ));
+        let punt = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_punt.json"
+        ));
+        assert_eq!(boat_speed(&row), Some(1_500_000));
+        assert!(boat_speed(&canoe).is_some());
+        assert_eq!(boat_speed(&bike), None);
+        assert_eq!(boat_speed(&punt), None);
+    }
 
     /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
