@@ -1494,7 +1494,7 @@ pub(crate) fn added_kinds(
     built: &mut Built,
     tree: &replica::tree::Tree,
     entries: &[(String, Json)],
-) -> Vec<(Name, Vec<u8>)> {
+) -> answers::Definitions {
     use replica::kinds::defined;
     let entry_of = |pin: &str| {
         let p = plain(pin);

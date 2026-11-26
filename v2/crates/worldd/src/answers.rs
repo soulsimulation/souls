@@ -722,7 +722,7 @@ pub struct Config {
     /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`),
     /// each its pin and its entry's bytes: written at this start's first tick as definitions in the world's history
     /// ([`Clock::put_kinds`]), so things and activities of them are made and every copy applies them.
-    pub define: Vec<(Name, Vec<u8>)>,
+    pub define: Definitions,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
@@ -841,6 +841,9 @@ pub struct Synced {
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
 pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
+/// Kinds a start defines in the world's history (#4954, [`Config::define`]): each its pin and its entry's bytes.
+pub type Definitions = Vec<(Name, Vec<u8>)>;
+
 /// See [`Config::follow`].
 pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
 
@@ -1190,7 +1193,7 @@ struct Clock {
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
     /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
-    define: Option<(Vec<(Name, Vec<u8>)>, Minter)>,
+    define: Option<(Definitions, Minter)>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
