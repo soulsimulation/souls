@@ -1425,15 +1425,15 @@ impl Forms {
         // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
         // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
         // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
-        // moves (a ride, a boat): its seats are left by its own forms. Only once settled in the slot: a sit or rise
-        // still under way is waited for, and the act opened again after it decides then. A form with a rise, a sit or a
-        // settle of its own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip
-        // (an approach to a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that
-        // take is made from the seat.
+        // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
+        // waits behind that run and rises first when it starts (#4187). A form with a rise, a sit or a settle of its
+        // own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip (an approach to
+        // a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that take is made
+        // from the seat.
         let held_in = w.places.as_ref().and_then(|p| {
             p.slots
                 .held_by(body)
-                .filter(|s| *s != node && p.slots.settled(body) && !p.slots.moves(*s))
+                .filter(|s| *s != node && !p.slots.moves(*s))
         });
         let rises_elsewhere = node != body
             && !in_its_slot
