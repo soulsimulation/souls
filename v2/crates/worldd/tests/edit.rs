@@ -2156,7 +2156,13 @@ fn a5006_a_building_placed_live_brings_its_rooms_and_doorways_in_one_edit() {
         planned: w.live.version(),
         ops: vec![place(1, BTreeMap::new())],
     };
-    worldd::buildsafe::with_buildings(&mut edit, &entries, &w.world.kinds).expect("expanded");
+    let parts =
+        worldd::buildsafe::with_buildings(&mut edit, &entries, &w.world.kinds).expect("expanded");
+    assert_eq!(
+        parts.len(),
+        12,
+        "the floor, rooms and windows are named as the building's parts"
+    );
     let count = |p: &str| {
         edit.ops
             .iter()
@@ -2244,6 +2250,8 @@ fn a5006_a_building_placed_live_brings_its_rooms_and_doorways_in_one_edit() {
         planned: w.live.version(),
         ops: vec![place(1, own)],
     };
-    worldd::buildsafe::with_buildings(&mut copy_edit, &entries, &w.world.kinds).expect("left");
+    let none =
+        worldd::buildsafe::with_buildings(&mut copy_edit, &entries, &w.world.kinds).expect("left");
+    assert!(none.is_empty());
     assert_eq!(copy_edit.ops.len(), 1, "a copy's place gains nothing");
 }

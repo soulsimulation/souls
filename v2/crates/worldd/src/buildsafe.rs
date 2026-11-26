@@ -89,11 +89,19 @@ pub fn stand_as_kinds(
     edit: &mut replica::edit::Edit,
     entries: &Json,
     structure: &sim::structure::Structure,
+    parts: &BTreeSet<u64>,
 ) {
     for op in &mut edit.ops {
-        let replica::edit::Op::Place { kind, fields, .. } = op else {
+        let replica::edit::Op::Place {
+            name, kind, fields, ..
+        } = op
+        else {
             continue;
         };
+        // A placed building's own parts (`with_buildings`) stand as its plan says, as a template's do.
+        if parts.contains(name) {
+            continue;
+        }
         let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields)) else {
             continue;
         };
@@ -122,19 +130,20 @@ pub fn stand_as_kinds(
 /// Left as it is: a place that gives its own solids (a clone's or an import's copy, which brings its own rooms in its
 /// next edits), one whose batch already places a floor in it, a kind the world does not let hold a floor, and every
 /// place in a world that pins no floor or room kind. A plan the mapping cannot read refuses the edit
-/// (`edit.building-plan`), never placing a shell.
+/// (`edit.building-plan`), never placing a shell. Gives the batch names of the parts it placed, which
+/// [`stand_as_kinds`] leaves as the plan has them (a structural window is no furniture window's box).
 pub fn with_buildings(
     edit: &mut replica::edit::Edit,
     entries: &Json,
     kinds: &BTreeMap<String, Kind>,
-) -> Result<(), replica::edit::Refused> {
+) -> Result<BTreeSet<u64>, replica::edit::Refused> {
     use import_eden::placed::{Parts, ops};
     use replica::edit::{Op, Ref};
     use sim::ground::scene::{FLOOR, ROOM, WINDOW};
     const DOOR: &str = "eden:door";
     let pinned = |p: &str| kinds.keys().find(|k| plain(k) == p).map(String::as_str);
     let (Some(floor), Some(room)) = (pinned(FLOOR), pinned(ROOM)) else {
-        return Ok(());
+        return Ok(BTreeSet::new());
     };
     let admits = |parent: &str, child: &str, category: Option<&str>| {
         kinds.get(parent).is_some_and(|k| {
@@ -208,8 +217,15 @@ pub fn with_buildings(
             })?;
         added.extend(more);
     }
+    let parts = added
+        .iter()
+        .filter_map(|op| match op {
+            Op::Place { name, .. } => Some(*name),
+            _ => None,
+        })
+        .collect();
     edit.ops.extend(added);
-    Ok(())
+    Ok(parts)
 }
 
 /// Whether a kind's entry has a slot that takes a part `structure` reads (one that stands or one that bears): a bay's,
