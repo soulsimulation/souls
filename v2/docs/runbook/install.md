@@ -270,9 +270,10 @@ install -d -m 755 $T/.aside && { [ ! -e $T/<name> ] || mv $T/<name> $T/.aside/<n
 systemctl restart souls-directory
 ```
 
-`publish-template` builds the tree with the entries the seed kept, so a kind whose entry joins parts (a rack bay, a
-shade site) is pinned by its entry. It does not yet run worldd's courses step, so a template of a world with punts or
-rides (Eden) has neither. It writes `<out>/<name>` (renamed into place when whole) and its source checkpoint
+`publish-template` builds the tree as worldd builds a seeded world: worldd's courses step first (the punts on the
+water, the rides' and boats' courses), then the import with the entries the seed kept, so a kind whose entry joins
+parts (a rack bay, a shade site) is pinned by its entry, and a world made from Eden's template has a seeded Eden's
+punts and courses (`templates courses <fork>/checkpoints` lists them). It writes `<out>/<name>` (renamed into place when whole) and its source checkpoint
 `<out>/<name>.source`, and refuses either if it exists. The dry-run fork uses `/usr/local/lib/souls/worldd`, the
 build `/etc/souls/placement.json` pins, against the copy beside the catalogue; the swap is a rename, so a create never
 reads a half-copied template. The directory reads the catalogue only at its start, every folder with a `template`
