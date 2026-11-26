@@ -11,8 +11,9 @@ each due change at its due time.
 `SOULS_SLEEP=1` in the unit's environment, off by default and turned on per world by `sleep-rollout.sh` below; 0.133 S3b,
 `worldd/src/sleep.rs`) reads its clock each second: **still** (no intent queued or open, no act forming or checking,
 no body moving for an intent or for the wind-down) and its **next due time**, the earliest over its due lists (the
-sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends).
-Still for 60 s on end, with nothing due within 60 s (`supervisor::sleep::may_sleep`), it sleeps. Agents' sockets live
+sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends, the
+forms' timers: a bell's fade, a planter's next stage). A form's timer pending when the world sleeps or restarts goes
+back on its list from the timers the tree holds, at the first tick (#3991). Still for 60 s on end, with nothing due within 60 s (`supervisor::sleep::may_sleep`), it sleeps. Agents' sockets live
 in the gateway and keep no world awake. The order is fixed:
 
 1. its log durable to the last record (a woken world resumes from its newest checkpoint and the records after it, as
