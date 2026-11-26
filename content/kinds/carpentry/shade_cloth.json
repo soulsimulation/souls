@@ -1,0 +1,103 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:shade_cloth",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:timber_rail",
+   "most": 2,
+   "most_per": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "edge_l": {
+   "role": "joint",
+   "connector": "cloth_edge",
+   "mates": "cloth_seat",
+   "at_mm": [-850, 0, 0],
+   "yaw_mdeg": 0
+  },
+  "edge_r": {
+   "role": "joint",
+   "connector": "cloth_edge",
+   "mates": "cloth_seat",
+   "at_mm": [850, 0, 0],
+   "yaw_mdeg": 0
+  },
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [0, 15, -1300]
+  },
+  "grip_1": {
+   "role": "grip",
+   "at_mm": [0, 15, -800]
+  },
+  "grip_2": {
+   "role": "grip",
+   "at_mm": [0, 15, -300]
+  },
+  "grip_3": {
+   "role": "grip",
+   "at_mm": [0, 15, 300]
+  },
+  "grip_4": {
+   "role": "grip",
+   "at_mm": [0, 15, 800]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [0, 15, 1300]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1900, 30, 2800]
+ },
+ "looks": {
+  "shape": {
+   "round": 4,
+   "palette": {"cloth": "#e2cfa6", "batten": "#8a5d36"},
+   "tags": ["shade", "cloth", "roof", "panel"],
+   "shapes": [
+    {"kind": "box", "at": [0, 20, 0], "size": [1900, 12, 2800], "tint": "cloth"},
+    {"kind": "box", "at": [-850, 15, 0], "size": [60, 30, 2800], "tint": "batten"},
+    {"kind": "box", "at": [850, 15, 0], "size": [60, 30, 2800], "tint": "batten"}
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A shade-cloth roof panel on two battens: four to six carry it and lift it onto both rails."
+ },
+ "card": {
+  "text": "card"
+ }
+}

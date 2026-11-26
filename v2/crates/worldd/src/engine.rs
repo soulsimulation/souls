@@ -948,6 +948,31 @@ impl Engine {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
                     let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    // A part is taken by as many as carry it (0.135 C6: its `carry_crew`, else its hold crew) and by no
+                    // more than its grips take (C5): a shade cloth by four to six. Refused before anyone moves.
+                    if let Some(load) = tree
+                        .handle(part)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
+                    {
+                        let n = members.len();
+                        if (n as u64) < load.crew {
+                            return Err(refusal(
+                                "carry-crew-too-small",
+                                format!("{n} taking {}; it takes {}", show(part), load.crew),
+                            ));
+                        }
+                        if n > load.most() {
+                            return Err(refusal(
+                                "carry-crew-too-large",
+                                format!(
+                                    "{n} taking {}; its grips take {}",
+                                    show(part),
+                                    load.most()
+                                ),
+                            ));
+                        }
+                    }
                     let (at, turn) = asm.take(
                         &mut tree,
                         &self.activities,

@@ -1,0 +1,101 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:timber_bent",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "stand_front": {
+   "role": "stand",
+   "at_mm": [0, 0, 500]
+  },
+  "grip_low": {
+   "role": "grip",
+   "at_mm": [0, 400, 0]
+  },
+  "grip_high": {
+   "role": "grip",
+   "at_mm": [0, 1500, 0]
+  },
+  "seat_front_l": {
+   "role": "joint",
+   "connector": "rail_seat",
+   "mates": "rail_end",
+   "at_mm": [-850, 1900, 50],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r": {
+   "role": "joint",
+   "connector": "rail_seat",
+   "mates": "rail_end",
+   "at_mm": [850, 1900, 50],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l": {
+   "role": "joint",
+   "connector": "rail_seat",
+   "mates": "rail_end",
+   "at_mm": [-850, 1900, -50],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r": {
+   "role": "joint",
+   "connector": "rail_seat",
+   "mates": "rail_end",
+   "at_mm": [850, 1900, -50],
+   "yaw_mdeg": 180000
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1800, 1900, 100],
+  "solids_mm": [[-850, 0, 50, 50, 0, 0, 1800], [850, 0, 50, 50, 0, 0, 1800]]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"timber": "#9b6b3f", "end": "#7a5230"},
+   "tags": ["timber", "bent", "post", "shade"],
+   "shapes": [
+    {"kind": "box", "at": [-850, 900, 0], "size": [100, 1800, 100], "tint": "timber"},
+    {"kind": "box", "at": [850, 900, 0], "size": [100, 1800, 100], "tint": "timber"},
+    {"kind": "box", "at": [0, 1850, 0], "size": [1800, 100, 100], "tint": "end"}
+   ]
+  }
+ },
+ "children": {
+  "crew": {
+   "kind": "mars:carry_activity",
+   "most": 2
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A timber bent: two 1.8 m posts and the tie beam across their tops. Two carry it; one holds it up in its site until the rails brace it."
+ },
+ "card": {
+  "text": "card"
+ }
+}

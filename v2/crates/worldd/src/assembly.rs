@@ -5,7 +5,8 @@
 //!
 //! - **Verbs** ([`crate::engine::Verb`]): `part:take` and `part:unseat` (target the crew's activity, 1 the part) and
 //!   `part:put` (target the activity; 1 the node it goes in, 2 its slot there, or 3 a point `[x, y, z]` µm in that
-//!   node's frame; 4 the parts it joins, ids, when not the bay's standing parts).
+//!   node's frame; 4 the parts it joins, ids, when not the bay's standing parts, or for a resting part its bearing
+//!   ones).
 //! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
 //!   slot in one commit (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
@@ -437,6 +438,9 @@ impl Assembly {
                 ),
             ));
         }
+        // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
+        // (its rails), which it rests on.
+        let rests = s.rests(pk.as_str());
         let joins = match joins {
             Some(j) => j,
             None if bay && !s.stands(pk.as_str()) => tree
@@ -444,7 +448,10 @@ impl Assembly {
                 .unwrap_or(&[])
                 .iter()
                 .filter_map(|h| tree.node(*h))
-                .filter(|n| n.slot().is_some() && s.stands(n.kind().as_str()))
+                .filter(|n| {
+                    let k = n.kind().as_str();
+                    n.slot().is_some() && if rests { s.bears(k) } else { s.stands(k) }
+                })
                 .map(|n| n.id())
                 .collect(),
             None => Vec::new(),

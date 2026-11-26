@@ -1,0 +1,100 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:timber_rail",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:timber_bent",
+   "most": 2,
+   "most_per": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "end_l": {
+   "role": "joint",
+   "connector": "rail_end",
+   "mates": "rail_seat",
+   "at_mm": [0, 0, -1500],
+   "yaw_mdeg": 180000
+  },
+  "end_r": {
+   "role": "joint",
+   "connector": "rail_end",
+   "mates": "rail_seat",
+   "at_mm": [0, 0, 1500],
+   "yaw_mdeg": 0
+  },
+  "cloth_seat": {
+   "role": "joint",
+   "connector": "cloth_seat",
+   "mates": "cloth_edge",
+   "at_mm": [0, 100, 0],
+   "yaw_mdeg": 0
+  },
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [0, 50, -1400]
+  },
+  "grip_l": {
+   "role": "grip",
+   "at_mm": [0, 50, -500]
+  },
+  "grip_r": {
+   "role": "grip",
+   "at_mm": [0, 50, 500]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [0, 50, 1400]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [100, 100, 3100]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {"timber": "#a87a4a"},
+   "tags": ["timber", "rail", "beam", "shade"],
+   "shapes": [
+    {"kind": "box", "at": [0, 50, 0], "size": [100, 100, 3100], "tint": "timber"}
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 3.1 m timber rail: two to four carry it, then seat it across the tops of two standing bents."
+ },
+ "card": {
+  "text": "card"
+ }
+}
