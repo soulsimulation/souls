@@ -415,19 +415,12 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 Ref::New(_) => None,
             })
         };
-        // A place's outline and line as the batch has left them, and whether a node is the open ground (#5006).
+        // A place's outline and line as the batch has left them (#5006).
         let place_fields = |node: Ref| -> BTreeMap<u64, Value> {
             crate::arrival::READS
                 .iter()
                 .filter_map(|&f| Some((f, value(node, f)?)))
                 .collect()
-        };
-        let is_ground = |node: Ref| match node {
-            Ref::Node(id) => tree
-                .handle(id)
-                .and_then(|h| tree.node(h))
-                .is_some_and(|n| n.fields().contains_key(&crate::arrival::TILES)),
-            Ref::New(_) => false,
         };
         let wall_of = |wall: Ref, ends: [Ref; 2]| -> Result<(), Refused> {
             let (kind, _) = named(wall)?;
@@ -598,8 +591,11 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         Err(why) => return refuse(here, crate::arrival::UNKNOWN, why),
                     };
                     if let Some(place) = place {
+                        let on_ground = |parent: Ref| {
+                            named(parent).is_ok_and(|(k, _)| crate::arrival::is_ground(&k))
+                        };
                         let is_place = matches!(named(Ref::Node(place)), Ok((_, Some(parent)))
-                            if crate::arrival::is_place(&place_fields(Ref::Node(place)), is_ground(parent)));
+                            if crate::arrival::is_place(&place_fields(Ref::Node(place)), on_ground(parent)));
                         if !is_place {
                             return refuse(
                                 here,

@@ -22,8 +22,6 @@ pub const UNKNOWN: &str = "edit.arrival-unknown";
 const OUTLINE: u64 = 11;
 /// A path's or a line place's line, `[[x, z] mm …]` (import-eden's field 16).
 const LINE: u64 = 16;
-/// The open ground's tiles (import-eden's field 25): the node that holds them is the open ground.
-pub const TILES: u64 = 25;
 /// The fields [`middle`] reads of a place.
 pub const READS: [u64; 2] = [OUTLINE, LINE];
 
@@ -63,8 +61,13 @@ pub fn middle(fields: &BTreeMap<u64, Value>) -> Option<(i64, i64)> {
     Some(((x0 + x1) / 2, (z0 + z1) / 2))
 }
 
-/// Whether a node with `fields` is a place Souls can arrive at, `on_ground` whether it stands on the open ground (the
-/// node holding [`TILES`]): it does, and it has an outline or a line.
+/// Whether a node of kind `kind` is the open ground (`eden:ground`, or a world's own `*:ground`), what places stand on.
+pub fn is_ground(kind: &str) -> bool {
+    crate::world_model::plain(kind).ends_with(":ground")
+}
+
+/// Whether a node with `fields` is a place Souls can arrive at, `on_ground` whether it stands on the open ground
+/// ([`is_ground`]): it does, and it has an outline or a line.
 pub fn is_place(fields: &BTreeMap<u64, Value>, on_ground: bool) -> bool {
     on_ground && middle(fields).is_some()
 }
@@ -77,7 +80,7 @@ pub fn point(tree: &Tree) -> Option<(Id, Vec3)> {
     let node = tree.handle(place).and_then(|h| tree.node(h))?;
     let ground = node.parent()?;
     let g = tree.handle(ground).and_then(|h| tree.node(h))?;
-    if !is_place(node.fields(), g.fields().contains_key(&TILES)) {
+    if !is_place(node.fields(), is_ground(g.kind().as_str())) {
         return None;
     }
     let (x, z) = middle(node.fields())?;
@@ -131,5 +134,7 @@ mod tests {
             "a room's outline is not on the open ground"
         );
         assert!(!is_place(&BTreeMap::new(), true), "a thing has no outline");
+        assert!(is_ground("eden:ground@1220ab") && is_ground("testworld:ground"));
+        assert!(!is_ground("eden:room@1220ab") && !is_ground("eden:groundskeeper"));
     }
 }
