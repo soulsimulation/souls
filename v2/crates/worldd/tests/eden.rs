@@ -7078,7 +7078,6 @@ fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
     out
 }
 
-
 /// First-day round 2 (0.139): a Soul on the harbour boardwalk walks to the lighthouse at the end of the breakwater,
 /// as `act <id>` sends it: to the lighthouse (today's e_edbbc6a7, its main room), its entrance's floor and its
 /// entrance. Each ends `done` on the entrance's floor. Before, each was refused `spot-none-free` at once, with
@@ -7102,7 +7101,12 @@ fn the_lighthouse_is_walked_to_from_the_boardwalk() {
         soul.0
             .set_read_timeout(Some(Duration::from_secs(400)))
             .unwrap();
-        let r = soul.act_within("eden:walk", Some(im.nodes[*key]), BTreeMap::new(), 300_000_000);
+        let r = soul.act_within(
+            "eden:walk",
+            Some(im.nodes[*key]),
+            BTreeMap::new(),
+            300_000_000,
+        );
         println!("from the boardwalk to {key}: {r:?}");
         walked.push(r);
     }
@@ -7112,7 +7116,10 @@ fn the_lighthouse_is_walked_to_from_the_boardwalk() {
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     for ((key, r), end) in targets.iter().zip(&walked).zip(&ends) {
-        println!("  {key}: ends at {:?} on {:?}", end.position, end.frame.node);
+        println!(
+            "  {key}: ends at {:?} on {:?}",
+            end.position, end.frame.node
+        );
         assert!(r.is_ok(), "{key}: {r:?}");
         assert_eq!(end.frame.node, floor, "{key}: in the lighthouse");
     }
