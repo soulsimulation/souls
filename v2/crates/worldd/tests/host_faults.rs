@@ -149,6 +149,8 @@ impl Run {
         self.all.lock().map(|a| a.join("\n")).unwrap_or_default()
     }
 
+    // A real process on the real clock.
+    #[allow(clippy::disallowed_methods)]
     fn at(&self) -> u128 {
         self.began.elapsed().as_millis()
     }

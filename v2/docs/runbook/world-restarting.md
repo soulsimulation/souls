@@ -25,7 +25,7 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   blaming the disk.
 - **A full disk** (O10, #2806). The running world exits 87 at the first write the disk refuses; nothing unwritten
   was acknowledged. Its restart waits for room before it writes anything: `worldd: disk.full: <free> bytes free under
-  the world, <need> to start; the start waits for room` (`need` is 16 MiB and the newest checkpoint's size), saying
+  the world, <need> to start; the start waits for room` (`need` is 16 MiB and the largest checkpoint's size), saying
   progress to systemd meanwhile, so the unit never loops on it and the world is restarted once. Within half a second
   of room coming back it says `worldd: disk.full cleared` and starts; its time owed is paid at its first ticks,
   exactly. While it waits it does not listen: its gateway keeps intents and sends them once it does, or answers

@@ -176,7 +176,7 @@ fn stamp(stage: &str) {
         crate::progress();
     }
 }
-/// O10 (#2806): the room a start needs on its world's disk beyond a checkpoint (the newest one's size): the files it
+/// O10 (#2806): the room a start needs on its world's disk beyond a checkpoint (the largest one's size): the files it
 /// writes before it listens and the log's first ticks.
 const START_ROOM: u64 = 16 << 20;
 
