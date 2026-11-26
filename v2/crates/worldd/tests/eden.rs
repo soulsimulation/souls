@@ -5515,3 +5515,76 @@ fn souls_walk_on_from_a_stump_and_four_walk_to_the_quad_fountain() {
         }
     }
 }
+
+/// A Soul sits on the rim of the campus quad's fountain, where every new Soul arrives facing it (core-fountain@2's
+/// `rim-n` seats, `content/kinds/washing/fountain.json`'s `rim_n`). Three Souls born on the quad each sit on the
+/// fountain by the gateway's bare sit, naming only the fountain, each in its own seat, and each rises. A seat is the
+/// thing's own slot row (field 13, `[n, x, y, z, yaw mdeg, capacity]` mm): the world places a seated body at its point
+/// (`sim::ground::scene` `slot_point`) and the page draws it by the same row (`apps/web/src/v2-engine/bridge.ts`
+/// `sample`: feet the row's height under the seat, facing the thing's +z turned by the row's yaw). Each row taken is on
+/// the rim, 575 mm up and 1925 mm out from the middle (the model's basin), facing out. Before, the fountain's six rows
+/// were stand points on the paving and its entry had no seat: the sit was refused `place-unknown`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn three_souls_born_at_the_quad_each_sit_on_the_fountain_rim() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let fountain = im.nodes[&facts_id(&text, "campus-quad-fountain")];
+    let lineage = im.nodes["world"].scope();
+    let (served, first, dir) = serve(&facts, "-12.0,-88.0", "rim", lineage);
+    let mut souls = vec![first, join(&dir, 2, lineage), join(&dir, 3, lineage)];
+    let sat: Vec<_> = souls
+        .iter_mut()
+        .map(|s| s.act("eden:sit", Some(fountain), BTreeMap::new()))
+        .collect();
+    let mut slots: Vec<u64> = last_frames(&dir)
+        .values()
+        .filter(|f| f.0 == fountain)
+        .filter_map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    let rose: Vec<_> = souls
+        .iter_mut()
+        .map(|s| s.act("eden:rise", None, BTreeMap::new()))
+        .collect();
+    println!("sit on the fountain: {sat:?}, in its slots {slots:?}; rise: {rose:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for s in &sat {
+        s.as_ref().expect("sat on the fountain's rim");
+    }
+    let mut each = slots.clone();
+    each.dedup();
+    assert_eq!(each.len(), 3, "three Souls, each in its own seat: {slots:?}");
+    let num = |v: &Value| match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(u) => i64::try_from(*u).ok().map(|u| -u - 1),
+        _ => None,
+    };
+    let node = im.tree.node(im.tree.handle(fountain).unwrap()).unwrap();
+    let Some(Value::Array(rows)) = node.fields().get(&import_eden::F_SLOTS) else {
+        panic!("the fountain has slot rows")
+    };
+    for n in &slots {
+        let row: Vec<i64> = rows
+            .iter()
+            .find_map(|r| match r {
+                Value::Array(r) if r.first().and_then(num) == i64::try_from(*n).ok() => {
+                    Some(r.iter().filter_map(num).collect())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("slot {n} has a row"));
+        let (x, y, z, yaw) = (row[1] as f64, row[2], row[3] as f64, row[4] as f64);
+        let (r, turn) = (x.hypot(z), (yaw / 1000.0).to_radians());
+        let out = (turn.sin() * x + turn.cos() * z) / r;
+        println!("slot {n}: row {row:?}, {r:.0} mm out, facing out at cos {out:.5}");
+        assert_eq!(y, 575, "slot {n} at the rim's height");
+        assert!((r - 1925.0).abs() <= 2.0, "slot {n} on the rim: {r} mm out");
+        assert!(out > 0.9999, "slot {n} faces out: {out}");
+    }
+    for r in rose {
+        r.expect("each rises off the rim");
+    }
+}

@@ -18943,7 +18943,7 @@
         },
         {
           "op": "place",
-          "def": "core/fountain@1",
+          "def": "core/fountain@2",
           "name": "campus-quad-fountain",
           "p": [
             -12,

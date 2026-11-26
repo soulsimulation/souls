@@ -52,12 +52,35 @@
       ]
     }
   },
+  "slots": {
+    "rim_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [1925, 575, 0], "stand": "edge_1" },
+    "rim_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, 1667], "stand": "edge_2" },
+    "rim_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, 1667], "stand": "edge_3" },
+    "rim_4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-1925, 575, 0], "stand": "edge_4" },
+    "rim_5": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, -1667], "stand": "edge_5" },
+    "rim_6": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, -1667], "stand": "edge_6" }
+  },
   "geometry": {
     "bounds_mm": [
       4100,
       2360,
       4100
     ]
+  },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
   },
   "areas": {
     "basin_edge": {

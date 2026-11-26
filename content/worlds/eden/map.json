@@ -198,7 +198,7 @@
     {"def": "core/drinking-fountain@1", "placed": 1, "entry": "eden:drinking_fountain", "forms": "own", "pr": 3048, "state": {"water": "default", "flowing": {"from": "playing"}}},
     {"def": "core/fence@1", "placed": 1, "entry": "eden:fence", "forms": "base", "base": "scenery", "card": "description"},
     {"def": "core/football-pitch@1", "placed": 1, "entry": "eden:football_pitch", "forms": "base", "dropped": {"sport": "the entry is the football pitch only; Eden places no other sport", "color": "the look is the entry's", "fence": "Eden's pitch has none"}},
-    {"def": "core/fountain@1", "placed": 1, "entry": "eden:fountain", "forms": "base", "pr": 3048},
+    {"def": "core/fountain@2", "placed": 1, "entry": "eden:fountain", "forms": "base", "pr": 3048},
     {"def": "core/garden-wall@1", "placed": 1, "entry": "eden:garden_wall", "forms": "base", "base": "scenery", "card": "description"},
     {"def": "core/hall@2", "placed": 1, "entry": "eden:hall", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
     {"def": "core/kettle@1", "placed": 1, "entry": "eden:kettle", "forms": "own", "pr": 3024, "state": {"water": "default", "heating": "default", "heat": "default"}},
