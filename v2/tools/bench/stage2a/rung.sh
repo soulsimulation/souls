@@ -38,10 +38,21 @@ pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@";
 cat /proc/loadavg > "$D/loadavg.before"
 # Stopped or not, the rung's own processes end with it, by pid (never by name: other runs use the same programs).
 SP= VP= GP= OP= WP= TP= DP=
-stop_all() { for p in $DP $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; }
+stop_all() { for p in ${IP:-} $DP $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; [ -z "${INJ:-}" ] || rm -f "$INJ"; }
 trap stop_all EXIT
 trap 'exit 143' INT TERM HUP
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"
+# INJECT=<MB> (#4973): another process's writes on the world's disk. INJECT_AT seconds (default 20) into the driver's
+# run, `dd` writes that many MB of zeros beside the world's folder and does not sync them; the kernel writes them
+# back about 30 s later (vm.dirty_expire_centisecs), while the agents act. Its start and end are in inject.txt; the
+# file goes when the rung ends.
+INJ=$(dirname "$W")/inject.bin IP=
+inject() {
+  sleep "${INJECT_AT:-20}"
+  echo "dd $INJECT MB start $(date +%s.%N)" >> "$D/inject.txt"
+  dd if=/dev/zero of="$INJ" bs=1M count="$INJECT" status=none
+  echo "dd end $(date +%s.%N); dirty $(grep -E '^Dirty:' /proc/meminfo | tr -s ' ')" >> "$D/inject.txt"
+}
 
 "$B/worldd" seed --facts "$FACTS" --dir "$W" --entries "$E" --souls "${N%%x*}" > "$D/seed.log" 2>&1 \
   || { echo "seed failed"; tail "$D/seed.log"; exit 1; }
@@ -101,6 +112,7 @@ taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run
   --remote "ws://$ADDR" --speech --stream "$STREAM_URL" ${TRACE:+--trace "$D/run/trace.txt"} > "$D/driver.out" 2>&1 &
 # In the background and waited for, so a stop's trap runs at once rather than after the driver's end.
 DP=$!
+if [ "${INJECT:-0}" -gt 0 ]; then inject & IP=$!; fi
 wait "$DP"
 echo "driver exit $?" >> "$D/driver.out"
 DP=
@@ -114,6 +126,7 @@ wait "$GP" "$OP" $TP 2> /dev/null; while kill -0 "$WP" 2> /dev/null; do sleep 0.
 SP= VP= GP= OP= WP= TP=
 # The world's folder (a few hundred MB at 500 Souls) goes once measured, unless KEEP_WORLD=1: a ladder on a disk
 # would otherwise fill it (a full disk ends the world's log: `log-failed`, every act after it refused).
+if [ -n "$IP" ]; then wait "$IP" 2> /dev/null; rm -f "$INJ"; IP=; fi
 du -sh "$W" > "$D/world-size.txt" 2>&1
 if [ "${KEEP_WORLD:-0}" != 1 ]; then rm -rf "$W"; [ -n "${WORLD_ROOT:-}" ] && rm -rf "$(dirname "$W")"; fi
 node "$V2/tools/bench/stage2a/analyze.mjs" "$D"
