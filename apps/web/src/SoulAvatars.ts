@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
+import {floaterModel} from '../../../mars/viewer/engine/bodies/models.ts';
 export const soulAvatars={images:new Map<string,string>(),sources:new Map<string,{entityId:string;model:string;bodyRoot:string}>(),events:new EventTarget(),wanted:new Map<string,number>()};
 /** A portrait shown on the page (a SoulAvatar mounted): the world draws portraits only for these. → its release */
 export function wantPortrait(id:string){soulAvatars.wanted.set(id,(soulAvatars.wanted.get(id)??0)+1);return()=>{const n=(soulAvatars.wanted.get(id)??1)-1;if(n>0)soulAvatars.wanted.set(id,n);else soulAvatars.wanted.delete(id);};}
@@ -28,8 +29,8 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  // #5039: the face fills FACE_FILL of the round crop, as the portrait's camera sees it. What the face is, by body:
  // a creature's marked face (the duck's and dog's head, the snail's head and eye stalks); a look's face from its Head
  // joint (kit landmarks: no hair, hat or mohawk); another skinned head's vertices less the highest 4 % (a horn, an ear
- // tip, an antenna); a whole body's vertices, as tall as it is wide: a ceramic head from its chin up (what is taller is
- // its hair), a carried shape such as the ghost from its top down (what is taller is its sheet).
+ // tip, an antenna); a Little Martian's ceramic head whole; another whole body (the ghost, an uploaded floater) from its
+ // top down, as tall as it is wide (what is taller is its sheet or its body).
  let face:ReturnType<typeof viewRect>=null;
  if(marked.length)face=viewRect(meshPoints(marked));
  else if(!rigid&&head&&skins.length){const points=skinnedTo(head,skins);
@@ -38,7 +39,7 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
    const zone=new THREE.Box3(new THREE.Vector3(joint.x-.02*k,joint.y+F.chin*k,joint.z-F.ear*k),new THREE.Vector3(joint.x+F.nose*k,joint.y+F.forehead*k,joint.z+F.ear*k)),inside=points.filter(p=>zone.containsPoint(p));
    face=viewRect(inside.length>=24?inside:corners(zone));}
   else face=viewRect(points,.04);}
- else if(rigid||carried)face=viewRect(meshPoints([root]),0,carried?'top':'bottom');
+ else if(rigid||carried)face=viewRect(meshPoints([root]),0,floaterModel(String(root.userData.bodyModel))&&!carried?undefined:'top');
  if(face){target.copy(face.center);return{box,target,height:2*Math.max(face.w,face.h)/FACE_FILL,slack:1};}
  // a head bone and no vertices on it: h is the height above the head joint, bounded by the body's size, the frame from
  // 0.75 h under the joint to 0.12 h over the crown; with no head bone, the top of the body
@@ -48,12 +49,12 @@ export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  return{box,target,height,slack};
 }
 /** The portrait camera's view of `points`: its centre and half width and height across the view, leaving out the
- * highest `topTrim` of the points. `square`: only its top or its bottom, as tall as it is wide. */
-function viewRect(points:THREE.Vector3[],topTrim=0,square?:'top'|'bottom'){
+ * highest `topTrim` of the points. `square`: only its top, as tall as it is wide. */
+function viewRect(points:THREE.Vector3[],topTrim=0,square?:'top'){
  if(!points.length)return null;const R=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),U=new THREE.Vector3().crossVectors(R,PORTRAIT_VIEW);
  const sorted=(axis:THREE.Vector3)=>Float64Array.from(points,p=>p.dot(axis)).sort(),at=(a:Float64Array,q:number)=>a[Math.round(q*(a.length-1))];
  const r=sorted(R),u=sorted(U),d=sorted(PORTRAIT_VIEW),r0=r[0],r1=r[r.length-1],w=(r1-r0)/2;let u0=u[0],u1=at(u,1-topTrim);
- if(square==='top')u0=Math.max(u0,u1-2*w);else if(square==='bottom')u1=Math.min(u1,u0+2*w);
+ if(square==='top')u0=Math.max(u0,u1-2*w);
  return{center:new THREE.Vector3().addScaledVector(R,(r0+r1)/2).addScaledVector(U,(u0+u1)/2).addScaledVector(PORTRAIT_VIEW,at(d,.5)),w,h:(u1-u0)/2};
 }
 const corners=(b:THREE.Box3)=>Array.from({length:8},(_,i)=>new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z));
