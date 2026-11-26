@@ -6863,7 +6863,6 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
     for (k, t) in tokens.iter().enumerate() {
         souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
     }
-    let bodies: Vec<Id> = w.souls.iter().map(|s| body_of(&w, *s)).collect();
     let crew_kind = pinned_activity(&w, "mars:carry_activity");
     let to = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
     let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
@@ -6976,7 +6975,7 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let c = crew(&mut souls, &members).await;
         let got = souls[0].act("part:take", c, part(beam)).await;
         assert_eq!(got.kind, 1, "beam taken: {got:?}");
-        let crew_bodies: Vec<Id> = members.iter().map(|k| bodies[*k]).collect();
+        let crew_bodies: Vec<Id> = members.iter().map(|k| body_of(&w, w.souls[*k])).collect();
         // Only the front walks from here, naming the load's heading at its goal.
         let s = slot_of(bay, slots[slot]);
         let staged = v3(s.x - 4_500_000, 0, s.z);
