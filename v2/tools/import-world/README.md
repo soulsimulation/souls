@@ -34,6 +34,22 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   The differences are against the backup itself: a thing row with no node, a count unlike today's bake, a loader note,
   or an upload no thing names (kept by hash). A backup that does not export is a row that is not clean, with the reason.
 
+- **One-way floors and seats** (W9, #4085), with `--ways` (a plain validation walks nothing). Each floor's pieces and
+  each seat's stand point (its entry's, from `--entries <dir>`, default the checkout's `content/kinds`; an installed
+  binary needs the flag, and names a folder that does not read) is walked to from the arrival point on the open ground
+  (`--arrival <x m>,<z m>`, default 0,0; the nearest open ground within 20 m) and back, as the served world walks: sent
+  to a standing spot, the place, legs and lines from the planner a tick later, the never-stuck ladder climbed after
+  each tick. Wherever the walk in ends done (on the target's piece, or on another piece or node its standing spot
+  was granted on: listed apart as reached elsewhere, with `back: ok` or `back: one-way`), the body walks back from
+  there; one whose walk back does not come back (refused, ended short, or no answer in 600 s of the world's time) is
+  counted in the row's `one-way (walked)` column and named with why. What the walk in does not reach (refused) is
+  listed apart. The walk is in lockstep in an idle world: `worldd` runs its planner free, so a late route answer counts
+  against the ladder's timers there, and it goes on past a tick it refuses where the check ends the walk; 0 one-way
+  here is not a claim about a busy served world. `node v2/tools/import-world/import-world.ts` passes `--ways`,
+  `--arrival` and `--entries` on. Measured on Saturn (26 Nov): the Mars template from `-6,-30` 0 one-way of 101 (10
+  reached elsewhere, all back; 8 not reached) in 3 s; Eden 2026 from the quad 0 of 3245 (237 reached elsewhere, all
+  back; 97 not reached, refused a standing spot) in 17 min.
+
 A world whose own backup is not at hand imports from its template's kept outputs on the asset CDN (#4281); the
 template builder that ran today's server code (`template-world.ts`) was removed with v1 (0.134 D3).
 
