@@ -44,7 +44,8 @@ pub const VIEW_BEHIND: &str = "view.behind";
 pub const VIEW_BEHIND_MOST: Duration = Duration::from_secs(10);
 /// How often a view socket is probed, once its last probe was answered.
 const VIEW_PROBE_EVERY: Duration = Duration::from_secs(2);
-/// How long a view socket that fell behind is given to take its reason and close frame before it is dropped.
+/// How long a view socket that fell behind, or an agent's let go for a full queue (`agent.behind`, #4979), is given to
+/// take its reason and close frame before it is dropped.
 const VIEW_BEHIND_GRACE: Duration = Duration::from_secs(1);
 /// The close code of a view socket that fell behind: 1013, Try Again Later. It rejoins as any new viewer does.
 const VIEW_BEHIND_CODE: u16 = 1013;
@@ -282,6 +283,23 @@ async fn send_view(
     }
 }
 
+/// Sends on an agent's socket unless it is let go for a full queue meanwhile (#4979): then `false`, with `let_go` set.
+/// A send waiting on a slow reader is given up, so its close is not held behind the frames still queued.
+async fn send_agent(
+    socket: &mut WebSocket,
+    message: Message,
+    behind: &tokio::sync::Notify,
+    let_go: &mut bool,
+) -> bool {
+    tokio::select! {
+        sent = socket.send(message) => sent.is_ok(),
+        _ = behind.notified() => {
+            *let_go = true;
+            false
+        }
+    }
+}
+
 fn binary(frame: Vec<u8>) -> Message {
     Message::Binary(frame.into())
 }
@@ -385,11 +403,18 @@ async fn serve(
     }
 
     // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`). Until the
-    // gateway stops: then the socket closes with 1012 (O16).
+    // gateway stops: then the socket closes with 1012 (O16). Or until it is let go for a full queue, its stream's or
+    // its view items': then it closes with 1013 `agent.behind` at once, what is still queued not sent (#4979).
     let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     let mut closing = gw.closing.subscribe();
+    let behind = attached.behind.clone();
+    let mut let_go = false;
     while ok {
         tokio::select! {
+            _ = behind.notified() => {
+                let_go = true;
+                break;
+            }
             _ = stopped(&mut closing) => {
                 let close = CloseFrame { code: crate::RESTART, reason: "gateway.restarting".into() };
                 let _ = socket.send(Message::Close(Some(close))).await;
@@ -417,7 +442,7 @@ async fn serve(
                     if let Some((n, _)) = view.take() {
                         gw.views.end(n);
                     }
-                    view = Some(gw.views.subscribe(request, &views::audiences(grant)));
+                    view = Some(gw.views.subscribe(request, &views::audiences(grant), Some(behind.clone())));
                     continue;
                 }
                 // A token revoked since sign-in (W9, #2827): its next intent is refused by name, and the socket ends.
@@ -427,12 +452,12 @@ async fn serve(
                 }
                 if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
-                    ok = send(&mut socket, answer).await;
+                    ok = send_agent(&mut socket, binary(answer), &behind, &mut let_go).await;
                 }
             }
             Some(mail) = attached.mail.recv() => {
                 if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                ok = socket.send(Message::Text(mail.into())).await.is_ok();
+                ok = send_agent(&mut socket, Message::Text(mail.into()), &behind, &mut let_go).await;
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => {
@@ -441,7 +466,7 @@ async fn serve(
                     if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
                     let frame = times::finish(frame);
                     if let Some(t) = &trace { t.final_frame(&frame); }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
                 // Another socket signed in for this grant (a Soul's: the last device wins): it is told so, by name,
@@ -450,6 +475,8 @@ async fn serve(
                     if gw.replaced(grant, attached.session) {
                         let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
                         let _ = socket.send(Message::Close(Some(close))).await;
+                    } else {
+                        let_go = true;
                     }
                     break;
                 }
@@ -462,10 +489,13 @@ async fn serve(
             } => match item {
                 Some(frame) => {
                     if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                 },
                 // Its view queue was full: let go, as a slow stream is.
-                None => break,
+                None => {
+                    let_go = true;
+                    break;
+                }
             },
         }
     }
@@ -473,6 +503,19 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+    // #4979: its reason and close frame, if it can still take them; either way the socket is dropped. A client that
+    // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then.
+    if let_go {
+        let close = CloseFrame {
+            code: crate::BEHIND,
+            reason: crate::AGENT_BEHIND.into(),
+        };
+        let _ = tokio::time::timeout(
+            VIEW_BEHIND_GRACE,
+            socket.send(Message::Close(Some(close))),
+        )
+        .await;
+    }
 }
 
 /// A page's view socket (V13b, #3407), signed in with a view token: it subscribes to views for the token's grants (its
@@ -555,7 +598,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     if let Some((n, _)) = sub.take() {
                         gw.views.end(n);
                     }
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view), None));
                     asked = Some(request);
                     continue;
                 }
@@ -577,7 +620,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     && let (Some(request), Some((n, _))) = (&asked, sub.take())
                 {
                     gw.views.end(n);
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh), None));
                 }
                 view = fresh;
                 authority = fresh_authority;
