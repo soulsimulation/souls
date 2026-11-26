@@ -40,10 +40,12 @@ pub const GRIPS: &str = "souls:carry-grips";
 pub const HAND_HALF: i64 = 200_000;
 
 /// The phases a carry's holds are in: carried, on a seating's set-in track, on its way back, let go.
-pub const CARRY: &str = "carry";
-pub const SET_IN: &str = "set-in";
-pub const RETURN: &str = "return";
-pub const RELEASED: &str = "released";
+pub const CARRY: &str = "souls:carry";
+pub const SET_IN: &str = "souls:set-in";
+pub const RETURN: &str = "souls:return";
+pub const RELEASED: &str = "souls:released";
+/// A grip is said by its entry's point name after this (a part's texts are all `namespace:name`).
+pub const POINT: &str = "point:";
 
 /// A grip of a load's entry: its point's name, the point in the load's own frame (µm), and where it lies along the
 /// load's long axis from its middle (µm), as [`Load::of`] reads it.
@@ -147,9 +149,11 @@ impl Holds {
         })?;
         let mut holds = Vec::new();
         for h in &self.holds {
-            let grip = Name::new(&h.grip).ok_or_else(|| replica::effects::Refusal {
-                name: "carry-grips",
-                detail: format!("the grip {}", h.grip),
+            let grip = Name::new(&format!("{POINT}{}", h.grip)).ok_or_else(|| {
+                replica::effects::Refusal {
+                    name: "carry-grips",
+                    detail: format!("the grip {}", h.grip),
+                }
             })?;
             holds.push(Value::Map(BTreeMap::from([
                 (1, h.body.to_value()),
@@ -192,7 +196,7 @@ impl Holds {
             };
             holds.push(Hold {
                 body: id(h.get(&1)?)?,
-                grip: grip.as_str().to_owned(),
+                grip: grip.as_str().strip_prefix(POINT)?.to_owned(),
                 at: read_point(h.get(&3)?)?,
                 hands: [read_point(a)?, read_point(b)?],
             });
