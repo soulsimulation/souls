@@ -382,6 +382,12 @@ function send(bytes, sequence, ranked, world = sequence) {
 
 /** Whether `sequence` is one another client of this Soul numbered. */
 const foreign = (sequence) => state.foreign.some(([from, to]) => sequence >= from && sequence <= to);
+/** A sequence this client numbered and the world never took (refused before it, by name): the other client may take
+ *  it, so an answer under it is not this client's. */
+function lent(sequence) {
+  state.foreign.push([sequence, sequence]);
+  if (state.foreign.length > 64) state.foreign.shift();
+}
 
 /**
  * Signed in, told the newest sequence sent for this Soul (by whichever client): if another client numbered past this
@@ -402,12 +408,15 @@ function numberAfter(newest) {
     state.alias[String(next)] = q.sequence;
   }
   state.sequence = next;
-  log(`another client of this Soul numbered up to ${newest}: this one's next intent is ${next + 1}`);
+  log(`another client of this Soul numbered up to ${newest}: this one's acts go on from ${newest + 1}`);
   save();
 }
 
-/** An own intent that never reached the world, refused here by name, as the gateway's refusal of it would be. */
-function refusedHere(sequence, reason) {
+/** An own intent that never reached the world (sent or to go under `world`), refused here by name, as the gateway's
+ *  refusal of it would be. */
+function refusedHere(sequence, reason, world) {
+  lent(world);
+  if (state.alias[world] !== undefined) delete state.alias[world];
   const k = state.unanswered.indexOf(sequence);
   if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
   trace.write({ k: 'answer', seq: sequence, cause: causeOf(2, reason, rankedOf.get(sequence)), achieved: false });
@@ -542,7 +551,7 @@ function onText(text, sock) {
   // #4978: another client took the Soul; the gateway read this socket's intents up to `read`. One sent after never
   // reached the world: refused here by name, as the gateway refuses one it reads then.
   if (Number.isSafeInteger(f.replaced?.read)) {
-    for (const x of sock.sent ?? []) if (x.world > f.replaced.read && state.unanswered.includes(x.sequence)) refusedHere(x.sequence, 'agent.replaced');
+    for (const x of sock.sent ?? []) if (x.world > f.replaced.read && state.unanswered.includes(x.sequence)) refusedHere(x.sequence, 'agent.replaced', x.world);
     return;
   }
   const m = f.mail;
@@ -797,6 +806,8 @@ function connect() {
       // #4978: an answer to another client of this Soul is not this one's; an own intent sent under a later sequence
       // is answered under the one its agent was told.
       if (a !== '-' && state.alias[a] === undefined && foreign(Number(a))) { counts.foreign++; save(); return; }
+      // Refused by the gateway before the world took it: the other client may number it.
+      if (a !== '-' && Number(c) === 2 && (d === 'agent.replaced' || d === 'intent.seq-in-use')) lent(Number(a));
       if (a !== '-' && state.alias[a] !== undefined) {
         const told = state.alias[a];
         if (Number(c) !== 3) delete state.alias[a];
@@ -876,7 +887,7 @@ function connect() {
       if (held) {
         replacedAt = Date.now();
         // #4978: an act held for the sign-in another client's took the Soul from is refused by name, not kept.
-        for (const q of queued.splice(0)) refusedHere(q.sequence, 'agent.replaced');
+        for (const q of queued.splice(0)) refusedHere(q.sequence, 'agent.replaced', q.world ?? q.sequence);
         log('another client of this Soul signed in (the last to connect wins); signing in again at the next command, or once it is free');
         note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
       }
