@@ -4101,14 +4101,15 @@ fn t_late_run(incremental: bool) -> (Vec<u8>, u64) {
 /// writer's time a part on Eden's 10,000 nodes): a node taken out with the nodes under it (one private), the links at
 /// them (one to a private node, never public) and their timers; an activity's node taken out in the cut that makes
 /// another node; a node made under one and taken out with it in one part; a node made with a link and a timer in one
-/// part and taken out in the next, one cut; and a node alone. The parts and the reader's state are the same bytes as
-/// when every cut is whole.
+/// part and taken out in the next, one cut; a node made and taken out in one part with a link already made to its id
+/// (`Tree` rule 7); a node holding words taken out; and a node alone. The parts, the words and the reader's state are
+/// the same bytes as when every cut is whole.
 #[test]
 fn removes_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
     let (rows, rows_whole) = removes_run(true);
     let (whole, whole_whole) = removes_run(false);
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
-    assert_eq!(whole_whole, 5, "every reference cut is whole");
+    assert_eq!(whole_whole, 8, "every reference cut is whole");
     assert_eq!(rows_whole, 0, "a remove is a cut by rows");
 }
 
@@ -4128,6 +4129,17 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
         (n(1), n(2), n(3), n(4), n(5), n(6), n(7), n(8), n(9));
     let (l1, l2, l3, t1, t2) = (n(10), n(11), n(12), n(13), n(14));
     let (brief, l4, t3) = (n(15), n(16), n(17));
+    let (ghost, l5) = (n(18), n(19));
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let said = words
+        .write(b"words on the fresh node", Audience::Everyone, fresh)
+        .unwrap();
     let mut out = PublicWriter::open(
         PublicStart {
             root: &d.join("views"),
@@ -4136,7 +4148,7 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
             initial: actual.frozen(),
             record: 0,
             checkpoint: Some(cp),
-            text: None,
+            text: Some(words),
             names: None,
             clock_seed: None,
             history: None,
@@ -4219,6 +4231,17 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
         ],
         vec![remove(21, brief)],
         vec![remove(22, other)],
+        // A link to an id no node has yet, and words on the node that owns it.
+        vec![
+            link(23, l5, [fresh, ghost]),
+            change(24, fresh, everyone, set(fresh, 5, said.to_value())),
+        ],
+        // The node is made, which takes the link in, and taken out with it, in one part.
+        vec![
+            w3e_create(&h, 25, ghost, h.zone, everyone),
+            remove(26, ghost),
+        ],
+        vec![remove(27, fresh)],
     ];
     let mut whole = 0;
     for (i, effects) in log.into_iter().enumerate() {
@@ -4350,7 +4373,7 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
 
 /// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
 /// and so is a thing of the kind it defines; a thing of a kind only a private definition names (which a public reader
-/// cannot check) is left out, logged by name, and the stream goes on, touched or not.
+/// cannot check) is left out, logged by name, and the stream goes on, touched or taken out.
 #[test]
 fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     let h = header();
@@ -4428,15 +4451,34 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
             BTreeMap::new(),
         )],
         vec![i3948_set(4, secret, 1), i3948_set(5, boxed, 2)],
+        // The left-out node taken out: by rows, naming no version for it, as the whole cut names none.
+        vec![w3e_effect(
+            6,
+            secret,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Remove { node: secret },
+                rest: Rest::new(),
+            }]),
+        )],
     ];
+    let mut whole = 0;
     // The private definition changes nothing public: no part for it.
-    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4]).enumerate() {
+    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4, 5]).enumerate() {
+        if n == 5 {
+            whole = out.whole_cuts;
+        }
         let p = w3e_packet(&h, effects);
         actual.apply_bytes(&p).unwrap();
         out.push(n as u64, &p).unwrap();
         out.flush().unwrap();
         assert_eq!(out.player.next(), parts, "after record {n}");
     }
+    assert_eq!(out.whole_cuts, whole, "the remove is a cut by rows");
+    assert_eq!(
+        out.player.state(),
+        &out.shown(out.canonical.tree()).unwrap()
+    );
     assert!(i3948_holds(&out.player, def) && i3948_holds(&out.player, boxed));
     assert!(
         !i3948_holds(&out.player, secret),
@@ -4448,7 +4490,7 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     );
     // A reader that plays the parts from the baseline holds the same state.
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
-    for n in 0..4 {
+    for n in 0..5 {
         reader
             .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
             .unwrap();

@@ -619,7 +619,7 @@ struct Plan {
     /// Whether the rows made are in the state now (and the rows of the nodes gone out of it).
     added_in: bool,
     /// The nodes the delta takes out (a Soul's body retired, a thing removed), each with its old row's index and,
-    /// while the plan is in the state, that row; in index order. Never with rows made.
+    /// while the plan is in the state, that row; in index order.
     removed: Vec<(usize, Id, Value)>,
     timers: Option<Value>,
     links: Option<Value>,
@@ -1218,6 +1218,10 @@ impl PublicPlayer {
     /// The digest of [`PublicPlayer::state`].
     pub fn digest(&self) -> &[u8] {
         &self.digest
+    }
+    /// Whether the state holds a live node row for `id`.
+    pub fn holds(&self, id: Id) -> R<bool> {
+        Ok(row_index(arr(field(map(&self.state)?, 2)?)?, id)?.is_some())
     }
     /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
     /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]

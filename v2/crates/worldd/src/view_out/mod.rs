@@ -3030,9 +3030,11 @@ impl<S: ObjectStore> PublicWriter<S> {
             let part = Part::read(raw)?;
             // The entries that put a thing into a closed container or touch one in it (#3948): never published.
             let kept = self.kept_out(&part);
-            if self.incremental {
-                self.note_removed(&part);
-            }
+            let waiting = if self.incremental {
+                self.note_removed(&part)
+            } else {
+                Vec::new()
+            };
             // Whole canonical validation first. Never publish a partial producer result or private ledger. The part is
             // taken entry by entry, as a viewer applies it; the view, the duplicates and the cut's state are kept only
             // when every entry applied, and a part refused part way poisons the writer. The view reads the writer's tree
@@ -3278,6 +3280,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 }
             }
+            self.note_landed(waiting);
             let at = part.effects.last().map(|e| e.envelope.at);
             if let Some(at) = at {
                 let win = at.div_euclid(stream::PERIOD_US);
@@ -3419,14 +3422,32 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// publish their rows gone rather than work out the public state whole. A node put under one of them earlier in
     /// the same part is not noted: one made in the cut was never public, and one moved there is not live at the cut,
     /// which is then worked out whole.
-    fn note_removed(&mut self, part: &Part) {
+    ///
+    /// A node made in the part takes in the links already made to its id (`Tree` rule 7), public until then: the
+    /// nodes made and the links waiting for each are returned, so that those of one taken out in the same part are
+    /// noted once it has applied ([`PublicWriter::note_landed`]). One that stays makes the cut whole (`bare`).
+    fn note_removed(&mut self, part: &Part) -> Vec<(Id, Vec<Id>)> {
         let tree = self.canonical.tree();
         let mut gone = std::collections::BTreeSet::new();
+        let mut waiting = Vec::new();
+        let removes = part.effects.iter().any(|e| {
+            matches!(&e.body, Body::Changes(cs)
+                if cs.iter().any(|c| matches!(c.change, replica::effects::Change::Remove { .. })))
+        });
+        if !removes {
+            return waiting;
+        }
         for e in &part.effects {
             let Body::Changes(cs) = &e.body else {
                 continue;
             };
             for c in cs {
+                if let replica::effects::Change::Create { node, .. } = &c.change {
+                    let links = tree.links_at(*node);
+                    if !links.is_empty() {
+                        waiting.push((*node, links.iter().map(|e| e.link).collect()));
+                    }
+                }
                 let replica::effects::Change::Remove { node } = &c.change else {
                     continue;
                 };
@@ -3441,9 +3462,6 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
-        if gone.is_empty() {
-            return;
-        }
         self.timers.extend(
             tree.timers()
                 .iter()
@@ -3451,6 +3469,16 @@ impl<S: ObjectStore> PublicWriter<S> {
                 .map(|(id, _)| *id),
         );
         self.gone.extend(gone);
+        waiting
+    }
+    /// After a part applied: the links that waited for a node it made ([`PublicWriter::note_removed`]) are noted
+    /// when the part also took that node out, so the cut publishes them gone.
+    fn note_landed(&mut self, waiting: Vec<(Id, Vec<Id>)>) {
+        for (node, links) in waiting {
+            if self.canonical.tree().handle(node).is_none() {
+                self.links.extend(links);
+            }
+        }
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
@@ -3744,18 +3772,31 @@ impl<S: ObjectStore> PublicWriter<S> {
             ids.extend(rows_of(self.player.state()));
             ids
         });
-        // A cut by rows names no version of a node it made and took out again (made in one part, gone in a later one):
-        // it is in neither state, as a whole cut leaves it out.
-        let tree = self.canonical.tree();
-        let changed = self
-            .changes
-            .iter()
-            .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
-            .filter(|(i, _)| {
-                after.is_some() || !self.made.contains(i) || tree.handle(**i).is_some()
-            })
-            .map(|(i, v)| (*i, *v))
-            .collect::<Vec<_>>();
+        // A cut by rows names versions only of nodes in the published state or made with a row in its delta, as a
+        // whole cut names them only of nodes in the state before or after it: one it made and took out again, or one
+        // left out (C5) that a remove took out, is in neither.
+        let made_rows: std::collections::BTreeSet<Id> = match &delta {
+            Some(Value::Map(d)) => match d.get(&2) {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(p) if p.len() == 2 => replica::effects::read_id(&p[0]).ok(),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+        let mut changed = Vec::new();
+        for (i, v) in &self.changes {
+            if shown_ids.as_ref().is_some_and(|s| !s.contains(i))
+                || after.is_none() && !made_rows.contains(i) && !self.player.holds(*i)?
+            {
+                continue;
+            }
+            changed.push((*i, *v));
+        }
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
         // is brought up to date from (#4192).
         let whole_delta = match &after {
