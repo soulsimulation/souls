@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // W3b's finite, root-owned initializer. The path unit supplies no arguments: the inbox is request identity only.
-import { isMain } from '../../../tools/lib/is-main.mjs';
+import { isMain } from './is-main.mjs';
 import { constants } from 'node:fs';
 import { lstat, realpath, readdir, mkdir, open, rename, chmod, copyFile } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';

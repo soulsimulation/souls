@@ -460,7 +460,8 @@ bundle() {
   origin_files "$out/origin"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
+  # is-main.mjs is tools/lib's, kept beside the scripts: their import of it resolves where they are installed ($LIB/ops).
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   rm -rf "$out/client"
