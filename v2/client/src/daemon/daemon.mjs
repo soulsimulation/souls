@@ -946,6 +946,24 @@ function holdingOf(rows, quote = () => true) {
   return heldIn(rows, [...rows.values()].find((r) => r.soul === ME)?.id, heldKinds, quote);
 }
 
+/**
+ * Trial 0.137: the brief's own lines about this Soul's body: what it is doing (its newest act still going, by verb and
+ * thing, with the most seconds the world gives it; else seated in its seat, or standing), what it holds, and how far
+ * each row is from it (the brief's things, nearest first).
+ */
+function meNow(rows) {
+  const body = [...rows.values()].find((r) => r.soul === ME);
+  if (!body) return {};
+  const r = receipts.get(going.at(-1)), on = body.parent ? rows.get(body.parent) : null;
+  let now = inBodySlot(rows) && on ? `in ${on.name} (${on.id})` : 'standing';
+  if (r) {
+    const verb = String(r.verbs[0] ?? '').replace(/^.*:/, '').replace(/_/g, ' '), t = rows.get(String(r.target ?? '').split(' ')[0]);
+    const ends = r.answers.findLast((a) => a.ends_by)?.ends_by, left = ends ? Math.max(0, Math.round((Date.parse(ends) - Date.now()) / 1000)) : null;
+    now = `${verb === 'walk' ? 'walking to' : verb}${t && t.id !== body.id ? ` ${t.name} (${t.id})` : ''}${left !== null ? `, at most ${left} s left` : ''}`;
+  }
+  return { now, holding: holdingOf(rows).holding ?? [], metres: metresFrom(rows, body.id, { placed: true }) ?? undefined };
+}
+
 /** The copy brought current unless `now`, and its age fields (R10). */
 async function ageAfter({ now = false } = {}) {
   // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
@@ -1224,7 +1242,26 @@ function formOf(req) {
   const words = String(req.words ?? '');
   if (!words.trim() || [...words].length > WORDS_MOST) return { code: 'words-empty-or-long', detail: `1 to ${WORDS_MOST} characters` };
   if (req.op === 'say') return { verb: `${NS}:${req.loud ? 'shout' : 'say'}`, words };
-  return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
+  const to = soulNamed(req.to, 'whisper-names-a-body', 'whisper <name or body id> "<words>"');
+  return to.code ? to : { verb: `${NS}:whisper`, target: to.id, words };
+}
+
+/**
+ * Trial 0.137: a Soul named in a command (whisper, converse, give, together, carry, say --to), by its body's id, its
+ * Soul's id or its name in the copy, any case, never this Soul's own: `{id, name}`, or a refusal by name: `code` when no
+ * Soul goes by it (`usage` its detail), `<code>`'s ambiguity naming the ids when several do. A body id the copy does not
+ * hold yet goes as it is (the world answers it).
+ */
+function soulNamed(w, code, usage, ambiguous = code) {
+  const rows = [...rowsOf(copy).values()], me = rows.find((r) => r.id === ME || r.soul === ME);
+  const want = String(w ?? '').trim(), lower = want.toLowerCase();
+  const souls = rows.filter((r) => r !== me && (r.soul !== undefined || r.kind === me?.kind));
+  const exact = souls.filter((r) => r.id === want || r.soul === want);
+  const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
+  if (found.length === 1) return { id: found[0].id, name: found[0].name };
+  if (found.length > 1) return { code: ambiguous, detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
+  if (ID.test(want) && want !== me?.id) return { id: want, name: want };
+  return { code, detail: want ? `no Soul called ${want} in the copy: find "${want}" or look; ${usage}` : usage };
 }
 
 /**
@@ -1236,13 +1273,9 @@ function formOf(req) {
 function towardOf(req) {
   if (req.to === undefined) return { code: 'gesture-needs-to', detail: 'say --to <name> --gesture <g> "<words>"' };
   const rows = [...rowsOf(copy).values()], me = rows.find((r) => r.id === ME || r.soul === ME);
-  const want = String(req.to).trim(), lower = want.toLowerCase();
-  const souls = rows.filter((r) => r !== me && (r.soul !== undefined || r.kind === me?.kind));
-  const exact = souls.filter((r) => r.id === want || r.soul === want);
-  const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
-  if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
-  if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
-  const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
+  const named = soulNamed(req.to, 'say-to-unknown', 'say --to <name or body id> "<words>"', 'say-to-ambiguous');
+  if (named.code) return named;
+  const them = rows.find((r) => r.id === named.id) ?? named, forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => isGesture(f));
   // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
@@ -1558,7 +1591,7 @@ async function answer(req, conn = null) {
       (rows, changes) => {
         // #3782: the brief `look` gives, after the messages and arrivals (today's `pending` carries it, N-C18), so the
         // turn needs no `look` first. What was heard is in `events` above, so not again in the brief.
-        const b = brief(rows, { me: ME, changes, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+        const b = brief(rows, { me: ME, changes, doing: doingLines(rows, mineIn(rows)), ...meNow(rows), ageMs: performance.now() - (confirmedAt ?? startedAt) });
         delete b.changed; // the answer's own closes it
         return { events: got.map((e) => shownOf(rows, e)), brief: b };
       }, { now: true });
@@ -1610,7 +1643,7 @@ async function answer(req, conn = null) {
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
       const heard = named(rows, heardSince.splice(0));
-      const b = { ...brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ageMs: performance.now() - (confirmedAt ?? startedAt) }), ...holdingOf(rows) };
+      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...meNow(rows), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -2222,6 +2255,11 @@ function converse(req) {
   // The open ground, which takes the conversation as a child, else the node this Soul's body stands under (never
   // the seat it sits on: two Souls on a bench still talk).
   const place = offerPlace(rowsOf(copy), ME);
+  if (req.do === 'start') {
+    const to = soulNamed(req.with, 'converse-names-a-body', 'converse start <name or body id> "<text>"');
+    if (to.code) return { ok: false, code: to.code, detail: to.detail };
+    req = { ...req, with: to.id };
+  }
   const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
@@ -2252,9 +2290,11 @@ async function give(req) {
     .map((r) => ({ id: r.id, d: from && at(r.id) ? Math.hypot(at(r.id).pos[0] - from[0], at(r.id).pos[2] - from[2]) : Infinity }))
     .sort((a, b) => a.d - b.d)[0]?.id ?? null;
   // A Soul named by its name (a body's name in the copy), not only by its body's id.
-  if (req.touch !== undefined && req.to !== undefined) {
-    const named = (w) => (ID.test(String(w)) ? w : rows.find((r) => r.soul && r.id !== ME && r.soul !== ME && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w);
-    req = { ...req, to: Array.isArray(req.to) ? req.to.map(named) : named(req.to) };
+  if (req.do === 'offer' && req.to !== undefined) {
+    const named = (w) => { const t = soulNamed(w, 'give-names-a-soul', req.touch !== undefined ? 'together offer <activity> <name or body id>' : 'give <thing id> --to <name or body id>'); return t.code ? t : t.id; };
+    const to = Array.isArray(req.to) ? req.to.map(named) : named(req.to), bad = [to].flat().find((t) => t?.code);
+    if (bad) return { ok: false, code: bad.code, detail: bad.detail, ...ageNow() };
+    req = { ...req, to };
   }
   // An answer by the activity's word: the newest offer of it to this Soul.
   if (['accept', 'decline', 'leave'].includes(req.do) && req.offer !== undefined && !ID.test(String(req.offer))) {
@@ -2308,7 +2348,9 @@ async function carry(req) {
   const me = all.find((r) => r.soul === ME)?.id ?? null;
   // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
   if (req.do === 'offer' && Array.isArray(req.to)) {
-    req = { ...req, to: req.to.map((w) => (ID.test(String(w)) ? w : all.find((r) => r.soul && r.id !== me && r.name.toLowerCase() === String(w).toLowerCase())?.id ?? w)) };
+    const to = req.to.map((w) => soulNamed(w, 'carry-names-a-soul', 'carry offer <name or body id> [...]')), bad = to.find((t) => t.code);
+    if (bad) return closing({ ok: false, code: bad.code, detail: bad.detail }, null, { age });
+    req = { ...req, to: to.map((t) => t.id) };
   }
   // Who is in each crew: its members as the world's node holds them in the copy (0.135), front and back first.
   const crews = crewsIn(rows), mine = mineIn(rows);

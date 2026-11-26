@@ -6,10 +6,14 @@
 //!
 //! So a gateway says on each connection that it is the world's gateway ([`ask`]), and the world hands an ended
 //! gateway connection's answers on: each answer to an intent (a frame naming an actor and a sequence) that the ended
-//! connection can no longer take goes to the newest gateway connection, or, while none is up, is held (at most
-//! [`HELD_MOST`]) and goes to the next one as it asks, oldest first. The gateway passes an answer for an intent it
-//! does not hold to its actor's socket, once. Nothing else is handed on: a sync answer or the Souls' words were for
-//! the ended connection's own asks.
+//! connection can no longer take goes to the newest gateway connection still up, or, while none is up, is held (at
+//! most [`HELD_MOST`]) and goes to the next one as it asks, oldest first. The gateway passes an answer for an intent
+//! it does not hold to its actor's socket, once. Nothing else is handed on: a sync answer or the Souls' words were
+//! for the ended connection's own asks.
+//!
+//! Every gateway connection still up is kept, not only the newest: each connection is served on its own thread, so
+//! a connection that ended at once (its gateway restarted under it) can ask after the one that replaced it, and its
+//! end must leave the newer one taking answers rather than none.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -46,8 +50,8 @@ pub struct Handover {
 #[derive(Default)]
 struct Inner {
     next: u64,
-    /// The newest gateway connection, by number, and its queue.
-    current: Option<(u64, Sender<Vec<u8>>)>,
+    /// The gateway connections up, by number, with their queues, in the order they asked: the last is the newest.
+    gateways: Vec<(u64, Sender<Vec<u8>>)>,
     held: VecDeque<Vec<u8>>,
 }
 
@@ -68,31 +72,30 @@ impl Handover {
                 return;
             }
         }
-        s.current = Some((n, reply.clone()));
+        s.gateways.push((n, reply.clone()));
     }
 
-    /// Connection `n` ended: it is no longer the one answers are handed to.
+    /// Connection `n` ended: answers are no longer handed to it.
     pub fn ended(&self, n: u64) {
         let mut s = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if s.current.as_ref().is_some_and(|(c, _)| *c == n) {
-            s.current = None;
-        }
+        s.gateways.retain(|(c, _)| *c != n);
     }
 
-    /// A frame ended connection `n` could not take: an intent's answer goes to the newest gateway connection, or is
-    /// held for the next; anything else is dropped.
-    pub fn hand_on(&self, n: u64, frame: Vec<u8>) {
+    /// A frame ended connection `n` could not take: an intent's answer goes to the newest other gateway connection
+    /// up, or is held for the next; anything else is dropped.
+    pub fn hand_on(&self, n: u64, mut frame: Vec<u8>) {
         if !answers_an_intent(&frame) {
             return;
         }
         let mut s = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let frame = match &s.current {
-            Some((c, tx)) if *c != n => match tx.send(frame) {
+        // `n` has ended (that is why it hands on) even while its `ended` is still to run: never hand back to it.
+        s.gateways.retain(|(c, _)| *c != n);
+        for (_, tx) in s.gateways.iter().rev() {
+            match tx.send(frame) {
                 Ok(()) => return,
-                Err(e) => e.0,
-            },
-            _ => frame,
-        };
+                Err(e) => frame = e.0,
+            }
+        }
         if s.held.len() == HELD_MOST {
             s.held.pop_front();
         }
@@ -140,5 +143,20 @@ mod tests {
         // The newest connection's own frames are never handed to itself.
         h.hand_on(b, answer(4));
         assert!(from_b.try_iter().next().is_none());
+    }
+
+    /// A connection that ended at once can ask after the one that replaced it (each is served on its own thread):
+    /// its end leaves the newer one taking answers, so nothing waits for a gateway that is already up.
+    #[test]
+    fn an_ended_connection_that_asked_late_leaves_the_newer_one_taking_answers() {
+        let h = Handover::default();
+        let (old, new) = (h.connection(), h.connection());
+        let (to_old, _from_old) = channel();
+        let (to_new, from_new) = channel();
+        h.asked(new, &to_new);
+        h.asked(old, &to_old);
+        h.ended(old);
+        h.hand_on(old, answer(1));
+        assert_eq!(from_new.try_iter().collect::<Vec<_>>(), vec![answer(1)]);
     }
 }

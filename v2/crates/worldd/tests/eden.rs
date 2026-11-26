@@ -1740,6 +1740,147 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     assert!(failed.is_empty(), "{failed:?}");
 }
 
+/// Long walks from the town to Eden's named landforms end at them. From each start, where a new Soul arrives (by the
+/// campus quad's fountain), outside the library's door, on the harbour quay, in the lane between the courtyard
+/// quarter's houses and on the north avenue, one Soul per landform walks to it, all at once: the mountains (the
+/// region the client's find picks by name, and the range), the sea (the land's and the region's), the eastern hills and
+/// the west lake's far shore. Each walk ends `Ok`, on it or at its edge facing it: a step ahead is nearer it. Before,
+/// walks whose route first heads away from the landform (round the vineyard, from the avenue) stopped on the way,
+/// `goal-unreachable`, walking at full speed: the never-stuck ladder measured progress only straight to the leg's end.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn walks_from_the_town_to_each_landform_end_at_it() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let ground = im.nodes["ground"];
+    let landforms = [
+        "place-region-northern-mountains",
+        "land-ring-north-range",
+        "land-southern-sea",
+        "place-region-southern-sea",
+        "place-region-eastern-hills",
+        "land-west-lake",
+    ];
+    let starts = [
+        ("-9.0,-97.0", "quad"),
+        ("-12.0,-113.0", "library"),
+        ("11.5,167.0", "harbour"),
+        ("-116.0,70.0", "house"),
+        ("45.0,-78.0", "avenue"),
+    ];
+    let places: Vec<Id> = landforms
+        .iter()
+        .map(|n| im.nodes[&facts_id(&text, n)])
+        .collect();
+    // Each walk: its start, its landform, its answer, its time and the body's last pose.
+    let ran = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for (at, from) in starts {
+            let (places, ran, facts, landforms) = (&places, &ran, &facts, &landforms);
+            s.spawn(move || {
+                let (served, first, dir) = serve(facts, at, &format!("lftown-{from}"), lineage);
+                let souls: Vec<Client> = std::iter::once(first)
+                    .chain((2..=places.len() as u64).map(|n| join(&dir, n, lineage)))
+                    .collect();
+                let walks: Vec<(Id, Result<Vec<u64>, String>, f64)> = std::thread::scope(|w| {
+                    let runs: Vec<_> = souls
+                        .into_iter()
+                        .zip(places.iter().copied())
+                        .map(|(mut soul, place)| {
+                            w.spawn(move || {
+                                soul.0
+                                    .set_read_timeout(Some(Duration::from_secs(960)))
+                                    .unwrap();
+                                let t = answers::now();
+                                let r = soul.act_within(
+                                    "eden:walk",
+                                    Some(place),
+                                    BTreeMap::new(),
+                                    900_000_000,
+                                );
+                                let secs = (answers::now() - t) as f64 / 1e6;
+                                println!(
+                                    "walked from the {from}: Soul {} {r:?} in {secs:.0} s",
+                                    soul.1.counter()
+                                );
+                                (soul.1, r, secs)
+                            })
+                        })
+                        .collect();
+                    runs.into_iter().map(|h| h.join().unwrap()).collect()
+                });
+                // The turn to face it is the legs' input after the walk's end: logged a tick or two later.
+                std::thread::sleep(Duration::from_secs(2));
+                let bytes = std::fs::read(dir.join("log")).unwrap();
+                let mut last = BTreeMap::new();
+                for r in sim::log::recover(&bytes).unwrap().records {
+                    if sim::recorder::is_input(&r) {
+                        continue;
+                    }
+                    if let Ok(Value::Map(m)) = decode(&r).map(|d| d.value)
+                        && let Some(Value::Array(rows)) = m.get(&answers::BODIES)
+                    {
+                        for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                            last.insert(id, pose);
+                        }
+                    }
+                }
+                drop(served);
+                let _ = std::fs::remove_dir_all(&dir);
+                // The world mints each Soul's body as it joins, in the order they joined: its bodies by id are the
+                // Souls in that order (the only bodies here: `--souls 0`).
+                let poses: Vec<_> = last.into_values().map(Some).collect();
+                let poses = if poses.len() == walks.len() {
+                    poses
+                } else {
+                    vec![None; walks.len()]
+                };
+                let mut ran = ran.lock().unwrap();
+                for (((_, walked, secs), (name, &place)), pose) in walks
+                    .into_iter()
+                    .zip(landforms.iter().zip(places))
+                    .zip(poses)
+                {
+                    ran.push((from, *name, place, walked, secs, pose));
+                }
+            });
+        }
+    });
+    let mut failed = Vec::new();
+    for (from, name, place, walked, secs, pose) in ran.into_inner().unwrap() {
+        let Some(pose) = pose else {
+            failed.push(format!(
+                "{from} -> {name}: {walked:?}, no pose for each Soul in the log"
+            ));
+            continue;
+        };
+        let p = pose.position;
+        let gap = replica::select::gap(&im.tree, place, ground, p).unwrap();
+        let ahead = pose
+            .orientation
+            .rotate(replica::pose::Vec3::new(3_000_000, 0, 0))
+            .unwrap();
+        let step = replica::pose::Vec3::new(p.x + ahead.x, 0, p.z + ahead.z);
+        let gap_ahead = replica::select::gap(&im.tree, place, ground, step).unwrap();
+        println!(
+            "from the {from} to {name}: {walked:?} in {secs:.0} s, ends at ({:.1}, {:.1}) m, {:.1} m from it, \
+             {:.1} m a step ahead",
+            p.x as f64 / 1e6,
+            p.z as f64 / 1e6,
+            gap as f64 / 1e6,
+            gap_ahead as f64 / 1e6
+        );
+        if let Err(e) = &walked {
+            failed.push(format!("{from} -> {name}: {e}"));
+        } else if gap > 0 && gap_ahead >= gap {
+            failed.push(format!("{from} -> {name}: not facing it"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
 /// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
 /// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
 /// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk

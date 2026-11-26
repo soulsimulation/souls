@@ -1,15 +1,17 @@
 // The brief (Engine v2 R7, #2701): what each turn begins with, under 2,000 bytes however busy the room, and saying
 // what it left out. Built from the copy's rows (`copy.mjs`), never from memory:
 //
-// - **my room**: its name, the things in it by name (the interest set), as many as fit, the rest left to `find`; the
-//   other bodies in it counted, never listed.
+// - **my room**: its name, the things in it by name (the interest set), nearest my body first, each with its id and
+//   metres when the copy places it, as many as fit, the rest left to `find`; the other bodies in it counted, never
+//   listed.
+// - **me**: what my body is doing (its act still going, else seated or standing) and what it holds.
 // - **cards outward**: the places around my room by name and kind: its parent and the parent's other places. The
 //   world beyond the room is never shown as counts and never shown whole: it is searched with `find`.
 // - **heard**: what was said to me and near me since my last turn, by whom, newest last, capped (C6, #3390).
 // - **changed**: what changed since my last turn, by name, capped, the rest counted.
 // - **age**: how old the copy is.
 //
-// Things are named, never given as coordinates. Text from the world or other Souls is quoted as data.
+// Things are named, never given as coordinates (a distance is not one). Text from the world or other Souls is quoted as data.
 
 import { asName, wordsOf } from './copy.mjs';
 
@@ -96,15 +98,22 @@ export function roomOf(rows, me) {
 /**
  * The brief, as an object whose JSON is under `most` bytes: `{ room, here, bodies, outward, changed, age, left }`.
  * `rows` are the copy's rows by id, `me` my body's id (if the copy holds it), `changes` what changed since my last
- * turn (`copy.mjs` `changedBetween`), `doing` the activities I am in, as lines (`in`), `ageMs` the copy's age.
+ * turn (`copy.mjs` `changedBetween`), `doing` the activities I am in, as lines (`in`), `ageMs` the copy's age. `now`
+ * is what my body is doing (a line), `holding` what is in its hands, `metres(row)` how far a row is from my body
+ * (undefined when the copy does not place it): then the room's things go nearest first, each `<name> (<id>, <n> m)`.
  */
-export function brief(rows, { me, changes = [], heard = [], doing = [], ageMs = 0, version, most = BRIEF_MOST } = {}) {
+export function brief(rows, { me, changes = [], heard = [], doing = [], now, holding, metres, ageMs = 0, version, most = BRIEF_MOST } = {}) {
   const at = whereOf(rows, me), room = roomOf(rows, me), mine = at?.body.id ?? me;
   const said = heard.length ? { heard: heardBlock(heard) } : {};
   if (!room) return { room: null, note: 'The copy holds nothing yet.', ...said, age: ageText(ageMs), changed: changedBlock(changes) };
   const inRoom = [...rows.values()].filter((r) => r.parent === room.id && r.id !== mine && r.id !== at?.seat?.id);
   const bodies = inRoom.filter((r) => BODY.test(r.kind)).length;
-  const things = inRoom.filter((r) => !BODY.test(r.kind)).sort((a, b) => byName(a.name, b.name));
+  // Nearest first where the copy places them (a world's open ground holds thousands: what is near is what matters),
+  // then by name; with no distances, by name alone.
+  const away = new Map(metres ? inRoom.map((r) => [r.id, metres(r)]) : []);
+  const far = (r) => away.get(r.id) ?? Infinity;
+  const things = inRoom.filter((r) => !BODY.test(r.kind)).sort((a, b) => far(a) - far(b) || byName(a.name, b.name));
+  const shownAs = (r) => (away.get(r.id) === undefined ? r.name : `${r.name} (${r.id}, ${metresText(away.get(r.id))})`);
   const parent = room.parent ? rows.get(room.parent) : null;
   const cards = [parent, ...[...rows.values()].filter((r) => parent && r.parent === parent.id && r.id !== room.id && r.children > 0)]
     .filter(Boolean).slice(0, CARDS_SHOWN).map((r) => ({ name: r.name, kind: r.kind }));
@@ -112,6 +121,8 @@ export function brief(rows, { me, changes = [], heard = [], doing = [], ageMs = 
     ...(version !== undefined ? { at: version } : {}),
     room: { name: room.name, kind: room.kind, ...(room.path.length ? { in: room.path.slice(-2).reverse().join(', ') } : {}) },
     ...(at?.seat ? { seat: { name: at.seat.name, kind: at.seat.kind, id: at.seat.id } } : {}),
+    ...(now ? { doing: now } : {}),
+    ...(holding ? { holding: holding.length ? holding : 'nothing' } : {}),
     ...(doing.length ? { in: doing } : {}),
     ...said,
     here: [],
@@ -128,7 +139,7 @@ export function brief(rows, { me, changes = [], heard = [], doing = [], ageMs = 
   const reserve = 200;
   let shown = 0;
   for (const t of things) {
-    out.here.push(t.name);
+    out.here.push(shownAs(t));
     if (t.text) { out.quoted = quoted; out.note = QUOTED_NOTE; quoted.push({ of: t.name, words: t.text.map((s) => s.slice(0, 80)) }); }
     if (size() > most - reserve) {
       out.here.pop();
@@ -160,6 +171,8 @@ export function heardBlock(heard) {
   }));
   return heard.length > HEARD_SHOWN ? [...shown, { more: heard.length - HEARD_SHOWN }] : shown;
 }
+
+const metresText = (d) => (d < 10 ? `${Math.round(d * 10) / 10} m` : `${Math.round(d)} m`);
 
 export function ageText(ms) {
   return ms < 1000 ? `${Math.round(ms)} ms` : ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`;

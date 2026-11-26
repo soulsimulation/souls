@@ -1427,6 +1427,31 @@ impl Forms {
                 _ => true,
             });
         }
+        // Trial 0.137: a form at another thing by a body a seat, a bed or a standing slot holds (a seated Soul's
+        // `take` of a book stack) walks there first, on legs the slot holds, which its hold refused `resource-held`.
+        // It rises first instead, by the rise move (as a form that moves the actor does, `rises_out`), as a sit at a
+        // seat walks there by itself. A form with a rise, a sit or a settle of its own keeps its steps; a walk the
+        // runner would skip (an approach to a hand step's thing already within reach, #4086) needs no rise, so that
+        // take is made from the seat.
+        let rises_elsewhere = node != body
+            && !in_its_slot
+            && w.places
+                .as_ref()
+                .is_some_and(|p| p.slots.held_by(body).is_some())
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
+            && steps.iter().enumerate().any(|(k, s)| match s {
+                Step::WalkTo { approach, .. } => {
+                    !(*approach
+                        && matches!(steps.get(k + 1), Some(Step::Hand))
+                        && w.geometry.within_reach(body, node) == Some(true))
+                }
+                _ => false,
+            });
+        if rises_elsewhere {
+            steps.insert(0, Step::Rise);
+        }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
         // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
         // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
@@ -1435,7 +1460,7 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
-        let rises_first = in_its_slot && !stays;
+        let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
             if let form_runner::Effect::Unlink { ty, .. } = e {
