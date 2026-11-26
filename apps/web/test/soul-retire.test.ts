@@ -17,3 +17,15 @@ test('#3375 retire asks once, naming the Soul and saying it cannot come back, th
   // A refused retire reads as not done.
   assert.equal(await retireSoul(async () => ({ status: 403 }), { id: 'x', name: 'X' }, () => true), false);
 });
+
+test('0.137: on a world the new engine runs, the confirmed retire goes to the directory, never the old route', async () => {
+  const calls: unknown[][] = [], directory: string[] = [];
+  const api = async (...a: unknown[]) => { calls.push(a); return { status: 409 }; };
+  const byDirectory = async (id: string) => { directory.push(id); return true; };
+  assert.equal(await retireSoul(api, { id: 's_1', name: 'Fern' }, () => false, byDirectory), false);
+  assert.deepEqual(directory, [], 'cancelled: nothing is sent');
+  assert.equal(await retireSoul(api, { id: 's_1', name: 'Fern' }, () => true, byDirectory), true);
+  assert.deepEqual(directory, ['s_1']);
+  assert.deepEqual(calls, [], 'the old process\'s DELETE (409 world.new-engine there) is not sent');
+  assert.equal(await retireSoul(api, { id: 's_1', name: 'Fern' }, () => true, async () => false), false, 'refused reads as not done');
+});

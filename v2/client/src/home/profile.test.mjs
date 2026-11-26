@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
+import { soulRetireWait } from '../account/account.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -106,12 +107,23 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   // An agent's retire changes nothing but the ask, shown on the page.
   const asked = await souls(home, 'retire', 'Wren');
   assert.deepEqual([asked.ok, asked.retire, asked.soul], [true, 'asked', first.soul]);
+  // 0.137: the owner confirms on the Soul's card on its world's page; there is no separate Souls page.
+  assert.equal(asked.page, `${directory}/w/local/#soul/${first.soul}`);
+  assert.match(asked.next, /press Retire for good on its card/);
+  assert.doesNotMatch(asked.next, /Souls page/);
+  // Not confirmed yet: `retire wait` comes back at its bound (a minute; here at once), still pending.
+  const pending = await soulRetireWait(home, { within: 0 });
+  assert.deepEqual([pending.retire, pending.next], ['pending', 'retire wait']);
   assert.equal((await mine()).find((s) => s.soul === first.grant).retire_asked, true);
   const hash = (token) => createHash('sha256').update(token).digest('hex');
   const token = Object.values(json(join(home, 'credentials.json')).souls[first.soul])[0].token;
   assert.ok(readFileSync(tokensFile, 'utf8').includes(hash(token)), 'the token still works');
   // The owner confirms on the page; `retire wait` sees it, and the dead token leaves the home.
   assert.equal((await page('/v1/account/souls/retire', { soul: first.grant, confirm: true })).status, 200);
+  // The world hears of it from the directory's Souls file beside the gateway's tokens (worldd directory.rs), and the
+  // gateway no longer takes its token.
+  assert.match(readFileSync(`${tokensFile}.souls`, 'utf8'), new RegExp(`^retired ${first.grant}$`, 'm'));
+  assert.ok(!readFileSync(tokensFile, 'utf8').includes(hash(token)), 'the gateway refuses its token');
   const waited = await souls(home, 'retire', 'wait');
   assert.deepEqual([waited.retire, waited.retired], ['done', true]);
   assert.equal(json(join(home, 'credentials.json')).souls?.[first.soul], undefined);
