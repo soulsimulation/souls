@@ -1363,7 +1363,7 @@ impl Carry {
         at: Micros,
         transfer: impl FnOnce() -> R<Id>,
     ) -> R<bool> {
-        let Some(h) = self.hoist.filter(|h| h.phase != Phase::Lift) else {
+        let Some(h) = self.hoist.filter(|h| h.phase != Phase::Lift && at > h.t0) else {
             return Ok(false);
         };
         let (p, q) = between(h.from, h.to, (h.t0, h.t1), at)?;
