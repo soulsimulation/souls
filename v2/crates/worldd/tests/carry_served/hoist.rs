@@ -156,7 +156,8 @@ fn held_in(dir: &Path, load: Id, activity: Id) -> Pose {
 }
 
 /// The samples of `node` after `t0` to `t1`, checked as one track begun at `t0`: one a tick, the last at `t1`, never a
-/// step more than twice the even pace (no jump). Returns them.
+/// step more than three times the even pace (no jump; a standing frame tipped flat about its foot moves unevenly).
+/// Returns them.
 fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64, Pose)> {
     let ss: Vec<(i64, Pose)> = samples(dir, node)
         .into_iter()
@@ -189,7 +190,7 @@ fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64
         most / 1000
     );
     assert!(
-        most <= 2 * total / ticks + 5_000,
+        most <= 3 * total / ticks + 5_000,
         "{name}: a step of {most} µm in a track of {total} µm"
     );
     ss
