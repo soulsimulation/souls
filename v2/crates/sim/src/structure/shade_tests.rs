@@ -231,8 +231,18 @@ impl World {
 
     /// Commits `changes` through the rule (`write_guarded`); a refusal changes nothing.
     fn write(&mut self, node: Id, changes: Vec<Change>) -> Result<(), (String, String)> {
+        self.write_all(vec![(node, changes)])
+    }
+
+    /// Commits each node's changes, written by that node, as one part through the rule.
+    fn write_all(&mut self, by: Vec<(Id, Vec<Change>)>) -> Result<(), (String, String)> {
         let before = (self.live.version(), self.live.tree().to_state());
-        let es = vec![effect(self.live.version(), node, changes)];
+        let seq = self.live.version();
+        let es: Vec<Effect> = by
+            .into_iter()
+            .zip(seq..)
+            .map(|((node, changes), k)| effect(k, node, changes))
+            .collect();
         match write_guarded(&mut self.live, &es, &self.s.structure) {
             Ok(_) => Ok(()),
             Err(r) => {
@@ -339,16 +349,18 @@ impl World {
                 }
             }
         }
-        // A bent goes with its holders' hold: they carry it out.
+        // A bent goes with its holders' hold, written by the hold: they carry it out.
+        let mut by = Vec::new();
         for (k, bent) in self.bents.iter().enumerate() {
             if *bent == part
                 && let Some((act, _)) = &self.holds[k]
             {
-                changes.push(Change::Remove { node: *act });
+                by.push((*act, vec![Change::Remove { node: *act }]));
             }
         }
         changes.push(Change::Remove { node: part });
-        self.write(part, changes)?;
+        by.push((part, changes));
+        self.write_all(by)?;
         for k in 0..2 {
             if self.bents[k] == part {
                 self.holds[k] = None;

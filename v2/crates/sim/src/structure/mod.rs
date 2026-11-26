@@ -221,12 +221,12 @@ impl Structure {
         };
         let bearers: BTreeSet<String> = defs
             .iter()
-            .filter(|k| k.links.values().any(|l| !linked(**k, l).is_empty()))
+            .filter(|k| k.links.values().any(|l| !linked(k, l).is_empty()))
             .map(|k| plain(k.name.as_str()).to_owned())
             .collect();
         for k in &defs {
             for l in k.links.values() {
-                let standing = linked(*k, l);
+                let standing = linked(k, l);
                 if standing.is_empty() {
                     continue;
                 }
