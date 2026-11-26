@@ -175,7 +175,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
+import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -2416,6 +2416,15 @@ async function carry(req) {
   const crewEnds = (crew) => { const ids = ends(crew), p = ids.map((b) => (b ? at(b) : null)); return p.every(Boolean) ? { ids, at: p.map((x) => [x.pos[0], x.pos[2]]) } : null; };
   const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
+  // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
+  // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.
+  let late = 0;
+  if (req.go !== undefined) {
+    const wait = Number(req.go) - Date.now();
+    if (!Number.isFinite(wait) || wait > GO_MOST_MS) return closing({ ok: false, code: 'carry-go', detail: `--go names a moment at most ${GO_MOST_MS / 1000} s from now: hh:mm:ss (UTC), an ISO time or Unix ms` }, null, { age });
+    if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+    late = Math.max(0, Date.now() - Number(req.go));
+  }
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.
   const before = req.do === 'offer' ? crews.map((c) => c.id) : null;
@@ -2423,7 +2432,7 @@ async function carry(req) {
   const walked = intents.find((i) => /:walk$/.test(i.verb));
   // What to do next, plainly; the command drops it when the step is refused.
   const next = nextStep(req, { load: rows.get(req.load ?? req.part)?.name ?? null });
-  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(next ? { next } : {}) }, null, { now: true });
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}) }, null, { now: true });
 }
 
 /**

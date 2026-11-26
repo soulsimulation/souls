@@ -11,8 +11,9 @@
 //                                     from its entry; 2.2 m off a part that stands), beside it along its own x (1.2 m),
 //                                     or to the n-th side carrier's place, beside a grip between its ends
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
-//   carry to <crew id> <x,z | thing id> [<slot>]   walks this Soul so the crew's load reaches there (its middle, or a
-//                                     bay's slot), keeping this Soul's place at the load: each carrier sends its own
+//   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
+//                                     middle, or a bay's slot), keeping this Soul's place at the load: each carrier
+//                                     sends its own, at the moment --go names when it names one
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
 //   part take|unseat <crew id> <part id>   the crew takes a loose part, or one out of a bay or stand
@@ -37,7 +38,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -308,6 +309,19 @@ export function carryIntents(req, ctx) {
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
 export const HEIGHT = 900_000;
+/** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
+export const GO_MOST_MS = 20_000;
+
+/** A `--go` word as Unix ms: digits are Unix ms; hh:mm:ss[.s] is today's time in UTC; else an ISO time. NaN when it is
+ *  none of these. */
+export function goTime(word, now = Date.now()) {
+  const w = String(word ?? '');
+  if (/^\d{10,}$/.test(w)) return Number(w);
+  const t = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)Z?$/.exec(w);
+  if (t) { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), +t[1], +t[2]) + Math.round(+t[3] * 1000); }
+  return /T/.test(w) ? Date.parse(w) : NaN;
+}
+
 /** How far outside a bay's bounds a load lined up on its slot stops, µm: within worldd's PUT_REACH (1 m) of the slot,
  *  however short of its goal a walk ends (0.3 m). */
 export const MOUTH_CLEAR = 200_000;

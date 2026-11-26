@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { MOUTH_CLEAR, activityPin, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
+import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
 import { nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
@@ -166,6 +166,17 @@ test('a beam carried into a slot past a beam seated at the height it is carried 
   assert.equal(to('beam_low_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'past a low beam to the far low slot');
   // Without the copy's slots (an older daemon), nothing is read and the walk is sent.
   assert.equal(carryIntents({ do: 'to', crew, where: id(5), slot: 'beam_high_r' }, { ...ctx, crewMiddle: () => [4e6, 6e6] })[0].verb, 'eden:walk');
+});
+
+test('carry to --go names the moment every carrier sets off: hh:mm:ss in UTC, an ISO time or Unix ms', () => {
+  const now = Date.UTC(2026, 10, 26, 12, 0, 0);
+  assert.equal(goTime('12:00:07', now), now + 7000);
+  assert.equal(goTime('12:00:07.5Z', now), now + 7500);
+  assert.equal(goTime('2026-11-26T12:00:09Z', now), now + 9000);
+  assert.equal(goTime(String(now + 3000), now), now + 3000);
+  assert.ok(Number.isNaN(goTime('soon', now)));
+  assert.equal(requestOf(['carry', 'to', id(8), '2,6', '--go', String(now)]).req.go, now);
+  assert.equal(requestOf(['carry', 'to', id(8), '2,6', '--go', 'soon']).refused, 'carry-go');
 });
 
 test('a part is taken, seated in a slot by name or number, laid on the ground, or taken out', () => {

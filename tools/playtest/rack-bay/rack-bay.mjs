@@ -203,8 +203,16 @@ export async function spareFrame(god, { run, both }, seats, bodies, at = AT, log
   return { placed, seen };
 }
 
-/** A runner over seats: `run(who, ...words)` logs and returns the answer; a refused step throws with the refusal. */
-export function runner(seats, log = console.log, t0 = Date.now()) {
+/** How long before the moment it names a carry's `--go` is said, ms: on a loaded laptop a command reaches its send 5 to
+ *  12 s after it starts, and carriers that set off a second apart break their carry off (carriers-apart). */
+export const GO_LEAD_MS = 12_000;
+
+/**
+ * A runner over seats: `run(who, ...words)` logs and returns the answer; a refused step throws with the refusal.
+ * `both(...steps)` runs steps at once; each `carry to` among them carries the same `--go` moment (`go()`), so its
+ * carriers set off together, as a leader saying "on go" has them.
+ */
+export function runner(seats, log = console.log, t0 = Date.now(), { go = () => String(Date.now() + GO_LEAD_MS) } = {}) {
   const lines = [];
   const run = async (who, ...words) => {
     const at = (Date.now() - t0) / 1000;
@@ -214,7 +222,10 @@ export function runner(seats, log = console.log, t0 = Date.now()) {
     if (!ans.ok) throw Object.assign(new Error(`${who}: ${words.join(' ')} refused ${ans.code} ${ans.detail ?? ''}`), { answer: ans });
     return ans;
   };
-  const both = (...steps) => Promise.all(steps.map((s) => run(...s)));
+  const both = (...steps) => {
+    const at = steps.some((s) => s[1] === 'carry' && s[2] === 'to') ? go() : null;
+    return Promise.all(steps.map((s) => run(...(at && s[1] === 'carry' && s[2] === 'to' ? [...s, '--go', at] : s))));
+  };
   return { run, both, lines };
 }
 
@@ -340,7 +351,7 @@ const TEAMS = [
  * its back and four sides each at a grip, offered by the front to the other five, lifted, carried `to` and set down.
  */
 export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = AT6.tall.to) {
-  const all = (...steps) => Promise.all(steps.map((s) => run(...s)));
+  const all = both;
   const crew = crewOf({ run }, bodies);
   const frame = async (f, back, front, bay, slot) => {
     await both([back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']);
@@ -389,7 +400,7 @@ export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = A
  * holder letting go, back into its stand's slot (`stands`: [stand id, slot] by frame id).
  */
 export async function takeDownTwoBays({ run, both }, bodies, { bays }, homes, stands) {
-  const all = (...steps) => Promise.all(steps.map((s) => run(...s)));
+  const all = both;
   const crew = crewOf({ run }, bodies);
   const down = [];
   for (const k of [1, 0]) {
@@ -433,7 +444,7 @@ export async function printLines() {
     return words[0] === 'carry' && words[1] === 'offer' ? { ok: true, crew: `<crew${++n}>` } : { ok: true };
   } }]));
   const ids = { bay: '<bay>', stand: '<stand>', fa: '<frame1>', fb: '<frame2>', beams: ['<beam1>', '<beam2>'] };
-  await buildAndTakeDown(runner(seats, () => {}), Object.fromEntries(LABELS.map((l) => [l, `<${l}-body>`])), ids);
+  await buildAndTakeDown(runner(seats, () => {}, Date.now(), { go: () => '<hh:mm:ss>' }), Object.fromEntries(LABELS.map((l) => [l, `<${l}-body>`])), ids);
 }
 
 /** Where each part is, in Ada's copy; once the last crew has let go (its activity ends a moment later), up to 10 s. */
@@ -519,7 +530,10 @@ async function main() {
       let done = null;
       const camera = six ? CAMERA6 : CAMERA;
       out.clip = { file: join(dir, 'rack-bay.mp4'), camera };
-      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: camera }, record, 16 / 9), log, onPlay: () => { done = play(); } });
+      // a long take (six Souls run half an hour) ends when the run does, at 30 fps, and is encoded fast
+      let ended = null; const end = new Promise((r) => { ended = r; });
+      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: camera }, record, 16 / 9), log,
+        ...(six ? { fps: 30, mbps: 8, preset: 'veryfast', until: end } : {}), onPlay: () => { done = play().finally(() => setTimeout(ended, 5000)); } });
       await done;
     } else await play();
     if (!six) out.after = await partsWhere(seats.ada, out.ids);
