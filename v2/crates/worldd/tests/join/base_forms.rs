@@ -402,7 +402,8 @@ fn a_bow_toward_a_thing_is_made_facing_it() {
     let ahead = p.orientation.rotate(Vec3::new(1 << 20, 0, 0)).unwrap();
     let to = (bench_at().x - p.position.x, bench_at().z - p.position.z);
     let len = ((i128::from(to.0).pow(2) + i128::from(to.1).pow(2)).isqrt()) as f64;
-    let dot = (i128::from(ahead.x) * i128::from(to.0) + i128::from(ahead.z) * i128::from(to.1)) as f64
+    let dot = (i128::from(ahead.x) * i128::from(to.0) + i128::from(ahead.z) * i128::from(to.1))
+        as f64
         / (len * f64::from(1 << 20));
     println!("  facing {ahead:?}, toward the bench {to:?}: cos {dot:.3}");
     assert!(dot > 0.95, "it faces the bench: cos {dot:.3}");

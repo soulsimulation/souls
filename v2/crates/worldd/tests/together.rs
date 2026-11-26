@@ -157,6 +157,8 @@ const DANCE_AT: &str = "test:dance_at";
 /// A dance whose members stand within 1 m of its middle, as content's (`within_mm`): one who accepts from farther than
 /// 2 m of the asker is refused (trial of 25 Nov).
 const DANCE_NEAR: &str = "test:dance_near";
+/// A conversation, by the name the activities hold apart (E26): a Soul in one does one other activity at once.
+const TALK: &str = "souls:conversation";
 /// Content's handshake, hug, high-five and holding hands, standing where their entries place them (0.134 item 5).
 const W_HANDSHAKE: &str = "test:w_handshake";
 const W_HUG: &str = "test:w_hug";
@@ -201,6 +203,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (WAVE, pinned(WAVE, 18)),
         (INTRO, pinned(INTRO, 19)),
         (DANCE_NEAR, pinned(DANCE_NEAR, 20)),
+        (TALK, pinned(TALK, 21)),
     ]
 }
 
@@ -434,6 +437,7 @@ fn tree_rules() -> TreeRules {
                         WAVE,
                         INTRO,
                         DANCE_NEAR,
+                        TALK,
                     ],
                 ),
             ),
@@ -456,6 +460,7 @@ fn tree_rules() -> TreeRules {
             (full(WAVE), k("activity", &[])),
             (full(INTRO), k("activity", &[])),
             (full(DANCE_NEAR), k("activity", &[])),
+            (full(TALK), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -684,6 +689,7 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             hold_at(),
             dance_at(),
             dance_near(),
+            touch(TALK, 60_000_000, "souls:none"),
             content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
@@ -758,6 +764,7 @@ impl Run {
                             WAVE,
                             INTRO,
                             DANCE_NEAR,
+                            TALK,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -2178,13 +2185,18 @@ fn trial_a_far_member_is_refused_a_dance_until_it_walks_over() {
     println!("trial: from 2.6 m: {r}");
     assert!(r.contains("together.too-far"), "{r}");
     assert!(run.starts(far).is_empty(), "nobody dances");
-    c[0].act("activity:leave", Some(far), &[]).expect("withdrawn");
+    c[0].act("activity:leave", Some(far), &[])
+        .expect("withdrawn");
     let near = run.created(&c[0].offer(DANCE_NEAR, 2).expect("offered"));
     c[1].act("activity:accept", Some(near), &[])
         .expect("from 0.6 m");
     std::thread::sleep(Duration::from_millis(2_500));
     let members: BTreeSet<Id> = run.starts(near).iter().map(|s| s.0).collect();
-    assert_eq!(members, [soul(1), soul(2)].into_iter().collect(), "both dance");
+    assert_eq!(
+        members,
+        [soul(1), soul(2)].into_iter().collect(),
+        "both dance"
+    );
     run.stop();
 }
 
@@ -2208,5 +2220,52 @@ fn trial_partners_of_two_face_each_other_as_it_begins() {
     let (c1, c2) = (cos(q1, p1, p2), cos(q2, p2, p1));
     println!("trial: Soul 1 faces Soul 2 at cos {c1:.3}, Soul 2 faces Soul 1 at cos {c2:.3}");
     assert!(c1 > 0.95 && c2 > 0.95, "face to face: {c1:.3} {c2:.3}");
+    run.stop();
+}
+
+/// Review of #4925: turning two who begin to talk to face each other takes nothing from their legs. Soul 2 follows
+/// Soul 1, then the two begin a conversation: nobody leaves the follow, and Soul 2 still follows Soul 1 over a 10 m
+/// walk (within 2.5 m of its place behind, walked, never placed).
+#[test]
+fn trial_a_follower_who_begins_to_talk_goes_on_following() {
+    let run = serve("follow-talk");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    std::thread::sleep(Duration::from_millis(300));
+    let lefts = run.lefts();
+    let talk = run.created(&b.offer(TALK, 1).expect("Soul 2 offers to talk"));
+    a.act("activity:accept", Some(talk), &[])
+        .expect("Soul 1 talks while followed");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(run.starts(talk).len(), 2, "both talk");
+    assert_eq!(run.lefts(), lefts, "nobody left the follow");
+    let from = run.rows().len();
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-30_000_000, 30_000_000))],
+    )
+    .expect("Soul 1 walks");
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "trial: talking, the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    let apart = (((follower.x - leader.x) as i128).pow(2)
+        + ((follower.z - leader.z) as i128).pow(2))
+    .isqrt();
+    assert!(
+        apart < 3_000_000,
+        "the follower ended behind: {follower:?} {leader:?}"
+    );
     run.stop();
 }
