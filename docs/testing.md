@@ -107,7 +107,8 @@ PR that causes it; and V3-bundle in the release gate. A PR that changes only the
 on the same page, never "could not be loaded"), Back again, From the start, Link to this moment (the button says
 "Copied"; the link opened in a new tab must show that moment) and Return to live (the pill reads "Live"). Then the
 Broadcast menu, the sound switch, Explore, its places, following a Soul from
-Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
+Explore (a world whose Explore lists no Soul passes that step with "no Soul listed in Explore: nothing to follow"),
+New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
 failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
 only exception and is empty. A world whose `load` step fails has nothing to click: its remaining steps are not run and
 are reported as `skipped-after-load-failure`, which fails the world as a failed step does. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
