@@ -1795,6 +1795,47 @@ fn tint_of(live: &Replica, id: Id) -> Option<Value> {
     fields.get(&replica::tint::F_TINT).cloned()
 }
 
+/// #5006 review: the world's arrival is set whole and checked as a place; rows into it, or a link's row, would skip
+/// that check, so each is refused `edit.arrival-unknown` by name, with nothing written.
+#[test]
+fn rows_or_a_link_into_the_worlds_arrival_are_refused_by_name() {
+    use replica::arrival::{F_ARRIVAL, UNKNOWN};
+    let mut w = W::new();
+    let (room, _, _) = w.furnish();
+    let log = w.log_hash();
+    let v = w.live.version();
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Rows {
+                node: Ref::Node(w.root),
+                field: F_ARRIVAL,
+                rows: vec![Value::Array(vec![Value::Uint(1), Value::Uint(2)])],
+            }],
+        )
+        .expect_err("rows into the arrival");
+    assert_eq!((r.op, r.name), (Some(0), UNKNOWN), "{r:?}");
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Link {
+                name: 1,
+                ty: Name::new("test:link").expect("a name"),
+                ends: [Ref::Node(w.root), Ref::Node(room)],
+                owner: replica::world_model::End::First,
+                field: F_ARRIVAL,
+                row: vec![Value::Uint(7)],
+                door: None,
+            }],
+        )
+        .expect_err("a link into the arrival");
+    assert_eq!((r.op, r.name), (Some(0), UNKNOWN), "{r:?}");
+    assert_eq!(w.log_hash(), log, "nothing refused reached the log");
+    w.close();
+}
+
 /// R4: the creator's recolour of a thing and of one part commits as one set each, seen by the client's replica, the
 /// public stream and the log (`W::edit` compares all three); anyone else's is refused by name, and so is a tint that
 /// does not read, with nothing written; the log read back from the disk, as a restart reads it, holds the tint.

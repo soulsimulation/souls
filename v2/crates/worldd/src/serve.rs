@@ -4159,6 +4159,8 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
+    // Every reach a birth or a creator's arrival is judged by starts from the town's own entry (#5006).
+    cfg.main_entry = town.entry();
     cfg.wear = Some(answers::Wearing {
         catalogue,
         born,

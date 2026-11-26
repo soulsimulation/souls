@@ -383,14 +383,13 @@ impl Life {
                 held = true;
                 continue;
             }
-            // Never on ground sealed off from the main ground (#5006): a body born there could not walk away.
-            if floors.sealed(node, at, build) {
-                continue;
-            }
             let frame = Frame { node, slot: None };
-            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone.
+            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone. Never
+            // on ground sealed off from the main ground (#5006): a body born there could not walk away. Asked only of
+            // a spot the ground holds, so a spot off the ground costs no reach.
             if let Some(s) = surfaces.get(&node)
                 && let Ok(mut m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
+                && !floors.sealed(node, at, build)
             {
                 if let Some(q) = standing
                     .faces(b.entry, i)

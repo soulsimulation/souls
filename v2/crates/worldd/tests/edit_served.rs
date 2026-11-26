@@ -1406,6 +1406,27 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
     assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
 }
 
+/// A thing on the open ground at the origin whose solids are `boxes`, each `[cx, cz, hx, hz]` mm (its middle and half
+/// sizes), 2.5 m tall: a wall, a pen or a block.
+fn solids(w: &Seeded, boxes: &[[i64; 4]]) -> Op {
+    let mut op = wall(w, 0, 0);
+    if let Op::Place { fields, .. } = &mut op {
+        let boxes = boxes
+            .iter()
+            .map(|&[cx, cz, hx, hz]| {
+                Value::Array(
+                    [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
+                        .iter()
+                        .map(|&v| int(v))
+                        .collect(),
+                )
+            })
+            .collect();
+        fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
+    }
+    op
+}
+
 /// Each body born in the world's log, with its spot on the open ground (µm), in the order born.
 fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
     let bytes = std::fs::read(w.dir.join("log")).unwrap();
@@ -1597,30 +1618,15 @@ async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_e
     )
     .await;
     assert_eq!(got.kind, 1, "the square is named: {got:?}");
-    let solids = |boxes: &[[i64; 4]]| {
-        let mut op = wall(&w, 0, 0);
-        if let Op::Place { fields, .. } = &mut op {
-            let boxes = boxes
-                .iter()
-                .map(|&[cx, cz, hx, hz]| {
-                    Value::Array(
-                        [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
-                            .iter()
-                            .map(|&v| int(v))
-                            .collect(),
-                    )
-                })
-                .collect();
-            fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
-        }
-        op
-    };
-    let pen = solids(&[
-        [0, 4_000, 4_200, 100],
-        [0, -4_000, 4_200, 100],
-        [4_000, 0, 100, 4_200],
-        [-4_000, 0, 100, 4_200],
-    ]);
+    let pen = solids(
+        &w,
+        &[
+            [0, 4_000, 4_200, 100],
+            [0, -4_000, 4_200, 100],
+            [4_000, 0, 100, 4_200],
+            [-4_000, 0, 100, 4_200],
+        ],
+    );
     let (got, _) = send(&mut ws, edit_intent(&w, creator, 8, got.version, pen)).await;
     assert_eq!(got.kind, 1, "the pen is built: {got:?}");
     let penned = got.names[&1];
@@ -1648,7 +1654,7 @@ async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_e
                 Op::Remove {
                     node: Ref::Node(penned),
                 },
-                solids(&[[0, 0, 17_000, 17_000]]),
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
             ],
         ),
     )
@@ -1666,6 +1672,67 @@ async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_e
         (2, replica::arrival::NO_GROUND),
         "{got:?}"
     );
+}
+
+/// #5006 review: a host's arrival (`worldd arrival`) walled off from the world's entry never leaves the world unjoinable.
+/// The square is the host's arrival; a pen 34 m across round its middle shuts in every spot births try round it (16 m);
+/// the next Soul is born round the world's entry, and walks.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hosts_arrival_walled_off_from_the_entry_births_at_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let d = scratch("arrival-host");
+    let w = seed(&d, &text, 1, (-40, 30));
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["arrival", "--dir"])
+        .arg(&w.dir)
+        .args(["--place", "square.area"])
+        .output()
+        .expect("worldd arrival runs");
+    assert!(
+        out.status.success(),
+        "arrival: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc4);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    println!("{}", s.line("worldd: Souls arrive at square.area", 60));
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let pen = solids(
+        &w,
+        &[
+            [0, 17_000, 17_200, 100],
+            [0, -17_000, 17_200, 100],
+            [17_000, 0, 100, 17_200],
+            [-17_000, 0, 100, 17_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the Soul is born and walks with the host's arrival walled off: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 1, "one body born");
+    let (dx, dz) = (born[0].1.x + 40 * M, born[0].1.z - 30 * M);
+    let off = ((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt() / 1e6;
+    println!(
+        "born with the host's arrival walled off: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+        born[0].1.x as f64 / 1e6,
+        born[0].1.z as f64 / 1e6
+    );
+    assert!(off <= 9.0, "born round the entry: {off} m");
 }
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'

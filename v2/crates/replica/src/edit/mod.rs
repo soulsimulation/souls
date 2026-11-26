@@ -623,6 +623,14 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 }
             }
             Op::Rows { node, field, rows } => {
+                // #5006: the world's arrival is set whole, checked as a place; rows would skip that check.
+                if *field == crate::arrival::F_ARRIVAL {
+                    return refuse(
+                        here,
+                        crate::arrival::UNKNOWN,
+                        "the arrival is set whole, a place's id or none, never in rows",
+                    );
+                }
                 if *field == DOOR_GEOMETRY || *field == 7 {
                     return refuse(
                         here,
@@ -679,6 +687,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         here,
                         "edit.tint-malformed",
                         "a tint's rows are [part, rgb], never a link's",
+                    );
+                }
+                if *field == crate::arrival::F_ARRIVAL {
+                    return refuse(
+                        here,
+                        crate::arrival::UNKNOWN,
+                        "the arrival is a place's id or none, never a link's row",
                     );
                 }
                 if *field == DOOR_GEOMETRY
