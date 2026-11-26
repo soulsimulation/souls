@@ -1120,14 +1120,14 @@ fn a2_5_walkers_beyond_a_full_place_end_done_on_overflow_points() {
 /// PR #5012's short walk (`rack-bay.mjs local --crew 6`, bay 2's third beam): a walker on one 16 m square, east of a
 /// pond that stands across its straight way, sent to a point 2.8 m past the edge of the square beside it, is granted
 /// that point itself. The coarse search measured the way across the squares' edge at the middle of the whole stretch
-/// they share (7.4 m off the way here), so the point cost 18.1 m against a place on the walker's own square 3.5 m
-/// short of it at 6.3 m plus three times 3.5 m, and that place was granted: the walk ended `done` 3.5 m short.
+/// they share (7.4 m off the way here), so the point's 9.8 m walk cost 18.1 m, and a place 2.1 m short of it was
+/// granted instead (in the trial, one 3.5 m short on the walker's own square: the walk ended `done` there).
 #[test]
 fn a_point_past_a_squares_edge_is_granted_itself_not_a_place_short_of_it() {
-    // On the test world's open square: a pond 2 m wide, 4 m to 6 m east and 0.75 m to 9 m north of the origin. The
+    // On the test world's open square: a pond 2 m wide, 4 m to 6 m east and 0.45 m to 9 m north of the origin. The
     // squares' edge is x = 0, their shared stretch from z = -16 m to 0 (its middle at z = -8 m).
     let pond = "{\"id\":\"pond\",\"kind\":\"pond\",\"level\":0,\"name\":\"a pond\",\"of\":\"water\",\
-                \"polygon\":[[4000,-9000],[6000,-9000],[6000,-750],[4000,-750]]},";
+                \"polygon\":[[4000,-9000],[6000,-9000],[6000,-450],[4000,-450]]},";
     let w = testworld::generate(1, 0).expect("the test world");
     let text = w
         .text
