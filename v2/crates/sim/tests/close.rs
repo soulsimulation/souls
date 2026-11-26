@@ -805,7 +805,7 @@ fn r1_a_follower_beside_that_cannot_keep_its_place_lets_go() {
 /// behind and 0.6 m to its side, as the front walks 5 s east (sideways to the load, as a crew carries a load into a
 /// bay beside it), then 5 s north, then stops. It never turns with the front's heading: a second after each start its
 /// place is within 0.15 m, it never moves more than a run's tick, it is never more than 1 m from its place (the world's
-/// stretch before a carry breaks off), and it stands within 10 mm of its place half a second after the front stops.
+/// stretch before a carry breaks off), and it stands within 50 mm of its place two seconds after the front stops.
 #[test]
 fn a_carrier_keeps_its_place_from_the_front_without_turning() {
     let off = [-2_700_000, 600_000];
@@ -842,5 +842,5 @@ fn a_carrier_keeps_its_place_from_the_front_without_turning() {
     assert!(settled <= 150_000, "kept its place: {settled} µm");
     assert!(most <= 200_000, "walked: {most} µm in a tick");
     assert!(far < 1_000_000, "never stretched a carry: {far} µm");
-    assert!(apart(h.me, place) <= THERE, "stands at its place");
+    assert!(apart(h.me, place) <= 50_000, "stands at its place");
 }

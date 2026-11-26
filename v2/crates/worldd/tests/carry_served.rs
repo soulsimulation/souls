@@ -1891,8 +1891,10 @@ async fn group_a_carrier_lets_go_mid_walk() {
         f.x > west.x + 10 * M && k.x > west.x + 10 * M,
         "both stopped short of where the front was going"
     );
-    for s in [&mut crew[0], &mut crew[2]] {
-        let _ = s.act("activity:leave", carry, BTreeMap::new()).await;
+    for k in [0, 2] {
+        let _ = crew[k]
+            .act("activity:leave", carry, BTreeMap::new())
+            .await;
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
