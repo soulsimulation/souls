@@ -39,19 +39,35 @@
     0
    ]
   },
-  "grip_low": {
+  "grip_1": {
    "role": "grip",
    "at_mm": [
     0,
-    2132,
+    1399,
     0
    ]
   },
-  "grip_high": {
+  "grip_2": {
    "role": "grip",
    "at_mm": [
     0,
-    3964,
+    2498,
+    0
+   ]
+  },
+  "grip_3": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    3598,
+    0
+   ]
+  },
+  "grip_4": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    4697,
     0
    ]
   },
@@ -100,7 +116,7 @@
   "ever": true
  },
  "text": {
-  "card": "A 6.1 m rack frame: four carry it laid flat, one holds it standing."
+  "card": "A 6.1 m rack frame: four to six carry it laid flat, one at each of its six grips; one holds it standing."
  },
  "card": {
   "text": "card"
