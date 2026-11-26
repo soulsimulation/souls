@@ -135,7 +135,7 @@
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered and
-//   nothing received for 10 s) is let go at once, and acts wait for the next sign-in (#4980). One whose frames still
+//   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in (#4980). One whose frames still
 //   arrive while a sync's answer is late is behind, not gone: it stays, says `gap.why` `behind`, and its acts go on
 //   it (#4979: on a link slower than the world's speech, reconnecting only fell behind again). One the gateway let go
 //   for a full queue is closed as `agent.behind` (1013): it signs in again at once, and answers say `gap.why` `behind`
@@ -348,6 +348,10 @@ let stopped = 0; // acts stopped locally, for the trace
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 let laggingAt = null; // when the socket, frames still arriving, was found behind on a sync's answer (#4979)
+// A link found behind: until a sync's answer comes within SYNC_WITHIN again, a socket on it is given up only after
+// SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
+let slowLink = false;
+const SLOW_QUIET = 60_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -590,17 +594,21 @@ function startSync(sock, kind) {
  */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
+  syncing.askedAt = performance.now();
   const due = () => {
     if (!syncing) return;
-    const quiet = performance.now() - sock.heardAt;
-    if (quiet >= SYNC_WITHIN) { sock.giveUp('sync: no answer; reconnecting'); return; }
+    // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
+    // B/s), so silence counts only past SLOW_QUIET there; a new socket on it would only start that backlog again.
+    const quiet = performance.now() - sock.heardAt, bound = slowLink ? SLOW_QUIET : SYNC_WITHIN;
+    if (quiet >= bound) { sock.giveUp('sync: no answer; reconnecting'); return; }
     if (laggingAt === null) {
       laggingAt = performance.now();
+      slowLink = true;
       cutAt ??= laggingAt;
       cutWhy = 'behind';
       log('sync: no answer yet while frames still arrive; behind, not reconnecting');
     }
-    syncing.timer = setTimeout(due, SYNC_WITHIN - quiet);
+    syncing.timer = setTimeout(due, Math.min(bound - quiet, SYNC_WITHIN));
   };
   syncing.timer = setTimeout(due, SYNC_WITHIN);
 }
@@ -623,6 +631,7 @@ function syncAnswer(sock, n, refused, bytes) {
   cutAt = null;
   if (laggingAt !== null) log(`caught up: the sync answered ${Math.round(t - laggingAt)} ms after it was found behind`);
   laggingAt = null;
+  if (t - syncing.askedAt < SYNC_WITHIN) slowLink = false; // its last answer came in time: the link keeps up again
   const { waiters } = syncing;
   syncing = null;
   hearing();
