@@ -279,6 +279,22 @@ export class V2Creator {
     throw new Error(f.t === 'refused' ? refusalText(f.reason) : 'The world did not answer.');
   }
 
+  /** #5006 row 7: the world's kind entries (`GET /v2/entries` beside the gateway's socket, signed in with a creator's
+   *  token as a paired client's pairing fetches them, #3760), which Build's catalogue reads; null when the gateway gives
+   *  none. Asked once a page. */
+  entries(post: typeof fetch = fetch): Promise<unknown[] | null> {
+    this.entriesAsked ??= (async () => {
+      const place = placeNow(this.stream);
+      if (!place) return null;
+      const { token } = await creatorToken(place, post);
+      const r = await post(new URL('entries', place.gateway.replace(/^ws/, 'http')).href, { headers: { authorization: `Bearer ${token}` }, credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const list: unknown = r.ok ? await r.json().catch(() => null) : null;
+      return Array.isArray(list) ? list : null;
+    })().catch(() => null);
+    return this.entriesAsked;
+  }
+  private entriesAsked: Promise<unknown[] | null> | null = null;
+
   undo(which: 'undo' | 'redo'): Promise<string> { return this.edit({ undo: which }, which === 'undo' ? 'Undid the newest edit.' : 'Redid the newest undone edit.'); }
 
   weather(kind: 'rain' | 'fog'): Promise<string> {

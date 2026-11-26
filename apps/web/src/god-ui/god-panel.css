@@ -122,3 +122,7 @@
 .gp-build .gp-head { display: flex; align-items: center; gap: 8px; }
 .gp-build .gp-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .gp-build select { max-width: 200px; }
+/* #5006: the world's whole catalogue, searched; the kinds it finds as chips that scroll */
+.gp-build input[type=search] { flex: 1; min-width: 0; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, .2); font: inherit; }
+.gp-build-kinds { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 112px; overflow-y: auto; }
+@media (prefers-color-scheme: dark) { .gp-build input[type=search] { background: #2a2b28; color: #ebeae3; border-color: rgba(255, 255, 255, .2); } }

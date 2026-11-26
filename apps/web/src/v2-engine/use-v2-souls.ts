@@ -12,7 +12,7 @@ import type { V2Bridge } from './bridge.ts';
 import { StreamLife, streamNotice } from './stream-health.ts';
 import { EdgeLog, setKindFields, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
-import { setBuildNodes } from './creator-build.ts';
+import { setBuildNodes, watchHeader } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
 import { oldViews } from './source/scene-offer.ts';
 import { KIND_BOUNDS, KIND_LOOKS_URL, KIND_STATE_URL } from './source/kind-bounds.ts';
@@ -104,7 +104,9 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
       // #4159: the live stream from the CDN when the launcher names it (stream-cdn.ts), else from this page's origin
-      bridge.start(streamReadUrl(stream, PAGE_CONFIG, location.search), () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
+      const read = new URL(streamReadUrl(stream, PAGE_CONFIG, location.search), location.href).href;
+      // #5006: Build's catalogue reads the kinds the world pins from the header the reader reads (creator-build.ts)
+      bridge.start(read, () => watchHeader(fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))), read));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)

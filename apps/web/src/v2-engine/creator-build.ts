@@ -6,6 +6,7 @@
 import { entityId } from './creator-kinds.ts';
 import { placedOf } from './world-state.ts';
 import type { Op, Spot, Turn } from './creator-socket.ts';
+import { turned as turnedBy } from './creator-catalogue.ts';
 
 /** A node as the stream reader keeps it (v2/web/src/source/source.ts NodeRec), the fields read here. */
 export type BuildNode = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
@@ -16,6 +17,19 @@ let nodesOf: (() => Nodes) | null = null;
 /** The stream's nodes, set by the v2 page's reader (use-v2-souls.ts); null on an old world. */
 export const setBuildNodes = (f: (() => Nodes) | null) => { nodesOf = f; };
 export const buildNodes = (): Nodes | null => nodesOf?.() ?? null;
+
+let headerAt: string | null = null;
+/** #5006 row 7: where the stream's header is (the kinds the world pins), noted from the reader's pointer as its worker
+ *  reads it (`../../../headers/<hash>` of the stream); null until the first pointer. */
+export const buildHeader = () => headerAt;
+/** Notes the header's address from each pointer the reader's worker posts (`stream`: the address it reads); returns it. */
+export function watchHeader<W extends { addEventListener(type: 'message', fn: (e: MessageEvent) => void): void }>(w: W, stream: string): W {
+  w.addEventListener('message', (e) => {
+    const m = e.data as { t?: string; p?: { header?: unknown } } | null;
+    if (m?.t === 'pointer' && typeof m.p?.header === 'string' && /^[0-9a-f]{8,128}$/.test(m.p.header)) headerAt = new URL(`../../../headers/${m.p.header}`, stream).href;
+  });
+  return w;
+}
 
 let clicks = false;
 /** While the panel's Build is open a click on the world is its own (place, select), not a thing card's (LiveWorld). */
@@ -91,6 +105,16 @@ export function moveOp(nodes: Nodes, id: string, at: [number, number, number]): 
   const spot = spotIn(nodes, n.parent, at);
   if (!spot) return { why: 'The page cannot place what it is in.' };
   return { op: 'move', node: id, at: spot, ...(n.rot ? { rot: [...n.rot] as Turn } : {}) };
+}
+
+/** #5006 row 9: the turn of thing `id` by `yaw` radians about its parent's +y (counter-clockwise seen from above), where
+ *  it stands: one move, its place kept, so the world's edit check (build safety's among it) judges it as any move. */
+export function turnOp(nodes: Nodes, id: string, yaw: number): Op | { why: string } {
+  const n = nodes.get(id);
+  if (!n || !isThing(n) || n.parent === null || !n.pos || !n.rot) return { why: 'That thing is not in the world now.' };
+  if (n.slot != null) return { why: `The ${shortKind(n.kind)} is held in a slot of what it is in: turn that instead.` };
+  const whole = (v: number) => Math.round(v) || 0;
+  return { op: 'move', node: id, at: { x: whole(n.pos[0]), y: whole(n.pos[1]), z: whole(n.pos[2]) }, rot: turnedBy(n.rot, yaw) };
 }
 
 /** The removal of thing `id` (and everything in it). */

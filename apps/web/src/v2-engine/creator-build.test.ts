@@ -1,7 +1,7 @@
 // 0.133 item 6: Build's place, move and remove from what the stream shows.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { buildKinds, groundOf, isThing, moveOp, placeOp, removeOp, shortKind, spotIn, thingNear, thingOf, type BuildNode } from './creator-build.ts';
+import { buildHeader, buildKinds, groundOf, isThing, moveOp, placeOp, removeOp, shortKind, spotIn, thingNear, thingOf, turnOp, watchHeader, type BuildNode } from './creator-build.ts';
 import { entityId } from './creator-kinds.ts';
 
 const S = '1a'.repeat(16), Q = 1 << 30, I: [number, number, number, number] = [Q, 0, 0, 0];
@@ -47,4 +47,24 @@ test('a click names a thing by the entity the page draws it as, or by standing n
   assert.equal(thingOf(nodes, entityId(`${S}.4`)), null);
   assert.equal(thingNear(nodes, [4.4, -2.2]), `${S}.3`);
   assert.equal(thingNear(nodes, [40, 40]), null);
+});
+
+test('#5006 row 9: a turn is one move where the thing stands, turned about +y; one held in a slot or a body is not turned', () => {
+  // the bench stands a half turn about y; a quarter turn left more is three quarters (the sign rule's form)
+  assert.deepEqual(turnOp(nodes, `${S}.3`, Math.PI / 2), { op: 'move', node: `${S}.3`, at: { x: 4e6, y: 1e6, z: -2e6 }, rot: [759250125, 0, -759250125, 0] });
+  assert.deepEqual((turnOp(nodes, `${S}.6`, -Math.PI / 2) as { rot: number[] }).rot, [759250125, 0, -759250125, 0], 'in its parent\'s frame');
+  assert.match((turnOp(nodes, `${S}.7`, 1) as { why: string }).why, /held in a slot/);
+  assert.match((turnOp(nodes, `${S}.4`, 1) as { why: string }).why, /not in the world/, 'a Soul\'s body is never Build\'s');
+});
+
+test('#5006 row 7: the header Build reads the pinned kinds from is noted from the reader\'s pointer', () => {
+  const fns: ((e: MessageEvent) => void)[] = [];
+  const w = watchHeader({ addEventListener: (_t: 'message', f: (e: MessageEvent) => void) => { fns.push(f); } }, 'https://example.test/s/w/a/live/0/');
+  fns[0]!({ data: { t: 'part', p: {} } } as MessageEvent);
+  assert.equal(buildHeader(), null);
+  fns[0]!({ data: { t: 'pointer', p: { header: `1220${'ab'.repeat(32)}` } } } as MessageEvent);
+  assert.equal(buildHeader(), `https://example.test/s/w/headers/1220${'ab'.repeat(32)}`, 'where the worker reads it');
+  fns[0]!({ data: { t: 'pointer', p: { header: '../x' } } } as MessageEvent);
+  assert.match(buildHeader()!, /headers\/1220ab/, 'never a path from a message');
+  assert.ok(w);
 });

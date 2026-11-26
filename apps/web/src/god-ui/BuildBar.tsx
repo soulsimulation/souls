@@ -1,11 +1,13 @@
-// 0.133 item 6: Build in the creator's panel on a world the new engine runs. Place: pick one of the world's kinds and
-// click the ground. Select: click a thing; drag it, or move it with the arrow keys; Delete (or Remove) removes it.
+// 0.133 item 6: Build in the creator's panel on a world the new engine runs. Place: search every kind the world pins
+// (#5006 row 7, creator-catalogue.ts), pick one and click the ground. Select: click a thing; drag it, or move it with
+// the arrow keys; turn it with the turn buttons or [ and ] (#5006 row 9); Delete (or Remove) removes it.
 // Every change is one creator edit on the creator socket (creator-socket.ts, creator-build.ts); nothing moves on the
 // page until the world's stream says so, and a refusal (build safety's among them) is shown by its name.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { Op, V2Creator } from '../v2-engine/creator-socket.ts';
-import { buildKinds, buildNodes, moveOp, placeOp, placedAt, removeOp, setBuildClicks, shortKind, thingNear, thingOf } from '../v2-engine/creator-build.ts';
+import { buildHeader, buildKinds, buildNodes, moveOp, placeOp, placedAt, removeOp, setBuildClicks, shortKind, thingNear, thingOf, turnOp } from '../v2-engine/creator-build.ts';
+import { catalogueOf, pinnedKinds, searchKinds } from '../v2-engine/creator-catalogue.ts';
 
 type Entity = { layer?: { group?: THREE.Object3D; terrainMeshes?(): THREE.Object3D[] }; camera?: THREE.Camera; scene?: THREE.Scene;
   renderer?: { domElement: HTMLCanvasElement }; controls?: { enabled: boolean } };
@@ -14,12 +16,19 @@ const world = () => (window as unknown as { __soulsEntity?: Entity }).__soulsEnt
 const STEP = 1;
 /** How near (m) to the selected thing a press starts a drag: a large thing is pressed on its side, not its middle. */
 const GRAB = 3;
+/** A turn's step: 15 degrees. */
+const TURN = Math.PI / 12;
+/** How many of a search's kinds are shown at once. */
+const SHOWN = 60;
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable);
 
 export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creator>; start: 'place' | 'select'; onClose: () => void }) {
   const [mode, setMode] = useState(start);
   const [kinds, setKinds] = useState<string[]>([]);
   const [kind, setKind] = useState('');
+  const [q, setQ] = useState('');
+  const [pinned, setPinned] = useState<string[] | null>(null);
+  const [entries, setEntries] = useState<unknown[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,7 +40,16 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
     const read = () => { const n = buildNodes(); if (!n) return; const next = buildKinds(n); setKinds((k) => (k.join() === next.join() ? k : next)); };
     read(); const t = setInterval(read, 1000); return () => clearInterval(t);
   }, []);
-  useEffect(() => { if (!kinds.includes(kind) && kinds.length) setKind(kinds[0]!); }, [kinds, kind]);
+  // every kind the world pins (its stream's header), with the words its entries give them (creator-catalogue.ts)
+  useEffect(() => {
+    let gone = false, asked = false;
+    void creator.then((c) => c.entries()).then((e) => { if (!gone) setEntries(e); }, () => {});
+    const ask = () => { const h = buildHeader(); if (asked || !h) return; asked = true; void pinnedKinds(h).then((p) => { if (!gone) setPinned(p); }); };
+    ask(); const t = setInterval(ask, 1000);
+    return () => { gone = true; clearInterval(t); };
+  }, [creator]);
+  const catalogue = useMemo(() => catalogueOf(pinned ?? [], entries, kinds), [pinned, entries, kinds]);
+  const hits = useMemo(() => searchKinds(catalogue, q), [catalogue, q]);
   // a selected thing that leaves the world (removed, undone) is no longer selected
   // (one just placed is selected before the stream shows it)
   useEffect(() => {
@@ -41,6 +59,7 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
     return () => clearInterval(t);
   }, [selected]);
 
+  const turnRef = useRef<(id: string, yaw: number) => void>(() => {});
   const send = useRef(async (ops: Op[], done: string) => {
     setBusy(true); setNote(null);
     try { const r = await (await creator).answer({ ops }, done); setNote({ text: r.said }); return r.names; }
@@ -90,6 +109,13 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
       if ('why' in op) { setNote({ text: op.why, bad: true }); return; }
       void send([op], `Moved the ${shortKind(nodes.get(id)!.kind)} to (${to[0].toFixed(1)}, ${to[2].toFixed(1)}).`);
     };
+    const turn = (id: string, yaw: number) => {
+      const nodes = buildNodes(); if (!nodes) return;
+      const op = turnOp(nodes, id, yaw);
+      if ('why' in op) { setNote({ text: op.why, bad: true }); return; }
+      void send([op], `Turned the ${shortKind(nodes.get(id)!.kind)} 15° ${yaw > 0 ? 'left' : 'right'}.`);
+    };
+    turnRef.current = turn;
     // a ring on the selected thing, and where a drag would put it: interface only, never the thing itself
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.85, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffb02e', depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
     ring.renderOrder = 998; ring.visible = false; ring.name = 'build-ring'; w.scene?.add(ring);
@@ -140,6 +166,7 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
       const s = live.current.selected;
       if (!s || live.current.busy) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { e.stopPropagation(); e.preventDefault(); const k = buildNodes()?.get(s)?.kind; void send([removeOp(s)], `Removed the ${k ? shortKind(k) : 'thing'}.`); return; }
+      if (e.key === '[' || e.key === ']') { e.stopPropagation(); e.preventDefault(); turn(s, e.key === '[' ? TURN : -TURN); return; }
       const arrow = ({ ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] } as Record<string, [number, number]>)[e.key];
       if (!arrow) return;
       e.stopPropagation(); e.preventDefault();
@@ -177,16 +204,27 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
       <button className="gp-icon" data-build-close="1" onClick={onClose} title="Close Build (Escape)" aria-label="close build">×</button>
     </div>
     {mode === 'place'
-      ? <div className="gp-row">
-        <select data-build-kind="1" aria-label="kind to place" value={kind} onChange={(e) => setKind(e.target.value)} disabled={!kinds.length}>
-          {kinds.map((k) => <option key={k} value={k}>{shortKind(k)}</option>)}
-        </select>
-        <span className="gp-dim">{kinds.length ? 'then click the ground' : 'loading the world\'s kinds…'}</span>
-      </div>
+      ? <>
+        <div className="gp-row">
+          <input type="search" data-build-search="1" aria-label="search the world's kinds" placeholder={catalogue.length ? `Search ${catalogue.length} kinds` : 'Loading the world\'s kinds…'}
+            value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) setKind(hits[0].kind); }} />
+          <span className="gp-dim" data-build-kind={kind || undefined}>{kind ? <>{shortKind(kind)}: click the ground</> : 'pick a kind'}</span>
+        </div>
+        <div className="gp-build-kinds" role="listbox" aria-label="kinds to place" data-build-kinds={catalogue.length} data-build-hits={hits.length}>
+          {hits.slice(0, SHOWN).map((k) => <button type="button" key={k.kind} role="option" aria-selected={k.kind === kind} data-build-pick={k.kind}
+            className={'gp-btn gp-small' + (k.kind === kind ? ' gp-armed' : '')} title={k.card || k.kind} onClick={() => setKind(k.kind)}>{k.name}</button>)}
+          {hits.length > SHOWN && <span className="gp-dim">and {hits.length - SHOWN} more: type to narrow</span>}
+          {catalogue.length > 0 && !hits.length && <span className="gp-dim">No kind matches “{q}”.</span>}
+        </div>
+      </>
       : sel
         ? <div className="gp-row" data-build-selected={selected!}>
-          <span><b>{shortKind(sel.kind)}</b> <span className="gp-dim">drag it, or arrow keys</span></span>
-          <button className="gp-btn gp-small" data-build-remove="1" disabled={busy} onClick={() => { const s = selected!; void send([removeOp(s)], `Removed the ${shortKind(sel.kind)}.`); }}>Remove</button>
+          <span><b>{shortKind(sel.kind)}</b> <span className="gp-dim">drag, arrow keys; [ ] turn</span></span>
+          <span>
+            <button className="gp-btn gp-small" data-build-turn="left" disabled={busy} title="Turn 15° left ([)" aria-label="turn left" onClick={() => turnRef.current(selected!, TURN)}>⟲</button>{' '}
+            <button className="gp-btn gp-small" data-build-turn="right" disabled={busy} title="Turn 15° right (])" aria-label="turn right" onClick={() => turnRef.current(selected!, -TURN)}>⟳</button>{' '}
+            <button className="gp-btn gp-small" data-build-remove="1" disabled={busy} onClick={() => { const s = selected!; void send([removeOp(s)], `Removed the ${shortKind(sel.kind)}.`); }}>Remove</button>
+          </span>
         </div>
         : <p className="gp-dim">Click a thing to select it.</p>}
     {busy && <p className="gp-dim">Sending…</p>}
