@@ -662,6 +662,7 @@ function refreshKinds() {
 function connect() {
   clearTimeout(retryTimer);
   retryTimer = null;
+  if (stopping) return; // a retry due while the daemon stops opens nothing
   counts.connects++;
   let step = 'hello', ended = false;
   // Replaced, it asks only if the Soul is free: it never takes the Soul from another client's live socket.

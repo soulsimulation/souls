@@ -41,14 +41,16 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
     if (!entry) return { status: 404, refused: 'world-not-routed' };
     if (entry.archived) return { status: 410, refused: 'world-archived' };
     if (!preview && !entry.canonical) return { status: 404, refused: 'world-preview-only' };
-    if (url.search) return { status: 400, refused: 'world-route-query' };
+    // The one query passed on: a replaced agent's sign-in that asks only if its Soul is free (gatewayd's `FREE`).
+    const free = path === '/v2/ws' && url.search === '?free=1';
+    if (url.search && !free) return { status: 400, refused: 'world-route-query' };
     const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https:' : 'http:';
     const origin = `${protocol}//${req.headers.host}`;
     if (req.headers.origin && req.headers.origin !== origin) return { status: 403, refused: 'origin-refused' };
     let host;
     try { host = new URL(origin).hostname; } catch { return { status: 400, refused: 'world-route-host' }; }
     if (/^Bearer test:/i.test(req.headers.authorization ?? '') && (protocol !== 'http:' || !local(host))) return { status: 403, refused: 'test-sign-in-public-address' };
-    return { entry, world, path, base };
+    return { entry, world, path, base, free };
   };
   const headers = (req) => {
     const out = { ...req.headers };
@@ -91,7 +93,7 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
     if (!route) return socketReply(socket, 404, 'world-not-routed');
     if (route.refused) return socketReply(socket, route.status, route.refused);
     if (route.path !== '/v2/ws' || req.method !== 'GET') return socketReply(socket, 405, 'method');
-    const upstream = request(new URL('/v2/ws', route.entry.gateway), { headers: headers(req), timeout: 5000 });
+    const upstream = request(new URL(route.free ? '/v2/ws?free=1' : '/v2/ws', route.entry.gateway), { headers: headers(req), timeout: 5000 });
     let upgraded = false;
     socket.on('close', () => upstream.destroy());
     upstream.on('upgrade', (answer, native, nativeHead) => {
