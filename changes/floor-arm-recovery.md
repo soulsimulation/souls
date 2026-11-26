@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-Souls keep their arms planted and bent naturally when floor-exercise poses need a small ground correction.
+Souls preserve attained elbow and knee planes during small ground corrections. Free gestures retain the underlying floor transition and share ordinary standing foot support when they get up.
