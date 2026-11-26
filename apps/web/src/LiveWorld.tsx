@@ -5,7 +5,8 @@ import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { playSpeed, v2History } from './v2-engine/history.ts';
-import { CABIN } from './v2-engine/bridge.ts';
+import { CABIN, entityOf, soulIdOf } from './v2-engine/bridge.ts';
+import { installCapture } from './v2-engine/capture.ts';
 import { momentTick, seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
@@ -132,7 +133,7 @@ import {cameraGround,cameraGroundSampler,clearShotEye} from './WorldCameraGround
 import {WorldRenderedVisibility} from './WorldRenderedVisibility.ts';
 import {WorldFollowMotion} from './WorldFollowMotion.ts';
 import { godFeature } from './god-ui/features.ts';
-import { buildTakesClicks } from './v2-engine/creator-build.ts';
+import { buildNodes, buildTakesClicks } from './v2-engine/creator-build.ts';
 import { WorldBroadcast, openGroundScene, ridingCarrier, type WorldCameraMode, type CarrierPose } from './WorldBroadcast.ts';
 import { LiveClock } from './live-clock.ts';
 // P1 phones: old worlds' captured-scene content is a lazy chunk (old-scene-kit.ts); an old world's page fetches it at once
@@ -496,6 +497,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const round=(v:number)=>Math.round(v*100)/100;
       const pin:ShotPin={eye:camera.position.toArray(),at:controls.target.toArray(),lifted:round(lifted),closer:round(fixed?.closer??0),raised:fixed?.raised??0};(window as unknown as {__shotCamera?:ShotPin}).__shotCamera=pin;return pin;};
     renderer.domElement.addEventListener('click',onFlagClick);if(newWorld)publishEntityWorld({layer:entityLayer,get depictedTick(){return shown.current.tick;},get worldSeconds(){const dt=shown.current.take?.dt;return dt?shown.current.tick*dt:null;},transportFrame:()=>({tick:shown.current.tick,dt:shown.current.take?.dt,entities:shown.current.entities,bones:people&&!(people instanceof WorldLightPeople)?people.bones():null}),gameFrame:()=>({tick:shown.current.tick,dt:shown.current.take?.dt??.05,entities:shown.current.entities,bones:(people as TakePeople|null)?.bones?.()??{},souls:[...context.current.sim.conn.replica.souls.values()].map(s=>({id:s.id,entityId:s.entityId,name:s.name})),props:games.group.children.map(o=>({key:o.name,p:o.position.toArray(),kind:o.userData.gameKind}))}),contactFrame:()=>({tick:shown.current.tick,dt:shown.current.take?.dt,takeStart:shown.current.take?.startTick,entities:shown.current.entities,bones:people&&!(people instanceof WorldLightPeople)?people.contactDiagnostics():null}),shotCamera,labelScene,applyEdge:(msg:Parameters<WorldEntityLayer['applyEdge']>[0][number]|Parameters<WorldEntityLayer['applyEdge']>[0])=>entityLayer.applyEdge(Array.isArray(msg)?msg:[msg]),siteStyle:(style:string)=>entityLayer.sites.siteStyle(style),siteStats:()=>entityLayer.sites.inspect(),camera,get controls(){return controls;},residents:()=>{const out:{id:string;p:readonly[number,number,number];speaking?:boolean;body?:string;activity?:string;instrument?:string;activityAge?:number;activityLeft?:number}[]=[],now=Date.now();for(const s of context.current.sim.conn.replica.souls.values()){const e=shown.current.entities[s.entityId];if(e)out.push({id:s.id,p:e.p as readonly[number,number,number],speaking:speeches.some(sp=>sp.speaker===s.id&&now-sp.at<Math.min(9000,1500+sp.text.length*55)),body:s.entityId,activity:(e as {activity?:string}).activity,instrument:people&&!(people instanceof WorldLightPeople)?people.instrumentOf(s.entityId):undefined,activityAge:people&&!(people instanceof WorldLightPeople)?people.activityAgeOf(s.entityId):undefined,activityLeft:people&&!(people instanceof WorldLightPeople)?people.activityLeftOf(s.entityId):undefined});}return out;},scene,renderer,stats:()=>({draws:renderer.info.render.calls,tris:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,instances:entityLayer.instancer.instances,instanceDraws:entityLayer.instancer.draws,scatterDraws:entityLayer.scatterPools.draws,motionDraws:entityLayer.motionInstancer.draws,motionInstances:entityLayer.motionInstancer.instances,scatterInstances:entityLayer.scatterPools.instances,entities:entityLayer.entityCount,batches:entityBatches.inspection(),staticRevision:entityLayer.staticRevision,sunShadow:sunCache?{...sunCache.stats}:null}),batching:(on:boolean)=>{entityBatchDraw=on;}});  // the entity world (god mode), when this world has one
+    // #5022: `shoot` and a creator's `look` (v2/client shoot.mjs) wait for `v2.capture` on a ?shot=1 page, then aim it at a name (v2-engine/capture.ts)
+    const shotCapture=shotMode&&newWorld?installCapture(window as unknown as {v2?:unknown},{ready:()=>!!(window as unknown as {__shotReady?:boolean}).__shotReady,t:()=>{const dt=shown.current.take?.dt;return dt?Math.round(shown.current.tick*dt*1e6):null;},nodes:buildNodes,
+      body:n=>{const s=context.current.sim.conn.replica.souls.get(soulIdOf(n.soul??n.id)),base=entityOf(n.id),es=shown.current.entities,e=es[s?.entityId??base]??es[base+'_a']??es[base+'_b']??es[base+'_c'];return e?{name:s?.name??null,p:e.p,yaw:e.yaw}:null;},  // a resident figure with no Soul: its look's entity (bridge.ts bodies)
+      pin:(eye,at)=>{const p=shotCamera(eye,at);return{eye:[p.eye[0],p.eye[1],p.eye[2]],target:[p.at[0],p.at[1],p.at[2]]};}}):null;
     const games=new WorldGames();scene.add(games.group);
     const platformDraw=new WorldPlatforms();scene.add(platformDraw.group);
     const placeActivity=new WorldPlaceActivity();scene.add(placeActivity.group);
@@ -1407,7 +1412,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       labels.clear();
       people?.dispose();
       if(entityWorldFramed)entityView.current={eye:camera.position.toArray(),target:controls.target.toArray(),pending:!!arrivalPending,broadcast:context.current.cameraMode==='broadcast'};  // entity worlds only: the camera survives the scene re-mount
-      edgeItems.dispose();entityLayer.dispose();retireEntityWorld(entityLayer);setFleeSources(null);
+      edgeItems.dispose();entityLayer.dispose();retireEntityWorld(entityLayer);shotCapture?.retire();setFleeSources(null);
       initialGate?.cancel();retryInitial.current=null;staticBatches.dispose();entityBatches.dispose();distanceDetail?.dispose();meshLod?.dispose();farStandIns?.dispose();diagnostics.dispose();placePreviews.dispose();bodyModels.dispose();
       floaters.dispose();
       kin.dispose();
