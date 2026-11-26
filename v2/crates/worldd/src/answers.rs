@@ -1231,6 +1231,8 @@ struct Clock {
 /// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
 struct EditQueue {
     tx: Sender<(u64, CheckJob)>,
+    /// The most ids each building kind's place mints with its parts (#5006, `buildsafe::ids_most`): reserved at intake.
+    parts: BTreeMap<String, u64>,
     walkers: Arc<buildsafe::Moving>,
     /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
     offered: std::cell::Cell<u64>,
@@ -1416,23 +1418,35 @@ impl Heavens {
     }
 }
 
-/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
-fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
+/// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
+/// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
+fn reserve_edit(
+    edit: &Edit,
+    lineage: Scope,
+    next: &mut u64,
+    parts: u64,
+) -> Result<Minter, Refused> {
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
-    for op in &edit.ops {
-        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
-        if matches!(
-            op,
-            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
-        ) {
-            end.mint().map_err(|e| Refused {
-                op: None,
-                name: "edit.ids-exhausted",
-                detail: e.to_string(),
-            })?;
-            *next = end.next();
-        }
+    // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+    let own = edit
+        .ops
+        .iter()
+        .filter(|op| {
+            matches!(
+                op,
+                edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+            )
+        })
+        .count() as u64;
+    for _ in 0..own.saturating_add(parts) {
+        end.mint().map_err(|e| Refused {
+            op: None,
+            name: "edit.ids-exhausted",
+            detail: e.to_string(),
+        })?;
+        *next = end.next();
     }
     Ok(reserved)
 }
@@ -2386,7 +2400,14 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+            Taken::Edit(e) => match reserve_edit(
+                &e,
+                self.lineage,
+                &mut self.next_intent,
+                self.edits
+                    .as_ref()
+                    .map_or(0, |q| buildsafe::parts_ids(&e, &q.parts)),
+            ) {
                 Ok(reserved) => {
                     if let Some(tx) = &self.edits
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
@@ -6154,6 +6175,7 @@ pub fn start<S: Storage + 'static>(
     let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
         .then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
+    let building_ids = buildsafe::ids_most(&rules.kinds);
     let edits = walkers
         .clone()
         .map(|m| {
@@ -6170,6 +6192,7 @@ pub fn start<S: Storage + 'static>(
             )
             .map(|tx| EditQueue {
                 tx,
+                parts: building_ids,
                 walkers: m,
                 offered: std::cell::Cell::new(0),
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
@@ -7020,8 +7043,11 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
-                            edit::check(e, &copy, world)
+                            buildsafe::with_buildings(&mut e, &entries, &world.kinds)
+                                .and_then(|parts| {
+                                    buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    edit::check(e, &copy, world)
+                                })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
@@ -7292,8 +7318,12 @@ mod tests {
             claim: None,
         };
         let mut next = 5;
-        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 0).unwrap();
         assert_eq!(next, 6, "the link's id is reserved");
+        // #5006: a placed building's parts, which the edit checker adds after intake, are reserved with it.
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 19).unwrap();
+        assert_eq!(next, 25, "the link's id and the parts' ids are reserved");
     }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
@@ -8119,6 +8149,7 @@ mod tests {
         let (tx, _rx) = channel();
         let queue = EditQueue {
             tx,
+            parts: BTreeMap::new(),
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),

@@ -176,6 +176,10 @@ the root, which `describe` shows), and from then on you place it like any other 
 
 ## Furnishing
 
+- A building kind you place (`cottage`, `house`, `townhouse`, `shop`, `hall`, `tower` and the other buildings) comes
+  with its floors, rooms, doors and stairs, in the same edit, as a template's buildings have them, so Souls can walk in,
+  go up and come back out. The answer's `names` lists its parts too, after your own. One `undo` takes it all back.
+  Place it on open ground, at the ground's height there: a Soul standing where a wall or floor would go refuses it.
 - `node souls-god.mjs furnish <building or room id> [--style <s>]` furnishes a building's rooms (or one room) with
   today's recipes: the building's own style (townhouse, cottage, shop and 36 more), or `--style`. Each piece goes in
   the room's free space, out of doorways and off the stairs; a piece that does not fit, or whose kind the world does

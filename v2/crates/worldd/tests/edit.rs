@@ -2108,3 +2108,150 @@ fn a3934_removing_a_node_that_names_a_claimed_doorway_is_judged_where_the_doorwa
     assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
     assert!(w.live.tree().link(link).is_some(), "the doorway stands");
 }
+
+/// #5006 (god mode audit, row 20): a building kind placed by a creator's edit brings its floor, rooms, windows and
+/// doorways from its entry's `building` section, in the same edit, as a template's building has them; the floor's
+/// scene reads every doorway; a place that brings its own solids (a clone's or an import's copy) is left as it is.
+#[test]
+fn a5006_a_building_placed_live_brings_its_rooms_and_doorways_in_one_edit() {
+    let mut w = Doorways::new();
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    w.world.kinds = im.rules.kinds.clone();
+    let ground = im.nodes["ground"];
+    let building = w
+        .world
+        .kinds
+        .keys()
+        .find(|k| k.starts_with("testworld:building@"))
+        .expect("the test world's building kind")
+        .clone();
+    // The cottage's entry section, given to the test world's building kind.
+    let cottage = replica::rules::json::parse(include_str!(
+        "../../../../content/kinds/places/cottage.json"
+    ))
+    .expect("the cottage's entry");
+    let entries = replica::rules::json::parse(&format!(
+        r#"{{"testworld:building": {}}}"#,
+        cottage.to_json()
+    ))
+    .expect("entries");
+    let place = |name: u64, fields: BTreeMap<u64, Value>| Op::Place {
+        name,
+        kind: Name::new(&building).expect("a name"),
+        parent: Ref::Node(ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(60_000_000, 0, 60_000_000),
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        },
+        audience: Audience::Everyone,
+        fields,
+    };
+    let mut edit = Edit {
+        claim: None,
+        intent: w.intents.mint().expect("an id"),
+        actor: Actor::Creator(w.world.creator),
+        planned: w.live.version(),
+        ops: vec![place(1, BTreeMap::new())],
+    };
+    let parts =
+        worldd::buildsafe::with_buildings(&mut edit, &entries, &w.world.kinds).expect("expanded");
+    assert_eq!(
+        parts.len(),
+        12,
+        "the floor, rooms and windows are named as the building's parts"
+    );
+    let count = |p: &str| {
+        edit.ops
+            .iter()
+            .filter(|o| matches!(o, Op::Place { kind, .. } if kind.as_str().starts_with(p)))
+            .count()
+    };
+    let links = edit
+        .ops
+        .iter()
+        .filter(|o| matches!(o, Op::Link { .. }))
+        .count();
+    assert_eq!(
+        (
+            count("eden:floor@"),
+            count("eden:room@"),
+            count("eden:window@"),
+            links
+        ),
+        (1, 3, 8, 3),
+        "one floor, the three rooms, eight windows and three doorways"
+    );
+    let Op::Place { fields, .. } = &edit.ops[0] else {
+        panic!("the building's own place first")
+    };
+    assert!(
+        fields.contains_key(&import_eden::F_SOLIDS) && fields.contains_key(&import_eden::F_SLOTS)
+    );
+    // One edit: checked, planned and committed whole.
+    let copy = w.live.frozen();
+    let checked = check(edit, &copy, &w.world).expect("checked");
+    let planned = plan(checked, &copy, None).expect("planned");
+    w.at += 1_000;
+    let done = commit(&mut w.live, &mut w.minter, &planned, &[], w.at).expect("committed");
+    let tree = w.live.tree();
+    let id = done.names[&1];
+    let h = tree.handle(id).expect("the building");
+    let floors: Vec<Id> = tree
+        .children(h)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| tree.node(*c))
+        .filter(|n| n.kind().as_str().starts_with("eden:floor@"))
+        .map(|n| n.id())
+        .collect();
+    assert_eq!(floors.len(), 1, "a floor in the building");
+    let fh = tree.handle(floors[0]).expect("the floor");
+    assert_eq!(
+        tree.children(fh).unwrap_or_default().len(),
+        3,
+        "three rooms on it"
+    );
+    // The doorways' rows on their rooms, each a link the floor's scene reads; the front door's leads outside.
+    let mut ways = Vec::new();
+    for r in tree.children(fh).unwrap_or_default() {
+        if let Some(Value::Array(rows)) = tree.node(*r).and_then(|n| n.fields().get(&22).cloned()) {
+            for row in rows {
+                let Value::Array(row) = row else { continue };
+                ways.push(replica::effects::read_id(&row[0]).expect("a doorway's link"));
+            }
+        }
+    }
+    assert_eq!(ways.len(), 3, "three doorways, each in its room's row");
+    let scene = sim::ground::scene::Scene::of(tree, floors[0]).expect("the floor's scene");
+    for l in &ways {
+        assert!(
+            scene.doorways.iter().any(|d| d.link == *l),
+            "the floor reads doorway {l:?}"
+        );
+    }
+    let outside = ways
+        .iter()
+        .filter(|l| {
+            tree.link(**l)
+                .is_some_and(|(_, ends, ..)| ends.contains(&ground))
+        })
+        .count();
+    assert_eq!(outside, 1, "the front door leads to the open ground");
+
+    // A copy that brings its own walls is left as it is.
+    let own = BTreeMap::from([(import_eden::F_SOLIDS, Value::Array(Vec::new()))]);
+    let mut copy_edit = Edit {
+        claim: None,
+        intent: w.intents.mint().expect("an id"),
+        actor: Actor::Creator(w.world.creator),
+        planned: w.live.version(),
+        ops: vec![place(1, own)],
+    };
+    let none =
+        worldd::buildsafe::with_buildings(&mut copy_edit, &entries, &w.world.kinds).expect("left");
+    assert!(none.is_empty());
+    assert_eq!(copy_edit.ops.len(), 1, "a copy's place gains nothing");
+}
