@@ -6774,8 +6774,11 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
-                            edit::check(e, &copy, world)
+                            buildsafe::with_buildings(&mut e, &entries, &world.kinds)
+                                .and_then(|()| {
+                                    buildsafe::stand_as_kinds(&mut e, &entries, &structure);
+                                    edit::check(e, &copy, world)
+                                })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {

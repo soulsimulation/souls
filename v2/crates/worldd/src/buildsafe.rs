@@ -112,6 +112,106 @@ pub fn stand_as_kinds(
     }
 }
 
+/// A building placed new brings its rooms (#5006, row 20): each place of a kind whose entry keeps a `building` section
+/// (`import_eden::placed`) gets, in the same batch, its walls, floors, rooms, windows, doors, doorways and stairs, as
+/// a template's building has them, so a Soul can walk in, up and out of one a creator placed. The operations are added
+/// after the batch's own, so a refusal still names the creator's operations by their places; the world then checks,
+/// judges (BUILDSAFE: a Soul standing where a wall or floor would go refuses the whole place) and records the batch
+/// as one edit, and one undo takes it all back.
+///
+/// Left as it is: a place that gives its own solids (a clone's or an import's copy, which brings its own rooms in its
+/// next edits), one whose batch already places a floor in it, a kind the world does not let hold a floor, and every
+/// place in a world that pins no floor or room kind. A plan the mapping cannot read refuses the edit
+/// (`edit.building-plan`), never placing a shell.
+pub fn with_buildings(
+    edit: &mut replica::edit::Edit,
+    entries: &Json,
+    kinds: &BTreeMap<String, Kind>,
+) -> Result<(), replica::edit::Refused> {
+    use import_eden::placed::{Parts, ops};
+    use replica::edit::{Op, Ref};
+    use sim::ground::scene::{FLOOR, ROOM, WINDOW};
+    const DOOR: &str = "eden:door";
+    let pinned = |p: &str| kinds.keys().find(|k| plain(k) == p).map(String::as_str);
+    let (Some(floor), Some(room)) = (pinned(FLOOR), pinned(ROOM)) else {
+        return Ok(());
+    };
+    let admits = |parent: &str, child: &str, category: Option<&str>| {
+        kinds.get(parent).is_some_and(|k| {
+            k.children.contains(child) || category.is_some_and(|c| k.children.contains(c))
+        })
+    };
+    let mut next = 1 + edit
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Place { name, .. } | Op::Doorway { name, .. } | Op::Link { name, .. } => {
+                Some(*name)
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let floored: BTreeSet<u64> = edit
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Place {
+                kind,
+                parent: Ref::New(p),
+                ..
+            } if plain(kind.as_str()) == FLOOR => Some(*p),
+            _ => None,
+        })
+        .collect();
+    let mut added = Vec::new();
+    for (k, op) in edit.ops.iter_mut().enumerate() {
+        let Op::Place {
+            name,
+            kind,
+            parent,
+            fields,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        let Some(entry) = entries
+            .get(import_eden::entry_name(kind.as_str(), fields))
+            .filter(|e| e.get("building").is_some())
+        else {
+            continue;
+        };
+        if fields.contains_key(&F_SOLIDS)
+            || floored.contains(name)
+            || !admits(kind.as_str(), FLOOR, None)
+        {
+            continue;
+        }
+        let door = pinned(DOOR).filter(|d| admits(kind.as_str(), plain(d), Some("thing")));
+        let parts = Parts {
+            floor,
+            room,
+            window: pinned(WINDOW),
+            door,
+        };
+        let more =
+            ops(entry, Ref::New(*name), *parent, fields, &parts, &mut next).map_err(|detail| {
+                replica::edit::Refused {
+                    op: Some(k),
+                    name: "edit.building-plan",
+                    detail: format!(
+                        "{}: its rooms could not be read: {detail}",
+                        plain(kind.as_str())
+                    ),
+                }
+            })?;
+        added.extend(more);
+    }
+    edit.ops.extend(added);
+    Ok(())
+}
+
 /// Whether a kind's entry has a slot that takes a part `structure` reads (one that stands or one that bears): a bay's,
 /// a frame stand's.
 fn holds_parts(entry: &Json, structure: &sim::structure::Structure) -> bool {
