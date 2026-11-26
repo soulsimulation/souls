@@ -44,3 +44,25 @@ test('a mesh carried by a hidden rig frames the mesh, not the rig\'s head bone',
   const view = soulPortraitView(root, false)!;
   assert.ok(view.height >= 1.2 * .42 && view.target.y + view.height * view.slack / 2 > 1.8, `the whole top of the wisp is in frame (${view.height.toFixed(3)} m)`);
 });
+
+test('a look\'s face fills the frame: a mohawk or a tall hat does not shrink it', () => {
+  const frame = (spike: boolean) => {
+    const root = new THREE.Group(), model = new THREE.Group(); model.userData.humanoid = {look: {headSize: 1}}; root.add(model);
+    const hips = new THREE.Bone(), neck = new THREE.Bone(), head = new THREE.Bone(); neck.name = 'Neck'; head.name = 'Head';
+    neck.position.y = 1.51; head.position.y = .0767; hips.add(neck); neck.add(head); model.add(hips); model.updateMatrixWorld(true);
+    // the face (0.24 m chin to crown, 0.21 m ear to ear) on Head; the body on the hips; a 0.4 m mohawk on Head
+    const box = (cx: number, cy: number, cz: number, sx: number, sy: number, sz: number) => [0, 1, 2, 3, 4, 5, 6, 7].map(i => [cx + (i & 1 ? sx : -sx) / 2, cy + (i & 2 ? sy : -sy) / 2, cz + (i & 4 ? sz : -sz) / 2]);
+    const parts: [number[][], number][] = [[box(.05, 1.68, 0, .2, .24, .21), 2], [box(0, .9, 0, .3, 1.2, .5), 0], ...(spike ? [[box(0, 1.95, 0, .2, .4, .03), 2] as [number[][], number]] : [])];
+    const points = parts.flatMap(([p]) => p), g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(points.flat(), 3));
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(parts.flatMap(([p, b]) => p.flatMap(() => [b, 0, 0, 0])), 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(parts.flatMap(([p]) => p.flatMap(() => [1, 0, 0, 0])), 4));
+    const skin = new THREE.SkinnedMesh(g, new THREE.MeshBasicMaterial()); model.add(skin); skin.bind(new THREE.Skeleton([hips, neck, head]));
+    return soulPortraitView(root, false)!;
+  };
+  const plain = frame(false), mohawk = frame(true);
+  assert.ok(Math.abs(plain.height - mohawk.height) < 1e-6 && plain.target.distanceTo(mohawk.target) < 1e-6, `mohawk ${mohawk.height.toFixed(3)} m, plain ${plain.height.toFixed(3)} m`);
+  // the face is about 0.25 m across in the three-quarter view: the frame is that over FACE_FILL, centred on the face
+  assert.ok(plain.height > .25 && plain.height < .34, `frame ${plain.height.toFixed(3)} m`);
+  assert.ok(Math.abs(plain.target.y - 1.677) < .03, `centred on the face (${plain.target.y.toFixed(3)})`);
+});

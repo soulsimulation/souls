@@ -10,46 +10,65 @@ export const PORTRAIT_TINTS=['#c4dcf2','#c4e6cf','#d6cdef','#bfe3e6','#d6e6bd','
 export function portraitTint(id:string):string{let h=0x811c9dc5;for(let i=0;i<id.length;i++){h^=id.charCodeAt(i);h=Math.imul(h,0x01000193);}h=Math.imul(h^h>>>16,0x85ebca6b);h=Math.imul(h^h>>>13,0xc2b2ae35);h^=h>>>16;/* a final mix: ids that differ only at the end spread too */return PORTRAIT_TINTS[(h>>>0)%PORTRAIT_TINTS.length];}
 /** Where a portrait's camera looks from, relative to its target: in front of the body (+X) and a little to its side. */
 const PORTRAIT_VIEW=new THREE.Vector3(1,.08,.45).normalize(),PORTRAIT_FOV=28;
+/** How much of the round crop's diameter the face fills (#5039, Gene: "maximize face ... 85% rule"). Hair, hats, horns,
+ * stalks and shoulders may be cut off by the crop; the face is never sized from them. The server's portrait uses it too. */
+export const FACE_FILL=.85;
+/** A look's face from its Head joint, in kit metres (kit.json face landmarks; the rig's neck to head joint is 0.0767):
+ * the chin 0.02 under the joint, the forehead 0.20 over it, the ears 0.107 to each side, the nose 0.13 in front. */
+export const KIT_FACE={neckToHead:.07673,chin:-.02,forehead:.2,ear:.107,nose:.13} as const;
 const activityProp=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(p.name.startsWith('activity prop:'))return true;return false;};
-/** Fit visible portrait geometry and aim at its actual head, independent of world pose/hidden helpers. */
+/** Fit visible portrait geometry and aim at its actual face, independent of world pose/hidden helpers. */
 export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
- root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;root.updateMatrixWorld(true);const box=new THREE.Box3(),skins:THREE.SkinnedMesh[]=[],hiddenBones=new Set<THREE.Object3D>(),face=new THREE.Box3();let head:THREE.Object3D|null=null;
- root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible){if((o as THREE.SkinnedMesh).isSkinnedMesh)for(const b of (o as THREE.SkinnedMesh).skeleton.bones)hiddenBones.add(b);return;}if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if(o.userData.portraitFace)face.union(new THREE.Box3().setFromObject(o));if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
+ root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;root.updateMatrixWorld(true);const box=new THREE.Box3(),skins:THREE.SkinnedMesh[]=[],hiddenBones=new Set<THREE.Object3D>(),marked:THREE.Object3D[]=[];let head:THREE.Object3D|null=null,neck:THREE.Object3D|null=null,headSize=0;
+ root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible){if((o as THREE.SkinnedMesh).isSkinnedMesh)for(const b of (o as THREE.SkinnedMesh).skeleton.bones)hiddenBones.add(b);return;}const look=o.userData.humanoid?.look;if(look)headSize=Number(look.headSize)||1;if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if((o as THREE.Bone).isBone&&/neck$/i.test(o.name))neck??=o;if(o.userData.portraitFace)marked.push(o);if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
  // a head bone only a hidden skin follows (a rigid mesh such as the ghost, carried by a hidden rig) is not this body's head:
- // such a body is all head: framed whole, as a rigid body is, below
- const carried=!!head&&hiddenBones.has(head)&&!skins.some(s=>s.skeleton.bones.includes(head as THREE.Bone)),ghost=carried&&!rigid;if(carried)head=null;
+ // such a body is all head, framed from its top, below
+ const carried=!!head&&hiddenBones.has(head)&&!skins.some(s=>s.skeleton.bones.includes(head as THREE.Bone));if(carried)head=null;
  if(box.isEmpty()||![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite))return null;const size=box.getSize(new THREE.Vector3()),target=box.getCenter(new THREE.Vector3());
- // #5039: frame the head and the top of the shoulders. With skinned meshes the head is what is skinned to the head bone
- // (face, hair, a hat; Pip's big eyes): the frame is 1.8x its height (1.4x its width when wider), its top 15 % of
- // the head over the crown. Without (a head bone and no vertices on it), h is the height above the head joint, bounded
- // by the body's size, the frame from 0.75 h under the joint to 0.12 h over the crown. Either way at most 45 % of the body.
- let height=rigid?Math.max(size.x,size.y,size.z):Math.max(size.y*.42,size.x*.85),slack=rigid?1.15:1.4;
- const headBox=!rigid&&head&&skins.length?skinnedTo(head,skins):null;
- if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.15-height/2;slack=1.05;}
- else if(ghost){/* framed whole below */}
- else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=1;}
+ // #5039: the face fills FACE_FILL of the round crop, as the portrait's camera sees it. What the face is, by body:
+ // a creature's marked face (the duck's and dog's head, the snail's head and eye stalks); a look's face from its Head
+ // joint (kit landmarks: no hair, hat or mohawk); another skinned head's vertices less their 4 % outliers at each edge
+ // (a horn, an ear tip, a ponytail); a whole body's vertices (a ceramic head; a carried shape such as the ghost from its
+ // top down, as tall as it is wide).
+ let face:ReturnType<typeof viewRect>=null;
+ if(marked.length)face=viewRect(meshPoints(marked));
+ else if(!rigid&&head&&skins.length){const points=skinnedTo(head,skins);
+  if(headSize){const joint=head.getWorldPosition(new THREE.Vector3()),k=(neck?joint.distanceTo(neck.getWorldPosition(new THREE.Vector3()))/KIT_FACE.neckToHead:1)*headSize,F=KIT_FACE;
+   // the rig faces +X; the face is the head's vertices inside its landmark box (long hair at the cheeks stays, a mohawk goes)
+   const zone=new THREE.Box3(new THREE.Vector3(joint.x-.02*k,joint.y+F.chin*k,joint.z-F.ear*k),new THREE.Vector3(joint.x+F.nose*k,joint.y+F.forehead*k,joint.z+F.ear*k)),inside=points.filter(p=>zone.containsPoint(p));
+   face=viewRect(inside.length>=24?inside:corners(zone));}
+  else face=viewRect(points,.04);}
+ else if(rigid||carried)face=viewRect(meshPoints([root]),0,carried);
+ if(face){target.copy(face.center);return{box,target,height:2*Math.max(face.w,face.h)/FACE_FILL,slack:1};}
+ // a head bone and no vertices on it: h is the height above the head joint, bounded by the body's size, the frame from
+ // 0.75 h under the joint to 0.12 h over the crown; with no head bone, the top of the body
+ let height=Math.max(size.y*.42,size.x*.85),slack=1.4;
+ if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=1;}
  else if(!rigid)target.y=box.max.y-size.y*.17;
- // a creature marks its face (a head, a snail's eye stalks): frame it as seen from the portrait's view, 1.3x, and a little below
- if(!face.isEmpty()){const r=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),u=new THREE.Vector3().crossVectors(PORTRAIT_VIEW,r),mid=face.getCenter(new THREE.Vector3()),c=new THREE.Vector3();let w=0,h=0;
-  for(let i=0;i<8;i++){c.set(i&1?face.max.x:face.min.x,i&2?face.max.y:face.min.y,i&4?face.max.z:face.min.z).sub(mid);w=Math.max(w,Math.abs(c.dot(r)));h=Math.max(h,Math.abs(c.dot(u)));}
-  height=2.6*Math.max(w,h);target.copy(mid);target.y-=height*.1;slack=1;}
- // a whole body (a ceramic head, the ghost): every visible vertex inside the round crop, seen in perspective, 8 % in
- else if(rigid||ghost){const fit=roundFit(root,target,1.08);if(fit>0){height=fit;slack=1;}}
  return{box,target,height,slack};
 }
-/** The frame height at `target` that keeps every visible plain-mesh vertex inside the portrait's round crop, `room` times over. */
-function roundFit(root:THREE.Object3D,target:THREE.Vector3,room:number){
- const t=Math.tan(PORTRAIT_FOV*Math.PI/360),v=new THREE.Vector3();let D=0;
- root.traverse(o=>{if(!(o as THREE.Mesh).isMesh||(o as THREE.SkinnedMesh).isSkinnedMesh||(o as THREE.InstancedMesh).isInstancedMesh)return;for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible)return;const P=(o as THREE.Mesh).geometry.attributes.position;if(!P)return;
-  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld).sub(target);const z=v.dot(PORTRAIT_VIEW);D=Math.max(D,z+room*Math.sqrt(Math.max(0,v.lengthSq()-z*z))/t);}});
- return 2*D*t;
+/** The portrait camera's view of `points`: its centre and half width and height across the view, leaving out `trim` of
+ * the points at each edge. `fromTop`: only the top of it, as tall as it is wide (a ghost's head). */
+function viewRect(points:THREE.Vector3[],trim=0,fromTop=false){
+ if(!points.length)return null;const R=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),U=new THREE.Vector3().crossVectors(R,PORTRAIT_VIEW);
+ const sorted=(axis:THREE.Vector3)=>Float64Array.from(points,p=>p.dot(axis)).sort(),at=(a:Float64Array,q:number)=>a[Math.round(q*(a.length-1))];
+ const r=sorted(R),u=sorted(U),d=sorted(PORTRAIT_VIEW),r0=at(r,trim),r1=at(r,1-trim),u1=at(u,1-trim),w=(r1-r0)/2;let u0=at(u,trim);
+ if(fromTop)u0=Math.max(u0,u1-2*w);
+ return{center:new THREE.Vector3().addScaledVector(R,(r0+r1)/2).addScaledVector(U,(u0+u1)/2).addScaledVector(PORTRAIT_VIEW,at(d,.5)),w,h:(u1-u0)/2};
 }
-/** World box of the skinned vertices that follow `head` or a bone under it most (their largest skin weight), or null. */
+const corners=(b:THREE.Box3)=>Array.from({length:8},(_,i)=>new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z));
+/** World positions of the visible plain-mesh vertices under `roots`. */
+function meshPoints(roots:THREE.Object3D[]){
+ const out:THREE.Vector3[]=[];for(const root of roots)root.traverse(o=>{if(!(o as THREE.Mesh).isMesh||(o as THREE.SkinnedMesh).isSkinnedMesh||(o as THREE.InstancedMesh).isInstancedMesh)return;for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible)return;const P=(o as THREE.Mesh).geometry.attributes.position;if(!P)return;
+  for(let i=0;i<P.count;i++)out.push(new THREE.Vector3().fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld));});
+ return out;
+}
+/** World positions of the skinned vertices that follow `head` or a bone under it most (their largest skin weight). */
 function skinnedTo(head:THREE.Object3D,skins:THREE.SkinnedMesh[]){
- const under=new Set<THREE.Object3D>();head.traverse(o=>{under.add(o);});const out=new THREE.Box3(),v=new THREE.Vector3();
+ const under=new Set<THREE.Object3D>();head.traverse(o=>{under.add(o);});const out:THREE.Vector3[]=[];
  for(const skin of skins){const g=skin.geometry,J=g.attributes.skinIndex,W=g.attributes.skinWeight,P=g.attributes.position;if(!J||!W||!P)continue;const bones=skin.skeleton.bones;
-  for(let i=0;i<P.count;i++){let best=0,most=-1;for(let k=0;k<4;k++){const w=W.getComponent(i,k);if(w>most){most=w;best=J.getComponent(i,k);}}if(!under.has(bones[best]))continue;skin.getVertexPosition(i,v);out.expandByPoint(v.applyMatrix4(skin.matrixWorld));}}
- return out.isEmpty()?null:out;
+  for(let i=0;i<P.count;i++){let best=0,most=-1;for(let k=0;k<4;k++){const w=W.getComponent(i,k);if(w>most){most=w;best=J.getComponent(i,k);}}if(!under.has(bones[best]))continue;out.push(skin.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(skin.matrixWorld));}}
+ return out;
 }
 /** Main-thread milliseconds a frame (one `now`) may spend drawing portraits: the rest wait for the next frame. */
 const PORTRAIT_FRAME_MS=4;

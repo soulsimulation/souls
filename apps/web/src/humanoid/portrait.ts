@@ -7,7 +7,7 @@ import {deflateSync} from 'node:zlib';
 import {createRig} from '../../../../mars/viewer/app/engine-view/people.ts';
 import type {HumanoidKit} from './compose.ts';
 import {resolveLook} from './look.ts';
-import {portraitTint} from '../SoulAvatars.ts';
+import {FACE_FILL, KIT_FACE, portraitTint} from '../SoulAvatars.ts';
 
 export const PORTRAIT_SIZE = 256;
 // A change to framing or light here must bump AUTO_PORTRAIT_STYLE (apps/server/src/portrait/auto-portraits.ts) so stored portraits redraw.
@@ -73,13 +73,12 @@ export async function humanoidPortraitPNG(kit: HumanoidKit, params: unknown, siz
   rig.mixer.update(0.01); rig.holder.updateMatrixWorld(true);
   const meshes: THREE.SkinnedMesh[] = []; rig.model.traverse(o => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh); });
   const headBone = rig.model.getObjectByName('Head'); if (!headBone) throw Error('portrait: rig has no Head bone');
-  // The body faces +x (createRig). Frame from the skull, not from hair or hats (a mohawk or a tall hat may be cropped,
-  // as in a real portrait): ks = the rig's world scale (neck→head joint is 0.0767 m in kit space), the skull top 0.24 m and
-  // the eyes 0.11 m above the head joint (kit landmarks). #5039: head and the top of the shoulders, 0.44 m tall, the skull
-  // top 0.06 m under the frame's top, so the head fills ~60 % of it and the eyes sit just above a round crop's middle.
+  // The body faces +x (createRig). Frame the face, never hair or hats (a mohawk, a hat or the shoulders may be cut off, as in
+  // a real portrait): ks = the rig's world scale (neck→head joint is 0.0767 m in kit space) times the look's head size.
+  // #5039: the face, chin to forehead and ear to ear (KIT_FACE, the kit's landmarks), fills FACE_FILL of the frame, centred.
   const neckBone = rig.model.getObjectByName('Neck'), hp = headBone.getWorldPosition(new THREE.Vector3());
-  const ks = (neckBone ? Math.max(0.5, Math.min(2, (hp.y - neckBone.getWorldPosition(new THREE.Vector3()).y) / 0.07673)) : 1) * look.headSize;
-  const span = 0.44 * ks, skull = hp.y + 0.24 * ks, cy = skull + 0.06 * ks - span / 2, cz = hp.z;
+  const ks = (neckBone ? Math.max(0.5, Math.min(2, (hp.y - neckBone.getWorldPosition(new THREE.Vector3()).y) / KIT_FACE.neckToHead)) : 1) * look.headSize;
+  const span = Math.max(KIT_FACE.forehead - KIT_FACE.chin, 2 * KIT_FACE.ear) * ks / FACE_FILL, cy = hp.y + (KIT_FACE.forehead + KIT_FACE.chin) / 2 * ks, cz = hp.z;
   const pattern = (meshes[0]?.material as THREE.Material | undefined)?.userData.humanoid.pattern.value as number ?? 0, tris: Tri[] = [];
   const fov = 16 * Math.PI / 180, tanH = Math.tan(fov / 2);
   // 'full' and 'side' (whole body, for checking outfits and body shape) frame 2.1 m around the body's middle
