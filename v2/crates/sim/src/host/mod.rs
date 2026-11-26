@@ -1134,7 +1134,10 @@ impl Runner {
             if o != order
                 || !self.running(who)
                 || !self.waits_for_place(who)
-                || self.out_places.get(&who).is_some_and(|&(out, _)| out == order)
+                || self
+                    .out_places
+                    .get(&who)
+                    .is_some_and(|&(out, _)| out == order)
             {
                 continue;
             }
