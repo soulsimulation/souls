@@ -1983,15 +1983,18 @@ async fn group_a_carrier_lets_go_mid_walk() {
         .expect("lifted where it lies");
     let on = Vec3::new(f.x + 14 * M, 0, f.z);
     crew[0].send("eden:walk", ground, point(on)).await;
+    let walk = crew[0].sequence;
     tokio::time::sleep(Duration::from_secs(3)).await;
     crew[0]
         .act("activity:leave", third, BTreeMap::new())
         .await
         .expect("the front lets go");
-    crew[0]
-        .answer()
-        .await
-        .expect("the front's own walk goes on when it lets go itself");
+    // The walk's own answer, by its sequence (the leave's came first).
+    let leave = crew[0].sequence;
+    crew[0].sequence = walk;
+    let walked_on = crew[0].answer().await;
+    crew[0].sequence = leave;
+    walked_on.expect("the front's own walk goes on when it lets go itself");
     tokio::time::sleep(Duration::from_millis(500)).await;
     let at = stood(&dir);
     println!(
