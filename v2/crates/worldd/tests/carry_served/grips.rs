@@ -177,6 +177,15 @@ async fn crew_at(
     carry
 }
 
+/// Prints what the served world has said on its own lines so far about grips, refusals and entries not written.
+fn said(served: &Served) {
+    while let Ok(l) = served.lines.try_recv() {
+        if l.contains("grip") || l.contains("not written") || l.contains("refus") {
+            println!("served: {l}");
+        }
+    }
+}
+
 /// The last word for `carry` within 20 s that `ok` takes.
 async fn word_that(dir: &Path, carry: Id, what: &str, ok: impl Fn(&Holds) -> bool) -> Holds {
     let end = Instant::now() + Duration::from_secs(20);
@@ -184,7 +193,15 @@ async fn word_that(dir: &Path, carry: Id, what: &str, ok: impl Fn(&Holds) -> boo
         if let Some(h) = words(dir, carry).into_iter().rev().find(|h| ok(h)) {
             return h;
         }
-        assert!(Instant::now() < end, "no grips word: {what}");
+        if Instant::now() > end {
+            let names: Vec<String> = effects(dir)
+                .iter()
+                .flat_map(|e| e.events.iter().flatten())
+                .map(|ev| ev.name.as_str().to_owned())
+                .filter(|n| n.contains("carry"))
+                .collect();
+            panic!("no grips word: {what}; the log's carry words {names:?}");
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -259,6 +276,8 @@ async fn grips_crews_of_two_four_and_six_keep_their_grips_through_a_leave_and_a_
             .act("carry:lift", carry, BTreeMap::from([(1, load.to_value())]))
             .await
             .unwrap_or_else(|r| panic!("{n} lift {what}: {r}"));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        said(&served);
         let lifted = word_that(&dir, carry, what, |h| h.phase == grips::CARRY).await;
         println!("{n} lift {what}: {:?}", by_body(&lifted));
         assert_eq!(lifted.load, load, "{what}");
@@ -457,18 +476,20 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
             (3, Value::Array(vec![int(p.x), int(0), int(p.z)])),
         ])
     };
-    let take = async |souls: &mut Vec<Soul>, at: Vec3| {
+    let take = async |souls: &mut Vec<Soul>, served: &Served, at: Vec3| {
         let places = places_north(at, &l, 2);
         let carry = crew_at(souls, &dir, ground, &bodies, &[0, 1], &places).await;
         souls[0]
             .act("part:take", carry, BTreeMap::from([(1, beam.to_value())]))
             .await
             .expect("the crew takes the beam");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        said(served);
         word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
         carry
     };
     let at = beam_at();
-    let carry = take(&mut souls, at).await;
+    let carry = take(&mut souls, &served, at).await;
     let got = souls[0]
         .act("part:put", carry, here(Vec3::new(at.x + 900_000, 0, at.z)))
         .await;
@@ -496,7 +517,7 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
 
     // Taken again where it lies; as it goes in, the back walks 4 m south.
     let at = moves_of(&dir, beam).last().unwrap().position;
-    let carry = take(&mut souls, Vec3::new(at.x, 0, at.z)).await;
+    let carry = take(&mut souls, &served, Vec3::new(at.x, 0, at.z)).await;
     souls[0]
         .send("part:put", carry, here(Vec3::new(at.x + 500_000, 0, at.z)))
         .await;
