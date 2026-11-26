@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir } from 'node:
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed } from './place-created-world.mjs';
+import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
 
 // Canonical T0 fixture data, independent of the initializer's decoder. Actual native proof uses Rust's real records.
 const cbor = value => {
@@ -89,7 +89,7 @@ test('configuration-only placement writes exact existing units without reading o
   try {
     const root=join(f.dir,'install'),outside=join(f.dir,'must-not-be-created');await mkdir(root);
     await symlink(outside,join(root,'var'));
-    const script=resolve('v2/tools/ops/place-world.sh');
+    const script=join(import.meta.dirname,'place-world.sh');
     const args=[script,'--configuration-only','--instance',f.instance,'--creator',`${'2'.repeat(32)}-0`,'--port','7500','--build',f.config.build,'--directory','localhost:7310','--resume'];
     const result=spawnSync('/bin/bash',args,{env:{...process.env,PLACE_ROOT:root},encoding:'utf8'});
     assert.equal(result.status,0,result.stderr);
@@ -178,7 +178,7 @@ test('#1960 B7: on a folder store placement names the folder, and place-world.sh
     assert.equal(directoryStore(f.config,{}).kind,'folder');
     await placeRequest(f.config,f.request,{run:routed(f),asSouls:async()=>{},store:directoryStore(f.config,{})});
     assert.ok(f.configured.includes('--folder-store'));
-    const script=resolve('v2/tools/ops/place-world.sh');
+    const script=join(import.meta.dirname,'place-world.sh');
     for (const folder of [true,false]) {
       const root=join(f.dir,`install-${folder}`);await mkdir(root);
       const args=[script,'--configuration-only','--instance',f.instance,'--creator',`${'2'.repeat(32)}-0`,'--port','7500','--build',f.config.build,
@@ -188,4 +188,48 @@ test('#1960 B7: on a folder store placement names the folder, and place-world.sh
       assert.equal(conf.includes('Environment=WORLDD_STORE=/var/lib/souls/worlds/directory'),folder,conf);
     }
   } finally {await rm(f.dir,{recursive:true,force:true});}
+});
+
+// Run as souls-place.service runs it: the script is node's entry, with one request in the inbox. drain imports
+// archive-world.mjs, which imports this script; with a top-level await in the entry that import never settled, Node exited
+// 13 ("unsettled top-level await") and every request was set aside unplaced (26 Nov). Root and the fixed configuration
+// path are stood in for by a preload (uid 0, /etc/souls/placement.json read from the fixture); the state lookup's child
+// is not root, so the request is refused and kept, as a request with no readable state is.
+test('as its own entry, a drain imports the archive path, refuses a request it cannot read and exits', async () => {
+  const scratch = resolve('.local'); await mkdir(scratch,{recursive:true});
+  const dir = await mkdtemp(join(scratch,'w3b-main-'));
+  try {
+    const placement = join(dir,'protected'), request = 'b'.repeat(64);
+    for (const n of ['requests','attempts','status']) await mkdir(join(placement,n),{recursive:true});
+    await writeFile(join(placement,'requests',request),'');
+    const config = join(dir,'placement.json');
+    await json(config,{format:'souls/placement/1',build:`1220${'3'.repeat(64)}`,worldsRoot:join(dir,'worlds'),templates:join(dir,'templates'),library:join(dir,'library'),
+      placement,backup:join(dir,'backup'),worldRoutes:'/var/lib/souls/routes/worlds.json',routesOut:'/var/lib/souls-routes',portFirst:7500,portLast:7502,
+      directory:'http://localhost:7310',originUpstream:'http://localhost:7320'});
+    const preload = join(dir,'as-root.mjs');
+    await writeFile(preload,`import fs from 'node:fs';\nimport { syncBuiltinESMExports } from 'node:module';\n`
+      + `const CONFIG = '/etc/souls/placement.json', FIXTURE = ${JSON.stringify(config)}, { lstat, open } = fs.promises;\n`
+      + `process.getuid = () => 0;\n`
+      + `fs.promises.lstat = async (p, ...a) => { if (p !== CONFIG) return lstat(p, ...a); const s = await lstat(FIXTURE, ...a); s.uid = 0; s.mode &= ~0o022; return s; };\n`
+      + `fs.promises.open = (p, ...a) => open(p === CONFIG ? FIXTURE : p, ...a);\nsyncBuiltinESMExports();\n`);
+    const run = spawnSync(process.execPath,['--import',preload,join(import.meta.dirname,'place-created-world.mjs')],{encoding:'utf8',timeout:60_000});
+    assert.notEqual(run.status,13,`unsettled top-level await: ${run.stderr}`);
+    assert.doesNotMatch(run.stderr,/unsettled top-level await/i);
+    assert.match(run.stderr,/placement: request refused \(\S[^)]*\)/,'the drain reached the request and refused it, naming why');
+    assert.deepEqual(await readdir(join(placement,'requests')),[],'the inbox is drained');
+    assert.equal((await readdir(join(placement,'attempts'))).length,1,'the request is kept aside');
+  } finally { await rm(dir,{recursive:true,force:true}); }
+});
+
+// Every refusal used to read only "request refused" (Mars Lab's first create, 26 Nov): a failing command now names
+// itself and the last 600 bytes of its error output, and the drain logs that reason.
+test('a failing placement command names itself and the end of its error output', async () => {
+  await assert.rejects(command('/bin/sh',['-c',"printf '%0700d' 0 >&2; echo ' mkdir: Permission denied' >&2; exit 3"]),(error) => {
+    const [head, tail] = error.message.split(' | ');
+    assert.equal(head,"placement-command-failed: sh -c printf '%0700d' 0 >&2; echo ' mkdir: Permission denied' >&2; exit 3");
+    assert.match(tail,/^0+ mkdir: Permission denied $/);
+    assert.ok(tail.length <= 600,`${tail.length} bytes`);
+    return true;
+  });
+  await command('/bin/sh',['-c','echo fine >&2']);
 });

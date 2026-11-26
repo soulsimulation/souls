@@ -55,7 +55,9 @@ small_node() {
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
 step origin-headers node --test tools/origin/origin.test.mjs tools/origin/agents.test.mjs tools/origin/site.test.mjs tools/ops/archive-world.test.mjs web/src/home/list.test.ts
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
-step install-apart bash tools/ops/install.sh check
+# Every import of what it bundles resolves where it is installed, and the placement initializer runs as its own entry
+# (it did not load, then deadlocked on its archive import; 26 Nov).
+step install-apart bash -c 'bash tools/ops/install.sh check && node --test tools/ops/installed-imports.test.mjs tools/ops/place-created-world.test.mjs'
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
 # The cut-over's count of what a rollback leaves in the new system (X7, #2836).
