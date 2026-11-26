@@ -2444,7 +2444,12 @@ mod gone_in_place_tests {
         for n in [4, 15, 30] {
             after.nodes.insert(id(n), body(&header, n, header.zone));
         }
-        after.nodes.get_mut(&id(3)).unwrap().fields.insert(30, Value::Uint(99));
+        after
+            .nodes
+            .get_mut(&id(3))
+            .unwrap()
+            .fields
+            .insert(30, Value::Uint(99));
         let delta = delta_of(&header, &before, &after);
         let (old, new) = (
             project(&header, &before).unwrap(),

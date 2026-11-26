@@ -4208,10 +4208,7 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
             change(15, other, everyone, set(other, 1, Value::Uint(7))),
         ],
         // A node made under one taken out with it, in one cut: never public.
-        vec![
-            w3e_create(&h, 16, late, stand, everyone),
-            remove(17, stand),
-        ],
+        vec![w3e_create(&h, 16, late, stand, everyone), remove(17, stand)],
         vec![remove(18, other)],
     ];
     let mut whole = 0;
