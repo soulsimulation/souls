@@ -175,7 +175,9 @@ slot) with the stance the request named. Postures are the controller's stance in
   nor blocks them, so the seat's hold never refuses it `resource-held` (#4143). Every other move that claims the legs
   (a jump, a dance, a bow) is still refused `resource-held` there: a gateway sit writes no `posture`, so a form's
   posture need alone would not stop it. A rise during a seated stretch does not cancel the stretch, which holds no
-  leg; it plays out its hand phases.
+  leg; it plays out its hand phases. A form at another thing that walks (the lamp across the room, asked from the
+  sofa) rises from the seat first (`Forms::open`), unless the seat's thing moves (a ride, a boat): its rides are left
+  by their own forms.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is

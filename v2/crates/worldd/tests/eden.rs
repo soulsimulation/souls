@@ -5478,7 +5478,7 @@ const INDOOR: &[Visit] = &[
                 "work at the library's office desk",
                 "eden:work",
                 Some("e_d7e49dd3"),
-                Gap("as the teacher's desk"),
+                Done,
             ),
         ],
     ),

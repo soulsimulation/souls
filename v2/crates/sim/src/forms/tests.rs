@@ -1781,10 +1781,10 @@ fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
         Some("done".into())
     );
     // A lamp 2 m off, with its switch: the form walks to the switch, then waits as its move would.
-    let lamp = b.mint.mint().expect("id");
+    let other = b.mint.mint().expect("id");
     let at = Vec3::new(stand.x, stand.y, stand.z + 2_000_000);
     b.snap.things.insert(
-        lamp,
+        other,
         (at, BTreeMap::from([("switch".to_owned(), Vec3::ZERO)])),
     );
     let walk = Step::WalkTo {
@@ -1796,7 +1796,7 @@ fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
     };
     b.steps(
         body,
-        lamp,
+        other,
         vec![walk, Step::Wait(200_000)],
         intent(body, 1),
         Limits::default(),

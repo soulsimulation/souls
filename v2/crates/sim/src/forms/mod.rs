@@ -1406,13 +1406,13 @@ impl Forms {
         // room, asked from the sofa), first rises from that seat, as a person gets up to go: its legs are the seat's, so
         // the walk was refused `resource-held` (Eden indoor audit). Not from a thing that moves (a ride, a boat): its
         // seats are left by its own forms. A form that starts with its own rise keeps it.
-        let seat = w.places.as_ref().and_then(|p| {
+        let held_in = w.places.as_ref().and_then(|p| {
             p.slots
                 .held_by(body)
                 .filter(|s| *s != node && !p.slots.moves(*s))
         });
         if node != body
-            && seat.is_some()
+            && held_in.is_some()
             && steps.iter().any(|s| matches!(s, Step::WalkTo { .. }))
             && !matches!(steps.first(), Some(Step::Rise))
         {
