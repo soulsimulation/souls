@@ -11,6 +11,11 @@
 //! and by the footprint ("form at footprint"; a walkable thing, `spots::walkable`, on it, as a `go_to` ends). Every
 //! workbench is reached by the footprint, and no thing reached by its middle is lost by it ("lost").
 //!
+//! #4083: Eden's tower floor lamps stood over the stairwell (or behind the spiral stair), and its roof-terrace planters
+//! and pots on roofs with no way up. The lamps now stand on each floor's central landing and the terrace things on the
+//! ground by their building's door; every one is reached both ways. Every thing a form's walk still does not reach at
+//! its footprint is listed by name.
+//!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
 // Times its own calls: the wall-clock rule (K7) binds the engine, not this test.
@@ -56,6 +61,42 @@ fn entries(dir: &std::path::Path, out: &mut BTreeMap<String, Json>) {
             out.insert(kind.to_owned(), v.clone());
         }
     }
+}
+
+/// Eden's towers (#4083): each floor lamp in one stands on its central floor, which a body reaches up the spiral stair.
+const TOWERS: [&str; 10] = [
+    "eden-tower-house",
+    "region-old-town-bell-tower",
+    "region-vineyard-villa-tower",
+    "region-botanic-garden-pagoda",
+    "region-campus-clock-tower",
+    "castle-keep",
+    "castle-tower-1",
+    "castle-tower-2",
+    "castle-tower-3",
+    "castle-tower-4",
+];
+
+/// The roof-terrace things no walk reached (#4083): moved to the ground beside their building's door.
+fn terrace_thing(name: &str) -> bool {
+    name.ends_with("-roof-planter")
+        || name.ends_with("-roof-pot")
+        || name.contains("-roof-planter-")
+}
+
+/// Each thing's name by its origin id (`e_…`), from the facts.
+fn names(text: &str) -> BTreeMap<String, String> {
+    let facts = json::parse(text).expect("the facts");
+    let mut out = BTreeMap::new();
+    for t in facts.get("things").and_then(Json::arr).unwrap_or_default() {
+        if let (Some(id), Some(name)) = (
+            t.get("id").and_then(Json::str),
+            t.get("name").and_then(Json::str),
+        ) {
+            out.insert(id.to_owned(), name.to_owned());
+        }
+    }
+    out
 }
 
 fn field(tree: &replica::tree::Tree, id: Id, f: u64) -> String {
@@ -146,20 +187,36 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     let mut onto: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     // The map's parts are found on the first walk: not timed with the first target.
     town.with_ground(|_, g| g.walk(ground, Vec3::ZERO, ground, Vec3::new(1_000_000, 0, 0)));
+    let named = names(&text);
+    let name_of = |id: Id| {
+        let o = field(tree, id, import_eden::F_ORIGIN);
+        named.get(&o).cloned().unwrap_or(o)
+    };
+    // #4083: each tower lamp and each terrace thing moved to the ground, and whether a form's walk (by the footprint)
+    // and a plain walk reach it.
+    let mut fixed_4083: Vec<(String, bool, bool)> = Vec::new();
+    // Every thing a form's walk does not reach at its footprint, by name: kind, name, building.
+    let mut unreached_named: Vec<String> = Vec::new();
     let ids: Vec<Id> = im.nodes.values().copied().collect();
     for id in ids {
         let Some((floor, at, _)) = town.view().on_floor(id, Vec3::ZERO) else {
             continue;
         };
-        if floor == ground || floor == id {
+        let moved = floor == ground && terrace_thing(&name_of(id));
+        if (floor == ground && !moved) || floor == id {
             continue;
         }
         let Some(b) = parent(tree, floor) else {
             continue;
         };
-        // A building with no doorway onto the ground (a tower whose floors no way reaches) from another's.
+        // A building with no doorway onto the ground (a tower whose floors no way reaches) from another's; a thing on
+        // the open ground from the nearest doorway.
         let from = match door.get(&b) {
             Some(&p) => p,
+            None if moved => *door
+                .values()
+                .min_by_key(|p| (p.x - at.x).abs() + (p.z - at.z).abs())
+                .expect("a doorway"),
             None => {
                 no_door += 1;
                 *door.values().next().expect("a doorway")
@@ -246,6 +303,16 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             }
             d => d,
         };
+        let building_name = name_of(b);
+        if moved || (kind.starts_with("core-floor-lamp") && TOWERS.contains(&building_name.as_str())) {
+            fixed_4083.push((format!("{} in {building_name}", name_of(id)), foot, walk));
+        }
+        if moved {
+            continue;
+        }
+        if !foot {
+            unreached_named.push(format!("{kind} {} in {building_name}", name_of(id)));
+        }
         if let Some(d) = diag.0 {
             far.entry(kind.clone()).or_default().push(d);
         }
@@ -354,6 +421,19 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     for k in ["core-workbench", "core-floor-lamp", "core-bookshelf"] {
         println!("{k}: {} not reached at the footprint", unreached(k));
     }
+    println!("not reached at the footprint, by name:");
+    for u in &unreached_named {
+        println!("  {u}");
+    }
+    // #4083: Eden's 38 tower lamps stand on their central floor and its 35 roof-terrace things on the ground by their
+    // building's door, and a form's walk and a plain walk reach each.
+    let lost_4083: Vec<_> = fixed_4083.iter().filter(|t| !(t.1 && t.2)).collect();
+    println!(
+        "#4083: tower lamps and terrace things {}, not reached {lost_4083:?}",
+        fixed_4083.len()
+    );
+    assert_eq!(fixed_4083.len(), 38 + 35, "Eden's tower lamps and terrace things");
+    assert!(lost_4083.is_empty(), "every tower lamp and terrace thing is reached");
 
     // A target the walk does not reach answers at once: no route search per place round it (#4072's review: about
     // 1 s per call before, on the planner thread every walker waits on).
