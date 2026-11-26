@@ -1373,6 +1373,23 @@ impl Engine {
             return Ok(());
         }
         let Some(mut carry) = self.carries.remove(&activity) else {
+            // #5067: a crew holding its part with no carry (a seated frame it holds, or a part on a seating's track,
+            // which only a retire leaves) loses only the leaver's hold.
+            if let Some(s) = self.set_sides.get_mut(&activity) {
+                s.retain(|(b, _)| *b != body);
+            }
+            if let Some(mut h) = holds_on(tree, activity)
+                && h.phase != grips::RELEASED
+                && h.holds.iter().any(|x| x.body == body)
+            {
+                h.holds.retain(|x| x.body != body);
+                h.since = now;
+                let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+                self.activities.next = tree.next();
+                if let Err(r) = self.activities.carry_grips(tree, activity, &h, word) {
+                    eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
+                }
+            }
             return Ok(());
         };
         if let Some(i) = carry.sides.iter().position(|(b, _)| *b == body)
@@ -1394,6 +1411,7 @@ impl Engine {
             // #5067: only its own hold goes; every other carrier keeps its grip.
             if let Some(mut h) = holds_on(tree, activity) {
                 h.holds.retain(|x| x.body != body);
+                h.since = now;
                 e.next = tree.next();
                 if let Err(r) = e.carry_grips(tree, activity, &h, word) {
                     eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
@@ -1489,10 +1507,17 @@ impl Engine {
         else {
             return Vec::new();
         };
+        let ground = tree
+            .handle(activity)
+            .and_then(|n| tree.node(n))
+            .and_then(|n| n.parent());
         h.holds
             .iter()
             .filter_map(|hold| {
-                let (_, feet) = stands(c, hold.body).ok()?;
+                let (on, feet) = stands(c, hold.body).ok()?;
+                if Some(on) != ground {
+                    return None;
+                }
                 let [a, b] = hold.hands;
                 let mid = Vec3::new((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
                 let g = at.orientation.rotate(mid).ok()?;
@@ -1849,8 +1874,10 @@ impl Engine {
                 }
             }
         }
-        // #5067 item 3: a carrier out of reach of its grip stops its crew's track by name: a set-in goes back as a refused
-        // seating does, a way back stops where it is and the part is set down there.
+        // #5067 item 3: a carrier held to its reach who moves out of it stops its crew's set-in by name: the put is refused
+        // and the part goes back, as a refused seating's does, to where the set-in started; there its carry goes on, or
+        // breaks off when its carriers have gone (`Engine::came_back`). The way back only returns the part toward where
+        // every carrier who stood could reach it.
         if self.asm.as_ref().is_some_and(|s| s.setting_in()) {
             let tr = tree.get_or_insert_with(|| live.frozen());
             let tracks: Vec<_> = self
@@ -1859,72 +1886,18 @@ impl Engine {
                 .map(|s| {
                     s.tracks(now)
                         .into_iter()
-                        .map(|t| (t.activity, t.node, t.back, t.holding.to_vec()))
+                        .filter(|t| !t.back)
+                        .map(|t| (t.activity, t.node, t.holding.to_vec()))
                         .collect()
                 })
                 .unwrap_or_default();
-            for (activity, node, back, holding) in tracks {
+            for (activity, node, holding) in tracks {
                 let mut carriers = self.reaches(tr, c, slots, activity);
                 carriers.retain(|c| holding.contains(&c.body));
-                let Err(why) = crate::assembly::out_of_reach(&carriers, node) else {
-                    continue;
-                };
-                if !back {
-                    if let Some(s) = self.asm.as_mut() {
-                        s.refuse_set_in(activity, why);
-                    }
-                    continue;
-                }
-                eprintln!(
-                    "worldd: the crew {} stopped on its way back: {why}",
-                    show(activity)
-                );
-                let Some((s, effects, here)) =
-                    self.asm.as_mut().and_then(|a| a.halt(tr, now, activity))
-                else {
-                    continue;
-                };
-                self.send(vec![(s.by, effects)]);
-                let Some(audience) = tr
-                    .handle(activity)
-                    .and_then(|h| tr.node(h))
-                    .map(|n| n.audience())
-                else {
-                    continue;
-                };
-                let mut carry = Carry::new(
-                    activity,
-                    s.part,
-                    s.ground,
-                    audience,
-                    self.header.clone(),
-                    self.rules.clone(),
-                );
-                // Set down on the floor under where it stopped: the floor its carry was carried over, not where the
-                // set-in had lowered it to.
-                let over = Vec3::new(here.0.x, s.start.0.y, here.0.z);
-                carry.track.push((now, over, here.1));
-                carry.span = s.span;
-                carry.sides = self.set_sides.remove(&activity).unwrap_or_default();
-                if let Some(l) = self.held_load(tr, s.part) {
-                    carry.load = l;
-                }
-                match break_off(
-                    &mut carry,
-                    &mut self.activities,
-                    &mut self.mint,
-                    tr,
-                    now,
-                    None,
-                    "souls:grip-out-of-reach",
-                    Some(s.by),
-                ) {
-                    Ok(()) => {
-                        if let Some(asm) = self.asm.as_mut() {
-                            asm.ended(activity);
-                        }
-                    }
-                    Err(r) => eprintln!("worldd: a crew's part was not set down: {r}"),
+                if let Err(why) = crate::assembly::out_of_reach(&carriers, node)
+                    && let Some(s) = self.asm.as_mut()
+                {
+                    s.refuse_set_in(activity, why);
                 }
             }
         }
@@ -2990,15 +2963,26 @@ impl Engine {
         if r.step != crate::assembly::Step::Taken {
             // A seating refused at its commit is stopped where its track ended.
             let mut tree = live.frozen();
-            // #5067: a part seated is let go of.
+            // #5067: a part seated is let go of, unless its crew stays on holding it (a frame in a bay: their node moved
+            // under it).
             if r.step == crate::assembly::Step::Seated && written {
                 self.set_sides.remove(&r.activity);
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
+                let holds = holds_on(&tree, r.activity).map(|h| h.load);
+                let under = tree
+                    .handle(r.activity)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent());
+                let phase = if holds.is_some() && under == holds {
+                    grips::HELD
+                } else {
+                    grips::RELEASED
+                };
                 if let Err(e) = regrip(
                     &mut self.activities,
                     &mut tree,
                     r.activity,
-                    grips::RELEASED,
+                    phase,
                     None,
                     word,
                 ) {

@@ -8,10 +8,10 @@
 //!   lay is read as it is held, so its back carrier holds the grip at its back.
 //! - **Kept, not renumbered.** The holds are written on the carry's activity node ([`F_GRIPS`]) and said to its
 //!   audience ([`GRIPS`]) whenever they change: at the lift or a take ([`CARRY`]), a seating's set-in and its way back
-//!   ([`SET_IN`], [`RETURN`], each with when its track ends), a carry taken up again ([`CARRY`]) and its end
-//!   ([`RELEASED`], the last holds kept so a page can show the hands letting go). A side carrier who leaves takes only
-//!   its own hold away: every other carrier keeps its grip. The node is in the log, so the holds are there after a
-//!   restart.
+//!   ([`SET_IN`], [`RETURN`], each with when its track ends), a carry taken up again ([`CARRY`]), a part seated that
+//!   its crew stays on holding ([`HELD`]) and its end ([`RELEASED`], the last holds kept so a page can show the hands
+//!   letting go). A carrier who leaves while the crew goes on holding takes only its own hold away: every other carrier
+//!   keeps its grip. The node is in the log, so the holds are there after a restart.
 //! - **What a hold says** ([`Hold`]): the carrier's body, its grip (the entry's point name, said as `point:<name>`), the
 //!   grip's point and its two hands' points, each µm in the load's own frame (its entry's frame: x and z centred, y from
 //!   its floor up). The hands are [`HAND_HALF`] either side of where the carrier holds along the load's long axis (kept
@@ -22,7 +22,8 @@
 //!   it: each carrier holds where its grip lies along that line, kept to the load's edge, at the carry's height, its
 //!   hands above and below.
 //!
-//! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs, 5?: until µs, 6: [hold, ...]}`, a hold
+//! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs (the phase's start, or a carrier's leave),
+//! 5?: until µs, 6: [hold, ...]}`, a hold
 //! `{1: body, 2: point:<grip>, 3: [x, y, z], 4: [[x, y, z], [x, y, z]]}`. B9's board, a load of no entry, has no grips:
 //! its holds are empty.
 
@@ -37,7 +38,7 @@ use replica::time::Micros;
 use super::{INNER, Load, R, pose_refusal};
 
 /// The carry's activity node's field that holds who holds which grip.
-pub const F_GRIPS: u64 = 5;
+pub const F_GRIPS: u64 = 6;
 /// The world's word each time the holds or their phase change, to the carry's audience.
 pub const GRIPS: &str = "souls:carry-grips";
 /// How far either side of where a carrier holds its load its two hands are, along the load's long axis, µm.
@@ -48,6 +49,8 @@ pub const CARRY: &str = "souls:carry";
 pub const SET_IN: &str = "souls:set-in";
 pub const RETURN: &str = "souls:return";
 pub const RELEASED: &str = "souls:released";
+/// Seated and still held by its crew (a frame in its bay, held until it is braced).
+pub const HELD: &str = "souls:held";
 /// A grip is said by its entry's point name after this (a part's texts are all `namespace:name`).
 pub const POINT: &str = "point:";
 
@@ -491,25 +494,26 @@ mod tests {
     fn a_frame_taken_standing_is_held_at_its_edges_along_its_carriers_line() {
         let e = entry("construction", "rack_upright");
         let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
-        // Taken as it stands, its foot 0.9 m below the slot (its carriers' feet), its width along the carry.
-        let held = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
-        let h = assign(&g, &load, held, id(1), id(2), &[]).unwrap();
+        // Taken as it stands (a take puts its origin, its foot, at the crew's slot), its width along the carry.
+        let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
         assert_eq!(names(&h), ["grip_high", "grip_low"]);
         for (hold, x) in h.iter().zip([609_500, -609_500]) {
-            // At its edge toward the carrier, at the carry's height, its hands 0.2 m above and below.
+            // At its edge toward the carrier, at the carry's height (its foot), its hands up from there.
             assert_eq!(
-                hold.hands[0],
-                Vec3::new(x, 900_000 - HAND_HALF, 0),
-                "{}",
-                hold.grip
-            );
-            assert_eq!(
-                hold.hands[1],
-                Vec3::new(x, 900_000 + HAND_HALF, 0),
+                hold.hands,
+                [Vec3::new(x, 0, 0), Vec3::new(x, HAND_HALF, 0)],
                 "{}",
                 hold.grip
             );
         }
+        // Its foot held 0.9 m below the slot: its hands 0.2 m either side of the carry's height.
+        let low = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
+        let h = assign(&g, &load, low, id(1), id(2), &[]).unwrap();
+        let want = [
+            Vec3::new(609_500, 700_000, 0),
+            Vec3::new(609_500, 1_100_000, 0),
+        ];
+        assert_eq!(h[0].hands, want);
     }
 
     #[test]

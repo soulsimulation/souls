@@ -445,8 +445,9 @@ fn serve_again(dir: &Path, socket: &Path) -> Served {
 /// #5067 item 3: a crew of two takes a rack beam and lays it on the open ground. 0.9 m to the side, the front's and the
 /// back's grips would end out of their reach: refused `part.grip-out-of-reach` before anything moves. 0.3 m to the side
 /// it is laid there, its holds said on the set-in track and let go. Taken again and put 0.5 m to the side, the back
-/// walks off as the beam goes in: the set-in stops by name (the put refused `part.grip-out-of-reach`) and its way back
-/// stops too, the beam set down where it was then (`souls:grip-out-of-reach`), never moved out of the back's reach.
+/// walks off as the beam goes in: the set-in stops by name (the put refused `part.grip-out-of-reach`) and the beam goes
+/// back to where the set-in started, where its carry breaks off (`souls:carriers-apart`) and it is set down: never
+/// moved on toward the slot out of the back's reach, never set down anywhere unchecked.
 #[tokio::test(flavor = "multi_thread")]
 async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
     let d = scratch("creach");
@@ -540,20 +541,27 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
     assert_eq!(down.holds.len(), 2);
     assert_eq!(
         broke(&dir).last().map(String::as_str),
-        Some("souls:grip-out-of-reach"),
-        "its way back stopped by name"
+        Some("souls:carriers-apart"),
+        "set down where the set-in started, its carriers gone"
     );
     let laid = moves_of(&dir, beam).last().unwrap().position;
     println!(
-        "set down where its way back stopped, its foot {} mm up",
-        laid.y / 1000
+        "set down at ({}, {}) mm, its foot {} mm up; taken at ({}, {}) mm",
+        laid.x / 1000,
+        laid.z / 1000,
+        laid.y / 1000,
+        at.x / 1000,
+        at.z / 1000
     );
     assert!(laid.y >= 0, "on the ground, not in it");
+    assert!(
+        (laid.x - at.x).abs() < 350_000,
+        "where the set-in started, between its carriers"
+    );
     let phases: Vec<String> = words(&dir, carry).into_iter().map(|h| h.phase).collect();
     println!("phases: {phases:?}");
-    assert_eq!(
-        phases,
-        [grips::CARRY, grips::SET_IN, grips::RETURN, grips::RELEASED]
-    );
+    // Back where the set-in started, its carry goes on for a moment if the back has not yet gone 1 m, then breaks off.
+    assert_eq!(phases[..3], [grips::CARRY, grips::SET_IN, grips::RETURN]);
+    assert_eq!(phases.last().map(String::as_str), Some(grips::RELEASED));
     drop(served);
 }

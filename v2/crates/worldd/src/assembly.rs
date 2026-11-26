@@ -42,9 +42,9 @@
 //!   within reach where the track starts must be within reach where it ends (`part.grip-out-of-reach`, naming it); on a
 //!   straight track a carrier who stands is farthest from its grip at one end or the other. A carrier already out of
 //!   reach at the start (one who took a frame from 2 m off, say: how near a take must be is the take's own admission)
-//!   is not held to it. While a track runs, a carrier held to its reach who moves out of it stops the track by name: a
-//!   set-in goes back as a refused seating does, a way back stops where it is and the part is set down on the floor
-//!   under it (`crate::engine`).
+//!   is not held to it. While a set-in runs, a carrier held to its reach who moves out of it stops it by name: it goes
+//!   back as a refused seating does, to where it started, which every carrier who stood could reach; there its carry
+//!   goes on, or breaks off when its carriers have gone (`crate::engine`).
 //!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
@@ -493,14 +493,6 @@ impl Assembly {
             }
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
-        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
-        // a straight track, so all the way). One already out of reach is not moved farther by it, but is not held to it.
-        let holding: Vec<Carrier> = carriers
-            .iter()
-            .filter(|c| out_of_reach(&[**c], from).is_ok())
-            .copied()
-            .collect();
-        out_of_reach(&holding, (at, from.1))?;
         let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
         if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
             return Err(refusal(
@@ -511,6 +503,15 @@ impl Assembly {
                 ),
             ));
         }
+        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
+        // a straight track, so all the way). One already out of reach there is not held to it (how near a take must be
+        // is the take's own admission, #5067 item 4).
+        let holding: Vec<Carrier> = carriers
+            .iter()
+            .filter(|c| out_of_reach(&[**c], from).is_ok())
+            .copied()
+            .collect();
+        out_of_reach(&holding, (at, from.1))?;
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
         let rests = s.rests(pk.as_str());
@@ -642,38 +643,6 @@ impl Assembly {
         if let Some(s) = self.setting.remove(&activity) {
             self.refused.push((s.by.0, s.by.1, why));
             self.stopped.push((activity, s));
-        }
-    }
-
-    /// Stops crew `activity`'s way back at `now` where it has the node (#5067 item 3), writing on `tree`: the node handed
-    /// from its track to its mover there. The setting it came back from, the entries, and where it stopped.
-    pub fn halt(
-        &mut self,
-        tree: &mut Tree,
-        now: Micros,
-        activity: Id,
-    ) -> Option<(Setting, Vec<Effect>, (Vec3, Quat))> {
-        let here = self
-            .tracks(now)
-            .into_iter()
-            .find(|t| t.activity == activity && t.back)?
-            .node;
-        let (s, _, track) = self.returning.remove(&activity)?;
-        match self.hand_off(
-            tree,
-            now,
-            activity,
-            s.ground,
-            (track, Owner::Mover),
-            here,
-            Vec3::ZERO,
-        ) {
-            Ok(effects) => Some((s, effects, here)),
-            Err(r) => {
-                eprintln!("worldd: a crew's way back was not stopped: {r}");
-                self.seating.parts.clear();
-                None
-            }
         }
     }
 
