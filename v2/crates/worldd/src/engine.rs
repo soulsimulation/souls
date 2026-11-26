@@ -2895,9 +2895,10 @@ impl Engine {
     }
 
     /// Where carry `a`'s front walk to `goal` turns its crew (moving-group rule 3): the goal on its ground's plan and
-    /// the carry's heading there, `heading` when the walk names one (not zero), else the heading of the pose of the
-    /// carry's way (0.135 R2) whose front is within [`WAY_POSE_NEAR`] of the goal. None for a walk to another node, or
-    /// one that names no heading and goes to no pose of a way: the crew moves without turning.
+    /// the carry's heading there, `heading` when the walk names one (not zero), else the heading of a pose of the
+    /// carry's way (0.135 R2) whose front is within [`WAY_POSE_NEAR`] of the goal: of several, the one turned least from
+    /// the carry's heading now (the next pose of a way differs by one move). None for a walk to another node, or one
+    /// that names no heading and goes to no pose of a way: the crew moves without turning.
     fn turn_of(
         &self,
         a: Id,
@@ -2913,12 +2914,26 @@ impl Engine {
         if let Some(h) = heading.filter(|h| *h != [0, 0]) {
             return Some((at, h));
         }
-        carry.way.iter().find_map(|(f, b)| {
-            let near = (i128::from(f[0] - at[0]).pow(2) + i128::from(f[1] - at[1]).pow(2))
-                <= i128::from(WAY_POSE_NEAR).pow(2);
-            let h = [f[0] - b[0], f[1] - b[1]];
-            (near && h != [0, 0]).then_some((at, h))
-        })
+        let now = carry
+            .ends()
+            .ok()
+            .flatten()
+            .map(|(f, b)| [i128::from(f[0] - b[0]), i128::from(f[1] - b[1])])?;
+        let unit = |v: [i128; 2]| (v[0] * v[0] + v[1] * v[1]).isqrt().max(1);
+        carry
+            .way
+            .iter()
+            .filter(|(f, b)| {
+                f != b
+                    && (i128::from(f[0] - at[0]).pow(2) + i128::from(f[1] - at[1]).pow(2))
+                        <= i128::from(WAY_POSE_NEAR).pow(2)
+            })
+            .map(|(f, b)| [f[0] - b[0], f[1] - b[1]])
+            .max_by_key(|h| {
+                let v = [i128::from(h[0]), i128::from(h[1])];
+                (v[0] * now[0] + v[1] * now[1]) * 1_000_000 / (unit(v) * unit(now))
+            })
+            .map(|h| (at, h))
     }
 
     /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,

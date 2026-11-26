@@ -972,8 +972,22 @@ async fn c7_a_load_carried_with_no_destination_stops_at_a_post_between_its_carri
 /// east, and it is set down inside the room.
 #[tokio::test(flavor = "multi_thread")]
 async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
+    r2_through_the_doorway("r2", false).await;
+}
+
+/// Carrying together, turned with the front (moving-group rule 3): R2's way through the doorway walked by the front
+/// alone. Only the front's Soul walks each pose's front point; the world turns the crew to that pose (its front's walk
+/// goes to a pose of the carry's way), so the back keeps its place at the pose's back point by its own follow order
+/// and sends nothing. As R2: never stopped, no sample through a wall, turned from north to east, set down inside.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_the_front_alone_walks_a_way_that_turns_the_load() {
+    r2_through_the_doorway("r2front", true).await;
+}
+
+/// R2's doorway (above), its way walked by both carriers, or by the front alone (`front_only`).
+async fn r2_through_the_doorway(tag: &str, front_only: bool) {
     use sim::activity::carry::{Fixed, outline};
-    let d = scratch("r2");
+    let d = scratch(tag);
     // The room's west wall's west face, level with the beam's middle, 1.2 m east of it (mm).
     let (wx, wz) = (beam_at().x / 1000 + 1_200, beam_at().z / 1000);
     let walls: [[i64; 4]; 5] = [
@@ -1034,16 +1048,27 @@ async fn r2_a_beam_turns_through_a_doorway_narrower_than_it_is_long() {
         .expect("lifted, a way through the doorway found");
     // The way, as the world says it to the carry's audience: each pose where the front and the back stand.
     let way = carry_way(&dir);
+    let back = body_of(&dir, b.id);
     for (k, p) in way.iter().enumerate().skip(1) {
         a.send("eden:walk", ground, point(Vec3::new(p[0], 0, p[1])))
             .await;
+        if front_only {
+            a.answer()
+                .await
+                .unwrap_or_else(|r| panic!("the front's walk {k}: {r}"));
+            // The back keeps its place at the pose by its own order, sending nothing.
+            close_to(&dir, back, Vec3::new(p[2], 0, p[3]), 60_000, 10).await;
+            continue;
+        }
         b.send("eden:walk", ground, point(Vec3::new(p[2], 0, p[3])))
             .await;
         let (wa, wb) = (a.answer().await, b.answer().await);
         wa.unwrap_or_else(|r| panic!("the front's walk {k}: {r}"));
         wb.unwrap_or_else(|r| panic!("the back's walk {k}: {r}"));
     }
-    b.act("carry:set-down", carry, BTreeMap::new())
+    let setter = if front_only { &mut a } else { &mut b };
+    setter
+        .act("carry:set-down", carry, BTreeMap::new())
         .await
         .expect("set down inside, the carry never stopped");
     for s in [&mut a, &mut b] {
@@ -1550,6 +1575,25 @@ async fn together(dir: &Path, bodies: &[Id], to: &[Vec3], secs: u64) -> Duration
             "not all at their places within {secs} s: µm off {off:?}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Waits until `body` stands within `within` µm of `to` (the log's body rows), at most `secs` seconds; else the test
+/// fails, naming how far it stood.
+async fn close_to(dir: &Path, body: Id, to: Vec3, within: i64, secs: u64) {
+    let t0 = Instant::now();
+    loop {
+        let off = stood(dir).get(&body).map_or(i64::MAX, |q| {
+            (i128::from(q.x - to.x).pow(2) + i128::from(q.z - to.z).pow(2)).isqrt() as i64
+        });
+        if off <= within {
+            return;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(secs),
+            "not within {within} µm of its place in {secs} s: {off} µm off"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -2100,4 +2144,131 @@ async fn group_a_blocked_way_stops_the_whole_group() {
     drop(served);
     assert_eq!(broke(&dir), vec!["souls:carry-blocked".to_owned()]);
     assert_eq!(open_follows(&dir), 0, "the back's follow order ended");
+}
+
+/// Each place `body` stood at, in order, as the log's body rows have it.
+fn track_of(dir: &Path, body: Id) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    for r in sim::log::recover(&bytes)
+        .map(|r| r.records)
+        .unwrap_or_default()
+    {
+        let Ok(p) = Part::read(&r) else { continue };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    out.push(pose.position);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Carrying together: other walkers keep apart from a carried load (moving-group rule 3). The walkers' map learns
+/// where a load rests only when it is set down or seated, so a load being carried stands among the bodies a walker
+/// keeps apart from. Two carry the beam 6 m east of the yard by the front's walk and stand, the beam held across the
+/// way; a third Soul walks from 4 m west of the beam's middle to 4 m east of it, straight through where the beam is.
+/// It goes round: never within its own space (0.15 m) of the beam's outline as held, and it arrives. The carry is
+/// never broken off.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_a_passer_by_walks_round_a_carried_load() {
+    let d = scratch("cpass");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 3);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+    let mut c = Soul::connect(&url, souls[2], lineage, &tokens[2]).await;
+    let entry = construction("rack_beam.json");
+    let load = Load::of(&entry).unwrap();
+    let [back, front] = load.places();
+    let carry = gather(&mut a, &mut b, &dir, ground, beam, &entry, beam_at(), true).await;
+    a.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("lifted");
+    let at = Vec3::new(beam_at().x + 6 * M, 0, beam_at().z);
+    a.act("eden:walk", ground, point(spot(at, front, true)))
+        .await
+        .expect("the crew walked east");
+    let (fb, bb, cb) = (
+        body_of(&dir, souls[0]),
+        body_of(&dir, souls[1]),
+        body_of(&dir, souls[2]),
+    );
+    together(
+        &dir,
+        &[fb, bb],
+        &[spot(at, front, true), spot(at, back, true)],
+        10,
+    )
+    .await;
+    c.act("eden:walk", ground, point(Vec3::new(at.x - 4 * M, 0, at.z)))
+        .await
+        .expect("the passer-by stands west of the beam");
+    let from = track_of(&dir, cb).len();
+    let goal = Vec3::new(at.x + 4 * M, 0, at.z);
+    let t0 = Instant::now();
+    let crossed = tokio::time::timeout(
+        Duration::from_secs(60),
+        c.act("eden:walk", ground, point(goal)),
+    )
+    .await
+    .expect("the passer-by's walk ends within 60 s");
+    let took = t0.elapsed();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The beam as it is held, between where its carriers stand.
+    let now = stood(&dir);
+    let (f, k) = (now[&fb], now[&bb]);
+    let (plan, _) = load.as_held().unwrap();
+    let (cx, cz) = ((f.x + k.x) as f64 / 2.0, (f.z + k.z) as f64 / 2.0);
+    let (ux, uz) = ((f.x - k.x) as f64, (f.z - k.z) as f64);
+    let l = ux.hypot(uz);
+    let (ux, uz) = (ux / l, uz / l);
+    let gap = |p: &Vec3| {
+        let (dx, dz) = (p.x as f64 - cx, p.z as f64 - cz);
+        let a = (dx * ux + dz * uz).abs() - plan.half_length as f64;
+        let b = (dz * ux - dx * uz).abs() - plan.half_width as f64;
+        a.max(0.0).hypot(b.max(0.0))
+    };
+    let walked = &track_of(&dir, cb)[from..];
+    let nearest = walked.iter().map(gap).fold(f64::INFINITY, f64::min);
+    let strayed = walked.iter().map(|p| (p.z - at.z).abs()).max().unwrap_or(0);
+    let end = now[&cb];
+    let short = ((end.x - goal.x) as f64).hypot((end.z - goal.z) as f64);
+    println!(
+        "passer-by: {crossed:?} in {:.1} s; {} rows; nearest the beam's outline {:.0} mm; {} mm off the straight line at \
+         most; {short:.0} mm from its goal",
+        took.as_secs_f64(),
+        walked.len(),
+        nearest / 1000.0,
+        strayed / 1000
+    );
+    crossed.expect("the passer-by's walk arrives");
+    assert!(
+        nearest >= 150_000.0,
+        "kept its own space from the carried beam: {nearest:.0} µm"
+    );
+    assert!(short < 500_000.0, "arrived: {short:.0} µm from its goal");
+    a.act("carry:set-down", carry, BTreeMap::new())
+        .await
+        .expect("the carry still held: set down");
+    for s in [&mut a, &mut b] {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("each carrier leaves");
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+    assert!(
+        broke(&dir).is_empty(),
+        "never broken off: {:?}",
+        broke(&dir)
+    );
 }
