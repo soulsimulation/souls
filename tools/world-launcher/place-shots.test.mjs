@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -81,7 +81,7 @@ test('#5038: the keeper draws a moved world\'s missing pictures ahead of visitor
     assert.deepEqual(shots.views('eden', ['e_balloon', 'e_new'], places).map((v) => v.status), ['ready', 'unavailable'], 'a visitor gets the kept pictures');
     assert.equal(k.status().last.slug, 'mars');
     await k.check();
-    assert.equal(runs.length, 2, 'a run that left the same place missing is not repeated');
+    assert.equal(runs.length, 2, 'a run that tried every place is not repeated for the same missing ones');
     at.t += 7 * 3600_000; skip = new Set();
     await k.check();
     assert.deepEqual(runs.at(-1)[0], 'eden', 'after the retry time it is tried again');
@@ -97,6 +97,18 @@ test('#5038: the keeper draws a moved world\'s missing pictures ahead of visitor
   const moved = keep();
   try { await moved.check(); assert.deepEqual(runs.at(-1)[0], 'mars', 'the moved place is drawn again'); } finally { moved.close(); }
   assert.ok(told.some((s) => /drawing 1 of 3 places of eden ahead of visitors/.test(s)), told.join('\n'));
+  // a run ended at its deadline that drew some goes on with the rest; one that drew none waits
+  worlds.splice(1, 1); rmSync(join(dir, 'eden'), { recursive: true, force: true });
+  const ended = [], cut = placeShotKeeper({ shots, dir, worlds: () => worlds, page: (s) => s, firstMs: 1e9, everyMs: 1e9, now: () => at.t,
+    run: async (o) => { const r = await run(o); ended.push(1); skip = new Set(['e_new']); return ended.length === 1 ? { code: null, signal: 'SIGTERM' } : r; } });
+  try {
+    skip = new Set(['e_moved', 'e_new']);
+    await cut.check();
+    for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 20)); while (cut.status().running) await new Promise((r) => setTimeout(r, 5)); }
+    assert.equal(ended.length, 2, 'ended early with progress: a second run at once');
+    assert.equal(cut.status().missing.eden, 1);
+    await cut.check(); assert.equal(ended.length, 2, 'the second tried every place: no third');
+  } finally { cut.close(); }
 });
 
 test('#5038: a drawing run is its own process, ended at its deadline', async () => {

@@ -96,8 +96,9 @@ export function placeShots({ dir, log = () => {} }) {
  *  `everyMs` after (a world's published places changed): a world with places that have no current picture
  *  (`shots.missing`) gets one drawing run (`drawRun`: this file's CLI, its own process and headless browser at the
  *  lowest CPU priority, ended after `deadlineMs`; what it drew by then is kept). One run at a time for all worlds, never
- *  in a world's process or on its clock; none while `canStart()` says no (the host's memory). A run that leaves the same
- *  places missing is not repeated for them until they change or `retryMs` passes.
+ *  in a world's process or on its clock; none while `canStart()` says no (the host's memory). A run that tried every
+ *  place (or drew none) is not repeated for the same missing places until they change or `retryMs` passes; one ended
+ *  early (its deadline) that drew some goes on with the rest.
  *  `worlds()`: [{slug, places}] of the moved worlds and their published places (cutover.mjs snapshotPlaces);
  *  `page(slug)`: the world's page URL. → {check(), status(), close()}; `status()` is the gauge (/__sim/metrics). */
 export function placeShotKeeper({ shots, dir, worlds, page, run = drawRun, log = () => {}, canStart = () => true, firstMs = 60_000, everyMs = 10 * 60_000, deadlineMs = 45 * 60_000, retryMs = 6 * 3600_000, now = Date.now }) {
@@ -123,7 +124,8 @@ export function placeShotKeeper({ shots, dir, worlds, page, run = drawRun, log =
         const still = shots.missing(slug, (places ?? []).map((p) => p.target), true), left = still.length;
         last = { slug, at: new Date(started).toISOString(), ms: now() - started, drawn: Math.max(0, want.length - left), left, code: r?.code ?? null, ...(r?.signal ? { signal: r.signal } : {}), ...(r?.error ? { error: r.error } : {}) };
         missing.set(slug, left);
-        if (left) tried.set(slug, { sig: signature(still), at: now() });
+        // a run that tried every place, or drew none, is not repeated for the same ones; one ended early that drew some goes on
+        if (left && (r?.code === 0 || !last.drawn)) tried.set(slug, { sig: signature(still), at: now() });
         log(`place-shots: ${slug}: drew ${last.drawn} in ${Math.round(last.ms / 1000)} s${left ? `, ${left} still missing (the page draws those meanwhile; log ${join(dir, slug, 'draw.log')})` : ''}`);
         running = null;
         if (!closed) setImmediate(check);   // the next world, if any

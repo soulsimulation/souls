@@ -9,14 +9,15 @@ import {bodyWord,type Body} from './soul-state.ts';
 import {firstExploreResult} from './explore-control.ts';
 /** Explore selects a camera view; it never moves or controls a Soul. */
 export type EdenTourPlace=string;
+/** #5038: the generic house only for a place with no picture; while its picture is asked for, the frame stays empty. */
 function PlacePicture({id,revision,preview}:{id:string;revision?:number|string;preview?:(id:string)=>Promise<string|null>}){
- const host=useRef<HTMLSpanElement>(null),[image,setImage]=useState<string|null>(null);
- useEffect(()=>{setImage(null);const el=host.current;if(!el||!preview)return;let gone=false,started=false;
-  const load=()=>{if(started)return;started=true;void preview(id).then(src=>{if(!gone)setImage(src);}).catch(()=>{});};
+ const host=useRef<HTMLSpanElement>(null),[image,setImage]=useState<string|null|undefined>(undefined);
+ useEffect(()=>{setImage(undefined);const el=host.current;if(!el||!preview){setImage(null);return;}let gone=false,started=false;
+  const load=()=>{if(started)return;started=true;void preview(id).then(src=>{if(!gone)setImage(src);}).catch(()=>{if(!gone)setImage(null);});};
   const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();load();}},{root:el.closest('.explore-scroll'),rootMargin:'80px'});observer.observe(el);
   return()=>{gone=true;observer.disconnect();};
  },[id,revision,preview]);
- return <span ref={host} className="explore-picture" aria-hidden="true">{image?<img src={image} alt=""/>:<svg viewBox="0 0 64 48"><path d="M10 37V18l15-9 15 9v19M40 37V24l14-8v21M20 37V26h10v11" fill="none" stroke="currentColor" strokeWidth="2"/></svg>}</span>;
+ return <span ref={host} className="explore-picture" aria-hidden="true">{image?<img src={image} alt=""/>:image===null&&<svg viewBox="0 0 64 48"><path d="M10 37V18l15-9 15 9v19M40 37V24l14-8v21M20 37V26h10v11" fill="none" stroke="currentColor" strokeWidth="2"/></svg>}</span>;
 }
 export function EdenTour({onView,souls=new Map(),present=new Set(),onSoul,preview,onOpen,onClose,locationPage,onSearch,onMore,presence=new Map(),room,worldName='Eden',locations=curatedExploreLocations,bodies}:{bodies?:ReadonlyMap<string,Body>;worldName?:string;locations?:readonly{id:string;label:string;previewRevision?:number|string}[];onView:(place:EdenTourPlace)=>boolean;souls?:ReadonlyMap<string,PublicSoul>;present?:ReadonlySet<string>;onSoul?:(id:string)=>boolean;preview?:(id:string)=>Promise<string|null>;onOpen?:()=>void;onClose?:()=>void;locationPage?:WorldLocationPage;onSearch?:(query:string)=>void;onMore?:()=>void;presence?:ReadonlyMap<string,ExplorePresence>;room?:{name:string;soulIds:readonly string[]}|null}){
  const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[unavailable,setUnavailable]=useState('');
