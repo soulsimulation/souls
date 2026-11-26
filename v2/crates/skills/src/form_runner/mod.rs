@@ -104,6 +104,9 @@ use replica::time::Micros;
 
 use crate::route::{Leg, Route};
 
+#[cfg(test)]
+mod reach_tests;
+
 /// One step of a form, bound. The closed list is SA-F1's (`walk_to`, `sit`, `rise`, `move`, `take`, `put`,
 /// `use_held`, `wait`, `settle`), every one built (C25, #3496): F4's `take` and `put` are bound as a `move` (their
 /// transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or as a [`Step::Hand`] when they name no move.
@@ -175,6 +178,16 @@ pub const APPROACH_REACH: i64 = 600_000;
 /// walk aims at the clear ground before the door on the body's own side, as today's game finds clear ground by the
 /// hand's point.
 pub const APPROACH_SHORT: i64 = 500_000;
+
+/// The point an approach before a bare `take` walks to ([`approach`], #4086): the thing's own origin, named apart from
+/// any point an entry declares.
+pub const TO_THING: &str = "souls:to-thing";
+
+/// How far from its thing the place that approach goes to may be, µm: a cup in the middle of a counter or a table is
+/// out of an arm's reach of every place a body may stand. With the approach's aim up to [`APPROACH_SHORT`] short of
+/// the thing and the walk ending on its place ([`crate::route::AT_SPOT`]), the body ends within 1.45 m of the thing,
+/// inside the world's reach for the hand's contact (half the thing's size and 1.5 m).
+pub const HAND_REACH: i64 = 900_000;
 
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
@@ -310,9 +323,9 @@ pub const FOR_MOST_S: i64 = 3_600;
 
 /// A move step's `for_s` (0.135): how long the move repeats, whole seconds from 1 to [`FOR_MOST_S`], as µs. Written
 /// out, or `{"arg": a, "default": n}`: the act's whole number `a` (a `count` it takes, or the same digits as a name,
-/// as `act dance for=60` sends them), else `default`. Refused `out-of-range`, `arg-not-a-number`, `arg-missing` (no
-/// argument and no default) or `step-malformed`.
-fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
+/// as `act dance for=60` sends them), else `default`. With no default, a move the act gives no `a` is done once
+/// (None: a wave, unless asked to keep on waving). Refused `out-of-range`, `arg-not-a-number` or `step-malformed`.
+fn for_us(v: &Value, args: &Args) -> Result<Option<Micros>, Refusal> {
     let n = match v {
         Value::Int(n) => i64::try_from(*n).unwrap_or(i64::MAX),
         _ => {
@@ -330,7 +343,10 @@ fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
                 },
                 (Some(_), _) => return refuse("arg-not-a-number", a),
                 (None, Some(Value::Int(n))) => i64::try_from(*n).unwrap_or(i64::MAX),
-                (None, _) => return refuse("arg-missing", a),
+                (None, None) => return Ok(None),
+                (None, Some(_)) => {
+                    return refuse("step-malformed", "move.for_s.default: whole seconds");
+                }
             }
         }
     };
@@ -340,7 +356,7 @@ fn for_us(v: &Value, args: &Args) -> Result<Micros, Refusal> {
             format!("for: {n} s; from 1 to {FOR_MOST_S} s"),
         );
     }
-    Ok(n * 1_000_000)
+    Ok(Some(n * 1_000_000))
 }
 
 /// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
@@ -511,7 +527,11 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         name: move_name(text(s.get("move"), "move.move")?)?,
                         at,
                         on,
-                        repeat: s.get("for_s").map(|v| for_us(v, args)).transpose()?,
+                        repeat: s
+                            .get("for_s")
+                            .map(|v| for_us(v, args))
+                            .transpose()?
+                            .flatten(),
                     })
                 }
                 "wait" => match s.get("us") {
@@ -554,7 +574,8 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
 /// A form that starts with a move at one of the thing's points, with no walk before it (a door's `open` at its
 /// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
 /// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
-/// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
+/// the nearest clear ground, before it acts (0.131 parity, #3688); one that starts with a bare `take` walks to the
+/// thing itself ([`TO_THING`], #4086). A form whose thing is in the actor's hand
 /// (`held_by_actor` with no `thing`: a cup's sip, a kettle's pour) does not walk; one that needs a thing argument in
 /// the hand (a sink's `wash` of a held bowl) still walks to its own point (0.135 E20).
 fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
@@ -569,6 +590,27 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
     let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
         return Ok(());
     };
+    // A form that starts with a bare `take` (a hand step with no move: a cup's take) first walks to its thing, as
+    // today's game walks to a thing before it picks it up (#4086, #4118): no take at a distance. The runner skips the
+    // walk for a body already within reach, and measures the reach again at the hand step's contact.
+    let bare_take = f
+        .get("steps")
+        .and_then(Value::arr)
+        .and_then(|s| s.get(k))
+        .and_then(|s| s.get("step"))
+        .and_then(Value::str)
+        == Some("take");
+    if matches!(bound[k], Step::Hand) && bare_take && !held {
+        let step = Step::WalkTo {
+            point: name(TO_THING),
+            at: Vec3::ZERO,
+            on: None,
+            approach: true,
+            face: None,
+        };
+        bound.insert(k, step);
+        return Ok(());
+    }
     if let Step::Move {
         at: Some(p),
         on: None,
@@ -750,18 +792,26 @@ pub enum Effect {
     Set { field: u64, to: encode::Value },
     /// Field `field` of the node moved by `by` (`set ... by`, C22): refused when that leaves the kind's bounds.
     Add { field: u64, by: i64 },
-    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
-    /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked and what the source has
+    /// above its least (more than the room the target has left is refused, never moved in part), written as the
+    /// source's and the target's sets in one part.
     /// The field is named, not numbered: the two ends may be of kinds that number it differently, and the world finds
-    /// its number on each end's own kind (E5).
+    /// its number on each end's own kind (E5). With `into_field`, the amount lands in that other field of the node
+    /// itself (`from` and `into` both the node, #4103): a stock into a well.
     Transfer {
         field: Name,
         from: Of,
         into: Of,
+        into_field: Option<Name>,
         amount: Amount,
     },
-    /// A thing of kind `kind` made into `into`, refused when that is not free (F4).
-    Make { kind: Name, into: Place },
+    /// A thing of kind `kind` made into `into`, refused when that is not free (F4), with the fields `set` gives it
+    /// (#4104): each by name, read against the made kind's own field when the world makes it.
+    Make {
+        kind: Name,
+        into: Place,
+        set: Vec<(Name, Init)>,
+    },
     /// Thing `what` removed: one the node contains or the body holds (F4).
     Remove { what: Of },
     /// A `take` step's transfer (B4's, at its contact): `what` into a free hand of the body.
@@ -811,11 +861,22 @@ pub enum Place {
     Slot(u64),
 }
 
-/// How much a transfer asks: a whole number of the field's unit, above zero, or all the room the target has left.
+/// How much a transfer asks: a whole number of the field's unit (zero, as a count argument may ask, moves nothing),
+/// or all the room the target has left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Amount {
     Units(i64),
     Room,
+}
+
+/// A made thing's field as its `create` sets it (#4104): a flag, a whole number, or a name (one of an enum's values),
+/// as written or as a value argument gives it. The made kind is not the entry the form is bound from, so the world
+/// reads it against the made kind's own field when it makes the thing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Init {
+    Flag(bool),
+    Int(i64),
+    Name(String),
 }
 
 /// Binds form `form`'s effects with no thing arguments ([`bind_effects_with`]).
@@ -1031,14 +1092,16 @@ pub fn bind_effects_in(
 
 /// Binds form `form`'s effects, all or none, with its act's arguments `args`: first each `take` or `put` step's
 /// transfer, in step order, then the form's `effects`: `set ... to` on the node (a field by name or through a field
-/// argument; the value as [`set_to`] reads it, F14), `transfer`, `create` into the actor's hand or a slot (`into`:
-/// `"actor_hand"` or a slot's name), `remove`, and `link` and `unlink` (`from`: `"actor"`, or `"all"` to unlink) of a
+/// argument; the value as [`set_to`] reads it, F14), `transfer` (between two things, or between two fields of the
+/// node with `into_field`, #4103; its amount a whole number, `"room"` or a count argument), `create` into the actor's
+/// hand or a slot (`into`: `"actor_hand"` or a slot's name; `set`, the made thing's fields, [`Init`], #4104),
+/// `remove`, and `link` and `unlink` (`from`: `"actor"`, or `"all"` to unlink) of a
 /// link the kind declares (F15), a `timer` (a form of the node the world starts later, C24), a `set` with a `rate`
 /// ([`Effect::Timed`], C24) and a `reparent` no step carries (C24). Refused: `effect-not-built` for any other change
 /// (a `create` `here` is E4's, a link not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`,
 /// `form-unknown`, `arg-missing`, `out-of-range` and `not-allowed` for a value the field does not take,
-/// `effect-malformed` for a value that is no value at all, or an amount that is not a whole number above zero or
-/// `"room"`.
+/// `effect-malformed` for a value that is no value at all, an amount that is not a whole number (zero or more) or
+/// `"room"`, or an `into_field` whose ends are not both the node or that names the field it leaves.
 /// A `put` names its slot, or a slot argument (`{"arg": a}`). A `take` or `put` with no `what` moves the thing the
 /// form's `reparent` effect into the same place names (the actor's hand, or that slot), else the node itself; that
 /// `reparent` is the step's transfer, bound once (C12, #3427). A `reparent` no take, put, sit or lie carries is bound
@@ -1142,28 +1205,31 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     detail: "set.by: a whole number".into(),
                 })?,
             },
-            // Between two fields of one thing is not built here.
-            ("transfer", _) if e.get("into_field").is_some() => {
-                return refuse("effect-not-built", "transfer into_field");
-            }
-            ("transfer", _) => Effect::Transfer {
-                field: a_name(text(e.get("field"), "transfer.field")?)?,
-                from: of(e.get("from"), args)?,
-                into: of(e.get("into"), args)?,
-                amount: match e.get("amount") {
-                    Some(Value::Int(n)) if *n > 0 => match i64::try_from(*n) {
-                        Ok(n) => Amount::Units(n),
-                        Err(_) => return refuse("effect-malformed", "transfer.amount: too large"),
-                    },
-                    Some(v) if v.str() == Some("room") => Amount::Room,
-                    _ => {
-                        return refuse(
-                            "effect-malformed",
-                            "transfer.amount: a whole number above zero or \"room\"",
-                        );
+            ("transfer", _) => {
+                let field = text(e.get("field"), "transfer.field")?;
+                let (from, into) = (of(e.get("from"), args)?, of(e.get("into"), args)?);
+                // Between two fields of one thing (#4103): both ends the node, and the field it lands in another.
+                let into_field = match e.get("into_field") {
+                    None => None,
+                    Some(f) => {
+                        let lands = text(Some(f), "transfer.into_field")?;
+                        if (from, into) != (Of::This, Of::This) || lands == field {
+                            return refuse(
+                                "effect-malformed",
+                                "transfer.into_field: another field of this one thing, from and into both \"this\"",
+                            );
+                        }
+                        Some(a_name(lands)?)
                     }
-                },
-            },
+                };
+                Effect::Transfer {
+                    field: a_name(field)?,
+                    from,
+                    into,
+                    into_field,
+                    amount: transfer_amount(e.get("amount"), args)?,
+                }
+            }
             ("create", _) => Effect::Make {
                 kind: a_name(text(e.get("kind"), "create.kind")?)?,
                 into: match text(e.get("into"), "create.into")? {
@@ -1171,6 +1237,7 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     "here" => return refuse("effect-not-built", "create here"),
                     slot => Place::Slot(slot_n(entry, slot)?),
                 },
+                set: made_set(e.get("set"), args)?,
             },
             ("remove", _) => Effect::Remove {
                 what: of(e.get("what"), args)?,
@@ -1199,6 +1266,75 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
         });
     }
     Ok(out)
+}
+
+/// What a `transfer` asks (F4): a whole number (zero or more), `"room"`, or a count argument's number (`{"arg": a}`,
+/// as content's spindles and caddies ask, #4103; a caddy's blend may ask 0 of one leaf, which moves nothing);
+/// `effect-malformed` for anything else, `arg-missing` for an argument not given.
+fn transfer_amount(v: Option<&Value>, args: &Args) -> Result<Amount, Refusal> {
+    let malformed = || {
+        refuse(
+            "effect-malformed",
+            "transfer.amount: a whole number (zero or more) or \"room\"",
+        )
+    };
+    let units = |n: i128| match i64::try_from(n) {
+        Ok(n) if n >= 0 => Ok(Amount::Units(n)),
+        _ => malformed(),
+    };
+    match v {
+        Some(Value::Int(n)) => units(*n),
+        Some(v) if v.str() == Some("room") => Ok(Amount::Room),
+        Some(v) => match v.get("arg").and_then(Value::str) {
+            Some(a) => match args.get(a) {
+                Some(Arg::Int(n)) => units(i128::from(*n)),
+                Some(_) => refuse("effect-malformed", format!("argument {a} is not a count")),
+                None => refuse("arg-missing", a),
+            },
+            None => malformed(),
+        },
+        None => malformed(),
+    }
+}
+
+/// A `create`'s `set` (#4104): each made field by name, its value a flag, a whole number or a name as written, or a
+/// value argument's (a candle's shape and colour chosen at the bench). `effect-malformed` for a `set` that is not a
+/// list or a `to` that is not such a value, `step-malformed` for a `field` that is not a name, `arg-missing` for an
+/// argument not given.
+fn made_set(v: Option<&Value>, args: &Args) -> Result<Vec<(Name, Init)>, Refusal> {
+    let Some(v) = v else {
+        return Ok(Vec::new());
+    };
+    let malformed = |detail: String| Refusal {
+        name: "effect-malformed",
+        detail,
+    };
+    let list = v
+        .arr()
+        .ok_or_else(|| malformed("create.set: a list of {\"field\", \"to\"}".into()))?;
+    list.iter()
+        .map(|x| {
+            let field = a_name(text(x.get("field"), "create.set.field")?)?;
+            let to = match x.get("to") {
+                Some(Value::Bool(b)) => Init::Flag(*b),
+                Some(Value::Int(n)) => {
+                    Init::Int(i64::try_from(*n).map_err(|_| malformed(format!("create.set: {n}")))?)
+                }
+                Some(Value::Str(s)) => Init::Name(s.clone()),
+                Some(t) => match t.get("arg").and_then(Value::str) {
+                    Some(a) => match args.get(a) {
+                        Some(Arg::Name(s)) => Init::Name(s.clone()),
+                        Some(Arg::Int(n)) => Init::Int(*n),
+                        Some(_) => return Err(malformed(format!("argument {a} is not a value"))),
+                        None => return refuse("arg-missing", a),
+                    },
+                    None => return Err(malformed("create.set.to: a value".into())),
+                },
+                None => return Err(malformed("create.set.to: a value".into())),
+            };
+            Ok((field, to))
+        })
+        .collect()
 }
 
 /// A `set` with a `rate` on a timed field (C24): F5's three numbers, settled at the effect's instant and given the
@@ -1962,6 +2098,14 @@ impl Runner {
             Step::WalkTo {
                 at, on, approach, ..
             } => {
+                // An approach to a hand step's thing is not walked by a body already within reach of it (#4086).
+                if approach
+                    && matches!(self.steps.get(self.at + 1), Some(Step::Hand))
+                    && host.within_reach(self.node) == Some(true)
+                {
+                    self.planning = false;
+                    return self.advance(host);
+                }
                 // A thing argument's place is read now, at the step's start (F14).
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
@@ -1976,6 +2120,7 @@ impl Runner {
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
                 let reach = match self.steps.get(self.at + 1) {
                     Some(Step::Sit { .. }) => SIT_REACH,
+                    Some(Step::Hand) if approach => HAND_REACH,
                     _ if approach => APPROACH_REACH,
                     _ => REACH,
                 };
@@ -2018,7 +2163,12 @@ impl Runner {
                 let mut walk = Route::new(legs, self.limits.speed, self.limits.tick);
                 // A walk right before a move ends on the point the move is reached from, as a walk to a granted
                 // standing spot does (0.135 E20): AT_GOAL short of it, the move's point can be out of its reach.
-                if matches!(self.steps.get(self.at + 1), Some(Step::Move { .. })) {
+                // An approach to a hand step's thing ends on its place too, so the body is within the world's reach
+                // ([`HAND_REACH`]); a form's own walk before a bare hand step arrives as it did.
+                let next = self.steps.get(self.at + 1);
+                if matches!(next, Some(Step::Move { .. }))
+                    || approach && matches!(next, Some(Step::Hand))
+                {
                     walk.arrive = crate::route::AT_SPOT;
                 }
                 Next::Walk(Box::new(walk))
@@ -2052,7 +2202,12 @@ impl Runner {
                     stand,
                 }
             }
+            // A hand's contact needs its thing within reach, however the steps before it ended (#4086): an approach
+            // that found no way, a walk that stopped short, a thing moved meanwhile. Nothing is taken from afar.
             Step::Hand => {
+                if host.within_reach(self.node) == Some(false) {
+                    return self.end(host, name("out-of-reach"));
+                }
                 if self.hand == Some(self.at) {
                     self.effect_now();
                 }

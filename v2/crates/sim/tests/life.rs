@@ -398,6 +398,54 @@ fn two_hundred_births_by_96_entry_spots_never_stack() {
     assert_eq!(run().0, at, "the same places every run");
 }
 
+/// A body born by an entry faces the entry's point (its +x turned toward it, within a degree): a Soul arrives looking
+/// into the place it comes to, not at whatever is behind it.
+#[test]
+fn a_birth_faces_its_entry_point() {
+    let (floor, surface) = floor_of(40_000);
+    let entry = fixture(2);
+    let c = Vec3::new(3_000_000, 0, -2_000_000);
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (floor, c))]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    };
+    let floors = BTreeMap::from([(floor, surface)]);
+    let mut runner = Runner::new(TICK);
+    let mut life = Life::new(WORLD, 8);
+    for n in 1..=30 {
+        life.ask(Birth {
+            soul: soul(n),
+            entry,
+            asked: 0,
+        })
+        .expect("asked");
+    }
+    let mut seen = 0;
+    for t in 1..=10 {
+        for b in life.tick(t * TICK, &mut runner, &floors, &ring, &family()) {
+            let pose = runner.controller.body(b.body).expect("born").pose;
+            let ahead = pose
+                .orientation
+                .rotate(Vec3::new(1 << 20, 0, 0))
+                .expect("turns");
+            let (dx, dz) = (c.x - pose.position.x, c.z - pose.position.z);
+            let dot = i128::from(ahead.x) * i128::from(dx) + i128::from(ahead.z) * i128::from(dz);
+            let len = (i128::from(ahead.x).pow(2) + i128::from(ahead.z).pow(2)).isqrt()
+                * (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+            // cos 1 degree is about 0.99985.
+            assert!(
+                dot * 100_000 >= len * 99_985,
+                "body at {:?} faces away from the entry",
+                pose.position
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 30, "every birth taken");
+}
+
 /// #4216: with every place by the entry and beyond it held, a birth waits by name and never stacks.
 #[test]
 fn a_birth_with_every_place_held_waits_by_name() {
@@ -472,4 +520,51 @@ fn a_birth_no_ground_holds_is_named_off_surface_and_withdrawn() {
     assert!(life.withdraw(soul), "it was waiting");
     assert_eq!((life.waiting(), life.held_back(soul)), (0, None));
     assert!(!life.withdraw(soul), "withdrawn once");
+}
+
+/// #5006: a spot on ground sealed off from the main ground (`Floors::sealed`: a walled pen) is passed over, as a spot
+/// the ground does not hold is: a body born there could not walk away.
+#[test]
+fn a_birth_passes_over_a_spot_sealed_off_from_the_main_ground() {
+    use replica::kinds::sizes::Build;
+    use sim::mover::Floors;
+    /// The floor, with everything east of the entry walled in.
+    struct Pen<'a>(&'a BTreeMap<Id, Surface>);
+    impl Floors for Pen<'_> {
+        fn for_build(&self, build: Build) -> Option<&BTreeMap<Id, Surface>> {
+            self.0.for_build(build)
+        }
+        fn sealed(&self, _: Id, at: Vec3, _: Build) -> bool {
+            at.x > 0
+        }
+    }
+    let (floor, surface) = floor_of(40_000);
+    let entry = fixture(2);
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (floor, Vec3::ZERO))]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    };
+    let floors = BTreeMap::from([(floor, surface)]);
+    let mut runner = Runner::new(TICK);
+    let mut life = Life::new(WORLD, 8);
+    life.ask(Birth {
+        soul: soul(1),
+        entry,
+        asked: 0,
+    })
+    .expect("asked");
+    let born = life.tick_built(TICK, &mut runner, &Pen(&floors), &ring, &family(), &|_| {
+        Build::STANDARD
+    });
+    assert_eq!(born.len(), 1, "born");
+    let at = runner
+        .controller
+        .body(born[0].body)
+        .expect("body")
+        .pose
+        .position;
+    println!("the first spot east is walled in; born at {at:?}");
+    assert!(at.x <= 0, "born outside the pen: {at:?}");
 }

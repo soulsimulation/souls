@@ -141,6 +141,11 @@ pub trait Host {
         self.legs(node, at, reach)
             .map_or(WalkPlan::Unplanned, WalkPlan::Legs)
     }
+    /// Whether the body stands within a hand's reach of `node` now, as the world measures a form's reach (#4086): a
+    /// hand step's contact needs it. `None` when the world cannot place the body or the node, or does not say.
+    fn within_reach(&self, _node: Id) -> Option<bool> {
+        None
+    }
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;
     /// Clears a timer the skill set (fired or cancelled).

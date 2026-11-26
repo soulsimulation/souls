@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import {ImportCredits} from './ImportCredits.tsx';
 import { createPortal } from 'react-dom';
 import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
+import { requestBroadcast } from './follow-soul-request.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
 import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
@@ -200,7 +201,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
     addEventListener('keydown', key); return () => removeEventListener('keydown', key);
   }, [navigationOpen, handle, onNavigationChange]);
-  const toBroadcast = () => { setCameraNote(''); handle?.setCameraMode('broadcast'); };
+  const toBroadcast = () => { setCameraNote(''); requestBroadcast(); handle?.setCameraMode('broadcast'); };
   const yourCamera = () => { setCameraNote(''); if (handle?.setManualNavigation) handle.setManualNavigation('orbit'); else handle?.setCameraMode('manual'); };
   // VF3 (Gene): the status and the camera chip live in the top bar (Shell's slots); nothing sits at the bottom of the screen.
   // Gene (24 Nov): the top bar holds ONE time control, the pill ("● Live", or "● Recorded · <clock of the moment shown>").

@@ -92,17 +92,30 @@ export function readSky(f: SkyFields): SkyRecord | null {
   };
 }
 
-/** The zone's offset in force at world time `t`, µs (the first row's before it). */
-export function offsetAt(r: SkyRecord, t: number): number {
-  let o = r.offsets[0][1];
+type Calendar = Pick<SkyRecord, 'dayS' | 'origin' | 'offsets'>;
+
+/** The zone's offset in force at world time `t`, µs (the first row's before it; 0 for a calendar without a zone). */
+export function offsetAt(r: Calendar, t: number): number {
+  let o = r.offsets[0]?.[1] ?? 0;
   for (const [from, off] of r.offsets) if (from <= t) o = off;
   return o;
 }
 
 /** Local wall time at world time `t`, µs since 1970-01-01T00:00 local. */
-export function localAt(r: SkyRecord, t: number): number {
+export function localAt(r: Calendar, t: number): number {
   const civil = r.dayS === 86_400 ? r.origin + t : r.origin + Math.floor((t * 86_400) / r.dayS);
   return civil + offsetAt(r, t);
+}
+
+/** The world's local clock at world time `t` µs, as the page's chunks carry it (`env.datetime`) for its sky, sun and
+ *  sites: a naive local ISO datetime (`YYYY-MM-DDTHH:MM:SS.sss`, no zone) through the world node's calendar and the
+ *  zone's offset in force (fields 60–62), or null before the node holds a calendar. Without the offset the sky was drawn
+ *  at UTC read as local: Eden at 15:25 in New York drew 20:25, a night sky. */
+export function localIsoAt(f: SkyFields | undefined, t: number): string | null {
+  const dayS = num(f?.[F.dayS]), origin = num(f?.[F.origin]), rows = f?.[F.offsets];
+  if (dayS === null || dayS <= 0 || origin === null) return null;
+  const offsets = (Array.isArray(rows) ? rows : []).flatMap((r) => (Array.isArray(r) && num(r[0]) !== null && num(r[1]) !== null ? [[r[0], r[1]] as [number, number]] : []));
+  return new Date(localAt({ dayS, origin, offsets }, t) / 1000).toISOString().slice(0, 23);
 }
 
 /** Local wall time at world time `t` as the sky is drawn: on the world's sky date when it has one (the clock's year

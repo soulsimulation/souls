@@ -248,9 +248,12 @@ fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
       "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] },
-        "far": { "role": "stand", "at_mm": [3000, 0, 0] } },
+        "far": { "role": "stand", "at_mm": [1200, 0, 0] },
+        "afar": { "role": "stand", "at_mm": [3000, 0, 0] } },
       "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
         "fetch": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "far" }, { "step": "take" }],
+          "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand" }] },
+        "fetch_afar": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "afar" }, { "step": "take" }],
           "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand" }] } } }"#,
     )
     .unwrap();
@@ -999,7 +1002,18 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     let (run, mut a, mut b) = serve("a3");
     a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
     let body = run.body_of(ada()).expect("born");
-    // The point is 3 m east of the vessel, which stands 300 mm from the birth: a walk of about 3.3 m first.
+    // #4086: from a point 3 m east of the vessel, beyond its reach, the walk is done and the take is not: nothing is
+    // taken at a distance.
+    let afar = a.act("test:fetch_afar", Some(vessel()), BTreeMap::new());
+    println!("A3 fetch from 3 m: {afar:?}");
+    assert_eq!(afar, Err("out-of-reach".to_owned()));
+    assert_ne!(
+        parent(&run.replay(), vessel()).0,
+        Some(body),
+        "not in its hand"
+    );
+    // The point is 1.2 m east of the vessel, within reach of it (#4086: a take from 3 m is a take at a distance), and
+    // the vessel stands 300 mm from the birth: a walk of about 1.5 m first.
     let fetched = a.act("test:fetch", Some(vessel()), BTreeMap::new());
     println!("A3 fetch: {fetched:?}");
     fetched.expect("walked to the point, then took the vessel");
@@ -1166,8 +1180,16 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// Re-pinned by #4795: a move refused as it starts is answered with its refusal's words (the second sit on the taken
 /// chair says who holds it), and the answer is logged (same 905 records, 2,342 motion samples); with only that detail
 /// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
+/// Re-pinned by the arrival fix: a body is born facing its entry's point, not +x (same 905 records, 2,342 motion
+/// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
+/// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
+/// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
+/// previous pin (aafd0a80...), so it is the whole difference. Re-pinned by #5034: a walk sent to a point says how far
+/// from that point it ended (its end's field 7), not from the ground node (same 904 records, 2,331 motion samples). 41
+/// walk ends' field 7 went from 39.9 m to 48.1 m to 0 mm to 48 mm, and nothing else differs; the spot change alone
+/// leaves this history as it was, and main's three files write the previous pin (f7b20d34...).
 const PINNED_MOTION_HISTORY: &str =
-    "1dff64e9459142e66eaa2479b57cad0d11897c42f1f1497c03a04a92a6415ff2";
+    "3148abac4afea323b3e04d9e0e466aed89503d96a3416b7ea84616be775186e9";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

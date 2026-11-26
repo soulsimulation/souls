@@ -35,9 +35,9 @@ target/release/driver --schedule <run folder>/schedule.txt --dir <run folder> [-
   (`unanswered`, below; `socket-closed`, `send-failed`, a gateway's own word such as `token.refused`). An act
   answered accepted (kind 3: a walk or a form whose run started, W11 #4087) is timed then and kept until its receipt
   or refusal; a sit's acceptance does not seat the Soul, its receipt does. One accepted and not ended when the drain
-  runs out is counted in `unfinished`, not as an error. A `claim-taken` on an act the same agent's later act already
-  replaced is the open loop's own doing, not the world refusing a Soul: it is counted as `replacedByOwnAct`, not as a
-  refusal, and `--trace` writes it as `claim-taken replaced-by <sequence>` (#4171).
+  runs out is counted in `unfinished`, not as an error. A `claim-taken` (or a form's run `left`) on an act the same
+  agent's later act already replaced is the open loop's own doing, not the world refusing a Soul: it is counted as
+  `replacedByOwnAct`, not as a refusal, and `--trace` writes it as `<name> replaced-by <sequence>` (#4171).
 
 ## A served world (X7, #4015)
 
@@ -72,7 +72,9 @@ the report), and the driver reads the world's ids the way a client does: the fir
 its scope's hashes, then every record they reach, each checked against its hash), and the driver fetches the world's
 kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as every placed world's unit does). The line
 `targets:` and the report's `targets` say what it found. Targets are reachable (#4193): only things standing on the
-ground most bodies stand on (the same frame), not things inside a building or on a table. Each Soul gets its own
+ground most bodies stand on (the same frame), not things inside a building or on a table. A body form's thing is never
+the world's land (an entry `"owner": "place"`: a mountain range, the sea), whose origin is the world's own wherever
+its outline lies, so it was "nearest" every Soul born at the middle (#4171). Each Soul gets its own
 four nearest walk, sit, take and thing targets, nearest its body (positions in micrometres, each frame's turn
 applied), taking a farther one where three Souls already have one; the report's `sameTarget` says how many Souls were
 sent to one place over the run (the most, and the places sent more than three). Then each act of the schedule goes as:
@@ -132,10 +134,11 @@ and its own gatewayd.
   again and each agent's last act naming a place is checked by where its body is: within 4 m of the place, positions
   in micrometres composed with each frame's turn, or seated in it (#4193; #4154 read micrometres as millimetres)); `refusedOnly` those that acted for 60 s or more with nothing but
   refusals back; `stallMaxMs` and the last answer's age at the end of the schedule.
-- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst|gene17>`, n of the ladder's counts, 20 for the
+- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst|gene17|gene42>`, n of the ladder's counts, 20 for the
   position check's rung, or `5000x500`): every act's kind is
   drawn from `MIX` (say 22 %, walk 14, gesture 10, take 10, go_to 8, sit 8, look_at 7, point 6, touch 6, lean_on 5,
-  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s; even is `uniform`,
+  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s, and Gene's 2 to 5 acts a
+  minute a Soul `gene17` (every 29.4 s, 17 a second at 500) and `gene42` (every 12 s, 42 a second); even is `uniform`,
   uneven the `event` shape with every agent present, its time scaled to intend as many acts. The driver sends a
   gesture as the body family's argument-free forms in turn (wave, clap, cheer, bow, shrug, stretch, jump, dance,
   look_around), the one-thing forms on the Soul's body with a thing of the copy as their argument (C2's
@@ -165,7 +168,10 @@ table, `x10-check` reads each arm):
   it was let go.
 - `--trace <file>`: one line per Soul (`soul <agent> <scope hex>:<counter>`), per receipt (`ack` or, a second one for
   the same sequence, `dup`), per first answer (`first <agent> <sequence> <sent ms> <answered ms> <receipt or refusal>`),
-  per lost and regained socket (`gone`, `back`) and per act never answered (`open`), times in Unix ms.
+  per lost and regained socket (`gone`, `back`) and per act never answered (`open`), times in Unix ms. #4171 adds, to
+  read each refusal against the acts before it: per act sent (`sent <agent> <sequence> <ms> <verb> <place or ->`, the
+  place a walk's or a sit's target or a body form's thing), per accepted act a refusal ends (`end <agent> <sequence>
+  <ms> <name>`), and per refusal with words (`why <agent> <sequence> <its detail>`, field 8: who holds what).
 
 The report adds `duplicateReceipts`, `resent` and `restartingAnswers`.
 

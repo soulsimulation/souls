@@ -124,6 +124,8 @@ pub(super) struct Offers {
     pub(super) queues: BTreeMap<Id, VecDeque<Id>>,
     /// What each timer is for: an offer or a pair, by its activity.
     pub(super) timers: BTreeMap<Id, Id>,
+    /// Why each waiting pair's last start was refused, by its activity: said when a member asks it to act.
+    pub(super) why: BTreeMap<Id, Refusal>,
 }
 
 /// The bodies in `room` at this instant: its children that the controller drives. An offer to a room asks these.
@@ -529,7 +531,7 @@ impl Activities {
             .collect();
         let driver = match l.node.state {
             State::Started => {
-                if let Some(other) = self.holding.get(&body) {
+                if let Some(other) = self.holds_of(&o.kind).get(&body) {
                     return refuse(
                         "body-in-activity",
                         format!("{} is held by {}", show(body), show(*other)),
@@ -578,7 +580,7 @@ impl Activities {
             l.node = node;
             if let Some(d) = driver {
                 l.drivers.insert(body, d);
-                self.holding.insert(body, offer);
+                self.hold(&o.kind, body, offer);
             }
         }
         // 0.135 G3: one who joins a started activity takes its place too.
@@ -819,6 +821,7 @@ impl Activities {
         let Some(p) = self.offers.pairs.remove(&pair) else {
             return Ok(());
         };
+        self.offers.why.remove(&pair);
         if let Some(q) = self.offers.queues.get_mut(&p.asker) {
             q.retain(|x| *x != pair);
         }
@@ -853,8 +856,10 @@ impl Activities {
         Ok(())
     }
 
-    /// Starts the waiting pairs that `body` is in, in order of arrival, while their bodies are free. A pair whose start
-    /// is refused waits on, until its turn comes again or its own expiry.
+    /// Starts the waiting pairs that `body` is in, in order of arrival, while their bodies are free: as a pair's own
+    /// body or as any member joined to it (a crew's side, 0.135 C5). A pair whose start is refused waits on, its
+    /// refusal kept to be said ([`Activities::unstarted_why`]), until its turn comes again or its own expiry. A pair
+    /// no longer waiting (gone, or started another way) holds no one's queue up.
     pub(super) fn advance(
         &mut self,
         tree: &mut Tree,
@@ -866,9 +871,15 @@ impl Activities {
         let mut askers: BTreeSet<Id> = self
             .offers
             .pairs
-            .values()
-            .filter(|p| p.body == body)
-            .map(|p| p.asker)
+            .iter()
+            .filter(|(pair, p)| {
+                p.body == body
+                    || self
+                        .live
+                        .get(pair)
+                        .is_some_and(|l| l.node.members.iter().any(|m| m.body == body))
+            })
+            .map(|(_, p)| p.asker)
             .collect();
         askers.insert(body);
         for asker in askers {
@@ -878,20 +889,31 @@ impl Activities {
                 .get(&asker)
                 .and_then(|q| q.front().copied())
             {
-                let Some(p) = self.offers.pairs.get(&pair) else {
-                    break;
+                let started = match self.offers.pairs.get(&pair) {
+                    None => true,
+                    Some(_) if self.started(pair) => true,
+                    Some(p) => {
+                        let ask = Ask {
+                            soul: p.soul,
+                            intent: p.intent,
+                            at: now,
+                        };
+                        match self.start(tree, c, ask, pair) {
+                            Ok(()) => true,
+                            Err(r) => {
+                                self.offers.why.insert(pair, r);
+                                false
+                            }
+                        }
+                    }
                 };
-                let ask = Ask {
-                    soul: p.soul,
-                    intent: p.intent,
-                    at: now,
-                };
-                if self.start(tree, c, ask, pair).is_err() {
+                if !started {
                     break;
                 }
                 if let Some(q) = self.offers.queues.get_mut(&asker) {
                     q.pop_front();
                 }
+                self.offers.why.remove(&pair);
                 if let Some(p) = self.offers.pairs.remove(&pair) {
                     self.offers.timers.remove(&p.timer);
                     due.cancel((p.expires, p.timer));

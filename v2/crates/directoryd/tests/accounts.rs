@@ -876,8 +876,9 @@ fn first_day_the_world_page_lists_pending_requests_from_its_address() {
     let served = app.clone();
     std::thread::spawn(move || run(listener, served));
     let ask = |hash: &str, world: &str| {
-        json!({"secret_hash": hash.repeat(32), "device": "laptop", "label": "agent", "new": true, "world": world})
-            .to_string()
+        json!({"secret_hash": hash.repeat(32), "device": "laptop", "label": "agent", "new": true, "world": world,
+               "name": "Fern"})
+        .to_string()
     };
     let (s1, _, asked) = request(&addr, "POST", "/v1/pair/request", None, &ask("ab", "eden"));
     let (s1b, _, _) = request(
@@ -903,6 +904,11 @@ fn first_day_the_world_page_lists_pending_requests_from_its_address() {
         "only this world's request: {list}"
     );
     assert_eq!(list["waiting"][0]["label"], "agent");
+    // trial of 0.137: the card shows the name the agent asked for (`souls.mjs pair --name`), here and on /pair
+    assert_eq!(list["waiting"][0]["name"], "Fern", "{list}");
+    let show = json!({"test_person": "Ada", "code": asked["code"]}).to_string();
+    let (s_show, _, card) = request(&addr, "POST", "/v1/pair/show", None, &show);
+    assert_eq!((s_show, &card["name"]), (200, &json!("Fern")), "{card}");
     // Signed out, nothing is listed.
     let (s3, _, _) = request(
         &addr,
@@ -915,6 +921,14 @@ fn first_day_the_world_page_lists_pending_requests_from_its_address() {
     let approve = json!({"test_person": "Ada", "code": asked["code"], "confirm": true}).to_string();
     let (s4, _, _) = request(&addr, "POST", "/v1/pair/approve", None, &approve);
     assert_eq!(s4, 200);
+    // first day, 26 Nov: the owner's list (the navbar, the Soul card) has the asked-for name at once
+    let mine = json!({"test_person": "Ada"}).to_string();
+    let (s5, _, souls) = request(&addr, "POST", "/v1/account/souls", None, &mine);
+    assert_eq!(
+        (s5, &souls["souls"][0]["name"]),
+        (200, &json!("Fern")),
+        "{souls}"
+    );
     let (_, _, after) = request(&addr, "POST", "/v1/pair/waiting", None, &waiting);
     assert_eq!(
         after["waiting"],

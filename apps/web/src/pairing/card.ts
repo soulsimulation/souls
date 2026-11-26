@@ -6,6 +6,10 @@ const params = new URLSearchParams(location.search);
 const code = params.get('code') ?? '', request = params.get('request');
 let session: BrowserSession | null = null, generation = 0;
 let unsubscribe: (() => void) | undefined;
+/** The Name row (its term and its value), shown only for a request that asked for a name. */
+const nameShown = (shown: boolean) => { $('name-row-label').hidden = !shown; $('name').hidden = !shown; };
+/** The Now on row: hidden for a Soul no device holds (a new one), where "no device" only puzzled a newcomer. */
+const connectedShown = (shown: boolean) => { $('connected-label').hidden = !shown; $('connected').hidden = !shown; };
 const person = () => $<HTMLInputElement>('person').value.trim();
 function invalidate() {
   generation++; session = null; unsubscribe?.(); unsubscribe = undefined;
@@ -13,7 +17,8 @@ function invalidate() {
   $('who').hidden = !localTestSignIn(location.href);
   $<HTMLInputElement>('match').checked = false;
   $<HTMLButtonElement>('approve').disabled = true;
-  for (const id of ['code', 'device', 'label', 'soul', 'age', 'connected']) $(id).textContent = '';
+  for (const id of ['code', 'device', 'label', 'name', 'soul', 'age', 'connected']) $(id).textContent = '';
+  nameShown(false); connectedShown(true); $('asked-code').hidden = false;
 }
 async function post(path: string, body: Record<string, unknown>) {
   const owned = session, attempt = generation;
@@ -43,11 +48,16 @@ async function show() {
     if (r.status !== 'pending') $('said').textContent = `Request ${r.status}.`;
   } else {
     $('code').textContent = body.code; $('device').textContent = body.device; $('label').textContent = body.label;
+    // trial of 0.137: the name the agent asked for (`souls.mjs pair --name`), for a new Soul
+    $('name').textContent = typeof body.name === 'string' ? body.name : ''; nameShown(typeof body.name === 'string');
     $('soul').textContent = body.soul ?? (body.former ? `${body.former}, brought over from today's client` : 'a new Soul');
     $('age').textContent = age(body.age);
-    $('connected').textContent = body.connected ? `${body.connected}${body.force ? ' (this request replaces it)' : ' (this request will be refused unless the agent forces it)'}` : 'no device';
+    $('connected').textContent = body.connected ? `${body.connected}${body.force ? ' (this request replaces it)' : ' (this request will be refused unless the agent forces it)'}` : '';
+    connectedShown(!!body.connected);
     $('card').hidden = false;
   }
+  // First day (26 Nov): the card's Code row (the world's own copy) replaces the one read from the link, so it shows once
+  if (!$('card').hidden) $('asked-code').hidden = true;
   $('who').hidden = true;
 }
 $('match').onchange = () => { $<HTMLButtonElement>('approve').disabled = !$<HTMLInputElement>('match').checked; };
@@ -68,19 +78,23 @@ $('cancel').onclick = async () => {
     if (status === 200) $('card').hidden = true;
   } catch (e) { $('said').textContent = (e as Error).message; }
 };
-const signIn = async () => {
+/** `silent`: the page's first look, signed in already or not; signed out, it opens nothing and says nothing. */
+const signIn = async (silent = false) => {
   invalidate(); const attempt = generation;
   try {
-    const next = await browserSession(person());
+    const next = await browserSession(person(), undefined, fetch, silent);
     if (attempt !== generation) return;
     session = next;
     if (next) {
       unsubscribe = next.subscribeIdentity?.(() => { invalidate(); $('said').textContent = 'Account changed. Sign in again.'; });
       if (session === next) { $('signin').hidden = true; await show(); }
       else { unsubscribe?.(); unsubscribe = undefined; }
-    } else $('said').textContent = 'Finish signing in, then select Sign in again.';
-  } catch (e) { $('said').textContent = (e as Error).message; }
+    } else if (!silent) $('said').textContent = 'Finish signing in, then select Sign in again.';
+  } catch (e) { if (!silent) $('said').textContent = (e as Error).message; }
 };
 $<HTMLFormElement>('who').onsubmit = (e) => { e.preventDefault(); void signIn(); };
 $('who').hidden = !localTestSignIn(location.href);
 $('signin').onclick = () => void signIn();
+// trial of 0.137: the code to compare shows at once, and a person already signed in sees the request without a click
+$('asked-code').textContent = code ? `Code ${code}` : '';
+if (code && !request) void signIn(true);

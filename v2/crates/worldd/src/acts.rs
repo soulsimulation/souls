@@ -77,7 +77,7 @@ use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
 use replica::tree::Tree;
-use sim::controller::Controller;
+use sim::controller::{Controller, Driver};
 use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
 use sim::ground::scene::xform_to;
 use sim::host::{Geometry, Staged};
@@ -126,18 +126,26 @@ pub(crate) struct Walk {
     planned: bool,
     /// Still bodies were stepped aside for it once (0.132 A2-3).
     made_way: bool,
+    /// Its gait's speed, µm a second (a walk's, a jog's, a run's): its deadline is the route at that speed.
+    speed: i64,
 }
 
-/// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
-/// (at least 5 s), plus 5 s per crossing or door. No total cap: a long walk that keeps moving ends done, never by the
-/// clock; C21's watch ends one that stalls, and the intent's expiry still bounds it.
-fn walk_span(length_mm: u64, links: usize) -> Micros {
-    let speed = i128::from(crate::bodies::WALK);
-    let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
-    let travel = i64::try_from(travel).unwrap_or(i64::MAX);
-    // Half the free walking time for bends and yielding, at least 5 s, plus 5 s per crossing/door.
-    travel
-        .saturating_add((travel / 2).max(5_000_000))
+/// A gateway walk's time once its route is planned: the route at its gait's `speed` (µm a second), plus half again for
+/// bends and yielding (at least 5 s), but never less than the route at walking speed, plus 5 s per crossing or door. So
+/// a run is told less time than a walk for the same way (trial 0.137), and a run held to walking pace (behind walkers,
+/// at a door) still ends done, never by the clock. No total cap: a long walk that keeps moving ends done; C21's watch
+/// ends one that stalls, and the intent's expiry still bounds it.
+fn walk_span(length_mm: u64, links: usize, speed: i64) -> Micros {
+    let travel = |speed: i64| {
+        let speed = i128::from(speed.max(1));
+        i64::try_from((i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed)
+            .unwrap_or(i64::MAX)
+    };
+    let at_gait = travel(speed);
+    // Half the free time at the gait for bends and yielding, at least 5 s; at least the walking time; 5 s per link.
+    at_gait
+        .saturating_add((at_gait / 2).max(5_000_000))
+        .max(travel(crate::bodies::WALK))
         .saturating_add(
             i64::try_from(links)
                 .unwrap_or(i64::MAX)
@@ -149,12 +157,13 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
 }
 
 impl Walk {
-    pub(crate) fn new(body: Id, order: Id) -> Self {
+    pub(crate) fn new(body: Id, order: Id, speed: i64) -> Self {
         Self {
             body,
             order,
             planned: false,
             made_way: false,
+            speed,
         }
     }
 
@@ -178,7 +187,7 @@ impl Walk {
         if !self.planned
             && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
         {
-            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links)));
+            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links, self.speed)));
             self.planned = true;
         }
         (due, false)
@@ -1117,6 +1126,17 @@ impl Geometry for Sight<'_> {
             fields,
         })
     }
+
+    /// A form's reach ([`within_reach`]) from where the controller has the body now, carried into the zone's frame,
+    /// to the node as the tree places it, measured by the node's own entry (#4086).
+    fn within_reach(&self, body: Id, node: Id) -> Option<bool> {
+        let seen = self.read(body)?;
+        let b = carried(self.tree, seen.parent, seen.position)?;
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        let entry = entry_in(self.kinds, self.tree, &n);
+        let entry = entry.as_deref().unwrap_or(&Json::Null);
+        Some(reach_between(entry, b, world_at(self.tree, node)?))
+    }
 }
 
 /// The pure reach measures, shared with the run gate's world (0.135 E19).
@@ -1314,6 +1334,23 @@ impl Reach for Sight<'_> {
 }
 
 pub use sim::reach::{AT_ARG, AT_SELF};
+
+/// Whether `form` of `entry` (as [`targets`] binds it: a move at its thing argument is `at` [`AT_ARG`]) has a move
+/// step made toward a thing argument (`"toward": {"arg": ..}`): its body faces that thing as the move begins.
+fn moves_toward(entry: &Json, form: &str) -> bool {
+    entry
+        .get("forms")
+        .and_then(|f| f.get(form))
+        .and_then(|f| f.get("steps"))
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .any(|s| {
+            s.get("step").and_then(Json::str) == Some("move")
+                && s.get("at").is_none_or(|a| a.str() == Some(AT_ARG))
+                && s.get("toward").and_then(|t| t.get("arg")).is_some()
+        })
+}
 use sim::reach::{obj_mut, targets};
 
 /// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
@@ -1456,6 +1493,9 @@ pub struct Acts {
     made_way: BTreeSet<(Id, usize)>,
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
+    /// The Soul's own walk (its driver) each body's run started beside (#4171): a point or a look while walking. Only
+    /// a walk sent after the run leaves it (intents rule 10); the walk it started beside goes on with it.
+    beside: BTreeMap<Id, Driver>,
     planning: RefCell<Planning>,
     /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
@@ -1469,6 +1509,8 @@ pub struct Acts {
     ties: BTreeMap<Id, Tie>,
     /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
     tied: bool,
+    /// The world's stocked containers (#4837, [`crate::stock`]): given again to forms read back at a restart.
+    stocks: Arc<sim::forms::Stocks>,
 }
 
 /// A form's links from a body that sat it on a seat of another thing (E14b: a lecture's listener on the hall's
@@ -1613,6 +1655,12 @@ pub(crate) fn within_reach(
     let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
         return false;
     };
+    reach_between(entry, b, n)
+}
+
+/// Whether a body at `b` is within a form's reach of a thing of entry `entry` at `n` (both in the zone's frame): its
+/// half size and [`NEAR_MM`], across x and z.
+fn reach_between(entry: &Json, b: Vec3, n: Vec3) -> bool {
     let half = entry
         .get("geometry")
         .and_then(|g| g.get("bounds_mm"))
@@ -1917,6 +1965,15 @@ pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
 }
 
+/// The driver of `body`'s walk under way (a gateway walk, the runner's), if it is walking.
+fn walk_driver(b: &Bodies, body: Id) -> Option<Driver> {
+    b.runner
+        .runs
+        .iter()
+        .find(|r| r.body == body)
+        .map(|r| r.driver)
+}
+
 /// The name of a node's Soul Actions entry ([`import_eden::entry_name`]): the entry it names, else its kind's.
 fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
     import_eden::entry_name(n.kind().as_str(), n.fields())
@@ -1944,11 +2001,11 @@ fn plain(kind: &Name) -> &str {
     k.split_once('@').map_or(k, |(p, _)| p)
 }
 
-/// The declared nearest-free seat form (#3573): `sit` taking one slot of this thing's free slots nearest me, walked to and
-/// then sat in. Its slot is bound by the form runner's pick (#3802); this only recognises the shape, so a bare fixture
-/// sit is routed through the form's own approach.
+/// The declared nearest-free seat form (#3573): `sit` (or `lie`: a bed's, a hammock's) taking one slot of this thing's
+/// free slots nearest me, walked to and then sat or lain in. Its slot is bound by the form runner's pick (#3802); this
+/// only recognises the shape, so a bare fixture sit or lie is routed through the form's own approach.
 fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
-    if form != "sit" {
+    if !matches!(form, "sit" | "lie") {
         return None;
     }
     let f = entry.get("forms")?.get(form)?;
@@ -1977,11 +2034,14 @@ fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
 }
 
 impl Acts {
-    /// A bare fixture sit uses its actual entry's approach; explicit arguments and selectors keep their path.
+    /// A bare fixture sit or lie uses its actual entry's approach (a lie in a bed walks to it first, as its sleep does);
+    /// explicit arguments and selectors keep their path.
     pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
-        if intent.parameters.contains_key(&1)
-            || !matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
-        {
+        let form = match intent.verb.as_str().split_once(':') {
+            Some((ns, f @ ("sit" | "lie"))) if ns != "souls" => f,
+            _ => return false,
+        };
+        if intent.parameters.contains_key(&1) {
             return false;
         }
         let Some(Target::Node(node)) = &intent.target else {
@@ -1991,7 +2051,7 @@ impl Acts {
         tree.handle(*node)
             .and_then(|h| tree.node(h))
             .and_then(|n| entry_in(&self.kinds, tree, &n))
-            .is_some_and(|entry| fixture_seat(&entry, "sit").is_some())
+            .is_some_and(|entry| fixture_seat(&entry, form).is_some())
     }
 }
 
@@ -2023,6 +2083,7 @@ impl Acts {
             fired: Vec::new(),
             watch: Watch::new(),
             made_way: BTreeSet::new(),
+            beside: BTreeMap::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
@@ -2030,6 +2091,7 @@ impl Acts {
             held: None,
             ties: BTreeMap::new(),
             tied: false,
+            stocks: Arc::default(),
         }
     }
 
@@ -2125,9 +2187,10 @@ impl Acts {
         out
     }
 
-    /// Whether `body`'s Soul has a form act running or waiting to run (`Forms::running`).
+    /// Whether `body`'s Soul has a form act running or waiting to run (`Forms::running`). A run in a repeated move (a
+    /// dance held until the Soul's next act) is not: joining an activity is that next act, so its place walk ends it.
     pub fn acting(&self, body: Id) -> bool {
-        self.forms.running(body)
+        self.forms.running(body) && !self.forms.in_repeat(body)
     }
 
     /// Whether `body` sits in the seat of another thing its form took, still linked by it (E14b): an act stopped
@@ -2153,7 +2216,15 @@ impl Acts {
         let mut forms = Forms::recover(log, now);
         forms.kinds(&loaded(&self.kinds));
         forms.zone(self.zone.clone());
+        forms.stocks(Arc::clone(&self.stocks));
         self.forms = forms;
+    }
+
+    /// The world's stocked containers (#4837, [`crate::stock`]): a take from one gives the thing it makes the fields
+    /// of the row at the top of its pile.
+    pub fn stocks(&mut self, stocks: Arc<sim::forms::Stocks>) {
+        self.forms.stocks(Arc::clone(&stocks));
+        self.stocks = stocks;
     }
 
     /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
@@ -2648,7 +2719,9 @@ impl Acts {
                     Err(_) => false,
                 };
                 let permitted = bound
-                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                    && self
+                        .forms
+                        .may_or_linking(tree, &audiences, &|_| None, body, *node, &entry, form)
                         .is_ok();
                 if permitted
                     && let Err(e) = crate::needs::check(
@@ -2683,6 +2756,15 @@ impl Acts {
                 Some(t) => self.toward.insert(body, t),
                 None => self.toward.remove(&body),
             };
+            // A move made toward its thing argument (`bow_to toward=<Soul>`, `point toward=`) is made facing it: the
+            // body turns to it first, as a walk's end turns it (trial of 25 Nov: a bow to a Soul faced away from it). Only
+            // a new act turns it: one the forms hold already is its run or its receipt.
+            if let (Some(t), Some(b)) = (thing, bodies.as_deref_mut())
+                && !self.forms.known(intent.id)
+                && moves_toward(&entry, form)
+            {
+                b.face_to(tree, body, t);
+            }
             // F3's reservation is a link from the body: until bodies are nodes of the tree, a form reserves nothing.
             if tree.handle(body).is_none() {
                 self.forms.shared(*node);
@@ -2718,7 +2800,7 @@ impl Acts {
                     });
                     effects.extend(sets);
                 }
-                sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                forms.may_or_linking(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 // A slot of another thing is checked as `Forms::commit` checks it (E14): no body, nothing private
                 // to another, a slot its kind declares or a seat the world holds.
                 forms.other_slots(w, body, &entry, form, &all)?;
@@ -2728,6 +2810,12 @@ impl Acts {
                 Ok(a) => {
                     if let Asked::Started(run) | Asked::Running(run) = a {
                         self.runs.insert(run, intent.id);
+                    }
+                    if let Asked::Started(_) = a {
+                        match bodies.as_deref().and_then(|b| walk_driver(b, body)) {
+                            Some(d) => self.beside.insert(body, d),
+                            None => self.beside.remove(&body),
+                        };
                     }
                     if let Asked::Started(_) = a
                         && let Some(t) = tie_of(&entry, form, &all, *node)
@@ -2773,12 +2861,16 @@ impl Acts {
         let mut blocked = Vec::new();
         // Intents rule 10 (0.134 I4): a Soul's own walk replaces its open run. In the run's walk its claim on the legs
         // ends the run (`claim-taken`); a hand move holds no legs, so the run is left, at the move's next phase end
-        // (its contact or its end: never mid-contact).
+        // (its contact or its end: never mid-contact). A run started beside a walk of its Soul's (a point while walking)
+        // is left only by a newer walk (#4171): before, the walk it was sent during left it at its first phase end.
         let walking: Vec<Id> = bodies.as_deref().map_or_else(Vec::new, |b| {
             b.runner
                 .running_bodies()
                 .into_iter()
-                .filter(|body| self.forms.in_hand_move(*body))
+                .filter(|body| {
+                    self.forms.in_hand_move(*body)
+                        && walk_driver(b, *body) != self.beside.get(body).copied()
+                })
                 .collect()
         });
         let mut stalled = Vec::new();
@@ -2992,14 +3084,29 @@ mod gateway_walk_tests {
 
     #[test]
     fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
+        let walk = crate::bodies::WALK;
         // 10 s of walking, 5 s of margin, and the ladder's 15 s climb (0.133 N1).
-        assert_eq!(walk_span(14_000, 0), 30_000_000);
-        assert_eq!(walk_span(14_000, 2), 40_000_000);
-        assert!(walk_span(20_000, 0) > 14_000_000);
-        assert!(walk_span(70_000, 0) >= 75_000_000);
+        assert_eq!(walk_span(14_000, 0, walk), 30_000_000);
+        assert_eq!(walk_span(14_000, 2, walk), 40_000_000);
+        assert!(walk_span(20_000, 0, walk) > 14_000_000);
+        assert!(walk_span(70_000, 0, walk) >= 75_000_000);
         // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
-        assert!(walk_span(600_000, 0) > 600_000_000);
-        assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
+        assert!(walk_span(600_000, 0, walk) > 600_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX, walk), Micros::MAX);
+    }
+
+    #[test]
+    fn trial_0137_a_run_is_told_less_time_than_a_walk_for_the_same_way() {
+        // 140 m: 100 s walking, 50 s margin, 15 s ladder. A run's 35 s and 17.5 s margin are under the walking time,
+        // so it is given the 100 s a run held to walking pace takes, and the ladder's 15 s.
+        let span = |gait: Option<&str>| walk_span(140_000, 0, crate::bodies::speed(gait));
+        assert_eq!(span(None), 165_000_000);
+        assert_eq!(span(Some("run")), 115_000_000);
+        assert!(span(Some("jog")) < span(None) && span(Some("run")) <= span(Some("jog")));
+        assert!(
+            span(Some("wade")) > span(None),
+            "a slower gait is given more"
+        );
     }
 }
 

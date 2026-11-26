@@ -37,12 +37,12 @@ test('names: pr-<n>/<file> on the CDN, safe characters, never overwrite', () => 
   assert.equal(contentType('a.bin'), 'application/octet-stream');
 });
 
-test('cdn target: PUTs proofs/pr-<n>/<file> to the bucket, never overwriting; the link is public on assets.eden.art', async () => {
+test('cdn target: PUTs proofs/pr-<n>/<file> to the bucket, never overwriting; the link is public on cdn.soul.game', async () => {
   const cdn = fakeCdn({ existing: ['proofs/pr-7/desktop.mp4'] });
   const a = await cdn.target.upload(7, clip), b = await cdn.target.upload(7, clip);
-  assert.equal(PROOF_CDN, 'https://assets.eden.art/proofs');
-  assert.equal(a.url, 'https://assets.eden.art/proofs/pr-7/desktop-2.mp4', 'an earlier take keeps its name');
-  assert.equal(b.url, 'https://assets.eden.art/proofs/pr-7/desktop-3.mp4');
+  assert.equal(PROOF_CDN, 'https://cdn.soul.game/proofs');
+  assert.equal(a.url, 'https://cdn.soul.game/proofs/pr-7/desktop-2.mp4', 'an earlier take keeps its name');
+  assert.equal(b.url, 'https://cdn.soul.game/proofs/pr-7/desktop-3.mp4');
   assert.equal(cdn.calls[0].url, 'https://acct.r2.example/eden-assets/proofs/pr-7/desktop.mp4');
   const h = cdn.calls[1].init.headers;
   assert.equal(cdn.calls[1].init.method, 'PUT');
@@ -56,11 +56,11 @@ test('cdn target: denied or offline is Blocked; a dry run sends nothing', async 
   for (const opts of [{ status: 403 }, { status: 401 }, { offline: true }]) await assert.rejects(() => fakeCdn(opts).target.upload(7, clip), Blocked, JSON.stringify(opts));
   await assert.rejects(() => fakeCdn({ status: 500 }).target.upload(7, clip), /HTTP 500/);
   const dry = await pickTarget({ env: {}, dryRun: true });
-  assert.deepEqual(await dry.upload(7, clip), { name: 'pr-7/desktop.mp4', url: 'https://assets.eden.art/proofs/pr-7/desktop.mp4', dryRun: true });
+  assert.deepEqual(await dry.upload(7, clip), { name: 'pr-7/desktop.mp4', url: 'https://cdn.soul.game/proofs/pr-7/desktop.mp4', dryRun: true });
 });
 
 test('without R2 credentials the upload is Blocked, naming where they go', async () => {
-  await assert.rejects(() => liveCdnTarget({ env: { EDEN_ASSETS_CREDENTIALS: join(dir, 'absent.env') } }), (e) => e instanceof Blocked && /no R2 credentials.*eden-assets-r2\.env/.test(e.message));
+  await assert.rejects(() => liveCdnTarget({ env: { EDEN_ASSETS_CREDENTIALS: join(dir, 'absent.env') } }), (e) => e instanceof Blocked && /no R2 credentials.*soul-game-assets-r2\.env/.test(e.message));
   await assert.rejects(() => pickTarget({ env: { EDEN_ASSETS_CREDENTIALS: join(dir, 'absent.env') } }), Blocked);
 });
 
@@ -87,10 +87,10 @@ test('--proof: links uploaded media into proof.json, then uploads proof.json las
   const shot = join(dir, 'still.png'); writeFileSync(shot, 'png');
   const gh = fakeCdn();
   const out = await uploadAll({ pr: 7, files: [clip, shot], proofPath, target: gh.target });
-  assert.equal(out.proofLink, 'https://assets.eden.art/proofs/pr-7/proof.json');
+  assert.equal(out.proofLink, 'https://cdn.soul.game/proofs/pr-7/proof.json');
   const saved = JSON.parse(readFileSync(proofPath, 'utf8'));
-  assert.equal(saved.media[0].url, 'https://assets.eden.art/proofs/pr-7/desktop.mp4');
-  assert.deepEqual(saved.media[1], { file: 'still.png', url: 'https://assets.eden.art/proofs/pr-7/still.png', kind: 'image', caption: '' });
+  assert.equal(saved.media[0].url, 'https://cdn.soul.game/proofs/pr-7/desktop.mp4');
+  assert.deepEqual(saved.media[1], { file: 'still.png', url: 'https://cdn.soul.game/proofs/pr-7/still.png', kind: 'image', caption: '' });
   assert.equal(out.uploaded.at(-1).file, proofPath);
 });
 
@@ -239,7 +239,7 @@ test('uploadAll: each video gets its preview uploaded beside it and recorded in 
   const preview = file => { asked.push(basename(file)); const out = previewPath(file); writeFileSync(out, 'gif'); return { file: out, bytes: 3 }; };
   const out = await uploadAll({ pr: 8, files: [clip, shot], proofPath, target: gh.target, preview, warn: m => warned.push(m) });
   assert.deepEqual(asked, ['desktop.mp4']);
-  const base = 'https://assets.eden.art/proofs/pr-8/';
+  const base = 'https://cdn.soul.game/proofs/pr-8/';
   assert.equal(out.uploaded[0].preview, `${base}desktop.preview.gif`);
   assert.equal(JSON.parse(readFileSync(proofPath, 'utf8')).media[0].preview, `${base}desktop.preview.gif`);
   assert.match(embedLine(out.uploaded[0]), /\[Full-resolution video: desktop\.mp4\]/);

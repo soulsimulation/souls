@@ -193,9 +193,9 @@ labels. The uploader blocks detected text leaks before uploading the batch; this
 node tools/proof/upload.mjs --pr $N --proof .e2e/journal/$ISSUE/proof.json .e2e/proof/$SLUG/desktop.mp4 .e2e/proof/$SLUG/phone.mp4
 ```
 
-- Proof goes to the proof CDN: `https://assets.eden.art/proofs/pr-<n>/<file>`, uploaded with the R2 credentials the
-  CDN tools use (`EDEN_ASSETS_CREDENTIALS`, else the main checkout's `.local/project/team/secrets/eden-assets-r2.env`,
-  and `CF_ACCOUNT_ID` from `deploy.env`); it works from a worktree. Never GitHub releases: those are for versions of
+- Proof goes to the proof CDN: `https://cdn.soul.game/proofs/pr-<n>/<file>`, uploaded with the R2 credentials the
+  CDN tools use (`EDEN_ASSETS_CREDENTIALS`, else the main checkout's `.local/project/team/secrets/soul-game-assets-r2.env`,
+  and `SOULS_ASSETS_R2_ENDPOINT` or `CF_ACCOUNT_ID` from `deploy.env`); it works from a worktree. Never GitHub releases: those are for versions of
   the software, and `proof-ok` no longer counts links on them. A re-take gets `-2`, `-3`, so earlier takes, including
   failed ones, stay linkable. Without the credentials (cloud sessions, outside contributors) the upload is blocked:
   drag the clips into the PR description instead, and GitHub hosts them. `SIM_PROOF_UPLOAD_URL`

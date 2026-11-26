@@ -13,7 +13,7 @@ From the Clerk dashboard you need three public values and no secret key:
 |---|---|
 | `CLERK_PUBLISHABLE_KEY` | The instance's `pk_live_...` key |
 | `CLERK_ISSUER_URL` | The Frontend API origin, `https://<clerk domain>`, with no path |
-| `CLERK_AUTHORIZED_PARTIES` | Comma-separated origins allowed to use sessions, e.g. `https://sim.eden.art` |
+| `CLERK_AUTHORIZED_PARTIES` | Comma-separated origins allowed to use sessions, e.g. `https://soul.game` |
 
 Add the site's origin to the instance's allowed origins in the dashboard. Put the three lines in an env file on the
 production host, root:simworlds 0640 (the stages read `/etc/sim-worlds/production-auth.env`, named by `--auth-env` in

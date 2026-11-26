@@ -97,7 +97,7 @@
     {"def": "core/pew@1", "placed": 8, "entry": "eden:pew", "forms": "own", "pr": 3039, "state": {"kneeler_down": "default"}},
     {"def": "core/postbox@1", "placed": 8, "entry": "eden:postbox", "forms": "own", "pr": 3062, "state": {"locked": {"from": "locked"}, "letters": "default"}},
     {"def": "core/string-lights@1", "placed": 8, "entry": "eden:string_lights", "forms": "own", "pr": 3034, "state": {"on": {"from": "on"}}},
-    {"def": "core/book-stack@1", "placed": 7, "entry": "eden:book_stack", "forms": "base", "pr": 3062},
+    {"def": "core/book-stack@1", "placed": 7, "entry": "eden:book_stack", "forms": "own", "pr": 3062, "state": {"books": "default"}},
     {"def": "core/picnic-table@1", "placed": 7, "entry": "eden:picnic_table", "forms": "own", "pr": 3038, "state": {"clean": "default"}},
     {"def": "core/barn@3", "placed": 6, "entry": "eden:barn", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
     {"def": "core/cabin@3", "placed": 6, "entry": "eden:cabin", "forms": "own", "pr": 3072, "note": "today's def furnishes its rooms (contents, 8 things); placing those as entries in its rooms waits for SA-E11's with list and those kinds' entries"},
@@ -198,7 +198,7 @@
     {"def": "core/drinking-fountain@1", "placed": 1, "entry": "eden:drinking_fountain", "forms": "own", "pr": 3048, "state": {"water": "default", "flowing": {"from": "playing"}}},
     {"def": "core/fence@1", "placed": 1, "entry": "eden:fence", "forms": "base", "base": "scenery", "card": "description"},
     {"def": "core/football-pitch@1", "placed": 1, "entry": "eden:football_pitch", "forms": "base", "dropped": {"sport": "the entry is the football pitch only; Eden places no other sport", "color": "the look is the entry's", "fence": "Eden's pitch has none"}},
-    {"def": "core/fountain@1", "placed": 1, "entry": "eden:fountain", "forms": "base", "pr": 3048},
+    {"def": "core/fountain@2", "placed": 1, "entry": "eden:fountain", "forms": "own", "pr": 3048},
     {"def": "core/garden-wall@1", "placed": 1, "entry": "eden:garden_wall", "forms": "base", "base": "scenery", "card": "description"},
     {"def": "core/hall@2", "placed": 1, "entry": "eden:hall", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
     {"def": "core/kettle@1", "placed": 1, "entry": "eden:kettle", "forms": "own", "pr": 3024, "state": {"water": "default", "heating": "default", "heat": "default"}},
@@ -261,6 +261,17 @@
     {"def": "core/chest@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:chest", "forms": "own", "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}},
     {"def": "core/radio@2", "placed": 1, "entry": "eden:radio", "forms": "own", "state": {"on": {"from": "on"}, "station": "default"}, "note": "House 1 living-room radio console; on/off proof, station-name mismatch retained"},
     {"def": "core/cup@2", "placed": 1, "entry": "eden:cup", "forms": "own", "state": {"water": "default", "sips": "default"}},
-    {"def":"core/conference_question@1","kind":"eden:conference_question","placed":1,"entry":"eden:conference_question","forms":"own","state":{"words":"default","pending":"default","answered":"default"}}
+    {"def":"core/conference_question@1","kind":"eden:conference_question","placed":1,"entry":"eden:conference_question","forms":"own","state":{"words":"default","pending":"default","answered":"default"}},
+    {
+      "def": "core/hall_lecture@1",
+      "kind": "eden:hall_lecture",
+      "placed": 1,
+      "entry": "eden:hall_lecture",
+      "forms": "own",
+      "state": {
+        "phase": "default",
+        "left_us": "default"
+      }
+    }
   ]
 }

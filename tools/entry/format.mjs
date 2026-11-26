@@ -17,7 +17,7 @@ export const FORMAT = 'souls-entry/1';
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640).
  *  Section 10 is Engine v2 T3's table of referenced kinds, written by the encoder, never in a file; 12 is `reactions`. */
 export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17, motion: 18, loose: 19,
-  looks: 20, text: 21, card: 22, howtos: 23});
+  looks: 20, text: 21, card: 22, howtos: 23, building: 24});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
 export const RESERVED = Object.freeze({reactions: 'SA-F15'});
@@ -196,7 +196,9 @@ export function validateEntry(entry) {
     const p = `slots.${name}`;
     if (name in points) err(p, `"${name}" is already a point; a part's name is used once`);
     if (!isObj(s)) { err(p, 'a slot is an object'); continue; }
-    only(s, ['admits', 'posture', 'most', 'at_mm', 'stand', 'board_mm', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
+    only(s, ['admits', 'posture', 'most', 'at_mm', 'yaw_mdeg', 'stand', 'board_mm', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
+    // the way what is in it faces (+z turned by it), as a thing placed live is given its slots (defined::slots_of)
+    if (s.yaw_mdeg !== undefined && !isInt(s.yaw_mdeg)) err(`${p}.yaw_mdeg`, 'whole millidegrees');
     if (!SLOT_ADMITS.includes(s.admits)) err(`${p}.admits`, `must be one of ${SLOT_ADMITS.join(', ')}`);
     if (s.posture !== undefined && (s.admits !== 'body' || !POSTURES.includes(s.posture))) err(`${p}.posture`, `a body's slot only, one of ${POSTURES.join(', ')}`);
     if (!(isInt(s.most) && s.most > 0)) err(`${p}.most`, 'how many it admits, a whole number above zero');

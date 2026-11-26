@@ -6,13 +6,15 @@
 //
 // - **gap**: present while the copy is not known current, with how long and why: `not-connected` (no signed-in socket),
 //   `no-answer` (signed in, but the gateway did not confirm in time), `syncing` (a compare under way), `unconfirmed`
-//   (an act's answer, which does not ask, from a copy older than FRESH_MS). The answer also says `stale: true`.
-// - **asleep**: a copy confirmed current whose world has written nothing for ASLEEP_AFTER_MS is a sleeping world, not
-//   a stale copy: `asleep: { sinceMs }`, how long ago it last wrote.
+//   (an act's answer, which does not ask, from a copy older than FRESH_MS), `replaced` (another client of this Soul
+//   holds it). The answer also says `stale: true`.
+// - **unchangedMs**: a copy confirmed current whose world has written nothing for ASLEEP_AFTER_MS is a still world, not
+//   a stale copy: `unchangedMs`, how long ago it last wrote. (First day, 26 Nov: it was `asleep: { sinceMs }`, which a
+//   new agent read as its Soul asleep, a body state of its own.)
 
 /** A copy older than this is not called current without asking (today's PUSHED_FRESH_MS). */
 export const FRESH_MS = 8000;
-/** A world that has written nothing for this long, its copy confirmed current, is shown as asleep. */
+/** A world that has written nothing for this long, its copy confirmed current, is shown as unchanged for that long. */
 export const ASLEEP_AFTER_MS = 10_000;
 
 /**
@@ -25,7 +27,7 @@ export function ageOf({ now, startedAt, confirmedAt, changedAt, cutAt, why, aske
   if (cutAt != null) return { age, stale: true, gap: { ms: Math.round(now - cutAt), why } };
   if (!asked && age > FRESH_MS) return { age, stale: true, gap: { ms: Math.round(now - confirmedAt - FRESH_MS), why: 'unconfirmed' } };
   const still = changedAt == null ? 0 : now - changedAt;
-  return { age, ...(still >= ASLEEP_AFTER_MS ? { asleep: { sinceMs: Math.round(still) } } : {}) };
+  return { age, ...(still >= ASLEEP_AFTER_MS ? { unchangedMs: Math.round(still) } : {}) };
 }
 
 // #1960: the world's sync copy seals at most every 250 ms (worldd `syncs::SEAL_EVERY`) and answers a hashes request

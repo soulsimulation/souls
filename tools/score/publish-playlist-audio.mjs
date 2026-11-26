@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CACHE, validKey } from '../cdn/inventory.mjs';
-import { loadCredentials, requireAccount, signRequest } from '../cdn/publish.mjs';
+import { BUCKET, loadCredentials, requireAccount, signRequest } from '../cdn/publish.mjs';
 import { withNewReceipt } from '../cdn/receipt.mjs';
 import { INDEX, readIndex, upgradeIndex } from './render-playlist.mjs';
 
@@ -37,7 +37,7 @@ export function plan({ out, index = readIndex(INDEX) }) {
     if (body.length !== e.bytes || sha(body) !== e.sha256) throw Error(`${id}: ${file} is not the index's bytes (re-render, or an edited index)`);
     objects.push({ id, key, file, bytes: e.bytes, sha256: e.sha256, contentType: TYPES[ext], cacheControl: CACHE, licence: LICENCE, url: e.url });
   }
-  return { version: 1, bucket: 'eden-assets', objects, missing, totals: { objects: objects.length, bytes: objects.reduce((s, o) => s + o.bytes, 0) } };
+  return { version: 1, bucket: BUCKET, objects, missing, totals: { objects: objects.length, bytes: objects.reduce((s, o) => s + o.bytes, 0) } };
 }
 
 function metadataErrors(h, o) {
@@ -79,7 +79,7 @@ export async function publish(p, { fetcher = fetch, credentials, onProgress = ()
 }
 /** Public proof, no credentials: each object from the CDN origin, with the app origin's CORS, right type and cache policy,
  *  and the exact bytes. */
-export async function verify(p, { cdn = 'https://assets.eden.art', origin = 'https://souls.game', fetcher = fetch, onProgress = () => {} } = {}) {
+export async function verify(p, { cdn = 'https://cdn.soul.game', origin = 'https://souls.game', fetcher = fetch, onProgress = () => {} } = {}) {
   const results = [];
   for (const o of p.objects) {
     const r = await fetcher(`${cdn}/${o.key}`, { headers: { origin, 'accept-encoding': 'identity' }, signal: AbortSignal.timeout(300_000) });

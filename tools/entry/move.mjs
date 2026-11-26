@@ -22,7 +22,8 @@ export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'cons
 export const REACH_MAX_MM = 700;
 /** An aimed move (`effector: aim`: a point, a wave, a look) touches nothing; its reach is sight, up to 20 m (0.134 B1). */
 export const AIM_MAX_MM = 20000;
-const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'contact', 'phases'];
+// `seated` (#4143): made from a seat; a body a slot holds makes it with its legs left to the slot (a stretch, a slump).
+const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'contact', 'phases', 'seated'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const TICK = /(?:^|[_\W])[Tt]icks?(?:$|[_\W])|[a-z]Ticks?\b/;
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -52,6 +53,7 @@ export function validateMove(m) {
   if (!Array.isArray(m.cancels_on)) err('cancels_on', 'a list');
   else m.cancels_on.forEach((c, i) => { if (!CANCELS_ON.includes(c)) err(`cancels_on.${i}`, `one of ${CANCELS_ON.join(', ')}`); });
   if (!EFFECTORS.includes(m.effector)) err('effector', `one of ${EFFECTORS.join(', ')}`);
+  if (m.seated !== undefined && m.seated !== true) err('seated', 'true, or left out');
   if (m.contact !== undefined && (typeof m.contact !== 'string' || !IDENT.test(m.contact))) err('contact', 'a lower_snake_case point name');
   const most = m.effector === 'aim' ? AIM_MAX_MM : REACH_MAX_MM;
   if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= most)) err('reach_mm', m.effector === 'aim' ? `whole millimetres, 1 to ${AIM_MAX_MM} (sight)` : `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);

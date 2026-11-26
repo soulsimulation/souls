@@ -456,7 +456,30 @@ fn yaw(mdeg: i64) -> Result<Quat, String> {
     Quat::from_yaw_mdeg(mdeg).map_err(|e| format!("{e:?}"))
 }
 
-/// The boxes of node `h` (an N1 `solids` row each), moved into the frame by `x`.
+/// The most a thing may measure across, µm, and still block the ground under its seats or its top ([`under_slots`]):
+/// a campfire's ring of logs (4.5 m), a swing set or a hammock between its posts stay walkable among their own boxes.
+pub const UNDER_MOST: i64 = 3_000_000;
+
+/// The kinds never given a box under their slots ([`under_slots`]), by the start of their plain name (any namespace):
+/// the rack family (`rack_bay`, `rack_beam`, `rack_upright`, `rack_upright_6m`, …), frame stands and pallet racks.
+pub const UNDER_NEVER: &[&str] = &["rack_", "frame_stand", "pallet_rack"];
+
+thread_local! {
+    /// Set only by [`without_under_boxes`]: the ground as it was before the boxes under slots, to measure them.
+    static UNDER_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with no box under any thing's slots on this thread: the ground as before them, for a check that compares
+/// the two (no piece of ground newly sealed off). The engine never calls it.
+pub fn without_under_boxes<R>(f: impl FnOnce() -> R) -> R {
+    UNDER_OFF.with(|c| c.set(true));
+    let r = f();
+    UNDER_OFF.with(|c| c.set(false));
+    r
+}
+
+/// The boxes of node `h` (an N1 `solids` row each), moved into the frame by `x`, and the box under its slots
+/// ([`under_slots`]) when it has one.
 fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<(), String> {
     let Some(v) = tree
         .node(h)
@@ -464,6 +487,8 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
     else {
         return Ok(());
     };
+    // Each box's corners and foot in the thing's own frame, for the box under its slots.
+    let mut legs: Vec<([Xz; 4], i64)> = Vec::new();
     for r in row(&v) {
         let n: Vec<i64> = row(r)
             .iter()
@@ -485,8 +510,88 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
             y0: y0 + w.pos.y,
             y1: y1 + w.pos.y,
         });
+        let l = |u: i64, v: i64| on_plane(&b, [u, v], 0).map(|p| [p.x, p.z]);
+        legs.push(([l(-hx, -hz)?, l(hx, -hz)?, l(hx, hz)?, l(-hx, hz)?], y0));
+    }
+    if let Some(([x0, z0, x1, z1], y0, y1)) = under_slots(tree, h, &legs) {
+        let c = |u: i64, v: i64| on_plane(x, [u, v], 0).map(|p| [p.x, p.z]);
+        let lift = on_plane(x, [(x0 + x1) / 2, (z0 + z1) / 2], 0)?.y;
+        out.push(Solid {
+            ring: [c(x0, z0)?, c(x1, z0)?, c(x1, z1)?, c(x0, z1)?],
+            y0: y0 + lift,
+            y1: y1 + lift,
+        });
     }
     Ok(())
+}
+
+/// The box under the seats or the top of node `h`, in its own frame: `[x0, z0, x1, z1]` and its height span, µm. A
+/// thing's boxes are its parts at least 0.3 m tall (kit/2's colliders), so a bench's are its end legs and a table's
+/// its four legs: its seat plank or its top blocks nothing, and a body walked to it would stand inside it. So a thing
+/// with a slot above a step and within the body's height ([`STEP`] to [`BODY_HIGH`]: a seat, a surface, a bunk) also
+/// blocks the box its legs (its boxes that start below that slot) span, from their foot up to its highest such slot.
+/// The box is the legs' whole span, never taken in: a leg's own cut then never reaches past the box's, so two such
+/// things close together (a bench 950 mm from its table) block the strip between them as one, never leaving a pocket
+/// of ground sealed off by their legs (measured: a 140 mm inset sealed 13 pockets on Eden and Mars camp, none
+/// without; `tests/under_seats.rs`). Not a thing with fewer than two legs (its one box is all it spans), one more than
+/// [`UNDER_MOST`] across, one that holds a floor (a building), one of [`UNDER_NEVER`]'s kinds, nor one with a slot
+/// inside that box no higher than a step (a place to stand in it: a kiosk's vendor, a bookshelf's bottom shelf). A
+/// walk to it ends beside it, as at any box (N9's spots, C15's reach), and its seats' stand points, measured against
+/// this ground when they are registered, are moved clear of it, never into a sealed pocket.
+fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64; 4], i64, i64)> {
+    // A rack's parts (a bay, its frames and beams, a frame stand) hold joined parts in their slots, never a seat or a
+    // top, and Souls build and take them down from inside: never a box under them, whatever their slots' heights.
+    let k = kind_of(tree, h);
+    let name = k.rsplit(':').next().unwrap_or("");
+    if UNDER_NEVER.iter().any(|n| name.starts_with(n)) || UNDER_OFF.with(|c| c.get()) {
+        return None;
+    }
+    let slots: Vec<Vec3> = tree
+        .node(h)?
+        .fields()
+        .get(&F_SLOTS)
+        .map(row)?
+        .iter()
+        .filter_map(|r| {
+            let r = row(r);
+            let at = |k: usize| r.get(k).and_then(um);
+            Some(Vec3::new(at(1)?, at(2)?, at(3)?))
+        })
+        .collect();
+    let top = slots
+        .iter()
+        .map(|p| p.y)
+        .filter(|y| *y > STEP * 1000 && *y <= BODY_HIGH * 1000)
+        .max()?;
+    let under: Vec<&([Xz; 4], i64)> = legs.iter().filter(|(_, y0)| *y0 < top).collect();
+    if under.len() < 2 {
+        return None;
+    }
+    let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    for p in under.iter().flat_map(|(r, _)| r) {
+        bb = [
+            bb[0].min(p[0]),
+            bb[1].min(p[1]),
+            bb[2].max(p[0]),
+            bb[3].max(p[1]),
+        ];
+    }
+    if bb[2] - bb[0] > UNDER_MOST || bb[3] - bb[1] > UNDER_MOST {
+        return None;
+    }
+    let stand_in = slots.iter().any(|p| {
+        p.y <= STEP * 1000 && (bb[0]..=bb[2]).contains(&p.x) && (bb[1]..=bb[3]).contains(&p.z)
+    });
+    let building = tree
+        .children(h)
+        .unwrap_or(&[])
+        .iter()
+        .any(|&c| kind_of(tree, c) == FLOOR);
+    if stand_in || building {
+        return None;
+    }
+    let y0 = under.iter().map(|(_, y0)| *y0).min()?;
+    Some((bb, y0, top))
 }
 
 /// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`.

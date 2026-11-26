@@ -1,7 +1,7 @@
 # HTTP API
 
-Routes are relative to a world's base: `https://sim.eden.art/worlds/w/<slug>` for a launcher world, `/w/<key>` for
-the original worlds. The server strips the world path (`WORLD_PATH`) before routing. Core routes are in
+Routes are relative to a world's base: `https://soul.game/w/<slug>` for a launcher world (`/worlds/w/<slug>` under a
+launcher started with `--base /worlds`), `/w/<key>` for the original worlds. The server strips the world path (`WORLD_PATH`) before routing. Core routes are in
 `apps/server/src/http.ts`; the Soul (edge) API is in [Souls](souls.md); the god API is in [god mode](godmode.md).
 
 ## Conventions
@@ -169,7 +169,7 @@ and bodies; the `soul_*` tools wrap the older steering API.
 ## World owner API (served by the launcher)
 
 These calls are served by the world launcher (`tools/world-launcher/handoff.mjs`, `worldops.mjs`), not by the world.
-`<B>` is the launcher's base (`https://sim.eden.art/worlds` in production, empty locally). The owner authenticates
+`<B>` is the launcher's base (empty in production at `https://soul.game` and locally; `/worlds` for a launcher started with `--base /worlds`). The owner authenticates
 with their sign-in session or with a god token of that world. Every step is appended to `<data>/audit.jsonl`.
 
 | Call | Body | Result |
@@ -194,9 +194,11 @@ unclaimable: claim, mint and pairing approval answer 403 `not-claimable`), `set-
 deletes; the slug stays reserved, and a restore brings the world back at the same address with the same owner.
 
 A new-engine world's page shows a Soul's pairing request on the page the owner already has open (first day, 25 Nov):
-signed in, it asks the directory `POST /v1/pair/waiting` `{world}` every 2 s, with `world` the engine's name for it (from
-the page's stream, `/s/w/<name>/…`). The directory answers `{waiting: [{code, device, label, soul, age, former}]}`: that
+signed in, it asks the directory `POST /v1/pair/waiting` `{world}` every 2 s, with `world` the engine's name for it (the
+inline config's `v2World`, else the page's slug; never the stream's folder, which on soul.game is the world's id). The directory answers `{waiting: [{code, device, label, soul, age, former}]}`: that
 world's Soul requests still pending, asked in the last ten minutes from the same address as the page (the address is kept
 in memory only, never stored). The card shows the code for the owner to match against the agent's before Approve; the
 agent's own link (`/pair?code=…`) still works from anywhere. The navbar's "your Souls" on such a world is the
-directory's `POST /v1/account/souls` for that world, a Soul with no body there yet drawn as arriving.
+directory's `POST /v1/account/souls` for that world (its rows whose `world` is that name), a Soul with no body there yet
+drawn as arriving. Such a page asks no old-world approvals (`/v1/account/approvals`), and asks the gateway's
+`v2/creator-token` only for an account whose directory view token lists a creator grant.

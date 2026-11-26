@@ -107,9 +107,11 @@ PR that causes it; and V3-bundle in the release gate. A PR that changes only the
 on the same page, never "could not be loaded"), Back again, From the start, Link to this moment (the button says
 "Copied"; the link opened in a new tab must show that moment) and Return to live (the pill reads "Live"). Then the
 Broadcast menu, the sound switch, Explore, its places, following a Soul from
-Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
+Explore (a world whose Explore lists no Soul passes that step with "no Soul listed in Explore: nothing to follow"),
+New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
 failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
-only exception and is empty. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
+only exception and is empty. A world whose `load` step fails has nothing to click: its remaining steps are not run and
+are reported as `skipped-after-load-failure`, which fails the world as a failed step does. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
 401, `/mars-assets/static-manifest.json` is 200. It only clicks: it never submits a form or signs in, so run it against
 production any time:
 
@@ -120,7 +122,9 @@ node tools/test-harness/e2e-controls/controls.mjs --slugs eden --origin https://
 
 It writes `<out>/<slug>/verdict.json`, one screenshot per step and `<out>/summary.json` (default out
 `.local/e2e-controls/<time>`), and exits 1 on any failure. Playwright comes from `mars/viewer` (`SHIP_PLAYWRIGHT_FROM`
-points elsewhere). In a release it is the `controls` job of `release.yml`, after the activation and the engine move,
+points elsewhere; `SHIP_GPU=<label>` launches with that hardware GL renderer). In a release it is the `controls` job of
+`release.yml`, on a `souls-timed` runner's GPU as the eyes job (a hardware renderer or nothing: on a hosted runner's
+SwiftShader the page draws at about 2 fps and the walk never finished), after the activation and the engine move,
 and `publish` needs it: a failure publishes nothing and the summary gives the rollback. `eyes_only=true` runs it alone
 against the live site.
 
@@ -479,4 +483,7 @@ The page with many Souls ([#2554](https://github.com/soulsimulation/souls/issues
 `-f command=page -f args='--souls 12,50,200,500 --shape event' -f repeats=2 -f cores=world=1` runs
 `tools/test-harness/page-souls.mjs`, which grows one fake-mind Eden 2026 to each size with raw Souls on a load shape
 and records frame time, draws, GPU time, heap and long tasks for desktop and phone, Broadcast and a high Free view. Its
-`REPORT.md` holds the table; the frame times are relative to the runner's GPU, not a visitor's.
+`REPORT.md` holds the table; the frame times are relative to the runner's GPU, not a visitor's. `--ab name=query;name2=query2`
+runs every arm once per variant on the same world, alternating (the page's own A/B switches, such as `tagCull=0`), and
+`--tiers`, `--cameras`, `--profile-at` and `--trace-sec` pick the arms, the sizes profiled and a main-thread trace (style,
+layout and script time per second).

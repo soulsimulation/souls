@@ -20,6 +20,26 @@ export function byCause(refusals) {
   return Object.fromEntries(Object.entries(c).sort((x, y) => y[1] - x[1]));
 }
 
+/** Each act's first answer and end (its receipt, or a refusal after it was accepted), ms from its send, read from a
+ *  driver trace (rung.sh TRACE=1): p50 and p99 over every act and by verb, and the acts with no end by the drain. */
+export function ends(trace) {
+  const acts = new Map();
+  for (const line of trace.split('\n')) {
+    const f = line.split(' '), a = acts.get(`${f[1]} ${f[2]}`);
+    if (f[0] === 'sent') acts.set(`${f[1]} ${f[2]}`, { sent: +f[3], verb: f[4] });
+    else if (f[0] === 'first' && a) { a.first = +f[4]; if (f[5] !== 'accepted') a.end = a.first; }
+    else if ((f[0] === 'ack' || f[0] === 'end') && a && a.end == null) a.end = +f[3];
+  }
+  const q = (xs, p) => (xs.length ? xs.sort((x, y) => x - y)[Math.min(xs.length - 1, Math.floor(p * xs.length))] : null);
+  const sum = (list) => {
+    const first = list.filter((a) => a.first != null).map((a) => a.first - a.sent), end = list.filter((a) => a.end != null).map((a) => a.end - a.sent);
+    return { acts: list.length, firstP50Ms: q(first, 0.5), firstP99Ms: q(first, 0.99), endP50Ms: q(end, 0.5), endP99Ms: q(end, 0.99), noEnd: list.length - end.length };
+  };
+  const byVerb = {};
+  for (const a of acts.values()) (byVerb[a.verb] ??= []).push(a);
+  return { ...sum([...acts.values()]), byVerb: Object.fromEntries(Object.entries(byVerb).sort().map(([v, l]) => [v, sum(l)])) };
+}
+
 export function analyze(D) {
   const J = (p) => JSON.parse(fs.readFileSync(`${D}/${p}`, 'utf8'));
   const rep = J('run/report.json');
@@ -59,6 +79,7 @@ export function analyze(D) {
       return { perS: +(lines.length / span).toFixed(1), takenPerS: +((v.taken ?? 0) / span).toFixed(1), threads: Object.keys(byPid).length, busiestThreadPerS: +(Math.max(0, ...Object.values(byPid)) / span).toFixed(1) };
     })(),
     viewers: fs.existsSync(`${D}/viewers.json`) ? J('viewers.json') : null,
+    ends: fs.existsSync(`${D}/run/trace.txt`) ? ends(fs.readFileSync(`${D}/run/trace.txt`, 'utf8')) : null,
     driverCores: rep.driverCores, loadavgBefore: fs.existsSync(`${D}/loadavg.before`) ? fs.readFileSync(`${D}/loadavg.before`, 'utf8').trim() : null,
   };
   out.bar = {

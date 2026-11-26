@@ -15,9 +15,11 @@
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
 //! - **Seating parts** (0.135 A2, [`crate::assembly`]): `part:take`, `part:unseat` and `part:put`, the target the crew's
-//!   activity (its two members, the first in front). Take and unseat: 1 the part. Seat: 1 the node it goes in, 2 its
+//!   activity (its members, the first in front). Take and unseat: 1 the part, by at least its kind's carry crew and no
+//!   more than its grips take (`carry-crew-too-small`, `carry-crew-too-large`). Seat: 1 the node it goes in, 2 its
 //!   slot, or 3 a point `[x, y, z]` µm in that node's frame, 4 the parts it joins (ids; by default a bearing part
-//!   joins the bay's standing parts). Their commits go through the walkers' maps, so they are answered then.
+//!   joins the bay's standing parts, a resting one its bearing parts). Their commits go through the walkers' maps, so
+//!   they are answered then.
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
@@ -128,6 +130,10 @@ pub struct Act {
     pub params: BTreeMap<u64, Value>,
 }
 
+/// A take waiting for its commit (0.135 A2): the crew's ground, its node's place and turn, its carriers' span, and
+/// each side carrier's place at the part (C5).
+type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
+
 /// The engine's systems, with their own due list, moves and minter.
 pub struct Engine {
     header: Header,
@@ -153,7 +159,7 @@ pub struct Engine {
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
-    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64)>,
+    taking: BTreeMap<Id, Taking>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -170,6 +176,12 @@ pub struct Engine {
     found: BTreeMap<Id, (WayAsk, Way)>,
     /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
     entries: Json,
+    /// Each lifted carry whose front has walked (`v2/docs/moving-group.md` rule 3): its front, which leads, and the
+    /// front's latest walk. While the carry lasts its other carriers keep their places from the front, by follow
+    /// orders `crate::answers` keeps ([`Engine::carry_follows`]).
+    led: BTreeMap<Id, (Id, Id)>,
+    /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
+    broke: BTreeMap<Id, &'static str>,
 }
 
 /// The kind of thing an activity of `kind` is played at (its entry's own, `<entry>_activity`), when its entry in
@@ -387,6 +399,29 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
+/// Turns `a` and `b`, each standing on the same floor, to face each other: the facing of its legs, set by a driver
+/// of them as a walk's end sets it (`Bodies::turn_to`). One seated, on another floor, within
+/// [`sim::controller::FACE_NEAR`] of the other or whose legs something else drives (a walk, a follow, settled on the
+/// ground: [`crate::bodies::turn_free`]) keeps its facing.
+fn face_each_other(c: &mut Controller, a: Id, b: Id) {
+    let at = |c: &Controller, x: Id| {
+        c.body(x)
+            .filter(|m| m.pose.frame.slot.is_none())
+            .map(|m| (sim::index::place_of(m).0, m.pose.position))
+    };
+    let (Some((na, pa)), Some((nb, pb))) = (at(c, a), at(c, b)) else {
+        return;
+    };
+    if na != nb {
+        return;
+    }
+    for (body, from, to) in [(a, pa, pb), (b, pb, pa)] {
+        if let Some(facing) = sim::controller::facing_toward(from, to) {
+            crate::bodies::turn_free(c, body, facing);
+        }
+    }
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -452,6 +487,8 @@ impl Engine {
             waiting: BTreeMap::new(),
             found: BTreeMap::new(),
             entries: Json::Null,
+            led: BTreeMap::new(),
+            broke: BTreeMap::new(),
         }
     }
 
@@ -501,6 +538,11 @@ impl Engine {
         let bodies = self.activities.beginning();
         if bodies.is_empty() {
             return;
+        }
+        // Two who begin a conversation (or any activity of two with no places) turn to face each other, each standing
+        // on one floor, as a walk's end turns a body to what it came to (trial of 25 Nov).
+        for [a, b] in self.activities.facing_pairs() {
+            face_each_other(c, a, b);
         }
         let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(
@@ -681,7 +723,38 @@ impl Engine {
                 // 0.134 T1: a touch starts only where its moves reach, read from the places the two will take when
                 // it starts (0.135 G3), so two who walked up to each other touch: each steps to its place no farther
                 // than the move reaches, and two farther apart are refused here, before anyone moves.
-                // A dance (T3) touches nobody: its moves are at each member's own body.
+                // A dance (T3) touches nobody: its moves are at each member's own body. But its members take their
+                // places together, within their role's `within` of the places' middle (0.135 G3), and one farther off
+                // is left where it is: one who accepts from farther than twice that from the asker, or from another
+                // floor (a seat), would be counted dancing while it stood 80 m off at a piano (trial of 25 Nov). It is
+                // refused here, before anyone moves; it walks over and accepts again.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| k.beat)
+                    && let Some(within) = e
+                        .offered_roles(offer)
+                        .and_then(|[_, other]| kind.role(other))
+                        .and_then(|r| r.within)
+                {
+                    let at = |b: Id| c.body(b).map(sim::index::place_of);
+                    let apart = match (at(asker), at(a.body)) {
+                        (Some((n0, p0)), Some((n1, p1))) if n0 == n1 => {
+                            let (dx, dz) = (i128::from(p1[0] - p0[0]), i128::from(p1[1] - p0[1]));
+                            Some((dx * dx + dz * dz).isqrt())
+                        }
+                        _ => None,
+                    };
+                    let most = i128::from(within) * 2;
+                    if apart.is_none_or(|d| d > most) {
+                        return Err(refusal(
+                            "together.too-far",
+                            format!(
+                                "{}: {} from {}, its places are within {most} µm of each other: stand and walk over first",
+                                plain(kind.name.as_str()),
+                                apart.map_or("not on one floor".into(), |d| format!("{d} µm")),
+                                show(asker),
+                            ),
+                        ));
+                    }
+                }
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let mut feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
                     let pair = [asker, a.body];
@@ -823,8 +896,10 @@ impl Engine {
                 if !members.iter().any(|m| m.body == a.body) {
                     return Err(refusal("not-a-member", show(a.body)));
                 }
+                // A crew of any size the carry takes (0.135 C5): its first two are its front and back, its sides
+                // walk beside the part.
                 let (front, back) = match members {
-                    [f, b] => (f.body, b.body),
+                    [f, b, ..] => (f.body, b.body),
                     _ => {
                         return Err(refusal(
                             "crew.size",
@@ -883,6 +958,31 @@ impl Engine {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
                     let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    // A part is taken by as many as carry it (0.135 C6: its `carry_crew`, else its hold crew) and by no
+                    // more than its grips take (C5): a shade cloth by four to six. Refused before anyone moves.
+                    if let Some(load) = tree
+                        .handle(part)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
+                    {
+                        let n = members.len();
+                        if (n as u64) < load.crew {
+                            return Err(refusal(
+                                "carry-crew-too-small",
+                                format!("{n} taking {}; it takes {}", show(part), load.crew),
+                            ));
+                        }
+                        if n > load.most() {
+                            return Err(refusal(
+                                "carry-crew-too-large",
+                                format!(
+                                    "{n} taking {}; its grips take {}",
+                                    show(part),
+                                    load.most()
+                                ),
+                            ));
+                        }
+                    }
                     let (at, turn) = asm.take(
                         &mut tree,
                         &self.activities,
@@ -896,8 +996,15 @@ impl Engine {
                         a.verb == Verb::Unseat,
                         slots.reach_of(front).min(slots.reach_of(back)),
                     )?;
+                    // A crew's sides (0.135 C5) carry beside the part from where they stand at the take.
+                    let sides = members[2..]
+                        .iter()
+                        .map(|m| {
+                            stands(c, m.body).map(|(_, at)| (m.body, Carry::place_of(f, k, at)))
+                        })
+                        .collect::<R<Vec<_>>>()?;
                     self.taking
-                        .insert(activity, (ground, at, turn, apart(f, k)));
+                        .insert(activity, (ground, at, turn, apart(f, k), sides));
                 }
             }
             Verb::Lift | Verb::SetDown => {
@@ -933,7 +1040,12 @@ impl Engine {
                 // where they stand: a set-down never waits on a side whose body is gone.
                 let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
-                    return Err(refusal("activity-not-started", show(activity)));
+                    // Never without its reason: a member held by another activity, say, or no accept yet.
+                    let why = self.activities.unstarted_why(activity).unwrap_or_default();
+                    return Err(refusal(
+                        "activity-not-started",
+                        format!("{}: {why}", show(activity)),
+                    ));
                 }
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
                 let transfer = self
@@ -1142,6 +1254,14 @@ impl Engine {
             "souls:partner-left",
             Some(by),
         )?;
+        // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
+        if self
+            .led
+            .get(&activity)
+            .is_some_and(|(front, _)| *front != body)
+        {
+            self.broke.insert(activity, "souls:partner-left");
+        }
         if let Some(s) = self.asm.as_mut() {
             s.ended(activity);
         }
@@ -1186,6 +1306,46 @@ impl Engine {
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
+        }
+        // A ride that flies a loop from its stop and was seeded with no course (Eden's launch balloon on a world seeded
+        // before its rides flew) is given its course at the start's first tick: from now, at its home, so it stands
+        // there for its boarding minute first and never jumps onto its loop.
+        for (thing, mut c) in slots.courses_given() {
+            let Some(n) = live.handle(thing).and_then(|h| live.node(h)) else {
+                continue;
+            };
+            if n.fields().contains_key(&replica::schedule::F_COURSE) {
+                continue;
+            }
+            // Its course was laid from where it stood at the start. A god edit that moved it since (and gave it no
+            // seats, `import_eden::body_slots_of`) leaves it standing: the next start lays one from where it is.
+            let home = c.stations.first().map_or(Vec3::ZERO, |s| s.at);
+            if n.place().map(|p| p.position) != Some(home) {
+                eprintln!(
+                    "worldd: {} moved before its course was given: none given",
+                    show(thing)
+                );
+                continue;
+            }
+            c.t0 = now;
+            let e = slots.moving(thing, &c, home).and_then(|()| {
+                crate::carrier::entry(
+                    live,
+                    thing,
+                    vec![crate::carrier::set(
+                        thing,
+                        replica::schedule::F_COURSE,
+                        c.to_value(),
+                    )],
+                    now,
+                    Cause::World,
+                    Actor::World,
+                )
+            });
+            match e {
+                Ok(e) => self.out.push(e),
+                Err(r) => eprintln!("worldd: {}'s course is not written: {r}", show(thing)),
+            }
         }
         // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
         let changed = slots.runs_changed();
@@ -1277,7 +1437,7 @@ impl Engine {
                     n.place()?.orientation,
                 ))
             }) {
-                carry.load = Load { turn: held, ..*l };
+                carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
             }
             match break_off(
                 &mut carry,
@@ -1357,6 +1517,9 @@ impl Engine {
                     ) {
                         // A crew's part set down is no longer its own (0.135 A2).
                         Ok(()) => {
+                            if self.led.contains_key(&a) {
+                                self.broke.insert(a, why);
+                            }
                             if let Some(s) = self.asm.as_mut() {
                                 s.ended(a);
                             }
@@ -1419,6 +1582,9 @@ impl Engine {
                 ) {
                     // A crew's part set down is no longer its own (0.135 A2).
                     Ok(()) => {
+                        if self.led.contains_key(&a) {
+                            self.broke.insert(a, "souls:carry-blocked");
+                        }
                         if let Some(s) = self.asm.as_mut() {
                             s.ended(a);
                         }
@@ -1497,7 +1663,7 @@ impl Engine {
                 carry.load = l;
             }
             let middle = match self.activities.members(activity) {
-                Some([f, k]) => match (stands(c, f.body), stands(c, k.body)) {
+                Some([f, k, ..]) => match (stands(c, f.body), stands(c, k.body)) {
                     (Ok((_, f)), Ok((_, k))) => Some([(f.x + k.x) / 2, (f.z + k.z) / 2]),
                     _ => None,
                 },
@@ -2403,10 +2569,8 @@ impl Engine {
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
         let l = self.loads.get(plain(n.kind().as_str()))?;
-        Some(Load {
-            turn: n.place()?.orientation,
-            ..*l
-        })
+        let turn = n.place()?.orientation;
+        Some(l.held_turned(turn).unwrap_or(Load { turn, ..*l }))
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
@@ -2461,7 +2625,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span)) = taking else {
+        let Some((ground, at, turn, span, sides)) = taking else {
             return;
         };
         let part = self
@@ -2501,6 +2665,7 @@ impl Engine {
                 carry.track.push((now, at, turn));
                 // Its carriers' span at the take: a carry they let drift apart breaks off (0.135 C3).
                 carry.span = span;
+                carry.sides = sides;
                 if let Some(l) = self.held_load(live, part) {
                     carry.load = l;
                 }
@@ -2564,6 +2729,11 @@ impl Engine {
         now: Micros,
         walk: bool,
     ) {
+        // Carrying together (moving-group rule 3): the walk of a lifted carry's front leads its crew.
+        if walk && let Some(a) = self.front_of(body) {
+            self.led.insert(a, (body, intent));
+            return;
+        }
         if walk && self.activities.lead(&self.moves, body) {
             return;
         }
@@ -2631,6 +2801,66 @@ impl Engine {
     /// of a place beside the leader (R1, hand in hand).
     pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
+    }
+
+    /// The lifted carry whose front is `body`, if any: the first member of a carry being sampled.
+    fn front_of(&self, body: Id) -> Option<Id> {
+        self.carries.keys().copied().find(|a| {
+            self.activities
+                .members(*a)
+                .and_then(|m| m.first())
+                .is_some_and(|m| m.body == body)
+        })
+    }
+
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,
+    /// but the front, that keeps a place from it: its activity, the front's body, the walker's body and Soul.
+    pub fn carry_follows(&self) -> Vec<(Id, Id, Id, Id)> {
+        let mut out = Vec::new();
+        for (a, (front, _)) in &self.led {
+            if !self.carries.contains_key(a) {
+                continue;
+            }
+            for m in self.activities.members(*a).unwrap_or(&[]) {
+                if m.body != *front {
+                    out.push((*a, *front, m.body, m.soul));
+                }
+            }
+        }
+        out
+    }
+
+    /// The front's latest walk in each led carry, by its body: a carrier that is not walking keeps its place from the
+    /// front while the front's walk goes ([`Engine::carry_follows`]).
+    pub fn leading(&self) -> Vec<(Id, Id)> {
+        self.led
+            .iter()
+            .filter(|(a, _)| self.carries.contains_key(a))
+            .map(|(_, l)| *l)
+            .collect()
+    }
+
+    /// The led carries that are over (set down, put, or broken off) since the last call, forgotten here: for each that
+    /// broke off, its front's body, its walk and why (`souls:partner-left`, `souls:carriers-apart`,
+    /// `souls:carry-blocked`), so the whole group stops with that one reason.
+    pub fn led_over(&mut self) -> Vec<(Id, Id, &'static str)> {
+        let over: Vec<Id> = self
+            .led
+            .keys()
+            .filter(|a| !self.carries.contains_key(a))
+            .copied()
+            .collect();
+        let mut out = Vec::new();
+        for a in over {
+            let Some((front, walk)) = self.led.remove(&a) else {
+                continue;
+            };
+            if let Some(why) = self.broke.remove(&a) {
+                out.push((front, walk, why));
+            }
+        }
+        self.broke.retain(|a, _| self.led.contains_key(a));
+        out
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

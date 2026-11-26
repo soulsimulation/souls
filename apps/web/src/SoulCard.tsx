@@ -8,7 +8,7 @@ import {apiPath,worldKey,worldPath} from './world-path.ts';
 import {BASE} from './base-path.ts';
 import './SoulCard.css';
 import {SoulMessageBox,soulStartPrompt,useSoulInbox,useWindowCode,type AgentInbox} from './AgentMessageBox.tsx';
-import {v2World} from './v2-engine/owner-mailbox.ts';
+import {useV2AccountSouls,v2Act,v2World} from './v2-engine/owner-mailbox.ts';
 import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
@@ -26,7 +26,8 @@ type Rec=PublicRecord|'loading'|'unavailable';
 /** B3-3: on a world the new engine runs, the card says what the Soul is doing now (the stream's, souls.ts `status`).
  *  Read when this module loads: the page's main takes the inline config, and deletes it, when it mounts. */
 const V2=typeof window!=='undefined'&&!!v2Stream();
-const doingNow=(soul:PublicSoul)=>V2&&soul.doing?doingText(soul.doing,null,soul.id)||null:null;
+/** What it is doing now; `activity`, the one its body is drawn with, names a pose the doing only gives the posture of. */
+const doingNow=(soul:PublicSoul,activity?:string|null)=>V2&&soul.doing?doingText(soul.doing,activity,soul.id)||null:null;
 /** `held`: the viewer pulled out of following this Soul; the button says "Follow again", as the chip's hint does. */
 type Camera={following:boolean;held?:boolean;follow():void;stop():void};
 
@@ -45,7 +46,7 @@ function usePublicRecord(api:Api,soulId:string):Rec{
 /** The fade colour of an older server, as a body (green = present and awake); nothing new reads `fade` otherwise. */
 const fadeBody=(rec:PublicRecord|null):Body|null=>rec?.fade&&['green','yellow','red'].includes(rec.fade.colour)?{state:'awake',doing:null,since:0}:null;
 
-export type SoulCardProps={api:Api;soul:PublicSoul;owner:boolean;signedIn?:boolean;bodyEvent?:Body|null;camera?:Camera};
+export type SoulCardProps={api:Api;soul:PublicSoul;owner:boolean;signedIn?:boolean;bodyEvent?:Body|null;camera?:Camera;activity?:string|null};
 export function SoulCard(props:SoulCardProps){
  const rec=usePublicRecord(props.api,props.soul.id),r=rec==='loading'||rec==='unavailable'?null:rec;
  // COMMON-LINK §2 addendum: the replica's `now` is optional (present only when set); the record always carries it (or null)
@@ -53,14 +54,18 @@ export function SoulCard(props:SoulCardProps){
  const body=newest(readBody(x.body),r?.body??null,props.bodyEvent??null)??fadeBody(r);
  const now=newest(readNow(x.now),r?.now??null);
  const place=placeOf(r?.self?.placePath);
- return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline} doing={doingNow(props.soul)}/>;
+ return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline} doing={doingNow(props.soul,props.activity)}/>;
 }
-function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
+function OwnerCard({api,soul,camera,signedIn=true,body,now,place,activity}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
  const link=ownerLink(here?.link??null,here);
- const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul)}
-  prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true)}/>;
+ // 0.137: on a world the new engine runs, the directory retires it, and its agent's ask (`souls retire`) opens the question here
+ const retireAsked=useV2AccountSouls().some(s=>s.id===soul.id&&s.retireAsked);
+ // and disconnects it (the old route answers 409 `world.new-engine` there); Keep clears its agent's ask
+ const disconnect=async()=>{const v2=v2Act('revoke');if(v2)return v2(soul.id);const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
+ const keep=async()=>{const v2=v2Act('keep');return v2?v2(soul.id):true;};
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul,activity)}
+  prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true,v2Act('retire'))} retireAsked={retireAsked} keep={keep}/>;
 }
 
 export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|null;now:Now|null;place:string|null;camera?:Camera;
@@ -70,13 +75,17 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
  link?:Link|null;here?:AgentHere|null;inbox?:AgentInbox|null;send?(text:string):Promise<unknown>;prompt?:string;signedIn?:boolean;disconnect?():Promise<boolean>;
  /** owner only (#3375): asks once, then retires the Soul for good */
  retire?():Promise<boolean>;
+ /** owner only: its agent asked to retire it; the card asks the owner at once */
+ retireAsked?:boolean;
+ /** owner only: Keep on that ask clears it, so the agent hears the owner kept it */
+ keep?():Promise<boolean>;
  /** fixtures and shots: a fixed clock, the link details (and Pair another session) open from the start */
  clock?:number;open?:{details?:boolean;pair?:boolean};
  /** owner only (B3-2): a v2 world's mailbox, which keeps a message until the agent takes it: the box shows without a link */
  mailbox?:boolean;
  /** B3-3: what it is doing now ("Walking"), shown in the status line while it is awake; null when not known */
  doing?:string|null};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open,mailbox=false,doing=null}:SoulCardViewProps){
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,retireAsked=false,keep,clock,open,mailbox=false,doing=null}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -124,7 +133,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   {followShown&&<div className="soul-actions">
    <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':camera.held?'Follow again':'Follow'}</button>
   </div>}
-  {owner&&retire&&<RetireRow name={soul.name} retire={retire}/>}
+  {owner&&retire&&<RetireRow name={soul.name} retire={retire} asked={retireAsked} keep={keep}/>}
  </article>;
 }
 
@@ -168,13 +177,17 @@ function PromptCopy({prompt}:{prompt:string}){
   {state==='failed'&&<span className="soul-dim" role="status"> Copy unavailable: select the prompt above.</span>}</>;
 }
 /** #3375: Retire asks once, in the card (the same question the Advanced tools ask), then retires for good. */
-function RetireRow({name,retire}:{name:string;retire():Promise<boolean>}){
- const [asking,setAsking]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[gone,setGone]=useState(false);
+function RetireRow({name,retire,asked=false,keep}:{name:string;retire():Promise<boolean>;asked?:boolean;keep?():Promise<boolean>}){
+ const [asking,setAsking]=useState(asked),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[gone,setGone]=useState(false);
  const go=async()=>{if(busy)return;setBusy(true);setNote('');try{if(await retire()){setGone(true);setAsking(false);}else setNote('Not retired. Try again in a moment.');}catch{setNote('Not retired. Try again in a moment.');}finally{setBusy(false);}};
+ // its agent asked: Keep answers it (the agent's `retire wait` hears it), and stays open until that is done
+ const stay=async()=>{if(busy)return;if(!asked||!keep){setAsking(false);return;}setBusy(true);setNote('');
+  try{if(await keep()){setAsking(false);setNote(`Kept. ${name}’s agent is told.`);}else setNote('Not answered. Try again in a moment.');}catch{setNote('Not answered. Try again in a moment.');}finally{setBusy(false);}};
+ useEffect(()=>{if(asked)setAsking(true);},[asked]);
  if(gone)return <div className="soul-retire" data-retire="done"><span className="soul-dim" role="status">{name} is retired and has left for good.</span></div>;
  return <div className="soul-retire" data-retire={asking?'asking':undefined}>
-  {asking?<><p className="soul-box-text" role="alert">{retireQuestion(name)}</p>
-   <div className="soul-box-actions"><button type="button" className="soul-pill fill" disabled={busy} onClick={()=>void go()}>Retire for good</button><button type="button" className="soul-pill quiet" disabled={busy} onClick={()=>setAsking(false)}>Keep {name}</button></div></>
+  {asking?<>{asked&&<p className="soul-box-text" data-retire-asked="1">{name}’s agent asked to retire {name}.</p>}<p className="soul-box-text" role="alert">{retireQuestion(name)}</p>
+   <div className="soul-box-actions"><button type="button" className="soul-pill fill" disabled={busy} onClick={()=>void go()}>Retire for good</button><button type="button" className="soul-pill quiet" disabled={busy} onClick={()=>void stay()}>Keep {name}</button></div></>
   :<button type="button" className="soul-pill quiet" onClick={()=>{setNote('');setAsking(true);}}>Retire</button>}
   {note&&<span className="soul-dim" role="status">{note}</span>}
  </div>;

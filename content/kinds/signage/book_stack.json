@@ -2,12 +2,134 @@
   "format": "souls-entry/1",
   "kind": "eden:book_stack",
   "owner": "thing",
+  "state": {
+    "books": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 6,
+      "default": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        450
+      ],
+      "yaw_mdeg": 180000
+    },
+    "top": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        200,
+        0
+      ]
+    }
+  },
   "geometry": {
     "bounds_mm": [
       270,
       298,
       304
     ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "books",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "top"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:book",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "put_back": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "book": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:book",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "holds": "eden:book"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "top"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": {
+            "arg": "book"
+          },
+          "event": "put_back"
+        }
+      ]
+    }
+  },
+  "stock": {
+    "books": {
+      "kind": "eden:book",
+      "count": "books",
+      "take": "take",
+      "carries": [
+        "title",
+        "first_page"
+      ]
+    }
   },
   "motion": {
     "how": "two_hands"
@@ -228,10 +350,11 @@
     }
   },
   "text": {
-    "card": "A tidy pile of six books on a table or the floor; carry it in two hands.",
+    "card": "A pile of six books: take one to read and put it back, or carry the pile.",
     "reading": "reading",
     "pile_of_books": "pile of books",
-    "books": "books"
+    "books": "books",
+    "howto_read": "With a hand free, take a book from the pile, then read it; put it back when you are done."
   },
   "card": {
     "text": "card",
@@ -240,5 +363,15 @@
       "pile_of_books",
       "books"
     ]
+  },
+  "howtos": {
+    "read": {
+      "text": "howto_read",
+      "steps": [
+        {
+          "form": "take"
+        }
+      ]
+    }
   }
 }

@@ -445,17 +445,30 @@ export async function openLauncher(cfg = {}) {
       if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls) || zone.timeZone) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}), ...zone });
     } catch { /* busy; keep the cached numbers */ }
   }
+  /** The Souls the world list shows. A world the new engine runs: the Souls in it now, from the directory's world list
+   *  (its row's `souls`, the world's own count, at most 30 s old there; asked at most every 10 s here), else none: the
+   *  registry's figure is the old engine's (26 Nov), as is its "things" (`entities`), so a moved world lists none. Any
+   *  other world: the old process's last count. */
+  const soulsOf = (w) => {
+    const v2 = w.routeOnly ? w.slug : cutover?.v2World(w);   // (moved: one read of the routes file)
+    if (!v2) return stats.get(w.slug)?.souls ?? w.souls ?? null;
+    const n = directory.rows.get(v2)?.souls;
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+  };
   const describe = (w) => {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
-    const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0, ...(moved(w) ? { status: 'running', state: 'running', engine: 'new' } : {}) };   // #2233 A3: state; status kept for old readers; D2b: a moved world is live on the new engine, as a world with no old twin
+    const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name)), v2 = moved(w);
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: v2 ? null : s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: soulsOf(w), timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0, ...(v2 ? { status: 'running', state: 'running', engine: 'new' } : {}) };   // #2233 A3: state; status kept for old readers; D2b: a moved world is live on the new engine, as a world with no old twin
   };
   async function worldsJson() {
-    // D2: the directory names the worlds with no old twin; the list waits for it only until it has answered once
-    const asked = cutover?.routeOnly().length ? directoryWorlds() : null;
+    // D2: the directory names the worlds with no old twin, and counts the Souls in every world the new engine runs; the
+    // list waits for it only until it has answered once
+    const asked = cutover?.routeOnly().length || registry.worlds.some(moved) ? directoryWorlds() : null;
     await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], (w) => stats.get(w.slug)?.souls ?? w.souls).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    // each world's count once (the sort compares many times, and a moved world's is a read of the routes file)
+    const all = [...registry.worlds, ...routeOnlyWorlds()], souls = new Map(all.map((w) => [w, soulsOf(w)]));
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(all, (w) => souls.get(w)).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */
@@ -784,7 +797,7 @@ export async function openLauncher(cfg = {}) {
   const describeRouteOnly = (w) => ({ nameTag: null, claimable: false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name,
     basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template,
     templateName: templateList({ all: true }).find((x) => x.id === w.template)?.name ?? w.template, createdAt: w.createdAt, owner: null, god: w.god,
-    entities: null, seq: null, souls: null, timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
+    entities: null, seq: null, souls: soulsOf(w), timeZone: null, godName: null, ...thumbView(w), status: 'running', state: 'running', restarts: 0, engine: 'new' });
   /** The page config of a world the new engine runs (routed, with or without an old twin), else null: every field an old
    *  world's config gives (apps/server http.ts configOf), from the launcher's sign-in, the registry (or the directory's
    *  row) and the route (cutover.mjs v2Fields), never from the old process. The page inlines it (routeOnlyPage) and the

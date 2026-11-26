@@ -114,6 +114,14 @@ its body path and gateway as above), its client and bodies from the first bindin
 directory answers), not when the directory marks it unlisted. `/__sim/op/cutover` names these worlds in `routeOnly`; read
 it before a release, since a routed test world would be listed.
 
+The Souls on a new-engine world's card (26 Nov): `/__sim/worlds.json` gives every world the new engine runs, moved or
+with no old twin, the `souls` of its row in `GET /v1/worlds`, and no `entities` ("things"): the registry's figures are
+the old engine's. The directory reads that count from the world's `health.json` (worldd's `souls`, the Souls embodied
+as its last tick left them, written every 2 s) under `DIRECTORYD_WORLDS_ROOT` (the unit's
+`/var/lib/souls/worlds/worlds`), at most every 30 s, outside its lock; a world with no such file on that machine, or
+one not written for 2 minutes (not running there now), lists `souls: null`, and its card shows no number. The homepage
+keeps the list's order (featured, then the most Souls, then the newest); it no longer re-sorts by "things".
+
 Locally (fake minds; never against production): a launcher started with `SOULS_CUTOVER_BINDING=<abs file>`, a v2 world
 from `worldd seed` and `worldd serve`, `v2/tools/origin/origin.mjs` serving its stream, and Caddy on one port sending
 `/s/*` to the origin (`handle_path`) and everything else to the launcher.
@@ -236,21 +244,31 @@ name, so its name, routes, gateway and pairing stay as they are. From 0.133 it i
 reseed=fresh` (or `release-v2.yml -f reseed=fresh`) runs it on the host after the stage and before the move, its
 pre-check first (a dry run runs only that), and `rollback-v2.yml -f reseed=<label>` undoes it; by hand, `bash
 v2/tools/ops/cutover/reseed-eden.sh <sha> check`, then `run` (root on the host, before release-v2;
-`reseed-eden-undo.sh <label> check|run` undoes it). A release staged from 0.133 carries the scripts, its own
-`world-aside` and the kinds at its commit. Every store call retries a dropped connection or a 5xx with back-off before
-it refuses. It sets the world's
-folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
-each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
-with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step
-the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
-it and `switch-eden.sh` after release-v2.
+`reseed-eden-undo.sh <label> check|run` undoes it). A release staged from 0.133 carries the scripts and the kinds at
+its commit. Every store call retries a dropped connection or a 5xx with back-off before it refuses. It sets the
+world's folder aside, seeds the same facts with the release's `worldd` on a fresh **store generation** (#4954), pins
+it, and leaves the world stopped for release-v2 to start. The store generation is the fresh folder's `generation` file:
+it names the reseed's label, and every program that reads the world's record (`worldd serve`, the launcher's pin,
+`deploy`) puts the world's own objects (record, checkpoints, log parts, stream recovery, history) under `g/<label>/` in
+the directory's bucket (`supervisor::bucket::Generation`). So the fresh world starts on an empty place and nothing in
+the bucket moves: the old world's objects stay at their keys, which the old folder, set aside, still names. The undo is
+the folder put back, its record, pin and history with it, exactly as they were. Before #4954 a reseed copied every
+object of the world aside first (`world-aside`, about 36,500 for Eden), which took hours on a slow store with the world
+down; an undo of such a reseed (its receipt says `bucket=moved`) still moves them back. The check refuses unless the
+installed supervisor (`install-v2`) and the release's `worldd` and `deploy` read the `generation` file. Limits: Back in
+time on the fresh world starts at the reseed (the old world's history stays whole where it was and returns with the
+undo), and a world on a fresh generation never runs a build from before #4954, which would claim the old world's
+record and stop on a restart gap at every start: `release.sh rollback` refuses such a build for it
+(`rollback.generation`) and the launcher refuses to start it (`build.mismatch`). A run that stopped at its pin says
+`resume <label>`, and the resume pins the fresh record. Run `save-wipe.sh` before it and `switch-eden.sh` after
+release-v2.
 
 Any other moved world starts fresh from its own kept facts the same way, by hand, with `bash
 v2/tools/ops/cutover/reseed-world.sh <world> <sha> check`, then `run` (0.133; `<world>` is its folder's name under
 `/var/lib/souls/worlds/worlds/`, root on the host, with release `<sha>` staged). That is how an importer fix reaches a
 world already seeded (Chiba's entrance, mars-college-2026), so the release may be the build the world is on already.
-It has the same steps and the same safety as Eden's (receipt first, folder and bucket objects aside, nothing deleted,
-`resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
+It has the same steps and the same safety as Eden's (receipt first, folder aside, a fresh store generation, nothing
+moved or deleted, `resume <label>`), and brings the world back running if it was. `reseed-eden-undo.sh <label>` undoes it: it reads
 the world from the receipt. Re-seeding a world needs Gene's yes; `reseed-world.test.mjs` runs it on stand-ins.
 
 ### Eden's old residents as Souls (25 Nov)

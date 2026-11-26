@@ -190,7 +190,151 @@
       ]
     }
   },
+  "building": {
+    "def": "core-cabin@3",
+    "solids": [
+      [-1750, -2390, 1250, 110, 0, 0, 2600, 1, 0],
+      [1750, -2390, 1250, 110, 0, 0, 2600, 1, 0],
+      [0, -2390, 500, 110, 0, 0, 1000, 1, 0],
+      [0, -2390, 500, 110, 0, 2250, 2600, 1, 0],
+      [-2610, 2390, 390, 110, 0, 0, 2600, 1, 0],
+      [-910, 2390, 310, 110, 0, 0, 2600, 1, 0],
+      [1800, 2390, 1200, 110, 0, 0, 2600, 1, 0],
+      [0, 2390, 600, 110, 0, 2200, 2600, 1, 0],
+      [-1720, 2390, 500, 110, 0, 0, 1000, 1, 0],
+      [-1720, 2390, 500, 110, 0, 2250, 2600, 1, 0],
+      [-2890, -1445, 945, 110, 270000, 0, 2600, 1, 0],
+      [-2890, 1445, 945, 110, 270000, 0, 2600, 1, 0],
+      [-2890, 0, 500, 110, 270000, 0, 1000, 1, 0],
+      [-2890, 0, 500, 110, 270000, 2250, 2600, 1, 0],
+      [2890, -1445, 945, 110, 270000, 0, 2600, 1, 0],
+      [2890, 1445, 945, 110, 270000, 0, 2600, 1, 0],
+      [2890, 0, 500, 110, 270000, 0, 1000, 1, 0],
+      [2890, 0, 500, 110, 270000, 2250, 2600, 1, 0],
+      [-2850, 3850, 90, 90, 0, 0, 2600, 4, 0],
+      [0, 3850, 90, 90, 0, 0, 2600, 4, 0],
+      [2850, 3850, 90, 90, 0, 0, 2600, 4, 0]
+    ],
+    "slots": [
+      {"n": 2, "id": "ground", "kind": "floor", "at": [0, 100, 0], "yaw": 0, "capacity": 256},
+      {"n": 3, "id": "front", "kind": "stand", "at": [0, 0, 5090], "yaw": 179977, "capacity": 8},
+      {"n": 4, "id": "porch", "kind": "floor", "at": [0, 100, 3250], "yaw": 0, "capacity": 16},
+      {"n": 5, "id": "wall-n-1", "kind": "wall", "at": [-1500, 1700, -2520], "yaw": 180023, "capacity": 1},
+      {"n": 6, "id": "wall-s-1", "kind": "wall", "at": [1500, 1700, 2520], "yaw": 0, "capacity": 1},
+      {"n": 7, "id": "wall-w-1", "kind": "wall", "at": [-3020, 1700, -1195], "yaw": 269988, "capacity": 1},
+      {"n": 8, "id": "wall-e-1", "kind": "wall", "at": [3020, 1700, -1195], "yaw": 90012, "capacity": 1},
+      {"n": 9, "id": "opening-front-door", "kind": "wall", "at": [0, 100, 2520], "yaw": 0, "capacity": 1},
+      {"n": 10, "id": "opening-window-1", "kind": "wall", "at": [0, 1000, -2520], "yaw": 180023, "capacity": 1},
+      {"n": 11, "id": "opening-window-2", "kind": "wall", "at": [-1720, 1000, 2520], "yaw": 0, "capacity": 1},
+      {"n": 12, "id": "opening-window-3", "kind": "wall", "at": [-3020, 1000, 0], "yaw": 269988, "capacity": 1},
+      {"n": 13, "id": "opening-window-4", "kind": "wall", "at": [3020, 1000, 0], "yaw": 90012, "capacity": 1},
+      {"n": 14, "id": "facade-f0-n-1", "kind": "wall", "at": [-1250, 1300, -2520], "yaw": 180023, "capacity": 1},
+      {"n": 15, "id": "facade-f0-s-1", "kind": "wall", "at": [1300, 1300, 2520], "yaw": 0, "capacity": 1},
+      {"n": 16, "id": "facade-f0-w-1", "kind": "wall", "at": [-3020, 1300, -1250], "yaw": 269988, "capacity": 1},
+      {"n": 17, "id": "facade-f0-e-1", "kind": "wall", "at": [3020, 1300, -1250], "yaw": 90012, "capacity": 1},
+      {"n": 18, "id": "gable-w", "kind": "wall", "at": [-3020, 4553, 0], "yaw": 269988, "capacity": 1},
+      {"n": 19, "id": "gable-e", "kind": "wall", "at": [3020, 4553, 0], "yaw": 90012, "capacity": 1},
+      {"n": 20, "id": "ridge", "kind": "roof", "at": [0, 5007, 0], "yaw": 0, "capacity": 1}
+    ],
+    "floors": [
+      {"level": 0, "y": 100, "polygon": [[-2780, -2280], [2780, -2280], [2780, 2280], [-2780, 2280]], "tag": "cabin"},
+      {"level": 0, "y": 100, "polygon": [[-3000, 2500], [3000, 2500], [3000, 4000], [-3000, 4000]], "tag": "porch"}
+    ],
+    "rooms": [
+      {
+        "id": "cabin",
+        "name": "room_cabin",
+        "floor": 0,
+        "pose": [0, 100, 0, 0],
+        "height": 2420,
+        "polygon": [[-2780, -2280], [2780, -2280], [2780, 2280], [-2780, 2280]]
+      }
+    ],
+    "openings": [
+      {
+        "id": "front-door",
+        "kind": "door",
+        "at": [0, 2390],
+        "yaw": 0,
+        "width": 1200,
+        "height": 2100,
+        "level": 0,
+        "from": "cabin",
+        "to": "outside",
+        "exterior": true,
+        "state": "open",
+        "inRoom": [0, 0, 2390, 0]
+      },
+      {
+        "id": "window-1",
+        "kind": "window",
+        "at": [0, -2390],
+        "yaw": 180023,
+        "width": 1000,
+        "height": 1250,
+        "sill": 900,
+        "level": 0,
+        "from": "cabin",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [0, 0, -2390, 180023]
+      },
+      {
+        "id": "window-2",
+        "kind": "window",
+        "at": [-1720, 2390],
+        "yaw": 0,
+        "width": 1000,
+        "height": 1250,
+        "sill": 900,
+        "level": 0,
+        "from": "cabin",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [-1720, 0, 2390, 0]
+      },
+      {
+        "id": "window-3",
+        "kind": "window",
+        "at": [-2890, 0],
+        "yaw": 269988,
+        "width": 1000,
+        "height": 1250,
+        "sill": 900,
+        "level": 0,
+        "from": "cabin",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [-2890, 0, 0, 269988]
+      },
+      {
+        "id": "window-4",
+        "kind": "window",
+        "at": [2890, 0],
+        "yaw": 90012,
+        "width": 1000,
+        "height": 1250,
+        "sill": 900,
+        "level": 0,
+        "from": "cabin",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [2890, 0, 0, 90012]
+      }
+    ],
+    "doors": [
+      {
+        "opening": "front-door",
+        "def": "core-door@2",
+        "pose": [0, 0, 2390, 0],
+        "solids": [[-566, 0, 20, 60, 0, 27, 2007, 0, 0], [566, 0, 20, 60, 0, 27, 2007, 0, 0]],
+        "params": "{\"sx\":1.01,\"sy\":0.9,\"frame\":\"#f2ead8\",\"leaf\":\"#3f6b5c\",\"trim\":\"#36594d\",\"glass\":\"#bcd9e0\",\"brass\":\"#b8913f\",\"sz\":1,\"vary\":0,\"condition\":\"new\",\"variant\":\"panel\"}",
+        "open": true
+      }
+    ]
+  },
   "text": {
+    "room_cabin": "Cabin",
     "card": "A one-room log cabin with a porch, a bed and a hearth.",
     "building": "building",
     "log_cabin": "log cabin",

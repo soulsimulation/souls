@@ -17,7 +17,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use replica::encode::{Value, decode};
+use replica::encode::{Value, decode, to_hex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -46,8 +46,16 @@ pub struct Mailbox {
     pub key: String,
 }
 
-/// One request to the directory over HTTP/1.1; its body if it was a 200.
-async fn http(mb: &Mailbox, method: &str, path: &str, soul: &str, body: &str) -> Option<String> {
+/// One request to the directory over HTTP/1.1; its body if it was a 200. `soul` (a socket's grant) and `creator` (the
+/// creator grant of this gateway's world, on a prayer) go in their own headers when not empty.
+async fn http(
+    mb: &Mailbox,
+    method: &str,
+    path: &str,
+    soul: &str,
+    creator: &str,
+    body: &str,
+) -> Option<String> {
     let mut s = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&mb.addr))
         .await
         .ok()?
@@ -56,6 +64,11 @@ async fn http(mb: &Mailbox, method: &str, path: &str, soul: &str, body: &str) ->
         String::new()
     } else {
         format!("souls-soul: {soul}\r\n")
+    };
+    let soul = if creator.is_empty() {
+        soul
+    } else {
+        format!("{soul}souls-creator: {creator}\r\n")
     };
     let req = format!(
         "{method} {path} HTTP/1.1\r\nhost: {}\r\nauthorization: Bearer {}\r\n{soul}content-type: application/json\r\n\
@@ -94,7 +107,7 @@ pub fn read_open(lines: &str) -> Vec<(Vec<u8>, String, String)> {
 pub async fn run(gw: Arc<Gateway>) {
     loop {
         if let Some(mb) = gw.mailbox.get()
-            && let Some(lines) = http(mb, "GET", "/v1/mailbox/open", "", "").await
+            && let Some(lines) = http(mb, "GET", "/v1/mailbox/open", "", "", "").await
         {
             gw.post_mail(read_open(&lines));
         }
@@ -102,10 +115,10 @@ pub async fn run(gw: Arc<Gateway>) {
     }
 }
 
-/// A text frame from `grant`'s socket: a close, passed to the directory for that grant alone (the directory reads
-/// it, and ignores anything else). Once the directory closed the message, the close goes to the view sockets that
-/// watch that grant (W10) as the agent sent it.
-pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
+/// A text frame from `grant`'s socket signed in as `session`: a close, passed to the directory for that grant alone
+/// (the directory reads it, and ignores anything else). Once the directory closed the message, the close goes to the
+/// view sockets that watch that grant (W10) as the agent sent it; any other reply goes back to that socket alone.
+pub fn on_text(gw: &Arc<Gateway>, grant: Grant, session: u64, text: &str) {
     if text.len() > CLOSE_MOST {
         return;
     }
@@ -115,13 +128,30 @@ pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
     let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
         return;
     };
+    // #5006 row 15: a prayer goes to this world's creator, whom the gateway names (a Soul's grant is not its world's)
+    let creator = match *path {
+        "pray" => crate::creator::current_mark(gw)
+            .and_then(|m| m.owner)
+            .map(|id| format!("creator-{}-{}", to_hex(&id.scope().0), id.counter()))
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
     let (gw, soul, body) = (gw.clone(), grant.to_text(), text.to_owned());
     tokio::spawn(async move {
         let Some(mb) = gw.mailbox.get() else {
             return;
         };
-        match http(mb, "POST", &format!("/v1/mailbox/{path}"), &soul, &body).await {
-            Some(reply) if *path != "close" => gw.post_text(&grant.key(), reply),
+        match http(
+            mb,
+            "POST",
+            &format!("/v1/mailbox/{path}"),
+            &soul,
+            &creator,
+            &body,
+        )
+        .await
+        {
+            Some(reply) if *path != "close" => gw.post_text(&grant.key(), session, reply),
             Some(reply) if reply.contains("\"closed\":true") => {
                 gw.tell_watchers(&grant.key(), body)
             }
@@ -183,7 +213,7 @@ pub fn on_view_text(gw: &Arc<Gateway>, grants: &[Grant], text: &str, reply: mpsc
     );
     tokio::spawn(async move {
         let Some(mb) = gw.mailbox.get() else { return };
-        let answer = match http(mb, "POST", "/v1/mailbox/put", "", &body).await {
+        let answer = match http(mb, "POST", "/v1/mailbox/put", "", "", &body).await {
             Some(b) if b.starts_with("{\"id\":\"") => format!(r#"{{"sent":{b}}}"#),
             _ => refused("not-taken"),
         };
@@ -273,7 +303,7 @@ pub fn on_states(gw: &Arc<Gateway>, frame: &[u8]) -> bool {
             key: mb.key.clone(),
         };
         tokio::spawn(async move {
-            let _ = http(&mb, "POST", "/v1/mailbox/state", "", &body).await;
+            let _ = http(&mb, "POST", "/v1/mailbox/state", "", "", &body).await;
         });
     }
     true

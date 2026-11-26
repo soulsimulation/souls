@@ -10,6 +10,7 @@ import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from '
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
 import { reloadForFormat } from './stream-format.ts';
+import { localIsoAt } from './source/sky-record.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -29,7 +30,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[];
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number; run?: string }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces;
   /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
@@ -250,13 +251,13 @@ export class V2Bridge {
     for (const m of p.moves ?? []) {
       const t = this.tracks.get(m.body);
       if (!t) continue;
-      if (m.ended) { endGesture(t.gestures, m.start, m.ended.at); continue; }
+      if (m.ended) { endGesture(t.gestures, m.start, m.ended.at, m.run); continue; }
       // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
       const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
-      const g = readingFrom(m, heldProp) ?? gestureFrom(m, this.toward(m.target));
+      const g = readingFrom(m, heldProp) ?? gestureFrom(m, m.target === m.body ? null : this.toward(m.target));
       if (g) t.gestures.push(g);
     }
-    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at, e.run); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
       if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
@@ -608,13 +609,12 @@ export class V2Bridge {
     }
   }
 
-  /** The world's civil time at world time `t` µs, from the world node's calendar (replica::sky: origin + t · 86,400 / day). */
+  /** The world's local time at world time `t` µs, from the world node's calendar and zone (sky-record.ts localIsoAt). */
   private datetime(t: number): string | null {
     for (const n of this.nodes.values()) {
       if (n.parent !== null) continue; // the world's own node holds the calendar (other kinds may use fields 60, 61)
-      const s = n.sky, dayS = Number(s?.[60]), origin = Number(s?.[61]);
-      if (!s || !Number.isFinite(dayS) || dayS <= 0 || !Number.isFinite(origin)) continue;
-      const iso = new Date((origin + Math.floor((t * 86_400) / dayS)) / 1000).toISOString();
+      const iso = localIsoAt(n.sky, t);
+      if (iso === null) continue;
       return this.hour ? `${iso.slice(0, 11)}${this.hour}${iso.slice(16)}` : iso;
     }
     return null;

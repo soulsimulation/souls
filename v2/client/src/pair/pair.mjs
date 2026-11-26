@@ -190,7 +190,8 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     secret_hash: createHash('sha256').update(secret).digest('hex'),
     // A creator (G7) names the world's creator grant its account holds; the directory never makes one. A Soul's
     // request names the world it is paired for (W11).
-    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', world, ...(soul ? { soul } : { new: true }) }),
+    // A new Soul's name (`--name`) goes with the request, so the owner's approval card shows it (trial of 0.137).
+    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', world, ...(soul ? { soul } : { new: true, ...(name ? { name } : {}) }) }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
   onAsk?.({ link: asked.link, code: asked.code });

@@ -67,7 +67,7 @@ import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLi
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
-import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, type PostureChange, type PostureNow } from './posture-transition.ts';
+import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, posturePhaseEnds, type PostureChange, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -80,7 +80,11 @@ import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './b
 
 type Hands = { left?: Vec3; right?: Vec3 };
 type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
+const POSTURE_ORIGINS = new Set(['idle','pushups','situps','stargaze','lie','jumping-jacks','stretch','yoga']);
+type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion };
 type View = {
+  postureOrigins?: Map<string, DrawnOrigin>;
+  clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
   posedOnce?: boolean;
@@ -147,7 +151,7 @@ type View = {
   footRest: THREE.Quaternion[];
   footLat: number[];
   /** Skinned vertices of each foot / hand (by the side the leg / arm has: +1 left): the prone layer keeps them on the deck. */
-  surf: { foot: Map<number, VertexRefs>; hand: Map<number, VertexRefs>; body?: VertexRefs };
+  surf: { leg?: Map<number, VertexRefs>; foot: Map<number, VertexRefs>; hand: Map<number, VertexRefs>; body?: VertexRefs };
   /** PERF-PASSES: restNeed's lowest samples from its last full pass (see restNeed). */
   restCache?: { key: string; n: number; refs: VertexRefs };
   stairShoes?:ReturnType<typeof stairShoeRefs>;
@@ -601,9 +605,9 @@ export class HumanViews {
     this.onTick(world);
   }
 
-  private make(id: string, s: Snap, activity: string,publicSoulKey?:string,bodyModel?:string): View {
+  private make(id: string, s: Snap, activity: string,publicSoulKey?:string,bodyModel?:string, sourceOnly = false): View {
     const rig = createRig(bodyModel?this.bodyTemplates.get(bodyModel)!:templateFor(id, this.templates)!);
-    mergeRigBody(rig);   // a classic body's primitives draw as one (body-merge.ts)
+    if (!sourceOnly) mergeRigBody(rig);   // a classic body's primitives draw as one (body-merge.ts)
     rig.holder.name = id;
     rig.holder.traverse(o=>{
       o.userData.entity=id;const m=o as THREE.SkinnedMesh,p=THREE.SkinnedMesh.prototype;
@@ -615,6 +619,7 @@ export class HumanViews {
     const saved = touched.filter((o): o is THREE.Object3D => !!o).map((o) => ({ o, p: o.position.clone(), q: o.quaternion.clone() }));
     const h = hashId(id);
     const v: View = { rig, prev: s, cur: { ...s }, speed: 0, activity, age: 0, base: activity, arms, legs, spine, seat: SEAT_DEFAULT, vary: (h % 1000) / 1000, cross: ((Math.imul(h, 2654435761) >>> 15) & 1) === 1, saved, layered: false, reachRatio: [], ankle: [], footRest: [], footLat: [], surf: { foot: new Map(), hand: new Map() }, dist: 0, libOn: new Set() };
+    v.clipReference=[];rig.model.traverse(o=>{if((o as THREE.Bone).isBone)v.clipReference!.push({o,p:o.position.clone(),q:o.quaternion.clone(),s:o.scale.clone()});});
     measure(v);
     holdable(v);
     this.views.set(id, v);
@@ -1013,8 +1018,19 @@ export class HumanViews {
     let out = 0; for (const v of this.views.values()) if (v.bike?.visible) out++; PLAY_MOTION.value.w = out;
   }
 
-  private pose(v: View, alpha: number, reach?: Reach) {
+  private pose(v: View, alpha: number, reach?: Reach, sourcePose = false) {
     const a = v.prev, b = v.cur, h = v.rig.holder;
+    // Animation bindings capture original values when activated. Reset before activating any clip so random-access
+    // evaluation cannot capture a previous procedural layer as the next clip's reference pose.
+    // Transition layouts change the lowest torso vertex; a prior-pose shortlist is not a valid contact sample.
+    if(v.postureChange)v.restCache=undefined;
+    const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
+    const plainIdle=v.activity==='idle'&&!v.postureChange;
+    if(!nativeHandOwner && !plainIdle){
+      v.rig.mixer.stopAllAction();
+      for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
+      v.rig.idle.play();v.rig.walk.play();v.layered=false;
+    }
     h.position.set(a.p[0] + (b.p[0] - a.p[0]) * alpha, a.p[1] + (b.p[1] - a.p[1]) * alpha, a.p[2] + (b.p[2] - a.p[2]) * alpha);
     let yaw = lerpAngle(a.yaw, b.yaw, alpha);
     const engineYaw = yaw;
@@ -1045,12 +1061,12 @@ export class HumanViews {
     const freeBody = !v.grip && !v.on && !fp && proneW === 0 && !v.sleepPose;
     // Shared Wave eases from its recorded onset and lowers from the attained
     // pose at a stop. Native hand/seat/walk owners keep the final authority.
-    const waveReturn=(v.waveSamples?v.waveSamples.some(s=>s.released!==undefined):(v.prevAct==='wave'&&(v.since??Infinity)<WAVE_BLEND_SECONDS)) && (v.activity==='idle'||GAIT_ACTS.has(v.activity)) && freeBody && !v.handHold && !v.rps;
+    const waveReturn=(v.waveSamples?v.waveSamples.some(s=>s.released!==undefined):(v.prevAct==='wave'&&(v.since??Infinity)<WAVE_BLEND_SECONDS)) && (v.activity==='idle'||v.activity==='sit'||v.base==='sit'||GAIT_ACTS.has(v.activity)) && freeBody && !v.handHold && !v.rps;
     const waveActive=v.activity==='wave'||waveReturn;
     const wave=waveActive?wavePose(v.waveSamples??[v.activity==='wave'?{age:v.since}:{released:v.since,duration:v.prevWaveDuration}],v.waveClock??tSec):null;
     const waveBlend=wave?.weight??0;
     const waveTime=wave?.fallbackTime??tSec;
-    const waveClip = waveActive && !!extra.wave && !engineHands, interactClip = INTERACT.has(v.activity) && !!extra.interact && !engineHands && b.sitW === 0;
+    const waveClip = waveActive && !!extra.wave && !engineHands && b.sitW === 0, interactClip = INTERACT.has(v.activity) && !!extra.interact && !engineHands && b.sitW === 0;
     // a library clip that does the whole body replaces the procedural frame; overlays (hands) stay on top of it
     const clipBody = !!lib.cur && CLIP_BODY.has(v.activity) && lib.cur.pick.body !== 'seat' && !(lib.cur.pick.body === 'ground-seat' && v.activity !== 'sit-ground');
     const pairPhase = v.partner && v.partner < h.name ? v.partner : h.name; // partners move in step
@@ -1075,15 +1091,16 @@ export class HumanViews {
     // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
     const pn = lib.posture, own = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
     const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity)
-      && postureKind(v.prevAct, v.prevBase) === 'stand' && postureKind(v.activity, v.base) === 'stand' ? v.prevAct : null;
-    const act: ActivityFrame | null = !own ? act0
-      : pn?.tilt ? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
-      : pn?.flat ? blendFrames(null, activityFrame(pn.flat.act, v.base, tSec, pairPhase, { actorId: h.name }), pn.flat.k)
+      && postureKind(v.prevAct, v.prevBase) === postureKind(v.activity, v.base) ? v.prevAct : null;
+    let act: ActivityFrame | null = !own ? act0
+      : pn?.tilt ? pn.frame ?? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
+      : pn?.flat ? pn.frame ?? blendFrames(null, activityFrame(pn.flat.act, v.base, tSec - (pn.flat.ago ?? 0), pairPhase, { actorId: h.name }), pn.flat.k)
       : pn ? blendFrames(null, act0, pn.settle)
       : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name }), act0, smooth(v.since! / ACT_BLEND))
       : act0;
     const tilt = pn?.tilt ? pn.tilt.k : 1;
-    if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
+    if(act&&pn?.tilt)act={...act,handW:[(act.handW?.[0]??1)*tilt,(act.handW?.[1]??1)*tilt]};
+    if(act && waveActive && !waveClip)act.handW=[0,waveBlend];
     h.rotation.z = 0; h.rotation.x = 0;
     let lieFloor = h.position.y;
     if (act?.lying) {
@@ -1094,7 +1111,7 @@ export class HumanViews {
         // on a slope the whole body lies along the ground (head uphill or down), not level above its highest point
         if (fit.k !== 0 && !v.bench) h.quaternion.premultiply(_tilt.setFromAxisAngle(_axis.set(-s, 0, c), Math.atan(fit.k))); }
       else { h.rotation.z = -(Math.PI / 2 - act.lying.raise) * tilt; h.position.y += 0.06 * tilt; }
-    } else if (act && act.hop > 0) h.position.y += act.hop;
+    } else if (act && act.hop > 0 && b.sitW === 0) h.position.y += act.hop;
     // leisure: a rider moves with the swing or the see-saw plank they sit on (play-motion.ts); the scenery seat follows
     if (act?.ride) { const seat = playSeatAt(act.ride.kind, h.position.x, h.position.z); if (seat) rideSeat(h, seat, act.ride.angle); }
     // clips: Run replaces Walk while running; Wave / Interact / Idle_Neutral take Idle's share
@@ -1132,7 +1149,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
+    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur && !lib.posture;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1192,19 +1209,19 @@ export class HumanViews {
     // A fresh seek must blend Wave and the idle layers in the same order as
     // continuous playback. Re-activate only this contributing wave's layers;
     // every action below receives its recorded time and weight again.
-    if(waveW>0||(act&&waveActive&&!extra.wave&&waveBlend>0)){
+    if(waveW>0||(act&&waveActive&&!waveClip&&waveBlend>0)){
       if(v.layered){for(const saved of v.saved){saved.o.position.copy(saved.p);saved.o.quaternion.copy(saved.q);}v.layered=false;}
       for(const action of v.libOn)action.stop();for(const action of Object.values(extra))action?.stop();
     }
     const libOn = new Set<THREE.AnimationAction>();
-    const libAt = (act: THREE.AnimationAction | null, weight: number, time: number) => {
+    const libAt = (act: THREE.AnimationAction | null, weight: number, time: number, loop = true) => {
       if (!act || weight <= 1e-4) return;
       if (!act.isRunning()) act.play();
       const d = act.getClip().duration;
-      act.time = ((time % d) + d) % d; act.setEffectiveWeight(weight + (libOn.has(act) ? act.getEffectiveWeight() : 0)); libOn.add(act);
+      act.time = loop ? ((time % d) + d) % d : Math.max(0,Math.min(d-1e-7,time)); act.setEffectiveWeight(weight + (libOn.has(act) ? act.getEffectiveWeight() : 0)); libOn.add(act);
     };
-    if (lib.cur) libAt(lib.cur.act, curW, lib.cur.time);
-    if (lib.prev) libAt(lib.prev.act, prevW, lib.prev.time);
+    if (lib.cur) libAt(lib.cur.act, curW, lib.cur.time, lib.cur.pick.mode==='loop');
+    if (lib.prev) libAt(lib.prev.act, prevW, lib.prev.time, lib.prev.pick.mode==='loop');
     // entry 42 (take 6): a gesture fading out under a hand actuator's reach also slows its own clip to a stop over the fade:
     // a look-around raising the hand kept moving it at its own speed while the arm reached for a drawer knob (0.095 m per 50 ms
     // together). Clip time = the reach start + ∫(1 − fade) — the same pose and speed at the reach start, at rest by its end.
@@ -1326,6 +1343,7 @@ export class HumanViews {
         // On the back the standing clip's stride (one foot forward, one back) would lift one leg and sink the other
         // foot through the ground (a shoe seemed to float apart): lay both legs out long, heels resting on the ground.
         if (act.lying.face === 'back' && v.legs.length >= 2) lyingLegs(v, lieFloor, v.bench ?? 0);
+        if (act.lying.face === 'front' && v.legs.length >= 2) frontLegs(v, h, lieFloor, tilt);
       }
       else {
         if (act.feetOut > 0 && sitW === 0 && v.legs.length >= 2) activityLegs(v, act.feetOut);
@@ -1510,7 +1528,19 @@ export class HumanViews {
         if(!act.piano)armTo(arm, t, wgt, 0.98, h, V().copy(_right).multiplyScalar(left ? -0.6 : 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
         for(const b of saved){b.o.position.lerpVectors(b.p,b.o.position,weight);b.o.quaternion.slerpQuaternions(b.q,b.o.quaternion.clone(),weight);}
       });
+      const fingerBase=act.handW?v.arms.map(arm=>[...arm.fingers,...arm.thumb].map(o=>({o,q:o.quaternion.clone()}))):null;
       closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
+      fingerBase?.forEach((bones,i)=>{const k=act.handW![armSide(v,i)==='left'?0:1];for(const b of bones)b.o.quaternion.slerpQuaternions(b.q,b.o.quaternion.clone(),k);});
+      if (act.lying?.face === 'front') v.arms.forEach((arm, i) => {
+        const target = targets[i]; if (!target) return;
+        curlHand(arm, 0);
+        const support = groundUnder(target.x, target.z, lieFloor);
+        target.y = Math.max(target.y, support + .04);
+        for (let n = 0; n < 3; n++) {
+          flatHand(v, arm, target, support, tilt, V().copy(_right).multiplyScalar(-arm.side * .6).addScaledVector(UP, -.5).addScaledVector(_fwd, -.2));
+          h.updateMatrixWorld(true);
+        }
+      });
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
     } else if (carried && carryW > 0) {
       // a carried thing: its hand at the carry point from its own shoulder (forearm forward, elbow bent), walking or
@@ -1615,10 +1645,59 @@ export class HumanViews {
       const lift=sleepHeadRestLift(pr,v.rig.template.name);
       if(lift>0){place(v.spine.head,v.spine.head.getWorldPosition(V()).addScaledVector(UP,lift));v.spine.head.updateWorldMatrix(true,true);}
     }
+    // A transition starts from the pose actually drawn at its immutable activity boundary. The source evaluation
+    // uses an isolated skeleton/mixer with the same immutable template; it never samples the previous frame.
+    const pc = v.postureChange;
+    const floorToMove=!!pc&&['back','front'].includes(postureKind(pc.from,pc.fromBase))&&GAIT_ACTS.has(v.activity);
+    const freeFloor=['back','front'].includes(postureKind(v.activity,v.base))&&POSTURE_ORIGINS.has(v.activity);
+    const phase = pc ? posturePhaseEnds(pc,v.base,v.activity).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
+    const walkingOrigin=!!pc&&GAIT_ACTS.has(pc.from)&&!!pc.fromWalk&&freeFloor&&pc.age<ACT_BLEND;
+    // A known floor-phase endpoint is safe to sample even when its original entry came from locomotion.
+    const noOwner = (POSTURE_ORIGINS.has(pc?.from ?? v.activity)||walkingOrigin||phase!==undefined&&freeFloor) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
+    if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
+      this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
+    } else if (!noOwner) v.postureOrigins?.clear();
+    const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
+    if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;
+  }
+
+  private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
+    const delta=pc.age-phase+1e-6;
+    const boundary = time - delta, h = v.rig.holder;
+    const shifted = (c: PostureChange): PostureChange => ({...c,age:c.age-delta,...(c.before?{before:shifted(c.before)}:{})});
+    const before = phase ? shifted(pc) : pc.before ? shifted(pc.before) : undefined;
+    const from = phase ? v.activity : pc.from, fromBase=phase?v.base:pc.fromBase;
+    const nativeQ = new THREE.Quaternion().setFromAxisAngle(UP, -v.cur.yaw);
+    const key = JSON.stringify([Math.round(boundary*1e6),pc.from,pc.fromBase,pc.fromAge,before,v.cur.p,v.cur.yaw,pc.fromWalk??null,phase],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
+    const cache = v.postureOrigins ??= new Map();
+    let origin = cache.get(key);
+    const joints:THREE.Object3D[]=[];v.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});
+    const target = {bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
+    const root = new THREE.Vector3(...v.cur.p);
+    if (!origin) {
+      const age = phase ? v.since===undefined?undefined:v.since-delta : pc.fromAge===undefined?undefined:Math.max(0,pc.fromAge-1e-6);
+      const snap = {...v.cur,...(!phase?GAIT_ACTS.has(from)&&pc.fromWalk?{walkW:pc.fromWalk.weight,walkT:((pc.fromWalk.distance/v.rig.template.walkSpeed)%v.rig.walk.getClip().duration+v.rig.walk.getClip().duration)%v.rig.walk.getClip().duration}:{walkW:0,walkT:0}:{}),expressionT:boundary,idleT:(boundary+(h.name.length*.37)%1)%v.rig.idle.getClip().duration};
+      // A separate skeleton AND mixer keep source evaluation out of the displayed rig's property-binding cache.
+      // This private evaluator is never attached to the world and never loads appearances, props or network assets.
+      const evaluator = new HumanViews(false);evaluator.templates=[v.rig.template];
+      const old=evaluator.make(h.name,snap,from,undefined,undefined,true);
+      Object.assign(old,{prev:snap,cur:snap,activity:from,base:fromBase??from,since:age,prevAct:before?.from,prevBase:before?.fromBase,prevDuration:before?.fromAge,postureChange:before,
+        restAge:REST_ACTS.has(from)?age:undefined,restFrom:REST_ACTS.has(from)&&age!==undefined?boundary-age:undefined});
+      try {
+        evaluator.pose(old,1,undefined,true);
+        const sourceJoints:THREE.Object3D[]=[];old.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)sourceJoints.push(o);});
+        origin={bones:sourceJoints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:old.rig.holder.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(old.rig.holder.quaternion)};
+      } finally { evaluator.clear(); }
+      // Cache only values derived from immutable boundaries. Eviction changes cost, never the evaluated pose.
+      if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key,origin!);}
+    }
+    const k=smooth((pc.age-phase)/ACT_BLEND);
+    target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin!.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin!.bones[i].q,s.q,k);});
+    h.position.copy(root).add(origin!.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));h.quaternion.copy(nativeQ).multiply(origin!.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));h.updateMatrixWorld(true);
   }
 
   /**
@@ -1642,7 +1721,7 @@ export class HumanViews {
     // posture-transition.ts: a change of posture with no phase of its own in the record is drawn over the next second;
     // getting up from the back or lying down on it is LayToIdle by phase in place of the activity's own frame
     const pc = v.postureChange;
-    const pn = pc && !v.sleepPose && !engineHands && !water ? postureNow(pc, v.activity, v.base) : null;
+    const pn = pc && !v.sleepPose && !engineHands && !water ? postureNow(pc, v.activity, v.base, { time: t, id: phaseId }) : null;
     out.posture = pn?.activity ? null : pn; // a seat's own phase is drawn as that activity (setFrame)
     const rise = out.posture?.rise;
     if (rise !== undefined && (out.cur = one({ clip: 'LayToIdle', mode: 'phase', body: 'lie' }, undefined, rise))) { out.rise = rise; out.still = true; return out; }
@@ -1654,7 +1733,8 @@ export class HumanViews {
     }
     const body = out.cur?.pick.body;
     out.sleep = !!(out.cur && body === 'lie' && v.sleepPose);
-    out.still = body === 'lie' || body === 'swim' || body === 'tread';
+    const movingFloorExit=!!pn&&!!pc&&GAIT_ACTS.has(v.activity)&&['back','front'].includes(postureKind(pc.from,pc.fromBase));
+    out.still = body === 'lie' || body === 'swim' || body === 'tread' || movingFloorExit&&!!(pn.flat||pn.tilt);
     out.water = body === 'swim' || body === 'tread';
     return out;
   }
@@ -2047,7 +2127,7 @@ type VertexRefs = { mesh: THREE.SkinnedMesh; idx: number[] }[];
 
 type StoredRefs={mesh:number;idx:number[]}[];
 type ShapeStamp={geometry:THREE.BufferGeometry;attributes:(THREE.BufferAttribute|THREE.InterleavedBufferAttribute)[];versions:number[]};
-type StandingShape={stamps:ShapeStamp[];front:ReturnType<typeof frontDepths>;body:StoredRefs;foot:Map<number,StoredRefs>;hand:Map<number,StoredRefs>};
+type StandingShape={stamps:ShapeStamp[];front:ReturnType<typeof frontDepths>;body:StoredRefs;leg:Map<number,StoredRefs>;foot:Map<number,StoredRefs>;hand:Map<number,StoredRefs>};
 const standingShapes=new WeakMap<Template,StandingShape>();
 /** The same immutable template in Idle0 has the same surface measurements for every actor. Cache numbers and vertex
  * indices only: mesh references are rebound to this actor, never retained from the actor that first measured them.
@@ -2066,28 +2146,28 @@ function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
   const bind=(refs:StoredRefs):VertexRefs=>refs.map(r=>({mesh:meshes[r.mesh],idx:r.idx.slice()}));
   return{
    front:{...old.front,foot:old.front.foot.map(p=>[...p] as [number,number])},
-   surf:{body:bind(old.body),foot:new Map([...old.foot].map(([side,r])=>[side,bind(r)])),hand:new Map([...old.hand].map(([side,r])=>[side,bind(r)]))},
+   surf:{body:bind(old.body),leg:new Map([...old.leg].map(([side,r])=>[side,bind(r)])),foot:new Map([...old.foot].map(([side,r])=>[side,bind(r)])),hand:new Map([...old.hand].map(([side,r])=>[side,bind(r)]))},
   };
  }
  const front=measureFront(),surf=surfaceRefs(rig),save=(refs:VertexRefs):StoredRefs=>refs.map(r=>({mesh:meshes.indexOf(r.mesh),idx:r.idx.slice()}));
  standingShapes.set(rig.template,{
   stamps:meshes.map(m=>{const a=attributes(m);return{geometry:m.geometry,attributes:a,versions:a.map(version)};}),
   front:{...front,foot:front.foot.map(p=>[...p] as [number,number])},
-  body:save(surf.body),foot:new Map([...surf.foot].map(([side,r])=>[side,save(r)])),hand:new Map([...surf.hand].map(([side,r])=>[side,save(r)])),
+  body:save(surf.body),leg:new Map([...surf.leg].map(([side,r])=>[side,save(r)])),foot:new Map([...surf.foot].map(([side,r])=>[side,save(r)])),hand:new Map([...surf.hand].map(([side,r])=>[side,save(r)])),
  });
  return{front,surf};
 }
 
 /** Foot and hand vertices of a rig, per side (+1 = the person's left: z < 0 with the holder at the origin facing +x). */
 function surfaceRefs(rig: Rig) {
-  const out: { foot: Map<number, VertexRefs>; hand: Map<number, VertexRefs>; body: VertexRefs } = { foot: new Map(), hand: new Map(), body: [] };
+  const out: { leg: Map<number, VertexRefs>; foot: Map<number, VertexRefs>; hand: Map<number, VertexRefs>; body: VertexRefs } = { leg:new Map(), foot: new Map(), hand: new Map(), body: [] };
   const p = V(), idx = new THREE.Vector4(), wt = new THREE.Vector4();
   rig.holder.updateMatrixWorld(true);
   rig.model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
     if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
-    const contacts:{i:number;part:'foot'|'hand'}[]=[];
+    const contacts:{i:number;part:'foot'|'hand'|'leg'}[]=[];
     for (let i = 0; i < pos.count; i++) {
       idx.fromBufferAttribute(si, i);
       wt.fromBufferAttribute(sw, i);
@@ -2096,7 +2176,7 @@ function surfaceRefs(rig: Rig) {
       const part = partOf(m.skeleton.bones[idx.getComponent(k)]?.name ?? '');
       // a sample of the torso, hips and head: what a body lying on the ground rests on
       if ((part === 'torso' || part === 'head') && i % 3 === 0) { let r = out.body.find((q) => q.mesh === m); if (!r) out.body.push((r = { mesh: m, idx: [] })); r.idx.push(i); }
-      if (part !== 'foot' && part !== 'hand') continue;
+      if (part !== 'foot' && part !== 'hand' && part !== 'leg') continue;
       contacts.push({i,part});
     }
     let at=0;eachSkinnedWorld([{mesh:m,idx:contacts.map(c=>c.i)}],p,p=>{
@@ -2312,6 +2392,63 @@ function lyingLegs(v: View, floor: number, bench = 0) {
     const sole = bench > 0 ? floor - bench : groundUnder(goal.x, goal.z, floor);
     if (Number.isFinite(low) && Math.abs(low - (sole + 0.01)) > 0.005) legTo(l, v.ankle[i], goal.setY(goal.y + sole + 0.01 - low), V().copy(UP).addScaledVector(across, side * 0.25), 0.999, q);
   });
+}
+
+/** A free plank owns both legs; the idle clip's asymmetric stride is not a planted stance. Solve each leg from
+ * its own hip to its measured rest lateral position, then fit its actual skinned shoe to support. No native root
+ * is moved, and this layer never runs for held/native hand targets, seats, locomotion or airborne activities. */
+function frontLegs(v: View, h: THREE.Object3D, floor: number, weight: number) {
+  if (!v.dims) return;
+  const yaw = h.rotation.y, q = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+  v.legs.forEach((leg, i) => {
+    const goal = new THREE.Vector3(0, 0, v.footLat[i]).applyQuaternion(q).add(h.position);
+    goal.y = groundUnder(goal.x, goal.z, floor) + v.dims!.ankleH;
+    const original = leg.foot.getWorldPosition(V()), originalRotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+    goal.lerp(original, 1 - weight);
+    const rotation = originalRotation.slerp(q.clone().multiply(v.footRest[i]), weight);
+    for (let j = 0; j < 3; j++) {
+      legTo(leg, v.ankle[i], goal, V().copy(UP).addScaledVector(_right, -leg.side * .15), .999, rotation);
+      h.updateMatrixWorld(true);
+      const low = lowestY(v.surf.foot.get(leg.side));
+      if (!Number.isFinite(low)) break;
+      const delta = groundUnder(goal.x, goal.z, floor) + .003 - low;
+      if (Math.abs(delta) < .001) break;
+      goal.y += delta > 0 ? delta : delta * weight;
+    }
+  });
+}
+
+/** Pose interpolation can dip an otherwise clear free limb. Correct only actual penetration after blending;
+ * unweighted limbs above support stay unweighted. Native hands, props, seats and locomotion never enter here. */
+function fitFreeGround(v: View, h: THREE.Object3D, floor: number) {
+  for (let pass = 0; pass < 3; pass++) {
+    h.updateMatrixWorld(true);
+    const feet = v.legs.map(leg=>({p:leg.foot.getWorldPosition(V()),q:leg.foot.getWorldQuaternion(new THREE.Quaternion())}));
+    const legLow=Math.min(...v.legs.map(leg=>lowestY(v.surf.leg?.get(leg.side))));
+    if(v.spine&&Number.isFinite(legLow)&&legLow<floor+.002){
+      place(v.spine.body,v.spine.body.getWorldPosition(V()).addScaledVector(UP,floor+.002-legLow));
+      h.updateMatrixWorld(true);
+      v.legs.forEach((leg,i)=>legTo(leg,v.ankle[i],feet[i].p,V().copy(UP).addScaledVector(_right,-leg.side*.15),.999,feet[i].q));
+    }
+    v.legs.forEach((leg, i) => {
+      const at = leg.foot.getWorldPosition(V()), support = Math.max(floor, groundUnder(at.x, at.z, floor));
+      const footLow = lowestY(v.surf.foot.get(leg.side)), legLow = lowestY(v.surf.leg?.get(leg.side));
+      const low = Math.min(footLow, legLow);
+      if (low >= support + .002 || !Number.isFinite(low)) return;
+      const q = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+      legTo(leg, v.ankle[i], at.setY(at.y + support + .002 - low), V().copy(UP).addScaledVector(_right, -leg.side * .15), .999, q);
+    });
+    h.updateMatrixWorld(true);
+    v.arms.forEach(arm => {
+      const at = palm(arm, V()), support = Math.max(floor, groundUnder(at.x, at.z, floor));
+      const low = lowestY(v.surf.hand.get(arm.side));
+      if (low >= support + .002 || !Number.isFinite(low)) return;
+      const q = arm.hand.getWorldQuaternion(new THREE.Quaternion());
+      armTo(arm, at.setY(at.y + support + .002 - low), 1, BODY_MODEL.maxExtension, h, V().copy(_right).multiplyScalar(-arm.side * .5).add(UP));
+      setWorldQuat(arm.hand, q);
+    });
+  }
+  h.updateMatrixWorld(true);
 }
 
 function activityLegs(v: View, out: number) {

@@ -12,7 +12,8 @@
 #                                                      R17 #2818), each served file a `served` line of the manifest;
 #                                                      directoryd, origin.tar (install.sh origin) and units.tar (their
 #                                                      two unit files) are the directory and the viewers' origin;
-#                                                      reseed/ holds Eden's reseed, its undo and content/kinds
+#                                                      reseed/ holds Eden's reseed, its undo, content/kinds and
+#                                                      Eden's stock with its libraries (reseed/stock, #4837)
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -26,7 +27,16 @@
 #                                  ($LIB/client, which a world's address serves), then the directory (souls-directory)
 #                                  and the viewers' origin (souls-origin), each restarted once on the release's program
 #                                  and unit and checked healthy, else put back on its previous ones; each step done
-#                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`
+#                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`.
+#                                  Just before each world's deploy, `entries stage` for that world: its deploy rehearses
+#                                  the new build on them and swaps them in between the pin and the restart, so only the
+#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged
+#   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
+#                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
+#                                  at its commit) by this release's `worldd entries`, every world when none is named:
+#                                  plan lists per world which entries change or are added, and which is refused and why,
+#                                  changing nothing; stage writes them as <world>/entries.next, never entries/ itself.
+#                                  A refused world, a fork (its boot pins its entries) and a world with none keep theirs
 #   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
 #                                  folder (every world when none is named) that has none, or whose own it admits
 #                                  every body of; a fork keeps its own (its boot pins it). worldd reads it at start
@@ -39,7 +49,8 @@
 #                                  --mailbox-key` in each gateway-<world>.env), apply changes it; check sends one
 #                                  owner's message for a grant no Soul holds through each world's gateway and wants it
 #                                  accepted. move applies before the gateways restart and checks after the directory
-#   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
+#   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>, and a world on
+#                                  a store generation (#4954) unless <to> reads it
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
 #   reseed-undo <label> check|run  undoes that reseed, with the undo the release it moved to carried
@@ -60,9 +71,11 @@ ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
 # The two services the move restarts after the worlds and the gateway; the scratch machine runs neither (scratch.sh).
 SERVICES=${RELEASE_SERVICES-directory origin}
 # What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
-# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
-TOOLS=(deploy gateway-upgrade world-aside assets-check)
-# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
+# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves; store-copy is
+# store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it.
+TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy)
+# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit) and its
+# stock (reseed/stock: content/worlds/eden/stock.json and content/library/, #4837).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
 die() {
@@ -149,6 +162,10 @@ bundle() {
   mkdir -p "$out/reseed"
   for t in "${RESEED[@]}"; do install -m 755 "$(dirname "$0")/../cutover/$t" "$out/reseed/$t"; done
   cp -R "$(dirname "$0")/../../../../content/kinds" "$out/reseed/kinds"
+  # Eden's stock and the libraries it draws (#4837), as a world folder keeps them: reseed-eden.sh seeds with them.
+  mkdir -p "$out/reseed/stock/library"
+  cp "$(dirname "$0")/../../../../content/worlds/eden/stock.json" "$out/reseed/stock/stock.json"
+  cp "$(dirname "$0")/../../../../content/library/"*.json "$out/reseed/stock/library/"
   for a in "${ARTIFACTS[@]}"; do
     lines+=("$(printf '{"name":"%s","hash":"%s","bytes":%s}' "$a" "$(hash "$out/artifacts/$a")" "$(wc -c < "$out/artifacts/$a" | tr -d ' ')")")
   done
@@ -276,6 +293,35 @@ bodies_worlds() {
     fi
   done
   rm -rf "$tmp"
+}
+
+# One world's `worldd entries <plan|stage>`, by this release's worldd on this release's kinds; its status (3: refused).
+# A stage writes <world>/entries.next only; the world's deploy swaps it in (or a stage that finds nothing removes it).
+entries_world() {
+  local act=$1 rel=$2 w=$3 f=$WORLDS_ROOT/worlds/$3 bin out s=0
+  bin=$WORLDS_ROOT/builds/$(artifact "$rel/manifest.json" worldd)/worldd
+  if [ ! -d "$f/entries" ] || [ ! -d "$rel/reseed/kinds" ]; then
+    [ "$act" != stage ] || rm -rf "$f/entries.next"
+    if [ ! -d "$f/entries" ]; then echo "entries: $w: kept: no entries"; else echo "entries: $w: kept: this release carries no kinds (staged by an older release-v2)"; fi
+    return 0
+  fi
+  out=$("$bin" entries "$act" --dir "$f" --kinds "$rel/reseed/kinds" 2>&1) || s=$?
+  # the build's own lines (its rides, punts, stand points and header) are the world's start's to print, not this
+  grep -E '^(entries|refused|worldd entries)' <<< "$out" || true
+  [ "$s" = 0 ] || [ "$s" = 3 ] || echo "entries: $w: not upgraded: worldd entries $act exited $s"
+  return "$s"
+}
+
+# entries plan|stage <sha> [<world>...]: entries_world for each world; a refused or failed world never stops the rest.
+library() {
+  local act=${1:-} sha=${2:-} rel w
+  { [ "$act" = plan ] || [ "$act" = stage ]; } && [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "entries plan|stage <sha> [<world>...]"
+  rel=$DATA/releases/$sha
+  [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
+  shift 2
+  # shellcheck disable=SC2046 # a world's name is one word
+  if [ $# -eq 0 ]; then set -- $(worlds); fi
+  for w in "$@"; do entries_world "$act" "$rel" "$w" || true; done
 }
 
 bodies_binding() {
@@ -432,10 +478,15 @@ move() {
       echo "move: $w already moved by this release"
       continue
     fi
+    # its entries staged just before its deploy, which rehearses the new build on them and swaps them in at its
+    # restart; a refused or failed stage stages none, and the world deploys on its own entries
+    entries_world stage "$rel" "$w" || true
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
     if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
       touch "$rel/moved/$w"
     else
+      # never left for a later deploy to take
+      rm -rf "$WORLDS_ROOT/worlds/$w/entries.next"
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done
@@ -491,7 +542,8 @@ move() {
   for s in $SERVICES; do
     case $s in
       directory)
-        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1)
+        # `|| true`: under pipefail a missing directory.args would end the move here, silently (#4954).
+        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1 || true)
         service "$rel" directory souls-directory.service directoryd 401 \
           -X POST "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}/v1/account/session"
         ;;
@@ -609,13 +661,20 @@ rollback() {
   [ $# -gt 0 ] || die "rollback <to> <from> <world>..."
   [ "$to" != "$from" ] || refuse "rollback.same: to and from are one build"
   # The release that brought <from> carries the deploy tool that knows its schemas.
-  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$from\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$from\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1 || true)
   [ -n "$rel" ] || refuse "rollback.from-unknown: no staged release has worldd $from"
   rel=$(dirname "$rel")
   [ -f "$WORLDS_ROOT/builds/$to/worldd" ] || refuse "rollback.to-missing: $to is not on this machine"
   directory_env
   for w in "$@"; do
     echo "rollback: $w to ${to:0:16}… from ${from:0:16}…"
+    # A world on a store generation (a rebuild's, #4954) runs only a build that reads it: one from before would claim
+    # the old world's record, take its shipping over and stop on a restart gap at every start.
+    if [ -f "$WORLDS_ROOT/worlds/$w/generation" ] && ! grep -qa 'generation-bad: ' "$WORLDS_ROOT/builds/$to/worldd"; then
+      echo "refused: rollback.generation: $w is on store generation g/$(tr -d '[:space:]' < "$WORLDS_ROOT/worlds/$w/generation")/, which ${to:0:16}… cannot read (a build from before #4954)"
+      status=3
+      continue
+    fi
     if "$rel/bin/deploy" rollback "$w" "$to" --from "$from"; then
       rm -f "$rel/moved/$w"
     else
@@ -642,10 +701,11 @@ reseed() {
 reseed_undo() {
   local label=$1 act=${2:-} receipt new rel
   [[ $label =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed-undo <label> check|run"
-  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1)
+  # `|| true`: under pipefail a probe that finds nothing would end the script before its refusal says why (#4954).
+  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1 || true)
   [ -f "$receipt" ] || refuse "release.no-reseed: no reseed receipt for $label"
   new=$(sed -n 's/^new=//p' "$receipt")
-  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1 || true)
   [ -n "$rel" ] && [ -f "$(dirname "$rel")/reseed/reseed-eden-undo.sh" ] || refuse "release.no-reseed: no staged release carries the undo for $label"
   RESEED_TOOL=${RESEED_TOOL:-$(dirname "$rel")/bin/world-aside} bash "$(dirname "$rel")/reseed/reseed-eden-undo.sh" "$label" "$act"
 }
@@ -679,7 +739,9 @@ publish() {
     echo "publish: tagged $tag at ${sha:0:12}"
   fi
   branch=release/changelog-$version
-  if git show origin/main:CHANGELOG.md 2> /dev/null | grep -q "^## $version "; then
+  # Read whole, not piped into grep -q: under pipefail git show, cut off when grep stops at the first match, would fail
+  # the test and the changelog would be opened again (#4954).
+  if grep -q "^## $version " <<< "$(git show origin/main:CHANGELOG.md 2> /dev/null || true)"; then
     echo "publish: CHANGELOG.md on main already has $version"
   elif [ -n "$(git ls-remote --heads origin "$branch")" ]; then
     echo "publish: the changelog's branch $branch is already there"
@@ -727,7 +789,8 @@ main() {
   case $cmd in
     checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
     reseed-undo) reseed_undo "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
+    entries) library "$@" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|entries|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 

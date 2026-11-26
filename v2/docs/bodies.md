@@ -101,8 +101,12 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    other body there (`resume-placed`). A body logged seated whose seat is still there sits in it again; with its seat
    taken it stands at the seat's stand point, or the nearest legal point to it (`resume-stood`). A body that cannot be
    placed on its own ground at all (its floor or seat gone, no legal point on it) is placed at the world's entry, where
-   Souls are born (`resume-entry`). None is silent: each is an entry on the body, `souls:restarted` (fields 1 body,
-   2 how, 3 node, 4 from, in the frame the log had it in, 5 to), written with the first tick, which its Soul's client
+   Souls are born (`resume-entry`). A legal point or a landing here is never ground sealed off from the main ground:
+   dry ground no walk from the world's entry reaches, read on the map for the body's own size
+   (`sim::mover::Floors::sealed`). A body logged in such a pocket is placed out of it; with no entry known, no ground
+   is sealed. None is silent:
+   each is an entry on the body, `souls:restarted` (fields 1 body, 2 how, 3 node, 4 from, in the frame the log had it
+   in, 5 to), written with the first tick, which its Soul's client
    reads as it reads the ladder's; the next row heals the log. Left out, by name, while the others start: only a body
    with no recorded build, or one whose ground holds no legal point for its build at all (a world with no ground).
    One bad row never leaves a world refusing every move.
@@ -166,7 +170,15 @@ slot) with the stance the request named. Postures are the controller's stance in
   standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
   body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
-  controller keeps it apart from the bodies it steps, so a tick never visits it.
+  controller keeps it apart from the bodies it steps, so a tick never visits it. A form's move made from a seat
+  (`seated` in `content/moves`: a stretch, a slump) by a body in a slot leaves the legs to the slot: it neither claims
+  nor blocks them, so the seat's hold never refuses it `resource-held` (#4143). Every other move that claims the legs
+  (a jump, a dance, a bow) is still refused `resource-held` there: a gateway sit writes no `posture`, so a form's
+  posture need alone would not stop it. A rise during a seated stretch does not cancel the stretch, which holds no
+  leg; it plays out its hand phases. A form at another thing that walks (the lamp across the room, asked from the
+  sofa) rises from the seat first (`Forms::open`), once settled in it, unless the seat's thing moves (a ride, a boat):
+  its rides are left by their own forms. A take of a thing within reach of the seat is done from the seat. A gateway
+  walk (`<ns>:walk`) asked while seated is still refused `resource-held`; the client's answer offers the rise.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
@@ -227,6 +239,13 @@ on a tie; a building whose main room the walker cannot reach is refused like any
 another body ends 1.2 m beside it on the walker's side (along +z when they stand on different floors), and to a seated
 body at the thing it sits in. That point is fixed when the walk starts: a body that moves on meanwhile is not followed,
 and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
+A walk to a place on the open ground (a child of the ground with an outline or a line and nothing built on it: a
+range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the walker, worked out on the ground's frame
+from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself). An area whose middle is not (a harbour round its water) is walked into by the nearest area within it whose middle is (its boardwalk), the same way, when that area lies within 20 m of the edge the walker comes to (a river's bridge 200 m along it does not). Else, where
+that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
+stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
+walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on
+its edge.
 The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
 the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
 receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),

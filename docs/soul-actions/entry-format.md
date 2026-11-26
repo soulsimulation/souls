@@ -50,7 +50,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
@@ -67,6 +67,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
+| 24 | `building` | A building kind's rooms, as a template's building of it has them at its def's defaults (written by `v2/tools/import-eden/export/buildings.ts`, never by hand): its walls (`solids`), `slots`, `floors`, `rooms` (each name a key of the text table), `openings` (doorways and windows), `stairs` and `doors`, in its frame, mm and millidegrees. A place of the kind gets them in the same edit (`worldd`'s `with_buildings`, #5006) |
 
 A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
 thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
@@ -221,7 +222,12 @@ lowers the count by one in the same batch as the make (`takeStock` shows the bat
 nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
 take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. On the new engine
+([#4837](https://github.com/soulsimulation/souls/issues/4837)) a world seeded with its stock file
+(`worldd seed --stock content/worlds/<world>/stock.json`, `v2/crates/worldd/src/stock.rs`) works out each container's
+pile from its stock row and draw; a take gives the thing it makes the carried fields of the row at the top of the pile,
+as references to the library row's words, which the world serves beside the record as public words. It does not yet
+lower the count. Eden's own storage
 (`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
@@ -293,7 +299,9 @@ an optional `yaw_mdeg`. A `joint` point is where a part joins another (Engine v2
 [#3338](https://github.com/soulsimulation/souls/issues/3338)): it names its `connector` kind and the kind it `mates`
 with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other point names either. The joint itself is a
 link (section 4), never a parent: a beam seated between two uprights is a child of its bay
-(`content/kinds/construction/`).
+(`content/kinds/construction/`). The kind that declares the joining link bears on the kind it names, which stands; a
+kind whose link names a kind that itself bears rests on it, a tier up, and needs as many of those held up as the link's
+`most` (a shade cloth on its two rails, `content/kinds/carpentry/`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.
@@ -410,12 +418,18 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4; `for_s` repeats it back to back, with
-  no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`: the
-  humanoid's `dance for=60` dances a minute, and a leave or `stop` ends it at the move's next phase; the log holds a
+  no pause, for whole seconds from 1 to 3600, written out or `{"arg": <a count it takes>, "default": <seconds>}`
+  (with no default, a move the act gives no such count is done once: a wave, unless asked to keep waving): the
+  humanoid's `dance for=60` dances a minute, `dance` alone (default 3600) until the Soul's next act or `stop` (a
+  stop or a walk ends it at the move's next phase, another form at once); its held activities and gestures are listed in `content/kinds/body/humanoid.json`;
+  the log holds a
   record of it for viewers at its start and every 15 s (a viewer who comes in mid-dance draws it from the next), each
   planned to the latest it can end, and the run's end says where it stopped), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
-  SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+  SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)). A form that starts with a `take` naming no
+  move (a cup's `take`) first walks to its thing, unless the body is already within reach; the hand step of a `take`
+  or `put` naming no move lands only with its thing within reach of the body, else the run ends `out-of-reach` with
+  nothing moved ([#4086](https://github.com/soulsimulation/souls/issues/4086)).
 - **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
   (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
   microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
@@ -554,7 +568,9 @@ A form's `move` step names a move and a point; moves are their own data in `cont
 and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
 classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
-`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+`start_up_us`, `recovery_us` and for a slide `slide_us`. `seated: true` (#4143) marks a move made from a seat (a
+stretch, a slump): a body a seat, a bed or a standing slot holds makes it with its legs left to the slot, which its
+`locomotion` claim and block then skip; any other move that claims the legs is refused there `resource-held`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
 point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
 `swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and

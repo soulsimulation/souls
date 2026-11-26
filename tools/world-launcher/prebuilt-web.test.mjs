@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { install, seal } from './deploy/prebuilt-web.mjs';
 
-const identity = { sourceSha: 'a'.repeat(40), buildId: 'we-aaaaaaaaaaaa', base: '/worlds/', cdn: '1', cdnOrigin: 'https://assets.eden.art', edenWorlds: 'test-world', arrivalUI: '0', goatCounter: 'simeden', godUploadsCdn: '1' };
+const identity = { sourceSha: 'a'.repeat(40), buildId: 'we-aaaaaaaaaaaa', base: '/worlds/', cdn: '1', cdnOrigin: 'https://cdn.soul.game', edenWorlds: 'test-world', arrivalUI: '0', goatCounter: 'simeden', godUploadsCdn: '1' };
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'souls-prebuilt-test-'));
   mkdirSync(join(root, 'dist/assets'), { recursive: true });

@@ -7,11 +7,16 @@
 //   carry offer <body id> [<body id> ...] [--on <thing id>]   a crew (the carry entry's activity, this Soul in front),
 //                                     offered to those bodies on the open ground, or on a part to hold it where it stands
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
-//   carry grip <thing id> front|back|left|right [--from <m>]   walks to that end of a load (its grip's place, from its
-//                                     entry; 2.2 m off a part that stands), or beside it along its own x (1.2 m)
+//   carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walks to that end of a load (its grip's place,
+//                                     from its entry; 2.2 m off a part that stands), beside it along its own x (1.2 m),
+//                                     or to the n-th side carrier's place, beside a grip between its ends
+//   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
-//   carry to <crew id> <x,z | thing id> [<slot>]   walks this Soul so the crew's load reaches there (its middle, or a
-//                                     bay's slot), keeping this Soul's place at the load: each carrier sends its own
+//   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
+//                                     middle, or a bay's slot), keeping this Soul's place at the load. The front's
+//                                     walks the whole crew (the world keeps each carrier's place); the others may send
+//                                     their own, at the moment --go names when it names one
+//   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
 //   part take|unseat <crew id> <part id>   the crew takes a loose part, or one out of a bay or stand
@@ -22,6 +27,7 @@
 // `{"kind":"carry","what":"offered","offer":..,"from":..}`.
 
 import { createHash } from 'node:crypto';
+import { isSpot, sideSpot, toSpot } from './spot.mjs';
 
 export const CARRY_ENTRY = 'mars:carry';
 const ID = /^[0-9a-f]{32}-\d+$/;
@@ -36,7 +42,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -84,7 +90,10 @@ export function loadOf(entry) {
     .map((p) => (p.at_mm[axis] - middle) * 1000).sort((x, y) => x - y);
   if (along.length < 2 || along.at(-1) <= along[0]) return null;
   const long = [0, 0, 0]; long[axis] = b[axis] * 500;
-  return { axis, long, halfLength: b[axis] * 500, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
+  // its grips between its ends, from the back toward the front (a side carrier's each, at most four), and half its
+  // width on the plan as it is carried: the larger of its other two sides
+  const inner = along.slice(1, -1).slice(0, 4), halfWidth = Math.max(...[0, 1, 2].filter((i) => i !== axis).map((i) => b[i])) * 500;
+  return { axis, long, halfLength: b[axis] * 500, halfWidth, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
 }
 
 /** `v` turned by the quaternion `q` ([w, x, y, z], any scale), as the copy's poses hold it. */
@@ -95,26 +104,36 @@ export function turn(q, v) {
 }
 
 /**
- * Where a carrier stands at a thing for its `end` (front or back), on the plan, µm: on a load that lies, its place
- * along its long axis (front at the + end); on one that stands (a frame), `from` (default 2.2 m) along its own z, front
- * at +. Left or right is beside it along its own x, `from` (default 1.2 m), right at +. `from` in µm; `at`: the
- * thing's place in the world ({pos, rot}).
+ * Where a carrier stands at a thing for its `end`, on the plan, µm. Front or back: on a load that lies, its place along
+ * its long axis (front at the + end); on one that stands (a frame), `from` (default 2.2 m) along its own z, front at +
+ * (a lift of a standing load checks its ends on that line: the 6.1 m frame's are 3.1 m out). Left or right is beside it
+ * along its own x, `from` (default 1.2 m), right at +. `side<n>` is the n-th side carrier's place
+ * (`sim::activity::carry::Load::side_places`): beside its n-th grip between its ends, counted from the back, along the
+ * line its front and back stand on, half its width and REACH off that line, the first on its + side, then alternating;
+ * null when it has no such grip. `from` in µm; `at`: the thing's place in the world ({pos, rot}).
  */
 export function gripSpot(at, load, end, from = null) {
   const rot = at.rot ?? [ONE, 0, 0, 0], sign = end === 'front' || end === 'right' ? 1 : -1;
   const mid = turn(rot, load?.middle ?? [0, 0, 0]).map((c, k) => c + at.pos[k]);
+  const unit = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
+  const v = load ? turn(rot, load.long) : [0, 0, 0], flat = Math.hypot(v[0], v[2]);
+  const lies = load && 2 * flat >= load.halfLength;
+  // The line its front and back stand on: its long axis lying; standing, its own z.
+  const line = lies ? unit(v) : unit(turn(rot, [0, 0, M]));
+  const side = /^side([1-4])$/.exec(end);
+  if (side) {
+    const k = Number(side[1]) - 1, along = load?.inner?.[k];
+    if (along === undefined) return null;
+    const across = (load.halfWidth + REACH) * (k % 2 === 0 ? 1 : -1);
+    return [mid[0] + line[0] * along - line[1] * across, mid[2] + line[1] * along + line[0] * across];
+  }
   if (end === 'left' || end === 'right') {
     // Beside it, along its own x (a frame's face, a beam's side): a holder's place.
-    const x = turn(rot, [M, 0, 0]), xf = Math.hypot(x[0], x[2]) || 1, d = (from ?? BESIDE) * sign;
-    return [mid[0] + (x[0] / xf) * d, mid[2] + (x[2] / xf) * d];
+    const x = unit(turn(rot, [M, 0, 0])), d = (from ?? BESIDE) * sign;
+    return [mid[0] + x[0] * d, mid[2] + x[1] * d];
   }
-  const v = load ? turn(rot, load.long) : [0, 0, 0], flat = Math.hypot(v[0], v[2]);
-  if (load && 2 * flat >= load.halfLength) {
-    const d = from != null ? from * sign : load.places[end === 'front' ? 1 : 0];
-    return [mid[0] + (v[0] / flat) * d, mid[2] + (v[2] / flat) * d];
-  }
-  const z = turn(rot, [0, 0, M]), zf = Math.hypot(z[0], z[2]) || 1, d = (from ?? STANDING_FROM) * sign;
-  return [mid[0] + (z[0] / zf) * d, mid[2] + (z[2] / zf) * d];
+  const d = from != null ? from * sign : lies ? load.places[end === 'front' ? 1 : 0] : STANDING_FROM * sign;
+  return [mid[0] + line[0] * d, mid[2] + line[1] * d];
 }
 
 /** A turn about +y by `mdeg` millidegrees, as a quaternion [w, x, y, z]. */
@@ -171,7 +190,14 @@ export function byName(req, rows) {
     const v = out[k];
     if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
     const want = String(v).trim().toLowerCase();
-    const hits = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    let named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    // None by the whole name: as said ("the loading spot" for `loading-spot`), dashes and underscores as spaces.
+    const said = (n) => String(n ?? '').trim().toLowerCase().replace(/^the\s+/, '').replace(/[\s_-]+/g, ' ');
+    if (!named.length) named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => said(n) === said(v)));
+    // A map's place can share a thing's name (Mars College's `rack-bay` place and its rack bay): a place is never
+    // gripped, taken or seated into, so with a thing of that name the thing is meant.
+    const things = named.filter((r) => !/:place$/.test(String(r.kind ?? '')));
+    const hits = things.length ? things : named;
     if (hits.length === 1) { out[k] = hits[0].id; continue; }
     return hits.length
       ? no('carry-name-ambiguous', `${hits.length} things go by "${v}": ${hits.map((r) => r.id).join(', ')}; name one by its id`)
@@ -224,15 +250,29 @@ export function carryIntents(req, ctx) {
     case 'set-down':
       return id(req.crew) ? [{ verb: 'carry:set-down', target: req.crew }] : usage;
     case 'grip': {
-      if (!id(req.thing) || !['front', 'back', 'left', 'right'].includes(req.end)) return usage;
+      if (!id(req.thing) || !/^(front|back|left|right|side[1-4])$/.test(String(req.end))) return usage;
       const at = placeOf(req.thing);
       if (!at) return no('carry-thing-unseen', `${req.thing} is not in the copy`);
       const from = req.from === undefined ? null : Number(req.from);
       if (from !== null && !(from > 0 && from < 10)) return no('carry-usage', '--from <metres, 0 to 10>');
-      return [walk(ns, ground, gripSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, from === null ? null : from * M))];
+      if (req.n !== undefined && (req.end === 'left' || req.end === 'right')) {
+        // A side carrier's place (spot.mjs): beside the load's n-th grip between its ends, from its back.
+        const s = /^[1-4]$/.test(String(req.n)) ? sideSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, Number(req.n)) : null;
+        return s ? [walk(ns, ground, s)] : no('carry-grip-unknown', `${req.thing} has no grip ${req.n} between its ends (count from its back, 1 to ${loadOf(kinds[kindOf(req.thing)])?.inner.length ?? 0})`);
+      }
+      const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M);
+      // A side stands at a grip between the ends: a load with fewer such grips takes fewer (sim's carry-crew-too-large).
+      const inner = load?.inner?.length ?? 0;
+      if (!spot) return no('carry-grip-unknown', `${req.thing} has ${inner} grip${inner === 1 ? '' : 's'} between its ends, so no ${req.end.replace('side', 'side ')}: a crew of ${2 + inner} at most carries it`);
+      return [walk(ns, ground, spot)];
     }
     case 'to': {
       if (!id(req.crew) || req.where === undefined) return usage;
+      if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
+        // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
+        const s = toSpot(req, ctx, req.where);
+        return s.code ? s : Object.assign([walk(ns, ground, s.point)], { bay: s.bay });
+      }
       let dest = pointOf(req.where);
       if (!dest && id(req.where)) {
         const at = placeOf(req.where);
@@ -249,13 +289,34 @@ export function carryIntents(req, ctx) {
       if (!mine) return no('carry-me-unseen', 'this Soul\'s body is not in the copy yet: look first');
       const off = [mine.pos[0] - mid[0], mine.pos[2] - mid[1]];
       if (req.slot !== undefined) {
-        // Into a slot, the crew lines up on the slot's own z (the way a slot holds a rack part, a frame's face or a
-        // beam's length), each carrier at its end of the line and as far from the middle as it is now: so the part
-        // goes in square, not turned by however its carriers happened to stand.
+        // Into a slot, the crew lines up on the slot's own z or x, whichever its line now runs nearer (a beam's length
+        // or a frame's face on z), its front and back at their ends of that line, each as far from the middle as it is
+        // now: so the part goes in square, not turned by however its carriers happened to stand. A side keeps its place
+        // along and across the line, beside its grip.
         const at = placeOf(req.where), s = slotPoint(at, kinds[kindOf(req.where)], req.slot);
-        const z = turn(times(at.rot ?? [ONE, 0, 0, 0], yawQuat(s.yaw)), [0, 0, M]), zf = Math.hypot(z[0], z[2]) || 1, u = [z[0] / zf, z[2] / zf];
-        const d = Math.hypot(...off) * (off[0] * u[0] + off[1] * u[1] < 0 ? -1 : 1);
-        return [walk(ns, ground, [dest[0] + u[0] * d, dest[1] + u[1] * d])];
+        const q = times(at.rot ?? [ONE, 0, 0, 0], yawQuat(s.yaw)), flat = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
+        const sz = flat(turn(q, [0, 0, M])), sx = flat(turn(q, [M, 0, 0])), dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+        // The crew's line now, from its back to its front (`ctx.crewEnds`: their ids and places); without it, z.
+        const ends = ctx.crewEnds?.(req.crew) ?? null, line = ends && [ends.at[0][0] - ends.at[1][0], ends.at[0][1] - ends.at[1][1]];
+        const lf = line ? Math.hypot(...line) : 0;
+        const w = lf ? [line[0] / lf, line[1] / lf] : null;
+        let u = !w || Math.abs(dot(sz, w)) >= Math.abs(dot(sx, w)) ? sz : sx;
+        if (w && dot(u, w) < 0) u = [-u[0], -u[1]];
+        // A slot off the bay's middle across that line (a beam's, at the frames' posts) is reached from its own side:
+        // the load stops lined up on the slot's axis outside the bay, and `part put` sets it in on the world's straight
+        // track. Walks end within 0.3 m of their goal, so a beam carried in between two frames' posts (a few cm to
+        // spare at each end) met a post whenever its crew had drifted (0.135, PR #4993's second bay).
+        const mouth = mouthOf(ctx, req, at, s, u, mid);
+        if (mouth) dest = mouth;
+        const crossed = crossedOnTheWay(req, ctx, at, s, mid, mouth);
+        if (crossed) return crossed;
+        if (!w) {
+          const d = Math.hypot(...off) * (dot(off, sz) < 0 ? -1 : 1);
+          return [walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d])];
+        }
+        const end = ends.ids.includes(me);
+        const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
+        return [walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across])];
       }
       return [walk(ns, ground, [dest[0] + off[0], dest[1] + off[1]])];
     }
@@ -263,8 +324,209 @@ export function carryIntents(req, ctx) {
   }
 }
 
+/** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
+export const HEIGHT = 900_000;
+/** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
+export const GO_MOST_MS = 20_000;
+
+/** A `--go` word as Unix ms: digits are Unix ms; hh:mm:ss[.s] is today's time in UTC; else an ISO time. NaN when it is
+ *  none of these. */
+export function goTime(word, now = Date.now()) {
+  const w = String(word ?? '');
+  if (/^\d{10,}$/.test(w)) return Number(w);
+  const t = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)Z?$/.exec(w);
+  if (t) { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), +t[1], +t[2]) + Math.round(+t[3] * 1000); }
+  return /T/.test(w) ? Date.parse(w) : NaN;
+}
+
+/** How far outside a bay's bounds a load lined up on its slot stops, µm: within worldd's PUT_REACH (1 m) of the slot,
+ *  however short of its goal a walk ends (0.3 m). */
+export const MOUTH_CLEAR = 200_000;
+
+/** The part a crew holds and its half extents as it is held now (its turn in the copy): `ext` [x, up, z], the heights
+ *  it spans as carried (`band`), and its half length and half width on the plan. Null when the copy cannot say. */
+function heldExtent(ctx, crew) {
+  const { kinds, kindOf, placeOf } = ctx, id = ctx.heldBy?.(crew), b = id && kinds[kindOf(id)]?.geometry?.bounds_mm, hp = id && placeOf(id);
+  if (!Array.isArray(b) || b.length !== 3 || !hp) return null;
+  const hb = b.map((v) => v * 500);
+  const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((c) => [-1, 1].map((e) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], c * hb[1], e * hb[2]]))));
+  const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
+  return { id, ext, band: [HEIGHT - ext[1], HEIGHT + ext[1]], long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
+}
+
+/**
+ * Where a crew carrying into a bay's slot stops, on the plan, µm, when that slot is off the bay's middle across the
+ * crew's line `u` (a beam's, at the frames' posts) and the crew is on the slot's side of the bay: on the slot's axis,
+ * the load's middle `MOUTH_CLEAR` beyond the bay's bounds and its own half width, so `part put` sets it in from there.
+ * Null for a slot on the bay's middle (a frame's, entering by its open end) or a crew across the bay from the slot,
+ * which carries it straight in as before.
+ */
+function mouthOf(ctx, req, bay, s, u, mid) {
+  const b = ctx.kinds[ctx.kindOf(req.where)]?.geometry?.bounds_mm;
+  if (!Array.isArray(b) || b.length !== 3) return null;
+  const a = [-u[1], u[0]], dot = (p, q) => p[0] * q[0] + p[1] * q[1], c = [bay.pos[0], bay.pos[2]];
+  const o = dot([s.point[0] - c[0], s.point[1] - c[1]], a);
+  if (Math.abs(o) < 100_000 || dot([mid[0] - c[0], mid[1] - c[1]], a) * o <= 0) return null;
+  const flat = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
+  const rot = bay.rot ?? [ONE, 0, 0, 0], half = Math.abs(dot(a, flat(turn(rot, [M, 0, 0])))) * b[0] * 500 + Math.abs(dot(a, flat(turn(rot, [0, 0, M])))) * b[2] * 500;
+  const out = Math.sign(o) * (half + (heldExtent(ctx, req.crew)?.across ?? 0) + MOUTH_CLEAR) - o;
+  return [s.point[0] + a[0] * out, s.point[1] + a[1] * out];
+}
+
+/**
+ * A part already seated in another slot of the bay a crew carries its load into, met on the straight way there at the
+ * height the load is carried (0.135 C7: the world stops that carry, `souls:carry-blocked`, and sets its load down
+ * under the part): a refusal naming it, before anyone moves; else null. On the bay's plan, the load lined up on the
+ * slot's z as it goes in, its middle from `mid` to the slot; each seated part where its slot holds it. `ctx.seated(id)`
+ * the parts in a node's slots ({id, slot}), `ctx.heldBy(crew)` the part a crew holds; without them nothing is read.
+ */
+function crossedOnTheWay(req, ctx, bay, s, mid, mouth = null) {
+  const { kinds, kindOf } = ctx, held = heldExtent(ctx, req.crew), entry = kinds[kindOf(req.where)];
+  const box = (id) => { const b = kinds[kindOf(id)]?.geometry?.bounds_mm; return Array.isArray(b) && b.length === 3 ? b.map((v) => v * 500) : null; };
+  if (!held || !ctx.seated) return null;
+  const { band, long, across } = held;
+  // Into the bay's frame (its turn about y only): x across the slots, z along them.
+  const inv = [...(bay.rot ?? [ONE, 0, 0, 0])]; inv[1] = -inv[1]; inv[2] = -inv[2]; inv[3] = -inv[3];
+  const local = ([x, z]) => { const p = turn(inv, [x - bay.pos[0], 0, z - bay.pos[2]]); return [p[0], p[2]]; };
+  const [from, to] = [local(mid), local(mouth ?? s.point)];
+  const names = Object.keys(entry?.slots ?? {});
+  for (const p of ctx.seated(req.where)) {
+    const name = names[p.slot - 1], at = entry?.slots?.[name]?.at_mm, pb = box(p.id);
+    // A part with solids (a frame: its posts, at the slots' ends) is met as those, by the world's own check.
+    if (p.id === held.id || name === s.name || !Array.isArray(at) || !pb || kinds[kindOf(p.id)]?.geometry?.solids_mm) continue;
+    const q = [at[0] * 1000, at[2] * 1000], quarter = Math.abs((entry.slots[name].yaw_mdeg ?? 0) % 180_000) === 90_000;
+    const [hx, hz] = quarter ? [pb[2], pb[0]] : [pb[0], pb[2]], up = [at[1] * 1000, at[1] * 1000 + 2 * pb[1]];
+    if (up[0] >= band[1] || up[1] <= band[0]) continue;   // wholly under or over the load as it is carried
+    if (meets(from, to, q, [across + hx, long + hz])) {
+      return no('carry-way-crossed', `on the way to ${s.name}, the load meets the part in ${name} (${p.id}), seated ${Math.round(up[0] / 1000)} to ${Math.round(up[1] / 1000)} mm up, at the height it is carried (${Math.round(band[0] / 1000)} to ${Math.round(band[1] / 1000)} mm): bring it in from the bay's other side, or seat ${s.name} before ${name} (and take ${name} out first)`);
+    }
+  }
+  return null;
+}
+
+/** Whether a point going straight from `a` to `b` comes inside the box of half sides `h` about `c` (touching is not). */
+function meets(a, b, c, h) {
+  let t0 = 0, t1 = 1;
+  for (const k of [0, 1]) {
+    const d = b[k] - a[k];
+    if (d === 0) { if (Math.abs(a[k] - c[k]) >= h[k]) return false; continue; }
+    const u = (c[k] - h[k] - a[k]) / d, v = (c[k] + h[k] - a[k]) / d;
+    t0 = Math.max(t0, Math.min(u, v)); t1 = Math.min(t1, Math.max(u, v));
+    if (t0 >= t1) return false;
+  }
+  return true;
+}
+
 /** The crews in the copy: each carry activity, where it is and what it holds (its children). `rows`: the copy's rows. */
 export function crewsIn(rows) {
   const all = [...rows.values()];
   return all.filter((r) => isCrew(r.kind)).map((r) => ({ id: r.id, on: r.parent, holds: all.filter((c) => c.parent === r.id).map((c) => ({ id: c.id, name: c.name, kind: c.kind })) }));
+}
+
+// Group work, as an agent finds and joins it: who needs hands near this Soul, an open crew offer accepted by its
+// offerer's name, and what each step's answer says to do next. Plain facts from the copy and the kind entries; the
+// world decides nothing here.
+
+/** How many carry a load, as the world reads its entry (`sim::activity::carry::Load::of`): its `carry_crew`, else its
+ *  `hold_crew`, else two; never fewer than a crew's front and back. */
+export function crewNeeds(entry) {
+  const n = entry?.state?.carry_crew?.default ?? entry?.state?.hold_crew?.default;
+  return Math.max(2, Number.isInteger(n) ? n : 2);
+}
+
+/** Words for "whoever is near" in `carry offer anyone`: every other Soul within NEAR_M metres, nearest first. */
+export const NEAR_WORDS = new Set(['anyone', 'everyone', 'near', 'nearby']);
+export const NEAR_M = 20;
+/** The most a crew is offered to at once (`carry offer`'s own limit). */
+export const OFFER_MOST = 5;
+
+/**
+ * The crew offers to this Soul still open: each `offered` of kind carry it was told (`logged`, oldest first) whose crew
+ * is still in the copy and does not hold this Soul yet. `mine`: this Soul's ids. → [{crew, from}], newest last.
+ */
+export function openCrewOffers(logged, rows, mine) {
+  const seen = new Set(), out = [];
+  for (const e of [...logged].reverse()) {
+    if (e.kind !== 'carry' || e.what !== 'offered' || !e.offer || seen.has(e.offer)) continue;
+    seen.add(e.offer);
+    const r = rows.get(e.offer);
+    if (!r || r.members?.some((m) => mine.includes(m.body) || mine.includes(m.soul))) continue;
+    out.unshift({ crew: e.offer, from: e.from });
+  }
+  return out;
+}
+
+/**
+ * `carry accept|decline [<crew id | name>]`: the crew by its id, by its offerer's name (`Ada`), or with no word the
+ * newest open offer to this Soul. `offers`: `openCrewOffers`; `nameOf(id)`: a body's name. → {crew}, or a refusal by
+ * name that says what to do instead.
+ */
+export function crewOffered(word, offers, nameOf) {
+  if (ID.test(String(word ?? ''))) return { crew: word };
+  if (!offers.length) return no('carry-no-offer', 'no crew offer to you is open: `look` shows the crews near (`work`) and who leads each; ask one (`say --to <name> "I can help"`) to offer you a place');
+  if (word === undefined) return { crew: offers.at(-1).crew };
+  const want = String(word).trim().toLowerCase();
+  const hit = offers.filter((o) => String(nameOf(o.from) ?? '').toLowerCase() === want || o.from === word);
+  if (hit.length) return { crew: hit.at(-1).crew };
+  return no('carry-no-offer', `no open crew offer from ${String(word).slice(0, 40)}: the open ones are from ${offers.map((o) => nameOf(o.from) ?? o.from).join(', ')}`);
+}
+
+/**
+ * Whom `carry offer anyone` asks: every other body within `within` metres, nearest first, at most OFFER_MOST.
+ * `bodies`: [{id, m}] (metres from this Soul). → ids, or a refusal by name when nobody is near.
+ */
+export function offerNear(bodies, within = NEAR_M) {
+  const near = bodies.filter((b) => Number.isFinite(b.m) && b.m <= within).sort((a, b) => a.m - b.m).slice(0, OFFER_MOST);
+  return near.length ? near.map((b) => b.id) : no('carry-nobody-near', `no other Soul within ${within} m: shout what you need ("Who can help carry the rack frames?"), wait, then offer by name`);
+}
+
+const metresText = (m) => `${m < 10 ? Math.round(m * 10) / 10 : Math.round(m)} m`;
+
+/**
+ * "Who needs help?": the group work near this Soul as plain lines (`look`'s `work`): each crew offer to it still open,
+ * with the command that joins it; then each crew near that it is not in: who is in it, what it holds and how many
+ * hands that takes, and whom to ask. `crews`: `crewsIn(rows)`; `offers`: `openCrewOffers`; `nameOf(id)`; `metres(id)`
+ * from this Soul (undefined when unplaced); `needs(id)`: how many carry a thing (`crewNeeds` of its entry);
+ * `nearest(id)`: the name of the thing nearest a crew that holds none.
+ */
+export function workLines({ crews, rows, mine, offers, nameOf, metres, needs, nearest = () => null, within = 40, most = 4 }) {
+  const out = [];
+  for (const o of offers.slice(-2).reverse()) {
+    const c = crews.find((x) => x.id === o.crew), held = c?.holds?.[0]?.name, by = nearest(o.crew), who = nameOf(o.from) ?? o.from;
+    out.push(`${who} offers you a place in a carry crew${held ? ` holding ${held}` : by ? ` near ${by}` : ''} (${o.crew}): carry accept ${who}`);
+  }
+  const offered = new Set(offers.map((o) => o.crew)), membersOf = (id) => rows.get(id)?.members ?? [];
+  const near = crews.filter((c) => !offered.has(c.id) && !membersOf(c.id).some((m) => mine.includes(m.body) || mine.includes(m.soul)))
+    .map((c) => ({ c, m: Math.min(metres(c.id) ?? Infinity, ...membersOf(c.id).map((x) => metres(x.body) ?? Infinity)) }))
+    .filter((x) => x.m <= within).sort((a, b) => a.m - b.m);
+  for (const { c, m } of near) {
+    if (out.length >= most) break;
+    const members = membersOf(c.id), lead = members.find((x) => /:front$/.test(x.role)) ?? members[0];
+    const load = c.holds?.[0], want = load ? needs(load.id) : null, short = want === null || members.length < want;
+    const hands = want ? `, ${members.length} of ${want} hands${short ? `: ${want - members.length} more wanted` : ''}` : '';
+    const at = load ? `holds ${load.name}` : nearest(c.id) ? `by ${nearest(c.id)}` : 'here';
+    const ask = short && lead ? `; to help, ask ${nameOf(lead.body)}: say --to ${nameOf(lead.body)} "I can help"` : '';
+    out.push(`a carry crew (${c.id}, ${metresText(m)}) ${at}: ${members.map((x) => nameOf(x.body)).join(', ') || 'nobody yet'}${hands}${ask}`);
+  }
+  return out;
+}
+
+/** What a step's answer says to do next, plainly (the `next` of `carry` and `part` answers). `req`: the request sent;
+ *  `load`: the name of what the crew holds; `bay`: `slotsCard` of the thing a part was put into, when it was. */
+export function nextStep(req, { load = null, bay = null } = {}) {
+  const c = req.crew ?? '<crew id>';
+  switch (req.kind === 'part' ? `part ${req.do}` : req.do) {
+    case 'grip': return 'you are at your end: the one who leads offers the crew (carry offer <name>); each other accepts (carry accept <their name>)';
+    case 'offer': return `wait for an accept (\`wait\` shows joined); then take or lift it (part take ${c} <part> | carry lift ${c} <load>) and say where it goes`;
+    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; when the front walks it (carry to ${c} <where>), you walk with it, keeping your place`;
+    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes; the front sends carry to ${c} <x,z | bay id> [<slot>] and the crew walks with it, each in its place (into a slot, every carrier sends the same carry to, so it turns square)`;
+    case 'to': return `when every carrier has arrived, one of you seats it (part put ${c} <bay id> <slot>) or sets it down (carry set-down ${c})`;
+    case 'part put':
+      if (bay?.left?.length) return `seated: ${bay.built}; still to fill: ${bay.left.join(', ')}. A seated frame stays held while one of you stays in its crew; the others: carry leave ${c}`;
+      if (bay) return `seated: ${bay.built}, so it is built: everyone in its crews can let go (carry leave <crew id>)`;
+      return `laid down: carry leave ${c} when you are done`;
+    case 'set-down': return `set down: lift it again, or let go (carry leave ${c})`;
+    case 'leave': return 'you let go: `look` shows the crews near that still want hands';
+    default: return null;
+  }
 }

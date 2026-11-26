@@ -10,7 +10,7 @@
 //     immutable uploaded content; their response must satisfy one complete policy.
 //   immutable/stable: Cloudflare must be able to cache it (cf-cache-status DYNAMIC or BYPASS is a miss). A first request after a
 //     release is a MISS/EXPIRED and is not counted; HIT/REVALIDATED/STALE/UPDATING/MISS/EXPIRED all pass.
-// Only 200 responses on the origin host are judged; assets.eden.art has its own checks in cdn-walk.
+// Only 200 responses on the origin host are judged; cdn.soul.game has its own checks in cdn-walk.
 const DAY = 86400;
 const VIEW = /^(?:\/worlds)?(?:\/w\/[a-z][a-z0-9-]{0,31})?\/asset-view\/[0-9a-f]{64}\.glb$/;
 const LEGACY_GLB = /^(?:\/worlds)?(?:\/w\/[a-z][a-z0-9-]{0,31})?\/assets\/[0-9a-f]{64}\.glb$/;

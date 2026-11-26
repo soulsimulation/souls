@@ -1,6 +1,6 @@
 // release.sh's release-head checks, the reseed it carries (0.133 R13) and its move of the directory and the origin,
 // with stand-ins for gh and the machine's programs: the merge queue's green ci run counts for ci-ok and the v2 legs, a
-// staged release runs Eden's reseed pre-check with its own world-aside and kinds, and the move restarts the directory
+// staged release runs Eden's reseed pre-check with its own kinds on a fresh store generation, and the move restarts the directory
 // and the origin once, after the worlds and the gateway, on the release's programs and units, and puts each back on its
 // previous ones when it does not answer as healthy.
 //   node --test v2/tools/ops/release/release.test.mjs
@@ -41,20 +41,22 @@ test('checks: the merge queue\'s green ci run at the head counts for ci-ok and t
   assert.match(noScrub.stdout, /release.missing-check: scrub-guard /);
 });
 
-test('a staged release carries the reseed, and its pre-check uses that release\'s world-aside and kinds', () => {
+test('a staged release carries the reseed, and its pre-check uses that release\'s kinds and a fresh store generation', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle');
   const data = join(dir, 'data'), etc = join(dir, 'etc'), lib = join(dir, 'lib');
   for (const d of [page, pkg, etc, lib]) mkdirSync(d, { recursive: true });
   const world = `${'c'.repeat(32)}-${'c'.repeat(32)}-0`;
-  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; world-aside lists 3 objects.
-  exe(join(bins, 'worldd'), 'exit 0');
+  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; both read a store generation
+  // (#4954: they carry its refusal, 'generation-bad: '), and so does the installed supervisor.
+  exe(join(bins, 'worldd'), '# generation-bad: \nexit 0');
   exe(join(bins, 'gatewayd'), 'exit 0');
   exe(join(bins, 'directoryd'), 'exit 0');
-  exe(join(bins, 'deploy'), 'echo 1220' + '0'.repeat(64));
+  exe(join(bins, 'deploy'), '# generation-bad: \necho 1220' + '0'.repeat(64));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
   exe(join(bins, 'assets-check'), 'exit 0');
-  exe(join(lib, 'supervisor'), 'if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
+  exe(join(bins, 'store-copy'), 'exit 0');
+  exe(join(lib, 'supervisor'), 'if [ "$1" = generation ]; then echo none; exit 0; fi; if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -77,9 +79,11 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   const check = run(['reseed', sha, 'check'], env);
   assert.equal(check.status, 0, check.stdout + check.stderr);
   const rel = join(data, 'releases', sha);
-  assert.match(check.stdout, new RegExp(`world-aside +the release's own, ${rel}/bin/world-aside`));
   assert.match(check.stdout, new RegExp(`kind entries +${rel}/reseed/kinds \\(\\d+ entries\\)`));
-  assert.match(check.stdout, /3 of the world's objects at their keys/);
+  // #4837: Eden's stock and its libraries go with the release, as a world folder keeps them, and the reseed seeds with them
+  assert.match(check.stdout, new RegExp(`stock +${rel}/reseed/stock/stock\\.json`));
+  for (const f of ['stock.json', 'library/books.json', 'library/garments.json']) assert.ok(existsSync(join(rel, 'reseed/stock', f)), f);
+  assert.match(check.stdout, /generation +the fresh world's objects under g\/\d{8}T\d{6}Z\/; the old world's \(at their keys\) stay where they are: none moves/);
   assert.match(check.stdout, /check only; nothing changed/);
   // a fresh reseed refuses while a reseed to this build is not undone, and names the label to resume
   const manifest = readFileSync(join(rel, 'manifest.json'), 'utf8');
@@ -112,6 +116,7 @@ test('move: the directory and the origin go on the release once, after the world
   exe(join(bins, 'gateway-upgrade'), 'echo "gateway-upgrade" >> "$LOG"');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -221,6 +226,7 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   const client = join(root, 'client'), pkg = join(root, 'pkg');
   for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
   writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
@@ -295,4 +301,99 @@ test('mailbox: plan shows, apply makes the key once (0600) and adds only the mis
   const checked = run(['mailbox', 'check'], env);
   assert.equal(checked.status, 0, checked.stderr);
   assert.match(checked.stdout, /no gateway here to check/);
+});
+
+test('entries: plan lists each world\'s changes and changes nothing; the move stages a world\'s just before its deploy, which takes them, and a failed deploy leaves none', () => {
+  const root = join(dir, 'entries'), bins = join(root, 'bins'), page = join(root, 'page'), out = join(root, 'bundle');
+  const data = join(root, 'data'), etc = join(root, 'etc'), lib = join(root, 'lib'), worlds = join(data, 'worlds/worlds');
+  for (const d of [etc, lib, page]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(page, 'index.html'), '<!doctype html>');
+  // Stand-in worldd: `entries plan|stage --dir <w> --kinds <k>` says it changes the humanoid, and stage writes "new"
+  // as <w>/entries.next. Stand-in deploy: records what it rehearses on and, unless FAIL_DEPLOY, swaps it in as the
+  // real one does between the pin and the restart.
+  exe(join(bins, 'worldd'), [
+    'case "$1" in schemas) exit 0 ;; entries) ;; *) exit 1 ;; esac',
+    '[ -d "$6/body" ] || exit 1',
+    'echo "ride: a ride line the world prints"',
+    'echo "entries: ${4##*/}: change eden:humanoid aaaaaaaaaaaa..bbbbbbbbbbbb (eden.humanoid.json)"',
+    'if [ "$2" = stage ]; then mkdir -p "$4/entries.next"; echo new > "$4/entries.next/eden.humanoid.json"; echo "entries: ${4##*/}: 1 staged, 0 unchanged"; fi',
+  ].join('\n'));
+  exe(join(bins, 'gatewayd'), 'exit 0');
+  exe(join(bins, 'directoryd'), 'exit 0');
+  const deployed = join(root, 'deployed');
+  exe(join(bins, 'deploy'), [
+    'f="$WORLDS_ROOT/worlds/$1"',
+    `if [ -d "$f/entries.next" ]; then echo "$1 rehearsed $(cat "$f/entries.next/eden.humanoid.json")" >> "${deployed}"; else echo "$1 rehearsed own" >> "${deployed}"; fi`,
+    '[ -z "$FAIL_DEPLOY" ] || exit 1',
+    'if [ -d "$f/entries.next" ]; then mv "$f/entries" "$f/entries.before"; mv "$f/entries.next" "$f/entries"; fi',
+  ].join('\n'));
+  exe(join(bins, 'gateway-upgrade'), 'exit 0');
+  exe(join(bins, 'world-aside'), 'exit 0');
+  exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
+  const client = join(root, 'client'), pkg = join(root, 'pkg');
+  for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  mkdirSync(pkg, { recursive: true });
+  for (const w of ['none', 'up']) {
+    mkdirSync(join(worlds, w), { recursive: true });
+    writeFileSync(join(worlds, w, 'world.json'), '{"format":"souls/world/1"}');
+  }
+  mkdirSync(join(worlds, 'up/entries'));
+  writeFileSync(join(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
+  // a stale staging in a world with no entries is never taken
+  mkdirSync(join(worlds, 'none/entries.next'));
+  const bundled = run(['bundle', out, sha, '0.136.1', bins, page, client, pkg]);
+  assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_LIB: lib, RELEASE_ETC: etc, RELEASE_SERVICES: '' };
+  const staged = run(['stage', out], env);
+  assert.equal(staged.status, 0, staged.stdout + staged.stderr);
+  const read = (...p) => readFileSync(join(...p), 'utf8');
+
+  const plan = run(['entries', 'plan', sha], env);
+  assert.equal(plan.status, 0, plan.stdout + plan.stderr);
+  assert.match(plan.stdout, /^entries: none: kept: no entries$/m);
+  assert.match(plan.stdout, /^entries: up: change eden:humanoid aaaaaaaaaaaa\.\.bbbbbbbbbbbb/m);
+  assert.doesNotMatch(plan.stdout, /ride:/, 'the build\'s own lines are left out');
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n', 'a plan changes nothing');
+  assert.equal(existsSync(join(worlds, 'up/entries.next')), false, 'a plan stages nothing');
+
+  // A failed deploy leaves the world's own entries and nothing staged.
+  const failed = run(['move', sha, 'up'], { ...env, FAIL_DEPLOY: '1' });
+  assert.equal(failed.status, 3, failed.stdout + failed.stderr);
+  assert.match(failed.stdout, /entries: up: 1 staged, 0 unchanged\nmove: deploy up \(the canary\)/);
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'old\n');
+  assert.equal(existsSync(join(worlds, 'up/entries.next')), false);
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new'], 'the deploy rehearsed the release\'s entries');
+
+  rmSync(deployed);
+  const moved = run(['move', sha, 'up'], env);
+  assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+  assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new', 'none rehearsed own']);
+  assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'new\n', 'the deploy took them');
+  assert.equal(read(worlds, 'up/entries.before/eden.humanoid.json'), 'old\n', 'the world\'s own kept beside them');
+});
+
+test('rollback refuses a build from before #4954 for a world on a store generation, and takes back every other world', () => {
+  const m = join(dir, 'rollback'), data = join(m, 'data'), root = join(data, 'worlds'), log = join(m, 'log');
+  const [from, to, toOld] = ['f', '7', '0'].map((c) => `1220${c.repeat(64)}`);
+  const [fresh, kept] = ['c', 'd'].map((c) => `${c.repeat(32)}-${c.repeat(32)}-0`);
+  // The release that brought <from>, its deploy a stand-in that logs; <to> reads store generations, <toOld> does not.
+  exe(join(data, 'releases', sha, 'bin/deploy'), `echo "deploy $*" >> ${log}`);
+  writeFileSync(join(data, 'releases', sha, 'manifest.json'),
+    `{"commit":"${sha}","version":"0.135.1","files":[]}\n{"name":"worldd","hash":"${from}","path":"bin/worldd"}\n`);
+  exe(join(root, 'builds', to, 'worldd'), '# generation-bad: ');
+  exe(join(root, 'builds', toOld, 'worldd'), '# a build from before #4954');
+  for (const w of [fresh, kept]) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  writeFileSync(join(root, 'worlds', fresh, 'generation'), '20261125T010000Z\n');
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc') };
+
+  const old = run(['rollback', toOld, from, fresh, kept], env);
+  assert.equal(old.status, 3, old.stdout + old.stderr);
+  assert.match(old.stdout, new RegExp(`refused: rollback\\.generation: ${fresh} is on store generation g/20261125T010000Z/, which 1220000000000000… cannot read`));
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${kept} ${toOld} --from ${from}`], 'only the world on no generation');
+  rmSync(log);
+  const ok = run(['rollback', to, from, fresh], env);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${fresh} ${to} --from ${from}`]);
 });

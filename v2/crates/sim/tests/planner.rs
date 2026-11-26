@@ -261,6 +261,7 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
             at: body.pose.position,
             waiting: None,
             crossing: None,
+            carried: false,
             staying: false,
             spot: Some((target, order)),
         }]),
@@ -579,4 +580,51 @@ fn s8_a_walkers_line_is_asked_once_while_the_request_is_out() {
         answer = stamped(planner.answer(&wants), k + 1, k + 1);
     }
     assert!(arrived(&r, id(1)).is_some(), "the walker arrived");
+}
+
+/// #4974 (S8): a walk's place asked in the tick it is sent (`Runner::ask_places`, with every body's mark for the spot
+/// tables) is asked once: not again by another call, nor by a tick while its batch is out, and again only once that
+/// batch was taken without its answer. The tick that reads the answer grants the place and gives the route: the walk
+/// is planned a tick after it is sent.
+#[test]
+fn i4974_a_walk_asked_as_it_is_sent_is_planned_at_the_next_tick_and_asked_once() {
+    let mut t = town();
+    let mut r = runner(&t, 1);
+    let (who, order) = (id(1), id(10_000));
+    let early = r.ask_places(&[(who, order)], 0);
+    assert_eq!(early.places.len(), 1, "asked as it is sent");
+    assert!(early.marks.is_some(), "with the marks for the spot tables");
+    assert!(
+        r.ask_places(&[(who, order)], 1).places.is_empty(),
+        "asked once"
+    );
+    assert!(
+        r.ask_places(&[(who, id(99_999))], 1).places.is_empty(),
+        "never for another order"
+    );
+    let mut planner = Planner::new(t.copy().unwrap());
+    let (wants, _) = r.tick_planned(&mut t, &stamped(planner.answer(&early), 1, 1));
+    assert!(wants.places.is_empty(), "nothing more to ask");
+    assert!(r.granted.contains_key(&who), "the place was granted");
+    assert!(
+        r.route_metrics(who, order).is_some(),
+        "planned at the tick after it was sent"
+    );
+    // Its batch out: not asked again by the ticks; taken without its answer: asked again, once.
+    let mut r = runner(&t, 1);
+    r.ask_places(&[(who, order)], 0);
+    let asked = |r: &mut Runner, t: &mut Town, p: &Planned| r.tick_planned(t, p).0.places.len();
+    for next in 1..4 {
+        assert_eq!(
+            asked(&mut r, &mut t, &stamped(Planned::default(), 0, next)),
+            0,
+            "still out: not asked again"
+        );
+    }
+    assert_eq!(
+        asked(&mut r, &mut t, &stamped(Planned::default(), 1, 4)),
+        1,
+        "taken without it: asked again"
+    );
+    assert_eq!(asked(&mut r, &mut t, &stamped(Planned::default(), 1, 5)), 0);
 }

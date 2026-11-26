@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { entryPrefetchScript } from './src/snapshot-prefetch.ts';
+import { worldListPrefetchScript } from './src/world-list-prefetch.ts';
 import { rewritePhasedHtml } from './src/phased-entry.ts';
 import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
@@ -26,7 +27,8 @@ function snapshotPrefetch(): Plugin {
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path)) return;
       if (!html.includes('</title>')) throw Error('index.html: no </title> to place the snapshot prefetch after');
-      return html.replace('</title>', `</title>\n    <script>${entryPrefetchScript(base, undefined, anonymousHello(true))}</script>`);
+      // 25 Nov: the homepage's world list leaves here too (src/world-list-prefetch.ts)
+      return html.replace('</title>', `</title>\n    <script>${entryPrefetchScript(base, undefined, anonymousHello(true))}${worldListPrefetchScript(base)}</script>`);
     },
   };
 }
@@ -40,7 +42,7 @@ function cdnPreconnect(): Plugin {
     apply: 'build',
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path) || process.env.SIM_ASSETS_CDN_ENABLED !== '1') return;
-      const origin = new URL(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art').origin;
+      const origin = new URL(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://cdn.soul.game').origin;
       if (!html.includes('</title>')) throw Error('index.html: no </title> to place the CDN preconnect after');
       return html.replace('</title>', `</title>\n    <link rel="preconnect" href="${origin}" crossorigin>`);
     },
@@ -322,9 +324,9 @@ export default defineConfig({
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',
     __SIM_V2_REPLICA_SERVED__: !process.env.V2_REPLICA_PKG,   // #4177: the replica is the front door's (replica-served.ts)
-    // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
+    // CDN4: god uploads via the pull-through Worker on cdn.soul.game/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
-    __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
+    __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://cdn.soul.game') },
   // #4153: the v2 stream reader's worker (src/v2-engine/source, copied from v2/web/src/source by X1) imports `replica` (the new engine's WASM)
   // and `cborg` (ours). #4177: the default build loads the replica the front door serves for a world routed to v2
   // (replica-served.ts), so no Rust build is needed and its bytes match the deployed v2; V2_REPLICA_PKG bundles a package.

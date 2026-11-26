@@ -9,6 +9,8 @@ import { dayIndexKey, headerKey, yearCountsKey } from './history-keys.ts';
 import { TICK_US, TICKS } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 import type { Seeked } from './history-worker.ts';
+import { solarPosition } from '../../../../mars/viewer/engine/env/sun.ts';
+import { setEquatorSun, sunSite } from '../sun-site.ts';
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000, BUNDLE = 60_000_000; // world µs; bundles of a minute
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
@@ -180,4 +182,23 @@ test('V6: hour=HH:MM draws the past in that light, as live: the chunks\' clock a
   const recorded = (await sun().chunks(from, to, 4)).map(at), lit = (await sun('21:30').chunks(from, to, 4)).map(at);
   assert.ok(recorded.every((d) => d && !d.includes('T21:30')), `the recorded clock without hour=: ${recorded[0]}`);
   assert.ok(lit.every((d, i) => d === `${recorded[i]!.slice(0, 11)}21:30${recorded[i]!.slice(16)}`), `with hour=21:30: ${lit[0]}`);
+});
+
+test('Eden daylight: a world at 15:25 in New York in late November draws daylight, its clock local (the zone\'s offset, field 62)', async () => {
+  (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/x/' };
+  // Eden's calendar as worldd serves it (serve.rs eden_sky): a 24 h day, America/New_York's offset in force (EST, -5 h),
+  // its origin set so the window opens at 2026-11-25 20:25 UTC, 15:25 in New York
+  const EST = -5 * 3_600_000_000, origin = Date.UTC(2026, 10, 25, 20, 25) * 1000 - (T0 + 30_000_000);
+  const sky = { 60: 86_400, 61: origin, 62: [[0, EST]] };
+  const { w } = fakeWorker(), post = w.postMessage.bind(w);
+  w.postMessage = (m) => { post(m); const on = w.onmessage!; w.onmessage = (e) => { (e.data.s.nodes[0] as { sky?: unknown }).sky = sky; on(e); w.onmessage = on; }; };
+  const from = (T0 + 30_000_000) / TICK_US, got = await new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' }).chunks(from, from + TICKS, 1);
+  const clock = (got[0].take as { finalState: { env: { datetime: string | null } } }).finalState.env.datetime!;
+  assert.match(clock, /^2026-11-25T15:25:\d\d\.\d{3}$/, `the chunk's clock is New York's, naive local: ${clock}`);
+  // as LiveWorld lights it (a naive local clock, as shiftIso reads it), with a real-time world's equator sun (sun-site.ts)
+  setEquatorSun(true);
+  try {
+    const { elevationDeg } = solarPosition(clock, ...sunSite(clock));
+    assert.ok(elevationDeg > 10, `the sun is up at 15:25 local: ${elevationDeg.toFixed(1)}°`);
+  } finally { setEquatorSun(false); }
 });

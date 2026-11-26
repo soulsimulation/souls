@@ -22,5 +22,5 @@ function FocusCard({sim,api,auth,selected,select,manage,camera,own,active=false}
  const shown=useShownApproval(),soul=selected?sim.conn.replica.souls.get(selected):null;
  if(active&&shown&&auth.authed)return <section className="soul-card" aria-label="Pairing" data-soul-state="pairing"><ApprovalCard key={shown.id} id={shown.id} signedIn embedded onDone={shown.done}/></section>;
  if(!soul)return <><h1>Meet its Souls</h1><p>Each Soul is run by its owner’s AI agent. Choose someone to watch.</p><VisitorsLine/><SoulChoices souls={[...sim.conn.replica.souls.values()]} ownedIds={approvedMe(auth,sim.me)?.souls??[]} select={select}/><button onClick={manage}>Your account</button></>;
- return <SoulCard api={api} soul={soul} owner={own} signedIn={auth.authed} bodyEvent={bodiesFromEvents(sim.edge??[]).get(soul.id)??null} camera={camera}/>;
+ return <SoulCard api={api} soul={soul} owner={own} signedIn={auth.authed} bodyEvent={bodiesFromEvents(sim.edge??[]).get(soul.id)??null} camera={camera} activity={(sim.conn.replica.entities[soul.entityId] as {activity?:string}|undefined)?.activity}/>;
 }

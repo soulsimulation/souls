@@ -7,3 +7,7 @@ export function godAgentState(paired: boolean, inbox: { connected: boolean } | n
   const words = live === 'on' ? 'agent connected' : live === 'off' ? 'agent not connected' : inboxError ? 'agent status unavailable' : 'agent status loading';
   return { live, words: pending ? `${words}, ${pending} pairing request${pending === 1 ? '' : 's'}` : words };
 }
+/** Whether the owner's agent is paired: the old engine's status counts its agents; on a world the new engine runs only
+ *  the creator's mailbox knows, and says so while the agent is connected (#5006 rows 2 and 5). */
+export const agentPaired = (agents: number | undefined, inbox: { v2?: true; connected: boolean } | null): boolean =>
+  (agents ?? 0) > 0 || (!!inbox?.v2 && inbox.connected);

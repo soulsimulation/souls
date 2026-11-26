@@ -95,9 +95,14 @@ struct Snap {
     no_way: bool,
     /// The thing every move aims at, when set (worldd's thing argument).
     aimed: Option<Id>,
+    /// Every thing is within a hand's reach of every body, when set (worldd's `Sight::within_reach`).
+    within: bool,
 }
 
 impl Geometry for Snap {
+    fn within_reach(&self, _: Id, _: Id) -> Option<bool> {
+        self.within.then_some(true)
+    }
     fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
         if self.defer_walk {
             replica::host::WalkPlan::Pending
@@ -1626,6 +1631,72 @@ fn e13_a_body_in_a_seat_of_the_thing_acts_without_an_approach_walk() {
     }
 }
 
+/// #4143: a gesture whose move claims the legs (`content/moves/stretch.json`, `slump.json`) on a seated body. The
+/// client's form rules say yes (the form has no posture need); the seat's hold on the legs refused the move
+/// `resource-held`. A move made from a seat (`Move::seated`) leaves its legs to the seat: the run ends `done` and the
+/// body is still seated. Any other move that claims the legs (a jump) is still refused `resource-held` by the seat's
+/// hold, as a gateway sit writes no posture for the form's posture need to refuse it by.
+#[test]
+fn a_seated_stretch_is_made_from_the_seat_never_refused_resource_held() {
+    use replica::bodies::Want;
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, _) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // A stretch, made from a seat (`seated`), and a jump, not: hand moves that also claim and block the legs,
+    // reaching anywhere the test's reach says (5 m).
+    let press = b
+        .library
+        .iter()
+        .find(|m| m.name.as_str() == "souls:press")
+        .expect("press")
+        .clone();
+    for (n, seated) in [("test:stretch", true), ("test:jump", false)] {
+        let mut mv = press.clone();
+        mv.name = Name::new(n).expect("a name");
+        mv.claims.push(Want::All(Class::Locomotion));
+        mv.blocks.push(Class::Locomotion);
+        mv.reach = 20_000_000;
+        mv.seated = seated;
+        b.library.push(mv);
+    }
+    b.snap.far = true;
+    for (k, (n, how)) in [("test:jump", "resource-held"), ("test:stretch", "done")]
+        .into_iter()
+        .enumerate()
+    {
+        let mv = Step::Move {
+            name: Name::new(n).expect("a name"),
+            at: None,
+            on: None,
+            repeat: None,
+        };
+        let i = intent(body, 1 + k as u64);
+        b.steps(body, body, vec![mv], i, Limits::default())
+            .expect("started");
+        b.run(30_000_000);
+        let e = b.forms.ended.pop().expect("ended");
+        let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+        println!(
+            "#4143: seated, {n} ended {}, body in {held:?}",
+            e.how.as_str()
+        );
+        assert_eq!(e.how.as_str(), how, "{n}");
+        assert_eq!(held, Some(chair), "{n}: still seated");
+    }
+}
+
 /// 0.135 E17: a form's own `walk_to` while the body is in a slot of the thing. A form that leaves the body there (a
 /// phone box's `open` from inside: no rise, no sit) is done from inside: its own walk is dropped and the run ends
 /// `done` with the body still in the slot, never refused `resource-held`. A form that moves the actor starts with the
@@ -1691,6 +1762,172 @@ fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
         (p.position.x, p.position.z),
         (stand.x, stand.z),
         "at the stand point"
+    );
+}
+
+/// Eden indoor audit (26 Nov): a body seated in a seat of one thing, asked a form at another thing that walks (the
+/// lamp across the room, asked from the sofa), rises from its seat first and does it, as a person gets up to go; it
+/// was refused `resource-held`, the seat holding its legs.
+#[test]
+fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // A lamp 2 m off, with its switch: the form walks to the switch, then waits as its move would.
+    let other = b.mint.mint().expect("id");
+    let at = Vec3::new(stand.x, stand.y, stand.z + 2_000_000);
+    b.snap.things.insert(
+        other,
+        (at, BTreeMap::from([("switch".to_owned(), Vec3::ZERO)])),
+    );
+    let walk = Step::WalkTo {
+        point: Name::new("switch").expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        other,
+        vec![walk, Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(
+        e.how.as_str(),
+        "done",
+        "risen and walked, not resource-held"
+    );
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        None,
+        "out of the chair"
+    );
+    assert!(
+        matches!(
+            b.c.body(body).expect("a body").pose.support,
+            replica::pose::Support::Surface { .. }
+        ),
+        "on its feet"
+    );
+}
+
+/// Trial 0.137: a seated body asked a form at another thing (a book stack's `take`, 3 m off) rises first by itself,
+/// out of its seat by the rise move, and then walks: never refused `resource-held` by its seat's hold on its legs.
+#[test]
+fn trial_0137_a_seated_bodys_form_at_another_thing_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    let books = b.mint.mint().expect("id");
+    let at = Vec3::new(stand.x + 3_000_000, stand.y, stand.z);
+    b.snap.things.insert(books, (at, BTreeMap::new()));
+    let walk = Step::WalkTo {
+        point: Name::new("books").expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        books,
+        vec![walk, Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+    println!(
+        "trial 0.137: seated, a walk to another thing ended {}, body in {held:?}",
+        e.how.as_str()
+    );
+    assert_eq!(e.how.as_str(), "done", "not resource-held");
+    assert_eq!(held, None, "out of its place");
+    let p = b.c.body(body).expect("a body").pose;
+    assert!(
+        matches!(p.support, replica::pose::Support::Surface { .. }),
+        "on its feet"
+    );
+}
+
+/// Review of the rise-first change: a bare take of a thing already within reach of the seat (a cup by the chair) is
+/// done from the seat, its approach skipped by the runner, so no rise is added: the body is still seated after it.
+#[test]
+fn a_seated_body_takes_a_thing_within_reach_from_its_seat() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    let other = b.mint.mint().expect("id");
+    b.snap.things.insert(
+        other,
+        (Vec3::new(stand.x, stand.y, stand.z), BTreeMap::new()),
+    );
+    b.snap.within = true;
+    let approach = Step::WalkTo {
+        point: Name::new(skills::form_runner::TO_THING).expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        other,
+        vec![approach, Step::Hand],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done");
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        Some(chair),
+        "taken without rising, still in the chair"
     );
 }
 
@@ -2408,6 +2645,7 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
     b.until_moving(body, 1);
     let sent = b.now;
     let take = bind(&entry, &form).expect("binds");
+    // Asked mid-rise, the take is decided when it starts: standing by then, it walks with no rise first (#4187).
     let span = super::span(&take, &limits);
     let Asked::Started(new) = b
         .steps(body, thing, take, intent(body, 1), limits)
@@ -2452,6 +2690,177 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
         e.at > sent + 10_000_000,
         "it ran past the 10 s an act gets on arrival"
     );
+}
+
+/// A node of `entry`'s points at `at` in the bench's tree, turned `yaw_mdeg` (C13), as a world's thing stands: the
+/// tree's place is what a run's points are turned by.
+fn turned_thing(b: &mut Bench, entry: &json::Value, at: Vec3, yaw_mdeg: i64) -> Id {
+    use replica::effects::{ChangeRec, Header, Rest, schema_hash};
+    use replica::encode::encode;
+    use replica::ids::{Hash, Purpose};
+    use replica::pose::{Pose, Support};
+    use replica::world_model::{Audience, plain};
+    let kinds = parse_kinds(KINDS).expect("kinds");
+    let kind = kinds
+        .keys()
+        .find(|k| plain(k) == "souls:crate")
+        .expect("a kind")
+        .clone();
+    let root = b.tree.node(b.tree.root()).expect("the root").id();
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/forms-turned/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(root.scope().0.to_vec())),
+        (4, root.to_value()),
+        (5, Value::Uint(0)),
+        (
+            6,
+            Value::Array(
+                kinds
+                    .keys()
+                    .map(|k| Value::Text(Name::new(k).expect("a name")))
+                    .collect(),
+            ),
+        ),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).expect("bytes")).expect("a header");
+    let node = b.mint.mint().expect("id");
+    let create = Change::Create {
+        node,
+        kind: Name::new(&kind).expect("a name"),
+        pose: Pose {
+            frame: Frame {
+                node: root,
+                slot: None,
+            },
+            position: at,
+            orientation: Quat::from_yaw_mdeg(yaw_mdeg).expect("a turn"),
+            support: Support::Surface {
+                surface: root,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let entry_ = (
+        root,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: create,
+            rest: Rest::new(),
+        }]),
+    );
+    let part = crate::setdown::part(
+        &header,
+        b.tree.next(),
+        b.now,
+        root,
+        replica::effects::Cause::World,
+        vec![entry_],
+    )
+    .expect("a part");
+    b.tree.apply(&header, &part).expect("the thing is placed");
+    b.snap.things.insert(node, (at, points(entry)));
+    node
+}
+
+/// #4187 review: an act that waits behind its body's seat step is turned with its thing once, when it starts, as an
+/// act started at once is. A doorbell turned 90 degrees (C13) is rung from its turned stand point; asked mid-sit or
+/// mid-rise, the waiting ring was turned again when it started (180 degrees) and walked to the far side. Its walk now
+/// aims where the same ring started at once from standing aims, and the body arrives there.
+#[test]
+fn i4187_a_waiting_act_is_turned_with_its_thing_once() {
+    use skills::form_runner::Step;
+    let (entry, form) = entries().remove(0);
+    let yaw = 90_000;
+    let turned = |p: Vec3| {
+        Quat::from_yaw_mdeg(yaw)
+            .expect("a turn")
+            .rotate(p)
+            .expect("turns")
+    };
+    let stand = |b: &Bench, run| match b.forms.runs.get(&run).and_then(|fr| fr.runner.step()) {
+        Some(Step::WalkTo { at, .. }) => Some(*at),
+        _ => None,
+    };
+    let mut seen = Vec::new();
+    for case in ["at once", "mid-sit", "mid-rise"] {
+        let (mut b, body, chair, slot, at) = seat_bench();
+        let bell_at = Vec3::new(at.x, 0, at.z + 4_000_000);
+        let bell = turned_thing(&mut b, &entry, bell_at, yaw);
+        let sit = Step::Sit {
+            slot,
+            lie: false,
+            stand: false,
+            on: None,
+        };
+        let limits = Limits {
+            walk: 60_000_000,
+            ..Limits::default()
+        };
+        match case {
+            "mid-sit" => {
+                b.steps(
+                    body,
+                    chair,
+                    vec![sit, Step::Wait(500_000)],
+                    intent(body, 0),
+                    limits,
+                )
+                .expect("started");
+                b.until_moving(body, 0);
+            }
+            "mid-rise" => {
+                b.steps(body, chair, vec![sit, Step::Rise], intent(body, 0), limits)
+                    .expect("started");
+                b.until_moving(body, 1);
+            }
+            _ => {}
+        }
+        let steps = bind(&entry, &form).expect("binds");
+        let Asked::Started(run) = b
+            .steps(body, bell, steps, intent(body, 1), limits)
+            .expect("accepted")
+        else {
+            panic!("a run number")
+        };
+        assert_eq!(
+            b.forms.due(run).is_none(),
+            case != "at once",
+            "{case}: waits behind the sit or rise"
+        );
+        while stand(&b, run).is_none() && b.now < 30_000_000 {
+            b.tick();
+        }
+        let goal = stand(&b, run).expect("the ring walks to its stand point");
+        while stand(&b, run).is_some() && b.now < 60_000_000 {
+            b.tick();
+        }
+        let p = b.c.body(body).expect("a body").pose.position;
+        let off = (i128::from(p.x - bell_at.x - goal.x).pow(2)
+            + i128::from(p.z - bell_at.z - goal.z).pow(2))
+        .isqrt();
+        println!(
+            "#4187 turned once, {case}: the ring's walk aims at {goal:?} from the bell; arrived {off} µm from it"
+        );
+        seen.push((case, goal, off));
+    }
+    let want = turned(points(&entry)["stand"]);
+    for (case, goal, off) in seen {
+        assert_eq!(
+            goal, want,
+            "{case}: the stand point turned once with the bell"
+        );
+        assert!(
+            off < 100_000,
+            "{case}: arrived at the turned stand point, {off} µm off"
+        );
+    }
 }
 
 /// 0.132 A1-5: a seat a thing's form takes writes the body's `posture` field (the slot's `sit`, or `lie`), and its
@@ -2824,7 +3233,8 @@ fn i4575_a_sit_and_a_pick_up_of_the_bench_one_holds_it_the_other_is_refused() {
 }
 
 /// #4575, the rule per form, on content's own entries as bound: a bench's sit and a locomotive's board take a seat
-/// and reserve only it; a locomotive's drive also sets its fields, so it reserves the whole thing.
+/// and reserve only it; so do a locomotive's drive and every ride's `ride`, which also set the thing's `under_way`, so
+/// one rider never holds a whole ride (a balloon's basket, a big wheel, a cable car, a carousel, a sailboat).
 #[test]
 fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
     use skills::form_runner::{Arg, Args, bind_effects_args, bind_with};
@@ -2835,7 +3245,13 @@ fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
     for (file, form, place, whole) in [
         ("seating/bench.json", "sit", "left", false),
         ("vehicles/locomotive.json", "board", "fireman", false),
-        ("vehicles/locomotive.json", "drive", "driver", true),
+        ("vehicles/locomotive.json", "drive", "driver", false),
+        ("rides/balloon.json", "ride", "rider_2", false),
+        ("rides/balloon.json", "board", "rider_3", false),
+        ("rides/big_wheel.json", "ride", "gondola_1", false),
+        ("rides/cable_car.json", "ride", "red_cabin", false),
+        ("rides/carousel.json", "ride", "horse_1", false),
+        ("vehicles/sailboat.json", "sail", "port", false),
     ] {
         let e = entry(file);
         // The form's one slot argument, by the name its entry gives it.
@@ -2879,18 +3295,14 @@ fn i4575_e14_a_whole_thing_form_at_a_lecture_is_refused_while_it_is_attended() {
             Step::Wait(500_000),
         ]
     };
+    // The finish, as a form that does something at the lecture (a hand step there): a bare wait holds nothing.
+    let finish_steps = || vec![Step::Hand, Step::Wait(300_000)];
     let limits = Limits::default();
     b.steps(ada, lecture, attend(left), intent(ada, 0), limits)
         .expect("Ada's attend starts");
     assert_eq!(b.forms.holder(lecture), Some(ada));
     let finish = b
-        .steps(
-            bea,
-            lecture,
-            vec![Step::Wait(300_000)],
-            intent(bea, 0),
-            limits,
-        )
+        .steps(bea, lecture, finish_steps(), intent(bea, 0), limits)
         .expect_err("refused");
     println!(
         "#4575 E14 finish while attended: {}: {}",
@@ -2907,13 +3319,7 @@ fn i4575_e14_a_whole_thing_form_at_a_lecture_is_refused_while_it_is_attended() {
         b.forms.ended
     );
     assert_eq!(b.forms.holder(lecture), None, "nothing held after");
-    let later = b.steps(
-        bea,
-        lecture,
-        vec![Step::Wait(300_000)],
-        intent(bea, 2),
-        limits,
-    );
+    let later = b.steps(bea, lecture, finish_steps(), intent(bea, 2), limits);
     assert!(matches!(later, Ok(Asked::Started(_))), "{later:?}");
 }
 
@@ -3024,4 +3430,38 @@ fn a_forms_walk_ends_facing_the_way_its_stand_point_says() {
             f.z
         );
     }
+}
+
+/// A form that only goes to its thing and waits there ([`super::only_there`]: Eden's campfire `warm`, a bridge's
+/// `cross`) holds nothing. Seen on a served Eden: while one Soul warmed at the campfire, three asked to sit on its logs
+/// were refused `thing-reserved`. Here, while Ada's wait at the bench runs, the bench is held by nobody; Bea's wait
+/// and then her sit on it start, not refused (her sit replaces her wait, which ends `left`); Ada's wait and Bea's sit
+/// end `done`, Bea in her seat.
+#[test]
+fn a_form_that_only_waits_at_a_thing_holds_nothing() {
+    use skills::form_runner::Step;
+    let (mut b, bench, [_, right], ada, bea) = two_seat_bench();
+    let limits = Limits::default();
+    let wait = || vec![Step::Wait(3_000_000)];
+    let warm = b.steps(ada, bench, wait(), intent(ada, 0), limits);
+    assert!(matches!(warm, Ok(Asked::Started(_))), "{warm:?}");
+    assert_eq!(b.forms.holder(bench), None, "a wait at it holds nothing");
+    let also = b.steps(bea, bench, wait(), intent(bea, 0), limits);
+    assert!(matches!(also, Ok(Asked::Started(_))), "{also:?}");
+    let sit = b.steps(bea, bench, sit_at(right), intent(bea, 1), limits);
+    println!("only there: Ada's wait {warm:?}; Bea's wait {also:?}, then her sit {sit:?}");
+    assert!(matches!(sit, Ok(Asked::Started(_))), "{sit:?}");
+    b.run(30_000_000);
+    let hows: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| (e.body, e.how.as_str().to_owned()))
+        .collect();
+    println!("only there: ended {hows:?}");
+    assert!(hows.contains(&(ada, "done".to_owned())), "{hows:?}");
+    assert!(hows.contains(&(bea, "done".to_owned())), "{hows:?}");
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.holder_in(bench, right), Some(bea));
+    b.clean();
 }

@@ -17,7 +17,8 @@ use replica::rules::json::{Value, parse};
 use replica::time::Micros;
 
 use skills::form_runner::{
-    Arg, Args, Effect, Limits, Next, Runner, Step, Woke, bind_effects_args, bind_with, check,
+    Amount, Arg, Args, Effect, Limits, Next, Of, Runner, Step, Woke, bind_effects_args, bind_with,
+    check,
 };
 
 const ENTRY: &str = r#"{
@@ -231,7 +232,11 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
         }]
     ));
     let grab = bind_with(&e, "grab", &Args::new()).expect("binds");
-    assert_eq!(grab, vec![Step::Hand]);
+    assert_eq!(
+        &grab[1..],
+        &[Step::Hand],
+        "after the walk to its thing (#4086)"
+    );
     // A hand step with no move: its contact, the effect's instant, is its start, and the run ends done.
     let mut h = Fake {
         places: BTreeMap::from([(node(), Vec3::ZERO)]),
@@ -239,7 +244,8 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
         reads: RefCell::default(),
     };
     let mut r = Runner::new(grab, node(), Limits::default());
-    let next = r.wake(&mut h, Woke::Start);
+    assert!(matches!(r.wake(&mut h, Woke::Start), Next::Walk(_)));
+    let next = r.wake(&mut h, Woke::Walked(replica::host::Progress::Done));
     assert!(matches!(next, Next::End(n) if n.as_str() == "done"));
     assert!(r.take_effect(), "the effect's instant came");
     assert!(!r.take_effect(), "once");
@@ -330,6 +336,54 @@ fn a3_a_point_the_kind_does_not_declare_is_refused_at_import() {
     let chosen = ENTRY.replace(r#""of": ["left", "right"]"#, r#""of": ["left", "top"]"#);
     let r = check(&parse(&chosen).expect("JSON")).expect_err("refused");
     assert_eq!((r.name, r.detail.as_str()), ("point-unknown", "tap: top"));
+}
+
+/// Content's transfers by a count argument bind as that number (#4103): the tea caddy's blend of one green and no
+/// mint (the reference case `food_tea_caddy.json` `rt3`, a count of 0 admitted), and the two between-thing transfers
+/// the count argument newly lets bind, the pitcher's `pour` and the ash hearth's `clear_ash`.
+#[test]
+fn content_transfers_by_a_count_argument_bind_as_that_number() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let load =
+        |f: &str| parse(&std::fs::read_to_string(root.join(f)).expect("read")).expect("JSON");
+    let amounts = |file: &str, form: &str, a: &[(&str, Arg)]| -> Vec<(Of, Of, Amount)> {
+        bind_effects_args(&load(file), form, &args(a))
+            .expect("binds")
+            .into_iter()
+            .filter_map(|e| match e {
+                Effect::Transfer {
+                    from, into, amount, ..
+                } => Some((from, into, amount)),
+                _ => None,
+            })
+            .collect()
+    };
+    let blend = [("green", Arg::Int(1)), ("mint", Arg::Int(0))];
+    assert_eq!(
+        amounts("food/tea_caddy.json", "blend", &blend),
+        vec![
+            (Of::This, Of::This, Amount::Units(1)),
+            (Of::This, Of::This, Amount::Units(0))
+        ]
+    );
+    let pour = [("into", Arg::Node(other())), ("amount", Arg::Int(2))];
+    assert_eq!(
+        amounts("water/pitcher.json", "pour", &pour),
+        vec![(Of::This, Of::Node(other()), Amount::Units(2))]
+    );
+    let clear = [("bucket", Arg::Node(other())), ("amount", Arg::Int(3))];
+    assert_eq!(
+        amounts("camp/ash_hearth.json", "clear_ash", &clear),
+        vec![(Of::This, Of::Node(other()), Amount::Units(3))]
+    );
+    // A negative count is no amount.
+    let less = [("green", Arg::Int(-1)), ("mint", Arg::Int(0))];
+    assert_eq!(
+        bind_effects_args(&load("food/tea_caddy.json"), "blend", &args(&less))
+            .expect_err("refused")
+            .name,
+        "effect-malformed"
+    );
 }
 
 #[test]

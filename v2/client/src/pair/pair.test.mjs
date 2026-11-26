@@ -104,7 +104,7 @@ test('A1, A2, A3: from an empty folder the owner approves once, the daemon acts,
   const shown = await browser('/v1/pair/show', { code: asked.code, test_person: 'owner' });
   assert.equal(shown.status, 200);
   assert.deepEqual({ ...shown.body, age: typeof shown.body.age },
-    { device: 'test machine', label: 'test agent', soul: null, former: null, code: asked.code, age: 'number', scope: 'soul', force: false, connected: null });
+    { device: 'test machine', label: 'test agent', soul: null, former: null, code: asked.code, age: 'number', scope: 'soul', force: false, connected: null, name: null });
   await sleep(200);
   assert.equal(readdirSync(folder).includes('.souls'), false, 'nothing paired before the approval');
 
@@ -219,4 +219,26 @@ test('A5: the daemon polls every interval and adds 5 s on "slow_down"', async ()
     assert.equal(out.soul, `s_${'ab'.repeat(16)}-0`);
   } finally { server.close(); }
   assert.deepEqual(waits, [5, 5, 10, 10, 15]);
+});
+
+test('trial of 0.137: a new Soul\'s --name goes with its request, so the approval card can show it; a reconnect sends none', async () => {
+  const asked = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/v1/pair/request') { asked.push(JSON.parse(body)); return res.end(JSON.stringify({ code: 'BCDF-GHJK', link: 'x', interval: 5 })); }
+      res.end(JSON.stringify({ refused: 'declined' }));
+    });
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const args = { home: join(dir, 'named', '.souls'), directory: `http://127.0.0.1:${server.address().port}`, world: 'w', gateway: 'ws://x', device: 'd', label: 'l', unit: 1, sleep: async () => {} };
+    await assert.rejects(pair({ ...args, name: 'Fern' }), { code: 'declined' });
+    await assert.rejects(pair({ ...args, soul: `soul-${'ab'.repeat(16)}-0`, name: 'Fern' }), { code: 'declined' });
+  } finally { server.close(); }
+  assert.equal(asked[0].name, 'Fern');
+  assert.equal(asked[0].new, true);
+  assert.equal('name' in asked[1], false, 'a reconnect names no new Soul');
 });

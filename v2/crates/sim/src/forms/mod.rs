@@ -26,12 +26,14 @@
 //!
 //! - **Reserved, and ended in one entry** (F3, #2768). Accepting a form writes one entry at commit, in arrival order:
 //!   a `souls:form-started` event and, when the form is done at a thing, the reservation, a `souls:reserves` link from
-//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`] reserves nothing. A
+//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`], or one that only
+//!   walks to its thing and waits there ([`only_there`]: a warm by a fire, a bridge's cross), reserves nothing. A
 //!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. A form
 //!   that only takes seats (#4575, [`slots_taken`]: a bench's `sit`, a boat's `board`) holds those seats and not its
 //!   whole thing, so two Souls sit on one bench at once; the second racing for the same seat is refused
-//!   `place-taken`, and a form that holds the whole thing (a carry, a vehicle's drive) and a seat's run refuse each
-//!   other `thing-reserved`. The log's reservation link is the same either way. However
+//!   `place-taken`, and a form that holds the whole thing (a carry) and a seat's run refuse each other
+//!   `thing-reserved`. A seat's form that also sets a field of its thing (a ride's `under_way`) still holds only its
+//!   seats, so four Souls board one balloon at once. The log's reservation link is the same either way. However
 //!   a run ends, one entry removes the reservation and names the ending (a `souls:form-ended` event with its name),
 //!   and the world ends the run's walk, move and timers with it: no path frees one alone. Ending never undoes an
 //!   effect.
@@ -98,6 +100,9 @@
 
 pub mod amounts;
 mod links;
+pub mod stock;
+
+pub use stock::{Stocked, Stocks};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -126,7 +131,7 @@ use crate::timers::{DueList, Timer};
 /// its kind: an entry naming a kind's plain name is refused (`name-not-pinned`). `None` for any other effect, a kind
 /// already pinned, or one the header does not pin (its create is then refused by name, as before).
 fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_runner::Effect> {
-    let form_runner::Effect::Make { kind, into } = e else {
+    let form_runner::Effect::Make { kind, into, set } = e else {
         return None;
     };
     if kind.as_str().contains('@') {
@@ -139,6 +144,7 @@ fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_run
     Some(form_runner::Effect::Make {
         kind: pinned.clone(),
         into: *into,
+        set: set.clone(),
     })
 }
 
@@ -506,10 +512,12 @@ fn arrival<G: Geometry, R>(w: &World<'_, G, R>, fr: &FormRun) -> Option<replica:
 /// The seats a form done at `node` reserves in place of its whole thing (#4575), read from the form's entry as bound:
 /// each `sit` or `lie` step's slot, and the standing slot a `reparent` of the actor hands it into, on the thing the
 /// step names (E14) or `node`. A form reserves only those when taking them is all it does to the thing: every step a
-/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own. Any other step or
-/// effect (a move or a hand at the thing, a field set, an amount, a take or put, a make or removal, a timer, an unlink
-/// of everyone's links) or a long form's stages reserves the whole thing, as does a form that takes no seat: a
-/// vehicle's drive sets its fields, a carry takes it into a hand. Empty for those.
+/// walk, a seat taken or left, or a wait, and every effect a link or unlink of the actor's own or a field of the thing
+/// set to a value (a ride's `under_way`: riders who set it off together all set it so; a balloon's `ride` holds its
+/// rider's place in the basket, never the basket). Any other step or effect (a move or a hand at the thing, a field
+/// moved by an amount, an amount, a take or put, a make or removal, a timer, an unlink of everyone's links) or a long
+/// form's stages reserves the whole thing, as does a form that takes no seat: a carry takes it into a hand. Empty for
+/// those.
 fn slots_taken(
     node: Id,
     steps: &[Step],
@@ -524,9 +532,12 @@ fn slots_taken(
                 Step::WalkTo { .. } | Step::Sit { .. } | Step::Rise | Step::Wait(_)
             )
         })
-        && effects
-            .iter()
-            .all(|e| matches!(e, E::Link { .. } | E::Unlink { all: false, .. }));
+        && effects.iter().all(|e| {
+            matches!(
+                e,
+                E::Link { .. } | E::Unlink { all: false, .. } | E::Set { .. }
+            )
+        });
     let mut taken: Vec<(Id, u64)> = steps
         .iter()
         .filter_map(|s| match s {
@@ -538,6 +549,18 @@ fn slots_taken(
     taken.sort_unstable();
     taken.dedup();
     taken
+}
+
+/// Whether a form with `steps` and `effects` only goes to its thing and stays there a while (a warm by a campfire, a
+/// bridge's cross, a building's walk to a room): every step a walk or a wait, no effect and no long form's stages. It
+/// moves, seats and changes nothing of the thing, so it reserves nothing there: several Souls warm at one fire at once,
+/// and sit on its logs while others warm. Any move, seat, hand or change of the thing reserves as before.
+fn only_there(steps: &[Step], effects: &[form_runner::Effect], long: bool) -> bool {
+    !long
+        && effects.is_empty()
+        && steps
+            .iter()
+            .all(|s| matches!(s, Step::WalkTo { .. } | Step::Wait(_)))
 }
 
 /// Whether `step` changes the body's posture (a seat taken or left, a ground posture): a run in one is let finish it.
@@ -580,6 +603,8 @@ pub struct Forms {
     shared: BTreeSet<Id>,
     /// The kinds' amount fields (F4).
     limits: amounts::Limits,
+    /// Every kind's state fields, which a made thing's fields are read against (#4104).
+    defs: amounts::Defs,
     /// The zone's header, for B4's transfer.
     header: Option<Header>,
     /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
@@ -599,6 +624,9 @@ pub struct Forms {
     /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
     /// (E14, [`other_slots`]).
     slots_of: BTreeMap<String, BTreeSet<u64>>,
+    /// The world's stocked containers (#4837): a `create` of a stock's kind at one gives the made thing its carried
+    /// fields ([`Forms::stocks`]).
+    stocks: std::sync::Arc<Stocks>,
 }
 
 /// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
@@ -960,6 +988,72 @@ impl Forms {
         self.by_body.contains_key(&body) || self.waiting.contains_key(&body)
     }
 
+    /// Whether form `form` of `node`'s kind `entry` is for those its `who` link names (`who: {link: t}`), takes down
+    /// the actor's own link of that type, and `body`'s own run in progress is on `node` and links it so: a swing
+    /// walked to and not yet sat in, whose `get_off` is the swinger's. Who may lets that body through ([`Forms::may_or_linking`]): its new act ends the run as any new act
+    /// does, so asking to get off on the way stops the swing instead of being refused while it goes on.
+    pub fn linking(
+        &self,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+    ) -> bool {
+        let f = entry.get("forms").and_then(|fs| fs.get(form));
+        let (Some(Who::Link(t)), Some(kind)) = (
+            f.and_then(Who::read),
+            entry.get("kind").and_then(|k| k.str()),
+        ) else {
+            return false;
+        };
+        // Only a way off: a form that takes down the actor's own link of that type (get_off, get_up, leave). Any
+        // other form of those the link names (a see-saw's push, a board's page) stays theirs alone.
+        let unlinks = f
+            .and_then(|f| f.get("effects"))
+            .and_then(|e| e.arr())
+            .is_some_and(|es| {
+                es.iter().any(|e| {
+                    e.get("change").and_then(|c| c.str()) == Some("unlink")
+                        && e.get("link").and_then(|l| l.str()) == Some(t.as_str())
+                        && e.get("from").and_then(|a| a.str()) == Some("actor")
+                })
+            });
+        if !unlinks {
+            return false;
+        }
+        let ty = audience::link_type(kind, &t);
+        self.by_body
+            .get(&body)
+            .and_then(|run| self.runs.get(run))
+            .is_some_and(|fr| {
+                fr.node == node
+                    && fr.effects.iter().any(|e| {
+                        matches!(e, form_runner::Effect::Link { ty: l, .. } if l.as_str() == ty)
+                    })
+            })
+    }
+
+    /// [`may`], or yes for a body whose own run on `node` links it as the form's `who` asks ([`Forms::linking`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn may_or_linking(
+        &self,
+        tree: &Tree,
+        audiences: &BTreeMap<Id, BTreeSet<Id>>,
+        names: &dyn Fn(Id) -> Option<String>,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+    ) -> Result<(), Refusal> {
+        may(tree, audiences, names, body, node, entry, form).or_else(|r| {
+            if r.name == "not-permitted" && self.linking(body, node, entry, form) {
+                Ok(())
+            } else {
+                Err(r)
+            }
+        })
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
@@ -974,6 +1068,23 @@ impl Forms {
             .and_then(|run| self.runs.get(run))
             .and_then(|fr| fr.runner.step())
             .is_some_and(|s| matches!(s, Step::Move { .. } | Step::Hand))
+    }
+
+    /// Whether `body`'s run is in a repeated move (a dance for a while, or held until the Soul's next act).
+    pub fn in_repeat(&self, body: Id) -> bool {
+        self.by_body
+            .get(&body)
+            .and_then(|run| self.runs.get(run))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(|s| {
+                matches!(
+                    s,
+                    Step::Move {
+                        repeat: Some(_),
+                        ..
+                    }
+                )
+            })
     }
 
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends
@@ -1291,6 +1402,13 @@ impl Forms {
                 detail: replica::world_model::show(body),
             });
         }
+        // An act that waits behind its run's seat step (below) keeps its steps as asked: it is turned and fitted to the
+        // body's place once, when it starts and is opened again, never twice.
+        let asked = running
+            .and_then(|old| self.runs.get(&old))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(posture)
+            .then(|| steps.clone());
         // A turned thing's points are walked to turned with it (C13, #3440).
         let mut steps = steps;
         if node != body
@@ -1319,6 +1437,37 @@ impl Forms {
                 _ => true,
             });
         }
+        // A body held by a seat, a bed or a standing slot of another thing, asked to do a form here that walks (the
+        // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
+        // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
+        // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
+        // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
+        // waits behind that run and is decided when it starts (#4187): after a sit it rises first, after a rise it
+        // walks from where it stands. A form with a rise, a sit or a settle of its own keeps its steps (a sit at a seat
+        // walks there by itself), and a walk the runner would skip (an approach to a hand step's thing already within
+        // reach, a cup by the chair, #4086) needs no rise, so that take is made from the seat.
+        let held_in = w.places.as_ref().and_then(|p| {
+            p.slots
+                .held_by(body)
+                .filter(|s| *s != node && !p.slots.moves(*s))
+        });
+        let rises_elsewhere = node != body
+            && !in_its_slot
+            && held_in.is_some()
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
+            && steps.iter().enumerate().any(|(k, s)| match s {
+                Step::WalkTo { approach, .. } => {
+                    !(*approach
+                        && matches!(steps.get(k + 1), Some(Step::Hand))
+                        && w.geometry.within_reach(body, node) == Some(true))
+                }
+                _ => false,
+            });
+        if rises_elsewhere {
+            steps.insert(0, Step::Rise);
+        }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
         // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
         // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
@@ -1327,7 +1476,7 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
-        let rises_first = in_its_slot && !stays;
+        let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
             if let form_runner::Effect::Unlink { ty, .. } = e {
@@ -1354,7 +1503,9 @@ impl Forms {
                 }
             }
         }
-        let reserves = node != body && !self.shared.contains(&node);
+        let reserves = node != body
+            && !self.shared.contains(&node)
+            && !only_there(&steps, &effects, long.is_some());
         // A form that only takes seats reserves those seats, not its whole thing (#4575): two Souls sit on one bench
         // at once, while a form that moves, carries or changes the thing holds all of it.
         let taken = match reserves {
@@ -1424,12 +1575,7 @@ impl Forms {
             // A seat taken or left, or a ground posture, runs to its end first, as a cancel lets it: the body is never
             // left half seated nor moved off a legal path. The new act waits, numbered now, and starts as the old run
             // is left after that step (`wake`); a later act takes its place, and the one it replaces ends `left`.
-            if self
-                .runs
-                .get(&old)
-                .and_then(|fr| fr.runner.step())
-                .is_some_and(posture)
-            {
+            if let Some(steps) = asked {
                 self.last += 1;
                 let run = self.last;
                 let waiting = Waiting {
@@ -1573,7 +1719,7 @@ impl Forms {
         let known =
             self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
         if !known {
-            may(w.tree, audiences, names, body, node, entry, form)?;
+            self.may_or_linking(w.tree, audiences, names, body, node, entry, form)?;
             other_slots(w, &self.slots_of, body, entry, form, args)?;
         }
         match bound {
@@ -1595,10 +1741,12 @@ impl Forms {
         other_slots(w, &self.slots_of, body, entry, form, args)
     }
 
-    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
-    /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
+    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read, and every
+    /// state field, which a made thing's fields are read against (#4104). Called after [`Forms::new`] or
+    /// [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.defs = amounts::defs(kinds);
         self.postures = kinds
             .admits()
             .keys()
@@ -1679,6 +1827,12 @@ impl Forms {
         self.header = Some(header);
     }
 
+    /// The world's stocked containers (#4837, [`stock`]): a `create` of a stock's kind at one of them gives the made
+    /// thing the fields of the row at the top of its pile. Called after [`Forms::new`] or [`Forms::recover`].
+    pub fn stocks(&mut self, stocks: std::sync::Arc<Stocks>) {
+        self.stocks = stocks;
+    }
+
     /// Writes run `run`'s effects at `at`, but no key already written or waiting to be. Each effect's entries, worked
     /// out against the tree and what is already in [`Forms::out`], go in order, the first carrying its key; they are
     /// one part. All of the run's effects or none: a refusal takes back what this call wrote and is returned.
@@ -1733,6 +1887,7 @@ impl Forms {
                     out: &self.out,
                 },
                 limits: &self.limits,
+                defs: &self.defs,
                 header: self.header.as_ref(),
                 body: fr.body,
                 soul: match fr.intent.actor {
@@ -1743,6 +1898,7 @@ impl Forms {
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
+                stocks: &self.stocks,
             };
             let made = pin_made(self.header.as_ref(), e);
             let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {
@@ -2018,6 +2174,25 @@ impl Forms {
                 let mut found = found.clone();
                 if let Some(at) = at {
                     found.contact = at;
+                }
+                // A move made from a seat (`Move::seated`: a stretch, a slump) by a body in a seat, a bed or a standing
+                // slot leaves its legs where the slot holds them (#4143): it neither claims nor blocks them, which the
+                // slot's hold would refuse `resource-held` while the client's form rules say yes. Every other move (a
+                // jump, a dance, a bow) still claims the legs, and the seat's hold refuses it: a gateway sit writes no
+                // `posture`, so a form's posture need alone would let it play through the seat.
+                if found.seated
+                    && w.places
+                        .as_ref()
+                        .is_some_and(|p| p.slots.held_by(body).is_some())
+                {
+                    use replica::bodies::{Class, Want};
+                    found.claims.retain(|c| {
+                        !matches!(
+                            c,
+                            Want::All(Class::Locomotion) | Want::One(Class::Locomotion)
+                        )
+                    });
+                    found.blocks.retain(|c| *c != Class::Locomotion);
                 }
                 match w.moves.start(
                     w.controller,

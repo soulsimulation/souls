@@ -6,6 +6,7 @@ import {pageRoute} from './page-route.ts';
 import {installAssetTransport} from './boot-assets.ts';
 import {takeConfigPrefetch} from './snapshot-prefetch.ts';
 import {takeInlineConfig} from './inline-config.ts';
+import {takeWorldListPrefetch} from './world-list-prefetch.ts';
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { EdenMark } from './EdenMark.tsx';
 import { createRoot } from 'react-dom/client';
@@ -108,6 +109,7 @@ function WorldRoot() {
 installAssetTransport(); // the CDN transport, then the meter of the original asset URL, including its CDN attempt and origin fallback
 if(!newWorld&&worldKey==='mars'&&!marsFork&&!(location.pathname===BASE+'/'&&!location.hash))prefetchBackdrop(BACKDROP_BLOBS[MARS_CAMPUS_URL]!); // W3: campus starts with the page
 const route=pageRoute(location.pathname,BASE,location.hash);if(route==='missing')document.title='No page here';
+if(route==='list')void import('./LauncherRoot.tsx').catch(()=>{});  // 25 Nov: the launcher's code loads beside the list, not after it
 if(route!=='missing')countPage(BASE);  // lane t4-analytics: GoatCounter (visitor-counts.ts), off locally and under automation
 createRoot(document.getElementById('root')!).render(<StrictMode>{route==='list'?<WorldList/>:route==='world'?<WorldRoot/>:<NoPage/>}</StrictMode>);
 
@@ -119,7 +121,8 @@ function WorldList(){
  const [checking,setChecking]=useState(true);
  // The public launcher manifest is the sole discovery source; retired cards never appear during loading/failure.
  useEffect(()=>{let active=true;void (async()=>{
-  try{const r=await fetch(BASE+'/__sim/worlds.json',{signal:AbortSignal.timeout(5000)});const data=r.ok&&r.headers.get('content-type')?.includes('application/json')?await r.json():null;if(data?.contract==='local-worlds/1'&&typeof data.launcher==='string'&&Array.isArray(data.worlds)){if(active)setLauncher(data);return;}}catch{/* show the home-page retry state */}
+  // 25 Nov: the GET index.html's head sent at entry (world-list-prefetch.ts), given the same 5 s from here as a fresh one
+  try{const url=BASE+'/__sim/worlds.json',pre=takeWorldListPrefetch(url);const r=await(pre?Promise.race([pre,new Promise<never>((_,no)=>setTimeout(()=>no(new Error('timeout')),5000))]):fetch(url,{signal:AbortSignal.timeout(5000)}));const data=r.ok&&r.headers.get('content-type')?.includes('application/json')?await r.json():null;if(data?.contract==='local-worlds/1'&&typeof data.launcher==='string'&&Array.isArray(data.worlds)){if(active)setLauncher(data);return;}}catch{/* show the home-page retry state */}
   if(active)setChecking(false);
  })();return()=>{active=false;};},[]);
  if(checking&&!launcher)return <HomeFrame><p className="lh-loading" role="status">Loading worlds…</p></HomeFrame>;

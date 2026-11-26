@@ -5,6 +5,7 @@
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
 //   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   (status, look and here add `update: {from, to}` when the home's site serves a newer client: upgrade/served.mjs)
 //   souls.mjs look set <preset | params file> puts a humanoid look on your default body (`life:look`, G3): a preset
 //                                             (casual, punk, woman) or a core/humanoid@2 params JSON file; prints
 //                                             the receipt
@@ -15,11 +16,17 @@
 //                                             the owner, and returns; the pairing finishes in the background (W2),
 //                                             and once approved the Soul joins the world by itself, named
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
-//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
-//                                             gait=walk|jog|run sets its pace (0.135 G1)
+//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; a
+//                                             word alone (rise, dance) is the body's act or the one act here by it
+//                                             (several or none are refused, named); ids or <name>=<id> after an act
+//                                             are its thing arguments (C10); a walk's
+//                                             gait=walk|jog|run sets its pace (0.135 G1). An activity (dance, yoga,
+//                                             push_ups...) goes on unbroken until the next act or `stop`; for=<s>
+//                                             (90s, 2m, 1h) sets its time, and keeps a gesture (wave, clap) up that long
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
-//                                             reason, resolved) or, after 60 s, a still-running line saying how to check
+//                                             reason, resolved) or, after 60 s (a declared for=, up to 5 min), a
+//                                             still-running line saying how to check; at once, with when the world
+//                                             ends it, for an act it gives longer (a held dance)
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
 //                                             and the act that sends it; asks the world nothing (#3686)
 //   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
@@ -29,14 +36,14 @@
 //   souls.mjs say --shout "<words>" | shout "<words>"   shouts them: public, heard farther than a say (C26)
 //   souls.mjs say --to <name|id> [--gesture <g>] "<words>"   says them to that Soul: turns to it, or plays the body's
 //                                             gesture <g> toward it; an unknown name or gesture sends nothing (C26)
-//   souls.mjs whisper <body id> "<words>"     says them to that one body alone
-//   souls.mjs converse start <body id> "<text>" [--private]   offers that body a conversation; the opening line goes
+//   souls.mjs whisper <name|body id> "<words>"   says them to that one Soul alone (a Soul by its name or id, any case)
+//   souls.mjs converse start <name|body id> "<text>" [--private]   offers that Soul a conversation; the opening line goes
 //                                             to it alone. Its accept or decline arrives in `wait` (E26)
 //   souls.mjs converse accept|decline|leave <conversation id>   joins, declines or leaves (a leave is always accepted)
 //   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
-//   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
+//   souls.mjs give <thing id> --to <name|body id>   offers that Soul a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs together kinds                  the activities the world serves: each one's word, card, how many it asks,
 //                                             how near they stand and where it is played (anywhere, or at a thing)
@@ -47,7 +54,7 @@
 //                                             accept after it is refused offer-withdrawn
 //   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
 //   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
-//   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
+//   souls.mjs lie <id>                        lies down on that bed (stand again with act rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
 //   souls.mjs now "<line>"                    sets the Soul's public status line, shown on its page beside its
@@ -141,6 +148,8 @@ import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
+import { clientUpdate } from '../upgrade/served.mjs';
+import { goTime, nextStep } from '../carry/carry.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -338,7 +347,7 @@ export function requestOf(argv) {
   }
   if (op === 'context') { req.words = rest.join(' '); if (opts.cursor !== undefined) req.cursor = Number(opts.cursor); }
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
-  if (op === 'act' || op === 'can') req.acts = rest;
+  if (op === 'act' || op === 'can') req.acts = rest.map(forSeconds);
   if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
   if (op === 'inspect') req.this = rest[0];
   if (op === 'object') {
@@ -416,14 +425,17 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from');
+    const on = flag('--on'), from = flag('--from'), go = flag('--go');
+    if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
-    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
-    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
+    // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
+    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
+    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does !== 'list') req.crew = a;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
   }
@@ -502,15 +514,31 @@ export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
   return { params };
 }
 
+/** How long a command waits for its daemon's answer before it says daemon-not-answering: on a busy machine a daemon
+ *  answered after 9 to 25 s (first day, 26 Nov), which had read as every command failing. */
+export const DAEMON_PATIENCE_MS = 30_000;
 /** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
 export const ACT_WAIT_MS = 60_000;
 /** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
 export const ACT_WAIT_MARGIN_MS = 15_000;
+/** The most a repeated move goes on, s (`skills::form_runner::FOR_MOST_S`): an act that asks for it is held. */
+export const FOR_MOST_S = 3600;
+/** The longest `act --wait` waits, however long the act: past it, the answer says when the act ends and returns. */
+export const ACT_WAIT_LONGEST_MS = 300_000;
 
-/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer. */
+/** How long `act --wait` waits for `req`: ACT_WAIT_MS, or an act's declared `for=<seconds>` and a margin when longer,
+ *  at most ACT_WAIT_LONGEST_MS. */
 export function actWaitMs(req) {
   const declared = (req?.acts ?? []).map((a) => /^for=(\d+)$/.exec(String(a))?.[1]).find((n) => n !== undefined);
-  return declared === undefined ? ACT_WAIT_MS : Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS);
+  return declared === undefined ? ACT_WAIT_MS : Math.min(ACT_WAIT_LONGEST_MS, Math.max(ACT_WAIT_MS, Number(declared) * 1000 + ACT_WAIT_MARGIN_MS));
+}
+
+/** How long an act's `for=` says, as whole seconds: `60`, `90s`, `2m`, `1h` (`for=1m` is `for=60`); else the word as given. */
+export function forSeconds(word) {
+  const m = /^for=(\d+)(s|sec|secs|seconds?|m|min|mins|minutes?|h|hours?)?$/i.exec(String(word));
+  if (!m) return word;
+  const unit = (m[2] ?? 's').toLowerCase()[0];
+  return `for=${Number(m[1]) * (unit === 'h' ? 3600 : unit === 'm' ? 60 : 1)}`;
 }
 /** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
 const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
@@ -523,13 +551,18 @@ const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
 export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
   const until = now() + ms;
+  // An activity whose moves keep up longer than this wait (`lasts_s`, the daemon's: a dance held until the next act,
+  // an hour at most, or a long `for=`) is said once the world has it under way, with when the world ends it at the
+  // latest. Any other act (a walk, a sit, whose deadline may be long) is waited for as before.
+  const outlastsWait = sent.lasts_s !== undefined && sent.lasts_s * 1000 + ACT_WAIT_MARGIN_MS > ms;
   for (;;) {
-    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
+    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, DAEMON_PATIENCE_MS);
     const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
-    const over = now() >= until;
+    const outlasts = outlastsWait && last?.answer === 'accepted';
+    const over = now() >= until || outlasts;
     if (ENDED(last) || over) {
       // The last read closes the answer as any command does: the copy's version and what changed since the act.
-      const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
+      const r = await ask({ op: 'receipt', sequence: sent.sequence }, DAEMON_PATIENCE_MS);
       const end = r?.ok ? r.receipt.answers.at(-1) : last;
       if (ENDED(end)) {
         const phase = end.answer === 'receipt' ? 'done' : end.answer;
@@ -547,6 +580,11 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
           // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).
           ...(phase === 'refused' && r?.receipt?.why ? { why: r.receipt.why } : {}) };
+      }
+      if (outlasts) {
+        const held = sent.lasts_s >= FOR_MOST_S;
+        return { ...sent, ...(r?.ok ? r : {}), phase: 'running', stillRunning: true, ...(last.ends_by ? { ends_by: last.ends_by } : {}),
+          detail: `running: ${held ? 'it goes on until your next act' : `it goes on ${sent.lasts_s} s, or until your next act`} or \`stop ${sent.sequence}\`${last.ends_by ? `; the world ends it by ${last.ends_by} at the latest` : ''}` };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };
@@ -568,7 +606,7 @@ export async function listen(ask, print, { follow = false, seconds = 60, pause =
   let since, daemon;
   for (;;) {
     let got;
-    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + 5000); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
+    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + DAEMON_PATIENCE_MS); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
     if (got?.ok !== true) {
       if (!follow) return print(got);
       [since, daemon] = [undefined, undefined];
@@ -639,10 +677,15 @@ export async function runViews(args, shootOne) {
   return { ok: views.some((v) => v.ok !== false), views, source: 'drawn here from the public stream, as a visitor sees it' };
 }
 
-function help(home, named, topic) {
+/** `help <topic>`'s topics. */
+export const HELP_TOPICS = ['schedule-wake', 'safety', 'account', 'carry', 'build'];
+/** First day (26 Nov): `help` with no topic lists the commands, as a newcomer expects; it had answered an error. */
+export function help(home, named, topic) {
+  if (topic === undefined) return { ok: true, commands: [...new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'views', 'map', 'upgrade'])].sort(), topics: HELP_TOPICS.map((t) => `help ${t}`), note: 'Each command is taught in the souls skill (.souls/bin/skill.md).' };
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account | carry'), { code: 'help-topics' });
+  if (topic === 'build') return { ok: true, steps: BUILD_HELP, note: BUILD_NOTE };
+  if (topic !== 'schedule-wake') throw Object.assign(new Error(`help | ${HELP_TOPICS.map((t) => `help ${t}`).join(' | ')}`), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -682,23 +725,61 @@ async function schedule(home, named, { sub, args, until, missed }) {
 
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
-  'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
+  'carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place)',
+  'carry grip <load> left|right <n>   a crew\'s third and later carrier: beside the load\'s n-th grip between its ends, from its back (the n-th to accept takes grip n)',
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place; to turn it square into a slot, every carrier sends the same, at once: the leader names the moment (UTC) and each sends it with --go, which sets off then. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
+  'carry to <crew id> the loading spot   every carrier at once: the load goes into the spot\'s first free bay (the answer names it); then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
   'part unseat <crew id> <part id>   take it out of its bay',
   'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
+  'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
+  'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. When the front of a lifted load walks (its `carry to`), the rest of the crew walks with it, each keeping its place, and the load does not turn; to turn it square into a slot, every carrier sends that same `carry to`. A carrier who walks elsewhere or leaves can break the carry off, and the load is set down (`set-down` in `wait`, `why`). A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
+
+/** `help build`: how a rack bay goes up, step by step, as a crew of Souls does it. */
+export const BUILD_HELP = [
+  'find rack bay; inspect <bay id>   its slots, what fills each and what is left: upright_a and upright_b take a frame (rack upright), the four beam slots a rack beam',
+  'frames first: two carry a frame from its stand (carry grip <frame> back | front, carry offer, carry accept, part take <crew> <frame>, both carry to <crew> <bay id> upright_a, part put <crew> <bay id> upright_a)',
+  'a seated frame must stay held until beams join it: one of its crew stays (the other carry leave <crew>); a new holder takes over with carry grip <frame> left|right, carry offer <name> --on <frame>, and the old crew leaves',
+  'then the second frame into upright_b, held the same way',
+  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same). Bring each beam from its slot\'s side of the bay (_l from the bay\'s -x, _r from its +x): it stops outside, lined up, and its put sets it in',
+  'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
+  'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
+];
+const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; the front\'s carry to walks the whole crew, and into a slot every carrier sends the same one.';
+
+/**
+ * A carry step's `next` (the daemon's `nextStep`), made true to how it ended: none for a refused step (its refusal
+ * says what to do); for a part seated in a bay, the bay as it stands now (`inspect`'s slots: built, or what is left).
+ */
+export async function nextOf(ask, req, answer) {
+  if (!answer || typeof answer !== 'object') return;
+  if (answer.ok !== true || answer.stillRunning) { delete answer.next; return; }
+  if (req.do === 'offer' && answer.crew) answer.next = nextStep({ ...req, crew: answer.crew });
+  // A walk that ended while the crew holds nothing: the carry broke off on the way, and the load lies where it was.
+  if (req.do === 'to' && req.kind !== 'part') {
+    const crew = (await ask({ op: 'carry', do: 'list' }, 15_000).catch(() => null))?.crews?.find((c) => c.id === (answer.crew ?? req.crew));
+    if (crew && !crew.holds.length) {
+      answer.carry = 'broke off';
+      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: a carrier fell more than 1 m from its place). Take it again; the front\'s carry to walks the whole crew';
+    }
+  }
+  if (req.kind === 'part' && req.do === 'put' && /^[0-9a-f]{32}-\d+$/.test(String(req.into ?? ''))) {
+    const bay = await ask({ op: 'inspect', this: req.into }, 15_000).catch(() => null);
+    if (bay?.ok && bay.built) answer.next = nextStep(req, { bay });
+  }
+}
 
 /** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   for (let i = 0; i < tries; i++) {
-    const listed = await ask({ op: 'carry', do: 'list' }, 5000);
+    const listed = await ask({ op: 'carry', do: 'list' }, DAEMON_PATIENCE_MS);
     const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
     if (made) return { crew: made.id };
     await sleep(200);
@@ -725,6 +806,8 @@ if (isMain(import.meta.url)) {
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: ADDS.has(process.argv[2]), named: homeNamed });
     newsHome = home;
     if (process.argv[2] !== 'news') fetchNewsLater(home);
+    // A session's first commands say when the home's site serves a newer client: asked beside the daemon, kept 10 min.
+    const updating = ['status', 'look'].includes(req?.op) ? clientUpdate({ home }).catch(() => null) : null;
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
@@ -756,16 +839,21 @@ if (isMain(import.meta.url)) {
       const waiting = ['look', 'status'].includes(req.op) && soulsWithTokens(home).length === 0 ? pairingState(home) : null;
       if (waiting) { out(waiting); process.exit(0); }
       const { soul, resident } = await chooseCommandSoul(home, named);
-      // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
+      // First day (26 Nov): on a busy machine a daemon answered after 9 to 25 s, and every command had already said
+      // daemon-not-answering at 5 s while the Soul did what it was told. Each now waits DAEMON_PATIENCE_MS (carry/part
+      // first bring the copy current, up to 10 s, within it); a wait, its seconds and that.
+      const ms = (req.op === 'wait' ? (req.seconds ?? 30) * 1000 : 0) + DAEMON_PATIENCE_MS;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
       const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
+      if (req.op === 'carry') await nextOf(ask, req, answer);
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
-      if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
+      if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, DAEMON_PATIENCE_MS);
+      const update = await updating;
+      if (update && answer && typeof answer === 'object') answer.update = update;
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
       if (req.op === 'pending' && !req.list) {
         if (answer.ok !== true) throw Object.assign(new Error(answer.detail ?? 'pending failed'), { code: answer.code });

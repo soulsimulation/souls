@@ -51,4 +51,4 @@ Terms as used in this repository.
 | **Jev** | TypeSafe's System One model: typed Choice / Score / Noul judgments, used by the central driver |
 | **Fake brain** | `BRAIN_MODE=fake`: deterministic stand-ins, no model calls, no cost |
 | **Model budget** | Per world, rolling 24 h: default $0.50, ceiling $1, reserved before each provider call |
-| **CDN** | `assets.eden.art`: immutable, content-addressed media |
+| **CDN** | `cdn.soul.game`: immutable, content-addressed media |

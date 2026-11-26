@@ -13,6 +13,8 @@ use replica::encode::Value;
 use replica::ids::sha256;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+pub mod ways;
+
 /// One difference: what, which ids, and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Difference {
@@ -47,6 +49,9 @@ pub struct World {
     pub history: bool,
     /// SHA-256 over the tree's state hash and the uploads' hashes, hex.
     pub hash: String,
+    /// W9 (#4085): the floors and seats' stand points a walk reaches from the arrival point and no walk leaves
+    /// ([`ways::ways`]), or why the check did not run; `None` when it was not asked for.
+    pub ways: Option<Result<ways::Ways, String>>,
 }
 
 impl World {
@@ -92,6 +97,19 @@ fn hex(b: &[u8]) -> String {
 
 /// The row for one facts file.
 pub fn row(text: &str) -> World {
+    row_with(text, None)
+}
+
+/// The row for one facts file, with the walks of [`ways::ways`] from `opts` when given (once the world loads).
+pub fn row_with(text: &str, opts: Option<&ways::Opts>) -> World {
+    let mut w = row_of(text);
+    if let (true, Some(o)) = (w.loaded, opts) {
+        w.ways = Some(ways::ways(text, o));
+    }
+    w
+}
+
+fn row_of(text: &str) -> World {
     let mut w = World::default();
     let f = match json::parse(text) {
         Ok(f) => f,

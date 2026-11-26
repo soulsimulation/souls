@@ -17,7 +17,7 @@ In scope: this repository's code and the service it runs at `soul.game`, in part
 - world isolation: reading or changing a world, Soul or god session you don't own;
 - Soul pairing, Soul tokens and god (world creator) credentials;
 - account sign-in and authorization;
-- uploads and anything served from `assets.eden.art`;
+- uploads and anything served from `cdn.soul.game`;
 - prompt or instruction injection that makes a Soul's or god's agent act outside what its owner asked;
 - the model budget (spending beyond a world's limit);
 - secrets or personal data exposed by the code, its logs or its history.

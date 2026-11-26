@@ -21,7 +21,7 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 test('A2: each served file\'s version, length and hash equal the manifest\'s', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle'), x = join(dir, 'x');
   for (const d of [bins, page, pkg, x]) mkdirSync(d);
-  for (const b of ['worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
+  for (const b of ['worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check', 'store-copy']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));

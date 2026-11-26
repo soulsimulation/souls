@@ -42,6 +42,9 @@ const publicStream = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/
 // `/v1/account/*`, which the front door sends to it), as the v2 page does on soul.game (v2/tools/ops/proxy/soul-game.caddy)
 const samePath = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const sameOriginDir = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*\/$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
+// #4159: the CDN origin the page reads the live stream from (`https://<host>`, nothing after it); apps/web stream-cdn.ts
+// follows only the one it knows, so a binding naming any other is read from the page's origin as before.
+const httpsOrigin = (s) => typeof s === 'string' && /^https:\/\/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s);
 const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
 // 24 Nov: Explore's places of a moved world, from its published snapshot: the model the new engine's world was imported
 // from (W4), so the same things by the same ids. Each thing at the world root, as the old process lists it
@@ -208,7 +211,8 @@ function fenceOf(binding) {
 function oneFence(binding) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
       || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))
-      || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')) throw Error('cutover.binding-invalid');
+      || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')
+      || (binding.v2StreamOrigin !== undefined && !httpsOrigin(binding.v2StreamOrigin))) throw Error('cutover.binding-invalid');
   // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it.
   // bodiesDir (B3-1): a built body-assets folder (V2_BODY_ASSETS) this launcher serves at the world's `v2/bodies/` while
   // routed; v2Bodies then defaults to that path.
@@ -293,7 +297,7 @@ function oneFence(binding) {
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body
-     *  catalogue's directory, and where the owner's box finds the gateway and the directory (the binding's, else the
+     *  catalogue's directory, the world's name in the new engine, and where the owner's box finds the gateway and the directory (the binding's, else the
      *  front door's paths: `/w/<world>/v2/ws` and `/`). */
     v2Fields(w) {
       if (!this.v2Stream(w)) return null;
@@ -303,7 +307,10 @@ function oneFence(binding) {
       const version = replicaVersion();
       // v2Views: whether the old views (snapshot, scene, items, platforms, kernel) are published; the page asks for none
       // when they are not (apps/web scene-offer.ts oldViews), since each would answer 404
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
+      // v2World: the world's name in the new engine, which the navbar's "your Souls" asks the directory by (the stream's
+      // folder is the world's id, not its name)
+      // v2StreamOrigin (#4159): the CDN in front of the stream, when the binding names one (docs/operations/cdn.md)
+      return { ...(v2Bodies ? { v2Bodies } : {}), ...(binding.v2StreamOrigin ? { v2StreamOrigin: binding.v2StreamOrigin } : {}), v2World: canonicalSlug, v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
         v2Views: this.published(w),
         ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },

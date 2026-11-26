@@ -397,7 +397,15 @@ fn entries() -> Json {
       "geometry": { "bounds_mm": [2000, 50, 300] } }"#,
     )
     .unwrap();
+    // A gesture on the body itself, a hand move with no walk (#4171: sent while its Soul walks).
+    let walker = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:walker", "owner": "thing",
+      "forms": { "wave": { "who": "anyone", "steps": [{ "step": "move", "move": "wave" }] },
+        "jump": { "who": "anyone", "steps": [{ "step": "move", "move": "jump" }] } } }"#,
+    )
+    .unwrap();
     Json::Obj(vec![
+        (WALKER.into(), walker),
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
@@ -1312,44 +1320,48 @@ fn at(r: &Replica, n: Id) -> Vec3 {
         .position
 }
 
-/// #4086: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the can's own
-/// form, as Eden and Mars serve it). Before this change a body 100 m away was handed the can at once, never moving
-/// (A1). Now the world measures the reach at commit: the can 100 m away and one just beyond a form's reach (2.2 m)
-/// are refused `out_of_reach`, naming the walk that would work, with nothing changed; one within it (1.5 m) is taken.
-/// The body's place and the cans' parents are read from the world's records.
+/// #4086, #4118: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the
+/// can's own form, as Eden and Mars serve it). Before #4097 a body 2.2 m or 100 m away was handed the can at once,
+/// never moving; #4097 refused it `out_of_reach` at commit. Now a bare take walks to its thing first and takes it at
+/// contact, within reach: the can 1.5 m away is taken where the body stands, with no walk; the one 2.2 m away, just
+/// beyond a form's reach, is walked to, then taken. The body's place and the cans' parents are read from the world's
+/// records.
 #[test]
-fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
+fn w10_a_bare_take_walks_to_its_thing_then_takes_it_in_reach() {
     let (run, mut a, _) = serve("w10");
     let none = BTreeMap::new;
     let before = at(&run.replay(), w1());
-    let far = a.act("test:take", Some(far_can()), none());
-    let r = run.replay();
-    println!(
-        "W10 take 100 m: {far:?}; body {before:?} then {:?}; can at {:?}, parent {:?}",
-        at(&r, w1()),
-        at(&r, far_can()),
-        parent(&r, far_can())
-    );
-    assert_eq!(far, Err("out_of_reach".to_owned()), "refused by name");
-    assert_eq!(at(&r, w1()), before, "the body has not moved");
-    assert_eq!(
-        parent(&r, far_can()),
-        (Some(ground()), None),
-        "the can lies where it lay"
-    );
-    let beyond = a.act("test:take", Some(beyond_can()), none());
-    println!("W10 take 2.2 m: {beyond:?}");
-    assert_eq!(beyond, Err("out_of_reach".to_owned()));
-    assert_eq!(parent(&run.replay(), beyond_can()), (Some(ground()), None));
     let near = a.act("test:take", Some(near_can()), none());
     let r = run.replay();
     println!(
-        "W10 take 1.5 m: {near:?}; parent {:?}",
-        parent(&r, near_can())
+        "W10 take 1.5 m: {near:?}; body {before:?} then {:?}",
+        at(&r, w1())
     );
     assert!(!near.expect("within reach: taken").is_empty());
     assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
     assert_eq!(at(&r, w1()), before, "taken where the body stands");
+    let can = at(&r, beyond_can());
+    let beyond = a.act("test:take", Some(beyond_can()), none());
+    let r = run.replay();
+    let after = at(&r, w1());
+    println!(
+        "W10 take 2.2 m: {beyond:?}; body {before:?} then {after:?}; can at {can:?}, parent {:?}",
+        parent(&r, beyond_can())
+    );
+    assert!(!beyond.expect("walked to, then taken").is_empty());
+    assert_eq!(parent(&r, beyond_can()).0, Some(w1()), "in the body's hand");
+    let gap =
+        |p: Vec3, q: Vec3| (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt();
+    assert!(gap(before, can) > 2_000_000, "the can lay beyond reach");
+    assert!(
+        gap(after, can) < gap(before, can) - 500_000,
+        "the body walked toward it first"
+    );
+    assert_eq!(
+        parent(&r, far_can()),
+        (Some(ground()), None),
+        "the far can lies where it lay"
+    );
     run.stop();
 }
 
@@ -1620,6 +1632,83 @@ fn i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end() {
             );
         }
     }
+}
+
+/// #4171, measured on a local Eden (8 Souls, the driver's mix): a point or a look sent while its Soul walks was
+/// accepted, then ended `left` at its first phase end, every time, by the walk it was sent during. Intents rule 10 is
+/// a walk sent after the run: the newer act wins. Here the walk (6 m) arrives first and the wave, a hand move on the
+/// body itself, while it goes: the wave plays to its receipt and the walk goes on to its own.
+#[test]
+fn a_hand_move_sent_while_its_soul_walks_is_done_and_the_walk_goes_on() {
+    let (run, walked, waved) = walk_then("test:wave");
+    assert!(matches!(waved, (2, Ok(_))), "the wave is done: {waved:?}");
+    assert!(matches!(walked, (1, Ok(_))), "the walk is done: {walked:?}");
+    let to = south(6_000_000);
+    let walker = at(&run.replay(), w1());
+    let off = (i128::from(walker.x - to.x).pow(2) + i128::from(walker.z - to.z).pow(2)).isqrt();
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "walked there: {off} µm off"
+    );
+    run.world.stop();
+}
+
+/// #4171: a gesture of the whole body (a jump: it claims the legs) sent while its Soul walks takes the legs from the
+/// walk, so the newer act wins; the walk ends `claim-taken`, as a walk any newer move replaces does. Before, it ended
+/// `resource-not-held` (the walk's next step finding its driver cancelled), a name that says nothing to its Soul.
+#[test]
+fn a_walk_a_whole_body_gesture_takes_the_legs_from_ends_claim_taken() {
+    let (run, walked, jumped) = walk_then("test:jump");
+    assert!(matches!(jumped, (2, Ok(_))), "the jump is done: {jumped:?}");
+    assert_eq!(
+        walked,
+        (1, Err("claim-taken".to_owned())),
+        "the walk is replaced"
+    );
+    run.world.stop();
+}
+
+/// An act's final answer: its sequence, and its receipt's entries or its refusal's name.
+type Final = (u64, Result<Vec<u64>, String>);
+
+/// A 6 m walk arriving at tick 1, then `verb` on the walker's own body at tick 10, run to tick 400: the world, then
+/// each act's final answer.
+fn walk_then(verb: &str) -> (Run, Final, Final) {
+    let run = lockstep();
+    let (walk, wave) = (std::sync::mpsc::channel(), std::sync::mpsc::channel());
+    let arrive = |tick, sequence, verb: &str, target, parameters, reply| {
+        let bytes = intent_bytes(w1(), sequence, verb, target, parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+    };
+    arrive(
+        1,
+        1,
+        "test:walk",
+        Some(ground()),
+        point(south(6_000_000)),
+        walk.0,
+    );
+    arrive(10, 2, verb, Some(w1()), BTreeMap::new(), wave.0);
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let final_of = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        let ends: Vec<_> = rx
+            .try_iter()
+            .filter(|f| answers::progress_of(f).is_none())
+            .collect();
+        assert_eq!(ends.len(), 1, "one final answer");
+        answer_in(&ends[0])
+    };
+    let (walked, then) = (final_of(&walk.1), final_of(&wave.1));
+    println!("#4171 {verb} while walking: walk {walked:?}, {verb} {then:?}");
+    (run, walked, then)
 }
 
 // --- 0.133 N1: the never-stuck ladder in a served world ---------------------------------------------------------------

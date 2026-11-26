@@ -226,6 +226,11 @@ echo "--- check"
 out=$($SW check 2>&1) && ok "check passed" || no "check: $out"
 echo "$out"
 
+echo "--- chains"
+# Each world sends its whole stream chain to the new store (worldd, a store moved), with SWITCH_SKIP too.
+for _ in $(seq 1 30); do out=$($SW chains 2>&1) && break || sleep 1; done
+printf '%s\n' "$out" | grep -q 'chains complete' && ok "every world's stream chain is in the new store${SWITCH_SKIP:+ (SWITCH_SKIP $SWITCH_SKIP)}" || no "chains: $out"
+
 echo "--- undo, with the directory planted to fail at its start"
 echo souls-directory > "$D/fail-unit"
 calls=$(wc -l < "$D/copy.log")
@@ -261,7 +266,12 @@ w=${NAMES[1]}
   ok "world ${w:0:12}… is up on the old store, never started on the new one" || no "world ${w:0:12}… after the failed copy"
 grep -q "^DIRECTORY_STORE_URL=$NEW/" "$D/units/worldd@${NAMES[0]}.env" && ok "the world before it stays moved" || no "the first world"
 cmp -s "$D/etc/secrets.env" "$D/secrets.before" && ok "secrets.env unchanged" || no "secrets.env changed"
-out=$($SW undo 2>&1) && ok "undo of the stopped run ran" || no "undo of the stopped run: $out"
+# The stopped run resumed to the end: `last` names that run's folder (not `current`, which the end removes), so check
+# probes the bucket it moved to and undo finds the run.
+out=$($SW apply 2>&1) && ok "the stopped run resumed to the end" || no "resume: $out"
+[ -e "$D/etc/store-switch/last" ] && [ "$(readlink "$D/etc/store-switch/last")" != current ] && ok "last names the resumed run" || no "last after a resume: $(readlink "$D/etc/store-switch/last")"
+out=$($SW check 2>&1) && printf '%s' "$out" | grep -q 'probe write, read back, delete and empty listing: ok' && ok "check after the resume probes the new bucket" || no "check after the resume: $out"
+out=$($SW undo 2>&1) && ok "undo of the resumed run ran" || no "undo of the resumed run: $out"
 for w in "${NAMES[@]}"; do
   $SYS is-active --quiet "worldd@$w.service" && grep -q "^DIRECTORY_STORE_URL=$OLD/" "$D/units/worldd@$w.env" && ok "world ${w:0:12}… back on the old store" || no "world ${w:0:12}… not back"
 done

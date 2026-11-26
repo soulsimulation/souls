@@ -23,11 +23,19 @@
     "wave": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [],
       "steps": [
         {
           "step": "move",
-          "move": "wave"
+          "move": "wave",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -99,11 +107,19 @@
     "clap": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [],
       "steps": [
         {
           "step": "move",
-          "move": "clap"
+          "move": "clap",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -199,11 +215,19 @@
     "stretch": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [],
       "steps": [
         {
           "step": "move",
-          "move": "stretch"
+          "move": "stretch",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -211,6 +235,11 @@
     "jump": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -221,7 +250,10 @@
       "steps": [
         {
           "step": "move",
-          "move": "jump"
+          "move": "jump",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -252,7 +284,7 @@
           "move": "dance",
           "for_s": {
             "arg": "for",
-            "default": 10
+            "default": 3600
           }
         }
       ],
@@ -744,6 +776,11 @@
     "jumping_jacks": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -759,7 +796,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "jumping_jacks"
+          "move": "jumping_jacks",
+          "for_s": {
+            "arg": "for",
+            "default": 3600
+          }
         }
       ],
       "effects": []
@@ -767,6 +808,11 @@
     "yoga": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -777,7 +823,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "yoga"
+          "move": "yoga",
+          "for_s": {
+            "arg": "for",
+            "default": 3600
+          }
         }
       ],
       "effects": []
@@ -785,6 +835,11 @@
     "push_ups": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -800,7 +855,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "push_ups"
+          "move": "push_ups",
+          "for_s": {
+            "arg": "for",
+            "default": 3600
+          }
         }
       ],
       "effects": []
@@ -808,6 +867,11 @@
     "sit_ups": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -823,7 +887,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "sit_ups"
+          "move": "sit_ups",
+          "for_s": {
+            "arg": "for",
+            "default": 3600
+          }
         }
       ],
       "effects": []
@@ -879,11 +947,19 @@
     "sing": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [],
       "steps": [
         {
           "step": "move",
-          "move": "sing"
+          "move": "sing",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -891,11 +967,19 @@
     "listen": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [],
       "steps": [
         {
           "step": "move",
-          "move": "listen"
+          "move": "listen",
+          "for_s": {
+            "arg": "for"
+          }
         }
       ],
       "effects": []
@@ -915,6 +999,11 @@
     "stargaze": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "for": {
+          "type": "count"
+        }
+      },
       "needs": [
         {
           "need": "state",
@@ -925,7 +1014,11 @@
       "steps": [
         {
           "step": "move",
-          "move": "stargaze"
+          "move": "stargaze",
+          "for_s": {
+            "arg": "for",
+            "default": 3600
+          }
         }
       ],
       "effects": []

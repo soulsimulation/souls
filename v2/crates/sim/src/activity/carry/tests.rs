@@ -797,7 +797,8 @@ mod from_entry {
             }
         );
         assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
-        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four, at its four grips.
+        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four to six, one at each of its six grips (a
+        // crew of six: its front, its back and four sides).
         let tall = Load::of(&entry("rack_upright_6m.json")).expect("the 6.1 m upright");
         assert_eq!(
             tall,
@@ -805,12 +806,17 @@ mod from_entry {
                 half_length: 3_048_000,
                 half_width: 609_500,
                 grips: [-2_748_000, 2_748_000],
-                inner: [Some(-916_000), Some(916_000), None, None],
+                inner: [
+                    Some(-1_649_000),
+                    Some(-550_000),
+                    Some(550_000),
+                    Some(1_649_000)
+                ],
                 crew: 4,
                 ..tall
             }
         );
-        assert_eq!(tall.most(), 4);
+        assert_eq!(tall.most(), 6);
     }
 
     /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to
@@ -895,6 +901,35 @@ mod from_entry {
         assert_eq!(
             board.resting(Vec3::new(1, 2, 3), q).unwrap(),
             (Vec3::new(1, 2, 3), q)
+        );
+    }
+
+    /// A frame taken standing from its stand is held upright, not laid flat: set down where a carry breaks off, its
+    /// posts' feet rest on the floor. Before, it kept the flat rest (half its thickness) under its middle, and sank
+    /// 1.18 m, half its height, into the ground. Held as its entry turns it, the rest is as before.
+    #[test]
+    fn a_load_held_standing_is_set_down_on_its_feet() {
+        use replica::pose::{Quat, Vec3};
+        let load = Load::of(&entry("rack_upright.json")).unwrap();
+        let c = Vec3::new(5 * M, 0, -3 * M);
+        let facing = Quat::from_yaw_mdeg(-90_000).unwrap();
+        let standing = load.held_turned(Quat::IDENTITY).unwrap();
+        let (p, o) = standing.resting(c, facing).unwrap();
+        assert_eq!(
+            p.y,
+            c.y,
+            "its feet on the floor, not {} µm under it",
+            c.y - p.y
+        );
+        assert_eq!(o.rotate(Vec3::new(0, M, 0)).unwrap().y, M, "still standing");
+        let flat = load.held_turned(load.turn).unwrap();
+        assert_eq!(
+            flat.rest, load.rest,
+            "laid flat as its entry turns it: rest unchanged"
+        );
+        assert_eq!(
+            flat.resting(c, facing).unwrap(),
+            load.resting(c, facing).unwrap()
         );
     }
 

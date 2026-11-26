@@ -26,6 +26,8 @@ const SOUL = 's_r6test';
 const WORLD_SCOPE = '2b'.repeat(16);
 const LAMP = `${WORLD_SCOPE}-3`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A replaced daemon asks whether the Soul is free this often (5 min in use).
+process.env.SOULS_REPLACED_RETRY_MS = '1500';
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-r6-'));
 const home = join(dir, '.souls');
@@ -38,15 +40,21 @@ let relay, arrivals, roots, rt;
 
 /**
  * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
- * `refuse` closes each new connection at once.
+ * `refuse` closes each new connection at once; `stall(true)` moves no byte either way on any connection, new ones too,
+ * and closes none (a stalled network), until `stall(false)` lets what waited through.
  */
 function makeRelay(port) {
   const pairs = new Set();
-  const r = { deaf: false, refuse: false, port: 0, cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); } };
+  const r = {
+    deaf: false, refuse: false, stalled: false, port: 0,
+    cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); },
+    stall: (on) => { r.stalled = on; for (const pair of pairs) for (const s of pair) if (on) s.pause(); else s.resume(); },
+  };
   const server = createServer((down) => {
     if (r.refuse) { down.destroy(); return; }
     const up = createConnection(port, '127.0.0.1');
     pairs.add([down, up]);
+    if (r.stalled) { down.pause(); up.pause(); }
     down.on('data', (d) => up.write(d));
     up.on('data', (d) => { if (!r.deaf) down.write(d); });
     for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
@@ -120,7 +128,7 @@ after(async () => {
 
 test('A1: the first command starts it, and it outlives the command that started it', async () => {
   const cli = join(v2, 'client/src/daemon/client.mjs');
-  const first = spawnSync(process.execPath, [cli, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+  const first = spawnSync(process.execPath, [cli, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG, SOULS_REPLACED_RETRY_MS: process.env.SOULS_REPLACED_RETRY_MS }, encoding: 'utf8' });
   outputs.push(first.stdout, first.stderr);
   const said = JSON.parse(first.stdout);
   assert.equal(said.started, true, first.stdout);
@@ -228,7 +236,7 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
 test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says so within 10 s; then asleep, not stale', async () => {
   const ask = async (req) => { const t = performance.now(); const a = await request(rt.socket, req, 30_000); outputs.push(JSON.stringify(a)); return { ...a, ms: Math.round(performance.now() - t) }; };
   const seen = []; // the transcript of answers, for the PR
-  const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.asleep ? { asleep: a.asleep } : {}) });
+  const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.unchangedMs ? { unchangedMs: a.unchangedMs } : {}) });
   // A1: every answer, of every command, carries a numeric age.
   const { answered } = await waitFor(async () => { const s = await status(); return s.connected && s; });
   const act = await ask({ op: 'act', verb: 'eden:wave' });
@@ -238,7 +246,8 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
     assert.equal(typeof a.age, 'number', `${req.op}: ${JSON.stringify(a).slice(0, 200)}`);
   }
   assert.equal(typeof act.age, 'number');
-  const fresh = await ask({ op: 'look' });
+  // A drop left by the tests before (R5b's forced ones) may still be resyncing: the fresh look is the first current one.
+  const fresh = await waitFor(async () => { const a = await ask({ op: 'look' }); return !a.gap && a; }, 10_000);
   assert.equal(fresh.gap, undefined);
   assert.ok(fresh.age < 2000, `age ${fresh.age}`);
   // A2: cut off for 30 s. First a black hole (the socket stays open, nothing comes back), then the connection cut
@@ -268,7 +277,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   keep('look', t0, back);
   assert.equal(back.stale, undefined);
   assert.ok(back.age < 2000, `age ${back.age}`);
-  assert.ok(back.asleep?.sinceMs > 30_000, `asleep ${JSON.stringify(back)} ${JSON.stringify(seen.slice(-4))}`);
+  assert.ok(back.unchangedMs > 30_000, `unchangedMs ${JSON.stringify(back)} ${JSON.stringify(seen.slice(-4))}`);
   // A3: stats over what this daemon did: every achieved intent's commands, bytes and first send.
   const st = await ask({ op: 'stats' });
   assert.ok(st.achieved >= 21, `achieved ${st.achieved}`);
@@ -390,6 +399,129 @@ test('#4700: a copy confirmed within 1 s answers at once, the world not asked; a
   outputs.push(JSON.stringify(act));
   assert.equal(act.stale, undefined, JSON.stringify(act).slice(0, 300));
   assert.ok(act.age < 6000, `age ${act.age}`);
+});
+
+test('another client of the Soul takes it: this one is told so, never takes it from the live one, takes it once that one has gone or at its own next command', async () => {
+  await waitFor(async () => (await status()).connected);
+  const other = join(dir, 'other', '.souls');
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, 'config.json'), readFileSync(join(home, 'config.json')));
+  writeFileSync(join(other, 'credentials.json'), readFileSync(join(home, 'credentials.json')), { mode: 0o600 });
+  const otherRt = runtimeOf(other, SOUL);
+  const otherStatus = () => request(otherRt.socket, { op: 'status' }).catch(() => null);
+  const startOther = async () => {
+    start(other, SOUL, PKG);
+    await waitFor(async () => (await otherStatus())?.connected, 60_000);
+  };
+  const stopOther = async () => {
+    const pid = (await otherStatus())?.pid;
+    await request(otherRt.socket, { op: 'stop' }).catch(() => {});
+    await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 10_000);
+  };
+  try {
+    await startOther();
+    const s = await waitFor(async () => { const s = await status(); return s.replaced && !s.connected && s; }, 10_000);
+    assert.match(s.replaced.say, /Another client of this Soul connected/);
+    // Reading what came and asking for a receipt do not take it back, nor do its asks whether the Soul is free
+    // (every REPLACED_RETRY_MS: 1.5 s here). Two clients took the Soul from each other about seven times a second.
+    await request(rt.socket, { op: 'read' });
+    await request(rt.socket, { op: 'receipt' });
+    await sleep(4000);
+    const later = await status();
+    assert.ok(later.replaced && !later.connected, 'still off while the other holds the Soul');
+    assert.ok(later.connects >= s.connects + 2, `asked whether the Soul is free: ${later.connects - s.connects} times`);
+    assert.equal((await otherStatus()).connected, true, 'the other keeps the Soul');
+    // The other goes: this one signs in again by itself, at its next ask.
+    await stopOther();
+    await waitFor(async () => { const s = await status(); return s.connected && !s.replaced; }, 10_000);
+    // Taken again; its own agent's next command takes it back, and the other, replaced in turn, never takes it.
+    await startOther();
+    await waitFor(async () => { const s = await status(); return s.replaced && !s.connected; }, 10_000);
+    const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
+    outputs.push(JSON.stringify(a));
+    // (An earlier test's wave is never answered by this world of lamps: only this act's answer is waited for.)
+    await waitFor(async () => { const s = await status(); return s.connected && !s.replaced && !s.unanswered.includes(a.sequence); }, 30_000);
+    await waitFor(async () => (await otherStatus())?.replaced, 10_000);
+    const held = await status();
+    await sleep(4000);
+    const after4 = await status();
+    assert.ok(after4.connected && !after4.replaced, 'this one keeps the Soul');
+    assert.equal(after4.connects, held.connects, 'and never lost it to the other\'s asks');
+    assert.ok((await otherStatus()).connects >= 3, 'the other asked');
+  } finally {
+    await stopOther().catch(() => {});
+  }
+});
+
+test('#4980: a socket given up over a stalled network is let go at once; an act then is held, sent at the next sign-in and answered once; that sign-in is not held back', async () => {
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
+  const said = () => readFileSync(rt.log, 'utf8').split('\n');
+  relay.stall(true);
+  let a, letGoMs;
+  const t0 = performance.now();
+  try {
+    // A look asks the world once the copy is over 1 s old; the stalled network never answers, and in 10 s the daemon
+    // gives the socket up.
+    await sleep(1500);
+    request(rt.socket, { op: 'look' }, 30_000).catch(() => {});
+    await waitFor(async () => !(await status()).connected, 20_000);
+    letGoMs = Math.round(performance.now() - t0);
+    assert.ok(letGoMs < 15_000, `let go ${letGoMs} ms into the stall`);
+    a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
+    outputs.push(JSON.stringify(a));
+    assert.equal(a.sent, false, `held while the socket is let go: ${JSON.stringify(a).slice(0, 300)}`);
+    await sleep(3000);
+    assert.equal((await status()).connected, false, 'still not connected while the network is stalled');
+  } finally {
+    relay.stall(false);
+  }
+  const t1 = performance.now(), from = said().length;
+  await waitFor(async () => (await status()).connected, 10_000);
+  const backMs = performance.now() - t1;
+  // Not held back by the old socket's close (a sign-in left connecting for its whole 5 s).
+  assert.ok(backMs < 3000, `signed in ${Math.round(backMs)} ms after the network came back`);
+  const answers = await waitFor(async () => {
+    const r = (await request(rt.socket, { op: 'receipt', sequence: a.sequence })).receipt;
+    return r?.answers.some((x) => x.answer !== 'accepted') && r.answers;
+  }, 30_000);
+  await sleep(1000);
+  const finals = (await request(rt.socket, { op: 'receipt', sequence: a.sequence })).receipt.answers.filter((x) => x.answer !== 'accepted');
+  assert.equal(finals.length, 1, `answered once: ${JSON.stringify(answers)}`);
+  const givenUpAfter = said().slice(from).filter((l) => /not signed in within/.test(l)).length;
+  console.log(JSON.stringify({ issue: 4980, letGoMs, backMs: Math.round(backMs), givenUpAfter, finals: finals.length }));
+});
+
+test('#4977: a wait under way is told at once when the connection is lost, and when it is back with the gap', async () => {
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
+  await request(rt.socket, { op: 'read' }); // what came before is not this test's
+  const waitOnce = () => { const t = performance.now(); return request(rt.socket, { op: 'wait', seconds: 30 }, 40_000).then((w) => ({ ...w, ms: performance.now() - t })); };
+  const first = waitOnce();
+  await sleep(500);
+  relay.refuse = true;
+  relay.cut();
+  const t0 = performance.now();
+  let lost;
+  try {
+    lost = await first;
+    outputs.push(JSON.stringify(lost));
+    const gone = lost.events.find((e) => e.kind === 'disconnected');
+    assert.ok(gone, `told: ${JSON.stringify(lost).slice(0, 400)}`);
+    assert.ok(performance.now() - t0 < 2000, `told ${Math.round(performance.now() - t0)} ms after the drop`);
+    assert.match(gone.say, /reconnecting/);
+    assert.match(gone.say, /acts are held/);
+    // A wait begun while it is off returns when it is back, with the gap's length.
+    const second = waitOnce();
+    await sleep(2000);
+    relay.refuse = false;
+    const back = await second;
+    outputs.push(JSON.stringify(back));
+    const again = back.events.find((e) => e.kind === 'reconnected');
+    assert.ok(again, `told: ${JSON.stringify(back).slice(0, 400)}`);
+    assert.ok(again.gap_ms >= 2000 && again.gap_ms < 15_000, `gap ${again.gap_ms} ms`);
+    console.log(JSON.stringify({ issue: 4977, toldMs: Math.round(lost.ms - 500), gapMs: again.gap_ms, backWaitMs: Math.round(back.ms) }));
+  } finally {
+    relay.refuse = false;
+  }
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {

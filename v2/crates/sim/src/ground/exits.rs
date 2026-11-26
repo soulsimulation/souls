@@ -84,12 +84,37 @@ fn on_segment(a: P, b: P, p: P) -> (P, i128) {
 /// nearest point of any triangle's edge, moved 1 mm into that triangle (towards its centroid) so that it lies inside
 /// whatever the rounding. Ties go to the first piece and triangle. `None` when there is no ground at all.
 pub fn nearest(pieces: &[Piece], at: Vec3) -> Option<(u32, Vec3)> {
+    nearest_where(pieces, at, &|_| true)
+}
+
+/// [`nearest`] among the points `ok` keeps: a piece whose nearest point it refuses (ground sealed off from the main
+/// ground, `crate::mover::Floors::sealed`) is passed over and the next nearest piece tried. `None` when none is kept.
+pub fn nearest_where(pieces: &[Piece], at: Vec3, ok: &dyn Fn(Vec3) -> bool) -> Option<(u32, Vec3)> {
+    let mut skip: Vec<u32> = Vec::new();
     if let Some(q) = piece_of(pieces, at) {
-        return Some((q, at));
+        if ok(at) {
+            return Some((q, at));
+        }
+        skip.push(q);
     }
+    while skip.len() < pieces.len() {
+        let (q, s) = nearest_off(pieces, at, &skip)?;
+        if ok(s) {
+            return Some((q, s));
+        }
+        skip.push(q);
+    }
+    None
+}
+
+/// The nearest point to `at` of any piece not in `skip`, moved 1 mm into its triangle.
+fn nearest_off(pieces: &[Piece], at: Vec3, skip: &[u32]) -> Option<(u32, Vec3)> {
     let p = [i128::from(at.x), i128::from(at.z)];
     let mut best: Option<(i128, u32, P, [P; 3])> = None;
     for (q, pc) in pieces.iter().enumerate() {
+        if skip.contains(&(q as u32)) {
+            continue;
+        }
         for t in tris(pc) {
             for k in 0..3 {
                 let (c, d) = on_segment(t[k], t[(k + 1) % 3], p);

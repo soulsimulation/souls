@@ -44,7 +44,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 ## Orders, and what the engine never holds
 
 5. **The orders are a closed list of four:** ranked fallbacks (any act's field 9), a held stance (`souls:hold`, its
-   stance a parameter), follow (`souls:follow`, its target; a band behind it, or a place beside it, as parameters) and standing in a queue (`souls:queue`, its target, and
+   stance a parameter), follow (`souls:follow`, its target; a band behind it, a place beside it, or a place at an offset from it on the
+   plan, `[x, z]` µm, parameter 4, as a carry's crew keeps its places from its front; a place at most 20 m away) and standing in a queue (`souls:queue`, its target, and
    the act taken at its head as a parameter: "queue for this seat and sit"). Each expires, can be cancelled, and is
    recorded as the agent's; an order is in the log, so it survives a restart.
 6. **Fallbacks are ranked and bounded:** at most 4, each another act `{2: verb, 3: target, 4: parameters, 8:
@@ -81,7 +82,9 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
     posture in progress ends (never half seated). A walk replaces it at any point: in the run's walk the walk's
     claim on the legs ends the run (`claim-taken`); in a hand move the run is left (`left`) at that move's next phase
     end, its contact or its end, never mid-contact, and the walk goes on (an effect landed at the contact stays; 0.134
-    I4). `form-running` is left only for a run of another actor (#4187).
+    I4). Only a walk sent after the run does: a hand move sent while its Soul walks (a point, a look, a wave) is made
+    as the walk goes on, and both end by their own receipts (#4171). A walk whose legs a newer claim takes ends `claim-taken`:
+    a newer move of its Soul's (a jump, a bow), or any other driver the controller lets cancel it. `form-running` is left only for a run of another actor (#4187).
     An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
     between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
     answer leaves, so the logged answer never holds it.

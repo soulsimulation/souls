@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock, heldBy } from './brief.mjs';
+import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf } from './brief.mjs';
 import { changedBetween, decode, entryKind } from './copy.mjs';
 
 const eden = JSON.parse(readFileSync(new URL('./eden-busiest-room.json', import.meta.url), 'utf8'));
@@ -139,4 +139,97 @@ test('D12: a Soul lying in a bed names its bed and the bedroom around it, not th
   assert.deepEqual(b.seat, { name: 'bedroom-2-bed', kind: 'eden:bed', id: 'bed' }, 'the bed that holds the body');
   assert.deepEqual(b.here, ['bedside lamp'], 'what is in the room, not my bed');
   assert.deepEqual(heldBy(rows, 'soul-3', { verbs: ['eden:lie'], target: 'bed' }), { rank: 0, verb: 'eden:lie', id: 'bed', name: 'bedroom-2-bed', fallback: false });
+});
+
+// #4837 review: a held book's words are the world's (or another Soul's) text. They go under `quoted` with the note,
+// only for the things the answer is about (`quote`); the book is named by its title, never by its first page.
+test('a held book is named by its title, and its words are quoted only where asked', () => {
+  const book = { id: 'b', name: 'book 9', kind: 'eden:book', parent: 'me' };
+  Object.defineProperty(book, 'words', { value: { 29: 'How the Library Began', 30: 'It began with one shelf and a borrowed key.' } });
+  const rows = byId([{ id: 'me', name: 'me', kind: 'souls:body', parent: 'h' }, book, { id: 'c', name: 'cup 3', kind: 'eden:cup', parent: 'me' }]);
+  const kinds = { 'eden:book': { state: { title: { n: 29, type: 'text' }, first_page: { n: 30, type: 'text' } } } };
+  let read = 0;
+  const kindsOf = () => { read++; return kinds; };
+  const look = holdingOf(rows, 'me', kindsOf);
+  assert.equal(look.note, QUOTED_NOTE);
+  assert.deepEqual(look.holding, [
+    { id: 'b', name: 'How the Library Began', kind: 'eden:book', quoted: { title: 'How the Library Began', first_page: 'It began with one shelf and a borrowed key.' } },
+    { id: 'c', name: 'cup 3', kind: 'eden:cup' },
+  ]);
+  // A take answered at the shelf: the book is named, its words left out, and so is the note.
+  const took = holdingOf(rows, 'me', kindsOf, (id) => id === 'shelf');
+  assert.deepEqual(took, { holding: [{ id: 'b', name: 'How the Library Began', kind: 'eden:book' }, { id: 'c', name: 'cup 3', kind: 'eden:cup' }] });
+  assert.equal(holdingOf(rows, 'me', kindsOf, (id) => id === 'b').holding[0].quoted.title, 'How the Library Began', 'a read of the book quotes it');
+  assert.equal(read, 3, 'the kinds are read only when a held thing has words');
+  assert.deepEqual(holdingOf(byId([{ id: 'c', name: 'cup 3', kind: 'eden:cup', parent: 'me' }]), 'me', () => assert.fail('no words: no kinds read')), { holding: [{ id: 'c', name: 'cup 3', kind: 'eden:cup' }] });
+  assert.deepEqual(holdingOf(rows, null, kindsOf), {}, 'no body: nothing held');
+});
+
+test('trial 0.137: on open ground of thousands, the brief names what is near the body first, with ids and metres, and what it does and holds', () => {
+  // Alphabetically the ground starts with alpine chalets far away; the bench and the book stack are beside me.
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 5000 },
+    { id: 'me', name: 'Moss', kind: 'souls:body', soul: 'soul-1', parent: 'g', path: ['ground 1'], children: 1, pos: [0, 0, 0] },
+    { id: 'cup', name: 'blue cup', kind: 'eden:cup', parent: 'me', path: ['ground 1', 'Moss'], children: 0 },
+    { id: 'bench', name: 'bench 4', kind: 'eden:bench', parent: 'g', path: ['ground 1'], children: 0, pos: [3_000_000, 0, 0] },
+    { id: 'books', name: 'book stack', kind: 'eden:book_stack', parent: 'g', path: ['ground 1'], children: 0, pos: [0, 0, 1_500_000] },
+    { id: 'zone', name: 'aardvark meadow', kind: 'eden:place', parent: 'g', path: ['ground 1'], children: 0 },
+  ]);
+  for (let i = 0; i < 5000; i++) rows.set(`a${i}`, { id: `a${i}`, name: `alpine chalet ${i}`, kind: 'eden:chalet', parent: 'g', path: ['ground 1'], children: 0, pos: [500_000_000 + i * 1_000_000, 0, 0] });
+  const metres = (r) => { const p = rows.get(r.id).pos; return p ? Math.hypot(...p) / 1e6 : undefined; };
+  const b = brief(rows, { me: 'soul-1', metres, now: 'standing', holding: [{ id: 'cup', name: 'blue cup', kind: 'eden:cup' }] });
+  assert.deepEqual(b.here.slice(0, 3), ['book stack (books, 1.5 m)', 'bench 4 (bench, 3 m)', 'alpine chalet 0 (a0, 500 m)']);
+  assert.ok(!b.here.includes('aardvark meadow'), 'unplaced rows come after every placed one');
+  assert.equal(b.doing, 'standing');
+  assert.deepEqual(b.holding, [{ id: 'cup', name: 'blue cup', kind: 'eden:cup' }]);
+  assert.ok(bytes(b) < BRIEF_MOST, `${bytes(b)} bytes`);
+  assert.ok(!NO_COORDINATES.test(JSON.stringify(b)), 'no coordinates');
+  assert.equal(brief(rows, { me: 'soul-1', holding: [] }).holding, 'nothing', 'empty hands said plainly');
+});
+
+test('group work: the Souls near are named nearest first (25 m, five at most), the work near is shown, and the brief stays under 2,000 bytes', () => {
+  const souls = [{ name: 'Bo', m: 2 }, { name: 'Cy', m: 6.04 }, { name: 'Di', m: 30 }];
+  const work = ['Ada offers you a place in a carry crew near rack frame 1 (c1): carry accept Ada'];
+  const b = brief(hall(1000, 3), { me: 'me', souls, work });
+  assert.deepEqual(b.souls_near, ['Bo (2 m)', 'Cy (6 m)']);
+  assert.deepEqual(b.work, work);
+  assert.ok(bytes(b) < BRIEF_MOST, `${bytes(b)} bytes`);
+  const none = brief(hall(3, 0), { me: 'me' });
+  assert.equal(none.souls_near, undefined);
+  assert.equal(none.work, undefined);
+});
+
+// First-day round 2 (0.139): a standing body's node is its floor's, never its room's. At the fish market's door,
+// `look` named only "Shop" (the floor's one room), not what is in it.
+test('a Soul standing on a building\'s floor sees the room it stands in, or whose doorway it stands in, and what is in it', async () => {
+  const { metresFrom } = await import('../daemon/reads.mjs');
+  // As the served Eden copy held it: the fish market on the ground, its floor at its origin, the Shop room on the
+  // floor with its outline in its own frame (mm), its things in the room; the Soul on the floor in the front doorway.
+  const shop = { id: 'shop', name: 'Shop', kind: 'eden:room', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 3, pos: [0, 100_000, 0] };
+  Object.defineProperty(shop, 'outline', { value: [[-6780, -2780], [6780, -2780], [6780, 2780], [-6780, 2780]] });
+  const at = ['ground 1', 'region-harbour-fish-market', 'floor 5730', 'Shop'];
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 2 },
+    { id: 'fm', name: 'region-harbour-fish-market', kind: 'eden:hall', parent: 'g', path: ['ground 1'], children: 1, pos: [20_500_000, 0, 132_000_000] },
+    { id: 'f', name: 'floor 5730', kind: 'eden:floor', parent: 'fm', path: ['ground 1', 'region-harbour-fish-market'], children: 3, pos: [0, 0, 0] },
+    shop,
+    { id: 'counter', name: 'shop-counter', kind: 'eden:workbench', parent: 'shop', path: at, children: 0, pos: [0, 0, -937_000] },
+    { id: 'shelf', name: 'shop-shelf-2', kind: 'eden:bookshelf', parent: 'shop', path: at, children: 0, pos: [6_580_000, 0, -457_000] },
+    { id: 'bench', name: 'shop-bench', kind: 'eden:bench_seat', parent: 'shop', path: at, children: 0, pos: [3_633_000, 0, 1_034_000] },
+    { id: 'me', name: 'Marlow', kind: 'souls:body', soul: 'soul-1', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 0, pos: [0, 100_000, 2_890_000] },
+    { id: 'bo', name: 'Bo', kind: 'souls:body', soul: 'soul-2', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 0, pos: [-3_000_000, 100_000, 0] },
+  ]);
+  const look = (r) => brief(r, { me: 'soul-1', metres: metresFrom(r, 'me', { placed: true }) });
+  const b = look(rows);
+  assert.equal(b.room.name, 'Shop', 'in the Shop\'s doorway: the Shop, not the floor');
+  assert.deepEqual(b.here.map((h) => h.split(' (')[0]), ['shop-counter', 'shop-bench', 'shop-shelf-2'], 'what is in it, nearest first');
+  assert.match(b.here[0], /^shop-counter \(counter, 3\.8 m\)$/);
+  assert.equal(b.bodies, 1, 'Bo stands on the floor in the Shop');
+  // In the middle of the room, the same; well outside its outline (a landing, a balcony), the floor as before.
+  const inside = new Map(rows), away = new Map(rows);
+  inside.set('me', { ...rows.get('me'), pos: [500_000, 100_000, 400_000] });
+  away.set('me', { ...rows.get('me'), pos: [0, 100_000, 6_000_000] });
+  assert.equal(look(inside).room.name, 'Shop');
+  assert.equal(look(away).room.name, 'floor 5730');
+  assert.deepEqual(look(away).here.map((h) => h.split(' (')[0]), ['Shop']);
 });

@@ -5,8 +5,9 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, creatorGrant, creatorToken, idOf, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
-const { MailBox, V2OwnerMailbox } = await import('./owner-mailbox.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, prayerRefusal, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { shownPrayer, soulIdOf } = await import('../god-ui/Prayers.tsx');
+const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
 const cbor = { encode, decode } as never;
@@ -16,11 +17,11 @@ const answer = (sequence: number, kind: 1 | 2, n: number, reason?: string) => en
 
 /** A session signed in on a stand-in socket that keeps what the page sent. */
 function signedIn() {
-  const sent: Uint8Array[] = [];
-  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100);
+  const sent: Uint8Array[] = [], texts: string[] = [];
+  const s = new CreatorSession({ send: (b) => { if (typeof b === 'string') texts.push(b); else sent.push(b); } }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100);
   s.frame(encode(new Map([[1, 2]])));          // the gateway's first frame: the page signs in
   s.frame(encode(new Map([[4, 'stream.started']])));
-  return { s, sent };
+  return { s, sent, texts };
 }
 
 test('the session says hello, signs in with the exchanged token by message, and opens on the gateway\'s outcome', () => {
@@ -62,6 +63,43 @@ test('a refusal is answered by name; a stale weather is sent once more against t
   const undo = s.edit({ undo: 'undo' });
   s.frame(answer(102, 2, 12, 'undo.nothing'));
   assert.equal((await undo as { reason: string }).reason, 'undo.nothing', 'the panel\'s note shows the refusal\'s name');
+});
+
+test('edits are numbered by the clock, never below the last, so the creator\'s agent (also by the clock) and the page never lock each other out', async () => {
+  const sent: Uint8Array[] = [];
+  let now = 5_000;
+  const s = new CreatorSession({ send: (b) => sent.push(b as Uint8Array) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
+  s.frame(encode(new Map([[1, 2]]))); s.frame(encode(new Map([[4, 'stream.started']])));
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_000, 'the clock, above the first');
+  void s.edit({ undo: 'redo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_001, 'the same instant: one more than the last');
+  now = 9_000;
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 9_000, 'later: the clock again');
+});
+
+test('a sequence the creator\'s agent has out at that moment (the gateway\'s intent.seq-in-use, #5006) is sent once more under the next', async () => {
+  const { s, sent } = signedIn();
+  const press = s.edit({ undo: 'undo' });
+  // The gateway's own refusal: no version, on this socket alone.
+  s.frame(encode(new Map<number, unknown>([[2, new Map<number, unknown>([[2, 100], [3, 2], [4, 'intent.seq-in-use']])]])));
+  assert.equal(dec(sent.at(-1)!).get(5), 101, 'sent again under the next sequence');
+  s.frame(answer(101, 1, 4));
+  assert.equal((await press).t, 'receipt');
+  const twice = s.edit({ undo: 'redo' });
+  s.frame(answer(102, 2, 4, 'intent.seq-in-use'));
+  s.frame(answer(103, 2, 4, 'intent.seq-in-use'));
+  assert.equal((await twice as { reason: string }).reason, 'intent.seq-in-use', 'once only');
+});
+
+test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever (the edit may have been made)', async () => {
+  const { s } = signedIn();
+  const a = s.edit({ undo: 'undo' }), b = s.edit({ ops: [{ op: 'remove', node: WORLD }] });
+  s.closed();
+  assert.deepEqual([(await a as { reason: string }).reason, (await b as { reason: string }).reason], [CLOSED, CLOSED]);
+  assert.match(refusalText(CLOSED), /answer did not reach this page.*look at the world before you press again/);
+  s.frame(answer(100, 1, 3));   // a late answer finds nothing waiting
 });
 
 test('Build\'s place, move and remove are the batch\'s operations 1, 2 and 4; the receipt names the placed thing', async () => {
@@ -106,4 +144,56 @@ test('the command box puts the creator\'s words in the creator\'s mailbox, the b
   const inbox = await box.send('Put a well by the square');
   assert.deepEqual(sock.sent, [`put ${CREATOR}\nPut a well by the square`]);
   assert.deepEqual(ticketOf(inbox), { id: 'm_1', text: 'Put a well by the square', state: 'sent', sentAt: ticketOf(inbox)!.sentAt }, 'the command log\'s row');
+});
+
+test('the exchange is asked only for an account the directory lists a creator grant for (first day: no 404 on Eden)', async () => {
+  const place = { directory: 'http://localhost:5960', gateway: 'ws://localhost:5960/w/eden/v2/ws', session: { page: true } } as never;
+  const owning = (...grants: string[]) => async () => ({ owned: grants.map((grant) => ({ grant })) });
+  assert.equal(await mayCreate(place, owning(CREATOR)), true, 'a creator is asked');
+  assert.equal(await mayCreate(place, owning(`soul-${'ab'.repeat(16)}-1`)), false, 'an owner of Souls only is not');
+  assert.equal(await mayCreate(place, async () => { throw new NothingOwned(); }), false, 'a new person, owning nothing, is not');
+  assert.equal(await mayCreate(place, async () => { throw new Error('no view: the directory said 500'); }), true, 'a view the directory cannot give leaves it to the exchange');
+});
+
+test('#5006: the panel\'s inbox says the creator\'s agent is connected only while the gateway says so', async () => {
+  const sock = { onText: null as ((t: string) => void) | null, start() {}, stop() {}, sendText() { return true; } };
+  const creator = new V2Creator('stream');
+  // the creator's mailbox, as mailbox() attaches it once the view token is held
+  Object.assign(creator, { box: new V2OwnerMailbox(async (self) => self.attach(new MailBox(), sock, CREATOR)) });
+  const said = async () => { const i = await creator.inbox(); return [i.connected, i.presence]; };
+  assert.deepEqual(await said(), [false, 'away'], 'not told yet: not connected, so the panel shows the line for the agent');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: true } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'its agent signed in for the grant');
+  sock.onText!(JSON.stringify({ agent: { grant: `soul-${SCOPE}-2`, connected: false } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'another grant\'s agent is not the creator\'s');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: false } }));
+  assert.deepEqual(await said(), [false, 'away'], 'gone again: the line comes back');
+});
+
+test('#5006 row 15: the panel lists and answers prayers by text frames on the creator\'s socket, each reply matched by n; a refusal and a closed socket are named', async () => {
+  const { s, texts } = signedIn();
+  const SOUL = `soul-${SCOPE}-2`, p = { id: 'p_0a0b0c0d0e0f', soul: SOUL, text: 'let it rain', at: 1_800_000_000, state: 'waiting', answer: null, answered_at: null };
+  const listed = s.ask('prayers', { all: false });
+  assert.deepEqual(JSON.parse(texts.at(-1)!), { prayers: { all: false, n: 1 } }, 'the frame the gateway passes to the directory (gatewayd mailbox.rs PASSED)');
+  const answered = s.ask('answer', { id: p.id, text: 'it will' });
+  assert.deepEqual(JSON.parse(texts.at(-1)!), { answer: { id: p.id, text: 'it will', n: 2 } });
+  // replies come back in any order, each to its own request; anything else on the socket is not the session's
+  s.text(JSON.stringify({ reply: { n: 2, ok: true, prayer: { ...p, state: 'answered', answer: 'it will', answered_at: p.at + 5 } } }));
+  s.text(JSON.stringify({ mail: { id: 'm_1', text: 'not a reply' } }));
+  s.text('not json');
+  s.text(JSON.stringify({ reply: { n: 1, ok: true, prayers: [p] } }));
+  assert.deepEqual(await listed, { n: 1, ok: true, prayers: [p] });
+  assert.equal((await answered as { prayer: { answer: string } }).prayer.answer, 'it will');
+  const other = s.ask('answer', { id: 'p_ffffffffffff', text: 'no' });
+  s.text(JSON.stringify({ reply: { n: 3, ok: false, refused: 'prayer.not-found' } }));
+  assert.deepEqual(await other, { ok: false, refused: 'prayer.not-found' }, 'another world\'s prayer is not found for this creator');
+  assert.equal(prayerRefusal('prayer.not-found'), 'That prayer is not one of this world\'s.');
+  const late = s.ask('prayers', {}), slow = s.ask('prayers', {}, 5);
+  assert.deepEqual(await slow, { ok: false, refused: 'prayer.unanswered' }, 'no reply in time: named, never waiting for ever');
+  s.closed();
+  assert.deepEqual(await late, { ok: false, refused: CLOSED });
+  // the panel's row: the Soul named as the page names it (its page id from its grant), its time in ms
+  assert.equal(soulIdOf(SOUL), `s_${SCOPE}-2`);
+  assert.deepEqual(shownPrayer(p as never, (g) => (soulIdOf(g) === `s_${SCOPE}-2` ? 'Moss' : null)), { id: p.id, soul_name: 'Moss', text: 'let it rain', at: 1_800_000_000_000, answer: null, answered_at: null });
+  assert.equal(shownPrayer(p as never).soul_name, 'A Soul', 'a Soul the page does not know yet');
 });

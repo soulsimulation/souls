@@ -4,7 +4,7 @@
 //! another provider, the old one only read.
 //!
 //! ```text
-//! store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--manifest <file>] [--dry-run]
+//! store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--skip <prefix>]... [--manifest <file>] [--dry-run]
 //! store-copy probe --settings <settings> --setting <NAME>
 //! ```
 //!
@@ -15,15 +15,17 @@
 //! copied: a `folder:` store refuses. Keys are read from the files by path and never printed; neither is an endpoint,
 //! a bucket or a prefix: output names the setting only.
 //!
-//! `copy` lists every key under the source (or, with `--world`, only that world's keys, as `world-aside` names them),
-//! and for each one: none at the target is written create-only; one there with the same length and ETag (or, when
+//! `copy` lists every key under the source (or, with `--world`, only that world's keys, as `world-aside` names them,
+//! and the same keys under every store generation, `g/<label>/`, where a rebuilt world's are: #4954), and for each one: none at the target is written create-only; one there with the same length and ETag (or, when
 //! the ETags differ, the same SHA-256) counts as made; one there with other bytes (a record written again since the
 //! last run) is replaced on its ETag. So a run stopped halfway is finished by the next. With `--manifest`, each key's
 //! ETag at the target as this tool last wrote or matched it is appended to the file (`<etag> <key>` lines), and a key
 //! whose target ETag has changed since is the target's own newer write (a world already moved, writing there): it is
 //! kept, never replaced, and counted. It then reads the target back and prints the source's count and bytes against
 //! the target's for the same keys; exit 1 when they differ. The source is only read. Every call is tried again with back-off while a store is out of reach. `--dry-run` lists and compares
-//! by length and ETag only, writing nothing.
+//! by length and ETag only, writing nothing. `--skip <prefix>` (repeatable, under the setting's own prefix, e.g.
+//! `aside/`) leaves the keys under it, and under it in every store generation (`g/<label>/<prefix>`), out of the copy
+//! and of the count, and the result line says how many.
 //!
 //! `probe` writes one object under `probe/store-switch/<time>/`, reads it back, deletes it and lists the prefix
 //! empty. Exits 0 on success, 1 on a refusal or a check that failed, 2 on a usage or settings error.
@@ -50,7 +52,7 @@ const NAMES: [&str; 3] = [URL_ENV, "SOULS_BACKUP_URL", "WORLDD_STORE"];
 
 fn usage() -> ! {
     eprintln!(
-        "usage: store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--dry-run]\n       store-copy probe --settings <settings> --setting <NAME>"
+        "usage: store-copy copy --from <settings> --to <settings> --setting <NAME> [--world <world>]... [--skip <prefix>]... [--dry-run]\n       store-copy probe --settings <settings> --setting <NAME>"
     );
     std::process::exit(2)
 }
@@ -143,13 +145,23 @@ fn world_places(world: &World) -> (String, [String; 4]) {
     )
 }
 
-/// The keys to copy: every key under the source, or only the worlds' own.
+/// Whether `key` is one of `world`'s own objects under a store generation (#4954): `g/<label>/<k>`, `k` a key the world
+/// owns ([`World::owns`]). A rebuilt world's objects are all there, under the label its folder names.
+fn in_generation(world: &World, key: &str) -> bool {
+    key.strip_prefix("g/")
+        .and_then(|k| k.split_once('/'))
+        .is_some_and(|(label, k)| !label.is_empty() && world.owns(k))
+}
+
+/// The keys to copy: every key under the source, or only the worlds' own, under every store generation too.
 fn source_keys(from: &dyn Store, worlds: &[World]) -> R<Vec<String>> {
     if worlds.is_empty() {
         return tried("the listing", || from.list(""));
     }
+    let generations = tried("the listing", || from.list("g/"))?;
     let mut out = Vec::new();
     for w in worlds {
+        out.extend(generations.iter().filter(|k| in_generation(w, k)).cloned());
         let (record, prefixes) = world_places(w);
         out.extend(
             tried("the listing", || from.list(&record))?
@@ -161,6 +173,23 @@ fn source_keys(from: &dyn Store, worlds: &[World]) -> R<Vec<String>> {
         }
     }
     Ok(out)
+}
+
+/// `keys` without those under any of `skip` (prefixes under the setting's own, e.g. `aside/`), as they are or under a
+/// store generation (`g/<label>/`, #4954): what is copied and counted, and how many were left out.
+pub fn without(keys: Vec<String>, skip: &[String]) -> (Vec<String>, u64) {
+    let before = keys.len() as u64;
+    let kept: Vec<String> = keys
+        .into_iter()
+        .filter(|k| {
+            let placed = k.strip_prefix("g/").and_then(|g| g.split_once('/'));
+            !skip.iter().any(|p| {
+                k.starts_with(p.as_str()) || placed.is_some_and(|(_, k)| k.starts_with(p.as_str()))
+            })
+        })
+        .collect();
+    let left = before - kept.len() as u64;
+    (kept, left)
 }
 
 /// What a copy did, and the check after it.
@@ -338,6 +367,18 @@ fn main() {
                     worlds.push(w);
                 }
             }
+            let mut skip = Vec::new();
+            for (i, a) in args.iter().enumerate() {
+                if a == "--skip" {
+                    let Some(p) = args
+                        .get(i + 1)
+                        .filter(|p| !p.is_empty() && !p.starts_with("--"))
+                    else {
+                        usage()
+                    };
+                    skip.push(p.clone());
+                }
+            }
             let dry = args.iter().any(|a| a == "--dry-run");
             let (src, dst) = (
                 open(&read_settings(&from), &name),
@@ -367,8 +408,12 @@ fn main() {
                     let _ = writeln!(f, "{e} {k}");
                 }
             };
-            let run = source_keys(&src, &worlds)
-                .and_then(|keys| copy(&src, &dst, &keys, dry, &seen, &mut note));
+            let mut left = 0;
+            let run = source_keys(&src, &worlds).and_then(|all| {
+                let (keys, n) = without(all, &skip);
+                left = n;
+                copy(&src, &dst, &keys, dry, &seen, &mut note)
+            });
             let c = run.unwrap_or_else(|e| {
                 println!("store-copy: {name}: refused: {}: {}", e.name, e.detail);
                 std::process::exit(1)
@@ -377,6 +422,11 @@ fn main() {
                 "every key".to_owned()
             } else {
                 format!("{} world(s)' keys", worlds.len())
+            };
+            let what = if skip.is_empty() {
+                what
+            } else {
+                format!("{what}, {left} skipped under {}", skip.join(" "))
             };
             if dry {
                 println!(
@@ -442,6 +492,53 @@ mod tests {
         ))
     }
 
+    /// soul.game's move (25 Nov 2026): `--skip aside/ --skip stream-recovery/` copies the rest and leaves those
+    /// out of the copy and of its count, so the check compares only what was copied; a rebuilt world's stream chain,
+    /// under its store generation (#4954), is left out as every other world's is.
+    #[test]
+    fn skipped_prefixes_are_neither_copied_nor_counted() {
+        let (a, b) = (StandIn::start(2).unwrap(), StandIn::start(2).unwrap());
+        let src = store(&vars(&format!("{}/dir", a.url("old"))), URL_ENV).unwrap();
+        let dst = store(&vars(&format!("{}/dir", b.url("new"))), URL_ENV).unwrap();
+        for (k, v) in [
+            ("world/x", "r1"),
+            ("h/w/0", "aaaa"),
+            ("aside/reseed-1/h/w/0", "old"),
+            ("stream-recovery/x/head", "hd"),
+            ("stream-recovery/x/objects/00", "obj"),
+            (
+                "g/20261126T120000Z/stream-recovery/x/head",
+                "a rebuilt world's",
+            ),
+            ("g/20261126T120000Z/part/x/1", "kept: not skipped"),
+            ("aside-not/x", "kept: not under aside/"),
+        ] {
+            src.put(k, v.as_bytes(), When::Absent).unwrap();
+        }
+        let skip = ["aside/".to_owned(), "stream-recovery/".to_owned()];
+        let (keys, left) = without(source_keys(&src, &[]).unwrap(), &skip);
+        assert_eq!(left, 4);
+        assert_eq!(keys.len(), 4, "{keys:?}");
+        let none = BTreeMap::new();
+        let c = copy(&src, &dst, &keys, false, &none, &mut |_, _| {}).unwrap();
+        assert_eq!((c.objects, c.written, c.held), (4, 4, 4));
+        let mut there = dst.list("").unwrap();
+        there.sort();
+        assert_eq!(
+            there,
+            [
+                "aside-not/x",
+                "g/20261126T120000Z/part/x/1",
+                "h/w/0",
+                "world/x"
+            ]
+        );
+        assert_eq!(
+            without(vec!["a/1".into()], &[]),
+            (vec!["a/1".to_owned()], 0)
+        );
+    }
+
     #[test]
     fn copies_resumes_replaces_and_checks() {
         let (a, b) = (StandIn::start(2).unwrap(), StandIn::start(2).unwrap());
@@ -488,6 +585,55 @@ mod tests {
         );
         probe(&dst, "probe/store-switch/1/").unwrap();
         assert_eq!(b.paths().len(), 3, "the probe leaves nothing");
+    }
+
+    /// #4954: a rebuilt world's own objects are under its store generation, `g/<label>/`. A move's per-world catch-up
+    /// (`--world`) copies them with the keys as they are (the old world's, which an undo serves again), and none of
+    /// another world's or the directory's.
+    #[test]
+    fn a_worlds_store_generation_is_copied_with_it() {
+        let (a, b) = (StandIn::start(2).unwrap(), StandIn::start(2).unwrap());
+        let src = store(&vars(&format!("{}/dir", a.url("old"))), URL_ENV).unwrap();
+        let dst = store(&vars(&format!("{}/dir", b.url("new"))), URL_ENV).unwrap();
+        let (l, s) = ("ab".repeat(16), "01".repeat(16));
+        let w = World::parse(&format!("{l}-{s}-7")).unwrap();
+        let other = World::parse(&format!("{l}-{s}-8")).unwrap();
+        let (z, name) = (format!("{l}/{s}-7"), w.name());
+        let ours = [
+            format!("world/{z}"),
+            format!("part/{z}/0/t/1"),
+            format!("g/20261126T120000Z/world/{z}"),
+            format!("g/20261126T120000Z/ckpt/{z}/5"),
+            format!("g/20261126T120000Z/part/{z}/0/t/1"),
+            format!("g/20261126T120000Z/stream-recovery/{z}/head"),
+            format!("g/20261126T120000Z/h/{name}/{l}/archive/head"),
+        ];
+        let theirs = [
+            format!("g/20261126T120000Z/world/{l}/{s}-8"),
+            format!("g/20261126T120000Z/part/{l}/{s}-70/x"),
+            format!("g/20261126T120000Z/h/{}/x", other.name()),
+            "g/20261126T120000Z/world-name/eden".to_owned(),
+            format!("g//world/{z}"),
+            "world-name/eden".to_owned(),
+        ];
+        for k in ours.iter().chain(&theirs) {
+            src.put(k, k.as_bytes(), When::Absent).unwrap();
+        }
+        let mut keys = source_keys(&src, &[w]).unwrap();
+        keys.sort();
+        let mut want = ours.to_vec();
+        want.sort();
+        assert_eq!(keys, want);
+        let none = BTreeMap::new();
+        let c = copy(&src, &dst, &keys, false, &none, &mut |_, _| {}).unwrap();
+        assert_eq!((c.objects, c.written, c.held), (7, 7, 7));
+        let mut there = dst.list("").unwrap();
+        there.sort();
+        assert_eq!(there, want);
+        assert_eq!(
+            dst.get(&ours[4]).unwrap().map(|o| o.bytes),
+            Some(ours[4].as_bytes().to_vec())
+        );
     }
 
     #[test]

@@ -355,13 +355,16 @@ impl Targets {
             })
             .collect();
         let sit = ids(&|e| has_slot(e, Some("sit")));
-        let all_things = ids(&|_| true);
+        // #4171: a body form's thing is a thing, not the world's land (`"owner": "place"`: a mountain range, the sea),
+        // whose origin is the world's (0, 0) wherever its outline lies, so it was "nearest" every Soul born there.
+        let thing = |e: &Json| e.get("owner").and_then(Json::str) != Some("place");
+        let all_things = ids(&thing);
         let takeable = ids(&|e| has_form(e, "take"));
         let mut used = BTreeMap::new();
         let mut w = spread(seen, &every(&|e| has_slot(e, None)), &mut used);
         let mut s = spread(seen, &every(&|e| has_slot(e, Some("sit"))), &mut used);
         let mut k = spread(seen, &every(&|e| has_form(e, "take")), &mut used);
-        let mut a = spread(seen, &every(&|_| true), &mut BTreeMap::new());
+        let mut a = spread(seen, &every(&thing), &mut BTreeMap::new());
         let mine = seen
             .bodies
             .keys()

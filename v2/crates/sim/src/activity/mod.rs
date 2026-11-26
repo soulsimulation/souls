@@ -108,6 +108,16 @@ type R<T> = Result<T, Refusal>;
 /// One more effect in an activity's part (B10): its node, its audience and its changes.
 type Bound = (Id, Audience, Vec<Change>);
 
+/// The conversation's kind, by its plain name (E26): it claims one voice, so a Soul in one still walks, sits and does
+/// any other activity with the same or another Soul (trial of 25 Nov: a follow offered by two Souls who were talking
+/// never started). Its holds are kept apart from every other activity's ([`Activities::talking`]).
+pub const CONVERSATION: &str = "souls:conversation";
+
+/// Whether activities of `kind` are conversations, held apart from the rest.
+fn talk(kind: &Name) -> bool {
+    plain(kind.as_str()) == CONVERSATION
+}
+
 /// The node `id` is under, if it is in the tree.
 fn parent(tree: &Tree, id: Id) -> Option<Id> {
     tree.handle(id)
@@ -265,8 +275,10 @@ pub struct Activities {
     pub stream: Vec<Effect>,
     kinds: BTreeMap<Name, ActivityKind>,
     live: BTreeMap<Id, Live>,
-    /// The started activity that holds each body.
+    /// The started activity that holds each body, a conversation apart.
     holding: BTreeMap<Id, Id>,
+    /// The started conversation that holds each body (E26): a body talks in one and does one other activity at once.
+    talking: BTreeMap<Id, Id>,
     /// Leaves in progress, by their timer's id.
     leaving: BTreeMap<Id, Leaving>,
     /// Offers still open or with pairs waiting (E8), and their bookkeeping.
@@ -300,6 +312,7 @@ impl Activities {
             kinds: kinds.into_iter().map(|k| (k.name.clone(), k)).collect(),
             live: BTreeMap::new(),
             holding: BTreeMap::new(),
+            talking: BTreeMap::new(),
             leaving: BTreeMap::new(),
             offers: offer::Offers::default(),
             begun: Vec::new(),
@@ -325,20 +338,59 @@ impl Activities {
             .is_some_and(|l| l.node.state == State::Started)
     }
 
-    /// The started activity holding `body`, if any.
+    /// Why `activity`, not started, is not: the refusal its accepted pair's last start met (a member held by another
+    /// activity, say), or that no one has accepted its offer yet. None once it has started, or when it is not live.
+    pub fn unstarted_why(&self, activity: Id) -> Option<String> {
+        if self.started(activity) || !self.live.contains_key(&activity) {
+            return None;
+        }
+        Some(match self.offers.why.get(&activity) {
+            Some(r) => format!("its start was refused {}: {}", r.name, r.detail),
+            None if self.offers.pairs.contains_key(&activity) => {
+                "its pair waits behind its asker's earlier one".to_owned()
+            }
+            None => "no one has accepted its offer yet".to_owned(),
+        })
+    }
+
+    /// The started activity holding `body`, if any: the one besides a conversation, else its conversation.
     pub fn holder(&self, body: Id) -> Option<Id> {
-        self.holding.get(&body).copied()
+        self.holding
+            .get(&body)
+            .or_else(|| self.talking.get(&body))
+            .copied()
+    }
+
+    /// The started activities of `kind`'s sort (a conversation, or any other) holding each body.
+    fn holds_of(&self, kind: &Name) -> &BTreeMap<Id, Id> {
+        if talk(kind) {
+            &self.talking
+        } else {
+            &self.holding
+        }
+    }
+
+    /// `body` held by started `activity` of `kind`.
+    fn hold(&mut self, kind: &Name, body: Id, activity: Id) {
+        if talk(kind) {
+            self.talking.insert(body, activity);
+        } else {
+            self.holding.insert(body, activity);
+        }
     }
 
     /// Whether `driver` on `body` is held by a live activity: its own claim, or a move it aimed.
     pub fn holds(&self, moves: &Moves, body: Id, driver: Driver) -> bool {
-        let Some(l) = self.holding.get(&body).and_then(|a| self.live.get(a)) else {
-            return false;
-        };
-        l.drivers.get(&body) == Some(&driver)
-            || l.moves
-                .get(&body)
-                .is_some_and(|n| moves.record(*n).is_some())
+        [self.holding.get(&body), self.talking.get(&body)]
+            .into_iter()
+            .flatten()
+            .filter_map(|a| self.live.get(a))
+            .any(|l| {
+                l.drivers.get(&body) == Some(&driver)
+                    || l.moves
+                        .get(&body)
+                        .is_some_and(|n| moves.record(*n).is_some())
+            })
     }
 
     fn write(
@@ -830,7 +882,7 @@ impl Activities {
             return refuse("roles-unfilled", open.join(", "));
         }
         for m in &l.node.members {
-            if let Some(other) = self.holding.get(&m.body) {
+            if let Some(other) = self.holds_of(&l.kind).get(&m.body) {
                 return refuse(
                     "body-in-activity",
                     format!("{} is held by {}", show(m.body), show(*other)),
@@ -869,7 +921,7 @@ impl Activities {
                 }
             }
         }
-        let audience = l.audience;
+        let (audience, kind) = (l.audience, l.kind.clone());
         let set = Change::Set {
             node: activity,
             field: F_STATE,
@@ -890,7 +942,7 @@ impl Activities {
             return Err(r);
         }
         for body in drivers.keys() {
-            self.holding.insert(*body, activity);
+            self.hold(&kind, *body, activity);
         }
         if let Some(l) = self.live.get_mut(&activity) {
             l.node.state = State::Started;
@@ -1100,11 +1152,13 @@ impl Activities {
                 q.retain(|p| *p != activity);
             }
         }
+        self.offers.why.remove(&activity);
         self.offers.timers.retain(|_, a| *a != activity);
         self.beats.remove(&activity);
         self.ending.remove(&activity);
         self.begun.retain(|a| *a != activity);
         self.holding.retain(|_, a| *a != activity);
+        self.talking.retain(|_, a| *a != activity);
         self.stalled.retain(|(a, _)| *a != activity);
         self.placing.remove(&activity);
         self.frames.remove(&activity);
@@ -1147,6 +1201,25 @@ impl Activities {
             .chain(self.dancing().iter())
             .filter_map(|a| self.live.get(a))
             .flat_map(|l| l.node.members.iter().map(|m| m.body))
+            .collect()
+    }
+
+    /// The two members of each activity of two started since [`Activities::begin_moves`] last ran whose roles say
+    /// nowhere to stand (a conversation, a follow, a touch with no places): the world turns each to face the other as
+    /// it begins (trial of 25 Nov: two Souls talking faced different ways). Members given places face as their stands
+    /// say (0.135 G3).
+    pub fn facing_pairs(&self) -> Vec<[Id; 2]> {
+        self.begun
+            .iter()
+            .filter_map(|a| self.live.get(a))
+            .filter(|l| {
+                let kind = &self.kinds[&l.kind];
+                kind.follows.is_none() && kind.roles.iter().all(|r| r.stands.is_empty())
+            })
+            .filter_map(|l| match l.node.members.as_slice() {
+                [a, b] => Some([a.body, b.body]),
+                _ => None,
+            })
             .collect()
     }
 
@@ -1607,6 +1680,9 @@ impl Activities {
         if self.holding.get(&body) == Some(&activity) {
             self.holding.remove(&body);
         }
+        if self.talking.get(&body) == Some(&activity) {
+            self.talking.remove(&body);
+        }
         if let Some(d) = driver {
             let _ = c.release(body, d);
         }
@@ -1831,10 +1907,14 @@ impl Activities {
         target: Id,
         at: Micros,
     ) -> R<Instance> {
-        let a = self.holding.get(&actor);
-        // A move at the actor's own body touches nobody (0.134 T3: a dance on the beat).
-        let same = a.is_some() && (actor == target || a == self.holding.get(&target));
-        let Some(activity) = a.copied().filter(|_| same) else {
+        // A move at the actor's own body touches nobody (0.134 T3: a dance on the beat). The activity both are in: the
+        // one besides a conversation, else the conversation they share.
+        let shared = |m: &BTreeMap<Id, Id>| {
+            m.get(&actor)
+                .filter(|a| actor == target || m.get(&target) == Some(*a))
+                .copied()
+        };
+        let Some(activity) = shared(&self.holding).or_else(|| shared(&self.talking)) else {
             return refuse(
                 "target-outside-activity",
                 format!(
@@ -1921,7 +2001,12 @@ impl Activities {
                     match c.claim(m.body, &shape) {
                         Ok(d) => {
                             drivers.insert(m.body, d);
-                            a.holding.insert(m.body, *id);
+                            // Fields apart (`kind` borrows the kinds): as [`Activities::hold`].
+                            if talk(&n.kind) {
+                                a.talking.insert(m.body, *id);
+                            } else {
+                                a.holding.insert(m.body, *id);
+                            }
                         }
                         Err(r) => {
                             for (b, d) in drivers {

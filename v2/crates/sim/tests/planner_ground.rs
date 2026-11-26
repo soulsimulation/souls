@@ -142,6 +142,7 @@ fn wants(body: Body, target: Target, to: Vec3, map: &Arc<Versions>) -> Wants {
             at: body.pose.position,
             waiting: None,
             crossing: None,
+            carried: false,
             staying: false,
             spot: Some((target, order)),
         }]),

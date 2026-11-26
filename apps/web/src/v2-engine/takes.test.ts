@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recordedTakeChunkSchema } from '@souls/protocol';
+import { TakePeople } from '../../../../mars/viewer/app/engine-view/take-replay.ts';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { chunkEnd, chunkOf, positionAt, TICKS, TICK_US, type Body } from './takes.ts';
@@ -47,4 +48,15 @@ test('a body with no sample by the chunk end is not in it; chunks end on whole c
   const late: Body = { ...walker, entity: 'v2_late', samples: [{ at: (FROM + TICKS + 1) * TICK_US, p: [0, 0, 0] }] };
   assert.equal(Object.keys((chunkOf([late], FROM, frame).take as { tracks: object }).tracks).length, 0);
   assert.equal(chunkEnd((FROM + TICKS + 7) * TICK_US), FROM + TICKS);
+});
+
+
+test('posture base changes preserve one-shot age and seated wave release in actual take history',()=>{
+  const take=chunkOf([stander],FROM,frame).take as unknown as Take,id=stander.entity;
+  const history=(changes:Take['changes'],tick:number,activity:string)=>{const people=new TakePeople({...take,changes});return (people as unknown as {activityHistory(id:string,tick:number,act:string,walk:number):{activityAge?:number;postureChange?:unknown;waveSamples?:unknown[]}}).activityHistory(id,tick,activity,0);};
+  const base:Take['changes']=[[0,id,'activity','idle'],[2,id,'activity','nod'],[2,id,'baseActivity','sit'],[8,id,'baseActivity',null]];
+  const nod=history(base,10,'nod');assert.equal(nod.activityAge,.4);assert.ok(nod.postureChange,'base-only seat exit is retained without restarting nod');
+  assert.ok(history([[0,id,'activity','nod'],[0,id,'baseActivity','sit'],[8,id,'baseActivity',null]],10,'nod').postureChange,'first retained activity still carries a base-only posture change');
+  const wave=history([[0,id,'activity','sit'],[0,id,'baseActivity','sit'],[2,id,'activity','wave'],[8,id,'activity','sit']],9,'sit');
+  assert.equal(wave.waveSamples?.length,1,'seated return keeps the original wave release sample');
 });

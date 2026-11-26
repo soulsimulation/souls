@@ -34,6 +34,9 @@ const transient=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.paren
 const PULL_OUT={ratio:1.05,angle:.05},GESTURE_GAP=.4;
 /** Nearest the camera comes to the Soul when walls (a narrow room, a stair) leave no clear view farther out. */
 export const FOLLOW_NEAR=1;
+/** First-day E4: a ride's follow camera (WorldFollow.riding): its least distance (m) and its least and most elevation over
+ *  the rider (rad). Broadcast's rider shot (RIDER_DISTANCE) stands 14 m off; a balloon's envelope is 4.2 m in radius. */
+export const RIDE={distance:10,pitch:.25,top:.6};
 /** #2216: the scene the follow camera's rays look at: gathered again every `refresh` s, out to the camera's distance
  *  ×1.5 (at least `least` m) plus `margin` m, and sooner once the Soul has moved `margin` m or the camera outgrows it. */
 export const SCENE={refresh:.5,least:20,margin:3};
@@ -52,7 +55,7 @@ export class WorldFollow {
   /** #2201 A1: sightline rays cast so far, and in the last resolve call (the camera trace's cost meter). */
   private cast=0;
   rays=0;
-  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();this.near.at=-Infinity;this.drawnBlocked=null;this.clearAll=false;
+  reset(){this.decoupled=this.turned=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();this.near.at=-Infinity;this.drawnBlocked=null;this.clearAll=false;
     this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;this.inside=false;this.insideAt.at=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
@@ -235,6 +238,7 @@ export class WorldFollow {
     if(!this.gesture||this.clock-this.userAt>GESTURE_GAP)this.gesture={turn:0,zoom:1};
     this.gesture.turn+=before.angleTo(after);this.gesture.zoom*=after.length()/before.length();
     if(this.gesture.zoom>PULL_OUT.ratio||this.gesture.turn>PULL_OUT.angle)this.decoupled=true;
+    if(this.gesture.turn>PULL_OUT.angle)this.turned=true;
     // Decoupled, the camera is exactly where the gesture put it (within the zoom bounds); coupled, the gesture scales the
     // asked-for distance, which the search comes back to.
     const length=this.decoupled?Math.max(FOLLOW_NEAR,Math.min(FOLLOW_MAX,after.length())):Math.max(FOLLOW_MIN,Math.min(FOLLOW_MAX,this.requested.length()*after.length()/before.length()));
@@ -247,6 +251,11 @@ export class WorldFollow {
   private gesture:{turn:number;zoom:number}|null=null;
   /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
   get held(){return this.decoupled;}
+  /** Trial of 0.137: true once the viewer dragged the view round. A zoom out alone keeps its distance (`held`) and still
+   *  follows the Soul, so the page goes on saying "Following" for it, never "Your view stays put" (the viewer read that
+   *  as the follow being dropped). */
+  get turnedAway(){return this.decoupled&&this.turned;}
+  private turned=false;
   /** #1317: the offset the viewer asked for (the camera trace's desired pose), or null before the first frame. */
   get desired():THREE.Vector3|null{return this.requested;}
   private decoupled=false;
@@ -256,7 +265,19 @@ export class WorldFollow {
     this.rays=0;if(!actualOffset.toArray().every(Number.isFinite)||actualOffset.length()<.01)return actualOffset.clone();
     if(!this.requested||!this.rendered)this.requested=actualOffset.clone();
     this.collect(roots,target);const cast=this.cast;this.frame++;
-    try{return this.instances.withQuery(this.objects,()=>this.resolveCollected(target,roots,seconds));}finally{this.rays=this.cast-cast;}
+    try{const offset=this.instances.withQuery(this.objects,()=>this.resolveCollected(target,roots,seconds));return this.riding?this.outside(offset):offset;}finally{this.rays=this.cast-cast;}
+  }
+  /** First-day E4: set each frame while the followed Soul rides a vehicle (a balloon's basket, a cable car, a big wheel's
+   *  gondola, a boat). The vehicle is camera-transparent, so the sightline search alone let the camera sit in or under it. */
+  riding=false;
+  /** A rider is framed from outside: at least RIDE.distance m out, between RIDE.pitch and RIDE.top rad above the rider
+   *  (out past a balloon's envelope, over a basket's rim or a boat's cabin, never under the vehicle). The asked-for and
+   *  drawn views move out too, so the glide carries on from there. */
+  private outside(offset:THREE.Vector3){
+    for(const v of [offset,this.requested,this.rendered]){if(!v||v.length()<.01)continue;
+      const s=new THREE.Spherical().setFromVector3(v);s.radius=Math.max(s.radius,RIDE.distance);
+      s.phi=Math.max(Math.PI/2-RIDE.top,Math.min(Math.PI/2-RIDE.pitch,s.phi));v.setFromSpherical(s);}
+    return offset;
   }
   // VF4 (Gene: Follow "goes crazy" in dense streets). The camera never snaps: it picks a clear viewpoint near the
   // requested one (rise first, then orbit a little; scored for clear sight, closeness to where the camera is, the

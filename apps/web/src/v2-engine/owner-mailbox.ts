@@ -9,6 +9,8 @@ import { useEffect, useState } from 'react';
 import type { AgentInbox } from '../AgentMessageBox.tsx';
 import { session as pageSession, useSession } from '../auth-session.ts';
 import { v2Stream } from './use-v2-souls.ts';
+import { BASE } from '../base-path.ts';
+import { worldKeyFrom } from '../snapshot-prefetch.ts';
 
 /** One message, as the v2 page's box keeps it (v2/web/src/owner/box.ts `Message`). */
 export type BoxMessage = {
@@ -305,9 +307,20 @@ export const v2World = (): string | null => PAGE_STREAM;
 /** The world's name as the page's inline config gives it (`worldName`), or null: what the page calls the world, never
  *  the tab's title (`<name> · Souls`). */
 export const v2PageWorldName = (): string | null => (typeof PAGE_CONFIG?.worldName === 'string' && PAGE_CONFIG.worldName.trim() ? PAGE_CONFIG.worldName.trim() : null);
-/** The new engine's name for this page's world, from its stream (`/s/w/<name>/views/…`): the name a Soul's pairing
- *  request and the owner's Soul list use, which need not be the page's slug. Null on an old-engine world. */
-export const v2WorldName = (stream: string | null = PAGE_STREAM): string | null => (stream ? /^\/s\/w\/([a-z0-9][a-z0-9-]{0,62})\//.exec(stream)?.[1] ?? null : null);
+const WORLD_NAME = /^[a-z0-9][a-z0-9-]{0,79}$/;
+/** The page's slug (`/w/<slug>/`), as world-path.ts `worldKey` reads it; read here when asked, so this module needs no
+ *  `location` when it loads. */
+const pageSlug = (): string | null => (typeof location === 'undefined' ? null : worldKeyFrom(location.pathname, BASE));
+/** The new engine's name for this page's world: the name a Soul's pairing request and the owner's Soul list use (the
+ *  directory's `world`, the world's routes key). The launcher's inline config names it (`v2World`); without it, the
+ *  page's slug, which is that key (tools/world-launcher/cutover.mjs `v2World`). Never the stream's folder: on soul.game
+ *  that is the world's id (`/s/w/<id>-<id>-0/…`), not its name, and a navbar asking the directory by it listed no Souls
+ *  (first day, 25 Nov). Null on an old-engine world. */
+export const v2WorldName = (stream: string | null = PAGE_STREAM, cfg: { v2World?: unknown } | undefined = PAGE_CONFIG, slug: string | null = pageSlug()): string | null => {
+  if (!stream) return null;
+  const named = typeof cfg?.v2World === 'string' ? cfg.v2World : null;
+  return named && WORLD_NAME.test(named) ? named : slug && WORLD_NAME.test(slug) ? slug : null;
+};
 /** R3b: where this page's view socket and directory are, as the box reaches them; null on an old-engine world. */
 export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof location !== 'undefined' ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null);
 
@@ -331,14 +344,58 @@ export function useV2OwnedSouls(): readonly string[] {
   return owned;
 }
 /** One of the signed-in person's Souls on this world, as the navbar lists it (the directory's `/v1/account/souls`). */
-export type V2AccountSoul = { id: string; name: string | null };
+export type V2AccountSoul = { id: string; name: string | null; retireAsked?: true };
 /** The rows of `/v1/account/souls` for `world`: its page id and its name; other worlds' Souls are left out. */
 export function accountSoulsOf(body: unknown, world: string, soulIdOf: (grant: string) => string): V2AccountSoul[] {
   const rows = (body as { souls?: unknown } | null)?.souls;
   if (!Array.isArray(rows)) return [];
   return rows.flatMap((r) => r && typeof r === 'object' && typeof r.soul === 'string' && r.soul.startsWith('soul-') && r.world === world
-    ? [{ id: soulIdOf(r.soul), name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 60) : null }] : []);
+    ? [{ id: soulIdOf(r.soul), name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 60) : null, ...(r.retire_asked === true ? { retireAsked: true as const } : {}) }] : []);
 }
+
+/** A POST to this world's directory signed in as the person (the view-token exchange's sign-in: a provider session as
+ *  the bearer, a local `dev:<name>` or `?as=` as the directory's test person); null when no one is signed in. */
+async function accountPost(place: MailboxPlace, path: string, body: Record<string, unknown>): Promise<Response | null> {
+  let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
+  if (!name) { const t = await pageSession().getToken().catch(() => null); if (!t) return null; if (t.startsWith('dev:')) name = t.slice(4); else bearer = t; }
+  return fetch(`${place.directory}${path}`, { method: 'POST',
+    headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+    body: JSON.stringify(name ? { ...body, test_person: name } : body), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+}
+
+/** The signed-in POST `byDirectory` sends: its status and JSON body (null when no one is signed in). */
+export type AccountCall = (path: string, body: Record<string, unknown>) => Promise<{ status: number; body: unknown } | null>;
+/** What the owner's Soul card does through the directory on a world the new engine runs (route.rs, signed in):
+ *  `retire` it for good (`confirm: true`), `revoke` its agent (Disconnect) or `keep` it (clears its agent's ask). */
+export type DirectoryAct = 'retire' | 'revoke' | 'keep';
+/** 0.137: does `act` for the person's Soul `soulId` (the page's id) on a world the new engine runs. The old routes
+ *  (`DELETE /v1/souls/:id`, `/v1/souls/:id/revoke`) are the old process's, which a moved world answers 409
+ *  `world.new-engine`: the directory does it instead (`/v1/account/souls/<act>`). A retire takes its token from the
+ *  gateway and tells the world, whose body leaves by K10's one path (worldd directory.rs); a revoke takes only its
+ *  token; a keep clears its agent's ask, so the agent's `retire wait` hears the owner kept it. Its grant is found in
+ *  the person's own list; a Soul not on it is left alone. */
+export async function byDirectory(act: DirectoryAct, soulId: string, call: AccountCall, soulIdOf: (grant: string) => string): Promise<boolean> {
+  const listed = await call('/v1/account/souls', {});
+  const rows = (listed?.body as { souls?: unknown } | null)?.souls;
+  const grant = Array.isArray(rows) ? rows.find((r) => r && typeof r.soul === 'string' && soulIdOf(r.soul) === soulId)?.soul as string | undefined : undefined;
+  if (listed?.status !== 200 || !grant) return false;
+  const done = await call(`/v1/account/souls/${act}`, act === 'retire' ? { soul: grant, confirm: true } : { soul: grant });
+  return done?.status === 200 && (done.body as { ok?: unknown } | null)?.ok === true;
+}
+export const retireByDirectory = (soulId: string, call: AccountCall, soulIdOf: (grant: string) => string) => byDirectory('retire', soulId, call, soulIdOf);
+/** `byDirectory(act)` from this page, or null on an old-engine world. Each tells the navbar's list to ask again. */
+export function v2Act(act: DirectoryAct): ((soulId: string) => Promise<boolean>) | null {
+  const place = typeof window !== 'undefined' && PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
+  if (!place) return null;
+  return async (soulId) => {
+    const { soulIdOf } = await import('./bridge.ts');
+    const call: AccountCall = async (path, body) => { const r = await accountPost(place, path, body); return r ? { status: r.status, body: await r.json().catch(() => null) } : null; };
+    const ok = await byDirectory(act, soulId, call, soulIdOf);
+    if (ok) window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));
+    return ok;
+  };
+}
+export const v2Retire = () => v2Act('retire');
 
 /** First day (25 Nov): the signed-in person's Souls on this v2 world, named, whether or not their body is here yet (the
  *  navbar's "your Souls"); asked again when this page approves one. Empty on an old-engine world or signed out. */
@@ -358,11 +415,8 @@ export function useV2AccountSouls(world: string | null = v2WorldName()): readonl
     let live = true;
     void (async () => {
       try {
-        let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
-        if (!name) { const t = await pageSession().getToken().catch(() => null); if (!t) return; if (t.startsWith('dev:')) name = t.slice(4); else bearer = t; }
-        const [{ soulIdOf }, res] = await Promise.all([import('./bridge.ts'), fetch(`${place.directory}/v1/account/souls`, { method: 'POST',
-          headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-          body: JSON.stringify(name ? { test_person: name } : {}), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })]);
+        const [{ soulIdOf }, res] = await Promise.all([import('./bridge.ts'), accountPost(place, '/v1/account/souls', {})]);
+        if (!res) return;
         const body = res.ok ? await res.json().catch(() => null) : null;
         if (live && body) setSouls(accountSoulsOf(body, world, soulIdOf));
       } catch { /* the directory is unreachable now: keep the last list */ }

@@ -11,7 +11,8 @@
 //! - **Checked off the clock, committed on it** (K18b, #3175). A move's checks are its own: the controller's claims
 //!   (T9 rule 4), the reach (B2), the seat free and in reach (B3), a route (N7). The route searches and the reach
 //!   distances run on the world's planner thread (`sim::planner`), from the bodies as a tick left them, and come
-//!   back for the next tick: a walk gets its place and legs a tick after it starts; a sit or a rise is committed at
+//!   back for the next tick: a walk's place question goes in the tick it starts, with the bodies as that tick left
+//!   them (#4974), so it gets its place and legs at the next tick; a sit or a rise is committed at
 //!   the first tick after its reach is back, a tick later than asked. The clock commits: the claims, and the seat
 //!   held or free and the distance against the move's reach, as B3 reserves a seat: one tick's sits are taken
 //!   together, in B3's stable order. A move refused there ends by that name.
@@ -127,9 +128,10 @@ fn form_args(v: Option<&Value>) -> bool {
 /// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
 /// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
-    // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the form
-    // runner with its walk (C17, #3453); a bare sit is the move.
-    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+    // A sit or a lie naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the
+    // form runner with its walk (C17, #3453); a bare one is the move, unless its thing's entry declares that form's
+    // walk to a free slot (`Acts::fixture_sit`).
+    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit" | "lie")) if ns != "souls")
         && form_args(intent.parameters.get(&1))
     {
         return None;
@@ -187,6 +189,32 @@ struct Waiting {
     stance: Option<Stance>,
 }
 
+/// The skill that turns a body where it stands: it takes all its legs for the turn and gives them back.
+fn face_skill() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: Vec::new(),
+        cancelled_by: Vec::new(),
+    }
+}
+
+/// Turns `body` to `facing` where it stands, only when the turn takes its legs from nothing: a walk, a follow, a body
+/// settled on the ground or any other driver of its legs keeps them, and the body keeps its facing (review of #4925:
+/// the turn as two begin to talk ended the follow one of them was in). For a turn as an activity begins or a form
+/// starts; a walk's end turns with [`Bodies::face`].
+pub(crate) fn turn_free(c: &mut sim::controller::Controller, body: Id, facing: Quat) {
+    let turn = face_skill();
+    let free = c
+        .claims(body)
+        .and_then(|k| k.plan(Driver::MAX, &turn).ok())
+        .is_some_and(|s| s.cancelled.is_empty());
+    if free && let Ok(d) = c.claim(body, &turn) {
+        let _ = c.set(body, d, Part::Facing(facing));
+        let _ = c.release(body, d);
+    }
+}
+
 /// The world's bodies: a town, the runner of skills over it with the one controller, and the moves and seats.
 pub struct Bodies {
     pub runner: Runner,
@@ -207,9 +235,9 @@ pub struct Bodies {
     pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
-    /// Each started walk's target, kept to its end however it ends (0.133): how far from it a done walk ended is
-    /// measured then.
-    walked_to: BTreeMap<Id, Id>,
+    /// Each started walk's target, and the point on it when it was sent to one, kept to its end however it ends
+    /// (0.133): how far from it a done walk ended is measured then.
+    walked_to: BTreeMap<Id, (Id, Option<Vec3>)>,
     /// How far from its target each done walk ended, mm, until its end is written ([`Bodies::away`]).
     away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
@@ -696,8 +724,15 @@ impl Bodies {
                             _ => resume = clean.map(|to| (surface, Some(to), r)),
                         }
                         if matches!(r, sim::slots::Resumed::Held) {
-                            let m =
-                                legal_near(s, body.id, p.frame, p.position, p.orientation, build)?;
+                            let m = legal_near(
+                                &self.town,
+                                s,
+                                body.id,
+                                p.frame,
+                                p.position,
+                                p.orientation,
+                                build,
+                            )?;
                             self.free_near(s, m, build)
                         } else {
                             sim::slots::placed_off(
@@ -749,9 +784,16 @@ impl Bodies {
                             .map(|b| b.pose)
                             .and_then(|p| {
                                 let s = self.town.surfaces_for(build.size)?.get(&floor)?;
-                                let m =
-                                    legal_near(s, id, p.frame, p.position, p.orientation, build)
-                                        .ok()?;
+                                let m = legal_near(
+                                    &self.town,
+                                    s,
+                                    id,
+                                    p.frame,
+                                    p.position,
+                                    p.orientation,
+                                    build,
+                                )
+                                .ok()?;
                                 Some(self.free_near(s, m, build))
                             });
                         self.runner.controller.remove(id);
@@ -882,13 +924,19 @@ impl Bodies {
         if taken.iter().all(apart) {
             return moved;
         }
-        sim::slots::clear_spot(
+        // Never into ground sealed off from the main ground: the nearest clear point that is not.
+        let open = |q: [i64; 2]| {
+            let at = Vec3::new(q[0], p.position.y, q[1]);
+            !sim::mover::Floors::sealed(&self.town, p.frame.node, at, build)
+        };
+        sim::slots::clear_spot_where(
             floor,
             [p.position.x, p.position.z],
             &taken,
             RESTART_APART,
             100_000,
             5_000_000,
+            &open,
         )
         .and_then(|q| {
             floor
@@ -929,7 +977,7 @@ impl Bodies {
                 name: "no-surface",
                 detail: "the ground for its build".into(),
             })?;
-        let moved = legal_near(s, id, frame, entry, logged.orientation, build)?;
+        let moved = legal_near(&self.town, s, id, frame, entry, logged.orientation, build)?;
         let moved = self.free_near(s, moved, build);
         let to = moved.pose.position;
         self.logged.insert(id, *logged);
@@ -1242,7 +1290,7 @@ impl Bodies {
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
-    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
+    fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             return Ok(Target::new(node, p));
         }
@@ -1271,6 +1319,70 @@ impl Bodies {
         if tree.node(tree.root()).is_some_and(|n| n.id() == node) {
             return Err(refusal("move.whole-world", node));
         }
+        // A landform or another place on the ground (a range, a sea, a lake, a wood, a square, a path): a walk to it
+        // ends at its edge, on the open ground, wherever the walker stands (a floor too). First on it at the point of
+        // its edge nearest the walker, when its middle is ground the walker may stand on and reach: an area
+        // [`select::GAP`] inside its outline, a line on itself, so a walk to a square, a wood or a path ends on it.
+        // Where that is no place to stand or the walker's walk cannot reach it (a sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
+        // toward the walker a metre at a time to the first point a body may stand on that the walker's walk may reach
+        // (`View::stand_reached`, no route search): the nearest walkable point at its edge on the walker's way there.
+        // A walker already within it, or with no such point nearer it, is there.
+        if let Some((half, area)) = place_half_width(tree, node)
+            && let Some((frame, at)) = self.pose(body)
+            && let Some(ground) = tree
+                .handle(node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent())
+        {
+            let here = select::point_in(tree, frame, at, ground)?;
+            let gap = select::gap(tree, node, ground, here)?;
+            if gap <= half {
+                return Ok(Target::new(frame, at));
+            }
+            let (edge, middle) = select::nearest_in(tree, node, ground, here)?;
+            let (dx, dz) = (here.x - edge.x, here.z - edge.z);
+            let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
+                .isqrt()
+                .max(1);
+            let along = |s: i128| {
+                let s = s.min(len);
+                let k = |d: i64| i64::try_from(i128::from(d) * s / len).unwrap_or(0);
+                Vec3::new(edge.x + k(dx), 0, edge.z + k(dz))
+            };
+            let first = i128::from(half.saturating_add(select::GAP));
+            let on = if area { -i128::from(select::GAP) } else { 0 };
+            let from = (frame, at);
+            // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
+            // mountain's (its slopes may be on the map and still no way up).
+            let walkable = self
+                .town
+                .view_for(body)?
+                .stand_reached(ground, middle, from)
+                .is_some();
+            // First-day round 2 (0.139): a district round water (a harbour, its middle the sea between its piers) is
+            // walked into by the nearest area it holds whose middle the walker may stand on and reach (its
+            // boardwalk), the same way; stood back from, it ended over its border, in the park beside it. Only an
+            // area within [`INNER_REACH`] of the edge the walker comes to: a river's bridge far along it is not.
+            if area
+                && !walkable
+                && let Some(inner) =
+                    inner_ground(&mut self.town, body, node, ground, here, edge, from)?
+            {
+                return self.goal(body, inner, None);
+            }
+            let view = self.town.view_for(body)?;
+            let mut tries = walkable
+                .then_some(on)
+                .into_iter()
+                .chain((0..).map(|k| first + k * 1_000_000));
+            while let Some(s) = tries.next().filter(|s| *s < len) {
+                if let Some(p) = view.stand_reached(ground, along(s), from) {
+                    return Ok(Target::new(ground, p));
+                }
+            }
+            // None nearer it that the walker may reach: it stands as near as it can get.
+            return Ok(Target::new(frame, at));
+        }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
         match spot::once(&r) {
@@ -1296,7 +1408,7 @@ impl Bodies {
 
     /// The candidate of `a`'s ranked list that is taken, and its rank (C14): a sit's or a lie's through I5's
     /// selector (`sim::commit::bind`, named slots: the first free one binds), a walk's the first with somewhere to go.
-    fn bind(&self, a: &Asked) -> R<(usize, Ask)> {
+    fn bind(&mut self, a: &Asked) -> R<(usize, Ask)> {
         if a.fallbacks.is_empty() {
             return Ok((0, a.ask.clone()));
         }
@@ -1347,6 +1459,15 @@ impl Bodies {
         self.walked_to.len() + self.away_of.len()
     }
 
+    /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
+    /// another frame.
+    fn gap_to(&self, body: Id, node: Id, p: Vec3) -> Option<u64> {
+        let (frame, at) = self.pose(body)?;
+        (frame == node)
+            .then(|| (i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt() / 1000)
+            .and_then(|mm| u64::try_from(mm).ok())
+    }
+
     /// The gap from where `body` stands to `target`'s shape (0 inside its area), or to a body it walked to, mm; none
     /// when the two are in different frames and `target` is a body.
     fn gap_of(&self, target: Id, body: Id) -> Option<u64> {
@@ -1363,10 +1484,13 @@ impl Bodies {
 
     /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
     /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
-    /// (the ground, a room, a building's main room) keeps its facing, as does one ending within
-    /// [`sim::controller::FACE_NEAR`] of the origin ([`sim::controller::facing_toward`], the one rule a form's walk
-    /// keeps too). The turn is its legs' facing input, set by a driver of them, as a place's facing is
-    /// ([`Self::take_places`]).
+    /// (the ground, a room, a building's main room, a point on one) turns it to what is there instead: the nearest
+    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. A walk to a
+    /// place on the ground that ends outside it (at a range's or a sea's edge) turns it to the nearest point of that
+    /// place's shape, or its middle when it stands right at it. One ending
+    /// within [`sim::controller::FACE_NEAR`] of what it faces keeps its facing ([`sim::controller::facing_toward`], the
+    /// one rule a form's walk keeps too). The turn is its legs' facing input, set by a driver of them, as a place's
+    /// facing is ([`Self::take_places`]).
     fn face(&mut self, body: Id, target: Id) {
         use sim::ground::scene::{GROUND, PLACE, ROOM};
         let Some((frame, at)) = self.pose(body) else {
@@ -1380,10 +1504,59 @@ impl Bodies {
                     [GROUND, PLACE, ROOM].contains(&kind)
                 })
         });
-        if target == body || place || main_room(tree, target).is_some() {
+        if target == body {
             return;
         }
+        // A place it walked to from outside (a range, a sea): its edge, the nearest point of it, else its middle when
+        // it stands on that edge.
+        let edge = place_half_width(tree, target)
+            .filter(|(half, _)| select::gap(tree, target, frame, at).is_ok_and(|g| g > *half))
+            .and_then(|_| select::nearest_in(tree, target, frame, at).ok());
+        let to = if let Some((near, middle)) = edge {
+            let d = i128::from(near.x - at.x).pow(2) + i128::from(near.z - at.z).pow(2);
+            Some(if d > i128::from(sim::controller::FACE_NEAR).pow(2) {
+                near
+            } else {
+                middle
+            })
+        } else if place || main_room(tree, target).is_some() {
+            let c = &self.runner.controller;
+            notable_near(tree, frame, at, &|id| c.body(id).is_some())
+        } else {
+            self.toward(target, frame)
+        };
+        self.turn_to(body, at, to);
+    }
+
+    /// `body`, standing, turns to face `target` (another Soul's body, or a thing of `live`, the tree it acts in) as a
+    /// walk's end turns it ([`Self::face`]): a form's move made toward it (`bow_to toward=<Soul>`) begins facing it. A
+    /// seated or lying body keeps its facing, and so does one within [`sim::controller::FACE_NEAR`] of it or one whose
+    /// legs something else drives ([`turn_free`]).
+    pub(crate) fn face_to(&mut self, live: &replica::tree::Tree, body: Id, target: Id) {
+        let standing = self
+            .runner
+            .controller
+            .body(body)
+            .is_some_and(|m| m.pose.frame.slot.is_none());
+        let Some((frame, at)) = self.pose(body).filter(|_| standing && target != body) else {
+            return;
+        };
         let to = match self.pose(target) {
+            Some((f, p)) if f == frame => Some(p),
+            _ => self
+                .toward(target, frame)
+                .or_else(|| select::origin_in(live, target, frame).ok()),
+        };
+        if let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) {
+            turn_free(&mut self.runner.controller, body, facing);
+        }
+    }
+
+    /// Where `target`, a thing or another Soul's body, is in `frame`'s axes, on the level: its origin, or the thing it
+    /// sits in when it is seated or lying ([`Bodies::face`]).
+    fn toward(&self, target: Id, frame: Id) -> Option<Vec3> {
+        let tree = &self.town.tree;
+        match self.pose(target) {
             Some((f, p)) if f == frame => Some(p),
             // seated or lying: the thing it is in
             Some(_) => self
@@ -1391,18 +1564,17 @@ impl Bodies {
                 .held_by(target)
                 .and_then(|t| select::origin_in(tree, t, frame).ok()),
             None => select::origin_in(tree, target, frame).ok(),
-        };
+        }
+    }
+
+    /// Turns `body`, standing at `at`, to face `to` (both in its frame's axes); nothing when there is nowhere to face or
+    /// it is already on it ([`sim::controller::facing_toward`]).
+    fn turn_to(&mut self, body: Id, at: Vec3, to: Option<Vec3>) {
         let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) else {
             return;
         };
         let c = &mut self.runner.controller;
-        let turn = SkillShape {
-            name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
-            claims: vec![Want::All(Class::Locomotion)],
-            blocks: Vec::new(),
-            cancelled_by: Vec::new(),
-        };
-        if let Ok(d) = c.claim(body, &turn) {
+        if let Ok(d) = c.claim(body, &face_skill()) {
             let _ = c.set(body, d, Part::Facing(facing));
             let _ = c.release(body, d);
         }
@@ -1415,11 +1587,24 @@ impl Bodies {
 
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
     /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
-    /// started (C14). A walk starts now (its place and legs come from the planner); a sit or a rise waits for its
-    /// reach, and comes back from the first call after the planner found it (K18b).
+    /// started (C14). A walk starts now (its place and legs come from the planner, asked at its next body tick); a sit
+    /// or a rise waits for its reach, and comes back from the first call after the planner found it (K18b).
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, false)
+    }
+
+    /// The world's commit of one tick's gateway moves (step 4, after the bodies stepped): as [`Bodies::start`], and
+    /// the new walks' place questions go to the planner now, with the bodies as the tick left them (#4974): the next
+    /// tick reads their place and legs, so each walk is planned and its act answered a tick after it starts, not two.
+    /// Moves started inside a body step (the wind-down's walks) are asked with that step's own wants already.
+    pub fn start_committed(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, true)
+    }
+
+    fn start_with(&mut self, asks: Vec<(Id, Asked)>, ask_now: bool) -> Vec<(Id, R<()>)> {
         let mut out = Vec::new();
         let mut asked = Vec::new();
+        let mut walked = Vec::new();
         for (id, a) in asks {
             if self.runner.controller.body(a.body).is_none() {
                 out.push((id, Err(refusal("body-unknown", a.body))));
@@ -1437,8 +1622,8 @@ impl Bodies {
                 continue;
             }
             self.took.insert(id, (rank, ask.target()));
-            if let (Ask::Walk { .. }, Some(t)) = (&ask, ask.target()) {
-                self.walked_to.insert(id, t);
+            if let (Ask::Walk { point, .. }, Some(t)) = (&ask, ask.target()) {
+                self.walked_to.insert(id, (t, *point));
             }
             match ask {
                 Ask::Walk { node, point, gait } => {
@@ -1448,6 +1633,7 @@ impl Bodies {
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
+                        walked.push((a.body, id));
                     } else {
                         self.walked_to.remove(&id);
                     }
@@ -1492,14 +1678,21 @@ impl Bodies {
             .collect();
         self.reached
             .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
-        if !pairs.is_empty() {
-            let reach = self.reach_of(pairs);
-            self.send(Wants {
-                form_map: Some(Arc::clone(&self.form_map)),
-                classes: self.town.body_classes.clone(),
-                reach,
-                ..Wants::default()
-            });
+        // Committed by the world's step 4, the new walks' place questions go with them, now (#4974).
+        let mut wants = if ask_now {
+            self.runner.ask_places(&walked, self.sent)
+        } else {
+            Wants::default()
+        };
+        if !pairs.is_empty() || !wants.places.is_empty() {
+            if wants.places.is_empty() {
+                wants.classes = self.town.body_classes.clone();
+            }
+            if !pairs.is_empty() {
+                wants.reach = self.reach_of(pairs);
+            }
+            wants.form_map = Some(Arc::clone(&self.form_map));
+            self.send(wants);
         }
         self.waiting.extend(asked);
         out
@@ -1716,6 +1909,11 @@ impl Bodies {
                         }
                         Ok(())
                     }
+                    // A walk whose legs a newer claim took (its Soul's bow or dance: the controller cancels the walk's
+                    // driver) is replaced, and says so as [`Self::replace`] does (#4171), not `resource-not-held`.
+                    Some((_, Progress::Failed(n))) if n.as_str() == "resource-not-held" => {
+                        Err("claim-taken".to_owned())
+                    }
                     Some((_, Progress::Failed(n))) => Err(n.as_str().to_owned()),
                     Some((_, Progress::Going)) => continue,
                     None if self.runner.running(body) => continue,
@@ -1724,8 +1922,13 @@ impl Bodies {
                 self.live.remove(&body);
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
-                if let Some(t) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
-                    if let Some(mm) = self.gap_of(t, body) {
+                if let Some((t, point)) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
+                    // From the point it was sent to (a grip's place on the ground), not from the ground node it named; a walk
+                    // that ended in another frame (overflowed from a floor onto the open ground) as before.
+                    let gap = point
+                        .and_then(|p| self.gap_to(body, t, p))
+                        .or_else(|| self.gap_of(t, body));
+                    if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
                     }
                     self.face(body, t);
@@ -1809,6 +2012,11 @@ impl Bodies {
         moved
     }
 
+    /// The move `body` is making of its own (a walk, or a walk to its place), by its intent, if any.
+    pub fn moving(&self, body: Id) -> Option<Id> {
+        self.live.get(&body).map(|(id, _)| *id)
+    }
+
     /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
     /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
     /// ends the act when its move ends. `None`: no move is going for it.
@@ -1890,8 +2098,10 @@ impl Bodies {
 
 /// `id` placed on `floor` at `at`, else at the floor's nearest legal point to it by the walk-out's rule
 /// (`sim::ground::exits::nearest`): a point it may stand on, placed there at once (a restart, not a move), or
-/// `off-surface` when the floor holds none for its build.
+/// `off-surface` when the floor holds none for its build. Never ground sealed off from the main ground (`floors`'
+/// [`sim::mover::Floors::sealed`]: a pocket no walk from outside reaches), so a restart never shuts a body in.
 pub fn legal_near(
+    floors: &dyn sim::mover::Floors,
     floor: &sim::mover::Surface,
     id: Id,
     frame: Frame,
@@ -1899,13 +2109,17 @@ pub fn legal_near(
     facing: Quat,
     build: Build,
 ) -> R<Moved> {
-    if let Ok(b) = floor.place_built(id, frame, at, facing, build) {
+    let sealed = |p: Vec3| floors.sealed(frame.node, p, build);
+    if !sealed(at)
+        && let Ok(b) = floor.place_built(id, frame, at, facing, build)
+    {
         return Ok(b);
     }
-    let (_, to) = sim::ground::exits::nearest(floor.pieces(), at).ok_or_else(|| Refusal {
-        name: "off-surface",
-        detail: format!("({}, {}) µm: no legal point on its floor", at.x, at.z),
-    })?;
+    let (_, to) = sim::ground::exits::nearest_where(floor.pieces(), at, &|p| !sealed(p))
+        .ok_or_else(|| Refusal {
+            name: "off-surface",
+            detail: format!("({}, {}) µm: no legal point on its floor", at.x, at.z),
+        })?;
     floor.place_built(id, frame, to, facing, build)
 }
 
@@ -2491,6 +2705,129 @@ fn beside(at: Vec3, from: Option<Vec3>, d: i64) -> Vec3 {
         return Vec3::new(at.x, at.y, at.z + d);
     }
     Vec3::new(at.x + dx * d / len, at.y, at.z + dz * d / len)
+}
+
+/// How far around a body a walk to a place looks for what to face, µm ([`notable_near`]): a few steps, so a Soul faces
+/// what is beside it, never a thing across the square.
+const NOTABLE_NEAR: i64 = 6_000_000;
+
+/// What a body standing at `at` in `frame` (its floor) faces after a walk to a place (0.136): the nearest thing standing
+/// there, by its origin on the level within [`NOTABLE_NEAR`] and farther than [`sim::controller::FACE_NEAR`], the
+/// lower id on a tie. A thing standing there is one on the floor itself or in a room on it, with solids of its own (a
+/// fountain, a bench, a tree, a table; not ground cover, a path or a lawn), that holds no room (not a building, whose
+/// wall is not what a Soul came to look at) and is not a body (`body`). One pass over the floor's things and its rooms'
+/// things, so the same tree gives the same answer. None when nothing stands near: the body keeps its facing.
+fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> Option<Vec3> {
+    use sim::ground::scene::{DOORWAY, F_SOLIDS, FLOOR, GROUND, PLACE, ROOM, WINDOW};
+    let near = i128::from(NOTABLE_NEAR).pow(2);
+    let off = i128::from(sim::controller::FACE_NEAR).pow(2);
+    let h = tree.handle(frame)?;
+    let mut todo: Vec<(replica::tree::Handle, bool)> = vec![(h, true)];
+    let mut best: Option<(i128, Id, Vec3)> = None;
+    while let Some((h, top)) = todo.pop() {
+        for c in tree.children(h).unwrap_or_default() {
+            let Some(n) = tree.node(*c) else { continue };
+            let full = n.kind().as_str();
+            let kind = full.split_once('@').map_or(full, |(k, _)| k);
+            if kind == ROOM && top {
+                todo.push((*c, false));
+                continue;
+            }
+            if [GROUND, PLACE, ROOM, FLOOR, WINDOW, DOORWAY].contains(&kind) || body(n.id()) {
+                continue;
+            }
+            if !matches!(n.fields().get(&F_SOLIDS), Some(Value::Array(s)) if !s.is_empty()) {
+                continue;
+            }
+            let Ok(p) = select::origin_in(tree, n.id(), frame) else {
+                continue;
+            };
+            let d = i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2);
+            if d <= off || d > near || best.is_some_and(|(b, id, _)| (b, id) <= (d, n.id())) {
+                continue;
+            }
+            if main_room(tree, n.id()).is_some() {
+                continue;
+            }
+            best = Some((d, n.id(), p));
+        }
+    }
+    best.map(|(_, _, p)| p)
+}
+
+/// Whether `node` is a place on the open ground of its own (a landform, a water, an area, a path: a child of the ground
+/// with an outline or a line and no solids, seats or floors, nor rooms within it), which a walk goes to the edge of
+/// (`Bodies::goal`) and faces (`Bodies::face`): how far its edge lies from its shape, µm (0 for an outline, half a
+/// line's width when the walkers' tree keeps it, else 0), and whether it is an area (an outline) rather than a line.
+fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
+    use sim::ground::scene::{F_LINE_WIDTH, GROUND};
+    let n = tree.node(tree.handle(node)?)?;
+    let on_ground = n
+        .parent()
+        .and_then(|p| tree.node(tree.handle(p)?))
+        .is_some_and(|g| g.kind().as_str().split('@').next() == Some(GROUND));
+    let f = n.fields();
+    let built = [select::F_SOLIDS, select::F_SLOTS, select::F_SURFACES]
+        .iter()
+        .any(|k| f.contains_key(k));
+    if !on_ground || built || main_room(tree, node).is_some() {
+        return None;
+    }
+    if f.contains_key(&select::F_OUTLINE) {
+        return Some((0, true));
+    }
+    f.contains_key(&select::F_LINE).then(|| {
+        let mm = match f.get(&F_LINE_WIDTH) {
+            Some(Value::Uint(w)) => i64::try_from(*w).unwrap_or(0),
+            _ => 0,
+        };
+        (mm.saturating_mul(500), false)
+    })
+}
+
+/// How far from the point of a place's edge nearest the walker an area within it may lie and still be walked into in
+/// its stead ([`inner_ground`]), µm: the harbour's boardwalk lies 9.5 m in from the edge a walker from the park comes
+/// to; the west river's stone bridge, 200 m along the river from a walker by the fishing hamlet, is not where a walk to
+/// the river ends.
+const INNER_REACH: i64 = 20_000_000;
+
+/// The area within area `node` (a child of `ground` too, [`place_half_width`]) whose middle the walker at `from` may
+/// stand on and reach, within [`INNER_REACH`] of `edge` (the point of `node`'s edge nearest the walker), nearest the
+/// walker's point `here` (both `ground`'s frame), the first by id on a tie; none when no such area lies within it.
+/// Read off the tree first, then checked on the walker's map.
+fn inner_ground(
+    town: &mut Town,
+    body: Id,
+    node: Id,
+    ground: Id,
+    here: Vec3,
+    edge: Vec3,
+    from: (Id, Vec3),
+) -> R<Option<Id>> {
+    let tree = &town.tree;
+    let within: Vec<(i64, Id, Vec3)> = tree
+        .handle(ground)
+        .and_then(|g| tree.children(g))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| tree.node(*c).map(|n| n.id()))
+        .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
+        .filter(|c| select::gap(tree, *c, ground, edge).is_ok_and(|g| g <= INNER_REACH))
+        .filter(|c| select::within(tree, *c, node).unwrap_or(false))
+        .filter_map(|c| {
+            let (_, middle) = select::nearest_in(tree, c, ground, here).ok()?;
+            Some((select::gap(tree, c, ground, here).ok()?, c, middle))
+        })
+        .collect();
+    if within.is_empty() {
+        return Ok(None);
+    }
+    let view = town.view_for(body)?;
+    Ok(within
+        .into_iter()
+        .filter(|(.., middle)| view.stand_reached(ground, *middle, from).is_some())
+        .min_by_key(|(gap, c, _)| (*gap, *c))
+        .map(|(_, c, _)| c))
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with

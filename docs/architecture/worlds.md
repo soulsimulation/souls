@@ -98,8 +98,8 @@ switch independent. A previously saved master mute migrates to both switches off
 
 ## The world launcher (`tools/world-launcher`)
 
-`launcher.mjs` runs many worlds behind one address. In production it is served under `/worlds`
-(`https://sim.eden.art/worlds`); locally it listens on port 4980 and starts worlds on ports 5101–5149.
+`launcher.mjs` runs many worlds behind one address. In production it is served at the root of
+`https://soul.game` (`--base /`); locally it listens on port 4980 and starts worlds on ports 5101–5149.
 
 - **Homepage and list.** `GET <base>/` serves the web app's world list; `<base>/__sim/worlds.json` lists worlds and
   `<base>/__sim/templates.json` the templates.

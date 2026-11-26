@@ -50,6 +50,10 @@ export type BootSocket = { url: string; ws: WebSocket; queue: unknown[]; hello: 
  *  round trips to the server all leave at once instead of one after another (research B, 2026-10-19). */
 export function entryPrefetchScript(base: string, oldKeys: readonly string[] = OLD_WORLD_KEYS, hello?: string): string {
   return `(function(){try{var b=${JSON.stringify(base)},k=(${worldKeyFrom.toString()})(location.pathname,b);`
+    // page arrival: a page the new engine runs reads its stream through the replica (WASM, immutable by version), which
+    // its stream worker fetched only once the page's code had run (~1.8 s in, then the WASM after the glue); fetched
+    // now, both are in the HTTP cache when the worker asks for them. Same URLs and defaults as the worker's own requests.
+    + `var rc=window.__simConfig,rp=rc&&rc.v2Replica;if(typeof rp==='string'&&/^\\/(?!\\/)[A-Za-z0-9._\\/-]+\\/replica\\.js$/.test(rp)&&rp.indexOf('..')<0&&typeof fetch==='function')[rp,rp.replace(/replica\\.js$/,'replica_bg.wasm')].forEach(function(u){fetch(u).then(function(r){return r.arrayBuffer();}).catch(function(){});});`
     // a v2 world whose old views are not published (v2Views false, cutover.mjs v2Fields) has no snapshot to fetch
     + `if((window.__simConfig&&typeof window.__simConfig.worldEngine==='boolean'?!window.__simConfig.worldEngine:${JSON.stringify(oldKeys)}.indexOf(k)>=0)||window.__simConfig&&window.__simConfig.v2Views===false||typeof fetch!=='function')return;`
     + `var w=b+'/w/'+k,rq=function(u){var c=typeof AbortController==='function'?new AbortController():null,p=c?fetch(u,{signal:c.signal}):fetch(u);p.catch(function(){});return {response:p,abort:function(){if(c)c.abort();}};},g=function(n,u){var r=rq(u);r.url=u;window[n]=r;};`

@@ -11,6 +11,8 @@ import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
+import { soulRetireWait } from '../account/account.mjs';
+import { folderOf } from './home.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -106,15 +108,29 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   // An agent's retire changes nothing but the ask, shown on the page.
   const asked = await souls(home, 'retire', 'Wren');
   assert.deepEqual([asked.ok, asked.retire, asked.soul], [true, 'asked', first.soul]);
+  // 0.137: the owner confirms on the Soul's card on its world's page; there is no separate Souls page.
+  assert.equal(asked.page, `${directory}/w/local/#soul/${first.soul}`);
+  assert.match(asked.next, /press Retire for good on its card/);
+  assert.doesNotMatch(asked.next, /Souls page/);
+  // Not confirmed yet: `retire wait` comes back at its bound (a minute; here at once), still pending.
+  const pending = await soulRetireWait(home, { within: 0 });
+  assert.deepEqual([pending.retire, pending.next], ['pending', 'retire wait']);
   assert.equal((await mine()).find((s) => s.soul === first.grant).retire_asked, true);
   const hash = (token) => createHash('sha256').update(token).digest('hex');
   const token = Object.values(json(join(home, 'credentials.json')).souls[first.soul])[0].token;
   assert.ok(readFileSync(tokensFile, 'utf8').includes(hash(token)), 'the token still works');
+  assert.match(readFileSync(join(folderOf(home), 'AGENTS.md'), 'utf8'), new RegExp(first.soul), 'the guide lists it while it lives here');
   // The owner confirms on the page; `retire wait` sees it, and the dead token leaves the home.
   assert.equal((await page('/v1/account/souls/retire', { soul: first.grant, confirm: true })).status, 200);
+  // The world hears of it from the directory's Souls file beside the gateway's tokens (worldd directory.rs), and the
+  // gateway no longer takes its token.
+  assert.match(readFileSync(`${tokensFile}.souls`, 'utf8'), new RegExp(`^retired ${first.grant}$`, 'm'));
+  assert.ok(!readFileSync(tokensFile, 'utf8').includes(hash(token)), 'the gateway refuses its token');
   const waited = await souls(home, 'retire', 'wait');
   assert.deepEqual([waited.retire, waited.retired], ['done', true]);
   assert.equal(json(join(home, 'credentials.json')).souls?.[first.soul], undefined);
+  // First day (26 Nov): the folder's guide no longer lists it, so the next chat there is not told it lives here.
+  assert.doesNotMatch(readFileSync(join(folderOf(home), 'AGENTS.md'), 'utf8'), new RegExp(first.soul));
   assert.ok(!(await mine()).some((s) => s.soul === first.grant), 'off the list');
 
   // revoke needs the account login, as today's.
@@ -136,4 +152,17 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   assert.equal(readFileSync(join(home, 'souls', second.soul, 'memory', 'journal.md'), 'utf8'), 'kept');
   assert.equal((await souls(home, 'list', '--account')).souls.find((s) => s.id === second.grant).device, null);
   assert.equal((await souls(home, 'revoke', 'nobody')).code, 'not-yours');
+});
+
+test('A3: the owner\'s Keep on the card clears the agent\'s ask; `retire wait` hears the Soul was kept (0.137)', async () => {
+  const home = join(dir, 'a3');
+  const { soul, grant } = await paired(home);
+  assert.equal((await souls(home, 'retire', soul)).retire, 'asked');
+  assert.equal((await soulRetireWait(home, { within: 0 })).retire, 'pending');
+  assert.equal((await page('/v1/account/souls/keep', { soul: grant })).status, 200);
+  assert.equal((await mine()).find((s) => s.soul === grant).retire_asked, false);
+  const kept = await souls(home, 'retire', 'wait');
+  assert.deepEqual([kept.ok, kept.retire, kept.retired, kept.why], [true, 'kept', false, 'Your person kept it. Nothing changed.']);
+  assert.ok(json(join(home, 'credentials.json')).souls?.[soul], 'still paired here');
+  assert.equal((await souls(home, 'retire', 'wait')).code, 'no-retire', 'nothing left to wait for');
 });

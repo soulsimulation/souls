@@ -247,3 +247,252 @@ fn a_soul_walks_out_of_mimos_from_each_of_its_floors() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The garden bed and the watering can by it, about 105 m east of the birth point, today's ids (#4086's rehearsal).
+const GARDEN_BED: &str = "e_33c75f86";
+const WATERING_CAN: &str = "e_d602cb0a";
+
+/// Each body's places in the world's log in `dir`, in order, by the body's id: the node it stood on and its position
+/// in that node's frame, µm.
+fn body_rows(dir: &Path) -> BTreeMap<Id, Vec<(Id, Vec3)>> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::<Id, Vec<(Id, Vec3)>>::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let Ok(Value::Map(m)) = decode(&r).map(|d| d.value) else {
+            continue;
+        };
+        if let Some(Value::Array(rows)) = m.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out.entry(id)
+                    .or_default()
+                    .push((pose.frame.node, pose.position));
+            }
+        }
+    }
+    out
+}
+
+/// W10 (#4086, #4118), the rehearsal's two answers on the served Mars template, each by its own Soul born about 105 m
+/// west of the garden bed: a walk to the garden bed, and a take of the watering can beside it. Each answer's time and
+/// the body's place at each end are read from the world's log. A receipt never comes without the walk: the body ends
+/// within a few metres of the thing, having crossed the 100 m between.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+#[ignore = "needs the Mars template's facts file and a built worldd (see the module doc)"]
+fn w10_a_walk_and_a_take_100_m_away_cross_the_ground_between() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("MARS_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/mars-two.facts.json"));
+    let im = import_eden::load(&std::fs::read_to_string(&facts).expect("the Mars facts file"))
+        .expect("Mars loads");
+    let (ground, bed, can) = (
+        im.nodes["ground"],
+        im.nodes[GARDEN_BED],
+        im.nodes[WATERING_CAN],
+    );
+    let dir = std::env::temp_dir().join(format!("mars-w10-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .args(["--entries", &format!("{root}/content/kinds")])
+        .args(["--souls", "0", "--at", "-6.0,-30.0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    let where_of = |b: Id| {
+        let rows = body_rows(&dir);
+        let r = rows.get(&b).expect("the body's rows");
+        (*r.first().unwrap(), *r.last().unwrap())
+    };
+    // A thing's place in the zone's frame, µm, from the facts (`world`, mm).
+    let f = replica::rules::json::parse(&std::fs::read_to_string(&facts).unwrap()).unwrap();
+    let thing_at = |id: &str| {
+        let t = f
+            .get("things")
+            .and_then(|t| t.arr())
+            .unwrap()
+            .iter()
+            .find(|t| t.get("id").and_then(|i| i.str()) == Some(id))
+            .expect("the thing");
+        let w = t.get("world").and_then(|w| w.arr()).unwrap();
+        let mm = |k: usize| match &w[k] {
+            replica::rules::json::Value::Int(v) => i64::try_from(*v).unwrap() * 1000,
+            _ => 0,
+        };
+        Vec3::new(mm(0), 0, mm(2))
+    };
+    let gap = |p: Vec3, q: Vec3| {
+        (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt() as f64 / 1e6
+    };
+    let mut failed = Vec::new();
+    for (n, verb, thing, at, what) in [
+        (
+            1,
+            "eden:walk",
+            bed,
+            thing_at(GARDEN_BED),
+            "walk to the garden bed",
+        ),
+        (
+            2,
+            "eden:take",
+            can,
+            thing_at(WATERING_CAN),
+            "take the watering can",
+        ),
+    ] {
+        let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(300))).unwrap();
+        let mut soul = Client(
+            s,
+            Id::new(Scope([0xc1; 16]), n).unwrap(),
+            0,
+            im.nodes["world"].scope(),
+        );
+        let known: Vec<Id> = body_rows(&dir).into_keys().collect();
+        soul.act(JOIN, None).expect("born by the entry");
+        let body = *body_rows(&dir)
+            .keys()
+            .find(|b| !known.contains(b))
+            .expect("the new body");
+        let t0 = std::time::Instant::now();
+        let answer = soul.act(verb, Some(thing));
+        let secs = t0.elapsed().as_secs_f64();
+        let ((on0, from), (on1, to)) = where_of(body);
+        println!(
+            "W10 Mars {what}: {answer:?} in {secs:.1} s; body from {} to {} (on the ground: {}), {:.1} m from the thing at the start and {:.1} m at the end",
+            metres(from),
+            metres(to),
+            on0 == ground && on1 == ground,
+            gap(from, at),
+            gap(to, at)
+        );
+        if answer.is_err() || gap(from, at) < 90.0 || gap(to, at) > 3.0 || secs < 30.0 {
+            failed.push(format!(
+                "{what}: {answer:?} in {secs:.1} s, {:.1} m from it at the end",
+                gap(to, at)
+            ));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The kitchen, its raised floor (530 mm up, the working kitchen and the dining hall) reached by an outside stair, and
+/// the dining hall's four bus seats, today's ids on the Mars template (W12, #4088).
+const KITCHEN: &str = "e_2333a04e";
+const BUS_SEATS: [&str; 4] = ["e_59043a4e", "e_3d52ac7f", "e_3e97414e", "e_f18eedd0"];
+
+/// W12 (#4088): on the served Mars template a walk to a seat in the dining hall had no answer within 120 s in the
+/// rehearsal of 22 Nov. Here a Soul born at the rehearsal's birth point walks to each bus seat of the dining hall; each
+/// walk's answer, its time and the body's place at each end (from the world's log) are printed. Each answers within
+/// 120 s, and a walk receipted ends on the raised floor.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+#[ignore = "needs the Mars template's facts file and a built worldd (see the module doc)"]
+fn w12_a_walk_to_each_dining_hall_seat_ends_with_an_answer() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("MARS_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/mars-two.facts.json"));
+    let im = import_eden::load(&std::fs::read_to_string(&facts).expect("the Mars facts file"))
+        .expect("Mars loads");
+    let raised = im.nodes[&format!("{KITCHEN}/floor-1")];
+    let dir = std::env::temp_dir().join(format!("mars-w12-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .args(["--entries", &format!("{root}/content/kinds")])
+        .args(["--souls", "0", "--at", "-6.0,-30.0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    let mut failed = Vec::new();
+    for (n, seat) in BUS_SEATS.iter().enumerate() {
+        let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+        // The rehearsal's wait: no answer within it fails here (the read times out).
+        s.set_read_timeout(Some(Duration::from_secs(120))).unwrap();
+        let mut soul = Client(
+            s,
+            Id::new(Scope([0xc1; 16]), n as u64 + 1).unwrap(),
+            0,
+            im.nodes["world"].scope(),
+        );
+        let known: Vec<Id> = body_rows(&dir).into_keys().collect();
+        soul.act(JOIN, None).expect("born by the entry");
+        let body = *body_rows(&dir)
+            .keys()
+            .find(|b| !known.contains(b))
+            .expect("the new body");
+        let t0 = std::time::Instant::now();
+        // No answer within the wait (the read times out): named, and the next seat walked.
+        let answer =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| soul.walk(im.nodes[*seat])))
+                .unwrap_or_else(|_| Err("no answer within 120 s".into()));
+        let secs = t0.elapsed().as_secs_f64();
+        let rows = body_rows(&dir);
+        let r = &rows[&body];
+        let ((on0, from), (on1, to)) = (r[0], *r.last().unwrap());
+        println!(
+            "W12 Mars walk to the dining hall's {seat}: {answer:?} in {secs:.1} s; body from {} (on the ground: {}) \
+             to {} (on the raised floor: {}), {} records",
+            metres(from),
+            on0 == im.nodes["ground"],
+            metres(to),
+            on1 == raised,
+            r.len()
+        );
+        if secs >= 120.0 || (answer.is_ok() && on1 != raised) {
+            failed.push(format!(
+                "{seat}: {answer:?} in {secs:.1} s, on the raised floor: {}",
+                on1 == raised
+            ));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failed.is_empty(), "{failed:#?}");
+}

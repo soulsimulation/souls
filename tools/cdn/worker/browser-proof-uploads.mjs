@@ -8,7 +8,7 @@
 // serve: a fresh local /worlds world `upload-proof` (dev auth mints a local god token, fake minds); a god upload of a cow GLB made unique (a new
 // node name, so its sha is in no manifest), defined and placed at the arrival. The Worker stand-in runs the real handler
 // (god-uploads.js) with an in-memory R2 and the page server as its origin; it only rewrites Access-Control-Allow-Origin to
-// the loopback page origin (the real Worker names https://sim.eden.art). `check` loads the page in real Chrome:
+// the loopback page origin (the real Worker names https://soul.game). `check` loads the page in real Chrome:
 //   miss (dpr 1)    the upload comes from the Worker (x-eden-cdn miss), the page never asks the origin for it;
 //   hit (dpr 2)     a fresh context: x-eden-cdn hit (stored by the miss);
 //   off (dpr 1)     ?godcdn=0: no Worker request, the origin serves it;
@@ -86,7 +86,7 @@ if (mode === 'serve') {
     const env = { ASSETS: r2 };   // the strict R2 stand-in (fake-r2.mjs)
     cdn = createServer(async (req, res) => {
       const waits = [];
-      const r = await handle(new Request(`https://assets.eden.art${req.url}`, { method: req.method }), env, { waitUntil: (p) => waits.push(p) },
+      const r = await handle(new Request(`https://cdn.soul.game${req.url}`, { method: req.method }), env, { waitUntil: (p) => waits.push(p) },
         { origin: page, caches: null, fetch: (u, init) => { stats.pulls++; return fetch(u, init); } });
       let body = req.method === 'HEAD' ? null : Buffer.from(await r.arrayBuffer());
       if (mode === 'corrupt' && body && r.status === 200) body = Buffer.alloc(body.length, 0);

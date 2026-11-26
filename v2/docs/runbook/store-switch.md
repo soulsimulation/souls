@@ -41,8 +41,11 @@ alone (object read and write). Creating it and the token is the release owner's 
 1. Create the R2 bucket `soul-game-worlds` and a token for it alone (object read and write).
 2. On the production host, write `/etc/souls/store-new.env` (root, mode 600) with three lines: `STORE_BASE=` the
    bucket's `s3:https://<account>.r2.cloudflarestorage.com/soul-game-worlds` (no prefix: each setting keeps its own),
-   `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` the token's. Write it with an editor, never with the key on a
-   command line.
+   `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` the token's. Never put the key on a command line. From the
+   operator's machine, `bash v2/tools/ops/store-new-env.sh plan` shows the file with its keys hidden and
+   `bash v2/tools/ops/store-new-env.sh apply` writes it on the host over ssh's stdin, from the main checkout's
+   `.local/project/team/secrets/r2-soul-game.env` (`R2_ENDPOINT`, `WORLDS_ACCESS_KEY_ID`, `WORLDS_SECRET_ACCESS_KEY`);
+   `undo` removes it.
 3. Build the copy tool from the release's commit, `cargo build --release --locked -p ops --bin store-copy` in `v2/`,
    and put it at `/var/lib/souls/oneoff/store-copy` (root, 755), its SHA-256 noted in the release record.
 4. Run the install from this release (`install.sh apply`). Production has no `souls-alarms` unit yet: this step
@@ -67,9 +70,10 @@ bash v2/tools/ops/store-switch.sh undo     # the last move backwards
    a manifest, so a later pass never copies an old version over what a moved world has since written in the new
    bucket (`newer there and kept`). Then it prints the source's count and bytes against what the new bucket holds of
    the same keys, and stops on any difference.
-3. For each running world, one at a time: stops it, copies its own keys written since, points that world alone at the
-   new store (`worldd@<world>.service.d/50-store-switch.conf`), starts it and waits for it to stay up 15 s. A world that
-   does not is switched back at once (the drop-in removed, started on the old store) and the run stops there.
+3. For each running world, one at a time: stops it, copies its own keys written since (those under any store generation
+   too, `g/<label>/`, where a rebuilt world's are), points that world alone at the new store
+   (`worldd@<world>.service.d/50-store-switch.conf`), starts it and waits for it to stay up 15 s. A world that does not
+   is switched back at once (the drop-in removed, started on the old store) and the run stops there.
 4. Stops `souls-directory` and `souls-alarms`, copies what they wrote since, installs the new `secrets.env`, removes the
    drop-ins and starts both again.
 
@@ -80,6 +84,73 @@ address rather than fencing on it.
 
 **The old bucket is never written or deleted by the move**: the old system's backups stay where they are. Remove the
 new engine's objects there only after Gene's yes, once the new bucket has run a release.
+
+## Keys left behind, and each world's stream chain
+
+`SWITCH_SKIP` names key prefixes, space-separated and each ending in `/`, under each setting's own prefix. Every copy
+of the move leaves those keys in the old store, and the same under every store generation (`g/<label>/<prefix>`, a
+rebuilt world's): store-copy's `--skip`, counted on its result line as `N skipped under ...`. `plan` says what is left
+behind.
+
+- **`aside/`** holds world sets put aside by reseeds (`world-aside`). Only an operator undoing a past reseed reads it.
+- **`stream-recovery/`** holds each world's public stream chain, its head and immutable objects. A world reads it from
+  the store only when it starts with no chain on its own disk: a new machine, or a spool lost.
+  - A world moved to a new store sends its whole chain from its own disk there before its first head (worldd: the
+    spool's confirmed head names another store, so every object kept on the disk is queued again, once). The new
+    store then holds a complete chain, though it was never copied.
+  - A world folder with no spooled chain would have nothing to send, and would start a new chain in the new store. So
+    the move refuses `stream-recovery/` in `SWITCH_SKIP` while any world folder has no spooled head. Start such a world
+    once first.
+
+`bash store-switch.sh chains` checks, for each running world, that its chain is all in the store its backup writes
+to: nothing waiting in its spool and no head put unanswered. After a move, run it until it says `chains complete`.
+Until then, a new machine could not recover that world's stream from the new store.
+
+## soul.game's move to R2 soul-game-worlds (Gene's yes, 25 Nov 2026)
+
+Gene's choice: keep every world live and leave the old backups behind. That means `SWITCH_SKIP="aside/
+stream-recovery/"`. The production listing on 25 Nov held 34,183 objects; the move copies about 2,038 of them,
+leaving 30,561 under `stream-recovery/` and 1,584 under `aside/`. At the old provider's ~1,300 objects an hour, that
+is about 1.6 h of copying, with the worlds running throughout. The operator's commands run from a checkout of the
+release commit. `ssh "$T"` is the production host, the deploy settings' target:
+`. tools/world-launcher/deploy/deploy-env.sh; T=$(deploy_target)`.
+
+1. **The release first.** The release carrying worldd's store-move requeue and `store-copy` (this change) is moved to
+   every world (`release.sh move`). A world on an older worldd would send the new store only its head.
+2. **The copy tool.** The release carries it as `/var/lib/souls/releases/<sha>/bin/store-copy`. Install it with
+   `ssh "$T" "install -m 755 /var/lib/souls/releases/$(git rev-parse HEAD)/bin/store-copy /var/lib/souls/oneoff/store-copy && sha256sum /var/lib/souls/oneoff/store-copy"`.
+   Note the hash in the release record.
+   - If the release did not carry it, build it on the Linux build machine (Saturn) in a checkout of the same commit:
+     `cd v2 && cargo build --release --locked -p ops --bin store-copy && sha256sum target/release/store-copy`.
+   - Copy that file to the same path on the host (root, 755), and check that `sha256sum` there gives the same hash.
+3. **The alarm daemon.** `install.sh apply` from the release installs `souls-alarms` with its drop-in reading
+   `secrets.env`. The plan refuses until it does.
+4. **The new store's file.** From the checkout: `bash v2/tools/ops/store-new-env.sh plan`, then `bash
+   v2/tools/ops/store-new-env.sh apply`. This writes `/etc/souls/store-new.env` (root, 600) over ssh's stdin, with
+   the `WORLDS_*` keys and `R2_ENDPOINT` from the main checkout's `.local/project/team/secrets/r2-soul-game.env`.
+5. **The script on the host.**
+   `ssh "$T" 'install -m 700 /dev/stdin /var/lib/souls/oneoff/store-switch.sh' < v2/tools/ops/store-switch.sh`.
+6. **Plan** (changes nothing):
+   `ssh "$T" 'SWITCH_SKIP="aside/ stream-recovery/" bash /var/lib/souls/oneoff/store-switch.sh plan'`.
+   - It lists the two settings, the 11 running worlds, `left in the old store, not copied: keys under aside/
+     stream-recovery/`, and per setting a dry-run line `... skipped under aside/ stream-recovery/: dry run: source N
+     objects ...`, with N about 2,038 for `DIRECTORY_STORE_URL`.
+   - A refusal that names worlds with no stream chain on disk: start each of them once, then plan again.
+7. **Apply**, as its own unit so it outlives the ssh session (it resumes when run again):
+   `ssh "$T" 'systemd-run --unit=store-switch --setenv=SWITCH_SKIP="aside/ stream-recovery/" -p StandardOutput=append:/var/lib/souls/oneoff/store-switch.log -p StandardError=append:/var/lib/souls/oneoff/store-switch.log bash /var/lib/souls/oneoff/store-switch.sh apply'`.
+   - Follow it with `ssh "$T" 'tail -n 20 /var/lib/souls/oneoff/store-switch.log'`.
+   - It is done at `store-switch: done. Check: ...`. A stop says why and how to go on: run the same unit command
+     again, or undo.
+8. **Check:** `ssh "$T" 'bash /var/lib/souls/oneoff/store-switch.sh check'` ends `check passed`.
+9. **Chains:** `ssh "$T" 'bash /var/lib/souls/oneoff/store-switch.sh chains'`, repeated a minute apart until
+   `chains complete`. Each world sends its whole chain to R2 (Eden's is the largest, about 20,000 objects).
+10. **In a browser**, signed out, on the real URL:
+    - `https://soul.game/` lists the worlds.
+    - `https://soul.game/w/eden` draws, its clock moves, and its Souls are where they were.
+    - A sleeping world wakes when visited.
+    - A Soul's command still acts (`souls.mjs look`).
+11. **Undo:** `ssh "$T" 'bash /var/lib/souls/oneoff/store-switch.sh undo'`. It puts every unit back on the old store,
+    whose objects are all still there. Writes the worlds made on R2 meanwhile are not carried back (see Undo).
 
 ## What you see
 
