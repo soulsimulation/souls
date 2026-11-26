@@ -1435,7 +1435,6 @@ impl PublicPlayer {
             in_place_digest,
             old_version,
             &flying,
-            check,
         );
         match (r, whole) {
             (Ok((digest, changes, part, version)), whole) => {
@@ -1523,8 +1522,7 @@ impl PublicPlayer {
         in_place_digest: Option<Vec<u8>>,
         old_version: u64,
         flying: &BTreeSet<Id>,
-        effects: bool,
-    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Option<Part>, u64)> {
+    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
         let next = whole.unwrap_or(&self.state);
         let next_digest = match in_place_digest {
             Some(d) => d,
@@ -1534,12 +1532,8 @@ impl PublicPlayer {
             return bad("context result digest");
         }
         let version = uint(field(map(next)?, 1)?)?;
-        // #3822: a part played deferred is not shown, so its entries are not read: the checks on them are skipped.
-        let part = match effects {
-            true => Some(self.check_effects(sp, c, old_version, version)?),
-            false if sp.from > sp.to || version < old_version => return bad("public part range"),
-            false => None,
-        };
+        // Only the state digest is deferred: samples and events still come from a fully checked public Part.
+        let part = self.check_effects(sp, c, old_version, version)?;
         // Whole: the old state and the next, by id. In place: the same ids before and after, and the swapped rows.
         let (old_nodes, new_nodes) = match whole {
             Some(next) => (
@@ -1683,13 +1677,13 @@ impl PublicPlayer {
     fn finish(
         &mut self,
         sp: StreamPart,
-        part: Option<Part>,
+        part: Part,
         changes: BTreeMap<Id, u64>,
         record: u64,
         version: u64,
     ) -> R<Played> {
         self.changed.extend(changes);
-        let effects = part.map(|p| p.effects).unwrap_or_default();
+        let effects = part.effects;
         self.samples = effects
             .iter()
             .flat_map(|e| match &e.body {
@@ -2505,5 +2499,364 @@ mod gone_in_place_tests {
                 .is_none(),
             "a node made inside one gone"
         );
+    }
+}
+
+#[cfg(test)]
+mod deferred_effect_tests {
+    use super::*;
+    use crate::effects::{
+        Actor, Cause, ChangeRec, Effect, Envelope, Event, FIXTURE_HEADER, fixture_bytes,
+    };
+    use crate::ids::Scope;
+    use crate::pose::{Frame, Owner, Quat, Support, Vec3};
+
+    fn id(n: u64) -> Id {
+        Id::new(Scope([97; 16]), n).unwrap()
+    }
+    fn pose(root: Id, n: u64, step: u64) -> Pose {
+        let q = Quat::from_yaw_mdeg(13_000 * step as i64).unwrap().parts();
+        Pose {
+            frame: Frame {
+                node: root,
+                slot: None,
+            },
+            position: Vec3::new(n as i64 * 2_000_000, 0, step as i64 * 20_000),
+            orientation: Quat::new(q[0], q[2], 0, 0).unwrap(),
+            support: Support::Surface {
+                surface: root,
+                height: 0,
+            },
+        }
+    }
+    fn effect(
+        sequence: u64,
+        node: Id,
+        at: i64,
+        changes: Vec<Change>,
+        events: Option<Vec<Event>>,
+    ) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence,
+                at,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node,
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: BTreeMap::new(),
+                    })
+                    .collect(),
+            ),
+            events,
+            rest: BTreeMap::new(),
+        }
+    }
+    // Construct ordinary canonical effects, apply each complete Part before making its authorized projection/context.
+    fn fixture(bodies: u64, moving: u64, count: u64) -> (Header, Vec<u8>, Vec<Vec<u8>>) {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut state = State::start(header.zone, header.kinds[0].clone());
+        let creates = (1..=bodies)
+            .map(|n| Change::Create {
+                node: id(n),
+                kind: header.kinds[2].clone(),
+                pose: pose(header.zone, n, 0),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            })
+            .collect();
+        let initial = Part::of_effects(
+            header.hash().to_bytes(),
+            vec![effect(0, header.zone, 0, creates, None)],
+        )
+        .unwrap();
+        state.apply(&header, &initial).unwrap();
+        let base = baseline(&header, &state, state.next).unwrap();
+        let mut parts = Vec::new();
+        for step in 1..=count {
+            let before = project(&header, &state).unwrap();
+            let start = state.next;
+            let at = step as i64 * 500_000;
+            let effects = (1..=moving)
+                .map(|n| {
+                    let motion = HandOff {
+                        node: id(n),
+                        at,
+                        from: Owner::Mover,
+                        to: Owner::Mover,
+                        pose: pose(header.zone, n, step),
+                        linear: Vec3::new(0, 0, 40_000),
+                        angular: Vec3::new(1000, 0, 0),
+                    };
+                    let record = Value::Map(BTreeMap::from([
+                        (1, id(n).to_value()),
+                        (2, Value::Bytes(b"souls:hold_hand".to_vec())),
+                        (7, Value::Uint(500_000)),
+                        (8, Value::Array(vec![Value::Uint(700_000)])),
+                        (
+                            9,
+                            Value::Map(BTreeMap::from([
+                                (1, Value::Uint(at as u64)),
+                                (2, Value::Bytes(b"released".to_vec())),
+                            ])),
+                        ),
+                    ]));
+                    let event = Event {
+                        name: Name::new("souls:form-move").unwrap(),
+                        fields: BTreeMap::from([
+                            (1, id(bodies + 1).to_value()),
+                            (2, id(n).to_value()),
+                            (3, record),
+                        ]),
+                        changes: vec![0],
+                        rest: BTreeMap::new(),
+                    };
+                    effect(
+                        start + n - 1,
+                        id(n),
+                        at,
+                        vec![Change::Motion(motion)],
+                        Some(vec![event]),
+                    )
+                })
+                .collect();
+            let part = Part::of_effects(header.hash().to_bytes(), effects).unwrap();
+            state.apply(&header, &part).unwrap();
+            let after = project(&header, &state).unwrap();
+            let changed: Vec<_> = (1..=moving).map(|n| (id(n), start + n)).collect();
+            let ctx = context(&base, &before, &after, state.next, &[], &changed).unwrap();
+            let sp = StreamPart {
+                number: step - 1,
+                from: at - 500_000,
+                to: at,
+                first: start,
+                entries: moving,
+                part: part.stored().to_vec(),
+                hash: Some(digest(&after).unwrap()),
+                gaps: Vec::new(),
+                carried: Vec::new(),
+            };
+            let mut wire = read_map(&sp.to_bytes().unwrap(), "fixture").unwrap();
+            wire.insert(10, Value::Bytes(ctx));
+            parts.push(encoded(&Value::Map(wire)).unwrap());
+        }
+        (header, base, parts)
+    }
+
+    #[test]
+    fn deferred_parts_keep_checked_samples_and_events_across_verify_and_generation() {
+        let (header, base, parts) = fixture(3, 3, 4);
+        let mut checked = PublicPlayer::start(header.stored(), &base).unwrap();
+        let mut deferred = PublicPlayer::start(header.stored(), &base).unwrap();
+        let mut handoff = PublicPlayer::start(header.stored(), &base).unwrap();
+        for (i, part) in parts.iter().enumerate() {
+            handoff.play_deferred(part).unwrap();
+            checked.play(part).unwrap();
+            if i == 3 {
+                deferred.play(part).unwrap();
+            } else {
+                deferred.play_deferred(part).unwrap();
+            }
+            assert_eq!(
+                deferred.samples(),
+                checked.samples(),
+                "all full HandOff fields in original order, part {i}"
+            );
+            assert_eq!(
+                deferred.events(),
+                checked.events(),
+                "move records and release fields, part {i}"
+            );
+            assert_eq!(deferred.samples().len(), 3);
+            assert_eq!(deferred.events().len(), 3);
+            assert_eq!(deferred.state(), checked.state());
+            assert_eq!(deferred.digest(), checked.digest());
+            assert_eq!(deferred.record(), checked.record());
+            assert_eq!(deferred.next(), checked.next());
+            if i == 1 {
+                assert!(deferred.unverified);
+                deferred.verify().unwrap();
+                assert!(!deferred.unverified);
+            }
+        }
+        assert!(!deferred.unverified);
+        assert_eq!(deferred.hash().unwrap(), checked.hash().unwrap());
+        let generation = [19; 32];
+        let digest = deferred.digest().to_vec();
+        assert!(handoff.unverified);
+        assert_eq!(
+            handoff.cross(&generation, &[0; 32]).unwrap_err().name,
+            "stream-handoff-state"
+        );
+        assert_eq!(
+            handoff.next(),
+            4,
+            "a refused handoff does not advance the generation"
+        );
+        handoff.cross(&generation, &digest).unwrap();
+        assert!(!handoff.unverified, "cross verifies all deferred state");
+        assert_eq!(handoff.next(), 0);
+        deferred.cross(&generation, &digest).unwrap();
+        assert_eq!(deferred.next(), 0);
+        assert_eq!(
+            deferred.samples(),
+            checked.samples(),
+            "handoff invents no samples"
+        );
+        assert_eq!(deferred.events(), checked.events());
+    }
+
+    fn corrupt_part(bytes_: &[u8], which: u64) -> Vec<u8> {
+        let mut wire = read_map(bytes_, "fixture").unwrap();
+        let mut sp = StreamPart::read(bytes_).unwrap();
+        let mut raw = read_map(&sp.part, "effects").unwrap();
+        let Value::Array(effects) = raw.get_mut(&2).unwrap() else {
+            unreachable!()
+        };
+        let Value::Map(e) = &mut effects[0] else {
+            unreachable!()
+        };
+        match which {
+            0 => {
+                e.insert(
+                    5,
+                    Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id(1).to_value())])),
+                );
+            }
+            1 => {
+                e.insert(
+                    8,
+                    Value::Array(vec![Value::Map(BTreeMap::from([(1, Value::Uint(42))]))]),
+                );
+            }
+            2 => {
+                e.insert(1, Value::Uint(999_999));
+            }
+            3 => {
+                sp.entries += 1;
+                wire.insert(5, Value::Uint(sp.entries));
+            }
+            _ => unreachable!(),
+        }
+        sp.part = encoded(&Value::Map(raw)).unwrap();
+        wire.insert(6, Value::Bytes(super::super::lz::pack(&sp.part)));
+        encoded(&Value::Map(wire)).unwrap()
+    }
+
+    #[test]
+    fn deferred_refusal_rolls_back_state_cursors_and_previous_outputs() {
+        let (header, base, parts) = fixture(2, 2, 3);
+        for whole in [false, true] {
+            for which in 0..4 {
+                let mut p = PublicPlayer::start(header.stored(), &base).unwrap();
+                p.play_deferred(&parts[0]).unwrap();
+                let saved = (
+                    p.state.clone(),
+                    p.digest.clone(),
+                    p.next,
+                    p.record,
+                    p.samples.clone(),
+                    p.events.clone(),
+                    p.changed.clone(),
+                    p.unverified,
+                );
+                let mut bad = corrupt_part(&parts[1], which);
+                if whole {
+                    // A whole-state-only delta with unchanged time exercises the non-in-place transaction too.
+                    let mut wire = read_map(&bad, "fixture").unwrap();
+                    let mut c = read_map(bytes(&wire[&10]).unwrap(), "context").unwrap();
+                    let Value::Map(delta) = c.get_mut(&5).unwrap() else {
+                        unreachable!()
+                    };
+                    delta.insert(7, Value::Array(Vec::new()));
+                    wire.insert(10, Value::Bytes(encoded(&Value::Map(c)).unwrap()));
+                    bad = encoded(&Value::Map(wire)).unwrap();
+                }
+                let refused = p.play_deferred(&bad).unwrap_err();
+                if which == 0 {
+                    assert_eq!(refused.detail, "private effect");
+                }
+                assert_eq!(
+                    (
+                        p.state.clone(),
+                        p.digest.clone(),
+                        p.next,
+                        p.record,
+                        p.samples.clone(),
+                        p.events.clone(),
+                        p.changed.clone(),
+                        p.unverified
+                    ),
+                    saved
+                );
+                p.play_deferred(&parts[1]).unwrap();
+                p.play(&parts[2]).unwrap();
+                p.verify().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_digest_claim_is_still_refused_by_verify_and_handoff() {
+        let (header, base, parts) = fixture(2, 2, 1);
+        let mut wire = read_map(&parts[0], "fixture").unwrap();
+        let mut c = read_map(bytes(&wire[&10]).unwrap(), "context").unwrap();
+        c.insert(4, Value::Bytes(vec![11; 32]));
+        wire.insert(7, Value::Bytes(vec![11; 32]));
+        wire.insert(10, Value::Bytes(encoded(&Value::Map(c)).unwrap()));
+        let mut p = PublicPlayer::start(header.stored(), &base).unwrap();
+        p.play_deferred(&encoded(&Value::Map(wire)).unwrap())
+            .unwrap();
+        assert!(p.unverified, "state hashing remains deferred");
+        assert_eq!(
+            p.samples().len(),
+            2,
+            "structurally validated effects remain available"
+        );
+        assert_eq!(p.verify().unwrap_err().name, "stream-digest");
+        assert_eq!(
+            p.cross(&[19; 32], &[11; 32]).unwrap_err().name,
+            "stream-digest"
+        );
+        assert_eq!(
+            p.next(),
+            1,
+            "a failed digest never installs another generation"
+        );
+        assert!(p.unverified);
+    }
+
+    #[test]
+    fn validated_500_body_stream_keeps_all_samples_and_can_export_cost_fixture() {
+        for (name, moving) in [("even", 500), ("uneven", 10)] {
+            let (header, base, parts) = fixture(500, moving, 20);
+            let mut checked = PublicPlayer::start(header.stored(), &base).unwrap();
+            let mut deferred = PublicPlayer::start(header.stored(), &base).unwrap();
+            for part in &parts {
+                checked.play(part).unwrap();
+                deferred.play_deferred(part).unwrap();
+                assert_eq!(deferred.samples(), checked.samples());
+                assert_eq!(deferred.events(), checked.events());
+                assert_eq!(deferred.samples().len() as u64, moving);
+            }
+            deferred.verify().unwrap();
+            assert_eq!(deferred.state(), checked.state());
+            assert_eq!(deferred.digest(), checked.digest());
+            if let Some(dir) = std::env::var_os("DEFERRED_FIXTURE_OUT") {
+                let dir = std::path::PathBuf::from(dir).join(name);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("header"), header.stored()).unwrap();
+                std::fs::write(dir.join("baseline"), base).unwrap();
+                for (i, part) in parts.iter().enumerate() {
+                    std::fs::write(dir.join(format!("{i}")), part).unwrap();
+                }
+            }
+        }
     }
 }
